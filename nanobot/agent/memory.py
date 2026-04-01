@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import weakref
 from datetime import datetime
 from pathlib import Path
@@ -77,11 +78,17 @@ class MemoryStore:
 
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
 
-    def __init__(self, workspace: Path):
+    _SHORT_MEMORY_MARKERS = re.compile(
+        r"(\bremember\b|\b/save[_-]?memory\b|запомни|сохрани\s+в\s+память|важно)",
+        re.IGNORECASE,
+    )
+
+    def __init__(self, workspace: Path, short_memory: bool = False):
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
         self._consecutive_failures = 0
+        self.short_memory = short_memory
 
     def read_long_term(self) -> str:
         if self.memory_file.exists():
@@ -124,6 +131,20 @@ class MemoryStore:
             )
         return "\n".join(lines)
 
+    @classmethod
+    def _extract_short_memory_messages(cls, messages: list[dict]) -> list[dict]:
+        """Keep only user messages with explicit memory markers in short-memory mode."""
+        selected: list[dict] = []
+        for message in messages:
+            if message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if not isinstance(content, str):
+                continue
+            if cls._SHORT_MEMORY_MARKERS.search(content):
+                selected.append(message)
+        return selected
+
     async def consolidate(
         self,
         messages: list[dict],
@@ -134,8 +155,29 @@ class MemoryStore:
         if not messages:
             return True
 
+        if self.short_memory:
+            messages = self._extract_short_memory_messages(messages)
+            if not messages:
+                self._consecutive_failures = 0
+                return True
+
         current_memory = self.read_long_term()
-        prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
+        if self.short_memory:
+            prompt = f"""Process this conversation and call save_memory.
+
+Short-memory mode requirements:
+- Keep only user-declared important facts.
+- Ignore all tool logs and operational details.
+- Keep output terse as bullet points.
+- Do not invent facts.
+
+## Current Long-term Memory
+{current_memory or "(empty)"}
+
+## Conversation to Process
+{self._format_messages(messages)}"""
+        else:
+            prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
 
 ## Current Long-term Memory
 {current_memory or "(empty)"}
@@ -246,8 +288,9 @@ class MemoryConsolidator:
         context_window_tokens: int,
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
+        short_memory: bool = False,
     ):
-        self.store = MemoryStore(workspace)
+        self.store = MemoryStore(workspace, short_memory=short_memory)
         self.provider = provider
         self.model = model
         self.sessions = sessions

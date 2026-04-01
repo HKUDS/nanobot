@@ -18,6 +18,7 @@ class ExecTool(Tool):
         working_dir: str | None = None,
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
+        internal_url_allowlist: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
     ):
@@ -35,6 +36,7 @@ class ExecTool(Tool):
             r":\(\)\s*\{.*\};\s*:",          # fork bomb
         ]
         self.allow_patterns = allow_patterns or []
+        self.internal_url_allowlist = internal_url_allowlist or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
 
@@ -155,7 +157,7 @@ class ExecTool(Tool):
                 return "Error: Command blocked by safety guard (not in allowlist)"
 
         from nanobot.security.network import contains_internal_url
-        if contains_internal_url(cmd):
+        if contains_internal_url(cmd, self.internal_url_allowlist):
             return "Error: Command blocked by safety guard (internal/private URL detected)"
 
         if self.restrict_to_workspace:

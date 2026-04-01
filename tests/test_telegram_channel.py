@@ -95,6 +95,8 @@ class _FakeBuilder:
         self.token_value = None
         self.request_value = None
         self.get_updates_request_value = None
+        self.base_url_value = None
+        self.base_file_url_value = None
 
     def token(self, token: str):
         self.token_value = token
@@ -106,6 +108,14 @@ class _FakeBuilder:
 
     def get_updates_request(self, request):
         self.get_updates_request_value = request
+        return self
+
+    def base_url(self, value: str):
+        self.base_url_value = value
+        return self
+
+    def base_file_url(self, value: str):
+        self.base_file_url_value = value
         return self
 
     def proxy(self, _proxy):
@@ -207,6 +217,33 @@ async def test_start_respects_custom_pool_config(monkeypatch) -> None:
     assert api_req.kwargs["connection_pool_size"] == 32
     assert api_req.kwargs["pool_timeout"] == 10.0
     assert poll_req.kwargs["pool_timeout"] == 10.0
+
+
+@pytest.mark.asyncio
+async def test_start_applies_custom_bot_api_urls(monkeypatch) -> None:
+    _FakeHTTPXRequest.clear()
+    config = TelegramConfig(
+        enabled=True,
+        token="123:abc",
+        allow_from=["*"],
+        api_base_url="http://127.0.0.1:8081/bot",
+        api_base_file_url="http://127.0.0.1:8081/file/bot",
+    )
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+    app = _FakeApp(lambda: setattr(channel, "_running", False))
+    builder = _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.Application",
+        SimpleNamespace(builder=lambda: builder),
+    )
+
+    await channel.start()
+
+    assert builder.base_url_value == "http://127.0.0.1:8081/bot"
+    assert builder.base_file_url_value == "http://127.0.0.1:8081/file/bot"
 
 
 @pytest.mark.asyncio

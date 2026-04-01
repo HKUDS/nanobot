@@ -20,6 +20,7 @@
 
 ## 📢 News
 
+- **2026-04-01** 🧠 Added optional `shortMemory` mode, safer internal URL allowlist for `exec`, and Telegram local Bot API URL/file URL support for large media workflows.
 - **2026-03-16** 🚀 Released **v0.1.4.post5** — a refinement-focused release with stronger reliability and channel support, and a more dependable day-to-day experience. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post5) for details.
 - **2026-03-15** 🧩 DingTalk rich media, smarter built-in skills, and cleaner model compatibility.
 - **2026-03-14** 💬 Channel plugins, Feishu replies, and steadier MCP, QQ, and media handling.
@@ -261,7 +262,9 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
     "telegram": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
+      "allowFrom": ["YOUR_USER_ID"],
+      "apiBaseUrl": "http://127.0.0.1:8081/bot",
+      "apiBaseFileUrl": "http://127.0.0.1:8081/file/bot"
     }
   }
 }
@@ -269,6 +272,8 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`.
 > Copy this value **without the `@` symbol** and paste it into the config file.
+> `apiBaseUrl` and `apiBaseFileUrl` are optional. Use them when running a local Telegram Bot API server (recommended for larger file download limits).
+> You can tune the default cloud download limit message threshold via `TELEGRAM_BOT_API_MAX_DOWNLOAD_BYTES` (default: `20971520`).
 
 
 **3. Run**
@@ -1160,8 +1165,10 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `agents.defaults.shortMemory` | `false` | When `true`, memory consolidation only persists user-marked important facts (e.g. “remember”, “save memory”, “запомни”) in concise form. |
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
+| `tools.exec.internalUrlAllowlist` | `[]` | Optional allowlist for internal URLs in `exec` commands (host, domain, CIDR/IP, or full URL prefix). Useful for trusted local endpoints like `localhost`/Ollama. |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
 
 

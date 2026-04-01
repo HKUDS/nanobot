@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import time
 import unicodedata
@@ -167,6 +168,8 @@ class TelegramConfig(Base):
     group_policy: Literal["open", "mention"] = "mention"
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
+    api_base_url: str | None = None
+    api_base_file_url: str | None = None
 
 
 class TelegramChannel(BaseChannel):
@@ -257,6 +260,10 @@ class TelegramChannel(BaseChannel):
             .request(api_request)
             .get_updates_request(poll_request)
         )
+        if self.config.api_base_url:
+            builder = builder.base_url(self.config.api_base_url.rstrip("/"))
+        if self.config.api_base_file_url:
+            builder = builder.base_file_url(self.config.api_base_file_url.rstrip("/"))
         self._app = builder.build()
         self._app.add_error_handler(self._on_error)
 
@@ -588,6 +595,23 @@ class TelegramChannel(BaseChannel):
         if not media_file or not self._app:
             return [], []
         try:
+            file_size = getattr(media_file, "file_size", None)
+            max_download_bytes = int(
+                os.environ.get("TELEGRAM_BOT_API_MAX_DOWNLOAD_BYTES", str(20 * 1024 * 1024))
+            )
+            # Bot API cloud endpoint has strict download limits for large files.
+            # Local Bot API server can lift this limit when api_base_file_url is configured.
+            if (
+                isinstance(file_size, int)
+                and file_size > 0
+                and file_size > max_download_bytes
+                and not self.config.api_base_file_url
+            ):
+                if add_failure_content:
+                    return [], [
+                        f"[{media_type}: download failed: File is too big ({file_size} bytes) for default Telegram Bot API]"
+                    ]
+                return [], []
             file = await self._app.bot.get_file(media_file.file_id)
             ext = self._get_extension(
                 media_type,
@@ -608,6 +632,10 @@ class TelegramChannel(BaseChannel):
             return [path_str], [f"[{media_type}: {path_str}]"]
         except Exception as e:
             logger.warning("Failed to download message media: {}", e)
+            if add_failure_content and "file is too big" in str(e).lower():
+                return [], [
+                    f"[{media_type}: download failed: File is too big (enable local Telegram Bot API for large downloads)]"
+                ]
             if add_failure_content:
                 return [], [f"[{media_type}: download failed]"]
             return [], []

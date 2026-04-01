@@ -476,3 +476,48 @@ class TestMemoryConsolidationTypeHandling:
         provider.chat_with_retry = AsyncMock(return_value=no_tool)
         assert await store.consolidate(messages, provider, "m") is False
         assert store._consecutive_failures == 1
+
+    @pytest.mark.asyncio
+    async def test_short_memory_skips_unmarked_messages(self, tmp_path: Path) -> None:
+        """Short-memory mode should ignore chunks without explicit user memory markers."""
+        store = MemoryStore(tmp_path, short_memory=True)
+        provider = AsyncMock()
+        provider.chat_with_retry = AsyncMock()
+        messages = [
+            {"role": "user", "content": "hello there", "timestamp": "2026-01-01 00:00"},
+            {"role": "assistant", "content": "hi", "timestamp": "2026-01-01 00:01"},
+        ]
+
+        result = await store.consolidate(messages, provider, "test-model")
+
+        assert result is True
+        provider.chat_with_retry.assert_not_called()
+        assert not store.history_file.exists()
+        assert not store.memory_file.exists()
+
+    @pytest.mark.asyncio
+    async def test_short_memory_processes_explicit_markers_only(self, tmp_path: Path) -> None:
+        """Short-memory mode should call provider when user explicitly asks to remember."""
+        store = MemoryStore(tmp_path, short_memory=True)
+        provider = AsyncMock()
+        provider.chat_with_retry = AsyncMock(
+            return_value=_make_tool_response(
+                history_entry="[2026-01-01] User asked to remember preferred language: ru.",
+                memory_update="# Long-term Memory\n- Preferred language: ru",
+            )
+        )
+        messages = [
+            {"role": "user", "content": "small talk", "timestamp": "2026-01-01 00:00"},
+            {"role": "assistant", "content": "ok", "timestamp": "2026-01-01 00:01"},
+            {
+                "role": "user",
+                "content": "Запомни: предпочитаемый язык ответа — русский.",
+                "timestamp": "2026-01-01 00:02",
+            },
+        ]
+
+        result = await store.consolidate(messages, provider, "test-model")
+
+        assert result is True
+        provider.chat_with_retry.assert_awaited_once()
+        assert "Preferred language: ru" in store.memory_file.read_text(encoding="utf-8")

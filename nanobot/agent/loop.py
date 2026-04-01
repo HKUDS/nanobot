@@ -64,6 +64,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        short_memory: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -110,6 +111,7 @@ class AgentLoop:
             context_window_tokens=context_window_tokens,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
+            short_memory=short_memory,
         )
         self._register_default_tools()
 
@@ -125,6 +127,7 @@ class AgentLoop:
             timeout=self.exec_config.timeout,
             restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
+            internal_url_allowlist=self.exec_config.internal_url_allowlist,
         ))
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
@@ -226,10 +229,26 @@ class AgentLoop:
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
                     result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    result_text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+                    exit_match = re.search(r"Exit code:\s*(-?\d+)", result_text)
+                    exit_code = exit_match.group(1) if exit_match else "n/a"
+                    preview = result_text.replace("\n", "\\n")[:240]
+                    logger.info(
+                        "Tool result: {} (len={}, exit_code={}, preview={})",
+                        tool_call.name,
+                        len(result_text),
+                        exit_code,
+                        preview,
+                    )
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
             else:
+                logger.info(
+                    "LLM response: finish_reason={}, content_len={}, tool_calls=0",
+                    response.finish_reason,
+                    len(response.content or ""),
+                )
                 clean = self._strip_think(response.content)
                 # Don't persist error responses to session history — they can
                 # poison the context and cause permanent 400 loops (#1303).

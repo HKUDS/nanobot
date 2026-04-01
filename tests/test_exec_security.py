@@ -67,3 +67,11 @@ async def test_exec_blocks_chained_internal_url():
             command="echo start && curl http://169.254.169.254/latest/meta-data/ && echo done"
         )
     assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_exec_allows_allowlisted_internal_url():
+    tool = ExecTool(internal_url_allowlist=["localhost"])
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_localhost):
+        guard_result = tool._guard_command("curl http://localhost:11434/api/tags", "/tmp")
+    assert guard_result is None

@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -38,6 +38,7 @@ class AgentDefaults(Base):
     context_window_tokens: int = 65_536
     temperature: float = 0.1
     max_tool_iterations: int = 40
+    short_memory: bool = False  # If true, persist only user-marked important facts in concise form
     # Deprecated compatibility field: accepted from old configs but ignored at runtime.
     memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
@@ -128,6 +129,15 @@ class ExecToolConfig(Base):
 
     timeout: int = 60
     path_append: str = ""
+    internal_url_allowlist: list[str] = Field(default_factory=list)
+
+    @field_validator("internal_url_allowlist", mode="before")
+    @classmethod
+    def _parse_internal_url_allowlist(cls, v):
+        if isinstance(v, str):
+            items = [item.strip() for item in v.replace("\n", ",").split(",")]
+            return [item for item in items if item]
+        return v
 
 
 class MCPServerConfig(Base):
