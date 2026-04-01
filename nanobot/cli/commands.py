@@ -623,7 +623,7 @@ def gateway(
         return "cli", "direct"
 
     # Create heartbeat service
-    async def on_heartbeat_execute(tasks: str) -> str:
+    async def on_heartbeat_execute(tasks: str, model_override: str | None = None) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
 
@@ -637,6 +637,7 @@ def gateway(
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
+            model_override=model_override,
         )
 
         # Keep a small tail of heartbeat history so the loop stays bounded

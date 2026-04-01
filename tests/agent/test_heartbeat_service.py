@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from nanobot.heartbeat.service import DueTask, HeartbeatService
+from nanobot.heartbeat.service import DueTask, HeartbeatService, MODEL_PRESETS
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
@@ -80,9 +80,10 @@ async def test_decide_returns_skip_when_no_tool_call(tmp_path) -> None:
         model="openai/gpt-4o-mini",
     )
 
-    action, tasks = await service._decide("heartbeat content")
+    action, tasks, due_tasks = await service._decide("heartbeat content")
     assert action == "skip"
     assert tasks == ""
+    assert due_tasks == []
 
 
 @pytest.mark.asyncio
@@ -104,7 +105,7 @@ async def test_trigger_now_executes_when_decision_is_run(tmp_path) -> None:
 
     called_with: list[str] = []
 
-    async def _on_execute(tasks: str) -> str:
+    async def _on_execute(tasks: str, model_override: str | None = None) -> str:
         called_with.append(tasks)
         return "done"
 
@@ -137,7 +138,7 @@ async def test_trigger_now_returns_none_when_decision_is_skip(tmp_path) -> None:
         )
     ])
 
-    async def _on_execute(tasks: str) -> str:
+    async def _on_execute(tasks: str, model_override: str | None = None) -> str:
         return tasks
 
     service = HeartbeatService(
@@ -249,7 +250,7 @@ async def test_tick_notifies_when_evaluator_says_yes(tmp_path, monkeypatch) -> N
     executed: list[str] = []
     notified: list[str] = []
 
-    async def _on_execute(tasks: str) -> str:
+    async def _on_execute(tasks: str, model_override: str | None = None) -> str:
         executed.append(tasks)
         return "deployment failed on staging"
 
@@ -295,7 +296,7 @@ async def test_tick_suppresses_when_evaluator_says_no(tmp_path, monkeypatch) -> 
     executed: list[str] = []
     notified: list[str] = []
 
-    async def _on_execute(tasks: str) -> str:
+    async def _on_execute(tasks: str, model_override: str | None = None) -> str:
         executed.append(tasks)
         return "everything is fine, no issues"
 
@@ -349,10 +350,11 @@ async def test_decide_retries_transient_error_then_succeeds(tmp_path, monkeypatc
         model="openai/gpt-4o-mini",
     )
 
-    action, tasks = await service._decide("heartbeat content")
+    action, tasks, due_tasks = await service._decide("heartbeat content")
 
     assert action == "run"
     assert tasks == "check open tasks"
+    assert due_tasks == []  # LLM fallback returns empty list
     assert provider.calls == 2
     assert delays == [1]
 
@@ -580,9 +582,10 @@ async def test_decide_skips_without_llm_when_no_due_tasks(tmp_path) -> None:
         last_run_tracking=True,
     )
 
-    action, tasks = await service._decide(content)
+    action, tasks, due_tasks = await service._decide(content)
     assert action == "skip"
     assert tasks == ""
+    assert due_tasks == []
     assert provider.calls == 0
 
 
@@ -602,9 +605,11 @@ async def test_decide_runs_without_llm_when_task_due(tmp_path) -> None:
         last_run_tracking=True,
     )
 
-    action, tasks = await service._decide(content)
+    action, tasks, due_tasks = await service._decide(content)
     assert action == "run"
     assert "Remind: pick up groceries" in tasks
+    assert len(due_tasks) == 1
+    assert due_tasks[0].model is None
     assert provider.calls == 0
 
 
@@ -625,10 +630,11 @@ async def test_decide_summary_includes_task_type(tmp_path) -> None:
         last_run_tracking=True,
     )
 
-    action, tasks = await service._decide(content)
+    action, tasks, due_tasks = await service._decide(content)
     assert action == "run"
     assert "announcement" in tasks
     assert "system" in tasks
+    assert len(due_tasks) == 2
     assert provider.calls == 0
 
 
@@ -644,7 +650,7 @@ async def test_decide_deterministic_skip_then_execute_on_due(tmp_path) -> None:
     provider = DummyProvider([])  # no LLM responses needed
     executed: list[str] = []
 
-    async def _on_execute(tasks: str) -> str:
+    async def _on_execute(tasks: str, model_override: str | None = None) -> str:
         executed.append(tasks)
         return "reminded"
 
@@ -675,7 +681,7 @@ async def test_decide_deterministic_skips_future_task(tmp_path) -> None:
     provider = DummyProvider([])
     executed: list[str] = []
 
-    async def _on_execute(tasks: str) -> str:
+    async def _on_execute(tasks: str, model_override: str | None = None) -> str:
         executed.append(tasks)
         return "done"
 
@@ -740,3 +746,192 @@ async def test_decide_prompt_includes_current_time(tmp_path) -> None:
     user_msg = captured_messages[1]
     assert user_msg["role"] == "user"
     assert "Current Time:" in user_msg["content"]
+
+
+# ---------------------------------------------------------------------------
+# Per-task model overrides
+# ---------------------------------------------------------------------------
+
+def test_compute_due_tasks_parses_model_preset() -> None:
+    """Model: flash resolves to the MODEL_PRESETS value."""
+    now = datetime(2026, 3, 12, 10, 0)
+    past = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Gmail scan\nType: system\nSchedule: {past}\nModel: flash\nRecur: every 1 hour\n"
+    )
+    due = HeartbeatService._compute_due_tasks(content, now)
+    assert len(due) == 1
+    assert due[0].model == MODEL_PRESETS["flash"]
+
+
+def test_compute_due_tasks_parses_model_literal() -> None:
+    """Model: with a full model string uses it as-is."""
+    now = datetime(2026, 3, 12, 10, 0)
+    past = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Heavy task\nSchedule: {past}\nModel: openai/gpt-4o\n"
+    )
+    due = HeartbeatService._compute_due_tasks(content, now)
+    assert len(due) == 1
+    assert due[0].model == "openai/gpt-4o"
+
+
+def test_compute_due_tasks_no_model_field_returns_none() -> None:
+    """Tasks without Model: field get model=None (backward compat)."""
+    now = datetime(2026, 3, 12, 10, 0)
+    past = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Simple task\nSchedule: {past}\nRecipients: abc:whatsapp\n"
+    )
+    due = HeartbeatService._compute_due_tasks(content, now)
+    assert len(due) == 1
+    assert due[0].model is None
+
+
+def test_compute_due_tasks_all_presets_resolve() -> None:
+    """All preset names resolve to their full model strings."""
+    now = datetime(2026, 3, 12, 10, 0)
+    past = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    for preset, expected in MODEL_PRESETS.items():
+        content = _make_heartbeat(
+            f"\n### Task {preset}\nSchedule: {past}\nModel: {preset}\n"
+        )
+        due = HeartbeatService._compute_due_tasks(content, now)
+        assert len(due) == 1
+        assert due[0].model == expected, f"Preset '{preset}' did not resolve"
+
+
+@pytest.mark.asyncio
+async def test_tick_groups_tasks_by_model(tmp_path, monkeypatch) -> None:
+    """Tasks with different models get separate on_execute calls."""
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    heartbeat_content = _make_heartbeat(
+        f"\n### Gmail scan\nType: system\nSchedule: {past}\nModel: flash\nRecur: every 1 hour\n\n"
+        f"### Morning briefing\nType: system\nSchedule: {past}\nModel: pro\nRecur: every 1 day\n\n"
+        f"### Remind: call dentist\nSchedule: {past}\n"
+    )
+    (tmp_path / "HEARTBEAT.md").write_text(heartbeat_content, encoding="utf-8")
+
+    provider = DummyProvider([])
+    calls: list[tuple[str, str | None]] = []
+
+    async def _on_execute(tasks: str, model_override: str | None = None) -> str:
+        calls.append((tasks, model_override))
+        return "done"
+
+    async def _eval_yes(*a, **kw):
+        return False  # suppress notifications for test simplicity
+
+    monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _eval_yes)
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+        last_run_tracking=True,
+    )
+
+    await service._tick()
+
+    # Should have 3 groups: flash, pro, None (default)
+    assert len(calls) == 3
+    models_used = {c[1] for c in calls}
+    assert MODEL_PRESETS["flash"] in models_used
+    assert MODEL_PRESETS["pro"] in models_used
+    assert None in models_used
+
+
+@pytest.mark.asyncio
+async def test_tick_single_model_group(tmp_path, monkeypatch) -> None:
+    """All tasks with same model (or no model) run in one on_execute call."""
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    heartbeat_content = _make_heartbeat(
+        f"\n### Task A\nSchedule: {past}\n\n"
+        f"### Task B\nSchedule: {past}\n"
+    )
+    (tmp_path / "HEARTBEAT.md").write_text(heartbeat_content, encoding="utf-8")
+
+    provider = DummyProvider([])
+    calls: list[tuple[str, str | None]] = []
+
+    async def _on_execute(tasks: str, model_override: str | None = None) -> str:
+        calls.append((tasks, model_override))
+        return "done"
+
+    async def _eval(*a, **kw):
+        return False
+
+    monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _eval)
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+        last_run_tracking=True,
+    )
+
+    await service._tick()
+
+    # Both tasks have no model -> single group with model_override=None
+    assert len(calls) == 1
+    assert calls[0][1] is None
+    assert "Task A" in calls[0][0]
+    assert "Task B" in calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_trigger_now_groups_by_model(tmp_path) -> None:
+    """trigger_now groups tasks by model and calls on_execute for each."""
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    heartbeat_content = _make_heartbeat(
+        f"\n### Fast task\nSchedule: {past}\nModel: flash\n\n"
+        f"### Default task\nSchedule: {past}\n"
+    )
+    (tmp_path / "HEARTBEAT.md").write_text(heartbeat_content, encoding="utf-8")
+
+    provider = DummyProvider([])
+    calls: list[tuple[str, str | None]] = []
+
+    async def _on_execute(tasks: str, model_override: str | None = None) -> str:
+        calls.append((tasks, model_override))
+        return f"done with {model_override}"
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+        last_run_tracking=True,
+    )
+
+    result = await service.trigger_now()
+    assert len(calls) == 2
+    assert result is not None
+    models_used = {c[1] for c in calls}
+    assert MODEL_PRESETS["flash"] in models_used
+    assert None in models_used
+
+
+@pytest.mark.asyncio
+async def test_decide_returns_due_tasks_with_model(tmp_path) -> None:
+    """_decide returns structured DueTask list with model field when last_run_tracking=True."""
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Gmail scan\nType: system\nSchedule: {past}\nModel: haiku\nRecur: every 1 hour\n"
+    )
+
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        last_run_tracking=True,
+    )
+
+    action, tasks, due_tasks = await service._decide(content)
+    assert action == "run"
+    assert len(due_tasks) == 1
+    assert due_tasks[0].model == MODEL_PRESETS["haiku"]
+    assert due_tasks[0].name == "Gmail scan"

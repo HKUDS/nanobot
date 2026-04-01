@@ -45,6 +45,15 @@ class DueTask:
     name: str
     task_type: Literal["announcement", "system", "reminder"]
     schedule: str | None  # None for announcements
+    model: str | None = None  # Optional per-task model override
+
+
+MODEL_PRESETS: dict[str, str] = {
+    "flash": "gemini/gemini-3-flash-preview",
+    "pro": "gemini/gemini-3.1-pro-preview",
+    "sonnet": "claude-sonnet-4-6",
+    "haiku": "claude-haiku-4-5-20251001",
+}
 
 
 class HeartbeatService:
@@ -64,7 +73,7 @@ class HeartbeatService:
         workspace: Path,
         provider: LLMProvider,
         model: str,
-        on_execute: Callable[[str], Coroutine[Any, Any, str]] | None = None,
+        on_execute: Callable[[str, str | None], Coroutine[Any, Any, str]] | None = None,
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
@@ -157,8 +166,14 @@ class HeartbeatService:
                 except ValueError:
                     pass
 
+            model_match = re.search(r"^Model:\s*(.+)", block, re.MULTILINE)
+            model = None
+            if model_match:
+                raw = model_match.group(1).strip()
+                model = MODEL_PRESETS.get(raw, raw)  # resolve preset or use as-is
+
             if now >= schedule_dt:
-                due.append(DueTask(name=task_name, task_type=task_type, schedule=schedule_str))
+                due.append(DueTask(name=task_name, task_type=task_type, schedule=schedule_str, model=model))
 
         return due
 
@@ -250,13 +265,14 @@ class HeartbeatService:
                 return None
         return None
 
-    async def _decide(self, content: str) -> tuple[str, str]:
+    async def _decide(self, content: str) -> tuple[str, str, list[DueTask]]:
         """Phase 1: determine whether any tasks are due.
 
         When last_run_tracking=True: fully deterministic, no LLM call.
         When last_run_tracking=False: falls back to LLM tool call.
 
-        Returns (action, tasks) where action is 'skip' or 'run'.
+        Returns (action, tasks_str, due_tasks) where action is 'skip' or 'run'.
+        due_tasks is populated only when last_run_tracking=True.
         """
         from nanobot.utils.helpers import current_time_str
         from zoneinfo import ZoneInfo
@@ -269,10 +285,10 @@ class HeartbeatService:
         if self.last_run_tracking:
             due = self._compute_due_tasks(content, now.replace(tzinfo=None))
             if not due:
-                return "skip", ""
+                return "skip", "", []
             summary = ", ".join(f"{t.name} ({t.task_type})" for t in due)
             logger.debug("Heartbeat: {} due task(s) — {}", len(due), summary)
-            return "run", summary
+            return "run", summary, due
 
         # LLM fallback when last_run_tracking is disabled
         now_str = current_time_str(self.timezone)
@@ -292,10 +308,10 @@ class HeartbeatService:
         )
 
         if not response.has_tool_calls:
-            return "skip", ""
+            return "skip", "", []
 
         args = response.tool_calls[0].arguments
-        return args.get("action", "skip"), args.get("tasks", "")
+        return args.get("action", "skip"), args.get("tasks", ""), []
 
     async def start(self) -> None:
         """Start the heartbeat service."""
@@ -341,7 +357,7 @@ class HeartbeatService:
         logger.info("Heartbeat: checking for tasks...")
 
         try:
-            action, tasks = await self._decide(content)
+            action, tasks_str, due_tasks = await self._decide(content)
 
             if action != "run":
                 logger.info("Heartbeat: OK (nothing to report)")
@@ -349,18 +365,38 @@ class HeartbeatService:
 
             logger.info("Heartbeat: tasks found, executing...")
             if self.on_execute:
-                response = await self.on_execute(tasks)
+                # If no structured tasks (LLM fallback), run as before
+                if not due_tasks:
+                    response = await self.on_execute(tasks_str, None)
+                    if response:
+                        should_notify = await evaluate_response(
+                            response, tasks_str, self.provider, self.model,
+                            suppress_errors=self.suppress_errors,
+                        )
+                        if should_notify and self.on_notify:
+                            logger.info("Heartbeat: completed, delivering response")
+                            await self.on_notify(response)
+                        else:
+                            logger.info("Heartbeat: silenced by post-run evaluation")
+                else:
+                    # Group tasks by model override
+                    groups: dict[str | None, list[DueTask]] = {}
+                    for t in due_tasks:
+                        groups.setdefault(t.model, []).append(t)
 
-                if response:
-                    should_notify = await evaluate_response(
-                        response, tasks, self.provider, self.model,
-                        suppress_errors=self.suppress_errors,
-                    )
-                    if should_notify and self.on_notify:
-                        logger.info("Heartbeat: completed, delivering response")
-                        await self.on_notify(response)
-                    else:
-                        logger.info("Heartbeat: silenced by post-run evaluation")
+                    for model_override, group_tasks in groups.items():
+                        summary = ", ".join(f"{t.name} ({t.task_type})" for t in group_tasks)
+                        response = await self.on_execute(summary, model_override)
+                        if response:
+                            should_notify = await evaluate_response(
+                                response, summary, self.provider, self.model,
+                                suppress_errors=self.suppress_errors,
+                            )
+                            if should_notify and self.on_notify:
+                                logger.info("Heartbeat: completed, delivering response")
+                                await self.on_notify(response)
+                            else:
+                                logger.info("Heartbeat: silenced by post-run evaluation")
         except Exception:
             logger.exception("Heartbeat execution failed")
 
@@ -369,7 +405,21 @@ class HeartbeatService:
         content = self._read_heartbeat_file()
         if not content:
             return None
-        action, tasks = await self._decide(content)
+        action, tasks_str, due_tasks = await self._decide(content)
         if action != "run" or not self.on_execute:
             return None
-        return await self.on_execute(tasks)
+
+        # If structured tasks available, group by model and run each group
+        if due_tasks:
+            groups: dict[str | None, list[DueTask]] = {}
+            for t in due_tasks:
+                groups.setdefault(t.model, []).append(t)
+            results: list[str] = []
+            for model_override, group_tasks in groups.items():
+                summary = ", ".join(f"{t.name} ({t.task_type})" for t in group_tasks)
+                result = await self.on_execute(summary, model_override)
+                if result:
+                    results.append(result)
+            return "\n".join(results) if results else None
+
+        return await self.on_execute(tasks_str, None)

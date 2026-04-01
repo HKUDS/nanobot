@@ -295,6 +295,7 @@ class AgentLoop:
         chat_id: str = "direct",
         message_id: str | None = None,
         blocked_tools: frozenset[str] = frozenset(),
+        model_override: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop.
 
@@ -346,7 +347,7 @@ class AgentLoop:
         result = await self.runner.run(AgentRunSpec(
             initial_messages=initial_messages,
             tools=self.tools,
-            model=self.model,
+            model=model_override or self.model,
             max_iterations=self.max_iterations,
             hook=_LoopHook(),
             error_message="Sorry, I encountered an error calling the AI model.",
@@ -480,6 +481,7 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        model_override: str | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -503,6 +505,7 @@ class AgentLoop:
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
+                model_override=model_override,
             )
             # skip +1 to exclude the injected system message from session
             # history — it's ephemeral context, not a real user turn.
@@ -564,6 +567,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id,
                 message_id=msg.metadata.get("message_id"),
                 blocked_tools=blocked_tools,
+                model_override=model_override,
             )
 
         if final_content is None:
@@ -676,6 +680,7 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        model_override: str | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
@@ -683,4 +688,5 @@ class AgentLoop:
         return await self._process_message(
             msg, session_key=session_key, on_progress=on_progress,
             on_stream=on_stream, on_stream_end=on_stream_end,
+            model_override=model_override,
         )
