@@ -7,7 +7,12 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from nanobot.agent.tools.mcp import MCPToolWrapper, connect_mcp_servers
+from nanobot.agent.tools.mcp import (
+    MCPToolWrapper,
+    connect_mcp_servers,
+    refresh_mcp_tools,
+    setup_tools_list_changed_handler,
+)
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.config.schema import MCPServerConfig
 
@@ -343,3 +348,156 @@ async def test_connect_mcp_servers_enabled_tools_warns_on_unknown_entries(
     assert "enabledTools entries not found: unknown" in warnings[-1]
     assert "Available raw names: demo" in warnings[-1]
     assert "Available wrapped names: mcp_test_demo" in warnings[-1]
+
+
+# ---------------------------------------------------------------------------
+# Helpers for mutable fake sessions used by notification tests
+# ---------------------------------------------------------------------------
+
+def _make_mutable_fake_session(
+    initial_tools: list[str],
+) -> tuple[SimpleNamespace, list[list[str]]]:
+    """Create a fake session whose ``list_tools`` output can be changed.
+
+    Returns ``(session, tool_names_ref)`` where *tool_names_ref* is a
+    single-element list wrapping the current tool-name list.  Mutate
+    ``tool_names_ref[0]`` to change what ``list_tools`` returns.
+    """
+    tool_names_ref: list[list[str]] = [list(initial_tools)]
+    call_count: list[int] = [0]
+
+    async def initialize() -> None:
+        return None
+
+    async def list_tools() -> SimpleNamespace:
+        call_count[0] += 1
+        return SimpleNamespace(
+            tools=[_make_tool_def(n) for n in tool_names_ref[0]]
+        )
+
+    session = SimpleNamespace(
+        initialize=initialize,
+        list_tools=list_tools,
+        _list_tools_call_count=call_count,
+    )
+    return session, tool_names_ref
+
+
+def _make_cfg(enabled: list[str] | None = None) -> MCPServerConfig:
+    """Shortcut to build an MCPServerConfig with ``enabled_tools``."""
+    if enabled is None:
+        return MCPServerConfig(command="fake")
+    return MCPServerConfig(command="fake", enabled_tools=enabled)
+
+
+# ---------------------------------------------------------------------------
+# notifications/tools/list_changed tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_tools_list_changed_triggers_refresh() -> None:
+    """Simulating the notification must call list_tools on ALL servers."""
+    sess_a, _ = _make_mutable_fake_session(["alpha"])
+    sess_b, _ = _make_mutable_fake_session(["beta"])
+
+    cfg_a = _make_cfg()
+    cfg_b = _make_cfg()
+
+    servers: dict[str, tuple[object, object]] = {
+        "a": (sess_a, cfg_a),
+        "b": (sess_b, cfg_b),
+    }
+    registry = ToolRegistry()
+    lock = asyncio.Lock()
+
+    # Initial registration
+    await refresh_mcp_tools(servers, registry)
+    assert sorted(registry.tool_names) == ["mcp_a_alpha", "mcp_b_beta"]
+
+    # Reset call counts after initial load
+    sess_a._list_tools_call_count[0] = 0
+    sess_b._list_tools_call_count[0] = 0
+
+    # Wire up notification handler and trigger it
+    setup_tools_list_changed_handler(servers, registry, lock)
+    await sess_a._on_tools_list_changed()
+
+    # Both servers must have been queried
+    assert sess_a._list_tools_call_count[0] == 1
+    assert sess_b._list_tools_call_count[0] == 1
+    assert sorted(registry.tool_names) == ["mcp_a_alpha", "mcp_b_beta"]
+
+
+@pytest.mark.asyncio
+async def test_tools_list_changed_registry_reflects_updated_tools() -> None:
+    """After the notification, old tools are gone and new tools are present."""
+    sess_a, ref_a = _make_mutable_fake_session(["old_tool"])
+    sess_b, ref_b = _make_mutable_fake_session(["stable"])
+
+    servers: dict[str, tuple[object, object]] = {
+        "a": (sess_a, _make_cfg()),
+        "b": (sess_b, _make_cfg()),
+    }
+    registry = ToolRegistry()
+    lock = asyncio.Lock()
+
+    await refresh_mcp_tools(servers, registry)
+    assert "mcp_a_old_tool" in registry
+    assert "mcp_b_stable" in registry
+
+    # Server "a" changes its tool list
+    ref_a[0] = ["new_tool"]
+
+    setup_tools_list_changed_handler(servers, registry, lock)
+    await sess_b._on_tools_list_changed()
+
+    assert "mcp_a_old_tool" not in registry
+    assert "mcp_a_new_tool" in registry
+    # Server "b" is unchanged
+    assert "mcp_b_stable" in registry
+
+
+@pytest.mark.asyncio
+async def test_tools_list_changed_does_not_interrupt_sessions() -> None:
+    """A mid-flight tool execution must complete even when the notification fires."""
+    execution_started = asyncio.Event()
+    allow_finish = asyncio.Event()
+
+    async def slow_call_tool(_name: str, arguments: dict) -> SimpleNamespace:
+        execution_started.set()
+        await allow_finish.wait()
+        return SimpleNamespace(content=[_FakeTextContent("done")])
+
+    sess, ref = _make_mutable_fake_session(["slow"])
+    sess.call_tool = slow_call_tool
+
+    servers: dict[str, tuple[object, object]] = {
+        "srv": (sess, _make_cfg()),
+    }
+    registry = ToolRegistry()
+    lock = asyncio.Lock()
+
+    await refresh_mcp_tools(servers, registry)
+    setup_tools_list_changed_handler(servers, registry, lock)
+
+    # Start a tool execution in the background
+    wrapper = MCPToolWrapper(sess, "srv", _make_tool_def("slow"))
+    exec_task = asyncio.create_task(wrapper.execute())
+    await execution_started.wait()
+
+    # Fire the notification while the tool is still running
+    ref[0] = ["slow", "extra"]
+    refresh_task = asyncio.create_task(
+        sess._on_tools_list_changed()
+    )
+
+    # Let the tool finish
+    allow_finish.set()
+    result = await exec_task
+    await refresh_task
+
+    assert result == "done"
+    # Registry now has the updated tool list
+    assert "mcp_srv_slow" in registry
+    assert "mcp_srv_extra" in registry

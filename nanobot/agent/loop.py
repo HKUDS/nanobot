@@ -222,6 +222,7 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
+        self._mcp_sessions: dict[str, tuple[object, object]] = {}
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
@@ -281,7 +282,9 @@ class AgentLoop:
         try:
             self._mcp_stack = AsyncExitStack()
             await self._mcp_stack.__aenter__()
-            await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
+            self._mcp_sessions = await connect_mcp_servers(
+                self._mcp_servers, self.tools, self._mcp_stack
+            )
             self._mcp_connected = True
         except BaseException as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
