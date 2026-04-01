@@ -58,7 +58,7 @@ class TestExtractToolHints:
             _make_attempt("list_dir", {"path": "/foo"}),
         ]
         result = _extract_tool_hints(attempts)
-        assert sorted(result) == sorted(result)  # already sorted
+        assert result == sorted(result)  # return value is already in sorted order
         assert set(result) == {"exec:obsidian", "list_dir", "read_file"}
 
     def test_empty_attempts_returns_empty(self):
