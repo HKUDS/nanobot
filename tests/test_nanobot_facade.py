@@ -125,6 +125,27 @@ def test_workspace_override(tmp_path):
     assert bot._loop.workspace == custom_ws
 
 
+def test_sdk_make_provider_uses_github_copilot_backend():
+    from nanobot.config.schema import Config
+    from nanobot.nanobot import _make_provider
+
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "github-copilot",
+                    "model": "github-copilot/gpt-4.1",
+                }
+            }
+        }
+    )
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = _make_provider(config)
+
+    assert provider.__class__.__name__ == "GitHubCopilotProvider"
+
+
 @pytest.mark.asyncio
 async def test_run_custom_session_key(tmp_path):
     from nanobot.bus.events import OutboundMessage
