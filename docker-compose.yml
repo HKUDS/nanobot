@@ -6,9 +6,24 @@ x-common-config: &common-config
     - ~/.nanobot:/root/.nanobot
 
 services:
+  speaker-id:
+    container_name: speaker-id
+    build:
+      context: ./speaker-id
+      dockerfile: Dockerfile
+    volumes:
+      - ./speaker-id/profiles:/app/profiles
+    ports:
+      - 8001:8001
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Moscow
+
   nanobot-gateway:
     container_name: nanobot-gateway
     <<: *common-config
+    depends_on:
+      - speaker-id
     entrypoint: ["python3", "-u", "-m", "nanobot"]
     command: ["gateway"]
     volumes:
@@ -41,3 +56,4 @@ services:
     command: ["status"]
     stdin_open: true
     tty: true
+

@@ -181,8 +181,12 @@ class VoiceServerChannel(BaseChannel):
 
     async def send(self, message: OutboundMessage) -> None:
         if hasattr(message, 'content') and message.content:
-            # Aggregate aggressive filtering to strip emojis/markdown/pu-pu-pu artifacts
+            # Strip emojis
             message.content = re.sub(r'[\U00010000-\U0010ffff]', '', message.content)
+            # Strip text inside brackets and asterisks (emotions/actions)
+            message.content = re.sub(r'\[.*?\]', '', message.content)
+            message.content = re.sub(r'\*.*?\*', '', message.content)
+            # Final cleanup of non-verbal characters but keep basic punctuation
             message.content = re.sub(r'[^\w\s\.,!\?\-:]', '', message.content)
 
         client_id = message.chat_id
