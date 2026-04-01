@@ -582,6 +582,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        otel_config=config.otel,
     )
 
     # Set cron callback (needs agent)
@@ -734,6 +735,10 @@ def gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
+            if config.otel.enabled:
+                from nanobot.observability.otel import shutdown_otel
+
+                shutdown_otel()
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
