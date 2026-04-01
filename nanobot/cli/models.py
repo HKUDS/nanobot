@@ -1,7 +1,7 @@
 """Model information helpers for the onboard wizard.
 
 Model database / autocomplete is temporarily disabled while litellm is
-being replaced. All public function signatures are preserved so callers
+being replaced.  All public function signatures are preserved so callers
 continue to work without changes.
 """
 

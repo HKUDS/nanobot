@@ -47,7 +47,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     ctx_est = 0
     try:
-        ctx_est, _ = loop.memory_consolidator.estimate_session_prompt_tokens(session)
+        ctx_est, _ = loop.consolidator.estimate_session_prompt_tokens(session)
     except Exception:
         pass
     if ctx_est <= 0:
@@ -75,29 +75,68 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot:
-        loop._schedule_background(loop.memory_consolidator.archive_messages(snapshot))
+        loop._schedule_background(loop.consolidator.archive(snapshot))
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
     )
 
 
+async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
+    """Manually trigger a Dream consolidation run."""
+    loop = ctx.loop
+    try:
+        did_work = await loop.dream.run()
+        content = "Dream completed." if did_work else "Dream: nothing to process."
+    except Exception as e:
+        content = f"Dream failed: {e}"
+    return OutboundMessage(
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id, content=content,
+    )
+
+
+async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
+    """Show the Dream consolidation log."""
+    loop = ctx.loop
+    store = loop.consolidator.store
+    log = store.read_dream_log()
+    if not log:
+        if store.get_last_dream_cursor() == 0:
+            content = "Dream has not run yet."
+        else:
+            content = "No dream log yet."
+    else:
+        content = f"## Dream Log\n\n{log}"
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata={"render_as": "text"},
+    )
+
+
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=build_help_text(),
+        metadata={"render_as": "text"},
+    )
+
+
+def build_help_text() -> str:
     lines = [
         "🐈 nanobot commands:",
         "/new — Start a new conversation",
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",
+        "/dream — Manually trigger Dream consolidation",
+        "/dream-log — Show Dream consolidation log",
         "/help — Show available commands",
     ]
-    return OutboundMessage(
-        channel=ctx.msg.channel,
-        chat_id=ctx.msg.chat_id,
-        content="\n".join(lines),
-        metadata={"render_as": "text"},
-    )
+    return "\n".join(lines)
 
 
 def register_builtin_commands(router: CommandRouter) -> None:
@@ -107,4 +146,6 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
+    router.exact("/dream", cmd_dream)
+    router.exact("/dream-log", cmd_dream_log)
     router.exact("/help", cmd_help)

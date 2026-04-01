@@ -15,7 +15,7 @@ from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
-from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.steering import InterruptionChecker, SteeringHook
 from nanobot.agent.subagent import SubagentManager
@@ -70,12 +70,6 @@ class _LoopHook(AgentHook):
     def wants_streaming(self) -> bool:
         return self._on_stream is not None
 
-    async def on_llm_retry(self, context: AgentHookContext, attempt: int, total: int) -> None:
-        if self._on_progress:
-            await self._on_progress(
-                f"AI service temporarily unavailable, retrying ({attempt}/{total})…",
-            )
-
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         from nanobot.utils.helpers import strip_think
 
@@ -109,6 +103,13 @@ class _LoopHook(AgentHook):
     async def after_iteration(self, context: AgentHookContext) -> None:
         if self._on_iteration_complete and context.tool_calls:
             self._on_iteration_complete(context.messages)
+        u = context.usage or {}
+        logger.debug(
+            "LLM usage: prompt={} completion={} cached={}",
+            u.get("prompt_tokens", 0),
+            u.get("completion_tokens", 0),
+            u.get("cached_tokens", 0),
+        )
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         return self._loop._strip_think(content)
@@ -235,8 +236,8 @@ class AgentLoop:
             asyncio.Semaphore(_max) if _max > 0 else None
         )
         self._interrupt_checkers: dict[str, InterruptionChecker] = {}
-        self.memory_consolidator = MemoryConsolidator(
-            workspace=workspace,
+        self.consolidator = Consolidator(
+            store=self.context.memory,
             provider=provider,
             model=self.model,
             sessions=self.sessions,
@@ -244,6 +245,11 @@ class AgentLoop:
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
+        )
+        self.dream = Dream(
+            store=self.context.memory,
+            provider=provider,
+            model=self.model,
         )
         self._register_default_tools()
         self.commands = CommandRouter()
@@ -431,25 +437,23 @@ class AgentLoop:
                             return f"{stream_base_id}:{stream_segment}"
 
                         async def on_stream(delta: str) -> None:
+                            meta = dict(msg.metadata or {})
+                            meta["_stream_delta"] = True
+                            meta["_stream_id"] = _current_stream_id()
                             await self.bus.publish_outbound(OutboundMessage(
                                 channel=msg.channel, chat_id=msg.chat_id,
-                                content=delta,
-                                metadata={
-                                    "_stream_delta": True,
-                                    "_stream_id": _current_stream_id(),
-                                },
+                                content=delta, metadata=meta,
                             ))
 
                         async def on_stream_end(*, resuming: bool = False) -> None:
                             nonlocal stream_segment
+                            meta = dict(msg.metadata or {})
+                            meta["_stream_end"] = True
+                            meta["_resuming"] = resuming
+                            meta["_stream_id"] = _current_stream_id()
                             await self.bus.publish_outbound(OutboundMessage(
                                 channel=msg.channel, chat_id=msg.chat_id,
-                                content="",
-                                metadata={
-                                    "_stream_end": True,
-                                    "_resuming": resuming,
-                                    "_stream_id": _current_stream_id(),
-                                },
+                                content="", metadata=meta,
                             ))
                             stream_segment += 1
 
@@ -517,11 +521,6 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            trimmed = self.memory_consolidator.fast_trim_if_needed(session)
-            if trimmed:
-                self._schedule_background(
-                    self.memory_consolidator.archive_trimmed_chunk(session.key, trimmed)
-                )
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
@@ -547,7 +546,7 @@ class AgentLoop:
             )
             self._save_turn(session, all_msgs, save_offset[0])
             self.sessions.save(session)
-            self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+            self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -562,12 +561,6 @@ class AgentLoop:
         ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self)
         if result := await self.commands.dispatch(ctx):
             return result
-
-        trimmed = self.memory_consolidator.fast_trim_if_needed(session)
-        if trimmed:
-            self._schedule_background(
-                self.memory_consolidator.archive_trimmed_chunk(session.key, trimmed)
-            )
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
@@ -614,7 +607,7 @@ class AgentLoop:
 
         self._save_turn(session, all_msgs, save_offset[0])
         self.sessions.save(session)
-        self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+        self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None

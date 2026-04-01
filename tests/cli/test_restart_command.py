@@ -127,7 +127,7 @@ class TestRestartCommand:
         loop.sessions.get_or_create.return_value = session
         loop._start_time = time.time() - 125
         loop._last_usage = {"prompt_tokens": 0, "completion_tokens": 0}
-        loop.memory_consolidator.estimate_session_prompt_tokens = MagicMock(
+        loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(20500, "tiktoken")
         )
 
@@ -152,10 +152,12 @@ class TestRestartCommand:
         ])
 
         await loop._run_agent_loop([])
-        assert loop._last_usage == {"prompt_tokens": 9, "completion_tokens": 4}
+        assert loop._last_usage["prompt_tokens"] == 9
+        assert loop._last_usage["completion_tokens"] == 4
 
         await loop._run_agent_loop([])
-        assert loop._last_usage == {"prompt_tokens": 0, "completion_tokens": 0}
+        assert loop._last_usage["prompt_tokens"] == 0
+        assert loop._last_usage["completion_tokens"] == 0
 
     @pytest.mark.asyncio
     async def test_status_falls_back_to_last_usage_when_context_estimate_missing(self):
@@ -164,7 +166,7 @@ class TestRestartCommand:
         session.get_history.return_value = [{"role": "user"}]
         loop.sessions.get_or_create.return_value = session
         loop._last_usage = {"prompt_tokens": 1200, "completion_tokens": 34}
-        loop.memory_consolidator.estimate_session_prompt_tokens = MagicMock(
+        loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(0, "none")
         )
 

@@ -8,7 +8,6 @@ import string
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import httpx
 import json_repair
 from loguru import logger
 
@@ -41,10 +40,7 @@ class AnthropicProvider(LLMProvider):
 
         from anthropic import AsyncAnthropic
 
-        client_kw: dict[str, Any] = {
-            "max_retries": 0,
-            "timeout": httpx.Timeout(180.0, connect=10.0),
-        }
+        client_kw: dict[str, Any] = {}
         if api_key:
             client_kw["api_key"] = api_key
         if api_base:
@@ -383,6 +379,10 @@ class AnthropicProvider(LLMProvider):
                 val = getattr(response.usage, attr, 0)
                 if val:
                     usage[attr] = val
+            # Normalize to cached_tokens for downstream consistency.
+            cache_read = usage.get("cache_read_input_tokens", 0)
+            if cache_read:
+                usage["cached_tokens"] = cache_read
 
         return LLMResponse(
             content="".join(content_parts) or None,

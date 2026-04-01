@@ -131,12 +131,9 @@ class OpenAICompatProvider(LLMProvider):
         if extra_headers:
             default_headers.update(extra_headers)
 
-        import httpx as _httpx
         self._client = AsyncOpenAI(
             api_key=api_key or "no-key",
             base_url=effective_base,
-            max_retries=0,
-            timeout=_httpx.Timeout(180.0, connect=10.0),
             default_headers=default_headers,
         )
 
@@ -261,9 +258,6 @@ class OpenAICompatProvider(LLMProvider):
                     kwargs.update(overrides)
                     break
 
-        if "max_completion_tokens" in kwargs and "max_tokens" in kwargs:
-            del kwargs["max_tokens"]
-
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
 
@@ -314,6 +308,13 @@ class OpenAICompatProvider(LLMProvider):
 
     @classmethod
     def _extract_usage(cls, response: Any) -> dict[str, int]:
+        """Extract token usage from an OpenAI-compatible response.
+
+        Handles both dict-based (raw JSON) and object-based (SDK Pydantic)
+        responses.  Provider-specific ``cached_tokens`` fields are normalised
+        under a single key; see the priority chain inside for details.
+        """
+        # --- resolve usage object ---
         usage_obj = None
         response_map = cls._maybe_mapping(response)
         if response_map is not None:
@@ -323,19 +324,53 @@ class OpenAICompatProvider(LLMProvider):
 
         usage_map = cls._maybe_mapping(usage_obj)
         if usage_map is not None:
-            return {
+            result = {
                 "prompt_tokens": int(usage_map.get("prompt_tokens") or 0),
                 "completion_tokens": int(usage_map.get("completion_tokens") or 0),
                 "total_tokens": int(usage_map.get("total_tokens") or 0),
             }
-
-        if usage_obj:
-            return {
+        elif usage_obj:
+            result = {
                 "prompt_tokens": getattr(usage_obj, "prompt_tokens", 0) or 0,
                 "completion_tokens": getattr(usage_obj, "completion_tokens", 0) or 0,
                 "total_tokens": getattr(usage_obj, "total_tokens", 0) or 0,
             }
-        return {}
+        else:
+            return {}
+
+        # --- cached_tokens (normalised across providers) ---
+        # Try nested paths first (dict), fall back to attribute (SDK object).
+        # Priority order ensures the most specific field wins.
+        for path in (
+            ("prompt_tokens_details", "cached_tokens"),  # OpenAI/Zhipu/MiniMax/Qwen/Mistral/xAI
+            ("cached_tokens",),                          # StepFun/Moonshot (top-level)
+            ("prompt_cache_hit_tokens",),                # DeepSeek/SiliconFlow
+        ):
+            cached = cls._get_nested_int(usage_map, path)
+            if not cached and usage_obj:
+                cached = cls._get_nested_int(usage_obj, path)
+            if cached:
+                result["cached_tokens"] = cached
+                break
+
+        return result
+
+    @staticmethod
+    def _get_nested_int(obj: Any, path: tuple[str, ...]) -> int:
+        """Drill into *obj* by *path* segments and return an ``int`` value.
+
+        Supports both dict-key access and attribute access so it works
+        uniformly with raw JSON dicts **and** SDK Pydantic models.
+        """
+        current = obj
+        for segment in path:
+            if current is None:
+                return 0
+            if isinstance(current, dict):
+                current = current.get(segment)
+            else:
+                current = getattr(current, segment, None)
+        return int(current or 0) if current is not None else 0
 
     def _parse(self, response: Any) -> LLMResponse:
         if isinstance(response, str):
