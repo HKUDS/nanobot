@@ -7,9 +7,22 @@ multi-hop traversal (BFS path-finding, subgraph merging).
 from __future__ import annotations
 
 from collections import deque
-from typing import Any
+from typing import Any, Protocol
 
 __all__ = ["find_paths", "query_subgraph"]
+
+
+class _KnowledgeGraphProtocol(Protocol):
+    """Structural type for KnowledgeGraph methods used by traversal functions."""
+
+    enabled: bool
+    _db: Any  # GraphStore — only accessed for get_entity, get_edges_from, get_edges_to
+
+    def _get_display_name(self, canonical: str) -> str: ...
+
+    async def get_neighbors(
+        self, entity_name: str, depth: int = 1, relation_types: list[str] | None = None
+    ) -> list[dict[str, Any]]: ...
 
 
 def _norm(name: str) -> str:
@@ -18,7 +31,7 @@ def _norm(name: str) -> str:
 
 
 def find_paths(
-    graph: Any,
+    graph: _KnowledgeGraphProtocol,
     source: str,
     target: str,
     max_depth: int = 3,
@@ -47,7 +60,8 @@ def find_paths(
 
     def _edge_rel(n1: str, n2: str) -> str:
         """Find the relation between two adjacent canonical nodes."""
-        assert graph._db is not None
+        if graph._db is None:
+            raise RuntimeError("graph._db not initialized")
         for e in graph._db.get_edges_from(n1):
             if e["target"] == n2:
                 return str(e["relation"])
@@ -101,7 +115,7 @@ def find_paths(
 
 
 async def query_subgraph(
-    graph: Any,
+    graph: _KnowledgeGraphProtocol,
     entity_names: list[str],
     depth: int = 1,
 ) -> dict[str, Any]:

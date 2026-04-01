@@ -16,6 +16,7 @@ persists them and updates the active knowledge snapshot.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -47,9 +48,9 @@ class MemoryExtractor:
     def __init__(
         self,
         *,
-        to_str_list: Any,
-        coerce_event: Any,
-        utc_now_iso: Any,
+        to_str_list: Callable[[Any], list[str]],
+        coerce_event: Callable[..., MemoryEvent | None],
+        utc_now_iso: Callable[[], str],
     ):
         self.to_str_list = to_str_list
         self.coerce_event = coerce_event

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from loguru import logger
 
@@ -69,6 +69,34 @@ __all__ = [
 ]
 
 
+class _ConflictManagerProtocol(Protocol):
+    """Methods ProfileStore delegates to ConflictManager."""
+
+    def _conflict_pair(self, old_value: str, new_value: str) -> bool: ...
+    def _apply_profile_updates(
+        self,
+        profile: dict[str, Any],
+        updates: dict[str, list[str]],
+        *,
+        enable_contradiction_check: bool,
+        source_event_ids: list[str] | None = None,
+    ) -> tuple[int, int, int]: ...
+    def has_open_conflict(self, profile: dict[str, Any], key: str) -> bool: ...
+
+
+class _CorrectorProtocol(Protocol):
+    """Methods ProfileStore delegates to CorrectionOrchestrator."""
+
+    def apply_live_user_correction(
+        self,
+        content: str,
+        *,
+        channel: str = "",
+        chat_id: str = "",
+        enable_contradiction_check: bool = True,
+    ) -> dict[str, Any]: ...
+
+
 # ---------------------------------------------------------------------------
 # ProfileCache
 # ---------------------------------------------------------------------------
@@ -109,15 +137,15 @@ class ProfileStore:
         db: MemoryDatabase | None = None,
     ) -> None:
         self._db = db
-        self._conflict_mgr: Any | None = None  # set via set_conflict_mgr() after construction
-        self._corrector: Any | None = None  # set via set_corrector() after construction
+        self._conflict_mgr: _ConflictManagerProtocol | None = None  # set via set_conflict_mgr()
+        self._corrector: _CorrectorProtocol | None = None  # set via set_corrector()
         self._cache = ProfileCache()
 
-    def set_conflict_mgr(self, conflict_mgr: Any) -> None:
+    def set_conflict_mgr(self, conflict_mgr: _ConflictManagerProtocol) -> None:
         """Post-construction wiring: set conflict manager (breaks circular dep)."""
         self._conflict_mgr = conflict_mgr
 
-    def set_corrector(self, corrector: Any) -> None:
+    def set_corrector(self, corrector: _CorrectorProtocol) -> None:
         """Post-construction wiring: set correction orchestrator (breaks circular dep)."""
         self._corrector = corrector
 
@@ -449,7 +477,8 @@ class ProfileStore:
 
     def _conflict_pair(self, old_value: str, new_value: str) -> bool:
         """Delegate to ConflictManager._conflict_pair."""
-        assert self._conflict_mgr is not None, "conflict_mgr not wired — call set_conflict_mgr()"
+        if self._conflict_mgr is None:
+            raise RuntimeError("conflict_mgr not wired — call set_conflict_mgr()")
         return bool(self._conflict_mgr._conflict_pair(old_value, new_value))
 
     def _apply_profile_updates(
@@ -461,7 +490,8 @@ class ProfileStore:
         source_event_ids: list[str] | None = None,
     ) -> tuple[int, int, int]:
         """Delegate to ConflictManager._apply_profile_updates."""
-        assert self._conflict_mgr is not None, "conflict_mgr not wired — call set_conflict_mgr()"
+        if self._conflict_mgr is None:
+            raise RuntimeError("conflict_mgr not wired — call set_conflict_mgr()")
         result: tuple[int, int, int] = self._conflict_mgr._apply_profile_updates(
             profile,
             updates,
@@ -493,7 +523,8 @@ class ProfileStore:
 
     def _has_open_conflict(self, profile: dict[str, Any], key: str) -> bool:
         """Delegating wrapper — see ConflictManager.has_open_conflict."""
-        assert self._conflict_mgr is not None, "conflict_mgr not wired — call set_conflict_mgr()"
+        if self._conflict_mgr is None:
+            raise RuntimeError("conflict_mgr not wired — call set_conflict_mgr()")
         return bool(self._conflict_mgr.has_open_conflict(profile, key))
 
     # ------------------------------------------------------------------
@@ -525,7 +556,8 @@ class ProfileStore:
         enable_contradiction_check: bool = True,
     ) -> dict[str, Any]:
         """Facade — delegates to CorrectionOrchestrator wired by MemoryStore."""
-        assert self._corrector is not None, "corrector not wired — call set_corrector()"
+        if self._corrector is None:
+            raise RuntimeError("corrector not wired — call set_corrector()")
         result: dict[str, Any] = self._corrector.apply_live_user_correction(
             content,
             channel=channel,

@@ -94,8 +94,10 @@ class MemoryRetriever:
         embedding and dual-source search (vector KNN + FTS5), fuses via
         Reciprocal Rank Fusion, then applies the standard scoring pipeline.
         """
-        assert self._db is not None  # noqa: S101 — guarded by caller
-        assert self._embedder is not None  # noqa: S101
+        if self._db is None:
+            raise RuntimeError("EventStore not initialized — db is None")
+        if self._embedder is None:
+            raise RuntimeError("Embedder not initialized — embedder is None")
 
         plan = self._planner.plan(query)
         policy = plan.policy

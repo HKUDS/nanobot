@@ -139,7 +139,8 @@ class StrategyExtractor:
         success_args: str,
     ) -> str:
         """Use LLM to generate a concise strategy description."""
-        assert self._provider is not None
+        if self._provider is None:
+            raise RuntimeError("LLM provider not set — cannot summarize strategy")
         prompt = (
             "Extract a tool-use rule from this recovery. Be specific and actionable.\n\n"
             f"User asked: {user_text[:200]}\n"
