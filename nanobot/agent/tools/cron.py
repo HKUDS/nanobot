@@ -101,7 +101,7 @@ class CronTool(Tool):
                  "deliver": {
                      "type": "boolean",
                      "description": "Whether to deliver the execution result to the user channel (default true)",
-                     "default": true
+                     "default": True
                  },
              },
              "required": ["action"],
