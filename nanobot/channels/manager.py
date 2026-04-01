@@ -39,6 +39,7 @@ class ChannelManager:
         from nanobot.channels.registry import discover_all
 
         groq_key = self.config.providers.groq.api_key
+        groq_lang = getattr(self.config.providers.groq, "transcription_language", "")
 
         for name, cls in discover_all().items():
             section = getattr(self.config.channels, name, None)
@@ -54,6 +55,7 @@ class ChannelManager:
             try:
                 channel = cls(section, self.bus)
                 channel.transcription_api_key = groq_key
+                channel.transcription_language = groq_lang
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
