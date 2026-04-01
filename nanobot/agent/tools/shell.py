@@ -47,6 +47,7 @@ class ExecTool(Tool):
 
     _MAX_TIMEOUT = 600
     _MAX_OUTPUT = 10_000
+    _WIN_GUI_COMMANDS = frozenset({"explorer", "explorer.exe"})
 
     @property
     def description(self) -> str:
@@ -131,7 +132,12 @@ class ExecTool(Tool):
                 if stderr_text.strip():
                     output_parts.append(f"STDERR:\n{stderr_text}")
 
-            output_parts.append(f"\nExit code: {process.returncode}")
+            if self._is_win_gui_command(command) and process.returncode == 1:
+                output_parts.append(
+                    "\nExit code: 0 (explorer.exe returns 1 on Windows even on success, normalized to 0)"
+                )
+            else:
+                output_parts.append(f"\nExit code: {process.returncode}")
 
             result = "\n".join(output_parts) if output_parts else "(no output)"
 
@@ -183,6 +189,18 @@ class ExecTool(Tool):
                     return "Error: Command blocked by safety guard (path outside working dir)"
 
         return None
+
+    @staticmethod
+    def _is_win_gui_command(command: str) -> bool:
+        """Detect Windows GUI commands that return non-zero exit codes on success."""
+        if sys.platform != "win32":
+            return False
+        try:
+            token = command.strip().split()[0].strip('"').strip("'")
+            name = Path(token).name.lower()
+            return name in ExecTool._WIN_GUI_COMMANDS
+        except (IndexError, ValueError):
+            return False
 
     @staticmethod
     def _extract_absolute_paths(command: str) -> list[str]:
