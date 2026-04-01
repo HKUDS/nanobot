@@ -122,6 +122,18 @@ class TestEventCRUD:
         assert rows[0]["summary"] == long_text
 
 
+class TestGetEventById:
+    def test_found(self, store: EventStore) -> None:
+        store.insert_event(_make_event(id="e1", summary="hello"))
+        result = store.get_event_by_id("e1")
+        assert result is not None
+        assert result["id"] == "e1"
+        assert result["summary"] == "hello"
+
+    def test_not_found(self, store: EventStore) -> None:
+        assert store.get_event_by_id("nonexistent") is None
+
+
 class TestFTSSearch:
     def test_search_finds_matching_terms(self, store: EventStore) -> None:
         store.insert_event(_make_event(id="f1", summary="Python programming language"))
