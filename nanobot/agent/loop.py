@@ -31,8 +31,9 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, OtelConfig, WebSearchConfig
     from nanobot.cron.service import CronService
+    from nanobot.observability.hook import OTelHook
 
 
 class AgentLoop:
@@ -66,6 +67,7 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        otel_config: OtelConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -125,6 +127,13 @@ class AgentLoop:
         self._register_default_tools()
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+
+        self._otel_config = otel_config
+        self._otel_hook: OTelHook | None = None
+        if otel_config and otel_config.enabled:
+            from nanobot.observability.otel import setup_otel
+
+            setup_otel(otel_config.endpoint, otel_config.service_name)
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -282,13 +291,24 @@ class AgentLoop:
             ) -> str | None:
                 return loop_self._strip_think(content)
 
+        loop_hook = _LoopHook()
+
+        if self._otel_config and self._otel_config.enabled:
+            from nanobot.agent.hook_composite import CompositeHook
+            from nanobot.observability.hook import OTelHook
+
+            self._otel_hook = OTelHook(channel=channel, chat_id=chat_id)
+            hook: AgentHook = CompositeHook([loop_hook, self._otel_hook])
+        else:
+            hook = loop_hook
+
         result = await self.runner.run(
             AgentRunSpec(
                 initial_messages=initial_messages,
                 tools=self.tools,
                 model=self.model,
                 max_iterations=self.max_iterations,
-                hook=_LoopHook(),
+                hook=hook,
                 error_message="Sorry, I encountered an error calling the AI model.",
                 concurrent_tools=True,
             )
