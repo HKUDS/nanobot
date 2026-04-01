@@ -7,6 +7,8 @@ import re
 import socket
 from urllib.parse import urlparse
 
+from loguru import logger
+
 _BLOCKED_NETWORKS = [
     ipaddress.ip_network("0.0.0.0/8"),
     ipaddress.ip_network("10.0.0.0/8"),
@@ -20,10 +22,53 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("fe80::/10"),         # link-local v6
 ]
 
+# Networks that are ALWAYS blocked regardless of allowlist
+_ALWAYS_BLOCKED = [
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+_allowed_subnets: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+
 _URL_RE = re.compile(r"https?://[^\s\"'`;|<>]+", re.IGNORECASE)
 
 
+def configure_allowed_subnets(subnets: list[str]) -> None:
+    """Parse and validate CIDR allowlist for SSRF bypass.
+
+    Raises ValueError for invalid CIDR strings.
+    Silently skips subnets that overlap with always-blocked ranges (with warning).
+    """
+    global _allowed_subnets
+    parsed: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for cidr in subnets:
+        try:
+            net = ipaddress.ip_network(cidr, strict=False)
+        except ValueError as e:
+            raise ValueError(
+                f"Invalid CIDR in ssrfAllowedSubnets: {cidr!r}: {e}"
+            ) from e
+        if any(net.overlaps(blocked) for blocked in _ALWAYS_BLOCKED):
+            logger.warning(
+                "ssrfAllowedSubnets: ignoring {!r}"
+                " — overlaps with always-blocked range",
+                cidr,
+            )
+            continue
+        parsed.append(net)
+    _allowed_subnets = parsed
+
+
 def _is_private(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    # Always block loopback and link-local
+    if any(addr in net for net in _ALWAYS_BLOCKED):
+        return True
+    # Check allowlist
+    if _allowed_subnets and any(addr in net for net in _allowed_subnets):
+        return False
     return any(addr in net for net in _BLOCKED_NETWORKS)
 
 

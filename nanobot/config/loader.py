@@ -36,18 +36,23 @@ def load_config(config_path: Path | None = None) -> Config:
         Loaded configuration object.
     """
     path = config_path or get_config_path()
+    config = Config()
 
     if path.exists():
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            return Config.model_validate(data)
+            config = Config.model_validate(data)
         except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
             logger.warning(f"Failed to load config from {path}: {e}")
             logger.warning("Using default configuration.")
 
-    return Config()
+    from nanobot.security.network import configure_allowed_subnets
+
+    configure_allowed_subnets(config.security.ssrf_allowed_subnets)
+
+    return config
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:

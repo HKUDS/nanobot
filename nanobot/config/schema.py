@@ -168,6 +168,12 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class SecurityConfig(Base):
+    """Security configuration."""
+
+    ssrf_allowed_subnets: list[str] = Field(default_factory=list)
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -177,6 +183,7 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
 
     @property
     def workspace_path(self) -> Path:

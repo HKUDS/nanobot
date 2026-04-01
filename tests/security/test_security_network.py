@@ -7,7 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.security.network import contains_internal_url, validate_url_target
+from nanobot.security.network import (
+    configure_allowed_subnets,
+    contains_internal_url,
+    validate_url_target,
+)
 
 
 def _fake_resolve(host: str, results: list[str]):
@@ -99,3 +103,81 @@ def test_allows_normal_curl():
 
 def test_no_urls_returns_false():
     assert not contains_internal_url("echo hello && ls -la")
+
+
+# ---------------------------------------------------------------------------
+# ssrfAllowedSubnets — subnet-based allowlist
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _reset_allowed_subnets():
+    """Reset SSRF allowlist between tests."""
+    yield
+    configure_allowed_subnets([])
+
+
+def test_allowed_subnet_bypasses_private_block():
+    configure_allowed_subnets(["172.16.0.0/12"])
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo",
+        _fake_resolve("internal.corp", ["172.16.5.1"]),
+    ):
+        ok, err = validate_url_target("http://internal.corp/api")
+        assert ok, f"172.16.5.1 should be allowed, got: {err}"
+
+
+def test_private_ip_not_in_allowlist_still_blocked():
+    configure_allowed_subnets(["172.16.0.0/12"])
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo",
+        _fake_resolve("evil.com", ["10.0.0.1"]),
+    ):
+        ok, err = validate_url_target("http://evil.com/path")
+        assert not ok, "10.0.0.1 should still be blocked"
+
+
+def test_empty_allowlist_blocks_all_private():
+    configure_allowed_subnets([])
+    for ip in ["10.0.0.1", "172.16.5.1", "192.168.1.1"]:
+        with patch(
+            "nanobot.security.network.socket.getaddrinfo",
+            _fake_resolve("evil.com", [ip]),
+        ):
+            ok, _ = validate_url_target("http://evil.com/path")
+            assert not ok, f"{ip} should be blocked with empty allowlist"
+
+
+def test_invalid_cidr_raises_error():
+    with pytest.raises(ValueError, match="Invalid CIDR"):
+        configure_allowed_subnets(["not-a-cidr"])
+
+
+def test_loopback_blocked_even_if_allowlisted():
+    configure_allowed_subnets(["127.0.0.0/8"])
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo",
+        _fake_resolve("evil.com", ["127.0.0.1"]),
+    ):
+        ok, _ = validate_url_target("http://evil.com/path")
+        assert not ok, "127.0.0.1 must always be blocked"
+
+
+def test_multiple_subnets_configured():
+    configure_allowed_subnets(["10.0.0.0/8", "172.16.0.0/12"])
+    for ip in ["10.0.0.1", "172.16.5.1"]:
+        with patch(
+            "nanobot.security.network.socket.getaddrinfo",
+            _fake_resolve("internal.corp", [ip]),
+        ):
+            ok, err = validate_url_target("http://internal.corp/api")
+            assert ok, f"{ip} should be allowed, got: {err}"
+
+
+def test_link_local_blocked_even_if_allowlisted():
+    configure_allowed_subnets(["169.254.0.0/16"])
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo",
+        _fake_resolve("evil.com", ["169.254.169.254"]),
+    ):
+        ok, _ = validate_url_target("http://evil.com/path")
+        assert not ok, "169.254.169.254 must always be blocked"
