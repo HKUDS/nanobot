@@ -27,6 +27,7 @@ from nanobot.observability.tracing import bind_trace
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider, LLMResponse
+    from nanobot.providers.rate_limiter import RateLimiter
 
 # LAN-90: pre-compile static regexes to avoid recompilation on every call.
 _THINK_RE = re.compile(r"<think>[\s\S]*?</think>")
@@ -63,11 +64,13 @@ class StreamingLLMCaller:
         model: str,
         temperature: float,
         max_tokens: int,
+        rate_limiter: RateLimiter | None = None,
     ) -> None:
         self.provider = provider
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self._rate_limiter = rate_limiter
 
     async def call(
         self,
@@ -89,6 +92,10 @@ class StreamingLLMCaller:
         the construction-time defaults, allowing callers (e.g. role
         switching) to propagate per-turn values without mutating the caller.
         """
+        if self._rate_limiter:
+            waited = await self._rate_limiter.wait_if_needed()
+            if waited > 0:
+                bind_trace().info("Rate limiter delayed LLM call by {:.1f}s", waited)
         t0 = time.monotonic()
         effective_model = model if model is not None else self.model
         effective_temperature = temperature if temperature is not None else self.temperature
@@ -112,6 +119,8 @@ class StreamingLLMCaller:
                 resp.usage.get("completion_tokens", 0),
                 len(resp.tool_calls),
             )
+            if self._rate_limiter:
+                self._rate_limiter.record(resp.usage.get("prompt_tokens", 0))
             return resp
 
         content_parts: list[str] = []
@@ -178,6 +187,8 @@ class StreamingLLMCaller:
             len(tool_calls),
             chunk_count,
         )
+        if self._rate_limiter:
+            self._rate_limiter.record(usage.get("prompt_tokens", 0))
 
         return LLMResponse(
             content=full_content,
