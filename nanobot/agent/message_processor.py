@@ -336,9 +336,18 @@ class MessageProcessor:
         # Only on the primary path where agent produced a substantive response.
         # The system-message path (~line 209) is intentionally excluded.
         if self._micro_extractor is not None and final_content:
+            _tool_log = (
+                getattr(self._last_turn_result, "tool_results_log", [])
+                if self._last_turn_result is not None
+                else []
+            )
+            _hints = _extract_tool_hints(_tool_log) if _tool_log else []
             await self._micro_extractor.submit(
                 user_message=msg.content,
                 assistant_message=final_content,
+                channel=msg.channel,
+                tool_hints=_hints,
+                turn_timestamp=datetime.now(timezone.utc).isoformat(),
             )
 
         # Procedural memory: extract strategies from guardrail recoveries
