@@ -283,3 +283,32 @@ class TestFullExtractorProvenance:
         assert len(events) == 1
         assert events[0].source == "whatsapp,exec:obsidian"
         assert events[0].metadata.get("source_timestamp") == "2026-03-31T14:30:00"
+
+    @pytest.mark.asyncio
+    async def test_extract_no_provenance_uses_event_default(self):
+        """Backward compat: omitting provenance params leaves source unchanged."""
+        tc = MagicMock()
+        tc.arguments = json.dumps(
+            {
+                "events": [{"type": "fact", "summary": "test fact", "source_span": [0, 1]}],
+                "profile_updates": {},
+            }
+        )
+        resp = MagicMock()
+        resp.has_tool_calls = True
+        resp.tool_calls = [tc]
+        provider = AsyncMock()
+        provider.chat = AsyncMock(return_value=resp)
+
+        events, _ = await self.extractor.extract_structured_memory(
+            provider=provider,
+            model="test",
+            current_profile={},
+            lines=["User: test"],
+            old_messages=[{"role": "user", "content": "test"}],
+            source_start=0,
+        )
+
+        assert len(events) == 1
+        assert events[0].source == "chat"  # MemoryEvent default, unchanged
+        assert "source_timestamp" not in events[0].metadata

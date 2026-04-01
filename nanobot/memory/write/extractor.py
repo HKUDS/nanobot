@@ -206,5 +206,6 @@ class MemoryExtractor:
                 "Structured event extraction failed, falling back to heuristic extraction"
             )
 
+        # Heuristic fallback: provenance params are not forwarded — events keep their default source.
         self.last_extraction_source = "heuristic"
         return self.heuristic_extract_events(old_messages, source_start=source_start)
