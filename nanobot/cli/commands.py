@@ -597,9 +597,13 @@ def gateway(
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
 
-    if verbose:
-        import logging
-        logging.basicConfig(level=logging.DEBUG)
+    # Configure loguru and logging levels based on verbose flag
+    import logging
+    from loguru import logger
+
+    logger.remove()
+    logger.add(sys.stderr, level="DEBUG" if verbose else "INFO")
+    logging.getLogger().setLevel(logging.DEBUG if verbose else logging.INFO)
 
     config = _load_runtime_config(config, workspace)
     port = port if port is not None else config.gateway.port
