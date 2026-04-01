@@ -267,6 +267,7 @@ class _FeishuStreamBuf:
     card_id: str | None = None
     sequence: int = 0
     last_edit: float = 0.0
+    tool_hint_len: int = 0
 
 
 class FeishuChannel(BaseChannel):
@@ -1279,6 +1280,19 @@ class FeishuChannel(BaseChannel):
                 if self.config.done_emoji and message_id:
                     await self._add_reaction(message_id, self.config.done_emoji)
 
+            resuming = meta.get("_resuming", False)
+            if resuming:
+                # Mid-turn pause (e.g. tool call between streaming segments).
+                # Flush current text to card but keep the buffer alive so the
+                # next segment appends to the same card.
+                buf = self._stream_bufs.get(chat_id)
+                if buf and buf.card_id and buf.text:
+                    buf.sequence += 1
+                    await loop.run_in_executor(
+                        None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
+                    )
+                return
+
             buf = self._stream_bufs.pop(chat_id, None)
             if not buf or not buf.text:
                 return
@@ -1317,6 +1331,9 @@ class FeishuChannel(BaseChannel):
         if buf is None:
             buf = _FeishuStreamBuf()
             self._stream_bufs[chat_id] = buf
+        if buf.tool_hint_len > 0:
+            buf.text = buf.text[:-buf.tool_hint_len]
+            buf.tool_hint_len = 0
         buf.text += delta
         if not buf.text.strip():
             return
@@ -1350,12 +1367,26 @@ class FeishuChannel(BaseChannel):
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
             loop = asyncio.get_running_loop()
 
-            # Handle tool hint messages as code blocks in interactive cards.
-            # These are progress-only messages and should bypass normal reply routing.
+            # Handle tool hint messages.  When a streaming card is active for
+            # this chat, inline the hint into the card instead of sending a
+            # separate message so the user experience stays cohesive.
             if msg.metadata.get("_tool_hint"):
-                if msg.content and msg.content.strip():
+                hint = (msg.content or "").strip()
+                if not hint:
+                    return
+                buf = self._stream_bufs.get(msg.chat_id)
+                if buf and buf.card_id:
+                    suffix = f"\n\n---\n🔧 {hint}"
+                    buf.text += suffix
+                    buf.tool_hint_len = len(suffix)
+                    buf.sequence += 1
+                    await loop.run_in_executor(
+                        None, self._stream_update_text_sync,
+                        buf.card_id, buf.text, buf.sequence,
+                    )
+                else:
                     await self._send_tool_hint_card(
-                        receive_id_type, msg.chat_id, msg.content.strip()
+                        receive_id_type, msg.chat_id, hint
                     )
                 return
 
