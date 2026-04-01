@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.feishu import FeishuChannel, FeishuConfig, _FeishuStreamBuf
 
@@ -204,6 +205,55 @@ class TestSendDelta:
         ch._client.im.v1.message.create.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_stream_end_resuming_keeps_buffer(self):
+        """_resuming=True flushes text to card but keeps the buffer for the next segment."""
+        ch = _make_channel()
+        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
+            text="Partial answer", card_id="card_1", sequence=2, last_edit=0.0,
+        )
+        ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
+
+        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True, "_resuming": True})
+
+        assert "oc_chat1" in ch._stream_bufs
+        buf = ch._stream_bufs["oc_chat1"]
+        assert buf.card_id == "card_1"
+        assert buf.sequence == 3
+        ch._client.cardkit.v1.card_element.content.assert_called_once()
+        ch._client.cardkit.v1.card.settings.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stream_end_resuming_then_final_end(self):
+        """Full multi-segment flow: resuming mid-turn, then final end closes the card."""
+        ch = _make_channel()
+        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
+            text="Seg1", card_id="card_1", sequence=1, last_edit=0.0,
+        )
+        ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
+        ch._client.cardkit.v1.card.settings.return_value = _mock_content_response()
+
+        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True, "_resuming": True})
+        assert "oc_chat1" in ch._stream_bufs
+
+        ch._stream_bufs["oc_chat1"].text += " Seg2"
+        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+
+        assert "oc_chat1" not in ch._stream_bufs
+        ch._client.cardkit.v1.card.settings.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stream_end_resuming_no_card_is_noop(self):
+        """_resuming with no card_id (card creation failed) is a safe no-op."""
+        ch = _make_channel()
+        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
+            text="text", card_id=None, sequence=0, last_edit=0.0,
+        )
+        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True, "_resuming": True})
+
+        assert "oc_chat1" in ch._stream_bufs
+        ch._client.cardkit.v1.card_element.content.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_stream_end_without_buf_is_noop(self):
         ch = _make_channel()
         await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
@@ -237,6 +287,67 @@ class TestSendDelta:
         buf.last_edit = 0.0  # reset to bypass throttle
         await ch.send_delta("oc_chat1", "c")
         assert buf.sequence == 7
+
+
+class TestToolHintInlineStreaming:
+    """Tool hint messages should be inlined into active streaming cards."""
+
+    @pytest.mark.asyncio
+    async def test_tool_hint_inlined_when_stream_active(self):
+        """With an active streaming buffer, tool hint appends to the card."""
+        ch = _make_channel()
+        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
+            text="Partial answer", card_id="card_1", sequence=2, last_edit=0.0,
+        )
+        ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
+
+        msg = OutboundMessage(
+            channel="feishu", chat_id="oc_chat1",
+            content='web_fetch("https://example.com")',
+            metadata={"_tool_hint": True},
+        )
+        await ch.send(msg)
+
+        buf = ch._stream_bufs["oc_chat1"]
+        assert buf.text.endswith('🔧 web_fetch("https://example.com")')
+        assert buf.tool_hint_len > 0
+        assert buf.sequence == 3
+        ch._client.cardkit.v1.card_element.content.assert_called_once()
+        ch._client.im.v1.message.create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tool_hint_stripped_on_next_delta(self):
+        """When new delta arrives, the previously appended tool hint is removed."""
+        ch = _make_channel()
+        suffix = "\n\n---\n🔧 web_fetch(\"url\")"
+        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
+            text="Partial answer" + suffix,
+            card_id="card_1", sequence=3, last_edit=0.0,
+            tool_hint_len=len(suffix),
+        )
+        ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
+
+        await ch.send_delta("oc_chat1", " continued")
+
+        buf = ch._stream_bufs["oc_chat1"]
+        assert buf.text == "Partial answer continued"
+        assert buf.tool_hint_len == 0
+
+    @pytest.mark.asyncio
+    async def test_tool_hint_fallback_when_no_stream(self):
+        """Without an active buffer, tool hint falls back to a standalone card."""
+        ch = _make_channel()
+        ch._client.im.v1.message.create.return_value = _mock_send_response("om_hint")
+
+        msg = OutboundMessage(
+            channel="feishu", chat_id="oc_chat1",
+            content='read_file("path")',
+            metadata={"_tool_hint": True},
+        )
+        await ch.send(msg)
+
+        assert "oc_chat1" not in ch._stream_bufs
+        ch._client.im.v1.message.create.assert_called_once()
 
 
 class TestSendMessageReturnsId:
