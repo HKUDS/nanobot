@@ -316,8 +316,8 @@ class TestToolHintInlineStreaming:
         ch._client.im.v1.message.create.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_tool_hint_stripped_on_next_delta(self):
-        """When new delta arrives, the previously appended tool hint is removed."""
+    async def test_tool_hint_kept_on_next_delta(self):
+        """When new delta arrives, the tool hint is preserved and new content appends after it."""
         ch = _make_channel()
         suffix = "\n\n---\n🔧 web_fetch(\"url\")"
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
@@ -330,7 +330,7 @@ class TestToolHintInlineStreaming:
         await ch.send_delta("oc_chat1", " continued")
 
         buf = ch._stream_bufs["oc_chat1"]
-        assert buf.text == "Partial answer continued"
+        assert buf.text == "Partial answer" + suffix + "\n\n continued"
         assert buf.tool_hint_len == 0
 
     @pytest.mark.asyncio

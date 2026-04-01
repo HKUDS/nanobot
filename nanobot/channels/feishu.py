@@ -1085,7 +1085,7 @@ class FeishuChannel(BaseChannel):
             buf = _FeishuStreamBuf()
             self._stream_bufs[chat_id] = buf
         if buf.tool_hint_len > 0:
-            buf.text = buf.text[:-buf.tool_hint_len]
+            buf.text += "\n\n"
             buf.tool_hint_len = 0
         buf.text += delta
         if not buf.text.strip():
