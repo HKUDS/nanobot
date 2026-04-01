@@ -20,7 +20,7 @@ from loguru import logger
 from nanobot.agent.agent_components import _ProcessorServices
 from nanobot.agent.callbacks import ProgressCallback
 from nanobot.agent.streaming import strip_think
-from nanobot.agent.turn_types import TurnState
+from nanobot.agent.turn_types import ToolAttempt, TurnState
 from nanobot.bus.canonical import CanonicalEventBuilder
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.config.agent import AgentConfig
@@ -622,3 +622,24 @@ def _build_no_answer_explanation(user_text: str, messages: list[dict[str, Any]])
 
     primary_reason = reasons[0]
     return f"Sorry, I couldn't answer that just now. {primary_reason} {help_line}"
+
+
+def _extract_tool_hints(attempts: list[ToolAttempt]) -> list[str]:
+    """Convert ToolAttempt objects to deduplicated, sorted tool hint strings.
+
+    Non-exec tools use their name directly (e.g. ``"read_file"``).
+    Exec tools extract the first word of the command argument
+    (e.g. ``"exec:obsidian"``).  Deduplicates and sorts alphabetically.
+    """
+    hints: set[str] = set()
+    for attempt in attempts:
+        if attempt.tool_name != "exec":
+            hints.add(attempt.tool_name)
+            continue
+        cmd = attempt.arguments.get("command", "")
+        if isinstance(cmd, str) and cmd.strip():
+            first_word = cmd.strip().split()[0]
+            hints.add(f"exec:{first_word}")
+        else:
+            hints.add("exec")
+    return sorted(hints)
