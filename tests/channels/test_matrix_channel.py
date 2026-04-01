@@ -3,6 +3,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from nio import RoomSendResponse
+
+from nanobot.channels.matrix import _build_matrix_text_content
 
 # Check optional matrix dependencies before importing
 try:
@@ -65,6 +68,7 @@ class _FakeAsyncClient:
         self.raise_on_send = False
         self.raise_on_typing = False
         self.raise_on_upload = False
+        self.room_send_response: RoomSendResponse | None = RoomSendResponse(event_id="", room_id="")
 
     def add_event_callback(self, callback, event_type) -> None:
         self.callbacks.append((callback, event_type))
@@ -87,7 +91,7 @@ class _FakeAsyncClient:
         message_type: str,
         content: dict[str, object],
         ignore_unverified_devices: object = _ROOM_SEND_UNSET,
-    ) -> None:
+    ) -> RoomSendResponse:
         call: dict[str, object] = {
             "room_id": room_id,
             "message_type": message_type,
@@ -98,6 +102,7 @@ class _FakeAsyncClient:
         self.room_send_calls.append(call)
         if self.raise_on_send:
             raise RuntimeError("send failed")
+        return self.room_send_response
 
     async def room_typing(
         self,
@@ -520,6 +525,7 @@ async def test_on_message_room_mention_requires_opt_in() -> None:
         source={"content": {"m.mentions": {"room": True}}},
     )
 
+    channel.config.allow_room_mentions = False
     await channel._on_message(room, room_mention_event)
     assert handled == []
     assert client.typing_calls == []
@@ -1322,3 +1328,302 @@ async def test_send_keeps_plaintext_only_for_plain_text() -> None:
         "body": text,
         "m.mentions": {},
     }
+
+
+def test_build_matrix_text_content_basic_text() -> None:
+    """Test basic text content without HTML formatting."""
+    result = _build_matrix_text_content("Hello, World!")
+    expected = {
+        "msgtype": "m.text",
+        "body": "Hello, World!",
+        "m.mentions": {}
+    }
+    assert expected == result
+
+
+def test_build_matrix_text_content_with_markdown() -> None:
+    """Test text content with markdown that renders to HTML."""
+    text = "*Hello* **World**"
+    result = _build_matrix_text_content(text)
+    assert "msgtype" in result
+    assert "body" in result
+    assert result["body"] == text
+    assert "format" in result
+    assert result["format"] == "org.matrix.custom.html"
+    assert "formatted_body" in result
+    assert isinstance(result["formatted_body"], str)
+    assert len(result["formatted_body"]) > 0
+
+
+def test_build_matrix_text_content_with_event_id() -> None:
+    """Test text content with event_id for message replacement."""
+    event_id = "$8E2XVyINbEhcuAxvxd1d9JhQosNPzkVoU8TrbCAvyHo"
+    result = _build_matrix_text_content("Updated message", event_id)
+    assert "msgtype" in result
+    assert "body" in result
+    assert result["m.new_content"]
+    assert result["m.new_content"]["body"] == "Updated message"
+    assert result["m.relates_to"]["rel_type"] == "m.replace"
+    assert result["m.relates_to"]["event_id"] == event_id
+
+
+def test_build_matrix_text_content_with_event_id_preserves_thread_relation() -> None:
+    """Thread relations for edits should stay inside m.new_content."""
+    relates_to = {
+        "rel_type": "m.thread",
+        "event_id": "$root1",
+        "m.in_reply_to": {"event_id": "$reply1"},
+        "is_falling_back": True,
+    }
+    result = _build_matrix_text_content("Updated message", "event-1", relates_to)
+
+    assert result["m.relates_to"] == {
+        "rel_type": "m.replace",
+        "event_id": "event-1",
+    }
+    assert result["m.new_content"]["m.relates_to"] == relates_to
+
+
+def test_build_matrix_text_content_no_event_id() -> None:
+    """Test that when event_id is not provided, no extra properties are added."""
+    result = _build_matrix_text_content("Regular message")
+
+    # Basic required properties should be present
+    assert "msgtype" in result
+    assert "body" in result
+    assert result["body"] == "Regular message"
+
+    # Extra properties for replacement should NOT be present
+    assert "m.relates_to" not in result
+    assert "m.new_content" not in result
+    assert "format" not in result
+    assert "formatted_body" not in result
+
+
+def test_build_matrix_text_content_plain_text_no_html() -> None:
+    """Test plain text that should not include HTML formatting."""
+    result = _build_matrix_text_content("Simple plain text")
+    assert "msgtype" in result
+    assert "body" in result
+    assert "format" not in result
+    assert "formatted_body" not in result
+
+
+@pytest.mark.asyncio
+async def test_send_room_content_returns_room_send_response():
+    """Test that _send_room_content returns the response from client.room_send."""
+    client = _FakeAsyncClient("", "", "", None)
+    channel = MatrixChannel(_make_config(), MessageBus())
+    channel.client = client
+
+    room_id = "!test_room:matrix.org"
+    content = {"msgtype": "m.text", "body": "Hello World"}
+
+    result = await channel._send_room_content(room_id, content)
+
+    assert result is client.room_send_response
+
+
+@pytest.mark.asyncio
+async def test_send_delta_creates_stream_buffer_and_sends_initial_message() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    client.room_send_response.event_id = "$8E2XVyINbEhcuAxvxd1d9JhQosNPzkVoU8TrbCAvyHo"
+
+    await channel.send_delta("!room:matrix.org", "Hello")
+
+    assert "!room:matrix.org" in channel._stream_bufs
+    buf = channel._stream_bufs["!room:matrix.org"]
+    assert buf.text == "Hello"
+    assert buf.event_id == "$8E2XVyINbEhcuAxvxd1d9JhQosNPzkVoU8TrbCAvyHo"
+    assert len(client.room_send_calls) == 1
+    assert client.room_send_calls[0]["content"]["body"] == "Hello"
+
+
+@pytest.mark.asyncio
+async def test_send_delta_appends_without_sending_before_edit_interval(monkeypatch) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    client.room_send_response.event_id = "$8E2XVyINbEhcuAxvxd1d9JhQosNPzkVoU8TrbCAvyHo"
+
+    now = 100.0
+    monkeypatch.setattr(channel, "monotonic_time", lambda: now)
+
+    await channel.send_delta("!room:matrix.org", "Hello")
+    assert len(client.room_send_calls) == 1
+
+    await channel.send_delta("!room:matrix.org", " world")
+    assert len(client.room_send_calls) == 1
+
+    buf = channel._stream_bufs["!room:matrix.org"]
+    assert buf.text == "Hello world"
+    assert buf.event_id == "$8E2XVyINbEhcuAxvxd1d9JhQosNPzkVoU8TrbCAvyHo"
+
+
+@pytest.mark.asyncio
+async def test_send_delta_edits_again_after_interval(monkeypatch) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    client.room_send_response.event_id = "$8E2XVyINbEhcuAxvxd1d9JhQosNPzkVoU8TrbCAvyHo"
+
+    times = [100.0, 102.0, 104.0, 106.0, 108.0]
+    times.reverse()
+    monkeypatch.setattr(channel, "monotonic_time", lambda: times and times.pop())
+
+    await channel.send_delta("!room:matrix.org", "Hello")
+    await channel.send_delta("!room:matrix.org", " world")
+
+    assert len(client.room_send_calls) == 2
+    first_content = client.room_send_calls[0]["content"]
+    second_content = client.room_send_calls[1]["content"]
+
+    assert "body" in first_content
+    assert first_content["body"] == "Hello"
+    assert "m.relates_to" not in first_content
+
+    assert "body" in second_content
+    assert "m.relates_to" in second_content
+    assert second_content["body"] == "Hello world"
+    assert second_content["m.relates_to"] == {
+        "rel_type": "m.replace",
+        "event_id": "$8E2XVyINbEhcuAxvxd1d9JhQosNPzkVoU8TrbCAvyHo",
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_replaces_existing_message() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    channel._stream_bufs["!room:matrix.org"] = matrix_module._StreamBuf(
+        text="Final text",
+        event_id="event-1",
+        last_edit=100.0,
+    )
+
+    await channel.send_delta("!room:matrix.org", "", {"_stream_end": True})
+
+    assert "!room:matrix.org" not in channel._stream_bufs
+    assert client.typing_calls[-1] == ("!room:matrix.org", False, TYPING_NOTICE_TIMEOUT_MS)
+    assert len(client.room_send_calls) == 1
+    assert client.room_send_calls[0]["content"]["body"] == "Final text"
+    assert client.room_send_calls[0]["content"]["m.relates_to"] == {
+        "rel_type": "m.replace",
+        "event_id": "event-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_delta_starts_threaded_stream_inside_thread() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    client.room_send_response.event_id = "event-1"
+
+    metadata = {
+        "thread_root_event_id": "$root1",
+        "thread_reply_to_event_id": "$reply1",
+    }
+    await channel.send_delta("!room:matrix.org", "Hello", metadata)
+
+    assert client.room_send_calls[0]["content"]["m.relates_to"] == {
+        "rel_type": "m.thread",
+        "event_id": "$root1",
+        "m.in_reply_to": {"event_id": "$reply1"},
+        "is_falling_back": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_delta_threaded_edit_keeps_replace_and_thread_relation(monkeypatch) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    client.room_send_response.event_id = "event-1"
+
+    times = [100.0, 102.0, 104.0]
+    times.reverse()
+    monkeypatch.setattr(channel, "monotonic_time", lambda: times and times.pop())
+
+    metadata = {
+        "thread_root_event_id": "$root1",
+        "thread_reply_to_event_id": "$reply1",
+    }
+    await channel.send_delta("!room:matrix.org", "Hello", metadata)
+    await channel.send_delta("!room:matrix.org", " world", metadata)
+    await channel.send_delta("!room:matrix.org", "", {"_stream_end": True, **metadata})
+
+    edit_content = client.room_send_calls[1]["content"]
+    final_content = client.room_send_calls[2]["content"]
+
+    assert edit_content["m.relates_to"] == {
+        "rel_type": "m.replace",
+        "event_id": "event-1",
+    }
+    assert edit_content["m.new_content"]["m.relates_to"] == {
+        "rel_type": "m.thread",
+        "event_id": "$root1",
+        "m.in_reply_to": {"event_id": "$reply1"},
+        "is_falling_back": True,
+    }
+    assert final_content["m.relates_to"] == {
+        "rel_type": "m.replace",
+        "event_id": "event-1",
+    }
+    assert final_content["m.new_content"]["m.relates_to"] == {
+        "rel_type": "m.thread",
+        "event_id": "$root1",
+        "m.in_reply_to": {"event_id": "$reply1"},
+        "is_falling_back": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_noop_when_buffer_missing() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    await channel.send_delta("!room:matrix.org", "", {"_stream_end": True})
+
+    assert client.room_send_calls == []
+    assert client.typing_calls == []
+
+
+@pytest.mark.asyncio
+async def test_send_delta_on_error_stops_typing(monkeypatch) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    client.raise_on_send = True
+    channel.client = client
+
+    now = 100.0
+    monkeypatch.setattr(channel, "monotonic_time", lambda: now)
+
+    await channel.send_delta("!room:matrix.org", "Hello", {"room_id": "!room:matrix.org"})
+
+    assert "!room:matrix.org" in channel._stream_bufs
+    assert channel._stream_bufs["!room:matrix.org"].text == "Hello"
+    assert len(client.room_send_calls) == 1
+    
+    assert len(client.typing_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_send_delta_ignores_whitespace_only_delta(monkeypatch) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    now = 100.0
+    monkeypatch.setattr(channel, "monotonic_time", lambda: now)
+
+    await channel.send_delta("!room:matrix.org", "   ")
+
+    assert "!room:matrix.org" in channel._stream_bufs
+    assert channel._stream_bufs["!room:matrix.org"].text == "   "
+    assert client.room_send_calls == []
