@@ -4,6 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
+pytest.importorskip("nio")
+pytest.importorskip("nh3")
+pytest.importorskip("mistune")
+
 import nanobot.channels.matrix as matrix_module
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
