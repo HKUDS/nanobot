@@ -44,7 +44,7 @@ multi-channel messaging.
 | `observability/` | Instrumentation and tracing | `init_langfuse()`, `TraceContext`, `bind_trace()` |
 | `bus/` | Async message bus | `MessageBus`, `InboundMessage`, `OutboundMessage` |
 | `channels/` | Chat platform adapters | `ChannelManager`, `BaseChannel` |
-| `providers/` | LLM provider abstraction | `LLMProvider`, `LiteLLMProvider` |
+| `providers/` | LLM provider abstraction | `LLMProvider`, `LiteLLMProvider`, `RateLimiter` |
 | `config/` | Pydantic config models + loader | `Config`, `load_config()` |
 | `session/` | Conversation session management | `SessionManager`, `Session` |
 | `cron/` | Scheduled task service | `CronService`, `CronJob` |

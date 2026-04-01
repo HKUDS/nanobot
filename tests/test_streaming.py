@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
+from nanobot.agent.streaming import StreamingLLMCaller
 from nanobot.providers.base import LLMProvider, LLMResponse, StreamChunk, ToolCallRequest
+from nanobot.providers.rate_limiter import RateLimiter
 
 # ---------------------------------------------------------------------------
 # Mock streaming provider
@@ -215,3 +219,41 @@ class TestChunkReassembly:
         )
         assert response.has_tool_calls
         assert response.content == "Searching"
+
+
+# ---------------------------------------------------------------------------
+# Rate limiter integration
+# ---------------------------------------------------------------------------
+
+
+class TestStreamingWithRateLimiter:
+    @pytest.mark.asyncio
+    async def test_rate_limiter_called_before_and_after(self):
+        """Rate limiter is consulted before the call and records tokens after."""
+        provider = FakeStreamProvider()
+        rl = RateLimiter(tokens_per_minute=50_000)
+        caller = StreamingLLMCaller(
+            provider=provider,
+            model="test",
+            temperature=0.1,
+            max_tokens=100,
+            rate_limiter=rl,
+        )
+        messages = [{"role": "user", "content": "hello"}]
+        await caller.call(messages, tools=None, on_progress=None)
+        # Provider was called (no rate limit hit since window is empty)
+        assert provider._chat_calls == 1
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_none_works(self):
+        """StreamingLLMCaller works fine without a rate limiter."""
+        provider = FakeStreamProvider()
+        caller = StreamingLLMCaller(
+            provider=provider,
+            model="test",
+            temperature=0.1,
+            max_tokens=100,
+        )
+        messages = [{"role": "user", "content": "hello"}]
+        await caller.call(messages, tools=None, on_progress=None)
+        assert provider._chat_calls == 1

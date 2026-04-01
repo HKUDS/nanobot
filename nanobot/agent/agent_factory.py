@@ -297,12 +297,20 @@ def build_agent(
     # 7. Wire memory
     consolidator = _wire_memory(context=context, config=config)
 
+    # 8.5. Construct RateLimiter for Anthropic models
+    from nanobot.providers.rate_limiter import RateLimiter as _RateLimiter
+
+    _rate_limiter: _RateLimiter | None = None
+    if "anthropic/" in model or "claude" in model.lower():
+        _rate_limiter = _RateLimiter(tokens_per_minute=50_000)
+
     # 9. Construct StreamingLLMCaller
     llm_caller = StreamingLLMCaller(
         provider=provider,
         model=model,
         temperature=temperature,
         max_tokens=config.max_tokens,
+        rate_limiter=_rate_limiter,
     )
 
     # 11. Construct TurnRunner with guardrails
