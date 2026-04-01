@@ -2,7 +2,15 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
+
+
+@dataclass
+class SystemEvent:
+    """System lifecycle event."""
+    event_type: Literal["gateway_ready", "gateway_shutdown"]
+    timestamp: datetime = field(default_factory=datetime.now)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

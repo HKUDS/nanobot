@@ -1,8 +1,12 @@
 """Async message queue for decoupled channel-agent communication."""
 
 import asyncio
+from collections.abc import Callable
+from typing import Any
 
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from loguru import logger
+
+from nanobot.bus.events import InboundMessage, OutboundMessage, SystemEvent
 
 
 class MessageBus:
@@ -16,6 +20,21 @@ class MessageBus:
     def __init__(self):
         self.inbound: asyncio.Queue[InboundMessage] = asyncio.Queue()
         self.outbound: asyncio.Queue[OutboundMessage] = asyncio.Queue()
+        self._system_subscribers: list[Callable[[SystemEvent], Any]] = []
+
+    def subscribe_system(self, callback: Callable[[SystemEvent], Any]) -> None:
+        """Subscribe to system events."""
+        self._system_subscribers.append(callback)
+
+    async def publish_system(self, event: SystemEvent) -> None:
+        """Publish a system event to all subscribers."""
+        for callback in self._system_subscribers:
+            try:
+                result = callback(event)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as e:
+                logger.warning("系统事件订阅者失败: {}", e)
 
     async def publish_inbound(self, msg: InboundMessage) -> None:
         """Publish a message from a channel to the agent."""
