@@ -247,6 +247,50 @@ class AgentLoop:
             logger.warning("Model router: classification failed, defaulting to complex")
         return "complex"
 
+    _VERIFY_TOOL = [
+        {
+            "type": "function",
+            "function": {
+                "name": "verify",
+                "description": "Verify whether the assistant's response needs escalation.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "needs_action": {
+                            "type": "string",
+                            "enum": ["yes", "no"],
+                            "description": "yes = the response promises actions (update, check, send, fetch, etc.) that were not performed. no = the response is complete as-is.",
+                        },
+                    },
+                    "required": ["needs_action"],
+                },
+            },
+        }
+    ]
+
+    async def _needs_escalation(self, user_message: str, response: str) -> bool:
+        """Check if a response promises actions that weren't taken. Uses cheap model."""
+        try:
+            result = await self.provider.chat(
+                messages=[
+                    {"role": "system", "content": (
+                        "The assistant responded to a user message but made no tool calls. "
+                        "Check if the response promises to perform actions (e.g. 'I'll update', "
+                        "'Let me check', 'I'll send') that were NOT actually done. "
+                        "If the response is just a conversational reply with no unfulfilled promises, "
+                        "call verify with needs_action='no'."
+                    )},
+                    {"role": "user", "content": f"User message: {user_message[:500]}\n\nAssistant response: {response[:500]}"},
+                ],
+                tools=self._VERIFY_TOOL,
+                model=self.model_router.classifier_model,
+            )
+            if result.has_tool_calls:
+                return result.tool_calls[0].arguments.get("needs_action") == "yes"
+        except Exception:
+            logger.warning("Model escalation: verification failed, skipping")
+        return False
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -529,9 +573,25 @@ class AgentLoop:
             ))
 
         try:
-            final_content, _, all_msgs = await self._run_agent_loop(
+            final_content, tools_used, all_msgs = await self._run_agent_loop(
                 initial_messages, on_progress=on_progress or _bus_progress,
             )
+
+            # Escalation: if the simple model promised actions but made no tool
+            # calls, verify with a cheap LLM call and retry with the complex model.
+            if (
+                self.model_router
+                and self.model_router.enabled
+                and self.model != self.model_router.complex_model
+                and not tools_used
+                and final_content
+                and await self._needs_escalation(msg.content, final_content)
+            ):
+                logger.info("Model escalation: simple model promised action without tool calls, retrying with {}", self.model_router.complex_model)
+                self.model = self.model_router.complex_model
+                final_content, tools_used, all_msgs = await self._run_agent_loop(
+                    initial_messages, on_progress=on_progress or _bus_progress,
+                )
 
             if final_content is None:
                 final_content = "I've completed processing but have no response to give."
