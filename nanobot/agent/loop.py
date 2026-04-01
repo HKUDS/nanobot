@@ -33,7 +33,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.config.schema import ChannelsConfig, DreamConfig, ExecToolConfig, WebSearchConfig
     from nanobot.cron.service import CronService
 
 
@@ -183,8 +183,9 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
+        dream_config: DreamConfig | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, WebSearchConfig
+        from nanobot.config.schema import DreamConfig, ExecToolConfig, WebSearchConfig
 
         self.bus = bus
         self.channels_config = channels_config
@@ -240,10 +241,13 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
         )
+        _dream = dream_config or DreamConfig()
         self.dream = Dream(
             store=self.context.memory,
             provider=provider,
-            model=self.model,
+            model=_dream.model or self.model,
+            max_batch_size=_dream.max_batch_size,
+            max_iterations=_dream.max_iterations,
         )
         self._register_default_tools()
         self.commands = CommandRouter()

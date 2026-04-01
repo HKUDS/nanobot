@@ -548,6 +548,7 @@ def serve(
         mcp_servers=runtime_config.tools.mcp_servers,
         channels_config=runtime_config.channels,
         timezone=runtime_config.agents.defaults.timezone,
+        dream_config=runtime_config.agents.defaults.dream,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -620,6 +621,7 @@ def gateway(
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
+    dream_cfg = config.agents.defaults.dream
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -636,6 +638,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        dream_config=dream_cfg,
     )
 
     # Set cron callback (needs agent)
@@ -770,11 +773,6 @@ def gateway(
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
     # Register Dream cron job (always-on, idempotent on restart)
-    dream_cfg = config.agents.defaults.dream
-    if dream_cfg.model:
-        agent.dream.model = dream_cfg.model
-    agent.dream.max_batch_size = dream_cfg.max_batch_size
-    agent.dream.max_iterations = dream_cfg.max_iterations
     from nanobot.cron.types import CronJob, CronPayload, CronSchedule
     cron.register_system_job(CronJob(
         id="dream",
@@ -865,6 +863,7 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        dream_config=config.agents.defaults.dream,
     )
 
     # Shared reference for progress callbacks
