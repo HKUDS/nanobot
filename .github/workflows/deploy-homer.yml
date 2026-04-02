@@ -57,10 +57,10 @@ jobs:
             echo "[deploy] Reinstalling nanobot fork (commit: ${{ github.sha }})"
             rm -rf /opt/homer/.venv && uv venv /opt/homer/.venv
             chown -R homer:homer /opt/homer/.venv
-            sudo -u homer HOME=/home/homer uv pip install -r /opt/homer/requirements.txt --python /opt/homer/.venv/bin/python -q
-            sudo -u homer HOME=/home/homer uv pip install --force-reinstall "$NANOBOT_FORK" --python /opt/homer/.venv/bin/python -q
+            sudo -u homer HOME=/home/homer UV_NO_CONFIG=1 uv pip install -r /opt/homer/requirements.txt --python /opt/homer/.venv/bin/python -q
+            sudo -u homer HOME=/home/homer UV_NO_CONFIG=1 uv pip install --force-reinstall "$NANOBOT_FORK" --python /opt/homer/.venv/bin/python -q
             if [ -f /opt/homer/portal/backend/requirements.txt ]; then
-              sudo -u homer HOME=/home/homer uv pip install -r /opt/homer/portal/backend/requirements.txt --python /opt/homer/.venv/bin/python -q
+              sudo -u homer HOME=/home/homer UV_NO_CONFIG=1 uv pip install -r /opt/homer/portal/backend/requirements.txt --python /opt/homer/.venv/bin/python -q
             fi
             echo "${{ github.sha }}" | cut -c1-8 > /opt/homer/context/.nanobot_workspace/NANOBOT_FORK_COMMIT
             if [[ "${{ steps.bridge.outputs.changed }}" == "true" ]]; then
