@@ -73,6 +73,7 @@ matrix = [
 ]
 openviking = [
     "openviking>=0.1.18",
+]
 discord = [
     "discord.py>=2.5.2,<3.0.0",
 ]
