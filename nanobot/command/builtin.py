@@ -84,6 +84,16 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
 
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=build_help_text(),
+        metadata={"render_as": "text"},
+    )
+
+
+def build_help_text() -> str:
+    """Build canonical help text shared across channels."""
     lines = [
         "🐈 nanobot commands:",
         "/new — Start a new conversation",
@@ -92,12 +102,7 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         "/status — Show bot status",
         "/help — Show available commands",
     ]
-    return OutboundMessage(
-        channel=ctx.msg.channel,
-        chat_id=ctx.msg.chat_id,
-        content="\n".join(lines),
-        metadata={"render_as": "text"},
-    )
+    return "\n".join(lines)
 
 
 def register_builtin_commands(router: CommandRouter) -> None:
