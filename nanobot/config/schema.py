@@ -97,6 +97,8 @@ class ProvidersConfig(Base):
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
 
+    transcription_language: str = ""  # Language code for Groq Whisper transcription (e.g. "en", "ru", "zh")
+
 
 class HeartbeatConfig(Base):
     """Heartbeat service configuration."""
