@@ -429,8 +429,13 @@ def mock_agent_runtime(tmp_path):
          patch("nanobot.cli.commands._make_provider", return_value=object()), \
          patch("nanobot.cli.commands._print_agent_response") as mock_print_response, \
          patch("nanobot.bus.queue.MessageBus"), \
-         patch("nanobot.cron.service.CronService"), \
+         patch("nanobot.cron.service.CronService") as mock_cron_cls, \
          patch("nanobot.agent.loop.AgentLoop") as mock_agent_loop_cls:
+
+        cron = MagicMock()
+        cron.start = AsyncMock(return_value=None)
+        cron.stop = MagicMock(return_value=None)
+        mock_cron_cls.return_value = cron
 
         agent_loop = MagicMock()
         agent_loop.channels_config = None
@@ -444,6 +449,7 @@ def mock_agent_runtime(tmp_path):
             "config": config,
             "load_config": mock_load_config,
             "sync_templates": mock_sync_templates,
+            "cron": cron,
             "agent_loop_cls": mock_agent_loop_cls,
             "agent_loop": agent_loop,
             "print_response": mock_print_response,
@@ -473,6 +479,9 @@ def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_
         mock_agent_runtime["config"].workspace_path
     )
     mock_agent_runtime["agent_loop"].process_direct.assert_awaited_once()
+    mock_agent_runtime["cron"].start.assert_awaited_once()
+    mock_agent_runtime["cron"].stop.assert_called_once()
+    assert callable(mock_agent_runtime["cron"].on_job)
     mock_agent_runtime["print_response"].assert_called_once_with(
         "mock-response", render_markdown=True, metadata={},
     )
@@ -504,7 +513,14 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
-    monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: object())
+    class _FakeCron:
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: _FakeCron())
 
     class _FakeAgentLoop:
         def __init__(self, *args, **kwargs) -> None:
@@ -543,6 +559,12 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
     class _FakeCron:
         def __init__(self, store_path: Path) -> None:
             seen["cron_store"] = store_path
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
 
     class _FakeAgentLoop:
         def __init__(self, *args, **kwargs) -> None:
@@ -590,6 +612,12 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
     class _FakeCron:
         def __init__(self, store_path: Path) -> None:
             seen["cron_store"] = store_path
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
 
     class _FakeAgentLoop:
         def __init__(self, *args, **kwargs) -> None:
@@ -643,6 +671,12 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
     class _FakeCron:
         def __init__(self, store_path: Path) -> None:
             seen["cron_store"] = store_path
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
 
     class _FakeAgentLoop:
         def __init__(self, *args, **kwargs) -> None:
@@ -703,6 +737,91 @@ def test_agent_hints_about_deprecated_memory_window(mock_agent_runtime, tmp_path
     assert result.exit_code == 0
     assert "memoryWindow" in result.stdout
     assert "no longer used" in result.stdout
+
+
+def test_agent_interactive_starts_and_stops_cron(monkeypatch, tmp_path: Path) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "interactive-workspace")
+    seen: dict[str, bool] = {}
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.cli.commands._init_prompt_session", lambda: None)
+    monkeypatch.setattr("nanobot.cli.commands._flush_pending_tty_input", lambda: None)
+    monkeypatch.setattr("nanobot.cli.commands._restore_terminal", lambda: None)
+    monkeypatch.setattr("signal.signal", lambda *_args, **_kwargs: None)
+
+    async def _read_once_then_exit() -> str:
+        return "exit"
+
+    monkeypatch.setattr("nanobot.cli.commands._read_interactive_input_async", _read_once_then_exit)
+
+    class _FakeBus:
+        async def publish_inbound(self, _msg) -> None:
+            return None
+
+        async def consume_outbound(self):
+            await asyncio.sleep(3600)
+
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: _FakeBus())
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+
+        async def start(self) -> None:
+            seen["cron_started"] = True
+
+        def stop(self) -> None:
+            seen["cron_stopped"] = True
+
+    class _FakeAgentLoop:
+        channels_config = None
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def run(self) -> None:
+            await asyncio.sleep(3600)
+
+        def stop(self) -> None:
+            seen["agent_stopped"] = True
+
+        async def close_mcp(self) -> None:
+            seen["mcp_closed"] = True
+
+        @property
+        def tools(self):
+            return {}
+
+        @property
+        def model(self):
+            return "test-model"
+
+    captured_cron: list = []
+
+    _OrigFakeCron = _FakeCron
+
+    class _TrackingFakeCron(_OrigFakeCron):
+        def __init__(self, _store_path: Path) -> None:
+            super().__init__(_store_path)
+            captured_cron.append(self)
+
+    monkeypatch.setattr("nanobot.cron.service.CronService", _TrackingFakeCron)
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+
+    result = runner.invoke(app, ["agent"])
+
+    assert result.exit_code == 0
+    assert seen == {
+        "cron_started": True,
+        "cron_stopped": True,
+        "agent_stopped": True,
+        "mcp_closed": True,
+    }
+    assert len(captured_cron) == 1
+    assert callable(captured_cron[0].on_job)
 
 
 def test_heartbeat_retains_recent_messages_by_default():
