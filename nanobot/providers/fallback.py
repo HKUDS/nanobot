@@ -37,6 +37,7 @@ class FallbackProvider(LLMProvider):
         return await self._try_fallbacks(self._call_chat, **kwargs)
 
     async def chat_stream(self, **kwargs: Any) -> LLMResponse:
+        logger.debug("FallbackProvider.chat_stream called, cooldown={}", self._in_cooldown())
         resp = await self._try_primary(self.primary._safe_chat_stream, **kwargs)
         if resp is not None:
             return resp
