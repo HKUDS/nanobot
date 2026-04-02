@@ -84,39 +84,39 @@ class MessageTool(Tool):
         media: list[str] | None = None,
         **kwargs: Any
     ) -> str:
-        channel = channel or self._default_channel
-        chat_id = chat_id or self._default_chat_id
-        # Only inherit default message_id when targeting the same channel+chat.
-        # Cross-chat sends must not carry the original message_id, because
-        # some channels (e.g. Feishu) use it to determine the target
-        # conversation via their Reply API, which would route the message
-        # to the wrong chat entirely.
-        if channel == self._default_channel and chat_id == self._default_chat_id:
-            message_id = message_id or self._default_message_id
-        else:
-            message_id = None
+        target_channel = channel or self._default_channel
+        target_chat_id = chat_id or self._default_chat_id
+        same_target = (
+            target_channel == self._default_channel and target_chat_id == self._default_chat_id
+        )
+        # Only inherit the context message_id when we stay in the same chat.
+        # For cross-chat sends, keep an explicitly provided message_id, but
+        # never leak the current conversation's default reply target.
+        target_message_id = message_id if message_id is not None else (
+            self._default_message_id if same_target else None
+        )
 
-        if not channel or not chat_id:
+        if not target_channel or not target_chat_id:
             return "Error: No target channel/chat specified"
 
         if not self._send_callback:
             return "Error: Message sending not configured"
 
         msg = OutboundMessage(
-            channel=channel,
-            chat_id=chat_id,
+            channel=target_channel,
+            chat_id=target_chat_id,
             content=content,
             media=media or [],
             metadata={
-                "message_id": message_id,
-            } if message_id else {},
+                "message_id": target_message_id,
+            } if target_message_id else {},
         )
 
         try:
             await self._send_callback(msg)
-            if channel == self._default_channel and chat_id == self._default_chat_id:
+            if same_target:
                 self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
-            return f"Message sent to {channel}:{chat_id}{media_info}"
+            return f"Message sent to {target_channel}:{target_chat_id}{media_info}"
         except Exception as e:
             return f"Error sending message: {str(e)}"
