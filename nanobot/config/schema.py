@@ -140,6 +140,25 @@ class ExecToolConfig(Base):
     timeout: int = 60
     path_append: str = ""
 
+
+class TTSConfig(Base):
+    """TTS (Text-to-Speech) configuration using GPT-SoVITS."""
+
+    enabled: bool = False  # Enable TTS functionality
+    python_path: str = "python"  # Path to Python executable for TTS environment
+    api_url: str = "http://127.0.0.1:9880/"  # GPT-SoVITS API endpoint
+    refer_wav: str = "reference.wav"  # Reference audio file for voice cloning
+    prompt_text: str = ""  # Prompt text for TTS
+    prompt_language: str = "zh"  # Prompt text language
+    text_language: str = "zh"  # TTS output language
+    gpt_path: str = ""  # Path to GPT-SoVITS installation
+    gpt_weight: str = ""  # GPT model weight file
+    sovits_weight: str = ""  # SoVITS model weight file
+    auto_start: bool = True  # Auto-start GPT-SoVITS service if not running
+    wait_startup: int = 8  # Seconds to wait for service startup
+    enabled_channels: list[str] = Field(default_factory=lambda: ["cli"])  # Channels to enable TTS for
+
+
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -157,6 +176,7 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    tts: TTSConfig = Field(default_factory=TTSConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
