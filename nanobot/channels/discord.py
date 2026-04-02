@@ -32,6 +32,7 @@ class DiscordConfig(Base):
     gateway_url: str = "wss://gateway.discord.gg/?v=10&encoding=json"
     intents: int = 37377
     group_policy: Literal["mention", "open"] = "mention"
+    slash_commands: bool = True  # 注册 Discord slash commands
 
 
 class DiscordChannel(BaseChannel):
@@ -57,6 +58,7 @@ class DiscordChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._http: httpx.AsyncClient | None = None
         self._bot_user_id: str | None = None
+        self._app_id: str | None = None
         self._channel_name_cache: dict[str, str] = {}  # channel_id -> name
 
     async def start(self) -> None:
@@ -102,6 +104,12 @@ class DiscordChannel(BaseChannel):
         """Send a message through Discord REST API, including file attachments."""
         if not self._http:
             logger.warning("Discord HTTP client not initialized")
+            return
+
+        # Slash command 响应：走 interaction followup 路径
+        interaction_token = (msg.metadata or {}).get("interaction_token")
+        if interaction_token:
+            await self._send_interaction_followup(msg, interaction_token)
             return
 
         # TTS: generate audio attachment (text is preserved)
@@ -255,6 +263,23 @@ class DiscordChannel(BaseChannel):
                 user_data = payload.get("user") or {}
                 self._bot_user_id = user_data.get("id")
                 logger.info("Discord bot connected as user {}", self._bot_user_id)
+                # 注册 slash commands
+                if self.config.slash_commands:
+                    from nanobot.command.discord_slash import (
+                        extract_app_id,
+                        register_all_commands,
+                    )
+                    try:
+                        self._app_id = extract_app_id(self.config.token)
+                    except Exception as e:
+                        logger.warning("Failed to extract app_id: {}", e)
+                    guild_ids = [str(g["id"]) for g in payload.get("guilds", [])]
+                    if guild_ids and self._app_id:
+                        asyncio.create_task(register_all_commands(
+                            self._http, self.config.token, guild_ids,
+                        ))
+            elif op == 0 and event_type == "INTERACTION_CREATE":
+                await self._handle_interaction(payload)
             elif op == 0 and event_type == "MESSAGE_CREATE":
                 await self._handle_message_create(payload)
             elif op == 7:
@@ -481,3 +506,169 @@ class DiscordChannel(BaseChannel):
         task = self._typing_tasks.pop(channel_id, None)
         if task:
             task.cancel()
+
+    # ── Slash Command / Interaction 处理 ─────────────────────
+
+    async def _interaction_respond(
+        self, interaction_id: str, interaction_token: str,
+        resp_type: int, content: str = "",
+    ) -> bool:
+        """发送 interaction callback。type=4 立即回复，type=5 deferred。
+
+        Interaction callback 用 token URL 鉴权，不需要 Bot Authorization。
+        """
+        if not self._http:
+            return False
+        url = f"{DISCORD_API_BASE}/interactions/{interaction_id}/{interaction_token}/callback"
+        payload: dict[str, Any] = {"type": resp_type}
+        if content:
+            payload["data"] = {"content": content}
+        try:
+            resp = await self._http.post(url, json=payload)
+            resp.raise_for_status()
+            return True
+        except Exception as e:
+            logger.warning("Interaction callback failed: {}", e)
+            return False
+
+    async def _handle_interaction(self, payload: dict[str, Any]) -> None:
+        """处理 INTERACTION_CREATE：deferred ack → 还原为文本命令 → 入 bus。"""
+        if payload.get("type") != 2:  # 只处理 APPLICATION_COMMAND
+            return
+
+        interaction_id = payload["id"]
+        interaction_token = payload["token"]
+        data = payload.get("data", {})
+        command_name = data.get("name", "")
+
+        # 提取调用者信息
+        member = payload.get("member", {})
+        user = member.get("user", {}) or payload.get("user", {})
+        sender_id = str(user.get("id", ""))
+        channel_id = str(payload.get("channel_id", ""))
+        guild_id = payload.get("guild_id")
+
+        if not sender_id or not channel_id:
+            return
+
+        # 权限检查
+        if not self.is_allowed(sender_id):
+            await self._interaction_respond(
+                interaction_id, interaction_token,
+                resp_type=4, content="⛔ Not authorized.",
+            )
+            return
+
+        # 立刻 deferred ack（3秒限制）
+        if not await self._interaction_respond(
+            interaction_id, interaction_token, resp_type=5,
+        ):
+            logger.warning("Deferred ack failed for interaction {}, dropping", interaction_id)
+            return
+
+        # 从 options 提取参数，还原为文本命令
+        options = data.get("options", [])
+        args_parts = []
+        for opt in options:
+            args_parts.append(str(opt.get("value", "")))
+        args = " ".join(args_parts).strip()
+
+        content = f"/{command_name} {args}".strip() if args else f"/{command_name}"
+
+        # sender display name
+        sender_name = (
+            member.get("nick")
+            or user.get("global_name")
+            or user.get("username")
+        )
+
+        channel_name = await self._resolve_channel_name(channel_id)
+        metadata: dict[str, Any] = {
+            "message_id": interaction_id,
+            "guild_id": guild_id,
+            "interaction_id": interaction_id,
+            "interaction_token": interaction_token,
+        }
+        if channel_name:
+            metadata["channel_name"] = channel_name
+        if sender_name:
+            metadata["sender_name"] = sender_name
+
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=channel_id,
+            content=content,
+            media=[],
+            metadata=metadata,
+        )
+
+    async def _send_interaction_followup(
+        self, msg: OutboundMessage, interaction_token: str,
+    ) -> None:
+        """通过 interaction webhook followup 发送响应。
+
+        Followup 有效期 15 分钟，无 3 秒限制。
+        Token 过期时降级为 channel message。
+        """
+        if not self._http or not self._app_id:
+            return
+
+        url = f"{DISCORD_API_BASE}/webhooks/{self._app_id}/{interaction_token}"
+        headers = {"Authorization": f"Bot {self.config.token}"}
+
+        # TTS（复用现有逻辑）
+        if self._tts_service and msg.content and not msg.metadata.get("_progress"):
+            session_tts = msg.metadata.get("_session_tts", False)
+            sender_name = msg.metadata.get("sender_name")
+            if self._tts_service.should_trigger(session_tts=session_tts, sender_name=sender_name):
+                audio_path = await self._tts_service.synthesize(msg.content)
+                if audio_path:
+                    if not msg.media:
+                        msg.media = []
+                    msg.media.insert(0, str(audio_path))
+
+        # 文件附件
+        sent_media: list[str] = []
+        for media_path in msg.media or []:
+            path = Path(media_path)
+            if not path.is_file() or path.stat().st_size > MAX_ATTACHMENT_BYTES:
+                continue
+            try:
+                with open(path, "rb") as f:
+                    files = {"files[0]": (path.name, f, "application/octet-stream")}
+                    resp = await self._http.post(url, headers=headers, files=files)
+                    if resp.status_code == 404:
+                        logger.warning("Interaction token expired, falling back to channel msg")
+                        # fallback 时只发还没发过的 media
+                        msg.media = [m for m in (msg.media or []) if m not in sent_media]
+                        await self._send_channel_message_fallback(msg)
+                        return
+                    resp.raise_for_status()
+                    sent_media.append(media_path)
+            except Exception as e:
+                logger.warning("Followup file send failed: {}", e)
+
+        # 文本分片
+        chunks = split_message(msg.content or "", MAX_MESSAGE_LEN)
+        for chunk in chunks:
+            payload: dict[str, Any] = {"content": chunk}
+            try:
+                resp = await self._http.post(url, headers=headers, json=payload)
+                if resp.status_code == 404:
+                    logger.warning("Interaction token expired, falling back to channel msg")
+                    msg.media = []  # media 已全部发完
+                    await self._send_channel_message_fallback(msg)
+                    return
+                resp.raise_for_status()
+            except Exception as e:
+                logger.warning("Followup text send failed: {}", e)
+                break
+
+    async def _send_channel_message_fallback(self, msg: OutboundMessage) -> None:
+        """Interaction token 过期时，降级为普通 channel message。"""
+        # 清除 interaction metadata 防止递归
+        clean_meta = dict(msg.metadata or {})
+        clean_meta.pop("interaction_token", None)
+        clean_meta.pop("interaction_id", None)
+        msg.metadata = clean_meta
+        await self.send(msg)

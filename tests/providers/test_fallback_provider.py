@@ -208,6 +208,41 @@ async def test_exception_in_primary_treated_as_transient():
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_with_retry_triggers_fallback():
+    """Regression: chat_stream_with_retry passes model=None in kwargs,
+    which must not conflict with fallback's explicit model parameter."""
+    from nanobot.providers.fallback import FallbackProvider
+
+    primary = ScriptedProvider([_transient()])
+    fb = ScriptedProvider([_ok("retry fb ok")])
+    provider = FallbackProvider(primary, [(fb, "fb-model")])
+
+    resp = await provider.chat_stream_with_retry(
+        messages=[{"role": "user", "content": "hi"}],
+    )
+
+    assert resp.content == "retry fb ok"
+    assert fb.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_triggers_fallback():
+    """Same regression test for non-streaming path."""
+    from nanobot.providers.fallback import FallbackProvider
+
+    primary = ScriptedProvider([_transient()])
+    fb = ScriptedProvider([_ok("retry fb ok")])
+    provider = FallbackProvider(primary, [(fb, "fb-model")])
+
+    resp = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hi"}],
+    )
+
+    assert resp.content == "retry fb ok"
+    assert fb.calls == 1
+
+
+@pytest.mark.asyncio
 async def test_generation_settings_inherited():
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.fallback import FallbackProvider

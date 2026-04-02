@@ -61,6 +61,7 @@ class FallbackProvider(LLMProvider):
 
     async def _try_fallbacks(self, call, **kwargs: Any) -> LLMResponse:
         resp = LLMResponse(content="All providers failed", finish_reason="error")
+        kwargs.pop("model", None)  # 避免与 fallback 的显式 model 参数冲突
         for fb_provider, fb_model in self.fallbacks:
             logger.info("Trying fallback: {}", fb_model)
             resp = await call(fb_provider, fb_model, **kwargs)

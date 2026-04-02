@@ -24,6 +24,24 @@ class CommandContext:
     args: str = ""
     loop: Any = None
     layout: WorkspaceLayout | None = None
+    interaction_id: str | None = None
+    interaction_token: str | None = None
+
+    def make_response(self, content: str, **kwargs: Any) -> OutboundMessage:
+        """构造 OutboundMessage，自动透传 interaction 信息到 metadata。"""
+        from nanobot.bus.events import OutboundMessage as _Out
+
+        metadata = dict(kwargs.pop("metadata", None) or {})
+        if self.interaction_id:
+            metadata["interaction_id"] = self.interaction_id
+            metadata["interaction_token"] = self.interaction_token
+        return _Out(
+            channel=self.msg.channel,
+            chat_id=self.msg.chat_id,
+            content=content,
+            metadata=metadata,
+            **kwargs,
+        )
 
 
 class CommandRouter:

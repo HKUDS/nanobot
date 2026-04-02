@@ -409,7 +409,11 @@ class AgentLoop:
 
             raw = msg.content.strip()
             if self.commands.is_priority(raw):
-                ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, loop=self)
+                ctx = CommandContext(
+                    msg=msg, session=None, key=msg.session_key, raw=raw, loop=self,
+                    interaction_id=(msg.metadata or {}).get("interaction_id"),
+                    interaction_token=(msg.metadata or {}).get("interaction_token"),
+                )
                 result = await self.commands.dispatch_priority(ctx)
                 if result:
                     await self.bus.publish_outbound(result)
@@ -571,7 +575,11 @@ class AgentLoop:
 
         # Slash commands
         raw = msg.content.strip()
-        cmd_ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self, layout=layout)
+        cmd_ctx = CommandContext(
+            msg=msg, session=session, key=key, raw=raw, loop=self, layout=layout,
+            interaction_id=(msg.metadata or {}).get("interaction_id"),
+            interaction_token=(msg.metadata or {}).get("interaction_token"),
+        )
         if result := await self.commands.dispatch(cmd_ctx):
             return result
 
