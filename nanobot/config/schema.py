@@ -66,6 +66,7 @@ class ProviderConfig(Base):
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    transcription_language: str = ""  # Language code for Whisper STT (e.g. "en", "ru", "zh")
 
 
 class ProvidersConfig(Base):
@@ -96,8 +97,6 @@ class ProvidersConfig(Base):
     byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
-
-    transcription_language: str = ""  # Language code for Groq Whisper transcription (e.g. "en", "ru", "zh")
 
 
 class HeartbeatConfig(Base):

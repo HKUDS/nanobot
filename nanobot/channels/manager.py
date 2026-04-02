@@ -38,7 +38,8 @@ class ChannelManager:
         """Initialize channels discovered via pkgutil scan + entry_points plugins."""
         from nanobot.channels.registry import discover_all
 
-        groq_key = self.config.providers.groq.api_key
+        groq_cfg = self.config.providers.groq
+        groq_key = groq_cfg.api_key
 
         for name, cls in discover_all().items():
             section = getattr(self.config.channels, name, None)
@@ -54,7 +55,7 @@ class ChannelManager:
             try:
                 channel = cls(section, self.bus)
                 channel.transcription_api_key = groq_key
-                channel.transcription_language = self.config.providers.transcription_language
+                channel.transcription_language = getattr(groq_cfg, "transcription_language", "")
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
