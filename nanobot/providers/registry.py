@@ -349,6 +349,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.groq.com/openai/v1",
     ),
+    # Qianfan (百度千帆): OpenAI-compatible API
+    ProviderSpec(
+        name="qianfan",
+        keywords=("qianfan", "ernie"),
+        env_key="QIANFAN_API_KEY",
+        display_name="Qianfan",
+        backend="openai_compat",
+        default_api_base="https://qianfan.baidubce.com/v2"
+    ),
 )
 
 
