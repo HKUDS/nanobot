@@ -257,6 +257,7 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        on_stream_event: Callable[[dict], Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
@@ -341,6 +342,10 @@ class AgentLoop:
                         result = await self.tools.execute(tool_call.name, tool_call.arguments)
                         if tool_call.name in self._MEMORY_TOOL_NAMES and result.startswith("[memory_saved]"):
                             memory_labels.append(self._memory_saved_label(tool_call.name, tool_call.arguments))
+                            if on_stream_event and tool_call.name == "update_bot_identity":
+                                new_name = tool_call.arguments.get("name")
+                                if new_name:
+                                    await on_stream_event({"type": "bot_name_updated", "display_name": new_name})
 
                     result_preview = result[:200] + "..." if len(result) > 200 else result
                     logger.debug("Tool result for {}: {}", tool_call.name, result_preview)
@@ -453,6 +458,7 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_stream_event: Callable[[dict], Awaitable[None]] | None = None,
         timezone: str | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
@@ -476,7 +482,9 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 timezone=timezone,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(
+                messages, on_stream_event=on_stream_event,
+            )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -564,6 +572,7 @@ class AgentLoop:
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
+            on_stream_event=on_stream_event,
         )
 
         if final_content is None:
@@ -623,6 +632,7 @@ class AgentLoop:
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_message: Callable[[OutboundMessage], Awaitable[None]] | None = None,
+        on_stream_event: Callable[[dict], Awaitable[None]] | None = None,
         confirmation_supported: bool = False,
         timezone: str | None = None,
     ) -> AgentResponse:
@@ -651,7 +661,10 @@ class AgentLoop:
 
         try:
             msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-            response = await self._process_message(msg, session_key=session_key, on_progress=on_progress, timezone=timezone)
+            response = await self._process_message(
+                msg, session_key=session_key, on_progress=on_progress,
+                on_stream_event=on_stream_event, timezone=timezone,
+            )
 
             if response is not None:
                 resolved_content = response.content

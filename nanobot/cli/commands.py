@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 import signal
 from pathlib import Path
 import select
@@ -495,6 +496,9 @@ def gateway(
                     "content": msg.content,
                 })
 
+            async def _on_stream_event(event: dict) -> None:
+                await queue.put(event)
+
             async def _run_agent():
                 try:
                     ctx = body.get("context") or {}
@@ -505,6 +509,7 @@ def gateway(
                         chat_id=body.get("chat_id", "direct"),
                         on_progress=_on_progress,
                         on_message=_on_message,
+                        on_stream_event=_on_stream_event,
                         confirmation_supported=body.get("confirmation_supported", False),
                         timezone=ctx.get("timezone"),
                     )
@@ -585,7 +590,24 @@ def gateway(
                     status=500,
                 )
 
+        async def handle_identity(request):
+            """Return the bot's display name extracted from SOUL.md."""
+            soul_path = workspace / "SOUL.md"
+            name = None
+            try:
+                if soul_path.exists():
+                    text = soul_path.read_text(encoding="utf-8")
+                    m = re.search(r"^# Soul\s*\n\s*I am (\S+)", text, re.MULTILINE)
+                    if m:
+                        raw = m.group(1).rstrip(",")
+                        if raw.lower() != "nanobot":
+                            name = raw
+            except Exception as e:
+                logger.warning("Failed to read identity from SOUL.md: {}", e)
+            return web.json_response({"name": name})
+
         web_app = web.Application(middlewares=[auth_middleware])
+        web_app.router.add_get("/agent/identity", handle_identity)
         web_app.router.add_post("/agent/run", handle_agent_run)
         web_app.router.add_post("/agent/run/stream", handle_agent_run_stream)
         web_app.router.add_post("/agent/execute-tool", handle_execute_tool)
