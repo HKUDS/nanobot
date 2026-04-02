@@ -557,13 +557,18 @@ def serve(
     bus = MessageBus()
     provider = _make_provider(runtime_config)
     session_manager = SessionManager(runtime_config.workspace_path)
+    from nanobot.providers.context_window import resolve_context_window_sync
+    _ctx_tokens, _ctx_src = resolve_context_window_sync(
+        model=runtime_config.agents.defaults.model,
+        configured_value=runtime_config.agents.defaults.context_window_tokens,
+    )
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=runtime_config.workspace_path,
         model=runtime_config.agents.defaults.model,
         max_iterations=runtime_config.agents.defaults.max_tool_iterations,
-        context_window_tokens=runtime_config.agents.defaults.context_window_tokens,
+        context_window_tokens=_ctx_tokens,
         web_search_config=runtime_config.tools.web.search,
         web_proxy=runtime_config.tools.web.proxy or None,
         exec_config=runtime_config.tools.exec,
@@ -651,13 +656,18 @@ def gateway(
         hooks.append(TraceHook(traces_dir=config.workspace_path / "traces"))
 
     # Create agent with cron service
+    from nanobot.providers.context_window import resolve_context_window_sync
+    _ctx_tokens, _ctx_src = resolve_context_window_sync(
+        model=config.agents.defaults.model,
+        configured_value=config.agents.defaults.context_window_tokens,
+    )
     agent = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
+        context_window_tokens=_ctx_tokens,
         web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
@@ -870,13 +880,18 @@ def agent(
         from nanobot.agent.trace import TraceHook
         cli_hooks.append(TraceHook(traces_dir=config.workspace_path / "traces"))
 
+    from nanobot.providers.context_window import resolve_context_window_sync
+    _ctx_tokens, _ctx_src = resolve_context_window_sync(
+        model=config.agents.defaults.model,
+        configured_value=config.agents.defaults.context_window_tokens,
+    )
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
+        context_window_tokens=_ctx_tokens,
         web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,

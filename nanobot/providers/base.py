@@ -274,6 +274,14 @@ class LLMProvider(ABC):
         """
         pass
 
+    async def fetch_model_context_window(self, model: str) -> int | None:
+        """Query the provider API for the model's context window size.
+
+        Returns the max input tokens, or None if unsupported / model not found.
+        Subclasses override for provider-specific implementations.
+        """
+        return None
+
     @classmethod
     def _is_transient_error(cls, content: str | None) -> bool:
         err = (content or "").lower()

@@ -166,6 +166,27 @@ class AnthropicProvider(LLMProvider):
             return model[len("anthropic/"):]
         return model
 
+    async def fetch_model_context_window(self, model: str) -> int | None:
+        """Fetch context window from Anthropic /v1/models endpoint."""
+        try:
+            model_name = self._strip_prefix(model)
+            response = await asyncio.wait_for(
+                self._client.models.list(limit=1000),
+                timeout=5.0,
+            )
+            for m in response.data:
+                if m.id == model_name:
+                    return getattr(m, "max_input_tokens", None)
+            # Model not found — proxy might be returning its own models
+            logger.debug(
+                "Model {} not found in /v1/models response ({} models listed)",
+                model_name, len(response.data),
+            )
+            return None
+        except Exception as e:
+            logger.debug("Anthropic fetch_model_context_window failed: {}", e)
+            return None
+
     # ------------------------------------------------------------------
     # Message conversion: OpenAI chat format → Anthropic Messages API
     # ------------------------------------------------------------------

@@ -137,6 +137,46 @@ class OpenAICompatProvider(LLMProvider):
             resolved = env_val.replace("{api_key}", api_key).replace("{api_base}", effective_base)
             os.environ.setdefault(env_name, resolved)
 
+    async def fetch_model_context_window(self, model: str) -> int | None:
+        """Fetch context window from OpenAI-compatible /v1/models endpoint."""
+        import httpx
+
+        try:
+            model_name = model.split("/")[-1] if "/" in model else model
+            base = (self.api_base or "https://api.openai.com/v1").rstrip("/")
+            headers: dict[str, str] = {"Authorization": f"Bearer {self.api_key or ''}"}
+            if self.extra_headers:
+                headers.update(self.extra_headers)
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                # Try GET /models/{model} first
+                resp = await client.get(f"{base}/models/{model_name}", headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    returned_id = data.get("id", "")
+                    if returned_id == model_name or returned_id == model:
+                        value = data.get("context_length") or data.get("context_window")
+                        if value:
+                            return value
+                    else:
+                        logger.debug(
+                            "Model id mismatch: requested={}, returned={}",
+                            model_name, returned_id,
+                        )
+
+                # Fallback: GET /models list
+                resp = await client.get(f"{base}/models", headers=headers)
+                if resp.status_code == 200:
+                    for m in resp.json().get("data", []):
+                        mid = m.get("id", "")
+                        if mid == model_name or mid == model:
+                            return m.get("context_length") or m.get("context_window")
+
+            return None
+        except Exception as e:
+            logger.debug("OpenAI-compat fetch_model_context_window failed: {}", e)
+            return None
+
     @staticmethod
     def _apply_cache_control(
         messages: list[dict[str, Any]],

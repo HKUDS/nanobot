@@ -47,7 +47,7 @@ class Nanobot:
                 ``~/.nanobot/config.json``.
             workspace: Override the workspace directory from config.
         """
-        from nanobot.config.loader import load_config, resolve_config_env_vars
+        from nanobot.config.loader import load_config
         from nanobot.config.schema import Config
 
         resolved: Path | None = None
@@ -56,7 +56,7 @@ class Nanobot:
             if not resolved.exists():
                 raise FileNotFoundError(f"Config not found: {resolved}")
 
-        config: Config = resolve_config_env_vars(load_config(resolved))
+        config: Config = load_config(resolved)
         if workspace is not None:
             config.agents.defaults.workspace = str(
                 Path(workspace).expanduser().resolve()
@@ -66,17 +66,21 @@ class Nanobot:
         bus = MessageBus()
         defaults = config.agents.defaults
 
+        from nanobot.providers.context_window import resolve_context_window_sync
+        ctx_tokens, _ctx_source = resolve_context_window_sync(
+            model=defaults.model,
+            configured_value=defaults.context_window_tokens,
+        )
+
         loop = AgentLoop(
             bus=bus,
             provider=provider,
             workspace=config.workspace_path,
             model=defaults.model,
             max_iterations=defaults.max_tool_iterations,
-            context_window_tokens=defaults.context_window_tokens,
-            context_block_limit=defaults.context_block_limit,
-            max_tool_result_chars=defaults.max_tool_result_chars,
-            provider_retry_mode=defaults.provider_retry_mode,
-            web_config=config.tools.web,
+            context_window_tokens=ctx_tokens,
+            web_search_config=config.tools.web.search,
+            web_proxy=config.tools.web.proxy or None,
             exec_config=config.tools.exec,
             restrict_to_workspace=config.tools.restrict_to_workspace,
             mcp_servers=config.tools.mcp_servers,
@@ -138,10 +142,6 @@ def _make_provider(config: Any) -> Any:
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
         provider = OpenAICodexProvider(default_model=model)
-    elif backend == "github_copilot":
-        from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
-
-        provider = GitHubCopilotProvider(default_model=model)
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
