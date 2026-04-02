@@ -235,7 +235,9 @@ class OpenAICompatProvider(LLMProvider):
         spec = self._spec
 
         if spec and spec.supports_prompt_caching:
-            messages, tools = self._apply_cache_control(messages, tools)
+            model_name = model or self.default_model
+            if any(model_name.lower().startswith(k) for k in ("anthropic/", "claude")):
+                messages, tools = self._apply_cache_control(messages, tools)
 
         if spec and spec.strip_model_prefix:
             model_name = model_name.split("/")[-1]
