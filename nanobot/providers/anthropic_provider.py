@@ -49,6 +49,8 @@ class AnthropicProvider(LLMProvider):
             client_kw["base_url"] = api_base
         if extra_headers:
             client_kw["default_headers"] = extra_headers
+        # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
+        client_kw["max_retries"] = 0
         self._client = AsyncAnthropic(**client_kw)
 
     @staticmethod
