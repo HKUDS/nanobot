@@ -151,34 +151,6 @@ class OpenAICompatProvider(LLMProvider):
             resolved = env_val.replace("{api_key}", api_key).replace("{api_base}", effective_base)
             os.environ.setdefault(env_name, resolved)
 
-    @staticmethod
-    def _tool_name(tool: dict[str, Any]) -> str:
-        fn = tool.get("function")
-        if isinstance(fn, dict):
-            name = fn.get("name")
-            if isinstance(name, str):
-                return name
-        name = tool.get("name")
-        return name if isinstance(name, str) else ""
-
-    @classmethod
-    def _tool_cache_marker_indices(cls, tools: list[dict[str, Any]]) -> list[int]:
-        if not tools:
-            return []
-
-        tail_idx = len(tools) - 1
-        last_builtin_idx: int | None = None
-        for i in range(tail_idx, -1, -1):
-            if not cls._tool_name(tools[i]).startswith("mcp_"):
-                last_builtin_idx = i
-                break
-
-        ordered_unique: list[int] = []
-        for idx in (last_builtin_idx, tail_idx):
-            if idx is not None and idx not in ordered_unique:
-                ordered_unique.append(idx)
-        return ordered_unique
-
     @classmethod
     def _apply_cache_control(
         cls,
