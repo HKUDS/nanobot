@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//d//**)",
+      "Read(//d/nanobot/**)",
+      "Read(//tmp/skills-HDEZpE/skills/**)",
+      "Bash(mkdir -p ~/.pua)",
+      "Bash(~/.pua/config.json)",
+      "WebSearch"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd D:/nanobot && python scripts/update_docs_nav.py"
+          }
+        ]
+      }
+    ]
+  }
+}
