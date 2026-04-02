@@ -58,8 +58,8 @@ def convert_messages(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str
 def convert_user_message(content: Any) -> dict[str, Any]:
     """Convert a user message's content to Responses API format.
 
-    Handles plain strings, ``text`` blocks → ``input_text``, and
-    ``image_url`` blocks → ``input_image``.
+    Handles plain strings, ``text`` blocks -> ``input_text``, and
+    ``image_url`` blocks -> ``input_image``.
     """
     if isinstance(content, str):
         return {"role": "user", "content": [{"type": "input_text", "text": content}]}

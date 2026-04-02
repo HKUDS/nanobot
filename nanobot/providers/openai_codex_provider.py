@@ -13,7 +13,7 @@ from loguru import logger
 from oauth_cli_kit import get_token as get_codex_token
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-from nanobot.providers.openai_responses_common import (
+from nanobot.providers.openai_responses import (
     consume_sse,
     convert_messages,
     convert_tools,

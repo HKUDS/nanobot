@@ -2,7 +2,7 @@
 
 Uses ``AsyncOpenAI`` pointed at ``https://{endpoint}/openai/v1/`` which
 routes to the Responses API (``/responses``).  Reuses shared conversion
-helpers from :mod:`nanobot.providers.openai_responses_common`.
+helpers from :mod:`nanobot.providers.openai_responses`.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse
-from nanobot.providers.openai_responses_common import (
+from nanobot.providers.openai_responses import (
     consume_sdk_stream,
     convert_messages,
     convert_tools,
@@ -30,7 +30,7 @@ class AzureOpenAIProvider(LLMProvider):
       ``base_url = {endpoint}/openai/v1/``
     - Calls ``client.responses.create()`` (Responses API)
     - Reuses shared message/tool/SSE conversion from
-      ``openai_responses_common``
+      ``openai_responses``
     """
 
     def __init__(

@@ -106,8 +106,11 @@ async def consume_sse(
                 try:
                     args = json.loads(args_raw)
                 except Exception:
-                    logger.warning("Failed to parse tool call arguments for '{}': {}",
-                                   buf.get("name") or item.get("name"), args_raw[:200])
+                    logger.warning(
+                        "Failed to parse tool call arguments for '{}': {}",
+                        buf.get("name") or item.get("name"),
+                        args_raw[:200],
+                    )
                     args = json_repair.loads(args_raw)
                     if not isinstance(args, dict):
                         args = {"raw": args_raw}
@@ -129,12 +132,7 @@ async def consume_sse(
 
 
 def parse_response_output(response: Any) -> LLMResponse:
-    """Parse an SDK ``Response`` object (from ``client.responses.create()``)
-    into an ``LLMResponse``.
-
-    Works with both Pydantic model objects and plain dicts.
-    """
-    # Normalise to dict
+    """Parse an SDK ``Response`` object into an ``LLMResponse``."""
     if not isinstance(response, dict):
         dump = getattr(response, "model_dump", None)
         response = dump() if callable(dump) else vars(response)
@@ -158,7 +156,6 @@ def parse_response_output(response: Any) -> LLMResponse:
                 if block.get("type") == "output_text":
                     content_parts.append(block.get("text") or "")
         elif item_type == "reasoning":
-            # Reasoning items may have a summary list with text blocks
             for s in item.get("summary") or []:
                 if not isinstance(s, dict):
                     dump = getattr(s, "model_dump", None)
@@ -172,8 +169,11 @@ def parse_response_output(response: Any) -> LLMResponse:
             try:
                 args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
             except Exception:
-                logger.warning("Failed to parse tool call arguments for '{}': {}",
-                               item.get("name"), str(args_raw)[:200])
+                logger.warning(
+                    "Failed to parse tool call arguments for '{}': {}",
+                    item.get("name"),
+                    str(args_raw)[:200],
+                )
                 args = json_repair.loads(args_raw) if isinstance(args_raw, str) else args_raw
                 if not isinstance(args, dict):
                     args = {"raw": args_raw}
@@ -211,12 +211,7 @@ async def consume_sdk_stream(
     stream: Any,
     on_content_delta: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[str, list[ToolCallRequest], str, dict[str, int], str | None]:
-    """Consume an SDK async stream from ``client.responses.create(stream=True)``.
-
-    The SDK yields typed event objects with a ``.type`` attribute and
-    event-specific fields.  Returns
-    ``(content, tool_calls, finish_reason, usage, reasoning_content)``.
-    """
+    """Consume an SDK async stream from ``client.responses.create(stream=True)``."""
     content = ""
     tool_calls: list[ToolCallRequest] = []
     tool_call_buffers: dict[str, dict[str, Any]] = {}
@@ -261,9 +256,11 @@ async def consume_sdk_stream(
                 try:
                     args = json.loads(args_raw)
                 except Exception:
-                    logger.warning("Failed to parse tool call arguments for '{}': {}",
-                                   buf.get("name") or getattr(item, "name", None),
-                                   str(args_raw)[:200])
+                    logger.warning(
+                        "Failed to parse tool call arguments for '{}': {}",
+                        buf.get("name") or getattr(item, "name", None),
+                        str(args_raw)[:200],
+                    )
                     args = json_repair.loads(args_raw)
                     if not isinstance(args, dict):
                         args = {"raw": args_raw}
@@ -278,7 +275,6 @@ async def consume_sdk_stream(
             resp = getattr(event, "response", None)
             status = getattr(resp, "status", None) if resp else None
             finish_reason = map_finish_reason(status)
-            # Extract usage from the completed response
             if resp:
                 usage_obj = getattr(resp, "usage", None)
                 if usage_obj:
@@ -287,7 +283,6 @@ async def consume_sdk_stream(
                         "completion_tokens": int(getattr(usage_obj, "output_tokens", 0) or 0),
                         "total_tokens": int(getattr(usage_obj, "total_tokens", 0) or 0),
                     }
-                # Extract reasoning_content from completed output items
                 for out_item in getattr(resp, "output", None) or []:
                     if getattr(out_item, "type", None) == "reasoning":
                         for s in getattr(out_item, "summary", None) or []:

@@ -1,17 +1,17 @@
-"""Tests for the shared openai_responses_common converters and parsers."""
+"""Tests for the shared openai_responses converters and parsers."""
 
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from nanobot.providers.base import LLMResponse, ToolCallRequest
-from nanobot.providers.openai_responses_common.converters import (
+from nanobot.providers.openai_responses.converters import (
     convert_messages,
     convert_tools,
     convert_user_message,
     split_tool_call_id,
 )
-from nanobot.providers.openai_responses_common.parsing import (
+from nanobot.providers.openai_responses.parsing import (
     consume_sdk_stream,
     map_finish_reason,
     parse_response_output,
@@ -19,7 +19,7 @@ from nanobot.providers.openai_responses_common.parsing import (
 
 
 # ======================================================================
-# converters — split_tool_call_id
+# converters - split_tool_call_id
 # ======================================================================
 
 
@@ -44,7 +44,7 @@ class TestSplitToolCallId:
 
 
 # ======================================================================
-# converters — convert_user_message
+# converters - convert_user_message
 # ======================================================================
 
 
@@ -99,7 +99,7 @@ class TestConvertUserMessage:
 
 
 # ======================================================================
-# converters — convert_messages
+# converters - convert_messages
 # ======================================================================
 
 
@@ -196,7 +196,7 @@ class TestConvertMessages:
         assert "_meta" not in str(item)
 
     def test_full_conversation_roundtrip(self):
-        """System + user + assistant(tool_call) + tool → correct structure."""
+        """System + user + assistant(tool_call) + tool -> correct structure."""
         msgs = [
             {"role": "system", "content": "Be concise."},
             {"role": "user", "content": "Weather in SF?"},
@@ -218,7 +218,7 @@ class TestConvertMessages:
 
 
 # ======================================================================
-# converters — convert_tools
+# converters - convert_tools
 # ======================================================================
 
 
@@ -261,7 +261,7 @@ class TestConvertTools:
 
 
 # ======================================================================
-# parsing — map_finish_reason
+# parsing - map_finish_reason
 # ======================================================================
 
 
@@ -286,7 +286,7 @@ class TestMapFinishReason:
 
 
 # ======================================================================
-# parsing — parse_response_output
+# parsing - parse_response_output
 # ======================================================================
 
 
@@ -332,7 +332,7 @@ class TestParseResponseOutput:
             }],
             "status": "completed", "usage": {},
         }
-        with patch("nanobot.providers.openai_responses_common.parsing.logger") as mock_logger:
+        with patch("nanobot.providers.openai_responses.parsing.logger") as mock_logger:
             result = parse_response_output(resp)
         assert result.tool_calls[0].arguments == {"raw": "{bad json"}
         mock_logger.warning.assert_called_once()
@@ -392,7 +392,7 @@ class TestParseResponseOutput:
 
 
 # ======================================================================
-# parsing — consume_sdk_stream
+# parsing - consume_sdk_stream
 # ======================================================================
 
 
@@ -515,7 +515,7 @@ class TestConsumeSdkStream:
             for e in [ev1, ev2, ev3, ev4]:
                 yield e
 
-        with patch("nanobot.providers.openai_responses_common.parsing.logger") as mock_logger:
+        with patch("nanobot.providers.openai_responses.parsing.logger") as mock_logger:
             _, tool_calls, _, _, _ = await consume_sdk_stream(stream())
         assert tool_calls[0].arguments == {"raw": "{bad"}
         mock_logger.warning.assert_called_once()
