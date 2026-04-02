@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.loop import AgentLoop
 from nanobot.agent.skills import filter_skill_names, resolve_skill_filter
 from nanobot.config.schema import AgentDefaults, SkillsConfig, SkillsFilterConfig
 
@@ -282,3 +283,66 @@ class TestSkillFilteringIntegration:
         assert "coding" in prompt
         assert "weather" in prompt
         assert "ljg-card" not in prompt
+
+
+class TestExtractLoadedSkills:
+    """Test _extract_loaded_skills from tool call messages."""
+
+    def test_read_file_skill_md(self):
+        msgs = [
+            {
+                "role": "assistant",
+                "tool_calls": [{
+                    "function": {
+                        "name": "read_file",
+                        "arguments": '{"path": "/root/workspace/skills/peppa-why/SKILL.md"}'
+                    }
+                }]
+            }
+        ]
+        assert AgentLoop._extract_loaded_skills(msgs) == ["peppa-why"]
+
+    def test_non_skill_read(self):
+        msgs = [
+            {
+                "role": "assistant",
+                "tool_calls": [{
+                    "function": {
+                        "name": "read_file",
+                        "arguments": '{"path": "/root/workspace/README.md"}'
+                    }
+                }]
+            }
+        ]
+        assert AgentLoop._extract_loaded_skills(msgs) == []
+
+    def test_multiple_skills(self):
+        msgs = [
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {"function": {"name": "read_file", "arguments": '{"path": "/skills/coding/SKILL.md"}'}},
+                    {"function": {"name": "read_file", "arguments": '{"path": "/skills/weather/SKILL.md"}'}},
+                ]
+            }
+        ]
+        result = AgentLoop._extract_loaded_skills(msgs)
+        assert result == ["coding", "weather"]
+
+    def test_non_read_file_tool(self):
+        msgs = [
+            {
+                "role": "assistant",
+                "tool_calls": [{
+                    "function": {"name": "write_file", "arguments": '{"path": "/skills/test/SKILL.md"}'}
+                }]
+            }
+        ]
+        assert AgentLoop._extract_loaded_skills(msgs) == []
+
+    def test_empty_messages(self):
+        assert AgentLoop._extract_loaded_skills([]) == []
+
+    def test_tool_role_ignored(self):
+        msgs = [{"role": "tool", "content": "something about SKILL.md"}]
+        assert AgentLoop._extract_loaded_skills(msgs) == []

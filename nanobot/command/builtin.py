@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from typing import TYPE_CHECKING
 
 from nanobot import __version__
 from nanobot.command.router import CommandContext, CommandRouter
+
+if TYPE_CHECKING:
+    from nanobot.bus.events import OutboundMessage
 from nanobot.utils.helpers import build_status_content
 
 

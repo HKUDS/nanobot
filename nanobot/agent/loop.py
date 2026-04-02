@@ -772,7 +772,43 @@ class AgentLoop:
                     entry["content"] = filtered
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
+
+        # Emit skill-load events for read_file calls targeting SKILL.md
+        loaded_skills = self._extract_loaded_skills(new_msgs)
+        if loaded_skills:
+            session.messages.append({
+                "_type": "event",
+                "event": "skill_loaded",
+                "skills": loaded_skills,
+                "sender": sender_name,
+                "timestamp": datetime.now().isoformat(),
+            })
+
         session.updated_at = datetime.now()
+
+    @staticmethod
+    def _extract_loaded_skills(messages: list[dict]) -> list[str]:
+        """Extract skill names from read_file tool calls targeting SKILL.md."""
+        skills = []
+        for m in messages:
+            if m.get("role") != "assistant":
+                continue
+            for tc in m.get("tool_calls", []):
+                func = tc.get("function", {})
+                if func.get("name") != "read_file":
+                    continue
+                import json as _json
+                try:
+                    args = _json.loads(func.get("arguments", "{}"))
+                except (ValueError, TypeError):
+                    continue
+                path = args.get("path", "")
+                if path.endswith("/SKILL.md") or path.endswith("\\SKILL.md"):
+                    # Extract skill name: parent directory name
+                    parts = path.replace("\\", "/").rstrip("/").split("/")
+                    if len(parts) >= 2:
+                        skills.append(parts[-2])
+        return skills
 
     async def process_direct(
         self,
