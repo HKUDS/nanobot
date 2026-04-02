@@ -430,7 +430,7 @@ class TelegramChannel(BaseChannel):
                 )
 
         # Send text content
-        if msg.content and msg.content != "[empty message]":
+        if msg.content and msg.content.strip() and msg.content != "[empty message]":
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
                 await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
 
