@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+import json_repair
 from loguru import logger
 
 
@@ -19,6 +20,31 @@ class ToolCallRequest:
     extra_content: dict[str, Any] | None = None
     provider_specific_fields: dict[str, Any] | None = None
     function_provider_specific_fields: dict[str, Any] | None = None
+
+    def __post_init__(self):
+        """Normalize tool arguments after initialization."""
+        def normalize(args: Any) -> dict:
+            # Parse JSON string
+            if isinstance(args, str):
+                try:
+                    args = json_repair.loads(args)
+                except Exception:
+                    logger.warning(f"Tool arguments is not valid JSON: {args[:100]}...")
+                    return {"raw": args}
+
+            # Extract from single-element list (recursive)
+            if isinstance(args, list) and args and isinstance(args[0], dict):
+                logger.warning(f"Provider returned tool arguments as list (length: {len(args)})")
+                return args[0]
+
+            # Wrap non-dict values
+            if isinstance(args, dict):
+                return args
+            logger.warning(f"Tool arguments is not a dict after normalization, got type: {type(args).__name__}")
+            return {"raw": args}
+        
+        if not isinstance(self.arguments, dict):
+            self.arguments = normalize(self.arguments)
 
     def to_openai_tool_call(self) -> dict[str, Any]:
         """Serialize to an OpenAI-style tool_call payload."""

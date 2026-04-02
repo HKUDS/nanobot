@@ -172,16 +172,11 @@ class AzureOpenAIProvider(LLMProvider):
             tool_calls = []
             if message.get("tool_calls"):
                 for tc in message["tool_calls"]:
-                    # Parse arguments from JSON string if needed
-                    args = tc["function"]["arguments"]
-                    if isinstance(args, str):
-                        args = json_repair.loads(args)
-
                     tool_calls.append(
                         ToolCallRequest(
                             id=tc["id"],
                             name=tc["function"]["name"],
-                            arguments=args,
+                            arguments=tc["function"]["arguments"],
                         )
                     )
 
@@ -293,7 +288,7 @@ class AzureOpenAIProvider(LLMProvider):
         tool_calls = [
             ToolCallRequest(
                 id=buf["id"], name=buf["name"],
-                arguments=json_repair.loads(buf["arguments"]) if buf["arguments"] else {},
+                arguments=buf["arguments"] or {},
             )
             for buf in tool_call_buffers.values()
         ]
