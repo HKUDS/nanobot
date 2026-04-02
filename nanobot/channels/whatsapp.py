@@ -4,6 +4,7 @@ import asyncio
 import json
 import mimetypes
 import os
+import re
 import shutil
 import subprocess
 from collections import OrderedDict
@@ -26,6 +27,7 @@ class WhatsAppConfig(Base):
     bridge_url: str = "ws://localhost:3001"
     bridge_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
+    react_emoji: str = "👍"  # Default reaction emoji for incoming messages
     group_policy: Literal["open", "mention"] = "open"  # "open" responds to all, "mention" only when @mentioned
 
 
@@ -133,13 +135,14 @@ class WhatsAppChannel(BaseChannel):
             self._ws = None
 
     async def send(self, msg: OutboundMessage) -> None:
-        """Send a message through WhatsApp."""
+        """Send message through WhatsApp (unified method)."""
         if not self._ws or not self._connected:
             logger.warning("WhatsApp bridge not connected")
             return
 
         chat_id = msg.chat_id
 
+        # Send text content first (if any)
         if msg.content:
             try:
                 payload = {"type": "send", "to": chat_id, "text": msg.content}
@@ -148,20 +151,52 @@ class WhatsAppChannel(BaseChannel):
                 logger.error("Error sending WhatsApp message: {}", e)
                 raise
 
+        # Send media using send_media command
         for media_path in msg.media or []:
             try:
                 mime, _ = mimetypes.guess_type(media_path)
+                caption = msg.content if media_path == msg.media[0] else None
                 payload = {
                     "type": "send_media",
                     "to": chat_id,
                     "filePath": media_path,
                     "mimetype": mime or "application/octet-stream",
+                    "caption": caption,
                     "fileName": media_path.rsplit("/", 1)[-1],
                 }
                 await self._ws.send(json.dumps(payload, ensure_ascii=False))
             except Exception as e:
                 logger.error("Error sending WhatsApp media {}: {}", media_path, e)
                 raise
+
+    def _detect_media_type(self, path: str) -> str:
+        """Detect media type from file extension."""
+        ext = Path(path).suffix.lower()
+        if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
+            return 'image'
+        elif ext in ['.mp3', '.wav', '.ogg', '.m4a', '.aac']:
+            return 'audio'
+        elif ext in ['.mp4', '.mov', '.avi', '.webm', '.mkv']:
+            return 'video'
+        else:
+            return 'document'
+
+    async def _add_reaction(self, chat_id: str, message_id: str, emoji: str) -> None:
+        """Add a reaction emoji to a message (non-blocking)."""
+        if not self._ws or not self._connected:
+            return
+
+        try:
+            payload = {
+                "type": "send_reaction",
+                "to": chat_id,
+                "message_id": message_id,
+                "emoji": emoji
+            }
+            await self._ws.send(json.dumps(payload, ensure_ascii=False))
+            logger.debug("Sent {} reaction to message {}", emoji, message_id)
+        except Exception as e:
+            logger.error("Error sending reaction: {}", e)
 
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""
@@ -231,6 +266,10 @@ class WhatsAppChannel(BaseChannel):
                     "is_group": data.get("isGroup", False),
                 },
             )
+
+            # Add reaction to incoming message (like Feishu does)
+            if self.config.react_emoji and message_id:
+                await self._add_reaction(sender, message_id, self.config.react_emoji)
 
         elif msg_type == "status":
             # Connection status update

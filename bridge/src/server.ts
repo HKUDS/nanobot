@@ -7,9 +7,13 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { WhatsAppClient, InboundMessage } from './whatsapp.js';
 
 interface SendCommand {
-  type: 'send';
+  type: 'send' | 'send_reaction';
   to: string;
-  text: string;
+  text?: string;
+  media_path?: string;
+  media_type?: 'image' | 'audio' | 'video' | 'document';
+  message_id?: string;  // For reaction
+  emoji?: string;       // For reaction
 }
 
 interface SendMediaCommand {
@@ -106,10 +110,14 @@ export class BridgeServer {
   private async handleCommand(cmd: BridgeCommand): Promise<void> {
     if (!this.wa) return;
 
-    if (cmd.type === 'send') {
-      await this.wa.sendMessage(cmd.to, cmd.text);
+    if (cmd.type === 'send_reaction' && 'message_id' in cmd && 'emoji' in cmd) {
+      // Send reaction to a message
+      await this.wa.sendReaction(cmd.to, cmd.message_id!, cmd.emoji!);
     } else if (cmd.type === 'send_media') {
       await this.wa.sendMedia(cmd.to, cmd.filePath, cmd.mimetype, cmd.caption, cmd.fileName);
+    } else if (cmd.type === 'send') {
+      // Unified send method (text or media)
+      await this.wa.sendMessage(cmd.to, cmd.text || '', cmd.media_path, cmd.media_type || undefined);
     }
   }
 
