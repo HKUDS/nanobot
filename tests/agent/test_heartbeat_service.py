@@ -935,3 +935,204 @@ async def test_decide_returns_due_tasks_with_model(tmp_path) -> None:
     assert len(due_tasks) == 1
     assert due_tasks[0].model == MODEL_PRESETS["haiku"]
     assert due_tasks[0].name == "Gmail scan"
+
+
+# ---------------------------------------------------------------------------
+# Pre-check parsing
+# ---------------------------------------------------------------------------
+
+def test_compute_due_tasks_parses_pre_check() -> None:
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Check escalations\nType: system\nSchedule: {past}\n"
+        "Recur: every 30 minutes\nPre-check: escalations\n"
+    )
+    due = HeartbeatService._compute_due_tasks(content, datetime.now())
+    assert len(due) == 1
+    assert due[0].pre_check == "escalations"
+
+
+def test_compute_due_tasks_no_pre_check_returns_none() -> None:
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    content = _make_heartbeat(
+        f"\n### Gmail scan\nType: system\nSchedule: {past}\nRecur: every 1 hour\n"
+    )
+    due = HeartbeatService._compute_due_tasks(content, datetime.now())
+    assert len(due) == 1
+    assert due[0].pre_check is None
+
+
+# ---------------------------------------------------------------------------
+# Pre-check execution
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_run_pre_check_empty_output_returns_false() -> None:
+    """Command that outputs nothing → no work."""
+    result = await HeartbeatService._run_pre_check("printf ''")
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_run_pre_check_empty_json_array_returns_false() -> None:
+    """Command that outputs [] → no work."""
+    result = await HeartbeatService._run_pre_check("echo '[]'")
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_run_pre_check_skip_output_returns_false() -> None:
+    """Command that outputs SKIP → no work."""
+    result = await HeartbeatService._run_pre_check("echo 'SKIP: no emails'")
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_run_pre_check_with_data_returns_true() -> None:
+    """Command that outputs real data → has work."""
+    result = await HeartbeatService._run_pre_check('echo \'[{"id": "abc"}]\'')
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_run_pre_check_failure_returns_true() -> None:
+    """Command that fails → proceed with LLM to be safe."""
+    result = await HeartbeatService._run_pre_check("false")
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_filter_by_pre_checks_removes_empty_tasks(tmp_path) -> None:
+    """Tasks whose pre-check returns empty are filtered out."""
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path, provider=provider, model="test",
+        last_run_tracking=True,
+        pre_check_registry={"escalations": "echo []"},
+    )
+    tasks = [
+        DueTask(name="Gmail scan", task_type="system", schedule="2026-01-01"),
+        DueTask(name="Check escalations", task_type="system", schedule="2026-01-01",
+                pre_check="escalations"),
+    ]
+    result = await service._filter_by_pre_checks(tasks)
+    assert len(result) == 1
+    assert result[0].name == "Gmail scan"
+
+
+@pytest.mark.asyncio
+async def test_filter_by_pre_checks_keeps_tasks_with_data(tmp_path) -> None:
+    """Tasks whose pre-check returns data are kept."""
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path, provider=provider, model="test",
+        last_run_tracking=True,
+        pre_check_registry={"escalations": "echo [{}]"},
+    )
+    tasks = [
+        DueTask(name="Check escalations", task_type="system", schedule="2026-01-01",
+                pre_check="escalations"),
+    ]
+    result = await service._filter_by_pre_checks(tasks)
+    assert len(result) == 1
+
+
+@pytest.mark.asyncio
+async def test_filter_by_pre_checks_unknown_key_proceeds(tmp_path) -> None:
+    """Unknown pre-check key → task proceeds to LLM."""
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path, provider=provider, model="test",
+        last_run_tracking=True,
+        pre_check_registry={},
+    )
+    tasks = [
+        DueTask(name="Check escalations", task_type="system", schedule="2026-01-01",
+                pre_check="unknown_key"),
+    ]
+    result = await service._filter_by_pre_checks(tasks)
+    assert len(result) == 1
+
+
+@pytest.mark.asyncio
+async def test_tick_skips_llm_when_pre_check_empty(tmp_path) -> None:
+    """Full tick: pre-check returns empty → no LLM call."""
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    heartbeat = _make_heartbeat(
+        f"\n### Check escalations\nType: system\nSchedule: {past}\n"
+        "Recur: every 30 minutes\nPre-check: escalations\n"
+    )
+    (tmp_path / "HEARTBEAT.md").write_text(heartbeat)
+
+    execute_calls = []
+
+    async def mock_execute(summary: str, model: str | None) -> str:
+        execute_calls.append(summary)
+        return ""
+
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path, provider=provider, model="test",
+        on_execute=mock_execute, last_run_tracking=True,
+        pre_check_registry={"escalations": "echo []"},
+    )
+
+    await service._tick()
+    assert len(execute_calls) == 0, "LLM should not have been called"
+
+
+@pytest.mark.asyncio
+async def test_tick_calls_llm_when_pre_check_has_data(tmp_path) -> None:
+    """Full tick: pre-check returns data → LLM called."""
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    heartbeat = _make_heartbeat(
+        f"\n### Check escalations\nType: system\nSchedule: {past}\n"
+        "Recur: every 30 minutes\nPre-check: escalations\n"
+    )
+    (tmp_path / "HEARTBEAT.md").write_text(heartbeat)
+
+    execute_calls = []
+
+    async def mock_execute(summary: str, model: str | None) -> str:
+        execute_calls.append(summary)
+        return ""
+
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path, provider=provider, model="test",
+        on_execute=mock_execute, last_run_tracking=True,
+        pre_check_registry={"escalations": "echo [{}]"},
+    )
+
+    await service._tick()
+    assert len(execute_calls) == 1, "LLM should have been called"
+
+
+@pytest.mark.asyncio
+async def test_tick_mixed_pre_check_only_runs_tasks_with_work(tmp_path) -> None:
+    """Two due tasks: one pre-check empty, one no pre-check → only the latter runs."""
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    heartbeat = _make_heartbeat(
+        f"\n### Gmail scan\nType: system\nSchedule: {past}\nRecur: every 1 hour\n"
+        f"\n### Check escalations\nType: system\nSchedule: {past}\n"
+        "Recur: every 30 minutes\nPre-check: escalations\n"
+    )
+    (tmp_path / "HEARTBEAT.md").write_text(heartbeat)
+
+    execute_calls = []
+
+    async def mock_execute(summary: str, model: str | None) -> str:
+        execute_calls.append(summary)
+        return ""
+
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path, provider=provider, model="test",
+        on_execute=mock_execute, last_run_tracking=True,
+        pre_check_registry={"escalations": "echo []"},
+    )
+
+    await service._tick()
+    assert len(execute_calls) == 1
+    assert "Gmail scan" in execute_calls[0]
+    assert "Check escalations" not in execute_calls[0]
