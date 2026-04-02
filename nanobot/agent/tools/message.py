@@ -84,6 +84,9 @@ class MessageTool(Tool):
         media: list[str] | None = None,
         **kwargs: Any
     ) -> str:
+        from nanobot.utils.helpers import strip_think
+        content = strip_think(content)
+        
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
         message_id = message_id or self._default_message_id

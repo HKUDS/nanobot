@@ -261,6 +261,7 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
 | **Wecom** | Bot ID + Bot Secret |
+| **iMessage** | macOS (local) or Photon server credentials (remote) |
 | **Mochat** | Claw token (auto-setup available) |
 
 <details>
@@ -828,6 +829,82 @@ Go to the WeCom admin console → Intelligent Robot → Create Robot → select 
 ```bash
 nanobot gateway
 ```
+
+</details>
+
+<details>
+<summary><b>iMessage</b></summary>
+
+Supports two modes via [Photon](https://photon.codes):
+
+- **Local mode**: macOS only. Reads the on-device iMessage database and sends via AppleScript. No external server needed.
+- **Remote mode**: Get your endpoint and API key from [Photon](https://photon.codes) and connect from any platform. Supports tapback reactions, typing indicators, mark-as-read, attachments, and inline replies.
+
+**Local mode (macOS)**
+
+1. Grant **Full Disk Access** to your terminal in **System Settings → Privacy & Security → Full Disk Access**
+2. Ensure iMessage is signed in and working on the Mac
+
+```json
+{
+  "channels": {
+    "imessage": {
+      "enabled": true,
+      "local": true,
+      "allowFrom": ["+1234567890"]
+    }
+  }
+}
+```
+
+```bash
+nanobot gateway
+```
+
+> Local mode supports sending/receiving text, images, and files. For reactions, typing indicators, and inline replies, use remote mode.
+
+**Remote mode**
+
+1. Get your **endpoint URL** and **API key** from [Photon](https://photon.codes)
+2. Configure:
+
+```json
+{
+  "channels": {
+    "imessage": {
+      "enabled": true,
+      "local": false,
+      "serverUrl": "https://xxxxx.imsgd.photon.codes",
+      "apiKey": "your-api-key",
+      "allowFrom": ["+1234567890"]
+    }
+  }
+}
+```
+
+```bash
+nanobot gateway
+```
+
+> `allowFrom`: Add phone numbers or email addresses. Use `["*"]` to allow all senders.
+> `groupPolicy`: `"open"` (default — respond to all messages) or `"ignore"` (skip group chats entirely).
+> `proxy`: Optional HTTP proxy URL (e.g. `"http://127.0.0.1:7890"`).
+> `pollInterval`: Polling interval in seconds (default `2.0`).
+
+> **Note:** Remote mode routes messages through Photon's [advanced-imessage-http-proxy](https://github.com/photon-hq/advanced-imessage-http-proxy). Your messages and attachments transit Photon's infrastructure — the same provider that hosts your iMessage Kit server. If you need full on-device privacy, use local mode instead.
+
+**Feature comparison:**
+
+| Feature | Local | Remote |
+|---------|-------|--------|
+| Send/receive messages | ✅ | ✅ |
+| Images & files | ✅ | ✅ |
+| Message history | ✅ | ✅ |
+| Reactions (tapbacks) | ❌ | ✅ |
+| Typing indicators | ❌ | ✅ |
+| Mark as read | ❌ | ✅ |
+| Inline replies | ❌ | ✅ (`replyToMessage: true`) |
+| Runs on any platform | ❌ | ✅ |
 
 </details>
 
