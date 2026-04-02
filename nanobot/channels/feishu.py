@@ -450,6 +450,35 @@ class FeishuChannel(BaseChannel):
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
 
+    def _remove_reaction_sync(self, message_id: str, emoji_type: str) -> None:
+        """Sync helper for removing reaction (runs in thread pool)."""
+        from lark_oapi.api.im.v1 import DeleteMessageReactionRequest
+        try:
+            request = DeleteMessageReactionRequest.builder() \
+                .message_id(message_id) \
+                .reaction_id(emoji_type) \
+                .build()
+
+            response = self._client.im.v1.message_reaction.delete(request)
+            if response.success():
+                logger.debug("Removed {} reaction from message {}", emoji_type, message_id)
+            else:
+                logger.debug("Failed to remove reaction: code={}, msg={}", response.code, response.msg)
+        except Exception as e:
+            logger.debug("Error removing reaction: {}", e)
+
+    async def _remove_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> None:
+        """
+        Remove a reaction emoji from a message (non-blocking).
+
+        Used to clear the "processing" indicator after bot replies.
+        """
+        if not self._client:
+            return
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._remove_reaction_sync, message_id, emoji_type)
+
     # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(
         r"((?:^[ \t]*\|.+\|[ \t]*\n)(?:^[ \t]*\|[-:\s|]+\|[ \t]*\n)(?:^[ \t]*\|.+\|[ \t]*\n?)+)",
@@ -1092,6 +1121,11 @@ class FeishuChannel(BaseChannel):
         if not self._client:
             logger.warning("Feishu client not initialized")
             return
+
+        # Remove reaction for final responses (not progress updates)
+        if not msg.metadata.get("_progress", False):
+            if message_id := msg.metadata.get("message_id"):
+                await self._remove_reaction(message_id, self.config.react_emoji)
 
         try:
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
