@@ -180,7 +180,24 @@ class VoiceServerChannel(BaseChannel):
         self.clients.clear()
 
     async def send(self, message: OutboundMessage) -> None:
+        emotion = None
         if hasattr(message, 'content') and message.content:
+            # Extract emotion from brackets [emotion] or JSON blocks {"emotion": "..."}
+            match = re.search(r'\[(.*?)\]', message.content)
+            if match:
+                emotion = match.group(1).lower()
+            else:
+                # Try to find JSON block with emotion
+                json_match = re.search(r'\{.*"emotion":\s*"([^"]+)".*\}', message.content, re.DOTALL)
+                if json_match:
+                    emotion = json_match.group(1).lower()
+
+            if emotion:
+                # Mapping puzzled and confused to thinking for device compatibility
+                if emotion in ["puzzled", "confused"]:
+                    emotion = "thinking"
+                logger.info(f"Detected emotion: {emotion} in message to {message.chat_id}")
+
             # Strip emojis
             message.content = re.sub(r'[\U00010000-\U0010ffff]', '', message.content)
             # Strip text inside brackets and asterisks (emotions/actions)
@@ -188,6 +205,8 @@ class VoiceServerChannel(BaseChannel):
             message.content = re.sub(r'\*.*?\*', '', message.content)
             # Final cleanup of non-verbal characters but keep basic punctuation
             message.content = re.sub(r'[^\w\s\.,!\?\-:]', '', message.content)
+            # Remove redundant spaces and strip
+            message.content = re.sub(r'\s+', ' ', message.content).strip()
 
         client_id = message.chat_id
         ws = self.clients.get(client_id)
@@ -197,6 +216,10 @@ class VoiceServerChannel(BaseChannel):
             return
 
         try:
+            # Send emotion update if detected
+            if emotion:
+                await ws.send(json.dumps({"type": "llm", "emotion": emotion}))
+
             audio_url = message.metadata.get("audio_url")
             mcp_payload = message.metadata.get("mcp")
             direct_json = message.metadata.get("json")
@@ -422,8 +445,8 @@ class VoiceServerChannel(BaseChannel):
                             else:
                                 state["silent_frames"] = 0
                                 
-                            # Auto-stop after 30 silent frames (1.8s) if not enrolling
-                            if not is_enrolling and state["silent_frames"] >= 30 and len(state["pcm_buffer"]) >= 16000 * 2 * 0.5:
+                            # Auto-stop after 80 silent frames (4.8s) if not enrolling
+                            if not is_enrolling and state["silent_frames"] >= 80 and len(state["pcm_buffer"]) >= 16000 * 2 * 0.5:
                                 logger.info(f"Silence detected ({rms:.1f}). Auto-stopping.")
                                 state["is_listening"] = False
                                 asyncio.create_task(self._process_audio_buffer(client_id))
@@ -480,8 +503,11 @@ class VoiceServerChannel(BaseChannel):
                         if resp.status_code == 200:
                             data = resp.json()
                             identified = data.get("identified", "Unknown")
-                            score = data.get("score", 0)
                             logger.info(f"Speaker ID: identified='{identified}' score={score:.2f}")
+                            if "results" in data:
+                                top_n = sorted(data["results"], key=lambda x: x["score"], reverse=True)[:3]
+                                scores_str = ", ".join([f"{r['user_id']}:{r['score']:.2f}" for r in top_n])
+                                logger.debug(f"Top scores: {scores_str}")
                             return identified
                         else:
                             logger.warn(f"Speaker ID error: code={resp.status_code} body={resp.text[:100]}")

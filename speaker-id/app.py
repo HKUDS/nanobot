@@ -103,8 +103,8 @@ async def identify(file: UploadFile = File(...)):
             
         results.sort(key=lambda x: x['score'], reverse=True)
         
-        # Порог 0.35 как в стабильной версии на .111
-        id_user = results[0]['user_id'] if results[0]['score'] > 0.35 else 'Unknown'
+        # Порог 0.30 для лучшей стабильности (снижен с 0.35)
+        id_user = results[0]['user_id'] if results[0]['score'] > 0.30 else 'Unknown'
         print(f'Result: {id_user} (Score: {results[0]["score"]:.4f})')
         
         return {'identified': id_user, 'score': float(results[0]['score'])}
