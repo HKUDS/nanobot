@@ -94,8 +94,12 @@ def _restore_terminal() -> None:
         pass
 
 
-def _init_prompt_session() -> None:
-    """Create the prompt_toolkit session with persistent file history."""
+def _init_prompt_session(router=None) -> None:
+    """Create the prompt_toolkit session with persistent file history.
+
+    Args:
+        router: Optional CommandRouter for slash command auto-completion.
+    """
     global _PROMPT_SESSION, _SAVED_TERM_ATTRS
 
     # Save terminal state so we can restore it on exit
@@ -110,11 +114,17 @@ def _init_prompt_session() -> None:
     history_file = get_cli_history_path()
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
-    _PROMPT_SESSION = PromptSession(
-        history=FileHistory(str(history_file)),
-        enable_open_in_editor=False,
-        multiline=False,   # Enter submits (single line mode)
-    )
+    session_kwargs = {
+        "history": FileHistory(str(history_file)),
+        "enable_open_in_editor": False,
+        "multiline": False,   # Enter submits (single line mode)
+    }
+
+    _PROMPT_SESSION = PromptSession(**session_kwargs)
+
+    if router is not None:
+        from nanobot.cli.completion import attach_slash_completion
+        attach_slash_completion(_PROMPT_SESSION, router)
 
 
 def _make_console() -> Console:
@@ -879,7 +889,7 @@ def agent(
     else:
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
-        _init_prompt_session()
+        _init_prompt_session(router=agent_loop.commands)
         console.print(f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n")
 
         if ":" in session_id:
