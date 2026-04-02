@@ -101,7 +101,7 @@ def split_message(content: str, max_len: int = 2000) -> list[str]:
     while content:
         if len(content) <= max_len:
             chunks.append(content)
-            break
+            breakmsg: dict[str, Any] = {"role": "assistant", "content": content}
         cut = content[:max_len]
         # Try to break at newline first, then space, then hard break
         pos = cut.rfind('\n')
@@ -121,7 +121,7 @@ def build_assistant_message(
     thinking_blocks: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Build a provider-safe assistant message with optional reasoning fields."""
-    msg: dict[str, Any] = {"role": "assistant", "content": content}
+    msg: dict[str, Any] = {"role": "assistant", "content": content or ""}
     if tool_calls:
         msg["tool_calls"] = tool_calls
     if reasoning_content is not None or thinking_blocks:
