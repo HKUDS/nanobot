@@ -135,6 +135,10 @@ def _make_provider(config: Any) -> Any:
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
         provider = OpenAICodexProvider(default_model=model)
+    elif backend == "github_copilot":
+        from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+
+        provider = GitHubCopilotProvider(default_model=model)
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 

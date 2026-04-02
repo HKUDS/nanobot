@@ -415,6 +415,9 @@ def _make_provider(config: Config):
             api_base=p.api_base,
             default_model=model,
         )
+    elif backend == "github_copilot":
+        from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+        provider = GitHubCopilotProvider(default_model=model)
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
         provider = AnthropicProvider(
@@ -1497,26 +1500,16 @@ def _login_openai_codex() -> None:
 
 @_register_login("github_copilot")
 def _login_github_copilot() -> None:
-    import asyncio
-
-    from openai import AsyncOpenAI
-
-    console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
-
-    async def _trigger():
-        client = AsyncOpenAI(
-            api_key="dummy",
-            base_url="https://api.githubcopilot.com",
-        )
-        await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=1,
-        )
-
     try:
-        asyncio.run(_trigger())
-        console.print("[green]✓ Authenticated with GitHub Copilot[/green]")
+        from nanobot.providers.github_copilot_provider import login_github_copilot
+
+        console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
+        token = login_github_copilot(
+            print_fn=lambda s: console.print(s),
+            prompt_fn=lambda s: typer.prompt(s),
+        )
+        account = token.account_id or "GitHub"
+        console.print(f"[green]✓ Authenticated with GitHub Copilot[/green]  [dim]{account}[/dim]")
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
