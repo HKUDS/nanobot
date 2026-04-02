@@ -285,6 +285,28 @@ def test_add_at_job_uses_default_timezone_for_naive_datetime(tmp_path) -> None:
     assert job.schedule.at_ms == expected
 
 
+def test_add_job_delivers_by_default(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool.set_context("telegram", "chat-1")
+
+    result = tool._add_job("Morning standup", 60, None, None, None)
+
+    assert result.startswith("Created job")
+    job = tool._cron.list_jobs()[0]
+    assert job.payload.deliver is True
+
+
+def test_add_job_can_disable_delivery(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool.set_context("telegram", "chat-1")
+
+    result = tool._add_job("Background refresh", 60, None, None, None, deliver=False)
+
+    assert result.startswith("Created job")
+    job = tool._cron.list_jobs()[0]
+    assert job.payload.deliver is False
+
+
 def test_list_excludes_disabled_jobs(tmp_path) -> None:
     tool = _make_tool(tmp_path)
     job = tool._cron.add_job(
