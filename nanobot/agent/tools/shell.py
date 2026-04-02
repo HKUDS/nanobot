@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool
+from nanobot.config.paths import get_media_dir
 
 
 class ExecTool(Tool):
@@ -180,9 +181,7 @@ class ExecTool(Tool):
                 except Exception:
                     continue
 
-                from nanobot.config.paths import get_runtime_subdir
-                media_path = get_runtime_subdir("media").resolve()
-
+                media_path = get_media_dir().resolve()
                 if (p.is_absolute() 
                     and cwd_path not in p.parents 
                     and p != cwd_path
