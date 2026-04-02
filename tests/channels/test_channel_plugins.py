@@ -208,7 +208,7 @@ def test_channels_login_uses_discovered_plugin_class(monkeypatch):
             seen["config"] = self.config
             return True
 
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: Config())
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: Config())
     monkeypatch.setattr(
         "nanobot.channels.registry.discover_all",
         lambda: {"fakeplugin": _LoginPlugin},
