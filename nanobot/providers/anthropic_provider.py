@@ -370,15 +370,22 @@ class AnthropicProvider(LLMProvider):
 
         usage: dict[str, int] = {}
         if response.usage:
+            input_tokens = response.usage.input_tokens
+            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            total_prompt_tokens = input_tokens + cache_creation + cache_read
             usage = {
-                "prompt_tokens": response.usage.input_tokens,
+                "prompt_tokens": total_prompt_tokens,
                 "completion_tokens": response.usage.output_tokens,
-                "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+                "total_tokens": total_prompt_tokens + response.usage.output_tokens,
             }
             for attr in ("cache_creation_input_tokens", "cache_read_input_tokens"):
                 val = getattr(response.usage, attr, 0)
                 if val:
                     usage[attr] = val
+            # Normalize to cached_tokens for downstream consistency.
+            if cache_read:
+                usage["cached_tokens"] = cache_read
 
         return LLMResponse(
             content="".join(content_parts) or None,
