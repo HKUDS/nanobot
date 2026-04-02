@@ -150,6 +150,19 @@ def test_build_body_image_conversion():
     assert image_block["image_url"] == "https://example.com/img.png"
 
 
+def test_build_body_sanitizes_single_dict_content_block():
+    """Single content dicts should be preserved via shared message sanitization."""
+    provider = AzureOpenAIProvider(api_key="k", api_base="https://r.com", default_model="gpt-4o")
+    messages = [{
+        "role": "user",
+        "content": {"type": "text", "text": "Hi from dict content"},
+    }]
+
+    body = provider._build_body(messages, None, None, 4096, 0.7, None, None)
+
+    assert body["input"][0]["content"] == [{"type": "input_text", "text": "Hi from dict content"}]
+
+
 # ---------------------------------------------------------------------------
 # chat() — non-streaming
 # ---------------------------------------------------------------------------

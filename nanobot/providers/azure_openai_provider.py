@@ -87,7 +87,7 @@ class AzureOpenAIProvider(LLMProvider):
     ) -> dict[str, Any]:
         """Build the Responses API request body from Chat-Completions-style args."""
         deployment = model or self.default_model
-        instructions, input_items = convert_messages(messages)
+        instructions, input_items = convert_messages(self._sanitize_empty_content(messages))
 
         body: dict[str, Any] = {
             "model": deployment,
