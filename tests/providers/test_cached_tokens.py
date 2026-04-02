@@ -198,7 +198,7 @@ def test_anthropic_maps_cache_fields_to_cached_tokens():
     usage_obj = FakeUsage(
         input_tokens=800,
         output_tokens=200,
-        cache_creation_input_tokens=0,
+        cache_creation_input_tokens=300,
         cache_read_input_tokens=1200,
     )
     content_block = FakeUsage(type="text", text="hello")
@@ -211,7 +211,9 @@ def test_anthropic_maps_cache_fields_to_cached_tokens():
     )
     result = AnthropicProvider._parse_response(response)
     assert result.usage["cached_tokens"] == 1200
-    assert result.usage["prompt_tokens"] == 800
+    assert result.usage["prompt_tokens"] == 2300
+    assert result.usage["total_tokens"] == 2500
+    assert result.usage["cache_creation_input_tokens"] == 300
 
 
 def test_anthropic_no_cache_fields():
