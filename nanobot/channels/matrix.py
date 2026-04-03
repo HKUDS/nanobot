@@ -3,6 +3,8 @@
 import asyncio
 import logging
 import mimetypes
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
 
@@ -28,8 +30,8 @@ try:
         RoomSendError,
         RoomTypingError,
         SyncError,
-        UploadError,
-    )
+        UploadError, RoomSendResponse,
+)
     from nio.crypto.attachments import decrypt_attachment
     from nio.exceptions import EncryptionError
 except ImportError as e:
@@ -97,6 +99,22 @@ MATRIX_HTML_CLEANER = nh3.Cleaner(
     link_rel="noopener noreferrer",
 )
 
+@dataclass
+class _StreamBuf:
+    """
+    Represents a buffer for managing LLM response stream data.
+
+    :ivar text: Stores the text content of the buffer.
+    :type text: str
+    :ivar event_id: Identifier for the associated event. None indicates no 
+        specific event association.
+    :type event_id: str | None
+    :ivar last_edit: Timestamp of the most recent edit to the buffer.
+    :type last_edit: float
+    """
+    text: str = ""
+    event_id: str | None = None
+    last_edit: float = 0.0
 
 def _render_markdown_html(text: str) -> str | None:
     """Render markdown to sanitized HTML; returns None for plain text."""
@@ -114,12 +132,47 @@ def _render_markdown_html(text: str) -> str | None:
     return formatted
 
 
-def _build_matrix_text_content(text: str) -> dict[str, object]:
-    """Build Matrix m.text payload with optional HTML formatted_body."""
+def _build_matrix_text_content(
+    text: str,
+    event_id: str | None = None,
+    thread_relates_to: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """
+    Constructs and returns a dictionary representing the matrix text content with optional
+    HTML formatting and reference to an existing event for replacement. This function is 
+    primarily used to create content payloads compatible with the Matrix messaging protocol.
+
+    :param text: The plain text content to include in the message.
+    :type text: str
+    :param event_id: Optional ID of the event to replace. If provided, the function will 
+        include information indicating that the message is a replacement of the specified 
+        event.
+    :type event_id: str | None
+    :param thread_relates_to: Optional Matrix thread relation metadata. For edits this is
+        stored in ``m.new_content`` so the replacement remains in the same thread.
+    :type thread_relates_to: dict[str, object] | None
+    :return: A dictionary containing the matrix text content, potentially enriched with 
+        HTML formatting and replacement metadata if applicable.
+    :rtype: dict[str, object]
+    """
     content: dict[str, object] = {"msgtype": "m.text", "body": text, "m.mentions": {}}
     if html := _render_markdown_html(text):
         content["format"] = MATRIX_HTML_FORMAT
         content["formatted_body"] = html
+    if event_id:
+        content["m.new_content"] = {
+            "body": text,
+            "msgtype": "m.text",
+        }
+        content["m.relates_to"] = {
+            "rel_type": "m.replace",
+            "event_id": event_id,
+        }
+        if thread_relates_to:
+            content["m.new_content"]["m.relates_to"] = thread_relates_to
+    elif thread_relates_to:
+        content["m.relates_to"] = thread_relates_to
+
     return content
 
 
@@ -159,7 +212,8 @@ class MatrixConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention", "allowlist"] = "open"
     group_allow_from: list[str] = Field(default_factory=list)
-    allow_room_mentions: bool = False
+    allow_room_mentions: bool = False,
+    streaming: bool = False
 
 
 class MatrixChannel(BaseChannel):
@@ -167,6 +221,8 @@ class MatrixChannel(BaseChannel):
 
     name = "matrix"
     display_name = "Matrix"
+    _STREAM_EDIT_INTERVAL = 2 # min seconds between edit_message_text calls
+    monotonic_time = time.monotonic
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -192,6 +248,8 @@ class MatrixChannel(BaseChannel):
         )
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
+        self._stream_bufs: dict[str, _StreamBuf] = {}
+
 
     async def start(self) -> None:
         """Start Matrix client and begin sync loop."""
@@ -297,14 +355,17 @@ class MatrixChannel(BaseChannel):
         room = getattr(self.client, "rooms", {}).get(room_id)
         return bool(getattr(room, "encrypted", False))
 
-    async def _send_room_content(self, room_id: str, content: dict[str, Any]) -> None:
+    async def _send_room_content(self, room_id: str,
+                                 content: dict[str, Any]) -> None | RoomSendResponse | RoomSendError:
         """Send m.room.message with E2EE options."""
         if not self.client:
-            return
+            return None
         kwargs: dict[str, Any] = {"room_id": room_id, "message_type": "m.room.message", "content": content}
+
         if self.config.e2ee_enabled:
             kwargs["ignore_unverified_devices"] = True
-        await self.client.room_send(**kwargs)
+        response = await self.client.room_send(**kwargs)
+        return response
 
     async def _resolve_server_upload_limit_bytes(self) -> int | None:
         """Query homeserver upload limit once per channel lifecycle."""
@@ -413,6 +474,53 @@ class MatrixChannel(BaseChannel):
         finally:
             if not is_progress:
                 await self._stop_typing_keepalive(msg.chat_id, clear_typing=True)
+
+    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+        meta = metadata or {}
+        relates_to = self._build_thread_relates_to(metadata)
+
+        if meta.get("_stream_end"):
+            buf = self._stream_bufs.pop(chat_id, None)
+            if not buf or not buf.event_id or not buf.text:
+                return
+
+            await self._stop_typing_keepalive(chat_id, clear_typing=True)
+            
+            content = _build_matrix_text_content(
+                buf.text,
+                buf.event_id,
+                thread_relates_to=relates_to,
+            )
+            await self._send_room_content(chat_id, content)
+            return
+
+        buf = self._stream_bufs.get(chat_id)
+        if buf is None:
+            buf = _StreamBuf()
+            self._stream_bufs[chat_id] = buf
+        buf.text += delta
+    
+        if not buf.text.strip():
+            return
+
+        now = self.monotonic_time()
+
+        if not buf.last_edit or (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
+            try:
+                content = _build_matrix_text_content(
+                    buf.text,
+                    buf.event_id,
+                    thread_relates_to=relates_to,
+                )
+                response = await self._send_room_content(chat_id, content)
+                buf.last_edit = now
+                if not buf.event_id:
+                    # we are editing the same message all the time, so only the first time the event id needs to be set
+                    buf.event_id = response.event_id
+            except Exception:
+                await self._stop_typing_keepalive(chat_id, clear_typing=True)
+                pass
+
 
     def _register_event_callbacks(self) -> None:
         self.client.add_event_callback(self._on_message, RoomMessageText)

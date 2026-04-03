@@ -76,6 +76,10 @@ class ReadFileTool(_FsTool):
         )
 
     @property
+    def read_only(self) -> bool:
+        return True
+
+    @property
     def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
@@ -345,6 +349,10 @@ class ListDirTool(_FsTool):
             "Set recursive=true to explore nested structure. "
             "Common noise directories (.git, node_modules, __pycache__, etc.) are auto-ignored."
         )
+
+    @property
+    def read_only(self) -> bool:
+        return True
 
     @property
     def parameters(self) -> dict[str, Any]:

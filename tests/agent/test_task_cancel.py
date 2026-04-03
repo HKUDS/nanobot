@@ -8,6 +8,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from nanobot.config.schema import AgentDefaults
+
+_MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
+
 
 def _make_loop(*, exec_config=None):
     """Create a minimal AgentLoop with mocked dependencies."""
@@ -118,6 +122,43 @@ class TestDispatch:
         assert out.content == "hi"
 
     @pytest.mark.asyncio
+    async def test_dispatch_streaming_preserves_message_metadata(self):
+        from nanobot.bus.events import InboundMessage
+
+        loop, bus = _make_loop()
+        msg = InboundMessage(
+            channel="matrix",
+            sender_id="u1",
+            chat_id="!room:matrix.org",
+            content="hello",
+            metadata={
+                "_wants_stream": True,
+                "thread_root_event_id": "$root1",
+                "thread_reply_to_event_id": "$reply1",
+            },
+        )
+
+        async def fake_process(_msg, *, on_stream=None, on_stream_end=None, **kwargs):
+            assert on_stream is not None
+            assert on_stream_end is not None
+            await on_stream("hi")
+            await on_stream_end(resuming=False)
+            return None
+
+        loop._process_message = fake_process
+
+        await loop._dispatch(msg)
+        first = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        second = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+
+        assert first.metadata["thread_root_event_id"] == "$root1"
+        assert first.metadata["thread_reply_to_event_id"] == "$reply1"
+        assert first.metadata["_stream_delta"] is True
+        assert second.metadata["thread_root_event_id"] == "$root1"
+        assert second.metadata["thread_reply_to_event_id"] == "$reply1"
+        assert second.metadata["_stream_end"] is True
+
+    @pytest.mark.asyncio
     async def test_processing_lock_serializes(self):
         from nanobot.bus.events import InboundMessage, OutboundMessage
 
@@ -149,7 +190,12 @@ class TestSubagentCancellation:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        mgr = SubagentManager(provider=provider, workspace=MagicMock(), bus=bus)
+        mgr = SubagentManager(
+            provider=provider,
+            workspace=MagicMock(),
+            bus=bus,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
 
         cancelled = asyncio.Event()
 
@@ -177,7 +223,12 @@ class TestSubagentCancellation:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        mgr = SubagentManager(provider=provider, workspace=MagicMock(), bus=bus)
+        mgr = SubagentManager(
+            provider=provider,
+            workspace=MagicMock(),
+            bus=bus,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
         assert await mgr.cancel_by_session("nonexistent") == 0
 
     @pytest.mark.asyncio
@@ -199,19 +250,24 @@ class TestSubagentCancellation:
             if call_count["n"] == 1:
                 return LLMResponse(
                     content="thinking",
-                    tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
+                    tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
                     reasoning_content="hidden reasoning",
                     thinking_blocks=[{"type": "thinking", "thinking": "step"}],
                 )
             captured_second_call[:] = messages
             return LLMResponse(content="done", tool_calls=[])
         provider.chat_with_retry = scripted_chat_with_retry
-        mgr = SubagentManager(provider=provider, workspace=tmp_path, bus=bus)
+        mgr = SubagentManager(
+            provider=provider,
+            workspace=tmp_path,
+            bus=bus,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
 
-        async def fake_execute(self, name, arguments):
+        async def fake_execute(self, **kwargs):
             return "tool result"
 
-        monkeypatch.setattr("nanobot.agent.tools.registry.ToolRegistry.execute", fake_execute)
+        monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
         await mgr._run_subagent("sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"})
 
@@ -236,6 +292,7 @@ class TestSubagentCancellation:
             provider=provider,
             workspace=tmp_path,
             bus=bus,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
             exec_config=ExecToolConfig(enable=False),
         )
         mgr._announce_result = AsyncMock()
@@ -267,20 +324,25 @@ class TestSubagentCancellation:
         provider.get_default_model.return_value = "test-model"
         provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
             content="thinking",
-            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
+            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
         ))
-        mgr = SubagentManager(provider=provider, workspace=tmp_path, bus=bus)
+        mgr = SubagentManager(
+            provider=provider,
+            workspace=tmp_path,
+            bus=bus,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
         mgr._announce_result = AsyncMock()
 
         calls = {"n": 0}
 
-        async def fake_execute(self, name, arguments):
+        async def fake_execute(self, **kwargs):
             calls["n"] += 1
             if calls["n"] == 1:
                 return "first result"
             raise RuntimeError("boom")
 
-        monkeypatch.setattr("nanobot.agent.tools.registry.ToolRegistry.execute", fake_execute)
+        monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
         await mgr._run_subagent("sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"})
 
@@ -303,15 +365,20 @@ class TestSubagentCancellation:
         provider.get_default_model.return_value = "test-model"
         provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
             content="thinking",
-            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
+            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
         ))
-        mgr = SubagentManager(provider=provider, workspace=tmp_path, bus=bus)
+        mgr = SubagentManager(
+            provider=provider,
+            workspace=tmp_path,
+            bus=bus,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
         mgr._announce_result = AsyncMock()
 
         started = asyncio.Event()
         cancelled = asyncio.Event()
 
-        async def fake_execute(self, name, arguments):
+        async def fake_execute(self, **kwargs):
             started.set()
             try:
                 await asyncio.sleep(60)
@@ -319,7 +386,7 @@ class TestSubagentCancellation:
                 cancelled.set()
                 raise
 
-        monkeypatch.setattr("nanobot.agent.tools.registry.ToolRegistry.execute", fake_execute)
+        monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
         task = asyncio.create_task(
             mgr._run_subagent("sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"})
@@ -327,7 +394,7 @@ class TestSubagentCancellation:
         mgr._running_tasks["sub-1"] = task
         mgr._session_tasks["test:c1"] = {"sub-1"}
 
-        await started.wait()
+        await asyncio.wait_for(started.wait(), timeout=1.0)
 
         count = await mgr.cancel_by_session("test:c1")
 

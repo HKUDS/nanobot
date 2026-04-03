@@ -647,43 +647,56 @@ async def test_group_policy_open_accepts_plain_group_message() -> None:
     assert channel._app.bot.get_me_calls == 0
 
 
-def test_extract_reply_context_no_reply() -> None:
+@pytest.mark.asyncio
+async def test_extract_reply_context_no_reply() -> None:
     """When there is no reply_to_message, _extract_reply_context returns None."""
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc"), MessageBus())
     message = SimpleNamespace(reply_to_message=None)
-    assert TelegramChannel._extract_reply_context(message) is None
+    assert await channel._extract_reply_context(message) is None
 
 
-def test_extract_reply_context_with_text() -> None:
+@pytest.mark.asyncio
+async def test_extract_reply_context_with_text() -> None:
     """When reply has text, return prefixed string."""
-    reply = SimpleNamespace(text="Hello world", caption=None)
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc"), MessageBus())
+    channel._app = _FakeApp(lambda: None)
+    reply = SimpleNamespace(text="Hello world", caption=None, from_user=SimpleNamespace(id=2, username="testuser", first_name="Test"))
     message = SimpleNamespace(reply_to_message=reply)
-    assert TelegramChannel._extract_reply_context(message) == "[Reply to: Hello world]"
+    assert await channel._extract_reply_context(message) == "[Reply to @testuser: Hello world]"
 
 
-def test_extract_reply_context_with_caption_only() -> None:
+@pytest.mark.asyncio
+async def test_extract_reply_context_with_caption_only() -> None:
     """When reply has only caption (no text), caption is used."""
-    reply = SimpleNamespace(text=None, caption="Photo caption")
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc"), MessageBus())
+    channel._app = _FakeApp(lambda: None)
+    reply = SimpleNamespace(text=None, caption="Photo caption", from_user=SimpleNamespace(id=2, username=None, first_name="Test"))
     message = SimpleNamespace(reply_to_message=reply)
-    assert TelegramChannel._extract_reply_context(message) == "[Reply to: Photo caption]"
+    assert await channel._extract_reply_context(message) == "[Reply to Test: Photo caption]"
 
 
-def test_extract_reply_context_truncation() -> None:
+@pytest.mark.asyncio
+async def test_extract_reply_context_truncation() -> None:
     """Reply text is truncated at TELEGRAM_REPLY_CONTEXT_MAX_LEN."""
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc"), MessageBus())
+    channel._app = _FakeApp(lambda: None)
     long_text = "x" * (TELEGRAM_REPLY_CONTEXT_MAX_LEN + 100)
-    reply = SimpleNamespace(text=long_text, caption=None)
+    reply = SimpleNamespace(text=long_text, caption=None, from_user=SimpleNamespace(id=2, username=None, first_name=None))
     message = SimpleNamespace(reply_to_message=reply)
-    result = TelegramChannel._extract_reply_context(message)
+    result = await channel._extract_reply_context(message)
     assert result is not None
     assert result.startswith("[Reply to: ")
     assert result.endswith("...]")
     assert len(result) == len("[Reply to: ]") + TELEGRAM_REPLY_CONTEXT_MAX_LEN + len("...")
 
 
-def test_extract_reply_context_no_text_returns_none() -> None:
+@pytest.mark.asyncio
+async def test_extract_reply_context_no_text_returns_none() -> None:
     """When reply has no text/caption, _extract_reply_context returns None (media handled separately)."""
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc"), MessageBus())
     reply = SimpleNamespace(text=None, caption=None)
     message = SimpleNamespace(reply_to_message=reply)
-    assert TelegramChannel._extract_reply_context(message) is None
+    assert await channel._extract_reply_context(message) is None
 
 
 @pytest.mark.asyncio

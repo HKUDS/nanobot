@@ -34,7 +34,7 @@ class ProviderSpec:
     display_name: str = ""  # shown in `nanobot status`
 
     # which provider implementation to use
-    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex"
+    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot"
     backend: str = "openai_compat"
 
     # extra env vars, e.g. (("ZHIPUAI_API_KEY", "{api_key}"),)
@@ -218,8 +218,9 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         keywords=("github_copilot", "copilot"),
         env_key="",
         display_name="Github Copilot",
-        backend="openai_compat",
+        backend="github_copilot",
         default_api_base="https://api.githubcopilot.com",
+        strip_model_prefix=True,
         is_oauth=True,
     ),
     # DeepSeek: OpenAI-compatible at api.deepseek.com
@@ -295,6 +296,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Step Fun",
         backend="openai_compat",
         default_api_base="https://api.stepfun.com/v1",
+    ),
+    # Xiaomi MIMO (小米): OpenAI-compatible API
+    ProviderSpec(
+        name="xiaomi_mimo",
+        keywords=("xiaomi_mimo", "mimo"),
+        env_key="XIAOMIMIMO_API_KEY",
+        display_name="Xiaomi MIMO",
+        backend="openai_compat",
+        default_api_base="https://api.xiaomimimo.com/v1",
     ),
     # === Local deployment (matched by config key, NOT by api_base) =========
     # vLLM / any OpenAI-compatible local server

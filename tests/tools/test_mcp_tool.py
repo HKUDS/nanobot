@@ -196,7 +196,7 @@ async def test_execute_re_raises_external_cancellation() -> None:
 
     wrapper = _make_wrapper(SimpleNamespace(call_tool=call_tool), timeout=10)
     task = asyncio.create_task(wrapper.execute())
-    await started.wait()
+    await asyncio.wait_for(started.wait(), timeout=1.0)
 
     task.cancel()
 

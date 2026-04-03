@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import re
 import secrets
 import string
@@ -370,15 +372,22 @@ class AnthropicProvider(LLMProvider):
 
         usage: dict[str, int] = {}
         if response.usage:
+            input_tokens = response.usage.input_tokens
+            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            total_prompt_tokens = input_tokens + cache_creation + cache_read
             usage = {
-                "prompt_tokens": response.usage.input_tokens,
+                "prompt_tokens": total_prompt_tokens,
                 "completion_tokens": response.usage.output_tokens,
-                "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+                "total_tokens": total_prompt_tokens + response.usage.output_tokens,
             }
             for attr in ("cache_creation_input_tokens", "cache_read_input_tokens"):
                 val = getattr(response.usage, attr, 0)
                 if val:
                     usage[attr] = val
+            # Normalize to cached_tokens for downstream consistency.
+            if cache_read:
+                usage["cached_tokens"] = cache_read
 
         return LLMResponse(
             content="".join(content_parts) or None,
@@ -427,13 +436,33 @@ class AnthropicProvider(LLMProvider):
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
+        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
             async with self._client.messages.stream(**kwargs) as stream:
                 if on_content_delta:
-                    async for text in stream.text_stream:
+                    stream_iter = stream.text_stream.__aiter__()
+                    while True:
+                        try:
+                            text = await asyncio.wait_for(
+                                stream_iter.__anext__(),
+                                timeout=idle_timeout_s,
+                            )
+                        except StopAsyncIteration:
+                            break
                         await on_content_delta(text)
-                response = await stream.get_final_message()
+                response = await asyncio.wait_for(
+                    stream.get_final_message(),
+                    timeout=idle_timeout_s,
+                )
             return self._parse_response(response)
+        except asyncio.TimeoutError:
+            return LLMResponse(
+                content=(
+                    f"Error calling LLM: stream stalled for more than "
+                    f"{idle_timeout_s} seconds"
+                ),
+                finish_reason="error",
+            )
         except Exception as e:
             return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
 

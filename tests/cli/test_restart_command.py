@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -36,14 +37,23 @@ class TestRestartCommand:
     async def test_restart_sends_message_and_calls_execv(self):
         from nanobot.command.builtin import cmd_restart
         from nanobot.command.router import CommandContext
+        from nanobot.utils.restart import (
+            RESTART_NOTIFY_CHANNEL_ENV,
+            RESTART_NOTIFY_CHAT_ID_ENV,
+            RESTART_STARTED_AT_ENV,
+        )
 
         loop, bus = _make_loop()
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
-        with patch("nanobot.command.builtin.os.execv") as mock_execv:
+        with patch.dict(os.environ, {}, clear=False), \
+             patch("nanobot.command.builtin.os.execv") as mock_execv:
             out = await cmd_restart(ctx)
             assert "Restarting" in out.content
+            assert os.environ.get(RESTART_NOTIFY_CHANNEL_ENV) == "cli"
+            assert os.environ.get(RESTART_NOTIFY_CHAT_ID_ENV) == "direct"
+            assert os.environ.get(RESTART_STARTED_AT_ENV)
 
             await asyncio.sleep(1.5)
             mock_execv.assert_called_once()
@@ -152,10 +162,12 @@ class TestRestartCommand:
         ])
 
         await loop._run_agent_loop([])
-        assert loop._last_usage == {"prompt_tokens": 9, "completion_tokens": 4}
+        assert loop._last_usage["prompt_tokens"] == 9
+        assert loop._last_usage["completion_tokens"] == 4
 
         await loop._run_agent_loop([])
-        assert loop._last_usage == {"prompt_tokens": 0, "completion_tokens": 0}
+        assert loop._last_usage["prompt_tokens"] == 0
+        assert loop._last_usage["completion_tokens"] == 0
 
     @pytest.mark.asyncio
     async def test_status_falls_back_to_last_usage_when_context_estimate_missing(self):

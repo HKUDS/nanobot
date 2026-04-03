@@ -13,8 +13,8 @@ import asyncio
 import base64
 import hashlib
 import json
-import mimetypes
 import os
+import random
 import re
 import time
 import uuid
@@ -53,7 +53,26 @@ MESSAGE_TYPE_BOT = 2
 MESSAGE_STATE_FINISH = 2
 
 WEIXIN_MAX_MESSAGE_LEN = 4000
-WEIXIN_CHANNEL_VERSION = "1.0.3"
+WEIXIN_CHANNEL_VERSION = "2.1.1"
+ILINK_APP_ID = "bot"
+
+
+def _build_client_version(version: str) -> int:
+    """Encode semantic version as 0x00MMNNPP (major/minor/patch in one uint32)."""
+    parts = version.split(".")
+
+    def _as_int(idx: int) -> int:
+        try:
+            return int(parts[idx])
+        except Exception:
+            return 0
+
+    major = _as_int(0)
+    minor = _as_int(1)
+    patch = _as_int(2)
+    return ((major & 0xFF) << 16) | ((minor & 0xFF) << 8) | (patch & 0xFF)
+
+ILINK_APP_CLIENT_VERSION = _build_client_version(WEIXIN_CHANNEL_VERSION)
 BASE_INFO: dict[str, str] = {"channel_version": WEIXIN_CHANNEL_VERSION}
 
 # Session-expired error code
@@ -65,18 +84,32 @@ MAX_CONSECUTIVE_FAILURES = 3
 BACKOFF_DELAY_S = 30
 RETRY_DELAY_S = 2
 MAX_QR_REFRESH_COUNT = 3
+TYPING_STATUS_TYPING = 1
+TYPING_STATUS_CANCEL = 2
+TYPING_TICKET_TTL_S = 24 * 60 * 60
+TYPING_KEEPALIVE_INTERVAL_S = 5
+CONFIG_CACHE_INITIAL_RETRY_S = 2
+CONFIG_CACHE_MAX_RETRY_S = 60 * 60
 
 # Default long-poll timeout; overridden by server via longpolling_timeout_ms.
 DEFAULT_LONG_POLL_TIMEOUT_S = 35
 
-# Media-type codes for getuploadurl  (1=image, 2=video, 3=file)
+# Media-type codes for getuploadurl  (1=image, 2=video, 3=file, 4=voice)
 UPLOAD_MEDIA_IMAGE = 1
 UPLOAD_MEDIA_VIDEO = 2
 UPLOAD_MEDIA_FILE = 3
+UPLOAD_MEDIA_VOICE = 4
 
 # File extensions considered as images / videos for outbound media
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".ico", ".svg"}
 _VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv"}
+_VOICE_EXTS = {".mp3", ".wav", ".amr", ".silk", ".ogg", ".m4a", ".aac", ".flac"}
+
+
+def _has_downloadable_media_locator(media: dict[str, Any] | None) -> bool:
+    if not isinstance(media, dict):
+        return False
+    return bool(str(media.get("encrypt_query_param", "") or "") or str(media.get("full_url", "") or "").strip())
 
 
 class WeixinConfig(Base):
@@ -124,6 +157,8 @@ class WeixinChannel(BaseChannel):
         self._poll_task: asyncio.Task | None = None
         self._next_poll_timeout_s: int = DEFAULT_LONG_POLL_TIMEOUT_S
         self._session_pause_until: float = 0.0
+        self._typing_tasks: dict[str, asyncio.Task] = {}
+        self._typing_tickets: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
     # State persistence
@@ -158,12 +193,20 @@ class WeixinChannel(BaseChannel):
                 }
             else:
                 self._context_tokens = {}
+            typing_tickets = data.get("typing_tickets", {})
+            if isinstance(typing_tickets, dict):
+                self._typing_tickets = {
+                    str(user_id): ticket
+                    for user_id, ticket in typing_tickets.items()
+                    if str(user_id).strip() and isinstance(ticket, dict)
+                }
+            else:
+                self._typing_tickets = {}
             base_url = data.get("base_url", "")
             if base_url:
                 self.config.base_url = base_url
             return bool(self._token)
-        except Exception as e:
-            logger.warning("Failed to load WeChat state: {}", e)
+        except Exception:
             return False
 
     def _save_state(self) -> None:
@@ -173,11 +216,12 @@ class WeixinChannel(BaseChannel):
                 "token": self._token,
                 "get_updates_buf": self._get_updates_buf,
                 "context_tokens": self._context_tokens,
+                "typing_tickets": self._typing_tickets,
                 "base_url": self.config.base_url,
             }
             state_file.write_text(json.dumps(data, ensure_ascii=False))
-        except Exception as e:
-            logger.warning("Failed to save WeChat state: {}", e)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # HTTP helpers  (matches api.ts buildHeaders / apiFetch)
@@ -199,12 +243,23 @@ class WeixinChannel(BaseChannel):
             "X-WECHAT-UIN": self._random_wechat_uin(),
             "Content-Type": "application/json",
             "AuthorizationType": "ilink_bot_token",
+            "iLink-App-Id": ILINK_APP_ID,
+            "iLink-App-ClientVersion": str(ILINK_APP_CLIENT_VERSION),
         }
         if auth and self._token:
             headers["Authorization"] = f"Bearer {self._token}"
         if self.config.route_tag is not None and str(self.config.route_tag).strip():
             headers["SKRouteTag"] = str(self.config.route_tag).strip()
         return headers
+
+    @staticmethod
+    def _is_retryable_media_download_error(err: Exception) -> bool:
+        if isinstance(err, httpx.TimeoutException | httpx.TransportError):
+            return True
+        if isinstance(err, httpx.HTTPStatusError):
+            status_code = err.response.status_code if err.response is not None else 0
+            return status_code >= 500
+        return False
 
     async def _api_get(
         self,
@@ -216,6 +271,25 @@ class WeixinChannel(BaseChannel):
     ) -> dict:
         assert self._client is not None
         url = f"{self.config.base_url}/{endpoint}"
+        hdrs = self._make_headers(auth=auth)
+        if extra_headers:
+            hdrs.update(extra_headers)
+        resp = await self._client.get(url, params=params, headers=hdrs)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def _api_get_with_base(
+        self,
+        *,
+        base_url: str,
+        endpoint: str,
+        params: dict | None = None,
+        auth: bool = True,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict:
+        """GET helper that allows overriding base_url for QR redirect polling."""
+        assert self._client is not None
+        url = f"{base_url.rstrip('/')}/{endpoint}"
         hdrs = self._make_headers(auth=auth)
         if extra_headers:
             hdrs.update(extra_headers)
@@ -259,23 +333,27 @@ class WeixinChannel(BaseChannel):
     async def _qr_login(self) -> bool:
         """Perform QR code login flow. Returns True on success."""
         try:
-            logger.info("Starting WeChat QR code login...")
             refresh_count = 0
             qrcode_id, scan_url = await self._fetch_qr_code()
             self._print_qr_code(scan_url)
+            current_poll_base_url = self.config.base_url
 
-            logger.info("Waiting for QR code scan...")
             while self._running:
                 try:
-                    # Reference plugin sends iLink-App-ClientVersion header for
-                    # QR status polling (login-qr.ts:81).
-                    status_data = await self._api_get(
-                        "ilink/bot/get_qrcode_status",
+                    status_data = await self._api_get_with_base(
+                        base_url=current_poll_base_url,
+                        endpoint="ilink/bot/get_qrcode_status",
                         params={"qrcode": qrcode_id},
                         auth=False,
-                        extra_headers={"iLink-App-ClientVersion": "1"},
                     )
-                except httpx.TimeoutException:
+                except Exception as e:
+                    if self._is_retryable_qr_poll_error(e):
+                        await asyncio.sleep(1)
+                        continue
+                    raise
+
+                if not isinstance(status_data, dict):
+                    await asyncio.sleep(1)
                     continue
 
                 status = status_data.get("status", "")
@@ -298,8 +376,15 @@ class WeixinChannel(BaseChannel):
                     else:
                         logger.error("Login confirmed but no bot_token in response")
                         return False
-                elif status == "scaned":
-                    logger.info("QR code scanned, waiting for confirmation...")
+                elif status == "scaned_but_redirect":
+                    redirect_host = str(status_data.get("redirect_host", "") or "").strip()
+                    if redirect_host:
+                        if redirect_host.startswith("http://") or redirect_host.startswith("https://"):
+                            redirected_base = redirect_host
+                        else:
+                            redirected_base = f"https://{redirect_host}"
+                        if redirected_base != current_poll_base_url:
+                            current_poll_base_url = redirected_base
                 elif status == "expired":
                     refresh_count += 1
                     if refresh_count > MAX_QR_REFRESH_COUNT:
@@ -309,14 +394,9 @@ class WeixinChannel(BaseChannel):
                             MAX_QR_REFRESH_COUNT,
                         )
                         return False
-                    logger.warning(
-                        "QR code expired, refreshing... ({}/{})",
-                        refresh_count,
-                        MAX_QR_REFRESH_COUNT,
-                    )
                     qrcode_id, scan_url = await self._fetch_qr_code()
+                    current_poll_base_url = self.config.base_url
                     self._print_qr_code(scan_url)
-                    logger.info("New QR code generated, waiting for scan...")
                     continue
                 # status == "wait" — keep polling
 
@@ -325,6 +405,16 @@ class WeixinChannel(BaseChannel):
         except Exception as e:
             logger.error("WeChat QR login failed: {}", e)
 
+        return False
+
+    @staticmethod
+    def _is_retryable_qr_poll_error(err: Exception) -> bool:
+        if isinstance(err, httpx.TimeoutException | httpx.TransportError):
+            return True
+        if isinstance(err, httpx.HTTPStatusError):
+            status_code = err.response.status_code if err.response is not None else 0
+            if status_code >= 500:
+                return True
         return False
 
     @staticmethod
@@ -337,7 +427,6 @@ class WeixinChannel(BaseChannel):
             qr.make(fit=True)
             qr.print_ascii(invert=True)
         except ImportError:
-            logger.info("QR code URL (install 'qrcode' for terminal display): {}", url)
             print(f"\nLogin URL: {url}\n")
 
     # ------------------------------------------------------------------
@@ -399,12 +488,6 @@ class WeixinChannel(BaseChannel):
                 if not self._running:
                     break
                 consecutive_failures += 1
-                logger.error(
-                    "WeChat poll error ({}/{}): {}",
-                    consecutive_failures,
-                    MAX_CONSECUTIVE_FAILURES,
-                    e,
-                )
                 if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                     consecutive_failures = 0
                     await asyncio.sleep(BACKOFF_DELAY_S)
@@ -415,12 +498,12 @@ class WeixinChannel(BaseChannel):
         self._running = False
         if self._poll_task and not self._poll_task.done():
             self._poll_task.cancel()
+        for chat_id in list(self._typing_tasks):
+            await self._stop_typing(chat_id, clear_remote=False)
         if self._client:
             await self._client.aclose()
             self._client = None
         self._save_state()
-        logger.info("WeChat channel stopped")
-
     # ------------------------------------------------------------------
     # Polling  (matches monitor.ts monitorWeixinProvider)
     # ------------------------------------------------------------------
@@ -446,10 +529,6 @@ class WeixinChannel(BaseChannel):
     async def _poll_once(self) -> None:
         remaining = self._session_pause_remaining_s()
         if remaining > 0:
-            logger.warning(
-                "WeChat session paused, waiting {} min before next poll.",
-                max((remaining + 59) // 60, 1),
-            )
             await asyncio.sleep(remaining)
             return
 
@@ -499,8 +578,8 @@ class WeixinChannel(BaseChannel):
         for msg in msgs:
             try:
                 await self._process_message(msg)
-            except Exception as e:
-                logger.error("Error processing WeChat message: {}", e)
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Inbound message processing  (matches inbound.ts + process-message.ts)
@@ -536,6 +615,7 @@ class WeixinChannel(BaseChannel):
         item_list: list[dict] = msg.get("item_list") or []
         content_parts: list[str] = []
         media_paths: list[str] = []
+        has_top_level_downloadable_media = False
 
         for item in item_list:
             item_type = item.get("type", 0)
@@ -572,6 +652,8 @@ class WeixinChannel(BaseChannel):
 
             elif item_type == ITEM_IMAGE:
                 image_item = item.get("image_item") or {}
+                if _has_downloadable_media_locator(image_item.get("media")):
+                    has_top_level_downloadable_media = True
                 file_path = await self._download_media_item(image_item, "image")
                 if file_path:
                     content_parts.append(f"[image]\n[Image: source: {file_path}]")
@@ -586,6 +668,8 @@ class WeixinChannel(BaseChannel):
                 if voice_text:
                     content_parts.append(f"[voice] {voice_text}")
                 else:
+                    if _has_downloadable_media_locator(voice_item.get("media")):
+                        has_top_level_downloadable_media = True
                     file_path = await self._download_media_item(voice_item, "voice")
                     if file_path:
                         transcription = await self.transcribe_audio(file_path)
@@ -599,6 +683,8 @@ class WeixinChannel(BaseChannel):
 
             elif item_type == ITEM_FILE:
                 file_item = item.get("file_item") or {}
+                if _has_downloadable_media_locator(file_item.get("media")):
+                    has_top_level_downloadable_media = True
                 file_name = file_item.get("file_name", "unknown")
                 file_path = await self._download_media_item(
                     file_item,
@@ -613,12 +699,60 @@ class WeixinChannel(BaseChannel):
 
             elif item_type == ITEM_VIDEO:
                 video_item = item.get("video_item") or {}
+                if _has_downloadable_media_locator(video_item.get("media")):
+                    has_top_level_downloadable_media = True
                 file_path = await self._download_media_item(video_item, "video")
                 if file_path:
                     content_parts.append(f"[video]\n[Video: source: {file_path}]")
                     media_paths.append(file_path)
                 else:
                     content_parts.append("[video]")
+
+        # Fallback: when no top-level media was downloaded, try quoted/referenced media.
+        # This aligns with the reference plugin behavior that checks ref_msg.message_item
+        # when main item_list has no downloadable media.
+        if not media_paths and not has_top_level_downloadable_media:
+            ref_media_item: dict[str, Any] | None = None
+            for item in item_list:
+                if item.get("type", 0) != ITEM_TEXT:
+                    continue
+                ref = item.get("ref_msg") or {}
+                candidate = ref.get("message_item") or {}
+                if candidate.get("type", 0) in (ITEM_IMAGE, ITEM_VOICE, ITEM_FILE, ITEM_VIDEO):
+                    ref_media_item = candidate
+                    break
+
+            if ref_media_item:
+                ref_type = ref_media_item.get("type", 0)
+                if ref_type == ITEM_IMAGE:
+                    image_item = ref_media_item.get("image_item") or {}
+                    file_path = await self._download_media_item(image_item, "image")
+                    if file_path:
+                        content_parts.append(f"[image]\n[Image: source: {file_path}]")
+                        media_paths.append(file_path)
+                elif ref_type == ITEM_VOICE:
+                    voice_item = ref_media_item.get("voice_item") or {}
+                    file_path = await self._download_media_item(voice_item, "voice")
+                    if file_path:
+                        transcription = await self.transcribe_audio(file_path)
+                        if transcription:
+                            content_parts.append(f"[voice] {transcription}")
+                        else:
+                            content_parts.append(f"[voice]\n[Audio: source: {file_path}]")
+                        media_paths.append(file_path)
+                elif ref_type == ITEM_FILE:
+                    file_item = ref_media_item.get("file_item") or {}
+                    file_name = file_item.get("file_name", "unknown")
+                    file_path = await self._download_media_item(file_item, "file", file_name)
+                    if file_path:
+                        content_parts.append(f"[file: {file_name}]\n[File: source: {file_path}]")
+                        media_paths.append(file_path)
+                elif ref_type == ITEM_VIDEO:
+                    video_item = ref_media_item.get("video_item") or {}
+                    file_path = await self._download_media_item(video_item, "video")
+                    if file_path:
+                        content_parts.append(f"[video]\n[Video: source: {file_path}]")
+                        media_paths.append(file_path)
 
         content = "\n".join(content_parts)
         if not content:
@@ -630,6 +764,8 @@ class WeixinChannel(BaseChannel):
             ",".join(str(i.get("type", 0)) for i in item_list),
             len(content),
         )
+
+        await self._start_typing(from_user_id, ctx_token)
 
         await self._handle_message(
             sender_id=from_user_id,
@@ -652,9 +788,10 @@ class WeixinChannel(BaseChannel):
         """Download + AES-decrypt a media item. Returns local path or None."""
         try:
             media = typed_item.get("media") or {}
-            encrypt_query_param = media.get("encrypt_query_param", "")
+            encrypt_query_param = str(media.get("encrypt_query_param", "") or "")
+            full_url = str(media.get("full_url", "") or "").strip()
 
-            if not encrypt_query_param:
+            if not encrypt_query_param and not full_url:
                 return None
 
             # Resolve AES key (media-download.ts:43-45, pic-decrypt.ts:40-52)
@@ -671,21 +808,50 @@ class WeixinChannel(BaseChannel):
             elif media_aes_key_b64:
                 aes_key_b64 = media_aes_key_b64
 
-            # Build CDN download URL with proper URL-encoding (cdn-url.ts:7)
-            cdn_url = (
-                f"{self.config.cdn_base_url}/download"
-                f"?encrypted_query_param={quote(encrypt_query_param)}"
-            )
+            # Reference protocol behavior: VOICE/FILE/VIDEO require aes_key;
+            # only IMAGE may be downloaded as plain bytes when key is missing.
+            if media_type != "image" and not aes_key_b64:
+                return None
 
             assert self._client is not None
-            resp = await self._client.get(cdn_url)
-            resp.raise_for_status()
-            data = resp.content
+            fallback_url = ""
+            if encrypt_query_param:
+                fallback_url = (
+                    f"{self.config.cdn_base_url}/download"
+                    f"?encrypted_query_param={quote(encrypt_query_param)}"
+                )
+
+            download_candidates: list[tuple[str, str]] = []
+            if full_url:
+                download_candidates.append(("full_url", full_url))
+            if fallback_url and (not full_url or fallback_url != full_url):
+                download_candidates.append(("encrypt_query_param", fallback_url))
+
+            data = b""
+            for idx, (download_source, cdn_url) in enumerate(download_candidates):
+                try:
+                    resp = await self._client.get(cdn_url)
+                    resp.raise_for_status()
+                    data = resp.content
+                    break
+                except Exception as e:
+                    has_more_candidates = idx + 1 < len(download_candidates)
+                    should_fallback = (
+                        download_source == "full_url"
+                        and has_more_candidates
+                        and self._is_retryable_media_download_error(e)
+                    )
+                    if should_fallback:
+                        logger.warning(
+                            "WeChat media download failed via full_url, falling back to encrypt_query_param: type={} err={}",
+                            media_type,
+                            e,
+                        )
+                        continue
+                    raise
 
             if aes_key_b64 and data:
                 data = _decrypt_aes_ecb(data, aes_key_b64)
-            elif not aes_key_b64:
-                logger.debug("No AES key for {} item, using raw bytes", media_type)
 
             if not data:
                 return None
@@ -694,12 +860,12 @@ class WeixinChannel(BaseChannel):
             ext = _ext_for_type(media_type)
             if not filename:
                 ts = int(time.time())
-                h = abs(hash(encrypt_query_param)) % 100000
+                hash_seed = encrypt_query_param or full_url
+                h = abs(hash(hash_seed)) % 100000
                 filename = f"{media_type}_{ts}_{h}{ext}"
             safe_name = os.path.basename(filename)
             file_path = media_dir / safe_name
             file_path.write_bytes(data)
-            logger.debug("Downloaded WeChat {} to {}", media_type, file_path)
             return str(file_path)
 
         except Exception as e:
@@ -710,15 +876,81 @@ class WeixinChannel(BaseChannel):
     # Outbound  (matches send.ts buildTextMessageReq + sendMessageWeixin)
     # ------------------------------------------------------------------
 
+    async def _get_typing_ticket(self, user_id: str, context_token: str = "") -> str:
+        """Get typing ticket with per-user refresh + failure backoff cache."""
+        now = time.time()
+        entry = self._typing_tickets.get(user_id)
+        if entry and now < float(entry.get("next_fetch_at", 0)):
+            return str(entry.get("ticket", "") or "")
+
+        body: dict[str, Any] = {
+            "ilink_user_id": user_id,
+            "context_token": context_token or None,
+            "base_info": BASE_INFO,
+        }
+        data = await self._api_post("ilink/bot/getconfig", body)
+        if data.get("ret", 0) == 0:
+            ticket = str(data.get("typing_ticket", "") or "")
+            self._typing_tickets[user_id] = {
+                "ticket": ticket,
+                "ever_succeeded": True,
+                "next_fetch_at": now + (random.random() * TYPING_TICKET_TTL_S),
+                "retry_delay_s": CONFIG_CACHE_INITIAL_RETRY_S,
+            }
+            return ticket
+
+        prev_delay = float(entry.get("retry_delay_s", CONFIG_CACHE_INITIAL_RETRY_S)) if entry else CONFIG_CACHE_INITIAL_RETRY_S
+        next_delay = min(prev_delay * 2, CONFIG_CACHE_MAX_RETRY_S)
+        if entry:
+            entry["next_fetch_at"] = now + next_delay
+            entry["retry_delay_s"] = next_delay
+            return str(entry.get("ticket", "") or "")
+
+        self._typing_tickets[user_id] = {
+            "ticket": "",
+            "ever_succeeded": False,
+            "next_fetch_at": now + CONFIG_CACHE_INITIAL_RETRY_S,
+            "retry_delay_s": CONFIG_CACHE_INITIAL_RETRY_S,
+        }
+        return ""
+
+    async def _send_typing(self, user_id: str, typing_ticket: str, status: int) -> None:
+        """Best-effort sendtyping wrapper."""
+        if not typing_ticket:
+            return
+        body: dict[str, Any] = {
+            "ilink_user_id": user_id,
+            "typing_ticket": typing_ticket,
+            "status": status,
+            "base_info": BASE_INFO,
+        }
+        await self._api_post("ilink/bot/sendtyping", body)
+
+    async def _typing_keepalive_loop(self, user_id: str, typing_ticket: str, stop_event: asyncio.Event) -> None:
+        try:
+            while not stop_event.is_set():
+                await asyncio.sleep(TYPING_KEEPALIVE_INTERVAL_S)
+                if stop_event.is_set():
+                    break
+                try:
+                    await self._send_typing(user_id, typing_ticket, TYPING_STATUS_TYPING)
+                except Exception:
+                    pass
+        finally:
+            pass
+
     async def send(self, msg: OutboundMessage) -> None:
         if not self._client or not self._token:
             logger.warning("WeChat client not initialized or not authenticated")
             return
         try:
             self._assert_session_active()
-        except RuntimeError as e:
-            logger.warning("WeChat send blocked: {}", e)
+        except RuntimeError:
             return
+
+        is_progress = bool((msg.metadata or {}).get("_progress", False))
+        if not is_progress:
+            await self._stop_typing(msg.chat_id, clear_remote=True)
 
         content = msg.content.strip()
         ctx_token = self._context_tokens.get(msg.chat_id, "")
@@ -729,29 +961,118 @@ class WeixinChannel(BaseChannel):
             )
             return
 
-        # --- Send media files first (following Telegram channel pattern) ---
-        for media_path in (msg.media or []):
-            try:
-                await self._send_media_file(msg.chat_id, media_path, ctx_token)
-            except Exception as e:
-                filename = Path(media_path).name
-                logger.error("Failed to send WeChat media {}: {}", media_path, e)
-                # Notify user about failure via text
-                await self._send_text(
-                    msg.chat_id, f"[Failed to send: {filename}]", ctx_token,
-                )
+        typing_ticket = ""
+        try:
+            typing_ticket = await self._get_typing_ticket(msg.chat_id, ctx_token)
+        except Exception:
+            typing_ticket = ""
 
-        # --- Send text content ---
-        if not content:
-            return
+        if typing_ticket:
+            try:
+                await self._send_typing(msg.chat_id, typing_ticket, TYPING_STATUS_TYPING)
+            except Exception:
+                pass
+
+        typing_keepalive_stop = asyncio.Event()
+        typing_keepalive_task: asyncio.Task | None = None
+        if typing_ticket:
+            typing_keepalive_task = asyncio.create_task(
+                self._typing_keepalive_loop(msg.chat_id, typing_ticket, typing_keepalive_stop)
+            )
 
         try:
+            # --- Send media files first (following Telegram channel pattern) ---
+            for media_path in (msg.media or []):
+                try:
+                    await self._send_media_file(msg.chat_id, media_path, ctx_token)
+                except Exception as e:
+                    filename = Path(media_path).name
+                    logger.error("Failed to send WeChat media {}: {}", media_path, e)
+                    # Notify user about failure via text
+                    await self._send_text(
+                        msg.chat_id, f"[Failed to send: {filename}]", ctx_token,
+                    )
+
+            # --- Send text content ---
+            if not content:
+                return
+
             chunks = split_message(content, WEIXIN_MAX_MESSAGE_LEN)
             for chunk in chunks:
                 await self._send_text(msg.chat_id, chunk, ctx_token)
         except Exception as e:
             logger.error("Error sending WeChat message: {}", e)
             raise
+        finally:
+            if typing_keepalive_task:
+                typing_keepalive_stop.set()
+                typing_keepalive_task.cancel()
+                try:
+                    await typing_keepalive_task
+                except asyncio.CancelledError:
+                    pass
+
+            if typing_ticket and not is_progress:
+                try:
+                    await self._send_typing(msg.chat_id, typing_ticket, TYPING_STATUS_CANCEL)
+                except Exception:
+                    pass
+
+    async def _start_typing(self, chat_id: str, context_token: str = "") -> None:
+        """Start typing indicator immediately when a message is received."""
+        if not self._client or not self._token or not chat_id:
+            return
+        await self._stop_typing(chat_id, clear_remote=False)
+        try:
+            ticket = await self._get_typing_ticket(chat_id, context_token)
+            if not ticket:
+                return
+            await self._send_typing(chat_id, ticket, TYPING_STATUS_TYPING)
+        except Exception as e:
+            logger.debug("WeChat typing indicator start failed for {}: {}", chat_id, e)
+            return
+
+        stop_event = asyncio.Event()
+
+        async def keepalive() -> None:
+            try:
+                while not stop_event.is_set():
+                    await asyncio.sleep(TYPING_KEEPALIVE_INTERVAL_S)
+                    if stop_event.is_set():
+                        break
+                    try:
+                        await self._send_typing(chat_id, ticket, TYPING_STATUS_TYPING)
+                    except Exception:
+                        pass
+            finally:
+                pass
+
+        task = asyncio.create_task(keepalive())
+        task._typing_stop_event = stop_event  # type: ignore[attr-defined]
+        self._typing_tasks[chat_id] = task
+
+    async def _stop_typing(self, chat_id: str, *, clear_remote: bool) -> None:
+        """Stop typing indicator for a chat."""
+        task = self._typing_tasks.pop(chat_id, None)
+        if task and not task.done():
+            stop_event = getattr(task, "_typing_stop_event", None)
+            if stop_event:
+                stop_event.set()
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        if not clear_remote:
+            return
+        entry = self._typing_tickets.get(chat_id)
+        ticket = str(entry.get("ticket", "") or "") if isinstance(entry, dict) else ""
+        if not ticket:
+            return
+        try:
+            await self._send_typing(chat_id, ticket, TYPING_STATUS_CANCEL)
+        except Exception as e:
+            logger.debug("WeChat typing clear failed for {}: {}", chat_id, e)
 
     async def _send_text(
         self,
@@ -825,6 +1146,10 @@ class WeixinChannel(BaseChannel):
             upload_type = UPLOAD_MEDIA_VIDEO
             item_type = ITEM_VIDEO
             item_key = "video_item"
+        elif ext in _VOICE_EXTS:
+            upload_type = UPLOAD_MEDIA_VOICE
+            item_type = ITEM_VOICE
+            item_key = "voice_item"
         else:
             upload_type = UPLOAD_MEDIA_FILE
             item_type = ITEM_FILE
@@ -838,7 +1163,7 @@ class WeixinChannel(BaseChannel):
         # Matches aesEcbPaddedSize: Math.ceil((size + 1) / 16) * 16
         padded_size = ((raw_size + 1 + 15) // 16) * 16
 
-        # Step 1: Get upload URL (upload_param) from server
+        # Step 1: Get upload URL from server (prefer upload_full_url, fallback to upload_param)
         file_key = os.urandom(16).hex()
         upload_body: dict[str, Any] = {
             "filekey": file_key,
@@ -853,22 +1178,27 @@ class WeixinChannel(BaseChannel):
 
         assert self._client is not None
         upload_resp = await self._api_post("ilink/bot/getuploadurl", upload_body)
-        logger.debug("WeChat getuploadurl response: {}", upload_resp)
 
-        upload_param = upload_resp.get("upload_param", "")
-        if not upload_param:
-            raise RuntimeError(f"getuploadurl returned no upload_param: {upload_resp}")
+        upload_full_url = str(upload_resp.get("upload_full_url", "") or "").strip()
+        upload_param = str(upload_resp.get("upload_param", "") or "")
+        if not upload_full_url and not upload_param:
+            raise RuntimeError(
+                "getuploadurl returned no upload URL "
+                f"(need upload_full_url or upload_param): {upload_resp}"
+            )
 
         # Step 2: AES-128-ECB encrypt and POST to CDN
         aes_key_b64 = base64.b64encode(aes_key_raw).decode()
         encrypted_data = _encrypt_aes_ecb(raw_data, aes_key_b64)
 
-        cdn_upload_url = (
-            f"{self.config.cdn_base_url}/upload"
-            f"?encrypted_query_param={quote(upload_param)}"
-            f"&filekey={quote(file_key)}"
-        )
-        logger.debug("WeChat CDN POST url={} ciphertextSize={}", cdn_upload_url[:80], len(encrypted_data))
+        if upload_full_url:
+            cdn_upload_url = upload_full_url
+        else:
+            cdn_upload_url = (
+                f"{self.config.cdn_base_url}/upload"
+                f"?encrypted_query_param={quote(upload_param)}"
+                f"&filekey={quote(file_key)}"
+            )
 
         cdn_resp = await self._client.post(
             cdn_upload_url,
@@ -884,7 +1214,6 @@ class WeixinChannel(BaseChannel):
                 "CDN upload response missing x-encrypted-param header; "
                 f"status={cdn_resp.status_code} headers={dict(cdn_resp.headers)}"
             )
-        logger.debug("WeChat CDN upload success for {}, got download_param", p.name)
 
         # Step 3: Send message with the media item
         # aes_key for CDNMedia is the hex key encoded as base64
@@ -933,7 +1262,6 @@ class WeixinChannel(BaseChannel):
             raise RuntimeError(
                 f"WeChat send media error (code {errcode}): {data.get('errmsg', '')}"
             )
-        logger.info("WeChat media sent: {} (type={})", p.name, item_key)
 
 
 # ---------------------------------------------------------------------------
@@ -1005,23 +1333,42 @@ def _decrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
         logger.warning("Failed to parse AES key, returning raw data: {}", e)
         return data
 
+    decrypted: bytes | None = None
+
     try:
         from Crypto.Cipher import AES
 
         cipher = AES.new(key, AES.MODE_ECB)
-        return cipher.decrypt(data)  # pycryptodome auto-strips PKCS7 with unpad
+        decrypted = cipher.decrypt(data)
     except ImportError:
         pass
 
-    try:
-        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    if decrypted is None:
+        try:
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-        cipher_obj = Cipher(algorithms.AES(key), modes.ECB())
-        decryptor = cipher_obj.decryptor()
-        return decryptor.update(data) + decryptor.finalize()
-    except ImportError:
-        logger.warning("Cannot decrypt media: install 'pycryptodome' or 'cryptography'")
+            cipher_obj = Cipher(algorithms.AES(key), modes.ECB())
+            decryptor = cipher_obj.decryptor()
+            decrypted = decryptor.update(data) + decryptor.finalize()
+        except ImportError:
+            logger.warning("Cannot decrypt media: install 'pycryptodome' or 'cryptography'")
+            return data
+
+    return _pkcs7_unpad_safe(decrypted)
+
+
+def _pkcs7_unpad_safe(data: bytes, block_size: int = 16) -> bytes:
+    """Safely remove PKCS7 padding when valid; otherwise return original bytes."""
+    if not data:
         return data
+    if len(data) % block_size != 0:
+        return data
+    pad_len = data[-1]
+    if pad_len < 1 or pad_len > block_size:
+        return data
+    if data[-pad_len:] != bytes([pad_len]) * pad_len:
+        return data
+    return data[:-pad_len]
 
 
 def _ext_for_type(media_type: str) -> str:

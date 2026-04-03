@@ -8,6 +8,7 @@ Validates that:
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -51,6 +52,15 @@ def _fake_tool_call_response() -> SimpleNamespace:
     choice = SimpleNamespace(message=message, finish_reason="tool_calls")
     usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
     return SimpleNamespace(choices=[choice], usage=usage)
+
+
+class _StalledStream:
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        await asyncio.sleep(3600)
+        raise StopAsyncIteration
 
 
 def test_openrouter_spec_is_gateway() -> None:
@@ -214,3 +224,54 @@ def test_openai_model_passthrough() -> None:
             spec=spec,
         )
     assert provider.get_default_model() == "gpt-4o"
+
+
+def test_openai_compat_strips_message_level_reasoning_fields() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    sanitized = provider._sanitize_messages([
+        {
+            "role": "assistant",
+            "content": "done",
+            "reasoning_content": "hidden",
+            "extra_content": {"debug": True},
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "fn", "arguments": "{}"},
+                    "extra_content": {"google": {"thought_signature": "sig"}},
+                }
+            ],
+        }
+    ])
+
+    assert "reasoning_content" not in sanitized[0]
+    assert "extra_content" not in sanitized[0]
+    assert sanitized[0]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "sig"}}
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_stream_watchdog_returns_error_on_stall(monkeypatch) -> None:
+    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "0")
+    mock_create = AsyncMock(return_value=_StalledStream())
+    spec = find_by_name("openai")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_create
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-4o",
+            spec=spec,
+        )
+        result = await provider.chat_stream(
+            messages=[{"role": "user", "content": "hello"}],
+            model="gpt-4o",
+        )
+
+    assert result.finish_reason == "error"
+    assert result.content is not None
+    assert "stream stalled" in result.content
