@@ -815,9 +815,9 @@ class FeishuChannel(BaseChannel):
         """Download a file/audio/media from a Feishu message by message_id and file_key."""
         from lark_oapi.api.im.v1 import GetMessageResourceRequest
 
-        # Feishu API only accepts 'image' or 'file' as type parameter
-        # Convert 'audio' to 'file' for API compatibility
-        if resource_type == "audio":
+        # Feishu resource download API only accepts 'image' or 'file' as type.
+        # Both 'audio' and 'media' (video) messages use type='file' for download.
+        if resource_type in ("audio", "media"):
             resource_type = "file"
 
         try:
