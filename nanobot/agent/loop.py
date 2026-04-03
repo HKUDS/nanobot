@@ -37,7 +37,7 @@ from nanobot.utils.helpers import image_placeholder_text, truncate_text
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig, FileToolConfig
     from nanobot.cron.service import CronService
 
 
@@ -174,6 +174,7 @@ class AgentLoop:
         provider_retry_mode: str = "standard",
         web_config: WebToolsConfig | None = None,
         exec_config: ExecToolConfig | None = None,
+        file_config: FileToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
@@ -182,7 +183,7 @@ class AgentLoop:
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, WebToolsConfig
+        from nanobot.config.schema import ExecToolConfig, WebToolsConfig, FileToolConfig
 
         defaults = AgentDefaults()
         self.bus = bus
@@ -207,6 +208,7 @@ class AgentLoop:
         self.provider_retry_mode = provider_retry_mode
         self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
+        self.file_config = file_config or FileToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
@@ -225,6 +227,7 @@ class AgentLoop:
             web_config=self.web_config,
             max_tool_result_chars=self.max_tool_result_chars,
             exec_config=self.exec_config,
+            file_config=self.file_config,
             restrict_to_workspace=restrict_to_workspace,
         )
 
@@ -264,9 +267,20 @@ class AgentLoop:
         """Register the default set of tools."""
         allowed_dir = self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
         extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-        self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
-        for cls in (WriteFileTool, EditFileTool, ListDirTool):
+        self.tools.register(ReadFileTool(
+            workspace=self.workspace,
+            allowed_dir=allowed_dir,
+            extra_allowed_dirs=extra_read,
+            max_chars=self.file_config.max_chars,
+            default_limit=self.file_config.default_limit,
+        ))
+        for cls in (WriteFileTool, EditFileTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+        self.tools.register(ListDirTool(
+            workspace=self.workspace,
+            allowed_dir=allowed_dir,
+            default_max=self.file_config.default_max,
+        ))
         for cls in (GlobTool, GrepTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         if self.exec_config.enable:

@@ -78,6 +78,7 @@ class Nanobot:
             provider_retry_mode=defaults.provider_retry_mode,
             web_config=config.tools.web,
             exec_config=config.tools.exec,
+            file_config=config.tools.file,
             restrict_to_workspace=config.tools.restrict_to_workspace,
             mcp_servers=config.tools.mcp_servers,
             timezone=defaults.timezone,
