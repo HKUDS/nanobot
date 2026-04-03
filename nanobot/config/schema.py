@@ -139,6 +139,7 @@ class ExecToolConfig(Base):
     enable: bool = True
     timeout: int = 60
     path_append: str = ""
+    allow_internal_urls: bool = False
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""

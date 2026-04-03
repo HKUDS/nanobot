@@ -1,0 +1,7 @@
+{
+  "tools": {
+    "exec": {
+      "allowInternalUrls": true
+    }
+  }
+}
