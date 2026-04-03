@@ -125,7 +125,7 @@ class Session:
         self.updated_at = datetime.now()
 
 
-class SessionManager:
+class NormalSessionManager:
     """
     Manages conversation sessions.
 
@@ -266,3 +266,7 @@ class SessionManager:
                 continue
 
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)
+
+
+# Backward-compat alias — existing code importing SessionManager still works.
+SessionManager = NormalSessionManager
