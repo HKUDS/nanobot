@@ -79,6 +79,8 @@ class Nanobot:
             restrict_to_workspace=config.tools.restrict_to_workspace,
             mcp_servers=config.tools.mcp_servers,
             timezone=defaults.timezone,
+            session_backend=defaults.session_backend,
+            memory_backend=defaults.memory_backend,
         )
         return cls(loop)
 
