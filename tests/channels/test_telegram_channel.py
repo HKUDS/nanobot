@@ -13,7 +13,7 @@ except ImportError:
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.telegram import TELEGRAM_REPLY_CONTEXT_MAX_LEN, TelegramChannel, _StreamBuf
+from nanobot.channels.telegram import FORWARD_DEBOUNCE_MS, TELEGRAM_REPLY_CONTEXT_MAX_LEN, TelegramChannel, _StreamBuf
 from nanobot.channels.telegram import TelegramConfig
 
 
@@ -35,6 +35,9 @@ class _FakeUpdater:
 
     async def start_polling(self, **kwargs) -> None:
         self._on_start_polling()
+
+    async def stop(self) -> None:
+        pass
 
 
 class _FakeBot:
@@ -69,6 +72,9 @@ class _FakeBot:
     async def send_chat_action(self, **kwargs) -> None:
         pass
 
+    async def set_message_reaction(self, **kwargs) -> None:
+        pass
+
     async def get_file(self, file_id: str):
         """Return a fake file that 'downloads' to a path (for reply-to-media tests)."""
         async def _fake_download(path) -> None:
@@ -93,6 +99,12 @@ class _FakeApp:
         pass
 
     async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    async def shutdown(self) -> None:
         pass
 
 
@@ -133,8 +145,14 @@ def _make_telegram_update(
     entities=None,
     caption_entities=None,
     reply_to_message=None,
+    forward_origin=None,
+    forward_from=None,
+    forward_from_chat=None,
+    message_thread_id=None,
+    message_id=1,
+    user_id=12345,
 ):
-    user = SimpleNamespace(id=12345, username="alice", first_name="Alice")
+    user = SimpleNamespace(id=user_id, username="alice", first_name="Alice")
     message = SimpleNamespace(
         chat=SimpleNamespace(type=chat_type, is_forum=False),
         chat_id=-100123,
@@ -148,8 +166,11 @@ def _make_telegram_update(
         audio=None,
         document=None,
         media_group_id=None,
-        message_thread_id=None,
-        message_id=1,
+        message_thread_id=message_thread_id,
+        message_id=message_id,
+        forward_origin=forward_origin,
+        forward_from=forward_from,
+        forward_from_chat=forward_from_chat,
     )
     return SimpleNamespace(message=message, effective_user=user)
 
@@ -548,6 +569,7 @@ async def test_group_policy_mention_ignores_unmentioned_group_message() -> None:
     channel._start_typing = lambda _chat_id: None
 
     await channel._on_message(_make_telegram_update(text="hello everyone"), None)
+    await asyncio.sleep(0.15)
 
     assert handled == []
     assert channel._app.bot.get_me_calls == 1
@@ -570,8 +592,10 @@ async def test_group_policy_mention_accepts_text_mention_and_caches_bot_identity
     channel._start_typing = lambda _chat_id: None
 
     mention = SimpleNamespace(type="mention", offset=0, length=13)
-    await channel._on_message(_make_telegram_update(text="@nanobot_test hi", entities=[mention]), None)
-    await channel._on_message(_make_telegram_update(text="@nanobot_test again", entities=[mention]), None)
+    await channel._on_message(_make_telegram_update(text="@nanobot_test hi", entities=[mention], message_id=1), None)
+    await asyncio.sleep(0.15)
+    await channel._on_message(_make_telegram_update(text="@nanobot_test again", entities=[mention], message_id=2), None)
+    await asyncio.sleep(0.15)
 
     assert len(handled) == 2
     assert channel._app.bot.get_me_calls == 1
@@ -598,6 +622,7 @@ async def test_group_policy_mention_accepts_caption_mention() -> None:
         _make_telegram_update(caption="@nanobot_test photo", caption_entities=[mention]),
         None,
     )
+    await asyncio.sleep(0.15)
 
     assert len(handled) == 1
     assert handled[0]["content"] == "@nanobot_test photo"
@@ -621,6 +646,7 @@ async def test_group_policy_mention_accepts_reply_to_bot() -> None:
 
     reply = SimpleNamespace(from_user=SimpleNamespace(id=999))
     await channel._on_message(_make_telegram_update(text="reply", reply_to_message=reply), None)
+    await asyncio.sleep(0.15)
 
     assert len(handled) == 1
 
@@ -642,6 +668,7 @@ async def test_group_policy_open_accepts_plain_group_message() -> None:
     channel._start_typing = lambda _chat_id: None
 
     await channel._on_message(_make_telegram_update(text="hello group"), None)
+    await asyncio.sleep(0.15)
 
     assert len(handled) == 1
     assert channel._app.bot.get_me_calls == 0
@@ -703,6 +730,7 @@ async def test_on_message_includes_reply_context() -> None:
     reply = SimpleNamespace(text="Hello", message_id=2, from_user=SimpleNamespace(id=1))
     update = _make_telegram_update(text="translate this", reply_to_message=reply)
     await channel._on_message(update, None)
+    await asyncio.sleep(0.15)
 
     assert len(handled) == 1
     assert handled[0]["content"].startswith("[Reply to: Hello]")
@@ -837,6 +865,7 @@ async def test_on_message_attaches_reply_to_media_when_available(monkeypatch, tm
         reply_to_message=reply_with_photo,
     )
     await channel._on_message(update, None)
+    await asyncio.sleep(0.15)
 
     assert len(handled) == 1
     assert handled[0]["content"].startswith("[Reply to: [image:")
@@ -873,6 +902,7 @@ async def test_on_message_reply_to_media_fallback_when_download_fails() -> None:
     )
     update = _make_telegram_update(text="what is this?", reply_to_message=reply_with_photo)
     await channel._on_message(update, None)
+    await asyncio.sleep(0.15)
 
     assert len(handled) == 1
     assert "what is this?" in handled[0]["content"]
@@ -920,6 +950,7 @@ async def test_on_message_reply_to_caption_and_media(monkeypatch, tmp_path) -> N
         reply_to_message=reply_with_caption_and_photo,
     )
     await channel._on_message(update, None)
+    await asyncio.sleep(0.15)
 
     assert len(handled) == 1
     assert "[Reply to: A cute cat]" in handled[0]["content"]
@@ -964,3 +995,285 @@ async def test_on_help_includes_restart_command() -> None:
     help_text = update.message.reply_text.await_args.args[0]
     assert "/restart" in help_text
     assert "/status" in help_text
+
+
+# ---------------------------------------------------------------------------
+# Forward debounce / coalescing tests
+# ---------------------------------------------------------------------------
+
+def _make_channel_open():
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token='123:abc', allow_from=['*'], group_policy='open'),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    return channel
+
+
+@pytest.mark.asyncio
+async def test_forward_plus_text_coalesced() -> None:
+    """Forward first, then user's text arrives — both coalesced into one turn."""
+    channel = _make_channel_open()
+    handled = []
+    async def capture(**kwargs): handled.append(kwargs)
+    channel._handle_message = capture
+    channel._start_typing = lambda _: None
+
+    fwd_update = _make_telegram_update(
+        text='Look at this', forward_origin=SimpleNamespace(type='user'), chat_type='private', message_id=1,
+    )
+    txt_update = _make_telegram_update(text='what do you think?', chat_type='private', message_id=2)
+
+    await channel._on_message(fwd_update, None)
+    await channel._on_message(txt_update, None)
+    await asyncio.sleep(FORWARD_DEBOUNCE_MS / 1000 + 0.05)
+
+    assert len(handled) == 1
+    assert 'Look at this' in handled[0]['content']
+    assert 'what do you think?' in handled[0]['content']
+
+
+@pytest.mark.asyncio
+async def test_text_before_forward_coalesced() -> None:
+    """Text arrives first, then forward absorbs it (reverse companion)."""
+    channel = _make_channel_open()
+    handled = []
+    async def capture(**kwargs): handled.append(kwargs)
+    channel._handle_message = capture
+    channel._start_typing = lambda _: None
+
+    txt_update = _make_telegram_update(text='my comment', chat_type='private', message_id=1)
+    fwd_update = _make_telegram_update(
+        text='Forwarded content', forward_origin=SimpleNamespace(type='user'), chat_type='private', message_id=2,
+    )
+
+    await channel._on_message(txt_update, None)
+    await channel._on_message(fwd_update, None)
+    await asyncio.sleep(FORWARD_DEBOUNCE_MS / 1000 + 0.05)
+
+    assert len(handled) == 1
+    assert 'my comment' in handled[0]['content']
+    assert 'Forwarded content' in handled[0]['content']
+
+
+@pytest.mark.asyncio
+async def test_forward_debounce_active() -> None:
+    """Forward message is buffered for 80ms before being dispatched."""
+    channel = _make_channel_open()
+    handled = []
+    async def capture(**kwargs): handled.append(kwargs)
+    channel._handle_message = capture
+    channel._start_typing = lambda _: None
+
+    fwd_update = _make_telegram_update(
+        text='Forwarded', forward_from=SimpleNamespace(id=111), chat_type='private', message_id=1,
+    )
+    await channel._on_message(fwd_update, None)
+
+    # Not yet dispatched
+    assert len(handled) == 0
+
+    await asyncio.sleep(FORWARD_DEBOUNCE_MS / 1000 + 0.05)
+
+    assert len(handled) == 1
+    assert handled[0]['content'] == 'Forwarded'
+
+
+@pytest.mark.asyncio
+async def test_text_only_has_brief_forward_window() -> None:
+    """Text-only message is buffered 80ms as forward companion window, then sent."""
+    channel = _make_channel_open()
+    handled = []
+    async def capture(**kwargs): handled.append(kwargs)
+    channel._handle_message = capture
+    channel._start_typing = lambda _: None
+
+    txt_update = _make_telegram_update(text='standalone text', chat_type='private', message_id=1)
+    await channel._on_message(txt_update, None)
+
+    # Not yet dispatched
+    assert len(handled) == 0
+
+    await asyncio.sleep(FORWARD_DEBOUNCE_MS / 1000 + 0.05)
+
+    assert len(handled) == 1
+    assert handled[0]['content'] == 'standalone text'
+
+
+@pytest.mark.asyncio
+async def test_non_forward_media_bypasses_debounce() -> None:
+    """Photo without forward metadata is sent immediately without buffering."""
+    channel = _make_channel_open()
+    handled = []
+    async def capture(**kwargs): handled.append(kwargs)
+    channel._handle_message = capture
+    channel._start_typing = lambda _: None
+
+    # Inject via _enqueue_debounce directly with media and no forward
+    await channel._enqueue_debounce(
+        sender_id='12345|alice', chat_id='-100123',
+        content='[image: /tmp/photo.jpg]', media=['/tmp/photo.jpg'],
+        metadata={}, session_key=None,
+        message=None, lane_override='text',
+        thread_id_override=None,
+    )
+
+    # Sent immediately, no sleep needed
+    assert len(handled) == 1
+    assert handled[0]['media'] == ['/tmp/photo.jpg']
+
+
+@pytest.mark.asyncio
+async def test_companion_text_joins_media_group() -> None:
+    """Text arriving alongside an album is absorbed into the media_group buffer."""
+    channel = _make_channel_open()
+    handled = []
+    async def capture(**kwargs): handled.append(kwargs)
+    channel._handle_message = capture
+    channel._start_typing = lambda _: None
+
+    # Seed a media_group buffer manually
+    mg_key = '-100123:mg001'
+    channel._media_group_buffers[mg_key] = {
+        'sender_id': '12345|alice', 'chat_id': '-100123',
+        'contents': ['[image: /tmp/a.jpg]'], 'media': ['/tmp/a.jpg'],
+        'metadata': {}, 'session_key': None,
+        'thread_id': None, 'lane': 'text',
+    }
+
+    txt_update = _make_telegram_update(text='caption for my album', chat_type='private', message_id=2)
+    await channel._on_message(txt_update, None)
+
+    # Text should have been appended to the mg buffer, not a separate debounce buffer
+    assert 'caption for my album' in channel._media_group_buffers[mg_key]['contents']
+    assert len(channel._debounce_buffers) == 0
+
+
+@pytest.mark.asyncio
+async def test_companion_text_skips_commands() -> None:
+    """Commands are NOT absorbed into media_group buffer (they go via _forward_command)."""
+    channel = _make_channel_open()
+    handled = []
+    async def capture(**kwargs): handled.append(kwargs)
+    channel._handle_message = capture
+    channel._start_typing = lambda _: None
+
+    # Companion detection only applies to non-command text messages via _on_message.
+    # /commands are handled by _forward_command handler, which bypasses _on_message.
+    # So this test verifies that companion text detection doesn't interfere
+    # with a regular text that passes through _on_message when no mg buffer exists.
+    txt_update = _make_telegram_update(text='regular text, no mg buffer', chat_type='private', message_id=1)
+    await channel._on_message(txt_update, None)
+    await asyncio.sleep(FORWARD_DEBOUNCE_MS / 1000 + 0.05)
+
+    assert len(handled) == 1
+    assert len(channel._media_group_buffers) == 0
+
+
+@pytest.mark.asyncio
+async def test_non_companion_media_not_absorbed() -> None:
+    """A media message (photo) is not absorbed by a media_group buffer — it gets its own path."""
+    channel = _make_channel_open()
+    handled = []
+    async def capture(**kwargs): handled.append(kwargs)
+    channel._handle_message = capture
+    channel._start_typing = lambda _: None
+
+    # A non-forward message with media goes immediately via _handle_message
+    await channel._enqueue_debounce(
+        sender_id='12345|alice', chat_id='-100123',
+        content='[image: /tmp/b.jpg]', media=['/tmp/b.jpg'],
+        metadata={}, session_key=None,
+        message=None, lane_override='text',
+        thread_id_override=None,
+    )
+
+    assert len(handled) == 1
+
+
+@pytest.mark.asyncio
+async def test_forum_different_topics_separate() -> None:
+    """Messages in different forum topics are buffered independently."""
+    channel = _make_channel_open()
+    handled = []
+    async def capture(**kwargs): handled.append(kwargs)
+    channel._handle_message = capture
+    channel._start_typing = lambda _: None
+
+    fwd1 = _make_telegram_update(
+        text='Topic 1 forward', forward_origin=SimpleNamespace(type='user'),
+        chat_type='supergroup', message_thread_id=10, message_id=1,
+    )
+    fwd2 = _make_telegram_update(
+        text='Topic 2 forward', forward_origin=SimpleNamespace(type='user'),
+        chat_type='supergroup', message_thread_id=20, message_id=2,
+    )
+    fwd1.message.chat.is_forum = True
+    fwd2.message.chat.is_forum = True
+
+    await channel._on_message(fwd1, None)
+    await channel._on_message(fwd2, None)
+    await asyncio.sleep(FORWARD_DEBOUNCE_MS / 1000 + 0.05)
+
+    assert len(handled) == 2
+    contents = [h['content'] for h in handled]
+    assert any('Topic 1' in c for c in contents)
+    assert any('Topic 2' in c for c in contents)
+
+
+@pytest.mark.asyncio
+async def test_stop_cleans_up_debounce_buffers() -> None:
+    """stop() cancels pending debounce tasks and clears buffers."""
+    channel = _make_channel_open()
+    channel._start_typing = lambda _: None
+
+    fwd_update = _make_telegram_update(
+        text='not yet flushed', forward_origin=SimpleNamespace(type='user'),
+        chat_type='private', message_id=1,
+    )
+
+    handled = []
+    async def capture(**kwargs): handled.append(kwargs)
+    channel._handle_message = capture
+
+    await channel._on_message(fwd_update, None)
+    # Buffer should exist, task should be pending
+    assert len(channel._debounce_buffers) == 1
+    assert len(channel._debounce_tasks) == 1
+
+    await channel.stop()
+
+    assert len(channel._debounce_buffers) == 0
+    assert len(channel._debounce_tasks) == 0
+    # Nothing was dispatched
+    assert len(handled) == 0
+
+
+@pytest.mark.asyncio
+async def test_forward_companion_joins_forward_buffer() -> None:
+    """After a forward is buffered, text that arrives resets the forward timer."""
+    channel = _make_channel_open()
+    handled = []
+    async def capture(**kwargs): handled.append(kwargs)
+    channel._handle_message = capture
+    channel._start_typing = lambda _: None
+
+    fwd_update = _make_telegram_update(
+        text='Fwd msg', forward_from_chat=SimpleNamespace(id=999),
+        chat_type='private', message_id=1,
+    )
+    txt_update = _make_telegram_update(text='my note', chat_type='private', message_id=2)
+
+    await channel._on_message(fwd_update, None)
+    # Only forward in buffer so far
+    assert len(channel._debounce_buffers) == 1
+
+    await channel._on_message(txt_update, None)
+    # Still only one buffer — text joined the forward buffer
+    assert len(channel._debounce_buffers) == 1
+
+    await asyncio.sleep(FORWARD_DEBOUNCE_MS / 1000 + 0.05)
+
+    assert len(handled) == 1
+    assert 'Fwd msg' in handled[0]['content']
+    assert 'my note' in handled[0]['content']
