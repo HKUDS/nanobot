@@ -37,6 +37,11 @@ from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.restart import (
+    consume_restart_notice_from_env,
+    format_restart_completed_message,
+    should_show_cli_restart_notice,
+)
 
 app = typer.Typer(
     name="nanobot",
@@ -853,6 +858,12 @@ def agent(
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
     )
+    restart_notice = consume_restart_notice_from_env()
+    if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
+        _print_agent_response(
+            format_restart_completed_message(restart_notice.started_at_raw),
+            render_markdown=False,
+        )
 
     # Shared reference for progress callbacks
     _thinking: ThinkingSpinner | None = None
