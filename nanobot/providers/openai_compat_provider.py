@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import secrets
@@ -20,7 +21,6 @@ if TYPE_CHECKING:
 
 _ALLOWED_MSG_KEYS = frozenset({
     "role", "content", "tool_calls", "tool_call_id", "name",
-    "reasoning_content", "extra_content",
 })
 _ALNUM = string.ascii_letters + string.digits
 
@@ -615,16 +615,33 @@ class OpenAICompatProvider(LLMProvider):
         )
         kwargs["stream"] = True
         kwargs["stream_options"] = {"include_usage": True}
+        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
             stream = await self._client.chat.completions.create(**kwargs)
             chunks: list[Any] = []
-            async for chunk in stream:
+            stream_iter = stream.__aiter__()
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(
+                        stream_iter.__anext__(),
+                        timeout=idle_timeout_s,
+                    )
+                except StopAsyncIteration:
+                    break
                 chunks.append(chunk)
                 if on_content_delta and chunk.choices:
                     text = getattr(chunk.choices[0].delta, "content", None)
                     if text:
                         await on_content_delta(text)
             return self._parse_chunks(chunks)
+        except asyncio.TimeoutError:
+            return LLMResponse(
+                content=(
+                    f"Error calling LLM: stream stalled for more than "
+                    f"{idle_timeout_s} seconds"
+                ),
+                finish_reason="error",
+            )
         except Exception as e:
             return self._handle_error(e)
 

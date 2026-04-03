@@ -92,6 +92,10 @@ class WebSearchTool(Tool):
         self.config = config if config is not None else WebSearchConfig()
         self.proxy = proxy
 
+    @property
+    def read_only(self) -> bool:
+        return True
+
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         provider = self.config.provider.strip().lower() or "brave"
         n = min(max(count or self.config.max_results, 1), 10)
@@ -233,6 +237,10 @@ class WebFetchTool(Tool):
     def __init__(self, max_chars: int = 50000, proxy: str | None = None):
         self.max_chars = max_chars
         self.proxy = proxy
+
+    @property
+    def read_only(self) -> bool:
+        return True
 
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> Any:
         max_chars = maxChars or self.max_chars
