@@ -33,8 +33,9 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig, TTSConfig
     from nanobot.cron.service import CronService
+    from nanobot.tts import TTSManager
 
 
 class _LoopHook(AgentHook):
@@ -183,6 +184,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
+        tts_config: "TTSConfig | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -245,6 +247,15 @@ class AgentLoop:
             provider=provider,
             model=self.model,
         )
+        
+        # TTS initialization
+        self._tts: "TTSManager | None" = None
+        self.tts_config = tts_config
+        self._tts_pending_queue: list[tuple[str, str]] = []
+        self._tts_max_pending = 5
+        if tts_config and tts_config.enabled:
+            self._init_tts()
+        
         self._register_default_tools()
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
@@ -265,7 +276,7 @@ class AgentLoop:
             ))
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
-        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound, tts_callback=self.trigger_tts))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(
@@ -442,6 +453,15 @@ class AgentLoop:
                 )
                 if response is not None:
                     await self.bus.publish_outbound(response)
+                    # Trigger TTS for the agent's response
+                    if mt := self.tools.get("message"):
+                        from nanobot.agent.tools.message import MessageTool
+                        if isinstance(mt, MessageTool) and mt._tts_triggered_by_message_tool:
+                            logger.debug("[TTS] Skipped - already triggered by message tool")
+                        else:
+                            self._trigger_tts(response, msg)
+                    else:
+                        self._trigger_tts(response, msg)
                 elif msg.channel == "cli":
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,
@@ -456,6 +476,187 @@ class AgentLoop:
                     channel=msg.channel, chat_id=msg.chat_id,
                     content="Sorry, I encountered an error.",
                 ))
+
+    # ─────────────────────────────────────────────────────────────────────────────
+    # TTS (Text-to-Speech) Methods
+    # ─────────────────────────────────────────────────────────────────────────────
+    
+    def _init_tts(self) -> None:
+        """Initialize TTS from config."""
+        if not self.tts_config:
+            return
+        
+        try:
+            from nanobot.tts import init_tts, TTSManager
+            self._tts = init_tts(
+                python_path=self.tts_config.python_path,
+                api_url=self.tts_config.api_url,
+                refer_wav=self.tts_config.refer_wav,
+                prompt_text=self.tts_config.prompt_text,
+                prompt_language=self.tts_config.prompt_language,
+                text_language=self.tts_config.text_language,
+                gpt_path=self.tts_config.gpt_path,
+                gpt_weight=self.tts_config.gpt_weight,
+                sovits_weight=self.tts_config.sovits_weight,
+                auto_start=self.tts_config.auto_start,
+                wait_startup=self.tts_config.wait_startup,
+            )
+            logger.info("[TTS] TTS initialized successfully")
+        except Exception as e:
+            logger.warning("[TTS] Failed to initialize TTS: {}", e)
+            self._tts = None
+
+    def trigger_tts(self, content: str, channel: str = "cli") -> None:
+        """
+        Trigger TTS playback (public method for external callers like CLI).
+
+        Args:
+            content: Text content to speak
+            channel: Message source channel (e.g., "cli", "feishu")
+        """
+        logger.info("[TTS] trigger_tts called: channel={}, content_len={}", channel, len(content))
+
+        if not self._tts:
+            logger.debug("[TTS] TTS not initialized")
+            return
+
+        # Check if TTS is enabled for this channel
+        if self.tts_config and self.tts_config.enabled_channels:
+            if channel not in self.tts_config.enabled_channels:
+                logger.debug("[TTS] Channel {} not in enabled channels: {}", channel, self.tts_config.enabled_channels)
+                return
+
+        # Process pending queue first
+        self._process_tts_pending_queue()
+
+        if not content:
+            return
+
+        # Use TTS module's should_speak to decide
+        from nanobot.tts import should_speak, clean_text_for_speech
+        if not should_speak(content):
+            self._add_to_tts_pending(content)
+            return
+
+        try:
+            from nanobot.tts import extract_interactive_opener, clean_text_for_speech, strip_code_and_formulas, chunk_by_sentence
+            content = strip_code_and_formulas(content)
+            extracted = extract_interactive_opener(content)
+            cleaned = clean_text_for_speech(extracted)
+            if not cleaned:
+                logger.debug("[TTS] No content to speak, adding to pending queue")
+                self._add_to_tts_pending(content)
+                return
+            
+            # 清理每句话末尾的 emoji
+            def strip_trailing_emoji(text: str) -> str:
+                import re
+                text = re.sub(r'\([^)\u0000-\u007F]*\)\s*$', '', text)
+                text = re.sub(r'[\U0001F300-\U0001F9FF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF😀-🙏]\s*$', '', text)
+                return text.strip()
+
+            sentences = chunk_by_sentence(cleaned)
+            
+            if len(sentences) > 1:
+                logger.info("[TTS] Speaking {} sentences", len(sentences))
+                for sentence in sentences:
+                    cleaned_sentence = strip_trailing_emoji(sentence)
+                    if cleaned_sentence:
+                        self._tts.generate_and_play(cleaned_sentence, wait=True)
+                for _ in range(len(sentences)):
+                    if self._tts_pending_queue:
+                        self._process_tts_pending_queue()
+            else:
+                cleaned_text = strip_trailing_emoji(cleaned)
+                logger.info("[TTS] Speaking: {}", cleaned_text[:80])
+                self._tts.generate_and_play(cleaned_text, wait=False)
+        except Exception as e:
+            logger.warning("[TTS] Error triggering TTS: {}", e)
+            self._add_to_tts_pending(content)
+
+    def _trigger_tts(self, response: OutboundMessage, original_msg: InboundMessage) -> None:
+        """Internal TTS trigger method."""
+        logger.info("[TTS] _trigger_tts called: channel={}, content_len={}", original_msg.channel, len(response.content))
+
+        if not self._tts:
+            return
+
+        # Check if TTS is enabled for this channel
+        if self.tts_config and self.tts_config.enabled_channels:
+            msg_channel = original_msg.channel
+            if msg_channel == "system":
+                if ":" in original_msg.chat_id:
+                    msg_channel = original_msg.chat_id.split(":", 1)[0]
+            
+            if msg_channel not in self.tts_config.enabled_channels:
+                logger.debug("[TTS] Channel {} not in enabled channels", msg_channel)
+                return
+
+        content = response.content
+        if not content:
+            return
+
+        from nanobot.tts import should_speak, clean_text_for_speech
+        if not should_speak(content):
+            self._add_to_tts_pending(content)
+            return
+
+        try:
+            from nanobot.tts import extract_interactive_opener, clean_text_for_speech, strip_code_and_formulas, chunk_by_sentence
+            content = strip_code_and_formulas(content)
+            extracted = extract_interactive_opener(content)
+            cleaned = clean_text_for_speech(extracted)
+            if not cleaned:
+                self._add_to_tts_pending(content)
+                return
+            
+            def strip_trailing_emoji(text: str) -> str:
+                import re
+                text = re.sub(r'\([^)\u0000-\u007F]*\)\s*$', '', text)
+                text = re.sub(r'[\U0001F300-\U0001F9FF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF😀-🙏]\s*$', '', text)
+                return text.strip()
+
+            sentences = chunk_by_sentence(cleaned)
+            
+            if len(sentences) > 1:
+                logger.info("[TTS] Speaking {} sentences", len(sentences))
+                for sentence in sentences:
+                    cleaned_sentence = strip_trailing_emoji(sentence)
+                    if cleaned_sentence:
+                        self._tts.generate_and_play(cleaned_sentence, wait=True)
+                for _ in range(len(sentences)):
+                    if self._tts_pending_queue:
+                        self._process_tts_pending_queue()
+            else:
+                cleaned_text = strip_trailing_emoji(cleaned)
+                logger.info("[TTS] Speaking: {}", cleaned_text[:80])
+                self._tts.generate_and_play(cleaned_text, wait=False)
+        except Exception as e:
+            logger.warning("[TTS] Error triggering TTS: {}", e)
+            self._add_to_tts_pending(content)
+
+    def _add_to_tts_pending(self, content: str) -> None:
+        """Add message to pending TTS queue."""
+        if len(self._tts_pending_queue) >= self._tts_max_pending:
+            self._tts_pending_queue.pop(0)
+            logger.debug("[TTS] Pending queue full, removing oldest")
+        self._tts_pending_queue.append((content, "pending"))
+        logger.debug(f"[TTS] Added to pending queue, size: {len(self._tts_pending_queue)}")
+
+    def _process_tts_pending_queue(self) -> None:
+        """Process pending TTS queue."""
+        if not self._tts_pending_queue or not self._tts:
+            return
+        
+        content, _ = self._tts_pending_queue.pop(0)
+        from nanobot.tts import should_speak, clean_text_for_speech
+        if should_speak(content):
+            try:
+                cleaned = clean_text_for_speech(content)
+                if cleaned:
+                    self._tts.generate_and_play(cleaned, wait=False)
+            except Exception as e:
+                logger.warning("[TTS] Error playing pending: {}", e)
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""

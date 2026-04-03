@@ -15,12 +15,18 @@ class MessageTool(Tool):
         default_channel: str = "",
         default_chat_id: str = "",
         default_message_id: str | None = None,
+        tts_callback: Callable[[str, str], None] | None = None,
     ):
         self._send_callback = send_callback
         self._default_channel = default_channel
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
         self._sent_in_turn: bool = False
+        self._last_sent_content: str = ""
+        self._last_sent_channel: str = ""
+        self._last_sent_chat_id: str = ""
+        self._tts_callback = tts_callback
+        self._tts_triggered_by_message_tool: bool = False
 
     def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Set the current message context."""
@@ -32,9 +38,17 @@ class MessageTool(Tool):
         """Set the callback for sending messages."""
         self._send_callback = callback
 
+    def set_tts_callback(self, callback: Callable[[str, str], None]) -> None:
+        """Set the callback for TTS."""
+        self._tts_callback = callback
+
     def start_turn(self) -> None:
         """Reset per-turn send tracking."""
         self._sent_in_turn = False
+        self._last_sent_content = ""
+        self._last_sent_channel = ""
+        self._last_sent_chat_id = ""
+        self._tts_triggered_by_message_tool = False
 
     @property
     def name(self) -> str:
@@ -109,8 +123,15 @@ class MessageTool(Tool):
 
         try:
             await self._send_callback(msg)
+            self._last_sent_content = content
+            self._last_sent_channel = channel
+            self._last_sent_chat_id = chat_id
             if channel == self._default_channel and chat_id == self._default_chat_id:
                 self._sent_in_turn = True
+                self._tts_triggered_by_message_tool = True
+                if self._tts_callback:
+                    self._tts_callback(content, channel)
+
             media_info = f" with {len(media)} attachments" if media else ""
             return f"Message sent to {channel}:{chat_id}{media_info}"
         except Exception as e:
