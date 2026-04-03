@@ -2,12 +2,15 @@
 
 import asyncio
 import json
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from loguru import logger
+
+from nanobot.utils.helpers import image_placeholder_text
 
 
 @dataclass
@@ -57,13 +60,7 @@ class LLMResponse:
 
 @dataclass(frozen=True)
 class GenerationSettings:
-    """Default generation parameters for LLM calls.
-
-    Stored on the provider so every call site inherits the same defaults
-    without having to pass temperature / max_tokens / reasoning_effort
-    through every layer.  Individual call sites can still override by
-    passing explicit keyword arguments to chat() / chat_with_retry().
-    """
+    """Default generation settings."""
 
     temperature: float = 0.7
     max_tokens: int = 4096
@@ -71,14 +68,12 @@ class GenerationSettings:
 
 
 class LLMProvider(ABC):
-    """
-    Abstract base class for LLM providers.
-    
-    Implementations should handle the specifics of each provider's API
-    while maintaining a consistent interface.
-    """
+    """Base class for LLM providers."""
 
     _CHAT_RETRY_DELAYS = (1, 2, 4)
+    _PERSISTENT_MAX_DELAY = 60
+    _PERSISTENT_IDENTICAL_ERROR_LIMIT = 10
+    _RETRY_HEARTBEAT_CHUNK = 30
     _TRANSIENT_ERROR_MARKERS = (
         "429",
         "rate limit",
@@ -208,7 +203,7 @@ class LLMProvider(ABC):
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "image_url":
                         path = (b.get("_meta") or {}).get("path", "")
-                        placeholder = f"[image: {path}]" if path else "[image omitted]"
+                        placeholder = image_placeholder_text(path, empty="[image omitted]")
                         new_content.append({"type": "text", "text": placeholder})
                         found = True
                     else:
@@ -273,6 +268,8 @@ class LLMProvider(ABC):
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        retry_mode: str = "standard",
+        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """Call chat_stream() with retry on transient provider failures."""
         if max_tokens is self._SENTINEL:
@@ -288,28 +285,13 @@ class LLMProvider(ABC):
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
             on_content_delta=on_content_delta,
         )
-
-        for attempt, delay in enumerate(self._CHAT_RETRY_DELAYS, start=1):
-            response = await self._safe_chat_stream(**kw)
-
-            if response.finish_reason != "error":
-                return response
-
-            if not self._is_transient_error(response.content):
-                stripped = self._strip_image_content(messages)
-                if stripped is not None:
-                    logger.warning("Non-transient LLM error with image content, retrying without images")
-                    return await self._safe_chat_stream(**{**kw, "messages": stripped})
-                return response
-
-            logger.warning(
-                "LLM transient error (attempt {}/{}), retrying in {}s: {}",
-                attempt, len(self._CHAT_RETRY_DELAYS), delay,
-                (response.content or "")[:120].lower(),
-            )
-            await asyncio.sleep(delay)
-
-        return await self._safe_chat_stream(**kw)
+        return await self._run_with_retry(
+            self._safe_chat_stream,
+            kw,
+            messages,
+            retry_mode=retry_mode,
+            on_retry_wait=on_retry_wait,
+        )
 
     async def chat_with_retry(
         self,
@@ -320,6 +302,8 @@ class LLMProvider(ABC):
         temperature: object = _SENTINEL,
         reasoning_effort: object = _SENTINEL,
         tool_choice: str | dict[str, Any] | None = None,
+        retry_mode: str = "standard",
+        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         """Call chat() with retry on transient provider failures.
 
@@ -339,28 +323,118 @@ class LLMProvider(ABC):
             max_tokens=max_tokens, temperature=temperature,
             reasoning_effort=reasoning_effort, tool_choice=tool_choice,
         )
+        return await self._run_with_retry(
+            self._safe_chat,
+            kw,
+            messages,
+            retry_mode=retry_mode,
+            on_retry_wait=on_retry_wait,
+        )
 
-        for attempt, delay in enumerate(self._CHAT_RETRY_DELAYS, start=1):
-            response = await self._safe_chat(**kw)
+    @classmethod
+    def _extract_retry_after(cls, content: str | None) -> float | None:
+        text = (content or "").lower()
+        match = re.search(r"retry after\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds|s|sec|secs|seconds|m|min|minutes)?", text)
+        if not match:
+            return None
+        value = float(match.group(1))
+        unit = (match.group(2) or "s").lower()
+        if unit in {"ms", "milliseconds"}:
+            return max(0.1, value / 1000.0)
+        if unit in {"m", "min", "minutes"}:
+            return value * 60.0
+        return value
 
+    async def _sleep_with_heartbeat(
+        self,
+        delay: float,
+        *,
+        attempt: int,
+        persistent: bool,
+        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
+    ) -> None:
+        remaining = max(0.0, delay)
+        while remaining > 0:
+            if on_retry_wait:
+                kind = "persistent retry" if persistent else "retry"
+                await on_retry_wait(
+                    f"Model request failed, {kind} in {max(1, int(round(remaining)))}s "
+                    f"(attempt {attempt})."
+                )
+            chunk = min(remaining, self._RETRY_HEARTBEAT_CHUNK)
+            await asyncio.sleep(chunk)
+            remaining -= chunk
+
+    async def _run_with_retry(
+        self,
+        call: Callable[..., Awaitable[LLMResponse]],
+        kw: dict[str, Any],
+        original_messages: list[dict[str, Any]],
+        *,
+        retry_mode: str,
+        on_retry_wait: Callable[[str], Awaitable[None]] | None,
+    ) -> LLMResponse:
+        attempt = 0
+        delays = list(self._CHAT_RETRY_DELAYS)
+        persistent = retry_mode == "persistent"
+        last_response: LLMResponse | None = None
+        last_error_key: str | None = None
+        identical_error_count = 0
+        while True:
+            attempt += 1
+            response = await call(**kw)
             if response.finish_reason != "error":
                 return response
+            last_response = response
+            error_key = ((response.content or "").strip().lower() or None)
+            if error_key and error_key == last_error_key:
+                identical_error_count += 1
+            else:
+                last_error_key = error_key
+                identical_error_count = 1 if error_key else 0
 
             if not self._is_transient_error(response.content):
-                stripped = self._strip_image_content(messages)
-                if stripped is not None:
-                    logger.warning("Non-transient LLM error with image content, retrying without images")
-                    return await self._safe_chat(**{**kw, "messages": stripped})
+                stripped = self._strip_image_content(original_messages)
+                if stripped is not None and stripped != kw["messages"]:
+                    logger.warning(
+                        "Non-transient LLM error with image content, retrying without images"
+                    )
+                    retry_kw = dict(kw)
+                    retry_kw["messages"] = stripped
+                    return await call(**retry_kw)
                 return response
 
+            if persistent and identical_error_count >= self._PERSISTENT_IDENTICAL_ERROR_LIMIT:
+                logger.warning(
+                    "Stopping persistent retry after {} identical transient errors: {}",
+                    identical_error_count,
+                    (response.content or "")[:120].lower(),
+                )
+                return response
+
+            if not persistent and attempt > len(delays):
+                break
+
+            base_delay = delays[min(attempt - 1, len(delays) - 1)]
+            delay = self._extract_retry_after(response.content) or base_delay
+            if persistent:
+                delay = min(delay, self._PERSISTENT_MAX_DELAY)
+
             logger.warning(
-                "LLM transient error (attempt {}/{}), retrying in {}s: {}",
-                attempt, len(self._CHAT_RETRY_DELAYS), delay,
+                "LLM transient error (attempt {}{}), retrying in {}s: {}",
+                attempt,
+                "+" if persistent and attempt > len(delays) else f"/{len(delays)}",
+                int(round(delay)),
                 (response.content or "")[:120].lower(),
             )
-            await asyncio.sleep(delay)
+            await self._sleep_with_heartbeat(
+                delay,
+                attempt=attempt,
+                persistent=persistent,
+                on_retry_wait=on_retry_wait,
+            )
 
-        return await self._safe_chat(**kw)
+        return last_response if last_response is not None else await call(**kw)
 
     @abstractmethod
     def get_default_model(self) -> str:

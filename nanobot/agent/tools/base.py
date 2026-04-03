@@ -53,6 +53,21 @@ class Tool(ABC):
         """JSON Schema for tool parameters."""
         pass
 
+    @property
+    def read_only(self) -> bool:
+        """Whether this tool is side-effect free and safe to parallelize."""
+        return False
+
+    @property
+    def concurrency_safe(self) -> bool:
+        """Whether this tool can run alongside other concurrency-safe tools."""
+        return self.read_only and not self.exclusive
+
+    @property
+    def exclusive(self) -> bool:
+        """Whether this tool should run alone even if concurrency is enabled."""
+        return False
+
     @abstractmethod
     async def execute(self, **kwargs: Any) -> Any:
         """

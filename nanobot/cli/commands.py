@@ -415,6 +415,9 @@ def _make_provider(config: Config):
             api_base=p.api_base,
             default_model=model,
         )
+    elif backend == "github_copilot":
+        from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+        provider = GitHubCopilotProvider(default_model=model)
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
         provider = AnthropicProvider(
@@ -492,6 +495,94 @@ def _migrate_cron_store(config: "Config") -> None:
 
 
 # ============================================================================
+# OpenAI-Compatible API Server
+# ============================================================================
+
+
+@app.command()
+def serve(
+    port: int | None = typer.Option(None, "--port", "-p", help="API server port"),
+    host: str | None = typer.Option(None, "--host", "-H", help="Bind address"),
+    timeout: float | None = typer.Option(None, "--timeout", "-t", help="Per-request timeout (seconds)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show nanobot runtime logs"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Start the OpenAI-compatible API server (/v1/chat/completions)."""
+    try:
+        from aiohttp import web  # noqa: F401
+    except ImportError:
+        console.print("[red]aiohttp is required. Install with: pip install 'nanobot-ai[api]'[/red]")
+        raise typer.Exit(1)
+
+    from loguru import logger
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.api.server import create_app
+    from nanobot.bus.queue import MessageBus
+    from nanobot.session.manager import SessionManager
+
+    if verbose:
+        logger.enable("nanobot")
+    else:
+        logger.disable("nanobot")
+
+    runtime_config = _load_runtime_config(config, workspace)
+    api_cfg = runtime_config.api
+    host = host if host is not None else api_cfg.host
+    port = port if port is not None else api_cfg.port
+    timeout = timeout if timeout is not None else api_cfg.timeout
+    sync_workspace_templates(runtime_config.workspace_path)
+    bus = MessageBus()
+    provider = _make_provider(runtime_config)
+    session_manager = SessionManager(runtime_config.workspace_path)
+    agent_loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=runtime_config.workspace_path,
+        model=runtime_config.agents.defaults.model,
+        max_iterations=runtime_config.agents.defaults.max_tool_iterations,
+        context_window_tokens=runtime_config.agents.defaults.context_window_tokens,
+        context_block_limit=runtime_config.agents.defaults.context_block_limit,
+        max_tool_result_chars=runtime_config.agents.defaults.max_tool_result_chars,
+        provider_retry_mode=runtime_config.agents.defaults.provider_retry_mode,
+        web_search_config=runtime_config.tools.web.search,
+        web_proxy=runtime_config.tools.web.proxy or None,
+        exec_config=runtime_config.tools.exec,
+        restrict_to_workspace=runtime_config.tools.restrict_to_workspace,
+        session_manager=session_manager,
+        mcp_servers=runtime_config.tools.mcp_servers,
+        channels_config=runtime_config.channels,
+        timezone=runtime_config.agents.defaults.timezone,
+    )
+
+    model_name = runtime_config.agents.defaults.model
+    console.print(f"{__logo__} Starting OpenAI-compatible API server")
+    console.print(f"  [cyan]Endpoint[/cyan] : http://{host}:{port}/v1/chat/completions")
+    console.print(f"  [cyan]Model[/cyan]    : {model_name}")
+    console.print("  [cyan]Session[/cyan]  : api:default")
+    console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
+    if host in {"0.0.0.0", "::"}:
+        console.print(
+            "[yellow]Warning:[/yellow] API is bound to all interfaces. "
+            "Only do this behind a trusted network boundary, firewall, or reverse proxy."
+        )
+    console.print()
+
+    api_app = create_app(agent_loop, model_name=model_name, request_timeout=timeout)
+
+    async def on_startup(_app):
+        await agent_loop._connect_mcp()
+
+    async def on_cleanup(_app):
+        await agent_loop.close_mcp()
+
+    api_app.on_startup.append(on_startup)
+    api_app.on_cleanup.append(on_cleanup)
+
+    web.run_app(api_app, host=host, port=port, print=lambda msg: logger.info(msg))
+
+
+# ============================================================================
 # Gateway / Server
 # ============================================================================
 
@@ -541,6 +632,9 @@ def gateway(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
+        context_block_limit=config.agents.defaults.context_block_limit,
+        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
+        provider_retry_mode=config.agents.defaults.provider_retry_mode,
         web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
@@ -747,6 +841,9 @@ def agent(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
+        context_block_limit=config.agents.defaults.context_block_limit,
+        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
+        provider_retry_mode=config.agents.defaults.provider_retry_mode,
         web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
@@ -935,12 +1032,18 @@ app.add_typer(channels_app, name="channels")
 
 
 @channels_app.command("status")
-def channels_status():
+def channels_status(
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
     """Show channel status."""
     from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config
+    from nanobot.config.loader import load_config, set_config_path
 
-    config = load_config()
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
+
+    config = load_config(resolved_config_path)
 
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
@@ -1027,12 +1130,17 @@ def _get_bridge_dir() -> Path:
 def channels_login(
     channel_name: str = typer.Argument(..., help="Channel name (e.g. weixin, whatsapp)"),
     force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with a channel via QR code or other interactive login."""
     from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config
+    from nanobot.config.loader import load_config, set_config_path
 
-    config = load_config()
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
+
+    config = load_config(resolved_config_path)
     channel_cfg = getattr(config.channels, channel_name, None) or {}
 
     # Validate channel exists
@@ -1204,26 +1312,16 @@ def _login_openai_codex() -> None:
 
 @_register_login("github_copilot")
 def _login_github_copilot() -> None:
-    import asyncio
-
-    from openai import AsyncOpenAI
-
-    console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
-
-    async def _trigger():
-        client = AsyncOpenAI(
-            api_key="dummy",
-            base_url="https://api.githubcopilot.com",
-        )
-        await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=1,
-        )
-
     try:
-        asyncio.run(_trigger())
-        console.print("[green]✓ Authenticated with GitHub Copilot[/green]")
+        from nanobot.providers.github_copilot_provider import login_github_copilot
+
+        console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
+        token = login_github_copilot(
+            print_fn=lambda s: console.print(s),
+            prompt_fn=lambda s: typer.prompt(s),
+        )
+        account = token.account_id or "GitHub"
+        console.print(f"[green]✓ Authenticated with GitHub Copilot[/green]  [dim]{account}[/dim]")
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)

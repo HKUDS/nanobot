@@ -38,8 +38,11 @@ class AgentDefaults(Base):
     )
     max_tokens: int = 8192
     context_window_tokens: int = 65_536
+    context_block_limit: int | None = None
     temperature: float = 0.1
-    max_tool_iterations: int = 40
+    max_tool_iterations: int = 200
+    max_tool_result_chars: int = 16_000
+    provider_retry_mode: Literal["standard", "persistent"] = "standard"
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
 
@@ -94,6 +97,14 @@ class HeartbeatConfig(Base):
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
     keep_recent_messages: int = 8
+
+
+class ApiConfig(Base):
+    """OpenAI-compatible API server configuration."""
+
+    host: str = "127.0.0.1"  # Safer default: local-only bind.
+    port: int = 8900
+    timeout: float = 120.0  # Per-request timeout in seconds.
 
 
 class GatewayConfig(Base):
@@ -156,6 +167,7 @@ class Config(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
 

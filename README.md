@@ -115,6 +115,8 @@
 - [Configuration](#️-configuration)
 - [Multiple Instances](#-multiple-instances)
 - [CLI Reference](#-cli-reference)
+- [Python SDK](#-python-sdk)
+- [OpenAI-Compatible API](#-openai-compatible-api)
 - [Docker](#-docker)
 - [Linux Service](#-linux-service)
 - [Project Structure](#-project-structure)
@@ -1541,6 +1543,7 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot agent` | Interactive chat mode |
 | `nanobot agent --no-markdown` | Show plain-text replies |
 | `nanobot agent --logs` | Show runtime logs during chat |
+| `nanobot serve` | Start the OpenAI-compatible API |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
 | `nanobot provider login openai-codex` | OAuth login for providers |
@@ -1568,6 +1571,110 @@ The agent can also manage this file itself — ask it to "add a periodic task" a
 > **Note:** The gateway must be running (`nanobot gateway`) and you must have chatted with the bot at least once so it knows which channel to deliver to.
 
 </details>
+
+## 🐍 Python SDK
+
+Use nanobot as a library — no CLI, no gateway, just Python:
+
+```python
+from nanobot import Nanobot
+
+bot = Nanobot.from_config()
+result = await bot.run("Summarize the README")
+print(result.content)
+```
+
+Each call carries a `session_key` for conversation isolation — different keys get independent history:
+
+```python
+await bot.run("hi", session_key="user-alice")
+await bot.run("hi", session_key="task-42")
+```
+
+Add lifecycle hooks to observe or customize the agent:
+
+```python
+from nanobot.agent import AgentHook, AgentHookContext
+
+class AuditHook(AgentHook):
+    async def before_execute_tools(self, ctx: AgentHookContext) -> None:
+        for tc in ctx.tool_calls:
+            print(f"[tool] {tc.name}")
+
+result = await bot.run("Hello", hooks=[AuditHook()])
+```
+
+See [docs/PYTHON_SDK.md](docs/PYTHON_SDK.md) for the full SDK reference.
+
+## 🔌 OpenAI-Compatible API
+
+nanobot can expose a minimal OpenAI-compatible endpoint for local integrations:
+
+```bash
+pip install "nanobot-ai[api]"
+nanobot serve
+```
+
+By default, the API binds to `127.0.0.1:8900`. You can change this in `config.json`.
+
+### Behavior
+
+- Session isolation: pass `"session_id"` in the request body to isolate conversations; omit for a shared default session (`api:default`)
+- Single-message input: each request must contain exactly one `user` message
+- Fixed model: omit `model`, or pass the same model shown by `/v1/models`
+- No streaming: `stream=true` is not supported
+
+### Endpoints
+
+- `GET /health`
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+
+### curl
+
+```bash
+curl http://127.0.0.1:8900/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": "hi"}],
+    "session_id": "my-session"
+  }'
+```
+
+### Python (`requests`)
+
+```python
+import requests
+
+resp = requests.post(
+    "http://127.0.0.1:8900/v1/chat/completions",
+    json={
+        "messages": [{"role": "user", "content": "hi"}],
+        "session_id": "my-session",  # optional: isolate conversation
+    },
+    timeout=120,
+)
+resp.raise_for_status()
+print(resp.json()["choices"][0]["message"]["content"])
+```
+
+### Python (`openai`)
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8900/v1",
+    api_key="dummy",
+)
+
+resp = client.chat.completions.create(
+    model="MiniMax-M2.7",
+    messages=[{"role": "user", "content": "hi"}],
+    extra_body={"session_id": "my-session"},  # optional: isolate conversation
+)
+print(resp.choices[0].message.content)
+```
 
 ## 🐳 Docker
 

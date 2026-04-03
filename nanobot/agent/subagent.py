@@ -21,6 +21,21 @@ from nanobot.config.schema import ExecToolConfig
 from nanobot.providers.base import LLMProvider
 
 
+class _SubagentHook(AgentHook):
+    """Logging-only hook for subagent execution."""
+
+    def __init__(self, task_id: str) -> None:
+        self._task_id = task_id
+
+    async def before_execute_tools(self, context: AgentHookContext) -> None:
+        for tool_call in context.tool_calls:
+            args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
+            logger.debug(
+                "Subagent [{}] executing: {} with arguments: {}",
+                self._task_id, tool_call.name, args_str,
+            )
+
+
 class SubagentManager:
     """Manages background subagent execution."""
 
@@ -29,6 +44,7 @@ class SubagentManager:
         provider: LLMProvider,
         workspace: Path,
         bus: MessageBus,
+        max_tool_result_chars: int,
         model: str | None = None,
         web_search_config: "WebSearchConfig | None" = None,
         web_proxy: str | None = None,
@@ -41,6 +57,7 @@ class SubagentManager:
         self.workspace = workspace
         self.bus = bus
         self.model = model or provider.get_default_model()
+        self.max_tool_result_chars = max_tool_result_chars
         self.web_search_config = web_search_config or WebSearchConfig()
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
@@ -100,33 +117,29 @@ class SubagentManager:
             tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
             tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-                path_append=self.exec_config.path_append,
-            ))
+            if self.exec_config.enable:
+                tools.register(ExecTool(
+                    working_dir=str(self.workspace),
+                    timeout=self.exec_config.timeout,
+                    restrict_to_workspace=self.restrict_to_workspace,
+                    path_append=self.exec_config.path_append,
+                ))
             tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
             tools.register(WebFetchTool(proxy=self.web_proxy))
-            
+
             system_prompt = self._build_subagent_prompt()
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
             ]
 
-            class _SubagentHook(AgentHook):
-                async def before_execute_tools(self, context: AgentHookContext) -> None:
-                    for tool_call in context.tool_calls:
-                        args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
-                        logger.debug("Subagent [{}] executing: {} with arguments: {}", task_id, tool_call.name, args_str)
-
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=messages,
                 tools=tools,
                 model=self.model,
                 max_iterations=15,
-                hook=_SubagentHook(),
+                max_tool_result_chars=self.max_tool_result_chars,
+                hook=_SubagentHook(task_id),
                 max_iterations_message="Task completed but no final response was generated.",
                 error_message=None,
                 fail_on_tool_error=True,
@@ -213,7 +226,7 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
             lines.append("Failure:")
             lines.append(f"- {result.error}")
         return "\n".join(lines) or (result.error or "Error: subagent execution failed.")
-    
+
     def _build_subagent_prompt(self) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.context import ContextBuilder
