@@ -16,7 +16,6 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import MemoryConsolidator
-from nanobot.memory.store import NormalMemoryStore
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
@@ -31,7 +30,8 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.base import BaseSessionManager
+from nanobot.session.manager import NormalSessionManager, Session, SessionManager
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
@@ -179,7 +179,10 @@ class AgentLoop:
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
-        session_manager: SessionManager | None = None,
+        session_backend: str = "normal",
+        memory_backend: str = "normal",
+        session_manager: BaseSessionManager | None = None,
+        memory_store=None,  # BaseMemoryStore | None
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
@@ -204,7 +207,14 @@ class AgentLoop:
         self._extra_hooks: list[AgentHook] = hooks or []
 
         self.context = ContextBuilder(workspace, timezone=timezone)
-        self.sessions = session_manager or SessionManager(workspace)
+        from nanobot.session.registry import discover_session_manager
+        from nanobot.memory.registry import discover_memory_store
+
+        _session_cls = discover_session_manager(session_backend)
+        self.sessions = session_manager or _session_cls(workspace)
+
+        _memory_cls = discover_memory_store(memory_backend)
+        _store = memory_store or _memory_cls(workspace)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
         self.subagents = SubagentManager(
@@ -232,7 +242,7 @@ class AgentLoop:
             asyncio.Semaphore(_max) if _max > 0 else None
         )
         self.memory_consolidator = MemoryConsolidator(
-            store=NormalMemoryStore(workspace),
+            store=_store,
             provider=provider,
             model=self.model,
             sessions=self.sessions,
