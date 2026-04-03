@@ -15,6 +15,7 @@ from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_
 
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.git_store import GitStore
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -41,6 +42,13 @@ class MemoryStore:
         self._dream_log_file = self.memory_dir / ".dream-log.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
+        self._git = GitStore(workspace, tracked_files=[
+            "SOUL.md", "USER.md", "memory/MEMORY.md",
+        ])
+
+    @property
+    def git(self) -> GitStore:
+        return self._git
 
     # -- generic helpers -----------------------------------------------------
 
@@ -576,5 +584,10 @@ class Dream:
             self.store.append_dream_log(log_entry)
         else:
             self.store.append_dream_log(f"## {ts}\nNo changes.\n")
+
+        if changelog and self.store.git.is_initialized():
+            sha = self.store.git.auto_commit(f"dream: {ts}, {len(changelog)} change(s)")
+            if sha:
+                logger.info("Dream commit: {}", sha)
 
         return True
