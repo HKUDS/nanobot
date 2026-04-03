@@ -21,13 +21,17 @@ def test_concrete_subclass_must_implement_all_methods():
 
 
 def test_concrete_subclass_can_instantiate():
-    from nanobot.session.manager import Session
+    from dataclasses import dataclass
+
+    @dataclass
+    class FakeSession:
+        key: str
 
     class MinimalManager(BaseSessionManager):
-        def get_or_create(self, key: str) -> Session:
-            return Session(key=key)
+        def get_or_create(self, key: str):
+            return FakeSession(key=key)
 
-        def save(self, session: Session) -> None:
+        def save(self, session) -> None:
             pass
 
         def invalidate(self, key: str) -> None:

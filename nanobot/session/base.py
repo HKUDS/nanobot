@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from nanobot.session.manager import Session
 
 
 class BaseSessionManager(ABC):
@@ -20,24 +23,28 @@ class BaseSessionManager(ABC):
     """
 
     @abstractmethod
-    def get_or_create(self, key: str) -> Any:
+    def get_or_create(self, key: str) -> Session:
         """Get an existing session or create a new one.
 
         Args:
             key: Session key (usually channel:chat_id).
 
         Returns:
-            A Session instance.
+            The existing session if found, otherwise a newly created Session.
         """
 
     @abstractmethod
-    def save(self, session: Any) -> None:
-        """Persist the session to storage."""
+    def save(self, session: Session) -> None:
+        """Persist the session to storage. Implementations should be idempotent."""
 
     @abstractmethod
     def invalidate(self, key: str) -> None:
-        """Remove a session from the in-memory cache."""
+        """Remove a session from cache and storage. Silent if key does not exist."""
 
     @abstractmethod
     def list_sessions(self) -> list[dict[str, Any]]:
-        """Return a list of session info dicts."""
+        """Return a list of session info dicts.
+
+        Each dict must contain at least: ``key`` (str), ``created_at`` (ISO str),
+        ``updated_at`` (ISO str).
+        """
