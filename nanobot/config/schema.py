@@ -42,6 +42,8 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    session_backend: str = "normal"  # Session storage backend name (plugin or "normal")
+    memory_backend: str = "normal"  # Memory storage backend name (plugin or "normal")
 
 
 class AgentsConfig(Base):
