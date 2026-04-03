@@ -142,6 +142,19 @@ def test_exec_guard_blocks_quoted_home_path_outside_workspace(tmp_path) -> None:
     assert error == "Error: Command blocked by safety guard (path outside working dir)"
 
 
+def test_exec_guard_allows_media_path_outside_workspace(tmp_path, monkeypatch) -> None:
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    media_file = media_dir / "photo.jpg"
+    media_file.write_text("ok", encoding="utf-8")
+
+    monkeypatch.setattr("nanobot.agent.tools.shell.get_media_dir", lambda: media_dir)
+
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command(f'cat "{media_file}"', str(tmp_path / "workspace"))
+    assert error is None
+
+
 def test_exec_guard_blocks_windows_drive_root_outside_workspace(monkeypatch) -> None:
     import nanobot.agent.tools.shell as shell_mod
 
