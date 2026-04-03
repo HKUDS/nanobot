@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
+from nanobot.session.base import BaseSessionManager
 from nanobot.utils.helpers import ensure_dir, safe_filename
 
 
@@ -125,7 +126,7 @@ class Session:
         self.updated_at = datetime.now()
 
 
-class NormalSessionManager:
+class NormalSessionManager(BaseSessionManager):
     """
     Manages conversation sessions.
 

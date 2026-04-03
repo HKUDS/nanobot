@@ -519,7 +519,6 @@ def serve(
     from nanobot.agent.loop import AgentLoop
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
-    from nanobot.session.manager import SessionManager
 
     if verbose:
         logger.enable("nanobot")
@@ -534,7 +533,6 @@ def serve(
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(runtime_config)
-    session_manager = SessionManager(runtime_config.workspace_path)
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -546,7 +544,8 @@ def serve(
         web_proxy=runtime_config.tools.web.proxy or None,
         exec_config=runtime_config.tools.exec,
         restrict_to_workspace=runtime_config.tools.restrict_to_workspace,
-        session_manager=session_manager,
+        session_backend=runtime_config.agents.defaults.session_backend,
+        memory_backend=runtime_config.agents.defaults.memory_backend,
         mcp_servers=runtime_config.tools.mcp_servers,
         channels_config=runtime_config.channels,
         timezone=runtime_config.agents.defaults.timezone,
@@ -598,7 +597,6 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
-    from nanobot.session.manager import SessionManager
 
     if verbose:
         import logging
@@ -611,7 +609,6 @@ def gateway(
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
-    session_manager = SessionManager(config.workspace_path)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
@@ -634,7 +631,8 @@ def gateway(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
-        session_manager=session_manager,
+        session_backend=config.agents.defaults.session_backend,
+        memory_backend=config.agents.defaults.memory_backend,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
@@ -695,7 +693,7 @@ def gateway(
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
         enabled = set(channels.enabled_channels)
         # Prefer the most recently updated non-internal session on an enabled channel.
-        for item in session_manager.list_sessions():
+        for item in agent.sessions.list_sessions():
             key = item.get("key") or ""
             if ":" not in key:
                 continue
@@ -840,6 +838,8 @@ def agent(
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
+        session_backend=config.agents.defaults.session_backend,
+        memory_backend=config.agents.defaults.memory_backend,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,

@@ -206,7 +206,6 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone)
         from nanobot.session.registry import discover_session_manager
         from nanobot.memory.registry import discover_memory_store
 
@@ -215,6 +214,8 @@ class AgentLoop:
 
         _memory_cls = discover_memory_store(memory_backend)
         _store = memory_store or _memory_cls(workspace)
+
+        self.context = ContextBuilder(workspace, timezone=timezone, memory_store=_store)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
         self.subagents = SubagentManager(
