@@ -21,3 +21,4 @@ poetry.lock
 botpy.log
 tests/
 specs/
+.gitmessage
