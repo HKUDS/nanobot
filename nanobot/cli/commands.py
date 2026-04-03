@@ -547,6 +547,9 @@ def serve(
         model=runtime_config.agents.defaults.model,
         max_iterations=runtime_config.agents.defaults.max_tool_iterations,
         context_window_tokens=runtime_config.agents.defaults.context_window_tokens,
+        context_block_limit=runtime_config.agents.defaults.context_block_limit,
+        max_tool_result_chars=runtime_config.agents.defaults.max_tool_result_chars,
+        provider_retry_mode=runtime_config.agents.defaults.provider_retry_mode,
         web_search_config=runtime_config.tools.web.search,
         web_proxy=runtime_config.tools.web.proxy or None,
         exec_config=runtime_config.tools.exec,
@@ -634,6 +637,9 @@ def gateway(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
+        context_block_limit=config.agents.defaults.context_block_limit,
+        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
+        provider_retry_mode=config.agents.defaults.provider_retry_mode,
         web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
@@ -840,6 +846,9 @@ def agent(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
+        context_block_limit=config.agents.defaults.context_block_limit,
+        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
+        provider_retry_mode=config.agents.defaults.provider_retry_mode,
         web_search_config=config.tools.web.search,
         web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
@@ -1034,12 +1043,18 @@ app.add_typer(channels_app, name="channels")
 
 
 @channels_app.command("status")
-def channels_status():
+def channels_status(
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
     """Show channel status."""
     from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config
+    from nanobot.config.loader import load_config, set_config_path
 
-    config = load_config()
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
+
+    config = load_config(resolved_config_path)
 
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
@@ -1126,12 +1141,17 @@ def _get_bridge_dir() -> Path:
 def channels_login(
     channel_name: str = typer.Argument(..., help="Channel name (e.g. weixin, whatsapp)"),
     force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with a channel via QR code or other interactive login."""
     from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config
+    from nanobot.config.loader import load_config, set_config_path
 
-    config = load_config()
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
+
+    config = load_config(resolved_config_path)
     channel_cfg = getattr(config.channels, channel_name, None) or {}
 
     # Validate channel exists

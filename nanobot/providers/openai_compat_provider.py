@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import secrets
@@ -20,7 +21,6 @@ if TYPE_CHECKING:
 
 _ALLOWED_MSG_KEYS = frozenset({
     "role", "content", "tool_calls", "tool_call_id", "name",
-    "reasoning_content", "extra_content",
 })
 _ALNUM = string.ascii_letters + string.digits
 
@@ -385,9 +385,13 @@ class OpenAICompatProvider(LLMProvider):
                 content = self._extract_text_content(
                     response_map.get("content") or response_map.get("output_text")
                 )
+                reasoning_content = self._extract_text_content(
+                    response_map.get("reasoning_content")
+                )
                 if content is not None:
                     return LLMResponse(
                         content=content,
+                        reasoning_content=reasoning_content,
                         finish_reason=str(response_map.get("finish_reason") or "stop"),
                         usage=self._extract_usage(response_map),
                     )
@@ -482,6 +486,7 @@ class OpenAICompatProvider(LLMProvider):
     @classmethod
     def _parse_chunks(cls, chunks: list[Any]) -> LLMResponse:
         content_parts: list[str] = []
+        reasoning_parts: list[str] = []
         tc_bufs: dict[int, dict[str, Any]] = {}
         finish_reason = "stop"
         usage: dict[str, int] = {}
@@ -535,6 +540,9 @@ class OpenAICompatProvider(LLMProvider):
                 text = cls._extract_text_content(delta.get("content"))
                 if text:
                     content_parts.append(text)
+                text = cls._extract_text_content(delta.get("reasoning_content"))
+                if text:
+                    reasoning_parts.append(text)
                 for idx, tc in enumerate(delta.get("tool_calls") or []):
                     _accum_tc(tc, idx)
                 usage = cls._extract_usage(chunk_map) or usage
@@ -549,6 +557,10 @@ class OpenAICompatProvider(LLMProvider):
             delta = choice.delta
             if delta and delta.content:
                 content_parts.append(delta.content)
+            if delta:
+                reasoning = getattr(delta, "reasoning_content", None)
+                if reasoning:
+                    reasoning_parts.append(reasoning)
             for tc in (delta.tool_calls or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
 
@@ -567,6 +579,7 @@ class OpenAICompatProvider(LLMProvider):
             ],
             finish_reason=finish_reason,
             usage=usage,
+            reasoning_content="".join(reasoning_parts) or None,
         )
 
     @staticmethod
@@ -615,16 +628,36 @@ class OpenAICompatProvider(LLMProvider):
         )
         kwargs["stream"] = True
         kwargs["stream_options"] = {"include_usage": True}
+        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
             stream = await self._client.chat.completions.create(**kwargs)
             chunks: list[Any] = []
-            async for chunk in stream:
+            stream_iter = stream.__aiter__()
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(
+                        stream_iter.__anext__(),
+                        timeout=idle_timeout_s,
+                    )
+                except StopAsyncIteration:
+                    break
                 chunks.append(chunk)
                 if on_content_delta and chunk.choices:
+                    text = getattr(chunk.choices[0].delta, "reasoning_content", None)
+                    if text:
+                        await on_content_delta(text)
                     text = getattr(chunk.choices[0].delta, "content", None)
                     if text:
                         await on_content_delta(text)
             return self._parse_chunks(chunks)
+        except asyncio.TimeoutError:
+            return LLMResponse(
+                content=(
+                    f"Error calling LLM: stream stalled for more than "
+                    f"{idle_timeout_s} seconds"
+                ),
+                finish_reason="error",
+            )
         except Exception as e:
             return self._handle_error(e)
 

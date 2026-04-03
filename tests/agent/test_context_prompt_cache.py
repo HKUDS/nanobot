@@ -71,3 +71,19 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Channel: cli" in user_content
     assert "Chat ID: direct" in user_content
     assert "Return exactly: OK" in user_content
+
+
+def test_subagent_result_does_not_create_consecutive_assistant_messages(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[{"role": "assistant", "content": "previous result"}],
+        current_message="subagent result",
+        channel="cli",
+        chat_id="direct",
+        current_role="assistant",
+    )
+
+    for left, right in zip(messages, messages[1:]):
+        assert not (left.get("role") == right.get("role") == "assistant")

@@ -347,6 +347,8 @@ async def test_empty_response_retry_then_success(aiohttp_client) -> None:
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_empty_response_falls_back(aiohttp_client) -> None:
+    from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
+
     call_count = 0
 
     async def always_empty(content, session_key="", channel="", chat_id=""):
@@ -367,5 +369,5 @@ async def test_empty_response_falls_back(aiohttp_client) -> None:
     )
     assert resp.status == 200
     body = await resp.json()
-    assert body["choices"][0]["message"]["content"] == "I've completed processing but have no response to give."
+    assert body["choices"][0]["message"]["content"] == EMPTY_FINAL_RESPONSE_MESSAGE
     assert call_count == 2

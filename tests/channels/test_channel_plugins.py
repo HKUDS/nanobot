@@ -209,7 +209,7 @@ def test_channels_login_uses_discovered_plugin_class(monkeypatch):
             seen["config"] = self.config
             return True
 
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: Config())
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: Config())
     monkeypatch.setattr(
         "nanobot.channels.registry.discover_all",
         lambda: {"fakeplugin": _LoginPlugin},
@@ -219,6 +219,57 @@ def test_channels_login_uses_discovered_plugin_class(monkeypatch):
 
     assert result.exit_code == 0
     assert seen["force"] is True
+
+
+def test_channels_login_sets_custom_config_path(monkeypatch, tmp_path):
+    from nanobot.cli.commands import app
+    from nanobot.config.schema import Config
+    from typer.testing import CliRunner
+
+    runner = CliRunner()
+    seen: dict[str, object] = {}
+    config_path = tmp_path / "custom-config.json"
+
+    class _LoginPlugin(_FakePlugin):
+        async def login(self, force: bool = False) -> bool:
+            return True
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: Config())
+    monkeypatch.setattr(
+        "nanobot.config.loader.set_config_path",
+        lambda path: seen.__setitem__("config_path", path),
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_all",
+        lambda: {"fakeplugin": _LoginPlugin},
+    )
+
+    result = runner.invoke(app, ["channels", "login", "fakeplugin", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert seen["config_path"] == config_path.resolve()
+
+
+def test_channels_status_sets_custom_config_path(monkeypatch, tmp_path):
+    from nanobot.cli.commands import app
+    from nanobot.config.schema import Config
+    from typer.testing import CliRunner
+
+    runner = CliRunner()
+    seen: dict[str, object] = {}
+    config_path = tmp_path / "custom-config.json"
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: Config())
+    monkeypatch.setattr(
+        "nanobot.config.loader.set_config_path",
+        lambda path: seen.__setitem__("config_path", path),
+    )
+    monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
+
+    result = runner.invoke(app, ["channels", "status", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert seen["config_path"] == config_path.resolve()
 
 
 @pytest.mark.asyncio
