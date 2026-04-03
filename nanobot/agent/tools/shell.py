@@ -120,6 +120,19 @@ class ExecTool(Tool):
                         except (ProcessLookupError, ChildProcessError) as e:
                             logger.debug("Process already reaped or not found: {}", e)
                 return f"Error: Command timed out after {effective_timeout} seconds"
+            except asyncio.CancelledError:
+                process.kill()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    pass
+                finally:
+                    if sys.platform != "win32":
+                        try:
+                            os.waitpid(process.pid, os.WNOHANG)
+                        except (ProcessLookupError, ChildProcessError) as e:
+                            logger.debug("Process already reaped or not found: {}", e)
+                raise
 
             output_parts = []
 
