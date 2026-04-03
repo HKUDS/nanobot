@@ -57,6 +57,7 @@ def ensure_dir(path: Path) -> Path:
 def get_home_path() -> Path:
     """Home directory $NANOBOT_HOME or ~/.nanobot."""
     home_dir = os.environ.get("NANOBOT_HOME")
+    print(f"NANOBOT_HOME: {home_dir}")
     if home_dir:
         return ensure_dir(Path(home_dir))
     else:
