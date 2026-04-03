@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 import json_repair
+from loguru import logger
 from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -373,6 +374,7 @@ class OpenAICompatProvider(LLMProvider):
             parsed_tool_calls = []
             for tc in raw_tool_calls:
                 if tc is None:
+                    logger.warning("Skipping null tool call in raw_tool_calls (mapping path)")
                     continue
                 tc_map = self._maybe_mapping(tc) or {}
                 fn = self._maybe_mapping(tc_map.get("function")) or {}
@@ -380,6 +382,11 @@ class OpenAICompatProvider(LLMProvider):
                 if isinstance(args, str):
                     args = json_repair.loads(args)
                 ec, prov, fn_prov = _extract_tc_extras(tc)
+
+                if not isinstance(args, dict):
+                    logger.warning("Tool arguments for '{}' are not a dict (mapping path): {}", 
+                                   fn.get("name", "unknown"), type(args))
+
                 parsed_tool_calls.append(ToolCallRequest(
                     id=_short_tool_id(),
                     name=str(fn.get("name") or ""),
@@ -402,6 +409,7 @@ class OpenAICompatProvider(LLMProvider):
 
         choice = response.choices[0]
         if choice is None:
+            logger.warning("API returned null choice (model: {})", getattr(response, "model", "unknown"))
             return LLMResponse(content="Error: API returned null choice.", finish_reason="error")
         msg = choice.message
         content = msg.content if msg else None
@@ -410,6 +418,7 @@ class OpenAICompatProvider(LLMProvider):
         raw_tool_calls: list[Any] = []
         for ch in response.choices:
             if ch is None:
+                logger.warning("Skipping null choice in choices (model: {})", getattr(response, "model", "unknown"))
                 continue
             m = ch.message
             if m and hasattr(m, "tool_calls") and m.tool_calls:
@@ -422,14 +431,21 @@ class OpenAICompatProvider(LLMProvider):
         tool_calls = []
         for tc in raw_tool_calls:
             if tc is None:
+                logger.warning("Skipping null tool call in raw_tool_calls (model: {})", getattr(response, "model", "unknown"))
                 continue
             fn = getattr(tc, "function", None)
             if fn is None:
+                logger.warning("Tool call missing 'function' object (model: {})", getattr(response, "model", "unknown"))
                 continue
             args = getattr(fn, "arguments", {})
             if isinstance(args, str):
                 args = json_repair.loads(args)
             ec, prov, fn_prov = _extract_tc_extras(tc)
+            
+            if not isinstance(args, dict):
+                logger.warning("Tool arguments for '{}' are not a dict (model: {}): {}", 
+                               getattr(fn, "name", "unknown"), getattr(response, "model", "unknown"), type(args))
+
             tool_calls.append(ToolCallRequest(
                 id=_short_tool_id(),
                 name=getattr(fn, "name", "") or "",
@@ -482,6 +498,7 @@ class OpenAICompatProvider(LLMProvider):
 
         for chunk in chunks:
             if chunk is None:
+                logger.warning("Skipping null chunk in chat stream")
                 continue
             if isinstance(chunk, str):
                 content_parts.append(chunk)
@@ -515,6 +532,7 @@ class OpenAICompatProvider(LLMProvider):
                 continue
             choice = chunk.choices[0]
             if choice is None:
+                logger.warning("Skipping null choice in chunk (model: {})", getattr(chunk, "model", "unknown"))
                 continue
             if choice.finish_reason:
                 finish_reason = choice.finish_reason
@@ -525,20 +543,31 @@ class OpenAICompatProvider(LLMProvider):
                 for tc in (delta.tool_calls or []):
                     _accum_tc(tc, getattr(tc, "index", 0))
 
+        tool_calls = []
+        for idx, b in tc_bufs.items():
+            name = b.get("name")
+            if not name:
+                logger.warning("Skipping tool call with empty name at index {}", idx)
+                continue
+            
+            args_raw = b.get("arguments", "")
+            args = json_repair.loads(args_raw) if args_raw else {}
+            if not isinstance(args, dict):
+                 logger.warning("Tool arguments for '{}' are not a dict in stream: {}", 
+                                name, type(args))
+
+            tool_calls.append(ToolCallRequest(
+                id=b["id"] or _short_tool_id(),
+                name=str(name),
+                arguments=args if isinstance(args, dict) else {},
+                extra_content=b.get("extra_content"),
+                provider_specific_fields=b.get("prov"),
+                function_provider_specific_fields=b.get("fn_prov"),
+            ))
+
         return LLMResponse(
             content="".join(content_parts) or None,
-            tool_calls=[
-                ToolCallRequest(
-                    id=b["id"] or _short_tool_id(),
-                    name=str(b.get("name") or "unknown"),
-                    arguments=json_repair.loads(b["arguments"]) if b["arguments"] else {},
-                    extra_content=b.get("extra_content"),
-                    provider_specific_fields=b.get("prov"),
-                    function_provider_specific_fields=b.get("fn_prov"),
-                )
-                for b in tc_bufs.values()
-                if b.get("name")
-            ],
+            tool_calls=tool_calls,
             finish_reason=finish_reason,
             usage=usage,
         )
