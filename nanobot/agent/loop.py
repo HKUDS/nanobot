@@ -16,6 +16,7 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import MemoryConsolidator
+from nanobot.memory.store import NormalMemoryStore
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
@@ -231,7 +232,7 @@ class AgentLoop:
             asyncio.Semaphore(_max) if _max > 0 else None
         )
         self.memory_consolidator = MemoryConsolidator(
-            workspace=workspace,
+            store=NormalMemoryStore(workspace),
             provider=provider,
             model=self.model,
             sessions=self.sessions,

@@ -1,4 +1,4 @@
-"""Memory system for persistent agent memory."""
+"""Memory consolidation engine for the agent."""
 
 from __future__ import annotations
 
@@ -6,12 +6,13 @@ import asyncio
 import json
 import weakref
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
-from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain
+from nanobot.memory.base import BaseMemoryStore
+from nanobot.memory.store import NormalMemoryStore
+from nanobot.utils.helpers import estimate_message_tokens, estimate_prompt_tokens_chain
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -58,6 +59,7 @@ def _normalize_save_memory_args(args: Any) -> dict[str, Any] | None:
         return args[0] if args and isinstance(args[0], dict) else None
     return args if isinstance(args, dict) else None
 
+
 _TOOL_CHOICE_ERROR_MARKERS = (
     "tool_choice",
     "toolchoice",
@@ -72,56 +74,54 @@ def _is_tool_choice_unsupported(content: str | None) -> bool:
     return any(m in text for m in _TOOL_CHOICE_ERROR_MARKERS)
 
 
-class MemoryStore:
-    """Two-layer memory: MEMORY.md (long-term facts) + HISTORY.md (grep-searchable log)."""
+class MemoryConsolidator:
+    """Owns consolidation policy, locking, and session offset updates."""
 
+    _MAX_CONSOLIDATION_ROUNDS = 5
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
+    _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
 
-    def __init__(self, workspace: Path):
-        self.memory_dir = ensure_dir(workspace / "memory")
-        self.memory_file = self.memory_dir / "MEMORY.md"
-        self.history_file = self.memory_dir / "HISTORY.md"
+    def __init__(
+        self,
+        store: BaseMemoryStore,
+        provider: LLMProvider,
+        model: str,
+        sessions: SessionManager,
+        context_window_tokens: int,
+        build_messages: Callable[..., list[dict[str, Any]]],
+        get_tool_definitions: Callable[[], list[dict[str, Any]]],
+        max_completion_tokens: int = 4096,
+    ):
+        self.store = store
+        self.provider = provider
+        self.model = model
+        self.sessions = sessions
+        self.context_window_tokens = context_window_tokens
+        self.max_completion_tokens = max_completion_tokens
+        self._build_messages = build_messages
+        self._get_tool_definitions = get_tool_definitions
+        self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._consecutive_failures = 0
 
-    def read_long_term(self) -> str:
-        if self.memory_file.exists():
-            return self.memory_file.read_text(encoding="utf-8")
-        return ""
+    def get_lock(self, session_key: str) -> asyncio.Lock:
+        """Return the shared consolidation lock for one session."""
+        return self._locks.setdefault(session_key, asyncio.Lock())
 
-    def write_long_term(self, content: str) -> None:
-        self.memory_file.write_text(content, encoding="utf-8")
+    async def consolidate_messages(self, messages: list[dict[str, object]]) -> bool:
+        """Archive a selected message chunk into persistent memory."""
+        return await self._consolidate(messages, self.provider, self.model)
 
-    def append_history(self, entry: str) -> None:
-        with open(self.history_file, "a", encoding="utf-8") as f:
-            f.write(entry.rstrip() + "\n\n")
-
-    def get_memory_context(self) -> str:
-        long_term = self.read_long_term()
-        return f"## Long-term Memory\n{long_term}" if long_term else ""
-
-    @staticmethod
-    def _format_messages(messages: list[dict]) -> str:
-        lines = []
-        for message in messages:
-            if not message.get("content"):
-                continue
-            tools = f" [tools: {', '.join(message['tools_used'])}]" if message.get("tools_used") else ""
-            lines.append(
-                f"[{message.get('timestamp', '?')[:16]}] {message['role'].upper()}{tools}: {message['content']}"
-            )
-        return "\n".join(lines)
-
-    async def consolidate(
+    async def _consolidate(
         self,
         messages: list[dict],
         provider: LLMProvider,
         model: str,
     ) -> bool:
-        """Consolidate the provided message chunk into MEMORY.md + HISTORY.md."""
+        """Consolidate the provided message chunk into long-term memory + history."""
         if not messages:
             return True
 
-        current_memory = self.read_long_term()
+        current_memory = self.store.read_long_term()
         prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
 
 ## Current Long-term Memory
@@ -131,7 +131,10 @@ class MemoryStore:
 {self._format_messages(messages)}"""
 
         chat_messages = [
-            {"role": "system", "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."},
+            {
+                "role": "system",
+                "content": "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation.",
+            },
             {"role": "user", "content": prompt},
         ]
 
@@ -144,9 +147,7 @@ class MemoryStore:
                 tool_choice=forced,
             )
 
-            if response.finish_reason == "error" and _is_tool_choice_unsupported(
-                response.content
-            ):
+            if response.finish_reason == "error" and _is_tool_choice_unsupported(response.content):
                 logger.warning("Forced tool_choice unsupported, retrying with auto")
                 response = await provider.chat_with_retry(
                     messages=chat_messages,
@@ -186,10 +187,10 @@ class MemoryStore:
                 logger.warning("Memory consolidation: history_entry is empty after normalization")
                 return self._fail_or_raw_archive(messages)
 
-            self.append_history(entry)
+            self.store.append_history(entry)
             update = _ensure_text(update)
             if update != current_memory:
-                self.write_long_term(update)
+                self.store.write_long_term(update)
 
             self._consecutive_failures = 0
             logger.info("Memory consolidation done for {} messages", len(messages))
@@ -208,52 +209,31 @@ class MemoryStore:
         return True
 
     def _raw_archive(self, messages: list[dict]) -> None:
-        """Fallback: dump raw messages to HISTORY.md without LLM summarization."""
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-        self.append_history(
-            f"[{ts}] [RAW] {len(messages)} messages\n"
-            f"{self._format_messages(messages)}"
-        )
-        logger.warning(
-            "Memory consolidation degraded: raw-archived {} messages", len(messages)
-        )
+        """Fallback: dump raw messages to store without LLM summarization."""
+        if hasattr(self.store, "raw_archive"):
+            self.store.raw_archive(messages)
+        else:
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+            self.store.append_history(
+                f"[{ts}] [RAW] {len(messages)} messages\n"
+                f"{self._format_messages(messages)}"
+            )
 
-
-class MemoryConsolidator:
-    """Owns consolidation policy, locking, and session offset updates."""
-
-    _MAX_CONSOLIDATION_ROUNDS = 5
-
-    _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
-
-    def __init__(
-        self,
-        workspace: Path,
-        provider: LLMProvider,
-        model: str,
-        sessions: SessionManager,
-        context_window_tokens: int,
-        build_messages: Callable[..., list[dict[str, Any]]],
-        get_tool_definitions: Callable[[], list[dict[str, Any]]],
-        max_completion_tokens: int = 4096,
-    ):
-        self.store = MemoryStore(workspace)
-        self.provider = provider
-        self.model = model
-        self.sessions = sessions
-        self.context_window_tokens = context_window_tokens
-        self.max_completion_tokens = max_completion_tokens
-        self._build_messages = build_messages
-        self._get_tool_definitions = get_tool_definitions
-        self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
-
-    def get_lock(self, session_key: str) -> asyncio.Lock:
-        """Return the shared consolidation lock for one session."""
-        return self._locks.setdefault(session_key, asyncio.Lock())
-
-    async def consolidate_messages(self, messages: list[dict[str, object]]) -> bool:
-        """Archive a selected message chunk into persistent memory."""
-        return await self.store.consolidate(messages, self.provider, self.model)
+    @staticmethod
+    def _format_messages(messages: list[dict]) -> str:
+        lines = []
+        for message in messages:
+            if not message.get("content"):
+                continue
+            tools = (
+                f" [tools: {', '.join(message['tools_used'])}]"
+                if message.get("tools_used")
+                else ""
+            )
+            lines.append(
+                f"[{message.get('timestamp', '?')[:16]}] {message['role'].upper()}{tools}: {message['content']}"
+            )
+        return "\n".join(lines)
 
     def pick_consolidation_boundary(
         self,
@@ -298,7 +278,7 @@ class MemoryConsolidator:
         """Archive messages with guaranteed persistence (retries until raw-dump fallback)."""
         if not messages:
             return True
-        for _ in range(self.store._MAX_FAILURES_BEFORE_RAW_ARCHIVE):
+        for _ in range(self._MAX_FAILURES_BEFORE_RAW_ARCHIVE):
             if await self.consolidate_messages(messages):
                 return True
         return True
@@ -364,3 +344,7 @@ class MemoryConsolidator:
                 estimated, source = self.estimate_session_prompt_tokens(session)
                 if estimated <= 0:
                     return
+
+
+# Backward-compat alias — existing code importing MemoryStore from this path still works.
+MemoryStore = NormalMemoryStore
