@@ -321,12 +321,14 @@ class AgentLoop:
     def _tool_hint(tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
         def _fmt(tc):
-            args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
+            if tc is None:
+                return "unknown"
+            args = (tc.arguments[0] if isinstance(tc.arguments, list) and tc.arguments else tc.arguments) or {}
             val = next(iter(args.values()), None) if isinstance(args, dict) else None
             if not isinstance(val, str):
-                return tc.name
-            return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
-        return ", ".join(_fmt(tc) for tc in tool_calls)
+                return tc.name or "unknown"
+            return f'{tc.name or "unknown"}("{val[:40]}…")' if len(val) > 40 else f'{tc.name or "unknown"}("{val}")'
+        return ", ".join(_fmt(tc) for tc in tool_calls if tc)
 
     async def _run_agent_loop(
         self,
@@ -347,15 +349,49 @@ class AgentLoop:
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
         """
-        loop_hook = _LoopHook(
-            self,
-            on_progress=on_progress,
-            on_stream=on_stream,
-            on_stream_end=on_stream_end,
-            channel=channel,
-            chat_id=chat_id,
-            message_id=message_id,
-        )
+        loop_self = self
+
+        class _LoopHook(AgentHook):
+            def __init__(self) -> None:
+                self._stream_buf = ""
+
+            def wants_streaming(self) -> bool:
+                return on_stream is not None
+
+            async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+                from nanobot.utils.helpers import strip_think
+
+                prev_clean = strip_think(self._stream_buf)
+                self._stream_buf += delta
+                new_clean = strip_think(self._stream_buf)
+                incremental = new_clean[len(prev_clean):]
+                if incremental and on_stream:
+                    await on_stream(incremental)
+
+            async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+                if on_stream_end:
+                    await on_stream_end(resuming=resuming)
+                self._stream_buf = ""
+
+            async def before_execute_tools(self, context: AgentHookContext) -> None:
+                if on_progress:
+                    if not on_stream:
+                        thought = loop_self._strip_think(context.response.content if context.response else None)
+                        if thought:
+                            await on_progress(thought)
+                    tool_hint = loop_self._strip_think(loop_self._tool_hint(context.tool_calls))
+                    await on_progress(tool_hint, tool_hint=True)
+                for tc in (context.tool_calls or []):
+                    if not tc:
+                        continue
+                    args_str = json.dumps(tc.arguments, ensure_ascii=False)
+                    logger.info("Tool call: {}({})", tc.name or "unknown", args_str[:200])
+                loop_self._set_tool_context(channel, chat_id, message_id)
+
+            def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+                return loop_self._strip_think(content)
+
+        loop_hook = _LoopHook()
         hook: AgentHook = (
             _LoopHookChain(loop_hook, self._extra_hooks)
             if self._extra_hooks
@@ -542,7 +578,8 @@ class AgentLoop:
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
-        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
+        content = msg.content or ""
+        preview = content[:80] + "..." if len(content) > 80 else content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         key = session_key or msg.session_key
@@ -600,7 +637,8 @@ class AgentLoop:
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+        final_content_safe = final_content or ""
+        preview = final_content_safe[:120] + "..." if len(final_content_safe) > 120 else final_content_safe
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         meta = dict(msg.metadata or {})

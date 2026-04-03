@@ -407,7 +407,7 @@ class OpenAICompatProvider(LLMProvider):
                 if isinstance(tool_calls, list) and tool_calls:
                     raw_tool_calls.extend(tool_calls)
                     if ch_map.get("finish_reason") in ("tool_calls", "stop"):
-                        finish_reason = str(ch_map["finish_reason"])
+                        finish_reason = str(ch_map.get("finish_reason") or "stop")
                 if not content:
                     content = self._extract_text_content(m.get("content"))
                 if not reasoning_content:
@@ -415,6 +415,8 @@ class OpenAICompatProvider(LLMProvider):
 
             parsed_tool_calls = []
             for tc in raw_tool_calls:
+                if tc is None:
+                    continue
                 tc_map = self._maybe_mapping(tc) or {}
                 fn = self._maybe_mapping(tc_map.get("function")) or {}
                 args = fn.get("arguments", {})
@@ -442,30 +444,39 @@ class OpenAICompatProvider(LLMProvider):
             return LLMResponse(content="Error: API returned empty choices.", finish_reason="error")
 
         choice = response.choices[0]
+        if choice is None:
+            return LLMResponse(content="Error: API returned null choice.", finish_reason="error")
         msg = choice.message
-        content = msg.content
+        content = msg.content if msg else None
         finish_reason = choice.finish_reason
 
         raw_tool_calls: list[Any] = []
         for ch in response.choices:
+            if ch is None:
+                continue
             m = ch.message
-            if hasattr(m, "tool_calls") and m.tool_calls:
+            if m and hasattr(m, "tool_calls") and m.tool_calls:
                 raw_tool_calls.extend(m.tool_calls)
                 if ch.finish_reason in ("tool_calls", "stop"):
                     finish_reason = ch.finish_reason
-            if not content and m.content:
+            if not content and m and m.content:
                 content = m.content
 
         tool_calls = []
         for tc in raw_tool_calls:
-            args = tc.function.arguments
+            if tc is None:
+                continue
+            fn = getattr(tc, "function", None)
+            if fn is None:
+                continue
+            args = getattr(fn, "arguments", {})
             if isinstance(args, str):
                 args = json_repair.loads(args)
             ec, prov, fn_prov = _extract_tc_extras(tc)
             tool_calls.append(ToolCallRequest(
                 id=_short_tool_id(),
-                name=tc.function.name,
-                arguments=args,
+                name=getattr(fn, "name", "") or "",
+                arguments=args if isinstance(args, dict) else {},
                 extra_content=ec,
                 provider_specific_fields=prov,
                 function_provider_specific_fields=fn_prov,
@@ -513,6 +524,8 @@ class OpenAICompatProvider(LLMProvider):
                 buf["fn_prov"] = fn_prov
 
         for chunk in chunks:
+            if chunk is None:
+                continue
             if isinstance(chunk, str):
                 content_parts.append(chunk)
                 continue
@@ -544,26 +557,30 @@ class OpenAICompatProvider(LLMProvider):
                 usage = cls._extract_usage(chunk) or usage
                 continue
             choice = chunk.choices[0]
+            if choice is None:
+                continue
             if choice.finish_reason:
                 finish_reason = choice.finish_reason
             delta = choice.delta
-            if delta and delta.content:
-                content_parts.append(delta.content)
-            for tc in (delta.tool_calls or []) if delta else []:
-                _accum_tc(tc, getattr(tc, "index", 0))
+            if delta:
+                if delta.content:
+                    content_parts.append(delta.content)
+                for tc in (delta.tool_calls or []):
+                    _accum_tc(tc, getattr(tc, "index", 0))
 
         return LLMResponse(
             content="".join(content_parts) or None,
             tool_calls=[
                 ToolCallRequest(
                     id=b["id"] or _short_tool_id(),
-                    name=b["name"],
+                    name=str(b.get("name") or "unknown"),
                     arguments=json_repair.loads(b["arguments"]) if b["arguments"] else {},
                     extra_content=b.get("extra_content"),
                     provider_specific_fields=b.get("prov"),
                     function_provider_specific_fields=b.get("fn_prov"),
                 )
                 for b in tc_bufs.values()
+                if b.get("name")
             ],
             finish_reason=finish_reason,
             usage=usage,
