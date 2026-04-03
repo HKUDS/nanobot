@@ -176,6 +176,8 @@ class ExecToolConfig(Base):
     timeout: int = 60
     path_append: str = ""
     sandbox: str = ""  # sandbox backend: "" (none) or "bwrap"
+    max_timeout: int = 600
+    max_output: int = 10_000
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
