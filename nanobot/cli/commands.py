@@ -206,6 +206,35 @@ def _is_exit_command(command: str) -> bool:
     return command.lower() in EXIT_COMMANDS
 
 
+def _clean_ask_question(raw_question: str | None, options: list[str] | None) -> str:
+    """Keep the ask_user prompt concise by removing option lines already rendered as a menu."""
+    if not raw_question:
+        return "Agent asks:"
+
+    lines = [ln.strip() for ln in raw_question.splitlines() if ln.strip()]
+    if not lines:
+        return "Agent asks:"
+
+    option_set = {opt.strip() for opt in (options or []) if isinstance(opt, str)}
+    filtered: list[str] = []
+    for ln in lines:
+        normalized = ln.lstrip("-*0123456789. )\t").strip()
+        if normalized in option_set:
+            continue
+        low = normalized.lower()
+        if low in {"options:", "option:", "choices:", "choice:", "选项:", "问题:", "场景:", "当前上下文:"}:
+            continue
+        filtered.append(ln)
+
+    if not filtered:
+        return lines[0]
+
+    for ln in filtered:
+        if "?" in ln or "？" in ln:
+            return ln
+    return filtered[-1]
+
+
 async def _read_interactive_input_async() -> str:
     """Read user input using prompt_toolkit (handles paste, history, display).
 
@@ -880,28 +909,77 @@ def agent(
                         _flush_pending_tty_input()
                         
                         if next_ask_options:
-                            import questionary
-                            
+                            from prompt_toolkit.application import Application
+                            from prompt_toolkit.key_binding import KeyBindings
+                            from prompt_toolkit.layout.containers import Window
+                            from prompt_toolkit.layout.controls import FormattedTextControl
+                            from prompt_toolkit.layout.layout import Layout
+                            from prompt_toolkit.styles import Style
+                            from prompt_toolkit.formatted_text import HTML
+
                             _restore_terminal()
-                            
+
                             choices = list(next_ask_options)
-                            choices.append("Other (type your answer)")
-                            
-                            choice = await questionary.select(
-                                next_ask_question or "Agent asks:",
-                                choices=choices,
-                                instruction="\n↑/↓: navigate, Enter: confirm",
-                                pointer="❯",
-                            ).ask_async()
-                            
-                            if choice == "Other (type your answer)":
-                                user_input = await questionary.text("Please type your answer:").ask_async()
+                            choices.append("Other (press Enter to type)")
+
+                            bindings = KeyBindings()
+                            state = {"selected": 0}
+
+                            @bindings.add("up")
+                            def _move_up(event):
+                                state["selected"] = max(0, state["selected"] - 1)
+
+                            @bindings.add("down")
+                            def _move_down(event):
+                                state["selected"] = min(len(choices) - 1, state["selected"] + 1)
+
+                            @bindings.add("enter")
+                            def _confirm(event):
+                                event.app.exit(result=choices[state["selected"]])
+
+                            @bindings.add("c-c")
+                            def _cancel(event):
+                                event.app.exit(result=None)
+
+                            def get_text():
+                                q = _clean_ask_question(next_ask_question, choices)
+                                inst = " (↑/↓: navigate, Enter: confirm)"
+                                res = [("class:title", f"? {q}"), ("class:instruction", f"{inst}\n")]
+                                for i, opt in enumerate(choices):
+                                    if i == state["selected"]:
+                                        res.append(("class:selected", f"❯ {opt}\n"))
+                                    else:
+                                        res.append(("", f"  {opt}\n"))
+                                if res:
+                                    cls, txt = res[-1]
+                                    res[-1] = (cls, txt.rstrip("\n"))
+                                return res
+
+                            app = Application(
+                                layout=Layout(Window(content=FormattedTextControl(get_text), dont_extend_height=True)),
+                                key_bindings=bindings,
+                                full_screen=False,
+                                style=Style.from_dict({
+                                    "title": "bold",
+                                    "instruction": "ansigray",
+                                    "selected": "ansicyan bold",
+                                })
+                            )
+
+                            choice = await app.run_async()
+
+                            if choice == "Other (press Enter to type)":
+                                with patch_stdout():
+                                    user_input = await _PROMPT_SESSION.prompt_async(HTML("<b fg='ansiblue'>Please type your custom answer: </b>"))
+                                if not (user_input or "").strip():
+                                    await _print_interactive_line("Empty input, please type an answer or pick another option.")
+                                    continue
                             elif choice:
                                 user_input = str(choice)
                                 console.print(f"[dim]You selected: {user_input}[/dim]")
                             else:
                                 user_input = "User cancelled the prompt."
-                            
+
                             next_ask_options = None
                         else:
                             user_input = await _read_interactive_input_async()

@@ -19,7 +19,9 @@ class AskUserTool(Tool):
     name = "ask_user"
     description = (
         "Ask the user a question to confirm an action, get a decision, or request more information. "
-        "The agent execution will pause and wait for the user's reply."
+        "The agent execution will pause and wait for the user's reply. "
+        "IMPORTANT: Do not list or enumerate the options in your response body before calling this tool. "
+        "Just provide the 'question' and 'options' in the tool call, and they will be rendered as an interactive menu automatically."
     )
     parameters = {
         "type": "object",
