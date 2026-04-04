@@ -381,36 +381,20 @@ def _onboard_plugins(config_path: Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def _make_provider(config: Config):
-    """Create the appropriate LLM provider from config.
+def _build_provider_for_model(config: Config, model: str):
+    """Instantiate an LLMProvider for *model* using keys already in *config*.
 
-    Routing is driven by ``ProviderSpec.backend`` in the registry.
+    Raises on misconfiguration (missing key for a non-exempt backend) so callers
+    can decide whether to abort or just skip the provider.
     """
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.registry import find_by_name
 
-    model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
     spec = find_by_name(provider_name) if provider_name else None
     backend = spec.backend if spec else "openai_compat"
 
-    # --- validation ---
-    if backend == "azure_openai":
-        if not p or not p.api_key or not p.api_base:
-            console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
-            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
-            console.print("Use the model field to specify the deployment name.")
-            raise typer.Exit(1)
-    elif backend == "openai_compat" and not model.startswith("bedrock/"):
-        needs_key = not (p and p.api_key)
-        exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
-        if needs_key and not exempt:
-            console.print("[red]Error: No API key configured.[/red]")
-            console.print("Set one in ~/.nanobot/config.json under providers section")
-            raise typer.Exit(1)
-
-    # --- instantiation by backend ---
     if backend == "openai_codex":
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
         provider = OpenAICodexProvider(default_model=model)
@@ -448,6 +432,48 @@ def _make_provider(config: Config):
         max_tokens=defaults.max_tokens,
         reasoning_effort=defaults.reasoning_effort,
     )
+    return provider
+
+
+def _make_provider(config: Config):
+    """Create the primary LLM provider from config, with fallback providers attached.
+
+    Routing is driven by ``ProviderSpec.backend`` in the registry.
+    Fallback providers are built from ``agents.defaults.fallbackModels`` and tried
+    in order when the primary is rate-limited (429).
+    """
+    model = config.agents.defaults.model
+
+    # --- validation for primary model ---
+    from nanobot.providers.registry import find_by_name
+    provider_name = config.get_provider_name(model)
+    p = config.get_provider(model)
+    spec = find_by_name(provider_name) if provider_name else None
+    backend = spec.backend if spec else "openai_compat"
+
+    if backend == "azure_openai":
+        if not p or not p.api_key or not p.api_base:
+            console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
+            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
+            console.print("Use the model field to specify the deployment name.")
+            raise typer.Exit(1)
+    elif backend == "openai_compat" and not model.startswith("bedrock/"):
+        needs_key = not (p and p.api_key)
+        exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
+        if needs_key and not exempt:
+            console.print("[red]Error: No API key configured.[/red]")
+            console.print("Set one in ~/.nanobot/config.json under providers section")
+            raise typer.Exit(1)
+
+    provider = _build_provider_for_model(config, model)
+
+    # --- attach fallback providers ---
+    for fb_model in config.agents.defaults.fallback_models:
+        try:
+            provider.fallback_providers.append(_build_provider_for_model(config, fb_model))
+        except Exception as exc:
+            console.print(f"[yellow]Warning: could not build fallback provider for '{fb_model}': {exc}[/yellow]")
+
     return provider
 
 

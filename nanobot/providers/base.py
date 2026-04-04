@@ -98,6 +98,7 @@ class LLMProvider(ABC):
         self.api_key = api_key
         self.api_base = api_base
         self.generation: GenerationSettings = GenerationSettings()
+        self.fallback_providers: list["LLMProvider"] = []
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -479,6 +480,21 @@ class LLMProvider(ABC):
                     retry_kw["messages"] = stripped
                     return await call(**retry_kw)
                 return response
+
+            for i, fallback in enumerate(self.fallback_providers):
+                logger.info(
+                    "Primary rate-limited, trying fallback provider {} of {}",
+                    i + 1, len(self.fallback_providers),
+                )
+                fb_response = await getattr(fallback, call.__name__)(**{**kw, "model": None})
+                if fb_response.finish_reason != "error":
+                    return fb_response
+                if not self._is_transient_error(fb_response.content):
+                    return fb_response
+                logger.warning(
+                    "Fallback provider {} also rate-limited: {}",
+                    i + 1, (fb_response.content or "")[:120].lower(),
+                )
 
             if persistent and identical_error_count >= self._PERSISTENT_IDENTICAL_ERROR_LIMIT:
                 logger.warning(
