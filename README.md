@@ -117,7 +117,9 @@
 - [Agent Social Network](#-agent-social-network)
 - [Configuration](#️-configuration)
 - [Multiple Instances](#-multiple-instances)
+- [Memory](#-memory)
 - [CLI Reference](#-cli-reference)
+- [In-Chat Commands](#-in-chat-commands)
 - [Python SDK](#-python-sdk)
 - [OpenAI-Compatible API](#-openai-compatible-api)
 - [Docker](#-docker)
@@ -151,7 +153,12 @@
 
 ## 📦 Install
 
-**Install from source** (latest features, recommended for development)
+> [!IMPORTANT]
+> This README may describe features that are available first in the latest source code.
+> If you want the newest features and experiments, install from source.
+> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
+
+**Install from source** (latest features, experimental changes may land here first; recommended for development)
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
@@ -159,13 +166,13 @@ cd nanobot
 pip install -e .
 ```
 
-**Install with [uv](https://github.com/astral-sh/uv)** (stable, fast)
+**Install with [uv](https://github.com/astral-sh/uv)** (stable release, fast)
 
 ```bash
 uv tool install nanobot-ai
 ```
 
-**Install from PyPI** (stable)
+**Install from PyPI** (stable release)
 
 ```bash
 pip install nanobot-ai
@@ -849,6 +856,11 @@ Simply send the command above to your nanobot (via CLI or any chat channel), and
 
 Config file: `~/.nanobot/config.json`
 
+> [!NOTE]
+> If your config file is older than the current schema, you can refresh it without overwriting your existing values:
+> run `nanobot onboard`, then answer `N` when asked whether to overwrite the config.
+> nanobot will merge in missing default fields and keep your current settings.
+
 ### Providers
 
 > [!TIP]
@@ -1228,6 +1240,16 @@ By default, web tools are enabled and web search uses `duckduckgo`, so search wo
 
 If you want to disable all built-in web tools entirely, set `tools.web.enable` to `false`. This removes both `web_search` and `web_fetch` from the tool list sent to the LLM.
 
+If you need to allow trusted private ranges such as Tailscale / CGNAT addresses, you can explicitly exempt them from SSRF blocking with `tools.ssrfWhitelist`:
+
+```json
+{
+  "tools": {
+    "ssrfWhitelist": ["100.64.0.0/10"]
+  }
+}
+```
+
 | Provider | Config fields | Env var fallback | Free |
 |----------|--------------|------------------|------|
 | `brave` | `apiKey` | `BRAVE_API_KEY` | No |
@@ -1561,6 +1583,18 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 - `--workspace` overrides the workspace defined in the config file
 - Cron jobs and runtime media/state are derived from the config directory
 
+## 🧠 Memory
+
+nanobot uses a layered memory system designed to stay light in the moment and durable over
+time.
+
+- `memory/history.jsonl` stores append-only summarized history
+- `SOUL.md`, `USER.md`, and `memory/MEMORY.md` store long-term knowledge managed by Dream
+- `Dream` runs on a schedule and can also be triggered manually
+- memory changes can be inspected and restored with built-in commands
+
+If you want the full design, see [docs/MEMORY.md](docs/MEMORY.md).
+
 ## 💻 CLI Reference
 
 | Command | Description |
@@ -1582,6 +1616,23 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot channels status` | Show channel status |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
+
+## 💬 In-Chat Commands
+
+These commands work inside chat channels and interactive agent sessions:
+
+| Command | Description |
+|---------|-------------|
+| `/new` | Start a new conversation |
+| `/stop` | Stop the current task |
+| `/restart` | Restart the bot |
+| `/status` | Show bot status |
+| `/dream` | Run Dream memory consolidation now |
+| `/dream-log` | Show the latest Dream memory change |
+| `/dream-log <sha>` | Show a specific Dream memory change |
+| `/dream-restore` | List recent Dream memory versions |
+| `/dream-restore <sha>` | Restore memory to the state before a specific change |
+| `/help` | Show available in-chat commands |
 
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>

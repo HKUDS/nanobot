@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Two-layer memory system with grep-based recall.
+description: Two-layer memory system with Dream-managed knowledge files.
 always: true
 ---
 
@@ -8,30 +8,22 @@ always: true
 
 ## Structure
 
-- `memory/MEMORY.md` — Long-term facts (preferences, project context, relationships). Always loaded into your context.
-- `memory/HISTORY.md` — Append-only event log. NOT loaded into context. Search it with grep-style tools or in-memory filters. Each entry starts with [YYYY-MM-DD HH:MM].
+- `SOUL.md` — Bot personality and communication style. **Managed by Dream.** Do NOT edit.
+- `USER.md` — User profile and preferences. **Managed by Dream.** Do NOT edit.
+- `memory/MEMORY.md` — Long-term facts (project context, important events). **Managed by Dream.** Do NOT edit.
+- `memory/history.jsonl` — append-only JSONL, not loaded into context. search with `jq`-style tools.
 
 ## Search Past Events
 
-Choose the search method based on file size:
+`memory/history.jsonl` is JSONL format — each line is a JSON object with `cursor`, `timestamp`, `content`.
 
-- Small `memory/HISTORY.md`: use `read_file`, then search in-memory
-- Large or long-lived `memory/HISTORY.md`: use the `exec` tool for targeted search
+Examples (replace `keyword`):
+- **Python (cross-platform):** `python -c "import json; [print(json.loads(l).get('content','')) for l in open('memory/history.jsonl','r',encoding='utf-8') if l.strip() and 'keyword' in l.lower()][-20:]"`
+- **jq:** `cat memory/history.jsonl | jq -r 'select(.content | test("keyword"; "i")) | .content' | tail -20`
+- **grep:** `grep -i "keyword" memory/history.jsonl`
 
-Examples:
-- **Linux/macOS:** `grep -i "keyword" memory/HISTORY.md`
-- **Windows:** `findstr /i "keyword" memory\HISTORY.md`
-- **Cross-platform Python:** `python -c "from pathlib import Path; text = Path('memory/HISTORY.md').read_text(encoding='utf-8'); print('\n'.join([l for l in text.splitlines() if 'keyword' in l.lower()][-20:]))"`
+## Important
 
-Prefer targeted command-line search for large history files.
-
-## When to Update MEMORY.md
-
-Write important facts immediately using `edit_file` or `write_file`:
-- User preferences ("I prefer dark mode")
-- Project context ("The API uses OAuth2")
-- Relationships ("Alice is the project lead")
-
-## Auto-consolidation
-
-Old conversations are automatically summarized and appended to HISTORY.md when the session grows large. Long-term facts are extracted to MEMORY.md. You don't need to manage this.
+- **Do NOT edit SOUL.md, USER.md, or MEMORY.md.** They are automatically managed by Dream.
+- If you notice outdated information, it will be corrected when Dream runs next.
+- Users can view Dream's activity with the `/dream-log` command.

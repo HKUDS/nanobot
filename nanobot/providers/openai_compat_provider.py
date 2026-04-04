@@ -136,6 +136,7 @@ class OpenAICompatProvider(LLMProvider):
             api_key=api_key or "no-key",
             base_url=effective_base,
             default_headers=default_headers,
+            max_retries=0,
         )
 
     def _setup_env(self, api_key: str, api_base: str | None) -> None:
@@ -585,9 +586,14 @@ class OpenAICompatProvider(LLMProvider):
 
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
-        body = getattr(e, "doc", None) or getattr(getattr(e, "response", None), "text", None)
-        msg = f"Error: {body.strip()[:500]}" if body and body.strip() else f"Error calling LLM: {e}"
-        return LLMResponse(content=msg, finish_reason="error")
+        response = getattr(e, "response", None)
+        body = getattr(e, "doc", None) or getattr(response, "text", None)
+        body_text = str(body).strip() if body is not None else ""
+        msg = f"Error: {body_text[:500]}" if body_text else f"Error calling LLM: {e}"
+        retry_after = LLMProvider._extract_retry_after_from_headers(getattr(response, "headers", None))
+        if retry_after is None:
+            retry_after = LLMProvider._extract_retry_after(msg)
+        return LLMResponse(content=msg, finish_reason="error", retry_after=retry_after)
 
     # ------------------------------------------------------------------
     # Public API

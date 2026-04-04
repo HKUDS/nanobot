@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, ToolCallRequest
 from nanobot.utils.helpers import (
@@ -28,10 +29,6 @@ from nanobot.utils.runtime import (
     repeated_external_lookup_error,
 )
 
-_DEFAULT_MAX_ITERATIONS_MESSAGE = (
-    "I reached the maximum number of tool call iterations ({max_iterations}) "
-    "without completing the task. You can try breaking the task into smaller steps."
-)
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _SNIP_SAFETY_BUFFER = 1024
 @dataclass(slots=True)
@@ -249,8 +246,16 @@ class AgentRunner:
             break
         else:
             stop_reason = "max_iterations"
-            template = spec.max_iterations_message or _DEFAULT_MAX_ITERATIONS_MESSAGE
-            final_content = template.format(max_iterations=spec.max_iterations)
+            if spec.max_iterations_message:
+                final_content = spec.max_iterations_message.format(
+                    max_iterations=spec.max_iterations,
+                )
+            else:
+                final_content = render_template(
+                    "agent/max_iterations_message.md",
+                    strip=True,
+                    max_iterations=spec.max_iterations,
+                )
             self._append_final_message(messages, final_content)
 
         return AgentRunResult(

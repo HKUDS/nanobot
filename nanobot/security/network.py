@@ -22,8 +22,24 @@ _BLOCKED_NETWORKS = [
 
 _URL_RE = re.compile(r"https?://[^\s\"'`;|<>]+", re.IGNORECASE)
 
+_allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+
+
+def configure_ssrf_whitelist(cidrs: list[str]) -> None:
+    """Allow specific CIDR ranges to bypass SSRF blocking (e.g. Tailscale's 100.64.0.0/10)."""
+    global _allowed_networks
+    nets = []
+    for cidr in cidrs:
+        try:
+            nets.append(ipaddress.ip_network(cidr, strict=False))
+        except ValueError:
+            pass
+    _allowed_networks = nets
+
 
 def _is_private(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if _allowed_networks and any(addr in net for net in _allowed_networks):
+        return False
     return any(addr in net for net in _BLOCKED_NETWORKS)
 
 

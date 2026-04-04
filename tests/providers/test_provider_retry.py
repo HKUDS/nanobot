@@ -240,6 +240,39 @@ async def test_chat_with_retry_uses_retry_after_and_emits_wait_progress(monkeypa
     assert progress and "7s" in progress[0]
 
 
+def test_extract_retry_after_supports_common_provider_formats() -> None:
+    assert LLMProvider._extract_retry_after('{"error":{"retry_after":20}}') == 20.0
+    assert LLMProvider._extract_retry_after("Rate limit reached, please try again in 20s") == 20.0
+    assert LLMProvider._extract_retry_after("retry-after: 20") == 20.0
+
+
+def test_extract_retry_after_from_headers_supports_numeric_and_http_date() -> None:
+    assert LLMProvider._extract_retry_after_from_headers({"Retry-After": "20"}) == 20.0
+    assert LLMProvider._extract_retry_after_from_headers({"retry-after": "20"}) == 20.0
+    assert LLMProvider._extract_retry_after_from_headers(
+        {"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"},
+    ) == 0.1
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_prefers_structured_retry_after_when_present(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        LLMResponse(content="429 rate limit", finish_reason="error", retry_after=9.0),
+        LLMResponse(content="ok"),
+    ])
+    delays: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.content == "ok"
+    assert delays == [9.0]
+
+
 @pytest.mark.asyncio
 async def test_persistent_retry_aborts_after_ten_identical_transient_errors(monkeypatch) -> None:
     provider = ScriptedProvider([
@@ -262,5 +295,4 @@ async def test_persistent_retry_aborts_after_ten_identical_transient_errors(monk
     assert response.content == "429 rate limit"
     assert provider.calls == 10
     assert delays == [1, 2, 4, 4, 4, 4, 4, 4, 4]
-
 

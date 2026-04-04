@@ -32,8 +32,10 @@ class _FakeHTTPXRequest:
 class _FakeUpdater:
     def __init__(self, on_start_polling) -> None:
         self._on_start_polling = on_start_polling
+        self.start_polling_kwargs = None
 
     async def start_polling(self, **kwargs) -> None:
+        self.start_polling_kwargs = kwargs
         self._on_start_polling()
 
 
@@ -184,7 +186,11 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     assert poll_req.kwargs["connection_pool_size"] == 4
     assert builder.request_value is api_req
     assert builder.get_updates_request_value is poll_req
+    assert callable(app.updater.start_polling_kwargs["error_callback"])
     assert any(cmd.command == "status" for cmd in app.bot.commands)
+    assert any(cmd.command == "dream" for cmd in app.bot.commands)
+    assert any(cmd.command == "dream_log" for cmd in app.bot.commands)
+    assert any(cmd.command == "dream_restore" for cmd in app.bot.commands)
 
 
 @pytest.mark.asyncio
@@ -302,6 +308,26 @@ async def test_on_error_logs_network_issues_as_warning(monkeypatch) -> None:
     await channel._on_error(object(), SimpleNamespace(error=NetworkError("proxy disconnected")))
 
     assert recorded == [("warning", "Telegram network issue: proxy disconnected")]
+
+
+@pytest.mark.asyncio
+async def test_on_error_summarizes_empty_network_error(monkeypatch) -> None:
+    from telegram.error import NetworkError
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    recorded: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.logger.warning",
+        lambda message, error: recorded.append(("warning", message.format(error))),
+    )
+
+    await channel._on_error(object(), SimpleNamespace(error=NetworkError("")))
+
+    assert recorded == [("warning", "Telegram network issue: NetworkError")]
 
 
 @pytest.mark.asyncio
@@ -963,6 +989,48 @@ async def test_forward_command_does_not_inject_reply_context() -> None:
 
 
 @pytest.mark.asyncio
+async def test_forward_command_preserves_dream_log_args_and_strips_bot_suffix() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    update = _make_telegram_update(text="/dream-log@nanobot_test deadbeef", reply_to_message=None)
+
+    await channel._forward_command(update, None)
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == "/dream-log deadbeef"
+
+
+@pytest.mark.asyncio
+async def test_forward_command_normalizes_telegram_safe_dream_aliases() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    update = _make_telegram_update(text="/dream_restore@nanobot_test deadbeef", reply_to_message=None)
+
+    await channel._forward_command(update, None)
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == "/dream-restore deadbeef"
+
+
+@pytest.mark.asyncio
 async def test_on_help_includes_restart_command() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
@@ -977,3 +1045,6 @@ async def test_on_help_includes_restart_command() -> None:
     help_text = update.message.reply_text.await_args.args[0]
     assert "/restart" in help_text
     assert "/status" in help_text
+    assert "/dream" in help_text
+    assert "/dream-log" in help_text
+    assert "/dream-restore" in help_text

@@ -12,13 +12,14 @@ from typing import Any, Literal
 from loguru import logger
 from pydantic import Field
 from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
-from telegram.error import BadRequest, TimedOut
+from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.command.builtin import build_help_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
@@ -196,9 +197,12 @@ class TelegramChannel(BaseChannel):
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("stop", "Stop the current task"),
-        BotCommand("help", "Show available commands"),
         BotCommand("restart", "Restart the bot"),
         BotCommand("status", "Show bot status"),
+        BotCommand("dream", "Run Dream memory consolidation now"),
+        BotCommand("dream_log", "Show the latest Dream memory change"),
+        BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
+        BotCommand("help", "Show available commands"),
     ]
 
     @classmethod
@@ -241,6 +245,17 @@ class TelegramChannel(BaseChannel):
 
         return sid in allow_list or username in allow_list
 
+    @staticmethod
+    def _normalize_telegram_command(content: str) -> str:
+        """Map Telegram-safe command aliases back to canonical nanobot commands."""
+        if not content.startswith("/"):
+            return content
+        if content == "/dream_log" or content.startswith("/dream_log "):
+            return content.replace("/dream_log", "/dream-log", 1)
+        if content == "/dream_restore" or content.startswith("/dream_restore "):
+            return content.replace("/dream_restore", "/dream-restore", 1)
+        return content
+
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
         if not self.config.token:
@@ -277,7 +292,18 @@ class TelegramChannel(BaseChannel):
 
         # Add command handlers (using Regex to support @username suffixes before bot initialization)
         self._app.add_handler(MessageHandler(filters.Regex(r"^/start(?:@\w+)?$"), self._on_start))
-        self._app.add_handler(MessageHandler(filters.Regex(r"^/(new|stop|restart|status)(?:@\w+)?$"), self._forward_command))
+        self._app.add_handler(
+            MessageHandler(
+                filters.Regex(r"^/(new|stop|restart|status|dream)(?:@\w+)?(?:\s+.*)?$"),
+                self._forward_command,
+            )
+        )
+        self._app.add_handler(
+            MessageHandler(
+                filters.Regex(r"^/(dream-log|dream_log|dream-restore|dream_restore)(?:@\w+)?(?:\s+.*)?$"),
+                self._forward_command,
+            )
+        )
         self._app.add_handler(MessageHandler(filters.Regex(r"^/help(?:@\w+)?$"), self._on_help))
 
         # Add message handler for text, photos, voice, documents
@@ -310,7 +336,8 @@ class TelegramChannel(BaseChannel):
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
             allowed_updates=["message"],
-            drop_pending_updates=False  # Process pending messages on startup
+            drop_pending_updates=False,  # Process pending messages on startup
+            error_callback=self._on_polling_error,
         )
 
         # Keep running until stopped
@@ -599,14 +626,7 @@ class TelegramChannel(BaseChannel):
         """Handle /help command, bypassing ACL so all users can access it."""
         if not update.message:
             return
-        await update.message.reply_text(
-            "🐈 nanobot commands:\n"
-            "/new — Start a new conversation\n"
-            "/stop — Stop the current task\n"
-            "/restart — Restart the bot\n"
-            "/status — Show bot status\n"
-            "/help — Show available commands"
-        )
+        await update.message.reply_text(build_help_text())
 
     @staticmethod
     def _sender_id(user) -> str:
@@ -803,6 +823,7 @@ class TelegramChannel(BaseChannel):
             cmd_part, *rest = content.split(" ", 1)
             cmd_part = cmd_part.split("@")[0]
             content = f"{cmd_part} {rest[0]}" if rest else cmd_part
+        content = self._normalize_telegram_command(content)
             
         await self._handle_message(
             sender_id=self._sender_id(user),
@@ -966,14 +987,36 @@ class TelegramChannel(BaseChannel):
         except Exception as e:
             logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
 
+    @staticmethod
+    def _format_telegram_error(exc: Exception) -> str:
+        """Return a short, readable error summary for logs."""
+        text = str(exc).strip()
+        if text:
+            return text
+        if exc.__cause__ is not None:
+            cause = exc.__cause__
+            cause_text = str(cause).strip()
+            if cause_text:
+                return f"{exc.__class__.__name__} ({cause_text})"
+            return f"{exc.__class__.__name__} ({cause.__class__.__name__})"
+        return exc.__class__.__name__
+
+    def _on_polling_error(self, exc: Exception) -> None:
+        """Keep long-polling network failures to a single readable line."""
+        summary = self._format_telegram_error(exc)
+        if isinstance(exc, (NetworkError, TimedOut)):
+            logger.warning("Telegram polling network issue: {}", summary)
+        else:
+            logger.error("Telegram polling error: {}", summary)
+
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
-        from telegram.error import NetworkError, TimedOut
-        
+        summary = self._format_telegram_error(context.error)
+
         if isinstance(context.error, (NetworkError, TimedOut)):
-            logger.warning("Telegram network issue: {}", str(context.error))
+            logger.warning("Telegram network issue: {}", summary)
         else:
-            logger.error("Telegram error: {}", context.error)
+            logger.error("Telegram error: {}", summary)
 
     def _get_extension(
         self,
