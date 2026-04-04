@@ -236,7 +236,7 @@ class OpenAICompatProvider(LLMProvider):
         if reasoning_effort and reasoning_effort.lower() != "none":
             return False
         name = model_name.lower()
-        return not any(token in name for token in ("o1", "o3", "o4"))
+        return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
 
     def _build_kwargs(
         self,

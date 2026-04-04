@@ -226,6 +226,38 @@ def test_openai_model_passthrough() -> None:
     assert provider.get_default_model() == "gpt-4o"
 
 
+def test_openai_compat_supports_temperature_matches_reasoning_model_rules() -> None:
+    assert OpenAICompatProvider._supports_temperature("gpt-4o") is True
+    assert OpenAICompatProvider._supports_temperature("gpt-5-chat") is False
+    assert OpenAICompatProvider._supports_temperature("o3-mini") is False
+    assert OpenAICompatProvider._supports_temperature("gpt-4o", reasoning_effort="medium") is False
+
+
+def test_openai_compat_build_kwargs_uses_gpt5_safe_parameters() -> None:
+    spec = find_by_name("openai")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-5-chat",
+            spec=spec,
+        )
+
+    kwargs = provider._build_kwargs(
+        messages=[{"role": "user", "content": "hello"}],
+        tools=None,
+        model="gpt-5-chat",
+        max_tokens=4096,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    assert kwargs["model"] == "gpt-5-chat"
+    assert kwargs["max_completion_tokens"] == 4096
+    assert "max_tokens" not in kwargs
+    assert "temperature" not in kwargs
+
+
 def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
