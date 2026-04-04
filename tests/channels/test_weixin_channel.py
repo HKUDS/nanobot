@@ -572,6 +572,85 @@ async def test_process_message_skips_bot_messages() -> None:
     assert bus.inbound_size == 0
 
 
+@pytest.mark.asyncio
+async def test_process_message_starts_typing_on_inbound() -> None:
+    """Typing indicator fires immediately when user message arrives."""
+    channel, _bus = _make_channel()
+    channel._running = True
+    channel._client = object()
+    channel._token = "token"
+    channel._start_typing = AsyncMock()
+
+    await channel._process_message(
+        {
+            "message_type": 1,
+            "message_id": "m-typing",
+            "from_user_id": "wx-user",
+            "context_token": "ctx-typing",
+            "item_list": [
+                {"type": ITEM_TEXT, "text_item": {"text": "hello"}},
+            ],
+        }
+    )
+
+    channel._start_typing.assert_awaited_once_with("wx-user", "ctx-typing")
+
+
+@pytest.mark.asyncio
+async def test_send_final_message_clears_typing_indicator() -> None:
+    """Non-progress send should cancel typing status."""
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "ctx-2"
+    channel._typing_tickets["wx-user"] = {"ticket": "ticket-2", "next_fetch_at": 9999999999}
+    channel._send_text = AsyncMock()
+    channel._api_post = AsyncMock(return_value={"ret": 0})
+
+    await channel.send(
+        type("Msg", (), {"chat_id": "wx-user", "content": "pong", "media": [], "metadata": {}})()
+    )
+
+    channel._send_text.assert_awaited_once_with("wx-user", "pong", "ctx-2")
+    typing_cancel_calls = [
+        c for c in channel._api_post.await_args_list
+        if c.args[0] == "ilink/bot/sendtyping" and c.args[1]["status"] == 2
+    ]
+    assert len(typing_cancel_calls) >= 1
+
+
+@pytest.mark.asyncio
+async def test_send_progress_message_keeps_typing_indicator() -> None:
+    """Progress messages must not cancel typing status."""
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "ctx-2"
+    channel._typing_tickets["wx-user"] = {"ticket": "ticket-2", "next_fetch_at": 9999999999}
+    channel._send_text = AsyncMock()
+    channel._api_post = AsyncMock(return_value={"ret": 0})
+
+    await channel.send(
+        type(
+            "Msg",
+            (),
+            {
+                "chat_id": "wx-user",
+                "content": "thinking",
+                "media": [],
+                "metadata": {"_progress": True},
+            },
+        )()
+    )
+
+    channel._send_text.assert_awaited_once_with("wx-user", "thinking", "ctx-2")
+    typing_cancel_calls = [
+        c for c in channel._api_post.await_args_list
+        if c.args and c.args[0] == "ilink/bot/sendtyping" and c.args[1].get("status") == 2
+    ]
+    assert len(typing_cancel_calls) == 0
+
+
 class _DummyHttpResponse:
     def __init__(self, *, headers: dict[str, str] | None = None, status_code: int = 200) -> None:
         self.headers = headers or {}

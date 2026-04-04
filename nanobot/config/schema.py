@@ -81,6 +81,7 @@ class ProvidersConfig(Base):
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
     mistral: ProviderConfig = Field(default_factory=ProviderConfig)
     stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰)
+    xiaomi_mimo: ProviderConfig = Field(default_factory=ProviderConfig)  # Xiaomi MIMO (小米)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
@@ -118,7 +119,7 @@ class GatewayConfig(Base):
 class WebSearchConfig(Base):
     """Web search tool configuration."""
 
-    provider: str = "brave"  # brave, tavily, duckduckgo, searxng, jina
+    provider: str = "duckduckgo"  # brave, tavily, duckduckgo, searxng, jina
     api_key: str = ""
     base_url: str = ""  # SearXNG base URL
     max_results: int = 5
@@ -127,6 +128,7 @@ class WebSearchConfig(Base):
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
+    enable: bool = True
     proxy: str | None = (
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )

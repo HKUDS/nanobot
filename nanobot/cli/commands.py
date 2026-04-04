@@ -37,6 +37,11 @@ from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.restart import (
+    consume_restart_notice_from_env,
+    format_restart_completed_message,
+    should_show_cli_restart_notice,
+)
 
 app = typer.Typer(
     name="nanobot",
@@ -545,8 +550,7 @@ def serve(
         context_block_limit=runtime_config.agents.defaults.context_block_limit,
         max_tool_result_chars=runtime_config.agents.defaults.max_tool_result_chars,
         provider_retry_mode=runtime_config.agents.defaults.provider_retry_mode,
-        web_search_config=runtime_config.tools.web.search,
-        web_proxy=runtime_config.tools.web.proxy or None,
+        web_config=runtime_config.tools.web,
         exec_config=runtime_config.tools.exec,
         restrict_to_workspace=runtime_config.tools.restrict_to_workspace,
         session_manager=session_manager,
@@ -632,11 +636,10 @@ def gateway(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
+        web_config=config.tools.web,
         context_block_limit=config.agents.defaults.context_block_limit,
         max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
         provider_retry_mode=config.agents.defaults.provider_retry_mode,
-        web_search_config=config.tools.web.search,
-        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -841,11 +844,10 @@ def agent(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
+        web_config=config.tools.web,
         context_block_limit=config.agents.defaults.context_block_limit,
         max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
         provider_retry_mode=config.agents.defaults.provider_retry_mode,
-        web_search_config=config.tools.web.search,
-        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -853,6 +855,12 @@ def agent(
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
     )
+    restart_notice = consume_restart_notice_from_env()
+    if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
+        _print_agent_response(
+            format_restart_completed_message(restart_notice.started_at_raw),
+            render_markdown=False,
+        )
 
     # Shared reference for progress callbacks
     _thinking: ThinkingSpinner | None = None

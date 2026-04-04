@@ -403,6 +403,15 @@ class AnthropicProvider(LLMProvider):
     # Public API
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _handle_error(e: Exception) -> LLMResponse:
+        msg = f"Error calling LLM: {e}"
+        response = getattr(e, "response", None)
+        retry_after = LLMProvider._extract_retry_after_from_headers(getattr(response, "headers", None))
+        if retry_after is None:
+            retry_after = LLMProvider._extract_retry_after(msg)
+        return LLMResponse(content=msg, finish_reason="error", retry_after=retry_after)
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -421,7 +430,7 @@ class AnthropicProvider(LLMProvider):
             response = await self._client.messages.create(**kwargs)
             return self._parse_response(response)
         except Exception as e:
-            return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
+            return self._handle_error(e)
 
     async def chat_stream(
         self,
@@ -466,7 +475,7 @@ class AnthropicProvider(LLMProvider):
                 finish_reason="error",
             )
         except Exception as e:
-            return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
+            return self._handle_error(e)
 
     def get_default_model(self) -> str:
         return self.default_model
