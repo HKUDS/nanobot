@@ -545,13 +545,17 @@ def update_config_from_dict(config: Config, data: dict):
                 setattr(config, snake_key, value)
             elif hasattr(attr, "model_dump"):
                 if isinstance(value, dict):
+                    # Check if model accepts extra fields (like ChannelsConfig)
+                    model_config = getattr(type(attr), "model_config", {})
+                    accepts_extra = model_config.get("extra") == "allow"
                     for sub_key, sub_value in value.items():
                         sub_snake = sub_key
                         for j, c in enumerate(sub_key):
                             if c.isupper() and (j == 0 or not sub_key[j-1].isupper()):
                                 sub_snake = sub_key[:j].lower() + "_" + sub_key[j:]
                                 break
-                        if hasattr(attr, sub_snake):
+                        # For models with extra="allow", set the field even if not defined
+                        if hasattr(attr, sub_snake) or accepts_extra:
                             setattr(attr, sub_snake, sub_value)
             else:
                 setattr(config, snake_key, value)
