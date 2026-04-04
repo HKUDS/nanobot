@@ -1,0 +1,17 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+    docker \
+    httpx \
+    fastapi \
+    uvicorn \
+    pydantic
+
+COPY bff/ /app/bff/
+COPY shared/ /app/shared/
+
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python3", "-m", "bff.bff_service"]

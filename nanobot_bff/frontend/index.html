@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nanobot 轨迹建模</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            height: 100vh;
+        }
+        #app { display: flex; height: 100vh; }
+        .sidebar {
+            width: 280px;
+            background: #fff;
+            border-right: 1px solid #e0e0e0;
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .sidebar-header h1 {
+            font-size: 18px;
+            color: #1890ff;
+        }
+        .new-chat-btn {
+            width: 100%;
+            padding: 12px;
+            margin-top: 15px;
+            background: #1890ff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .new-chat-btn:hover { background: #40a9ff; }
+        .conversation-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .conversation-item {
+            padding: 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        .conversation-item:hover { background: #f0f0f0; }
+        .conversation-item.active { background: #e6f7ff; }
+        .conversation-item .title { font-weight: 500; }
+        .conversation-item .meta { font-size: 12px; color: #999; margin-top: 4px; }
+        .main-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: #fff;
+        }
+        .chat-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .chat-header h2 { font-size: 16px; }
+        .model-select {
+            padding: 6px 12px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+        .message {
+            margin-bottom: 20px;
+            max-width: 80%;
+        }
+        .message.user { margin-left: auto; }
+        .message.assistant { margin-right: auto; }
+        .message-content {
+            padding: 12px 16px;
+            border-radius: 12px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+        .message.user .message-content {
+            background: #1890ff;
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+        .message.assistant .message-content {
+            background: #f5f5f5;
+            border-bottom-left-radius: 4px;
+        }
+        .trajectory-box {
+            margin-top: 12px;
+            padding: 12px;
+            background: #fafafa;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+        .trajectory-box h4 {
+            color: #1890ff;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        .trajectory-field { margin-bottom: 8px; }
+        .trajectory-label {
+            font-weight: 600;
+            color: #666;
+            margin-right: 8px;
+        }
+        .trajectory-value {
+            color: #333;
+            background: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid #e0e0e0;
+        }
+        .usage-info {
+            margin-top: 8px;
+            font-size: 11px;
+            color: #999;
+        }
+        .chat-input-area {
+            padding: 15px 20px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 10px;
+        }
+        .chat-input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #d9d9d9;
+            border-radius: 6px;
+            font-size: 14px;
+            resize: none;
+            font-family: inherit;
+        }
+        .chat-input:focus { outline: none; border-color: #1890ff; }
+        .send-btn {
+            padding: 12px 24px;
+            background: #1890ff;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .send-btn:hover { background: #40a9ff; }
+        .send-btn:disabled { background: #ccc; cursor: not-allowed; }
+        .loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #666;
+        }
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #e0e0e0;
+            border-top-color: #1890ff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+        }
+        .empty-state h3 { font-size: 18px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h1>🤖 Nanobot</h1>
+                <p style="font-size:12px;color:#666;margin-top:5px;">轨迹建模系统</p>
+                <button class="new-chat-btn" @click="createConversation">+ 新建对话</button>
+            </div>
+            <div class="conversation-list">
+                <div v-for="conv in conversations"
+                     :key="conv.id"
+                     class="conversation-item"
+                     :class="{ active: currentConversationId === conv.id }"
+                     @click="selectConversation(conv.id)">
+                    <div class="title">{{ conv.title }}</div>
+                    <div class="meta">{{ conv.model }} · {{ formatTime(conv.updated_at) }}</div>
+                </div>
+            </div>
+        </aside>
+        <main class="main-panel">
+            <div v-if="currentConversationId" class="chat-header">
+                <h2>{{ currentConversationTitle }}</h2>
+                <select class="model-select" v-model="currentModel">
+                    <option value="deepseek-chat">DeepSeek Chat</option>
+                    <option value="deepseek-reasoner">DeepSeek Reasoner</option>
+                    <option value="qwen-max">Qwen Max</option>
+                    <option value="kimi-k2.5">Kimi K2.5</option>
+                    <option value="MiniMax-M1">MiniMax M1</option>
+                </select>
+            </div>
+            <div v-if="currentConversationId" class="chat-messages" ref="messagesContainer">
+                <div v-for="msg in messages" :key="msg.turn_id" class="message" :class="msg.role">
+                    <div class="message-content">{{ msg.content }}</div>
+                    <div v-if="msg.trajectory" class="trajectory-box">
+                        <h4>📊 轨迹数据 (s,a,o,r)</h4>
+                        <div class="trajectory-field">
+                            <span class="trajectory-label">s:</span>
+                            <span class="trajectory-value">{{ msg.trajectory.state ? JSON.stringify(msg.trajectory.state, null, 2) : '{}' }}</span>
+                        </div>
+                        <div class="trajectory-field">
+                            <span class="trajectory-label">a:</span>
+                            <span class="trajectory-value">{{ msg.trajectory.action || '(no action)' }}</span>
+                        </div>
+                        <div class="trajectory-field">
+                            <span class="trajectory-label">o:</span>
+                            <span class="trajectory-value">{{ msg.trajectory.agent_response || '(no observation)' }}</span>
+                        </div>
+                        <div class="trajectory-field">
+                            <span class="trajectory-label">r:</span>
+                            <span class="trajectory-value">{{ msg.trajectory.reward }}</span>
+                        </div>
+                        <div class="usage-info" v-if="msg.usage && msg.usage.total_tokens">
+                            Tokens: {{ msg.usage.total_tokens }}
+                            (P: {{ msg.usage.prompt_tokens }} | C: {{ msg.usage.completion_tokens }})
+                        </div>
+                    </div>
+                </div>
+                <div v-if="loading" class="message assistant">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <span>Nanobot 思考中...</span>
+                    </div>
+                </div>
+            </div>
+            <div v-else class="empty-state">
+                <h3>选择一个对话开始</h3>
+                <p>或点击"新建对话"开始新对话</p>
+            </div>
+            <div class="chat-input-area">
+                <textarea
+                    class="chat-input"
+                    v-model="inputMessage"
+                    placeholder="输入消息..."
+                    :disabled="!currentConversationId || loading"
+                    @keydown.enter.exact.prevent="sendMessage"
+                    rows="1"></textarea>
+                <button class="send-btn" @click="sendMessage" :disabled="!inputMessage.trim() || !currentConversationId || loading">
+                    发送
+                </button>
+            </div>
+        </main>
+    </div>
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        const { createApp, ref, computed, nextTick, onMounted } = Vue;
+        createApp({
+            setup() {
+                const conversations = ref([]);
+                const currentConversationId = ref(null);
+                const currentModel = ref('deepseek-chat');
+                const messages = ref([]);
+                const inputMessage = ref('');
+                const loading = ref(false);
+                const messagesContainer = ref(null);
+                let turnCounter = 0;
+                const currentConversationTitle = computed(() => {
+                    const conv = conversations.value.find(c => c.id === currentConversationId.value);
+                    return conv ? conv.title : '';
+                });
+                const loadConversations = async () => {
+                    try {
+                        const resp = await axios.get(`${API_BASE}/conversations`);
+                        conversations.value = resp.data;
+                    } catch (e) {
+                        console.error('Failed to load conversations:', e);
+                    }
+                };
+                const createConversation = async () => {
+                    try {
+                        const resp = await axios.post(`${API_BASE}/conversations`, {
+                            title: `对话 ${new Date().toLocaleString('zh-CN')}`,
+                            model: currentModel.value
+                        });
+                        await loadConversations();
+                        selectConversation(resp.data.id);
+                    } catch (e) {
+                        console.error('Failed to create conversation:', e);
+                    }
+                };
+                const selectConversation = async (id) => {
+                    currentConversationId.value = id;
+                    turnCounter = 0;
+                    messages.value = [];
+                    try {
+                        const resp = await axios.get(`${API_BASE}/conversations/${id}/history`);
+                        const turns = resp.data.turns || [];
+                        messages.value = turns.map(t => ({
+                            turn_id: t.turn_id,
+                            role: 'assistant',
+                            content: t.observation,
+                            trajectory: {
+                                state: t.state,
+                                action: t.action,
+                                observation: t.observation,
+                                reward: t.reward
+                            },
+                            usage: t.usage
+                        }));
+                        await nextTick();
+                        scrollToBottom();
+                    } catch (e) {
+                        console.error('Failed to load history:', e);
+                    }
+                };
+                const sendMessage = async () => {
+                    if (!inputMessage.value.trim() || !currentConversationId.value || loading.value) return;
+                    const content = inputMessage.value;
+                    inputMessage.value = '';
+                    loading.value = true;
+                    turnCounter++;
+                    const userMsg = {
+                        turn_id: turnCounter,
+                        role: 'user',
+                        content: content
+                    };
+                    messages.value.push(userMsg);
+                    await nextTick();
+                    scrollToBottom();
+                    try {
+                        const resp = await axios.post(
+                            `${API_BASE}/conversations/${currentConversationId.value}/messages`,
+                            { conversation_id: currentConversationId.value, content }
+                        );
+                        const assistantMsg = {
+                            turn_id: resp.data.turn_id,
+                            role: 'assistant',
+                            content: resp.data.content,
+                            trajectory: resp.data.trajectory,
+                            usage: resp.data.usage
+                        };
+                        messages.value.push(assistantMsg);
+                        await loadConversations();
+                    } catch (e) {
+                        console.error('Failed to send message:', e);
+                        messages.value.push({
+                            turn_id: turnCounter,
+                            role: 'assistant',
+                            content: `错误: ${e.response?.data?.detail || e.message}`
+                        });
+                    } finally {
+                        loading.value = false;
+                        await nextTick();
+                        scrollToBottom();
+                    }
+                };
+                const scrollToBottom = () => {
+                    if (messagesContainer.value) {
+                        messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+                    }
+                };
+                const formatTime = (timeStr) => {
+                    if (!timeStr) return '';
+                    const d = new Date(timeStr);
+                    return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+                };
+                onMounted(() => {
+                    loadConversations();
+                });
+                return {
+                    conversations,
+                    currentConversationId,
+                    currentConversationTitle,
+                    currentModel,
+                    messages,
+                    inputMessage,
+                    loading,
+                    messagesContainer,
+                    createConversation,
+                    selectConversation,
+                    sendMessage,
+                    formatTime
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

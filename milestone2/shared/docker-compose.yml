@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  bff:
+    build:
+      context: .
+      dockerfile: shared/Dockerfile.bff
+    ports:
+      - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - agent_workspaces:/app/workspaces
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-sk-b192d1bf26f740adace7d5f628656921}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-sk-91fe1c9c529b46bb88dc200a2e97b2b6}
+    networks:
+      - nanobot_net
+
+volumes:
+  agent_workspaces:
+    driver: local
+
+networks:
+  nanobot_net:
+    driver: bridge

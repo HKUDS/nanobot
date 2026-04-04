@@ -1,0 +1,20 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir \
+    nanobot-ai \
+    openai \
+    httpx \
+    fastapi \
+    uvicorn \
+    aiosqlite
+
+COPY ../nanobot_agent/agent_server.py /app/agent_server.py
+
+ENV PYTHONUNBUFFERED=1
+ENV WORKSPACE_DIR=/app/workspace
+
+EXPOSE 8080
+
+CMD ["python3", "/app/agent_server.py"]

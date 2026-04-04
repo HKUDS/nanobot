@@ -24,3 +24,4 @@ nano.*.save
 .DS_Store
 uv.lock
 /personal/
+node_modules/
