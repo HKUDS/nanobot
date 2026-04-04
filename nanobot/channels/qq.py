@@ -134,6 +134,7 @@ class QQConfig(Base):
     secret: str = ""
     allow_from: list[str] = Field(default_factory=list)
     msg_format: Literal["plain", "markdown"] = "plain"
+    ack_message: str = "⏳ Processing..."
 
     # Optional: directory to save inbound attachments. If empty, use nanobot get_media_dir("qq").
     media_dir: str = ""
@@ -483,6 +484,17 @@ class QQChannel(BaseChannel):
 
         if not content and not media_paths:
             return
+
+        if self.config.ack_message:
+            try:
+                await self._send_text_only(
+                    chat_id=chat_id,
+                    is_group=is_group,
+                    msg_id=data.id,
+                    content=self.config.ack_message,
+                )
+            except Exception:
+                logger.debug("QQ ack message failed for chat_id={}", chat_id)
 
         await self._handle_message(
             sender_id=user_id,

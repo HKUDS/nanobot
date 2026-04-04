@@ -95,6 +95,14 @@ def test_exec_extract_absolute_paths_keeps_full_windows_path() -> None:
     assert paths == [r"C:\user\workspace\txt"]
 
 
+def test_exec_extract_absolute_paths_captures_windows_drive_root_path() -> None:
+    """Windows drive root paths like `E:\\` must be extracted for workspace guarding."""
+    # Note: raw strings cannot end with a single backslash.
+    cmd = "dir E:\\"
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert paths == ["E:\\"]
+
+
 def test_exec_extract_absolute_paths_ignores_relative_posix_segments() -> None:
     cmd = ".venv/bin/python script.py"
     paths = ExecTool._extract_absolute_paths(cmd)
@@ -131,6 +139,58 @@ def test_exec_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
 def test_exec_guard_blocks_quoted_home_path_outside_workspace(tmp_path) -> None:
     tool = ExecTool(restrict_to_workspace=True)
     error = tool._guard_command('cat "~/.nanobot/config.json"', str(tmp_path))
+    assert error == "Error: Command blocked by safety guard (path outside working dir)"
+
+
+def test_exec_guard_allows_media_path_outside_workspace(tmp_path, monkeypatch) -> None:
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    media_file = media_dir / "photo.jpg"
+    media_file.write_text("ok", encoding="utf-8")
+
+    monkeypatch.setattr("nanobot.agent.tools.shell.get_media_dir", lambda: media_dir)
+
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command(f'cat "{media_file}"', str(tmp_path / "workspace"))
+    assert error is None
+
+
+def test_exec_guard_blocks_windows_drive_root_outside_workspace(monkeypatch) -> None:
+    import nanobot.agent.tools.shell as shell_mod
+
+    class FakeWindowsPath:
+        def __init__(self, raw: str) -> None:
+            self.raw = raw.rstrip("\\") + ("\\" if raw.endswith("\\") else "")
+
+        def resolve(self) -> "FakeWindowsPath":
+            return self
+
+        def expanduser(self) -> "FakeWindowsPath":
+            return self
+
+        def is_absolute(self) -> bool:
+            return len(self.raw) >= 3 and self.raw[1:3] == ":\\"
+
+        @property
+        def parents(self) -> list["FakeWindowsPath"]:
+            if not self.is_absolute():
+                return []
+            trimmed = self.raw.rstrip("\\")
+            if len(trimmed) <= 2:
+                return []
+            idx = trimmed.rfind("\\")
+            if idx <= 2:
+                return [FakeWindowsPath(trimmed[:2] + "\\")]
+            parent = FakeWindowsPath(trimmed[:idx])
+            return [parent, *parent.parents]
+
+        def __eq__(self, other: object) -> bool:
+            return isinstance(other, FakeWindowsPath) and self.raw.lower() == other.raw.lower()
+
+    monkeypatch.setattr(shell_mod, "Path", FakeWindowsPath)
+
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command("dir E:\\", "E:\\workspace")
     assert error == "Error: Command blocked by safety guard (path outside working dir)"
 
 

@@ -10,6 +10,7 @@ from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
+from nanobot.utils.restart import set_restart_notice_to_env
 
 
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
@@ -26,19 +27,26 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     sub_cancelled = await loop.subagents.cancel_by_session(msg.session_key)
     total = cancelled + sub_cancelled
     content = f"Stopped {total} task(s)." if total else "No active task to stop."
-    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=content)
+    return OutboundMessage(
+        channel=msg.channel, chat_id=msg.chat_id, content=content,
+        metadata=dict(msg.metadata or {})
+    )
 
 
 async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
     """Restart the process in-place via os.execv."""
     msg = ctx.msg
+    set_restart_notice_to_env(channel=msg.channel, chat_id=msg.chat_id)
 
     async def _do_restart():
         await asyncio.sleep(1)
         os.execv(sys.executable, [sys.executable, "-m", "nanobot"] + sys.argv[1:])
 
     asyncio.create_task(_do_restart())
-    return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="Restarting...")
+    return OutboundMessage(
+        channel=msg.channel, chat_id=msg.chat_id, content="Restarting...",
+        metadata=dict(msg.metadata or {})
+    )
 
 
 async def cmd_status(ctx: CommandContext) -> OutboundMessage:
@@ -62,7 +70,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             session_msg_count=len(session.get_history(max_messages=0)),
             context_tokens_estimate=ctx_est,
         ),
-        metadata={"render_as": "text"},
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
 
 
@@ -79,6 +87,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
+        metadata=dict(ctx.msg.metadata or {})
     )
 
 
@@ -88,7 +97,7 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
         content=build_help_text(),
-        metadata={"render_as": "text"},
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
 
 
