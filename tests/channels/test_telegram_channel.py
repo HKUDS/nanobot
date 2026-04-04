@@ -453,6 +453,27 @@ async def test_send_progress_keeps_message_in_topic() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_tool_hint_renders_as_code_block() -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    channel = TelegramChannel(config, MessageBus())
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content='read_file("a<b>&c.txt")',
+            metadata={"_progress": True, "_tool_hint": True},
+        )
+    )
+
+    assert channel._app.bot.sent_messages[0]["text"] == (
+        '<pre><code>read_file("a&lt;b&gt;&amp;c.txt")</code></pre>'
+    )
+    assert channel._app.bot.sent_messages[0]["parse_mode"] == "HTML"
+
+
+@pytest.mark.asyncio
 async def test_send_reply_infers_topic_from_message_id_cache() -> None:
     config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], reply_to_message=True)
     channel = TelegramChannel(config, MessageBus())

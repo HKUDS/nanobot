@@ -28,6 +28,16 @@ TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
 
 
+def _escape_telegram_html(text: str) -> str:
+    """Escape text for Telegram HTML parse mode."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _tool_hint_to_telegram_html(text: str) -> str:
+    """Render tool hints as a Telegram code block."""
+    return f"<pre><code>{_escape_telegram_html(text)}</code></pre>" if text else ""
+
+
 def _strip_md(s: str) -> str:
     """Strip markdown inline formatting from text."""
     s = re.sub(r'\*\*(.+?)\*\*', r'\1', s)
@@ -120,7 +130,7 @@ def _markdown_to_telegram_html(text: str) -> str:
     text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
 
     # 5. Escape HTML special characters
-    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    text = _escape_telegram_html(text)
 
     # 6. Links [text](url) - must be before bold/italic to handle nested cases
     text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
@@ -141,13 +151,13 @@ def _markdown_to_telegram_html(text: str) -> str:
     # 11. Restore inline code with HTML tags
     for i, code in enumerate(inline_codes):
         # Escape HTML in code content
-        escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        escaped = _escape_telegram_html(code)
         text = text.replace(f"\x00IC{i}\x00", f"<code>{escaped}</code>")
 
     # 12. Restore code blocks with HTML tags
     for i, code in enumerate(code_blocks):
         # Escape HTML in code content
-        escaped = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        escaped = _escape_telegram_html(code)
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
 
     return text
@@ -433,8 +443,15 @@ class TelegramChannel(BaseChannel):
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
+            render_as_code = bool(msg.metadata.get("_tool_hint"))
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
-                await self._send_text(chat_id, chunk, reply_params, thread_kwargs)
+                await self._send_text(
+                    chat_id,
+                    chunk,
+                    reply_params,
+                    thread_kwargs,
+                    render_as_code=render_as_code,
+                )
 
     async def _call_with_retry(self, fn, *args, **kwargs):
         """Call an async Telegram API function with retry on pool/network timeout and RetryAfter."""
@@ -468,10 +485,11 @@ class TelegramChannel(BaseChannel):
         text: str,
         reply_params=None,
         thread_kwargs: dict | None = None,
+        render_as_code: bool = False,
     ) -> None:
         """Send a plain text message with HTML fallback."""
         try:
-            html = _markdown_to_telegram_html(text)
+            html = _tool_hint_to_telegram_html(text) if render_as_code else _markdown_to_telegram_html(text)
             await self._call_with_retry(
                 self._app.bot.send_message,
                 chat_id=chat_id, text=html, parse_mode="HTML",
