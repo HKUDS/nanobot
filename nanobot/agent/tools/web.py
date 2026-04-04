@@ -266,8 +266,13 @@ class WebFetchTool(Tool):
         except Exception as e:
             logger.debug("Pre-fetch image detection failed for {}: {}", url, e)
 
+        # Try Jina first
         result = await self._fetch_jina(url, max_chars)
         if result is None:
+            # Fall back to crawl4ai
+            result = await self._fetch_crawl4ai(url, max_chars)
+        if result is None:
+            # Final fallback to readability with html-to-markdown
             result = await self._fetch_readability(url, extractMode, max_chars)
         return result
 
@@ -304,7 +309,47 @@ class WebFetchTool(Tool):
                 "untrusted": True, "text": text,
             }, ensure_ascii=False)
         except Exception as e:
-            logger.debug("Jina Reader failed for {}, falling back to readability: {}", url, e)
+            logger.debug("Jina Reader failed for {}, falling back to crawl4ai: {}", url, e)
+            return None
+
+    async def _fetch_crawl4ai(self, url: str, max_chars: int) -> str | None:
+        """Try fetching via crawl4ai. Returns None on failure."""
+        try:
+            from crawl4ai import AsyncWebCrawler
+
+            async with AsyncWebCrawler(verbose=False) as crawler:
+                result = await crawler.arun(url=url)
+
+                # Check if crawl was successful
+                if not result.success:
+                    logger.debug("Crawl4AI failed for {}: {}", url, result.error_message if hasattr(result, 'error_message') else 'Unknown error')
+                    return None
+
+                text = result.markdown
+                if not text:
+                    logger.debug("Crawl4AI returned empty content for {}", url)
+                    return None
+
+                truncated = len(text) > max_chars
+                if truncated:
+                    text = text[:max_chars]
+                text = f"{_UNTRUSTED_BANNER}\n\n{text}"
+
+                return json.dumps({
+                    "url": url,
+                    "finalUrl": result.url if hasattr(result, 'url') else url,
+                    "status": result.status_code if hasattr(result, 'status_code') else 200,
+                    "extractor": "crawl4ai",
+                    "truncated": truncated,
+                    "length": len(text),
+                    "untrusted": True,
+                    "text": text,
+                }, ensure_ascii=False)
+        except ImportError:
+            logger.debug("crawl4ai not installed, falling back to readability")
+            return None
+        except Exception as e:
+            logger.debug("Crawl4AI failed for {}, falling back to readability: {}", url, e)
             return None
 
     async def _fetch_readability(self, url: str, extract_mode: str, max_chars: int) -> Any:

@@ -25,6 +25,9 @@ COPY nanobot/ nanobot/
 COPY bridge/ bridge/
 RUN uv pip install --system --no-cache .
 
+# Set up crawl4ai
+RUN uv run crawl4ai-setup
+
 # Build the WhatsApp bridge
 RUN git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 
