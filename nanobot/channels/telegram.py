@@ -179,6 +179,7 @@ class TelegramConfig(Base):
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
+    link_preview: bool = True
 
 
 class TelegramChannel(BaseChannel):
@@ -462,6 +463,12 @@ class TelegramChannel(BaseChannel):
                 )
                 await asyncio.sleep(delay)
 
+    def _link_preview_kwargs(self) -> dict[str, bool]:
+        """Map config to Telegram send/edit kwargs for link previews."""
+        if self.config.link_preview:
+            return {}
+        return {"disable_web_page_preview": True}
+
     async def _send_text(
         self,
         chat_id: int,
@@ -476,6 +483,7 @@ class TelegramChannel(BaseChannel):
                 self._app.bot.send_message,
                 chat_id=chat_id, text=html, parse_mode="HTML",
                 reply_parameters=reply_params,
+                **self._link_preview_kwargs(),
                 **(thread_kwargs or {}),
             )
         except Exception as e:
@@ -486,6 +494,7 @@ class TelegramChannel(BaseChannel):
                     chat_id=chat_id,
                     text=text,
                     reply_parameters=reply_params,
+                    **self._link_preview_kwargs(),
                     **(thread_kwargs or {}),
                 )
             except Exception as e2:
@@ -522,6 +531,7 @@ class TelegramChannel(BaseChannel):
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
                     text=html, parse_mode="HTML",
+                    **self._link_preview_kwargs(),
                 )
             except Exception as e:
                 if self._is_not_modified_error(e):
@@ -534,6 +544,7 @@ class TelegramChannel(BaseChannel):
                         self._app.bot.edit_message_text,
                         chat_id=int_chat_id, message_id=buf.message_id,
                         text=buf.text,
+                        **self._link_preview_kwargs(),
                     )
                 except Exception as e2:
                     if self._is_not_modified_error(e2):
@@ -562,6 +573,7 @@ class TelegramChannel(BaseChannel):
                 sent = await self._call_with_retry(
                     self._app.bot.send_message,
                     chat_id=int_chat_id, text=buf.text,
+                    **self._link_preview_kwargs(),
                 )
                 buf.message_id = sent.message_id
                 buf.last_edit = now
@@ -574,6 +586,7 @@ class TelegramChannel(BaseChannel):
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
                     text=buf.text,
+                    **self._link_preview_kwargs(),
                 )
                 buf.last_edit = now
             except Exception as e:
