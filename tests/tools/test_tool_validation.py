@@ -1,5 +1,13 @@
 from typing import Any
 
+from nanobot.agent.tools import (
+    ArraySchema,
+    IntegerSchema,
+    ObjectSchema,
+    Schema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
@@ -39,6 +47,58 @@ class SampleTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         return "ok"
+
+
+def test_schema_validate_value_matches_tool_validate_params() -> None:
+    """ObjectSchema.validate_value 与 validate_json_schema_value、Tool.validate_params 一致。"""
+    root = tool_parameters_schema(
+        query=StringSchema(min_length=2),
+        count=IntegerSchema(2, minimum=1, maximum=10),
+        required=["query", "count"],
+    )
+    obj = ObjectSchema(
+        query=StringSchema(min_length=2),
+        count=IntegerSchema(2, minimum=1, maximum=10),
+        required=["query", "count"],
+    )
+    params = {"query": "h", "count": 2}
+
+    class _Mini(Tool):
+        @property
+        def name(self) -> str:
+            return "m"
+
+        @property
+        def description(self) -> str:
+            return ""
+
+        @property
+        def parameters(self) -> dict[str, Any]:
+            return root
+
+        async def execute(self, **kwargs: Any) -> str:
+            return ""
+
+    expected = _Mini().validate_params(params)
+    assert Schema.validate_json_schema_value(params, root, "") == expected
+    assert obj.validate_value(params, "") == expected
+    assert IntegerSchema(0, minimum=1).validate_value(0, "n") == ["n must be >= 1"]
+
+
+def test_schema_classes_equivalent_to_sample_tool_parameters() -> None:
+    """Schema 类生成的 JSON Schema 应与手写 dict 一致，便于校验行为一致。"""
+    built = tool_parameters_schema(
+        query=StringSchema(min_length=2),
+        count=IntegerSchema(2, minimum=1, maximum=10),
+        mode=StringSchema("", enum=["fast", "full"]),
+        meta=ObjectSchema(
+            tag=StringSchema(""),
+            flags=ArraySchema(StringSchema("")),
+            required=["tag"],
+        ),
+        required=["query", "count"],
+    )
+    assert built == SampleTool().parameters
 
 
 def test_validate_params_missing_required() -> None:
