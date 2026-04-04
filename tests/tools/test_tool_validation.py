@@ -6,6 +6,7 @@ from nanobot.agent.tools import (
     ObjectSchema,
     Schema,
     StringSchema,
+    tool_parameters,
     tool_parameters_schema,
 )
 from nanobot.agent.tools.base import Tool
@@ -47,6 +48,26 @@ class SampleTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         return "ok"
+
+
+@tool_parameters(
+    tool_parameters_schema(
+        query=StringSchema(min_length=2),
+        count=IntegerSchema(2, minimum=1, maximum=10),
+        required=["query", "count"],
+    )
+)
+class DecoratedSampleTool(Tool):
+    @property
+    def name(self) -> str:
+        return "decorated_sample"
+
+    @property
+    def description(self) -> str:
+        return "decorated sample tool"
+
+    async def execute(self, **kwargs: Any) -> str:
+        return f"ok:{kwargs['count']}"
 
 
 def test_schema_validate_value_matches_tool_validate_params() -> None:
@@ -99,6 +120,31 @@ def test_schema_classes_equivalent_to_sample_tool_parameters() -> None:
         required=["query", "count"],
     )
     assert built == SampleTool().parameters
+
+
+def test_tool_parameters_returns_fresh_copy_per_access() -> None:
+    tool = DecoratedSampleTool()
+
+    first = tool.parameters
+    second = tool.parameters
+
+    assert first == second
+    assert first is not second
+    assert first["properties"] is not second["properties"]
+
+    first["properties"]["query"]["minLength"] = 99
+    assert tool.parameters["properties"]["query"]["minLength"] == 2
+
+
+async def test_registry_executes_decorated_tool_end_to_end() -> None:
+    reg = ToolRegistry()
+    reg.register(DecoratedSampleTool())
+
+    ok = await reg.execute("decorated_sample", {"query": "hello", "count": "3"})
+    assert ok == "ok:3"
+
+    err = await reg.execute("decorated_sample", {"query": "h", "count": 3})
+    assert "Invalid parameters" in err
 
 
 def test_validate_params_missing_required() -> None:

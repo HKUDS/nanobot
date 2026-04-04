@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any, TypeVar
 
 _ToolT = TypeVar("_ToolT", bound="Tool")
@@ -246,7 +247,7 @@ def tool_parameters(schema: dict[str, Any]) -> Callable[[type[_ToolT]], type[_To
     """Class decorator: attach JSON Schema and inject a concrete ``parameters`` property.
 
     Use on ``Tool`` subclasses instead of writing ``@property def parameters``. The
-    schema is stored on the class (shallow-copied) as ``_tool_parameters_schema``.
+    schema is stored on the class and returned as a fresh copy on each access.
 
     Example::
 
@@ -260,13 +261,13 @@ def tool_parameters(schema: dict[str, Any]) -> Callable[[type[_ToolT]], type[_To
     """
 
     def decorator(cls: type[_ToolT]) -> type[_ToolT]:
-        frozen = dict(schema)
+        frozen = deepcopy(schema)
 
         @property
         def parameters(self: Any) -> dict[str, Any]:
-            return frozen
+            return deepcopy(frozen)
 
-        cls._tool_parameters_schema = frozen
+        cls._tool_parameters_schema = deepcopy(frozen)
         cls.parameters = parameters  # type: ignore[assignment]
 
         abstract = getattr(cls, "__abstractmethods__", None)
