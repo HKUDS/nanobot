@@ -424,6 +424,23 @@ async def test_send_delta_incremental_edit_treats_not_modified_as_success() -> N
     assert channel._stream_bufs["123"].last_edit > 0.0
 
 
+@pytest.mark.asyncio
+async def test_send_delta_initial_send_keeps_message_in_thread() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send_delta(
+        "123",
+        "hello",
+        {"_stream_delta": True, "_stream_id": "s:0", "message_thread_id": 42},
+    )
+
+    assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
+
+
 def test_derive_topic_session_key_uses_thread_id() -> None:
     message = SimpleNamespace(
         chat=SimpleNamespace(type="supergroup"),
