@@ -58,6 +58,7 @@ class AzureOpenAIProvider(LLMProvider):
             api_key=api_key,
             base_url=base_url,
             default_headers={"x-session-affinity": uuid.uuid4().hex},
+            max_retries=0,
         )
 
     # ------------------------------------------------------------------
