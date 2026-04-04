@@ -10,34 +10,12 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from nanobot.agent.tools.evaluate_notification import EVALUATE_NOTIFICATION_TOOL_DEFINITIONS
 from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
-_EVALUATE_TOOL = [
-    {
-        "type": "function",
-        "function": {
-            "name": "evaluate_notification",
-            "description": "Decide whether the user should be notified about this background task result.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "should_notify": {
-                        "type": "boolean",
-                        "description": "true = result contains actionable/important info the user should see; false = routine or empty, safe to suppress",
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "One-sentence reason for the decision",
-                    },
-                },
-                "required": ["should_notify"],
-            },
-        },
-    }
-]
 
 async def evaluate_response(
     response: str,
@@ -62,7 +40,7 @@ async def evaluate_response(
                     response=response,
                 )},
             ],
-            tools=_EVALUATE_TOOL,
+            tools=EVALUATE_NOTIFICATION_TOOL_DEFINITIONS,
             model=model,
             max_tokens=256,
             temperature=0.0,

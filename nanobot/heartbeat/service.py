@@ -8,33 +8,10 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
 
+from nanobot.agent.tools.heartbeat import HEARTBEAT_DECISION_TOOL_DEFINITIONS
+
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
-
-_HEARTBEAT_TOOL = [
-    {
-        "type": "function",
-        "function": {
-            "name": "heartbeat",
-            "description": "Report heartbeat decision after reviewing tasks.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": {
-                        "type": "string",
-                        "enum": ["skip", "run"],
-                        "description": "skip = nothing to do, run = has active tasks",
-                    },
-                    "tasks": {
-                        "type": "string",
-                        "description": "Natural-language summary of active tasks (required for run)",
-                    },
-                },
-                "required": ["action"],
-            },
-        },
-    }
-]
 
 
 class HeartbeatService:
@@ -100,7 +77,7 @@ class HeartbeatService:
                     f"{content}"
                 )},
             ],
-            tools=_HEARTBEAT_TOOL,
+            tools=HEARTBEAT_DECISION_TOOL_DEFINITIONS,
             model=self.model,
         )
 
