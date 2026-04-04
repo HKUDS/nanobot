@@ -206,7 +206,10 @@ class WebSearchTool(Tool):
             from ddgs import DDGS
 
             ddgs = DDGS(timeout=10)
-            raw = await asyncio.to_thread(ddgs.text, query, max_results=n)
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(ddgs.text, query, max_results=n),
+                timeout=15.0,
+            )
             if not raw:
                 return f"No results for: {query}"
             items = [
@@ -214,6 +217,9 @@ class WebSearchTool(Tool):
                 for r in raw
             ]
             return _format_results(query, items, n)
+        except asyncio.TimeoutError:
+            logger.warning("DuckDuckGo search timed out (15s) for query: {}", query)
+            return "Error: DuckDuckGo search timed out"
         except Exception as e:
             logger.warning("DuckDuckGo search failed: {}", e)
             return f"Error: DuckDuckGo search failed ({e})"
