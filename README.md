@@ -1580,6 +1580,14 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot provider login openai-codex` | OAuth login for providers |
 | `nanobot channels login <channel>` | Authenticate a channel interactively |
 | `nanobot channels status` | Show channel status |
+| `nanobot cron status` | Show cron scheduler status |
+| `nanobot cron list` | List all scheduled cron jobs |
+| `nanobot cron add` | Create a new cron job |
+| `nanobot cron edit <id>` | Edit an existing cron job |
+| `nanobot cron rm <id>` | Delete a cron job |
+| `nanobot cron enable <id>` | Enable a cron job |
+| `nanobot cron disable <id>` | Disable a cron job |
+| `nanobot cron run <id>` | Immediately trigger a cron job execution |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
