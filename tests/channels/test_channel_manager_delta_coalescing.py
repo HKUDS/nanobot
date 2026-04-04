@@ -1,14 +1,14 @@
 """Tests for ChannelManager delta coalescing to reduce streaming latency."""
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
-from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.channels.base import BaseChannel
-from nanobot.channels.manager import ChannelManager
-from nanobot.config.schema import Config
+from janniebot.bus.events import OutboundMessage
+from janniebot.bus.queue import MessageBus
+from janniebot.channels.base import BaseChannel
+from janniebot.channels.manager import ChannelManager
+from janniebot.config.schema import Config
 
 
 class MockChannel(BaseChannel):

@@ -1,10 +1,9 @@
 """Tests for GitStore — git-backed version control for memory files."""
 
+
 import pytest
-from pathlib import Path
 
-from nanobot.utils.gitstore import GitStore, CommitInfo
-
+from janniebot.utils.gitstore import CommitInfo, GitStore
 
 TRACKED = ["SOUL.md", "USER.md", "memory/MEMORY.md"]
 
@@ -64,7 +63,7 @@ class TestBuildGitignore:
         content = gs._build_gitignore()
         assert "!a.md\n" in content
         assert "!b.md\n" in content
-        dir_lines = [l for l in content.split("\n") if l.startswith("!") and l.endswith("/")]
+        dir_lines = [line for line in content.split("\n") if line.startswith("!") and line.endswith("/")]
         assert dir_lines == []
 
 
@@ -181,7 +180,7 @@ class TestShowCommitDiff:
 
 class TestCommitInfoFormat:
     def test_format_with_diff(self):
-        from nanobot.utils.gitstore import CommitInfo
+        from janniebot.utils.gitstore import CommitInfo
         c = CommitInfo(sha="abcd1234", message="test commit\nsecond line", timestamp="2026-04-02 12:00")
         result = c.format(diff="some diff")
         assert "test commit" in result
@@ -189,7 +188,7 @@ class TestCommitInfoFormat:
         assert "some diff" in result
 
     def test_format_without_diff(self):
-        from nanobot.utils.gitstore import CommitInfo
+        from janniebot.utils.gitstore import CommitInfo
         c = CommitInfo(sha="abcd1234", message="test", timestamp="2026-04-02 12:00")
         result = c.format()
         assert "(no file changes)" in result
@@ -224,11 +223,11 @@ class TestRevert:
 
 class TestMemoryStoreGitProperty:
     def test_git_property_exposes_gitstore(self, tmp_path):
-        from nanobot.agent.memory import MemoryStore
+        from janniebot.agent.memory import MemoryStore
         store = MemoryStore(tmp_path)
         assert isinstance(store.git, GitStore)
 
     def test_git_property_is_same_object(self, tmp_path):
-        from nanobot.agent.memory import MemoryStore
+        from janniebot.agent.memory import MemoryStore
         store = MemoryStore(tmp_path)
         assert store.git is store._git

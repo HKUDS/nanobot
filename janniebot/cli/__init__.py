@@ -1,0 +1,1 @@
+"""CLI module for janniebot."""

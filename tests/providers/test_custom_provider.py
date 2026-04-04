@@ -3,11 +3,11 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+from janniebot.providers.openai_compat_provider import OpenAICompatProvider
 
 
 def test_custom_provider_parse_handles_empty_choices() -> None:
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("janniebot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
     response = SimpleNamespace(choices=[])
 
@@ -18,7 +18,7 @@ def test_custom_provider_parse_handles_empty_choices() -> None:
 
 
 def test_custom_provider_parse_accepts_plain_string_response() -> None:
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("janniebot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
     result = provider._parse("hello from backend")
@@ -28,7 +28,7 @@ def test_custom_provider_parse_accepts_plain_string_response() -> None:
 
 
 def test_custom_provider_parse_accepts_dict_response() -> None:
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("janniebot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
     result = provider._parse({

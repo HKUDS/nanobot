@@ -1,16 +1,16 @@
-# Memory in nanobot
+# Memory in janniebot
 
 > **Note:** This design is currently an experiment in the latest source code version and is planned to officially ship in `v0.1.5`.
 
-nanobot's memory is built on a simple belief: memory should feel alive, but it should not feel chaotic.
+janniebot's memory is built on a simple belief: memory should feel alive, but it should not feel chaotic.
 
 Good memory is not a pile of notes. It is a quiet system of attention. It notices what is worth keeping, lets go of what no longer needs the spotlight, and turns lived experience into something calm, durable, and useful.
 
-That is the shape of memory in nanobot.
+That is the shape of memory in janniebot.
 
 ## The Design
 
-nanobot does not treat memory as one giant file.
+janniebot does not treat memory as one giant file.
 
 It separates memory into layers, because different kinds of remembering deserve different tools:
 
@@ -23,11 +23,11 @@ This keeps the system light in the moment, but reflective over time.
 
 ## The Flow
 
-Memory moves through nanobot in two stages.
+Memory moves through janniebot in two stages.
 
 ### Stage 1: Consolidator
 
-When a conversation grows large enough to pressure the context window, nanobot does not try to carry every old message forever.
+When a conversation grows large enough to pressure the context window, janniebot does not try to carry every old message forever.
 
 Instead, the `Consolidator` summarizes the oldest safe slice of the conversation and appends that summary to `memory/history.jsonl`.
 
@@ -61,7 +61,7 @@ Then it works in two phases:
 1. It studies what is new and what is already known.
 2. It edits the long-term files surgically, not by rewriting everything, but by making the smallest honest change that keeps memory coherent.
 
-This is why nanobot's memory is not just archival. It is interpretive.
+This is why janniebot's memory is not just archival. It is interpretive.
 
 ## The Files
 
@@ -79,7 +79,7 @@ workspace/
 
 These files play different roles:
 
-- `SOUL.md` remembers how nanobot should sound.
+- `SOUL.md` remembers how janniebot should sound.
 - `USER.md` remembers who the user is and what they prefer.
 - `MEMORY.md` remembers what remains true about the work itself.
 - `history.jsonl` remembers what happened on the way there.
@@ -88,7 +88,7 @@ These files play different roles:
 
 The old `HISTORY.md` format was pleasant for casual reading, but it was too fragile as an operational substrate.
 
-`history.jsonl` gives nanobot:
+`history.jsonl` gives janniebot:
 
 - stable incremental cursors
 - safer machine parsing
@@ -130,7 +130,7 @@ These commands exist for a reason: automatic memory is powerful, but users shoul
 
 ## Versioned Memory
 
-After Dream changes long-term memory files, nanobot can record that change with `GitStore`.
+After Dream changes long-term memory files, janniebot can record that change with `GitStore`.
 
 This gives memory a history of its own:
 
@@ -175,8 +175,8 @@ In practical terms:
 
 Legacy note:
 
-- Older source-based configs may still contain `dream.cron`. nanobot continues to honor it for backward compatibility, but new configs should use `intervalH`.
-- Older source-based configs may still contain `dream.model`. nanobot continues to honor it for backward compatibility, but new configs should use `modelOverride`.
+- Older source-based configs may still contain `dream.cron`. janniebot continues to honor it for backward compatibility, but new configs should use `intervalH`.
+- Older source-based configs may still contain `dream.model`. janniebot continues to honor it for backward compatibility, but new configs should use `modelOverride`.
 
 ## In Practice
 

@@ -1,7 +1,7 @@
 """Tests for the Mistral provider registration."""
 
-from nanobot.config.schema import ProvidersConfig
-from nanobot.providers.registry import PROVIDERS
+from janniebot.config.schema import ProvidersConfig
+from janniebot.providers.registry import PROVIDERS
 
 
 def test_mistral_config_field_exists():

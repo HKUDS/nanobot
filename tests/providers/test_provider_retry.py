@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
+from janniebot.providers.base import GenerationSettings, LLMProvider, LLMResponse
 
 
 class ScriptedProvider(LLMProvider):
@@ -35,7 +35,7 @@ async def test_chat_with_retry_retries_transient_error_then_succeeds(monkeypatch
     async def _fake_sleep(delay: int) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+    monkeypatch.setattr("janniebot.providers.base.asyncio.sleep", _fake_sleep)
 
     response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
 
@@ -55,7 +55,7 @@ async def test_chat_with_retry_does_not_retry_non_transient_error(monkeypatch) -
     async def _fake_sleep(delay: int) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+    monkeypatch.setattr("janniebot.providers.base.asyncio.sleep", _fake_sleep)
 
     response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
 
@@ -77,7 +77,7 @@ async def test_chat_with_retry_returns_final_error_after_retries(monkeypatch) ->
     async def _fake_sleep(delay: int) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+    monkeypatch.setattr("janniebot.providers.base.asyncio.sleep", _fake_sleep)
 
     response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
 
@@ -228,7 +228,7 @@ async def test_chat_with_retry_uses_retry_after_and_emits_wait_progress(monkeypa
     async def _progress(msg: str) -> None:
         progress.append(msg)
 
-    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+    monkeypatch.setattr("janniebot.providers.base.asyncio.sleep", _fake_sleep)
 
     response = await provider.chat_with_retry(
         messages=[{"role": "user", "content": "hello"}],
@@ -265,7 +265,7 @@ async def test_chat_with_retry_prefers_structured_retry_after_when_present(monke
     async def _fake_sleep(delay: float) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+    monkeypatch.setattr("janniebot.providers.base.asyncio.sleep", _fake_sleep)
 
     response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
 
@@ -284,7 +284,7 @@ async def test_persistent_retry_aborts_after_ten_identical_transient_errors(monk
     async def _fake_sleep(delay: float) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+    monkeypatch.setattr("janniebot.providers.base.asyncio.sleep", _fake_sleep)
 
     response = await provider.chat_with_retry(
         messages=[{"role": "user", "content": "hello"}],

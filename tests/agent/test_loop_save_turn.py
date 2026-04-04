@@ -1,11 +1,11 @@
-from nanobot.agent.context import ContextBuilder
-from nanobot.agent.loop import AgentLoop
-from nanobot.session.manager import Session
+from janniebot.agent.context import ContextBuilder
+from janniebot.agent.loop import AgentLoop
+from janniebot.session.manager import Session
 
 
 def _mk_loop() -> AgentLoop:
     loop = AgentLoop.__new__(AgentLoop)
-    from nanobot.config.schema import AgentDefaults
+    from janniebot.config.schema import AgentDefaults
 
     loop.max_tool_result_chars = AgentDefaults().max_tool_result_chars
     return loop
@@ -35,12 +35,12 @@ def test_save_turn_keeps_image_placeholder_with_path_after_runtime_strip() -> No
             "role": "user",
             "content": [
                 {"type": "text", "text": runtime},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}, "_meta": {"path": "/media/feishu/photo.jpg"}},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}, "_meta": {"path": "/media/telegram/photo.jpg"}},
             ],
         }],
         skip=0,
     )
-    assert session.messages[0]["content"] == [{"type": "text", "text": "[image: /media/feishu/photo.jpg]"}]
+    assert session.messages[0]["content"] == [{"type": "text", "text": "[image: /media/telegram/photo.jpg]"}]
 
 
 def test_save_turn_keeps_image_placeholder_without_meta() -> None:

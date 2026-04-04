@@ -1,13 +1,12 @@
-from email.message import EmailMessage
-from datetime import date
 import imaplib
+from datetime import date
+from email.message import EmailMessage
 
 import pytest
 
-from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.channels.email import EmailChannel
-from nanobot.channels.email import EmailConfig
+from janniebot.bus.events import OutboundMessage
+from janniebot.bus.queue import MessageBus
+from janniebot.channels.email import EmailChannel, EmailConfig
 
 
 def _make_config(**overrides) -> EmailConfig:
@@ -75,7 +74,7 @@ def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
             return "BYE", [b""]
 
     fake = FakeIMAP()
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("janniebot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(_make_config(), MessageBus())
     items = channel._fetch_new_messages()
@@ -130,7 +129,7 @@ def test_fetch_new_messages_retries_once_when_imap_connection_goes_stale(monkeyp
         fake_instances.append(instance)
         return instance
 
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", _factory)
+    monkeypatch.setattr("janniebot.channels.email.imaplib.IMAP4_SSL", _factory)
 
     channel = EmailChannel(_make_config(), MessageBus())
     items = channel._fetch_new_messages()
@@ -176,7 +175,7 @@ def test_fetch_new_messages_keeps_messages_collected_before_stale_retry(monkeypa
         def logout(self):
             return "BYE", [b""]
 
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: FlakyIMAP())
+    monkeypatch.setattr("janniebot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: FlakyIMAP())
 
     channel = EmailChannel(_make_config(), MessageBus())
     items = channel._fetch_new_messages()
@@ -196,7 +195,7 @@ def test_fetch_new_messages_skips_missing_mailbox(monkeypatch) -> None:
             return "BYE", [b""]
 
     monkeypatch.setattr(
-        "nanobot.channels.email.imaplib.IMAP4_SSL",
+        "janniebot.channels.email.imaplib.IMAP4_SSL",
         lambda _h, _p: MissingMailboxIMAP(),
     )
 
@@ -266,7 +265,7 @@ async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
         fake_instances.append(instance)
         return instance
 
-    monkeypatch.setattr("nanobot.channels.email.smtplib.SMTP", _smtp_factory)
+    monkeypatch.setattr("janniebot.channels.email.smtplib.SMTP", _smtp_factory)
 
     channel = EmailChannel(_make_config(), MessageBus())
     channel._last_subject_by_chat["alice@example.com"] = "Invoice #42"
@@ -320,7 +319,7 @@ async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
         fake_instances.append(instance)
         return instance
 
-    monkeypatch.setattr("nanobot.channels.email.smtplib.SMTP", _smtp_factory)
+    monkeypatch.setattr("janniebot.channels.email.smtplib.SMTP", _smtp_factory)
 
     cfg = _make_config()
     cfg.auto_reply_enabled = False
@@ -381,7 +380,7 @@ async def test_send_proactive_email_when_auto_reply_disabled(monkeypatch) -> Non
         fake_instances.append(instance)
         return instance
 
-    monkeypatch.setattr("nanobot.channels.email.smtplib.SMTP", _smtp_factory)
+    monkeypatch.setattr("janniebot.channels.email.smtplib.SMTP", _smtp_factory)
 
     cfg = _make_config()
     cfg.auto_reply_enabled = False
@@ -429,7 +428,7 @@ async def test_send_skips_when_consent_not_granted(monkeypatch) -> None:
         called["smtp"] = True
         return FakeSMTP(host, port, timeout=timeout)
 
-    monkeypatch.setattr("nanobot.channels.email.smtplib.SMTP", _smtp_factory)
+    monkeypatch.setattr("janniebot.channels.email.smtplib.SMTP", _smtp_factory)
 
     cfg = _make_config()
     cfg.consent_granted = False
@@ -474,7 +473,7 @@ def test_fetch_messages_between_dates_uses_imap_since_before_without_mark_seen(m
             return "BYE", [b""]
 
     fake = FakeIMAP()
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("janniebot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     channel = EmailChannel(_make_config(), MessageBus())
     items = channel.fetch_messages_between_dates(
@@ -527,7 +526,7 @@ def test_spoofed_email_rejected_when_verify_enabled(monkeypatch) -> None:
     """An email without Authentication-Results should be rejected when verify_dkim=True."""
     raw = _make_raw_email(subject="Spoofed", body="Malicious payload")
     fake = _make_fake_imap(raw)
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("janniebot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     cfg = _make_config(verify_dkim=True, verify_spf=True)
     channel = EmailChannel(cfg, MessageBus())
@@ -544,7 +543,7 @@ def test_email_with_valid_auth_results_accepted(monkeypatch) -> None:
         auth_results="mx.example.com; spf=pass smtp.mailfrom=alice@example.com; dkim=pass header.d=example.com",
     )
     fake = _make_fake_imap(raw)
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("janniebot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     cfg = _make_config(verify_dkim=True, verify_spf=True)
     channel = EmailChannel(cfg, MessageBus())
@@ -563,7 +562,7 @@ def test_email_with_partial_auth_rejected(monkeypatch) -> None:
         auth_results="mx.example.com; spf=pass smtp.mailfrom=alice@example.com; dkim=fail",
     )
     fake = _make_fake_imap(raw)
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("janniebot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     cfg = _make_config(verify_dkim=True, verify_spf=True)
     channel = EmailChannel(cfg, MessageBus())
@@ -576,7 +575,7 @@ def test_backward_compat_verify_disabled(monkeypatch) -> None:
     """When verify_dkim=False and verify_spf=False, emails without auth headers are accepted."""
     raw = _make_raw_email(subject="NoAuth", body="No auth headers present")
     fake = _make_fake_imap(raw)
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("janniebot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     cfg = _make_config(verify_dkim=False, verify_spf=False)
     channel = EmailChannel(cfg, MessageBus())
@@ -589,7 +588,7 @@ def test_email_content_tagged_with_email_context(monkeypatch) -> None:
     """Email content should be prefixed with [EMAIL-CONTEXT] for LLM isolation."""
     raw = _make_raw_email(subject="Tagged", body="Check the tag")
     fake = _make_fake_imap(raw)
-    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+    monkeypatch.setattr("janniebot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
     cfg = _make_config(verify_dkim=False, verify_spf=False)
     channel = EmailChannel(cfg, MessageBus())
@@ -603,8 +602,8 @@ def test_email_content_tagged_with_email_context(monkeypatch) -> None:
 
 def test_check_authentication_results_method() -> None:
     """Unit test for the _check_authentication_results static method."""
-    from email.parser import BytesParser
     from email import policy
+    from email.parser import BytesParser
 
     # No Authentication-Results header
     msg_no_auth = EmailMessage()

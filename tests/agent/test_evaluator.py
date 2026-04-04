@@ -1,7 +1,7 @@
 import pytest
 
-from nanobot.utils.evaluator import evaluate_response
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from janniebot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from janniebot.utils.evaluator import evaluate_response
 
 
 class DummyProvider(LLMProvider):

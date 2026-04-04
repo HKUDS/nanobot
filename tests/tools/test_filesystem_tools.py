@@ -2,13 +2,12 @@
 
 import pytest
 
-from nanobot.agent.tools.filesystem import (
+from janniebot.agent.tools.filesystem import (
     EditFileTool,
     ListDirTool,
     ReadFileTool,
     _find_match,
 )
-
 
 # ---------------------------------------------------------------------------
 # ReadFileTool
@@ -330,7 +329,7 @@ class TestWorkspaceRestriction:
         media_file = media_dir / "photo.txt"
         media_file.write_text("shared media", encoding="utf-8")
 
-        monkeypatch.setattr("nanobot.agent.tools.filesystem.get_media_dir", lambda: media_dir)
+        monkeypatch.setattr("janniebot.agent.tools.filesystem.get_media_dir", lambda: media_dir)
 
         tool = ReadFileTool(workspace=workspace, allowed_dir=workspace)
         result = await tool.execute(path=str(media_file))
@@ -339,7 +338,7 @@ class TestWorkspaceRestriction:
 
     @pytest.mark.asyncio
     async def test_extra_dirs_does_not_widen_write(self, tmp_path):
-        from nanobot.agent.tools.filesystem import WriteFileTool
+        from janniebot.agent.tools.filesystem import WriteFileTool
 
         workspace = tmp_path / "ws"
         workspace.mkdir()

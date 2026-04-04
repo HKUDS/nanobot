@@ -1,16 +1,17 @@
 import json
 import re
+import shutil
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from typer.testing import CliRunner
 
-from nanobot.bus.events import OutboundMessage
-from nanobot.cli.commands import _make_provider, app
-from nanobot.config.schema import Config
-from nanobot.providers.openai_codex_provider import _strip_model_prefix
-from nanobot.providers.registry import find_by_name
+from janniebot.bus.events import OutboundMessage
+from janniebot.cli.commands import _make_provider, app
+from janniebot.config.schema import Config
+from janniebot.providers.openai_codex_provider import _strip_model_prefix
+from janniebot.providers.registry import find_by_name
 
 runner = CliRunner()
 
@@ -19,18 +20,13 @@ class _StopGatewayError(RuntimeError):
     pass
 
 
-import shutil
-
-import pytest
-
-
 @pytest.fixture
 def mock_paths():
     """Mock config/workspace paths for test isolation."""
-    with patch("nanobot.config.loader.get_config_path") as mock_cp, \
-         patch("nanobot.config.loader.save_config") as mock_sc, \
-         patch("nanobot.config.loader.load_config") as mock_lc, \
-         patch("nanobot.cli.commands.get_workspace_path") as mock_ws:
+    with patch("janniebot.config.loader.get_config_path") as mock_cp, \
+         patch("janniebot.config.loader.save_config") as mock_sc, \
+         patch("janniebot.config.loader.load_config") as mock_lc, \
+         patch("janniebot.cli.commands.get_workspace_path") as mock_ws:
 
         base_dir = Path("./test_onboard_data")
         if base_dir.exists():
@@ -66,7 +62,7 @@ def test_onboard_fresh_install(mock_paths):
     assert result.exit_code == 0
     assert "Created config" in result.stdout
     assert "Created workspace" in result.stdout
-    assert "nanobot is ready" in result.stdout
+    assert "janniebot is ready" in result.stdout
     assert config_file.exists()
     assert (workspace_dir / "AGENTS.md").exists()
     assert (workspace_dir / "memory" / "MEMORY.md").exists()
@@ -137,10 +133,10 @@ def test_onboard_help_shows_workspace_and_config_options():
 def test_onboard_interactive_discard_does_not_save_or_create_workspace(mock_paths, monkeypatch):
     config_file, workspace_dir, _ = mock_paths
 
-    from nanobot.cli.onboard import OnboardResult
+    from janniebot.cli.onboard import OnboardResult
 
     monkeypatch.setattr(
-        "nanobot.cli.onboard.run_onboard",
+        "janniebot.cli.onboard.run_onboard",
         lambda initial_config: OnboardResult(config=initial_config, should_save=False),
     )
 
@@ -156,7 +152,7 @@ def test_onboard_uses_explicit_config_and_workspace_paths(tmp_path, monkeypatch)
     config_path = tmp_path / "instance" / "config.json"
     workspace_path = tmp_path / "workspace"
 
-    monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
+    monkeypatch.setattr("janniebot.channels.registry.discover_all", lambda: {})
 
     result = runner.invoke(
         app,
@@ -178,13 +174,13 @@ def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkey
     config_path = tmp_path / "instance" / "config.json"
     workspace_path = tmp_path / "workspace"
 
-    from nanobot.cli.onboard import OnboardResult
+    from janniebot.cli.onboard import OnboardResult
 
     monkeypatch.setattr(
-        "nanobot.cli.onboard.run_onboard",
+        "janniebot.cli.onboard.run_onboard",
         lambda initial_config: OnboardResult(config=initial_config, should_save=True),
     )
-    monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
+    monkeypatch.setattr("janniebot.channels.registry.discover_all", lambda: {})
 
     result = runner.invoke(
         app,
@@ -195,8 +191,8 @@ def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkey
     stripped_output = _strip_ansi(result.stdout)
     compact_output = stripped_output.replace("\n", "")
     resolved_config = str(config_path.resolve())
-    assert f'nanobot agent -m "Hello!" --config {resolved_config}' in compact_output
-    assert f"nanobot gateway --config {resolved_config}" in compact_output
+    assert f'janniebot agent -m "Hello!" --config {resolved_config}' in compact_output
+    assert f"janniebot gateway --config {resolved_config}" in compact_output
 
 
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():
@@ -309,17 +305,17 @@ def test_config_falls_back_to_vllm_when_ollama_not_configured():
 
 
 def test_openai_compat_provider_passes_model_through():
-    from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+    from janniebot.providers.openai_compat_provider import OpenAICompatProvider
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("janniebot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(default_model="github-copilot/gpt-5.3-codex")
 
     assert provider.get_default_model() == "github-copilot/gpt-5.3-codex"
 
 
 def test_make_provider_uses_github_copilot_backend():
-    from nanobot.cli.commands import _make_provider
-    from nanobot.config.schema import Config
+    from janniebot.cli.commands import _make_provider
+    from janniebot.config.schema import Config
 
     config = Config.model_validate(
         {
@@ -332,16 +328,16 @@ def test_make_provider_uses_github_copilot_backend():
         }
     )
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("janniebot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = _make_provider(config)
 
     assert provider.__class__.__name__ == "GitHubCopilotProvider"
 
 
 def test_github_copilot_provider_strips_prefixed_model_name():
-    from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+    from janniebot.providers.github_copilot_provider import GitHubCopilotProvider
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("janniebot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = GitHubCopilotProvider(default_model="github-copilot/gpt-5.1")
 
     kwargs = provider._build_kwargs(
@@ -359,7 +355,7 @@ def test_github_copilot_provider_strips_prefixed_model_name():
 
 @pytest.mark.asyncio
 async def test_github_copilot_provider_refreshes_client_api_key_before_chat():
-    from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+    from janniebot.providers.github_copilot_provider import GitHubCopilotProvider
 
     mock_client = MagicMock()
     mock_client.api_key = "no-key"
@@ -368,7 +364,7 @@ async def test_github_copilot_provider_refreshes_client_api_key_before_chat():
         "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
     })
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI", return_value=mock_client):
+    with patch("janniebot.providers.openai_compat_provider.AsyncOpenAI", return_value=mock_client):
         provider = GitHubCopilotProvider(default_model="github-copilot/gpt-5.1")
 
     provider._get_copilot_access_token = AsyncMock(return_value="copilot-access-token")
@@ -408,7 +404,7 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
         }
     )
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
+    with patch("janniebot.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
         _make_provider(config)
 
     kwargs = mock_async_openai.call_args.kwargs
@@ -424,13 +420,13 @@ def mock_agent_runtime(tmp_path):
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "default-workspace")
 
-    with patch("nanobot.config.loader.load_config", return_value=config) as mock_load_config, \
-         patch("nanobot.cli.commands.sync_workspace_templates") as mock_sync_templates, \
-         patch("nanobot.cli.commands._make_provider", return_value=object()), \
-         patch("nanobot.cli.commands._print_agent_response") as mock_print_response, \
-         patch("nanobot.bus.queue.MessageBus"), \
-         patch("nanobot.cron.service.CronService"), \
-         patch("nanobot.agent.loop.AgentLoop") as mock_agent_loop_cls:
+    with patch("janniebot.config.loader.load_config", return_value=config) as mock_load_config, \
+         patch("janniebot.cli.commands.sync_workspace_templates") as mock_sync_templates, \
+         patch("janniebot.cli.commands._make_provider", return_value=object()), \
+         patch("janniebot.cli.commands._print_agent_response") as mock_print_response, \
+         patch("janniebot.bus.queue.MessageBus"), \
+         patch("janniebot.cron.service.CronService"), \
+         patch("janniebot.agent.loop.AgentLoop") as mock_agent_loop_cls:
 
         agent_loop = MagicMock()
         agent_loop.channels_config = None
@@ -497,14 +493,14 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     seen: dict[str, Path] = {}
 
     monkeypatch.setattr(
-        "nanobot.config.loader.set_config_path",
+        "janniebot.config.loader.set_config_path",
         lambda path: seen.__setitem__("config_path", path),
     )
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
-    monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: object())
+    monkeypatch.setattr("janniebot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("janniebot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("janniebot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("janniebot.bus.queue.MessageBus", lambda: object())
+    monkeypatch.setattr("janniebot.cron.service.CronService", lambda _store: object())
 
     class _FakeAgentLoop:
         def __init__(self, *args, **kwargs) -> None:
@@ -516,8 +512,8 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
         async def close_mcp(self) -> None:
             return None
 
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("janniebot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("janniebot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
 
@@ -534,11 +530,11 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
     config.agents.defaults.workspace = str(tmp_path / "agent-workspace")
     seen: dict[str, Path] = {}
 
-    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
+    monkeypatch.setattr("janniebot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("janniebot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("janniebot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("janniebot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("janniebot.bus.queue.MessageBus", lambda: object())
 
     class _FakeCron:
         def __init__(self, store_path: Path) -> None:
@@ -554,9 +550,9 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
         async def close_mcp(self) -> None:
             return None
 
-    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("janniebot.cron.service.CronService", _FakeCron)
+    monkeypatch.setattr("janniebot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("janniebot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
 
@@ -580,12 +576,12 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
     config = Config()
     seen: dict[str, Path] = {}
 
-    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
-    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
+    monkeypatch.setattr("janniebot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("janniebot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("janniebot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("janniebot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("janniebot.bus.queue.MessageBus", lambda: object())
+    monkeypatch.setattr("janniebot.config.paths.get_cron_dir", lambda: legacy_dir)
 
     class _FakeCron:
         def __init__(self, store_path: Path) -> None:
@@ -601,9 +597,9 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
         async def close_mcp(self) -> None:
             return None
 
-    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("janniebot.cron.service.CronService", _FakeCron)
+    monkeypatch.setattr("janniebot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("janniebot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(
         app,
@@ -633,12 +629,12 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
     config.agents.defaults.workspace = str(custom_workspace)
     seen: dict[str, Path] = {}
 
-    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
-    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
+    monkeypatch.setattr("janniebot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("janniebot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("janniebot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("janniebot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("janniebot.bus.queue.MessageBus", lambda: object())
+    monkeypatch.setattr("janniebot.config.paths.get_cron_dir", lambda: legacy_dir)
 
     class _FakeCron:
         def __init__(self, store_path: Path) -> None:
@@ -654,9 +650,9 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
         async def close_mcp(self) -> None:
             return None
 
-    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("janniebot.cron.service.CronService", _FakeCron)
+    monkeypatch.setattr("janniebot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("janniebot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
 
@@ -735,27 +731,27 @@ def _patch_cli_command_runtime(
     get_cron_dir=None,
 ) -> None:
     monkeypatch.setattr(
-        "nanobot.config.loader.set_config_path",
+        "janniebot.config.loader.set_config_path",
         set_config_path or (lambda _path: None),
     )
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("janniebot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr(
-        "nanobot.cli.commands.sync_workspace_templates",
+        "janniebot.cli.commands.sync_workspace_templates",
         sync_templates or (lambda _path: None),
     )
     monkeypatch.setattr(
-        "nanobot.cli.commands._make_provider",
+        "janniebot.cli.commands._make_provider",
         make_provider or (lambda _config: object()),
     )
 
     if message_bus is not None:
-        monkeypatch.setattr("nanobot.bus.queue.MessageBus", message_bus)
+        monkeypatch.setattr("janniebot.bus.queue.MessageBus", message_bus)
     if session_manager is not None:
-        monkeypatch.setattr("nanobot.session.manager.SessionManager", session_manager)
+        monkeypatch.setattr("janniebot.session.manager.SessionManager", session_manager)
     if cron_service is not None:
-        monkeypatch.setattr("nanobot.cron.service.CronService", cron_service)
+        monkeypatch.setattr("janniebot.cron.service.CronService", cron_service)
     if get_cron_dir is not None:
-        monkeypatch.setattr("nanobot.config.paths.get_cron_dir", get_cron_dir)
+        monkeypatch.setattr("janniebot.config.paths.get_cron_dir", get_cron_dir)
 
 
 def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -> None:
@@ -793,8 +789,8 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         message_bus=lambda: object(),
         session_manager=lambda _workspace: object(),
     )
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.api.server.create_app", _fake_create_app)
+    monkeypatch.setattr("janniebot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("janniebot.api.server.create_app", _fake_create_app)
     monkeypatch.setattr("aiohttp.web.run_app", _fake_run_app)
 
 
@@ -944,7 +940,7 @@ def test_gateway_custom_config_workspace_does_not_migrate_legacy_cron(
 
 def test_migrate_cron_store_moves_legacy_file(tmp_path: Path) -> None:
     """Legacy global jobs.json is moved into the workspace on first run."""
-    from nanobot.cli.commands import _migrate_cron_store
+    from janniebot.cli.commands import _migrate_cron_store
 
     legacy_dir = tmp_path / "global" / "cron"
     legacy_dir.mkdir(parents=True)
@@ -955,7 +951,7 @@ def test_migrate_cron_store_moves_legacy_file(tmp_path: Path) -> None:
     config.agents.defaults.workspace = str(tmp_path / "workspace")
     workspace_cron = config.workspace_path / "cron" / "jobs.json"
 
-    with patch("nanobot.config.paths.get_cron_dir", return_value=legacy_dir):
+    with patch("janniebot.config.paths.get_cron_dir", return_value=legacy_dir):
         _migrate_cron_store(config)
 
     assert workspace_cron.exists()
@@ -965,7 +961,7 @@ def test_migrate_cron_store_moves_legacy_file(tmp_path: Path) -> None:
 
 def test_migrate_cron_store_skips_when_workspace_file_exists(tmp_path: Path) -> None:
     """Migration does not overwrite an existing workspace cron store."""
-    from nanobot.cli.commands import _migrate_cron_store
+    from janniebot.cli.commands import _migrate_cron_store
 
     legacy_dir = tmp_path / "global" / "cron"
     legacy_dir.mkdir(parents=True)
@@ -977,7 +973,7 @@ def test_migrate_cron_store_skips_when_workspace_file_exists(tmp_path: Path) -> 
     workspace_cron.parent.mkdir(parents=True)
     workspace_cron.write_text('{"new": true}')
 
-    with patch("nanobot.config.paths.get_cron_dir", return_value=legacy_dir):
+    with patch("janniebot.config.paths.get_cron_dir", return_value=legacy_dir):
         _migrate_cron_store(config)
 
     assert workspace_cron.read_text() == '{"new": true}'

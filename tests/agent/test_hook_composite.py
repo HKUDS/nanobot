@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
+from janniebot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 
 
 def _ctx() -> AgentHookContext:
@@ -238,19 +238,19 @@ async def test_composite_empty_hooks_no_ops():
 
 
 def _make_loop(tmp_path, hooks=None):
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.bus.queue import MessageBus
+    from janniebot.agent.loop import AgentLoop
+    from janniebot.bus.queue import MessageBus
 
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation.max_tokens = 4096
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr, \
-         patch("nanobot.agent.loop.Consolidator"), \
-         patch("nanobot.agent.loop.Dream"):
+    with patch("janniebot.agent.loop.ContextBuilder"), \
+         patch("janniebot.agent.loop.SessionManager"), \
+         patch("janniebot.agent.loop.SubagentManager") as mock_sub_mgr, \
+         patch("janniebot.agent.loop.Consolidator"), \
+         patch("janniebot.agent.loop.Dream"):
         mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(
             bus=bus, provider=provider, workspace=tmp_path, hooks=hooks,
@@ -261,7 +261,7 @@ def _make_loop(tmp_path, hooks=None):
 @pytest.mark.asyncio
 async def test_agent_loop_extra_hook_receives_calls(tmp_path):
     """Extra hook passed to AgentLoop is called alongside core LoopHook."""
-    from nanobot.providers.base import LLMResponse
+    from janniebot.providers.base import LLMResponse
 
     events: list[str] = []
 
@@ -290,7 +290,7 @@ async def test_agent_loop_extra_hook_receives_calls(tmp_path):
 @pytest.mark.asyncio
 async def test_agent_loop_extra_hook_error_isolation(tmp_path):
     """A faulty extra hook does not crash the agent loop."""
-    from nanobot.providers.base import LLMResponse
+    from janniebot.providers.base import LLMResponse
 
     class BadHook(AgentHook):
         async def before_iteration(self, context):
@@ -312,7 +312,7 @@ async def test_agent_loop_extra_hook_error_isolation(tmp_path):
 @pytest.mark.asyncio
 async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
     """Extra hooks must not change the core LoopHook failure behavior."""
-    from nanobot.providers.base import LLMResponse, ToolCallRequest
+    from janniebot.providers.base import LLMResponse, ToolCallRequest
 
     loop = _make_loop(tmp_path, hooks=[AgentHook()])
     loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -333,7 +333,7 @@ async def test_agent_loop_extra_hooks_do_not_swallow_loop_hook_errors(tmp_path):
 @pytest.mark.asyncio
 async def test_agent_loop_no_hooks_backward_compat(tmp_path):
     """Without hooks param, behavior is identical to before."""
-    from nanobot.providers.base import LLMResponse, ToolCallRequest
+    from janniebot.providers.base import LLMResponse, ToolCallRequest
 
     loop = _make_loop(tmp_path)
     loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import datetime as datetime_module
 from datetime import datetime as real_datetime
 from importlib.resources import files as pkg_files
 from pathlib import Path
-import datetime as datetime_module
 
-from nanobot.agent.context import ContextBuilder
+from janniebot.agent.context import ContextBuilder
 
 
 class _FakeDatetime(real_datetime):
@@ -25,7 +25,7 @@ def _make_workspace(tmp_path: Path) -> Path:
 
 
 def test_bootstrap_files_are_backed_by_templates() -> None:
-    template_dir = pkg_files("nanobot") / "templates"
+    template_dir = pkg_files("janniebot") / "templates"
 
     for filename in ContextBuilder.BOOTSTRAP_FILES:
         assert (template_dir / filename).is_file(), f"missing bootstrap template: {filename}"

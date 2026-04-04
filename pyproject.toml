@@ -1,12 +1,12 @@
 [project]
-name = "nanobot-ai"
+name = "janniebot"
 version = "0.1.4.post6"
 description = "A lightweight personal AI assistant framework"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "nanobot contributors"}
+    {name = "janniebot"}
 ]
 keywords = ["ai", "agent", "chatbot"]
 classifiers = [
@@ -31,15 +31,10 @@ dependencies = [
     "readability-lxml>=0.8.4,<1.0.0",
     "rich>=14.0.0,<15.0.0",
     "croniter>=6.0.0,<7.0.0",
-    "dingtalk-stream>=0.24.0,<1.0.0",
     "python-telegram-bot[socks]>=22.6,<23.0",
-    "lark-oapi>=1.5.0,<2.0.0",
     "socksio>=1.0.0,<2.0.0",
     "python-socketio>=5.16.0,<6.0.0",
     "msgpack>=1.1.0,<2.0.0",
-    "slack-sdk>=3.39.0,<4.0.0",
-    "slackify-markdown>=0.2.0,<1.0.0",
-    "qq-botpy>=1.2.0,<2.0.0",
     "python-socks[asyncio]>=2.8.0,<3.0.0",
     "prompt-toolkit>=3.0.50,<4.0.0",
     "questionary>=2.0.0,<3.0.0",
@@ -50,28 +45,14 @@ dependencies = [
     "tiktoken>=0.12.0,<1.0.0",
     "jinja2>=3.1.0,<4.0.0",
     "dulwich>=0.22.0,<1.0.0",
+    "python-dotenv>=1.0.0,<2.0.0",
 ]
 
 [project.optional-dependencies]
 api = [
     "aiohttp>=3.9.0,<4.0.0",
 ]
-wecom = [
-    "wecom-aibot-sdk-python>=0.1.5",
-]
-weixin = [
-    "qrcode[pil]>=8.0",
-    "pycryptodome>=3.20.0",
-]
 
-matrix = [
-    "matrix-nio[e2e]>=0.25.2",
-    "mistune>=3.0.0,<4.0.0",
-    "nh3>=0.2.17,<1.0.0",
-]
-discord = [
-    "discord.py>=2.5.2,<3.0.0",
-]
 langsmith = [
     "langsmith>=0.1.0",
 ]
@@ -81,10 +62,13 @@ dev = [
     "aiohttp>=3.9.0,<4.0.0",
     "pytest-cov>=6.0.0,<7.0.0",
     "ruff>=0.1.0",
+    "mypy>=1.8.0",
+    "types-PyYAML>=6.0.0",
+    "types-croniter>=2.0.0",
 ]
 
 [project.scripts]
-nanobot = "nanobot.cli.commands:app"
+janniebot = "janniebot.cli.commands:app"
 
 [build-system]
 requires = ["hatchling"]
@@ -95,24 +79,24 @@ allow-direct-references = true
 
 [tool.hatch.build]
 include = [
-    "nanobot/**/*.py",
-    "nanobot/templates/**/*.md",
-    "nanobot/skills/**/*.md",
-    "nanobot/skills/**/*.sh",
+    "janniebot/**/*.py",
+    "janniebot/templates/**/*.md",
+    "janniebot/skills/**/*.md",
+    "janniebot/skills/**/*.sh",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["nanobot"]
+packages = ["janniebot"]
 
 [tool.hatch.build.targets.wheel.sources]
-"nanobot" = "nanobot"
+"janniebot" = "janniebot"
 
 [tool.hatch.build.targets.wheel.force-include]
-"bridge" = "nanobot/bridge"
+"bridge" = "janniebot/bridge"
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "nanobot/",
+    "janniebot/",
     "bridge/",
     "README.md",
     "LICENSE",
@@ -126,12 +110,27 @@ target-version = "py311"
 select = ["E", "F", "I", "N", "W"]
 ignore = ["E501"]
 
+[tool.mypy]
+python_version = "3.11"
+packages = ["janniebot"]
+warn_unused_ignores = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = [
+    "readability",
+    "readability.*",
+    "oauth_cli_kit",
+    "oauth_cli_kit.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["nanobot"]
+source = ["janniebot"]
 omit = ["tests/*", "**/tests/*"]
 
 [tool.coverage.report]

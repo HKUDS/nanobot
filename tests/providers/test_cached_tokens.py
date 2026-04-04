@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+from janniebot.providers.openai_compat_provider import OpenAICompatProvider
 
 
 class FakeUsage:
@@ -193,7 +193,7 @@ def test_extract_usage_priority_nested_over_top_level_dict():
 
 def test_anthropic_maps_cache_fields_to_cached_tokens():
     """Anthropic's cache_read_input_tokens should map to cached_tokens."""
-    from nanobot.providers.anthropic_provider import AnthropicProvider
+    from janniebot.providers.anthropic_provider import AnthropicProvider
 
     usage_obj = FakeUsage(
         input_tokens=800,
@@ -218,7 +218,7 @@ def test_anthropic_maps_cache_fields_to_cached_tokens():
 
 def test_anthropic_no_cache_fields():
     """Anthropic response without cache fields should not have cached_tokens."""
-    from nanobot.providers.anthropic_provider import AnthropicProvider
+    from janniebot.providers.anthropic_provider import AnthropicProvider
 
     usage_obj = FakeUsage(input_tokens=800, output_tokens=200)
     content_block = FakeUsage(type="text", text="hello")

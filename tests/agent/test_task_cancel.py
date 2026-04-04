@@ -8,15 +8,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.config.schema import AgentDefaults
+from janniebot.config.schema import AgentDefaults
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 
 def _make_loop(*, exec_config=None):
     """Create a minimal AgentLoop with mocked dependencies."""
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.bus.queue import MessageBus
+    from janniebot.agent.loop import AgentLoop
+    from janniebot.bus.queue import MessageBus
 
     bus = MessageBus()
     provider = MagicMock()
@@ -24,10 +24,10 @@ def _make_loop(*, exec_config=None):
     workspace = MagicMock()
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+    with patch("janniebot.agent.loop.ContextBuilder"), \
+         patch("janniebot.agent.loop.SessionManager"), \
+         patch("janniebot.agent.loop.SubagentManager") as mock_sub_mgr:
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace, exec_config=exec_config)
     return loop, bus
 
@@ -35,9 +35,9 @@ def _make_loop(*, exec_config=None):
 class TestHandleStop:
     @pytest.mark.asyncio
     async def test_stop_no_active_task(self):
-        from nanobot.bus.events import InboundMessage
-        from nanobot.command.builtin import cmd_stop
-        from nanobot.command.router import CommandContext
+        from janniebot.bus.events import InboundMessage
+        from janniebot.command.builtin import cmd_stop
+        from janniebot.command.router import CommandContext
 
         loop, bus = _make_loop()
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
@@ -47,9 +47,9 @@ class TestHandleStop:
 
     @pytest.mark.asyncio
     async def test_stop_cancels_active_task(self):
-        from nanobot.bus.events import InboundMessage
-        from nanobot.command.builtin import cmd_stop
-        from nanobot.command.router import CommandContext
+        from janniebot.bus.events import InboundMessage
+        from janniebot.command.builtin import cmd_stop
+        from janniebot.command.router import CommandContext
 
         loop, bus = _make_loop()
         cancelled = asyncio.Event()
@@ -74,9 +74,9 @@ class TestHandleStop:
 
     @pytest.mark.asyncio
     async def test_stop_cancels_multiple_tasks(self):
-        from nanobot.bus.events import InboundMessage
-        from nanobot.command.builtin import cmd_stop
-        from nanobot.command.router import CommandContext
+        from janniebot.bus.events import InboundMessage
+        from janniebot.command.builtin import cmd_stop
+        from janniebot.command.router import CommandContext
 
         loop, bus = _make_loop()
         events = [asyncio.Event(), asyncio.Event()]
@@ -102,7 +102,7 @@ class TestHandleStop:
 
 class TestDispatch:
     def test_exec_tool_not_registered_when_disabled(self):
-        from nanobot.config.schema import ExecToolConfig
+        from janniebot.config.schema import ExecToolConfig
 
         loop, _bus = _make_loop(exec_config=ExecToolConfig(enable=False))
 
@@ -110,7 +110,7 @@ class TestDispatch:
 
     @pytest.mark.asyncio
     async def test_dispatch_processes_and_publishes(self):
-        from nanobot.bus.events import InboundMessage, OutboundMessage
+        from janniebot.bus.events import InboundMessage, OutboundMessage
 
         loop, bus = _make_loop()
         msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="hello")
@@ -123,18 +123,18 @@ class TestDispatch:
 
     @pytest.mark.asyncio
     async def test_dispatch_streaming_preserves_message_metadata(self):
-        from nanobot.bus.events import InboundMessage
+        from janniebot.bus.events import InboundMessage
 
         loop, bus = _make_loop()
         msg = InboundMessage(
-            channel="matrix",
+            channel="telegram",
             sender_id="u1",
-            chat_id="!room:matrix.org",
+            chat_id="chat-1",
             content="hello",
             metadata={
                 "_wants_stream": True,
-                "thread_root_event_id": "$root1",
-                "thread_reply_to_event_id": "$reply1",
+                "ctx_a": "root-1",
+                "ctx_b": "reply-1",
             },
         )
 
@@ -151,16 +151,16 @@ class TestDispatch:
         first = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
         second = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
 
-        assert first.metadata["thread_root_event_id"] == "$root1"
-        assert first.metadata["thread_reply_to_event_id"] == "$reply1"
+        assert first.metadata["ctx_a"] == "root-1"
+        assert first.metadata["ctx_b"] == "reply-1"
         assert first.metadata["_stream_delta"] is True
-        assert second.metadata["thread_root_event_id"] == "$root1"
-        assert second.metadata["thread_reply_to_event_id"] == "$reply1"
+        assert second.metadata["ctx_a"] == "root-1"
+        assert second.metadata["ctx_b"] == "reply-1"
         assert second.metadata["_stream_end"] is True
 
     @pytest.mark.asyncio
     async def test_processing_lock_serializes(self):
-        from nanobot.bus.events import InboundMessage, OutboundMessage
+        from janniebot.bus.events import InboundMessage, OutboundMessage
 
         loop, bus = _make_loop()
         order = []
@@ -184,8 +184,8 @@ class TestDispatch:
 class TestSubagentCancellation:
     @pytest.mark.asyncio
     async def test_cancel_by_session(self):
-        from nanobot.agent.subagent import SubagentManager
-        from nanobot.bus.queue import MessageBus
+        from janniebot.agent.subagent import SubagentManager
+        from janniebot.bus.queue import MessageBus
 
         bus = MessageBus()
         provider = MagicMock()
@@ -217,8 +217,8 @@ class TestSubagentCancellation:
 
     @pytest.mark.asyncio
     async def test_cancel_by_session_no_tasks(self):
-        from nanobot.agent.subagent import SubagentManager
-        from nanobot.bus.queue import MessageBus
+        from janniebot.agent.subagent import SubagentManager
+        from janniebot.bus.queue import MessageBus
 
         bus = MessageBus()
         provider = MagicMock()
@@ -233,9 +233,9 @@ class TestSubagentCancellation:
 
     @pytest.mark.asyncio
     async def test_subagent_preserves_reasoning_fields_in_tool_turn(self, monkeypatch, tmp_path):
-        from nanobot.agent.subagent import SubagentManager
-        from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse, ToolCallRequest
+        from janniebot.agent.subagent import SubagentManager
+        from janniebot.bus.queue import MessageBus
+        from janniebot.providers.base import LLMResponse, ToolCallRequest
 
         bus = MessageBus()
         provider = MagicMock()
@@ -267,7 +267,7 @@ class TestSubagentCancellation:
         async def fake_execute(self, **kwargs):
             return "tool result"
 
-        monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
+        monkeypatch.setattr("janniebot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
         await mgr._run_subagent("sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"})
 
@@ -281,9 +281,9 @@ class TestSubagentCancellation:
 
     @pytest.mark.asyncio
     async def test_subagent_exec_tool_not_registered_when_disabled(self, tmp_path):
-        from nanobot.agent.subagent import SubagentManager
-        from nanobot.bus.queue import MessageBus
-        from nanobot.config.schema import ExecToolConfig
+        from janniebot.agent.subagent import SubagentManager
+        from janniebot.bus.queue import MessageBus
+        from janniebot.config.schema import ExecToolConfig
 
         bus = MessageBus()
         provider = MagicMock()
@@ -315,9 +315,9 @@ class TestSubagentCancellation:
 
     @pytest.mark.asyncio
     async def test_subagent_announces_error_when_tool_execution_fails(self, monkeypatch, tmp_path):
-        from nanobot.agent.subagent import SubagentManager
-        from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse, ToolCallRequest
+        from janniebot.agent.subagent import SubagentManager
+        from janniebot.bus.queue import MessageBus
+        from janniebot.providers.base import LLMResponse, ToolCallRequest
 
         bus = MessageBus()
         provider = MagicMock()
@@ -342,7 +342,7 @@ class TestSubagentCancellation:
                 return "first result"
             raise RuntimeError("boom")
 
-        monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
+        monkeypatch.setattr("janniebot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
         await mgr._run_subagent("sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"})
 
@@ -356,9 +356,9 @@ class TestSubagentCancellation:
 
     @pytest.mark.asyncio
     async def test_cancel_by_session_cancels_running_subagent_tool(self, monkeypatch, tmp_path):
-        from nanobot.agent.subagent import SubagentManager
-        from nanobot.bus.queue import MessageBus
-        from nanobot.providers.base import LLMResponse, ToolCallRequest
+        from janniebot.agent.subagent import SubagentManager
+        from janniebot.bus.queue import MessageBus
+        from janniebot.providers.base import LLMResponse, ToolCallRequest
 
         bus = MessageBus()
         provider = MagicMock()
@@ -386,7 +386,7 @@ class TestSubagentCancellation:
                 cancelled.set()
                 raise
 
-        monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
+        monkeypatch.setattr("janniebot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
         task = asyncio.create_task(
             mgr._run_subagent("sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"})

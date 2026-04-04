@@ -1,11 +1,9 @@
 import importlib
-import shutil
 import sys
 import zipfile
 from pathlib import Path
 
-
-SCRIPT_DIR = Path("nanobot/skills/skill-creator/scripts").resolve()
+SCRIPT_DIR = Path("janniebot/skills/skill-creator/scripts").resolve()
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
@@ -31,7 +29,7 @@ def test_init_skill_creates_expected_files(tmp_path: Path) -> None:
 
 def test_validate_skill_accepts_existing_skill_creator() -> None:
     valid, message = quick_validate.validate_skill(
-        Path("nanobot/skills/skill-creator").resolve()
+        Path("janniebot/skills/skill-creator").resolve()
     )
 
     assert valid, message

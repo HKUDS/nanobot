@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import pytest_asyncio
 
-from nanobot.api.server import (
+from janniebot.api.server import (
     API_CHAT_ID,
     API_SESSION_KEY,
     _chat_completion_response,
@@ -347,7 +347,7 @@ async def test_empty_response_retry_then_success(aiohttp_client) -> None:
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
 async def test_empty_response_falls_back(aiohttp_client) -> None:
-    from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
+    from janniebot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
     call_count = 0
 

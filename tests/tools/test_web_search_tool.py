@@ -3,8 +3,8 @@
 import httpx
 import pytest
 
-from nanobot.agent.tools.web import WebSearchTool
-from nanobot.config.schema import WebSearchConfig
+from janniebot.agent.tools.web import WebSearchTool
+from janniebot.config.schema import WebSearchConfig
 
 
 def _tool(provider: str = "brave", api_key: str = "", base_url: str = "") -> WebSearchTool:
@@ -24,13 +24,13 @@ async def test_brave_search(monkeypatch):
         assert "brave" in url
         assert kw["headers"]["X-Subscription-Token"] == "brave-key"
         return _response(json={
-            "web": {"results": [{"title": "NanoBot", "url": "https://example.com", "description": "AI assistant"}]}
+            "web": {"results": [{"title": "JannieBot", "url": "https://example.com", "description": "AI assistant"}]}
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
     tool = _tool(provider="brave", api_key="brave-key")
-    result = await tool.execute(query="nanobot", count=1)
-    assert "NanoBot" in result
+    result = await tool.execute(query="janniebot", count=1)
+    assert "JannieBot" in result
     assert "https://example.com" in result
 
 
@@ -73,11 +73,10 @@ async def test_duckduckgo_search(monkeypatch):
         def text(self, query, max_results=5):
             return [{"title": "DDG Result", "href": "https://ddg.example", "body": "From DuckDuckGo"}]
 
-    monkeypatch.setattr("nanobot.agent.tools.web.DDGS", MockDDGS, raising=False)
-    import nanobot.agent.tools.web as web_mod
+    monkeypatch.setattr("janniebot.agent.tools.web.DDGS", MockDDGS, raising=False)
+    import janniebot.agent.tools.web as web_mod
     monkeypatch.setattr(web_mod, "DDGS", MockDDGS, raising=False)
 
-    from ddgs import DDGS
     monkeypatch.setattr("ddgs.DDGS", MockDDGS)
 
     tool = _tool(provider="duckduckgo")

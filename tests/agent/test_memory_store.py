@@ -1,12 +1,11 @@
 """Tests for the restructured MemoryStore — pure file I/O layer."""
 
-from datetime import datetime
 import json
-from pathlib import Path
+from datetime import datetime
 
 import pytest
 
-from nanobot.agent.memory import MemoryStore
+from janniebot.agent.memory import MemoryStore
 
 
 @pytest.fixture

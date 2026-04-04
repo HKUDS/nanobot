@@ -1,4 +1,4 @@
-from nanobot.session.manager import Session
+from janniebot.session.manager import Session
 
 
 def _assert_no_orphans(history: list[dict]) -> None:

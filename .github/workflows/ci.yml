@@ -25,10 +25,13 @@ jobs:
       uses: astral-sh/setup-uv@v4
 
     - name: Install system dependencies
-      run: sudo apt-get update && sudo apt-get install -y libolm-dev build-essential
+      run: sudo apt-get update && sudo apt-get install -y build-essential
 
     - name: Install all dependencies
       run: uv sync --all-extras
+
+    - name: Run mypy
+      run: uv run mypy janniebot
 
     - name: Run tests
       run: uv run pytest tests/
