@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 _ALLOWED_MSG_KEYS = frozenset({
     "role", "content", "tool_calls", "tool_call_id", "name",
+    "reasoning_content", "extra_content",
 })
 _ALNUM = string.ascii_letters + string.digits
 
