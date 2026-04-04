@@ -267,6 +267,7 @@ class AgentLoop:
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
                 path_append=self.exec_config.path_append,
+                sandbox=self.exec_config.sandbox,
             ))
         if self.web_config.enable:
             self.tools.register(WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy))

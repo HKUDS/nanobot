@@ -135,12 +135,24 @@ class WebToolsConfig(Base):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class SandboxConfig(Base):
+    """Docker sandbox configuration for shell exec tool."""
+    enabled: bool = False
+    image: str = "python:3.12-slim"
+    memory_limit: str = "512m"
+    cpu_limit: float = 1.0
+    network: str = "none"  # "none", "bridge", or custom network name
+    timeout: int = 60
+    mount_workspace: bool = True
+
+
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
     enable: bool = True
     timeout: int = 60
     path_append: str = ""
+    sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
