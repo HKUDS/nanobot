@@ -37,17 +37,26 @@ def load_config(config_path: Path | None = None) -> Config:
     """
     path = config_path or get_config_path()
 
+    config = Config()
     if path.exists():
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            return Config.model_validate(data)
+            config = Config.model_validate(data)
         except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
             logger.warning(f"Failed to load config from {path}: {e}")
             logger.warning("Using default configuration.")
 
-    return Config()
+    _apply_ssrf_whitelist(config)
+    return config
+
+
+def _apply_ssrf_whitelist(config: Config) -> None:
+    """Apply SSRF whitelist from config to the network security module."""
+    from nanobot.security.network import configure_ssrf_whitelist
+
+    configure_ssrf_whitelist(config.tools.ssrf_whitelist)
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:

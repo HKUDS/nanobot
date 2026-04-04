@@ -856,6 +856,11 @@ Simply send the command above to your nanobot (via CLI or any chat channel), and
 
 Config file: `~/.nanobot/config.json`
 
+> [!NOTE]
+> If your config file is older than the current schema, you can refresh it without overwriting your existing values:
+> run `nanobot onboard`, then answer `N` when asked whether to overwrite the config.
+> nanobot will merge in missing default fields and keep your current settings.
+
 ### Providers
 
 > [!TIP]
@@ -1234,6 +1239,16 @@ nanobot supports multiple web search providers. Configure in `~/.nanobot/config.
 By default, web tools are enabled and web search uses `duckduckgo`, so search works out of the box without an API key.
 
 If you want to disable all built-in web tools entirely, set `tools.web.enable` to `false`. This removes both `web_search` and `web_fetch` from the tool list sent to the LLM.
+
+If you need to allow trusted private ranges such as Tailscale / CGNAT addresses, you can explicitly exempt them from SSRF blocking with `tools.ssrfWhitelist`:
+
+```json
+{
+  "tools": {
+    "ssrfWhitelist": ["100.64.0.0/10"]
+  }
+}
+```
 
 | Provider | Config fields | Env var fallback | Free |
 |----------|--------------|------------------|------|
