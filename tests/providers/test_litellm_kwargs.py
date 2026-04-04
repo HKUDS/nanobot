@@ -226,7 +226,7 @@ def test_openai_model_passthrough() -> None:
     assert provider.get_default_model() == "gpt-4o"
 
 
-def test_openai_compat_strips_message_level_reasoning_fields() -> None:
+def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -247,8 +247,8 @@ def test_openai_compat_strips_message_level_reasoning_fields() -> None:
         }
     ])
 
-    assert "reasoning_content" not in sanitized[0]
-    assert "extra_content" not in sanitized[0]
+    assert sanitized[0]["reasoning_content"] == "hidden"
+    assert sanitized[0]["extra_content"] == {"debug": True}
     assert sanitized[0]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "sig"}}
 
 
