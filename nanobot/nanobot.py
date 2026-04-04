@@ -82,6 +82,7 @@ class Nanobot:
             restrict_to_workspace=config.tools.restrict_to_workspace,
             mcp_servers=config.tools.mcp_servers,
             timezone=defaults.timezone,
+            max_concurrent_requests=defaults.max_concurrent_requests,
         )
         return cls(loop)
 
@@ -156,6 +157,7 @@ def _make_provider(config: Any) -> Any:
             api_base=config.get_api_base(model),
             default_model=model,
             extra_headers=p.extra_headers if p else None,
+            stream_idle_timeout_s=config.runtime.stream_idle_timeout_s,
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
@@ -166,6 +168,7 @@ def _make_provider(config: Any) -> Any:
             default_model=model,
             extra_headers=p.extra_headers if p else None,
             spec=spec,
+            stream_idle_timeout_s=config.runtime.stream_idle_timeout_s,
         )
 
     defaults = config.agents.defaults

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import secrets
 import string
@@ -34,10 +33,12 @@ class AnthropicProvider(LLMProvider):
         api_base: str | None = None,
         default_model: str = "claude-sonnet-4-20250514",
         extra_headers: dict[str, str] | None = None,
+        stream_idle_timeout_s: int = 90,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self.stream_idle_timeout_s = stream_idle_timeout_s
 
         from anthropic import AsyncAnthropic
 
@@ -495,7 +496,7 @@ class AnthropicProvider(LLMProvider):
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = self.stream_idle_timeout_s
         try:
             async with self._client.messages.stream(**kwargs) as stream:
                 if on_content_delta:

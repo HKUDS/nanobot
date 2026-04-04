@@ -77,6 +77,7 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    max_concurrent_requests: int = 3  # Max parallel LLM requests per loop; <=0 = unlimited
 
 
 class AgentsConfig(Base):
@@ -187,6 +188,13 @@ class FileToolConfig(Base):
     default_limit: int = 2_000   # read_file: default line limit when not specified
     default_max: int = 200        # list_dir: default max entries returned
 
+
+class RuntimeConfig(Base):
+    """Runtime tuning knobs that do not belong to a specific subsystem."""
+
+    stream_idle_timeout_s: int = 90  # Seconds before a stalled LLM stream is aborted
+
+
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -219,6 +227,7 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
 
     @property
     def workspace_path(self) -> Path:

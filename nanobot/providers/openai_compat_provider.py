@@ -127,11 +127,13 @@ class OpenAICompatProvider(LLMProvider):
         default_model: str = "gpt-4o",
         extra_headers: dict[str, str] | None = None,
         spec: ProviderSpec | None = None,
+        stream_idle_timeout_s: int = 90,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._spec = spec
+        self.stream_idle_timeout_s = stream_idle_timeout_s
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -742,7 +744,7 @@ class OpenAICompatProvider(LLMProvider):
         )
         kwargs["stream"] = True
         kwargs["stream_options"] = {"include_usage": True}
-        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
+        idle_timeout_s = self.stream_idle_timeout_s
         try:
             stream = await self._client.chat.completions.create(**kwargs)
             chunks: list[Any] = []

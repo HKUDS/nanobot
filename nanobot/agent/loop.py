@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import os
 import time
 from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
@@ -182,6 +181,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
+        max_concurrent_requests: int = 3,
     ):
         from nanobot.config.schema import ExecToolConfig, WebToolsConfig, FileToolConfig
 
@@ -239,10 +239,8 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
-        # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
-        _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
         self._concurrency_gate: asyncio.Semaphore | None = (
-            asyncio.Semaphore(_max) if _max > 0 else None
+            asyncio.Semaphore(max_concurrent_requests) if max_concurrent_requests > 0 else None
         )
         self.consolidator = Consolidator(
             store=self.context.memory,
