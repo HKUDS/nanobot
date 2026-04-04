@@ -911,16 +911,21 @@ def agent(
                         if next_ask_options:
                             from prompt_toolkit.application import Application
                             from prompt_toolkit.key_binding import KeyBindings
-                            from prompt_toolkit.layout.containers import Window
+                            from prompt_toolkit.layout.containers import HSplit, Window
                             from prompt_toolkit.layout.controls import FormattedTextControl
                             from prompt_toolkit.layout.layout import Layout
                             from prompt_toolkit.styles import Style
                             from prompt_toolkit.formatted_text import HTML
+                            from prompt_toolkit.widgets import Box, Frame
 
                             _restore_terminal()
 
-                            choices = list(next_ask_options)
-                            choices.append("Other (press Enter to type)")
+                            options = [str(opt) for opt in next_ask_options]
+                            other_label = "Other (type your answer)"
+                            display_choices = [
+                                f"{idx + 1}. {opt}" for idx, opt in enumerate(options)
+                            ]
+                            display_choices.append(f"{len(options) + 1}. {other_label}")
 
                             bindings = KeyBindings()
                             state = {"selected": 0}
@@ -931,44 +936,84 @@ def agent(
 
                             @bindings.add("down")
                             def _move_down(event):
-                                state["selected"] = min(len(choices) - 1, state["selected"] + 1)
+                                state["selected"] = min(len(display_choices) - 1, state["selected"] + 1)
 
                             @bindings.add("enter")
                             def _confirm(event):
-                                event.app.exit(result=choices[state["selected"]])
+                                idx = state["selected"]
+                                if idx < len(options):
+                                    event.app.exit(result=options[idx])
+                                else:
+                                    event.app.exit(result="__ask_user_other__")
+
+                            @bindings.add("escape")
+                            def _cancel_esc(event):
+                                event.app.exit(result=None)
 
                             @bindings.add("c-c")
                             def _cancel(event):
                                 event.app.exit(result=None)
 
-                            def get_text():
-                                q = _clean_ask_question(next_ask_question, choices)
-                                inst = " (↑/↓: navigate, Enter: confirm)"
-                                res = [("class:title", f"? {q}"), ("class:instruction", f"{inst}\n")]
-                                for i, opt in enumerate(choices):
+                            def _render_question():
+                                q = _clean_ask_question(next_ask_question, options)
+                                return [("class:question", q)]
+
+                            def _render_options():
+                                res = []
+                                for i, opt in enumerate(display_choices):
                                     if i == state["selected"]:
                                         res.append(("class:selected", f"❯ {opt}\n"))
                                     else:
-                                        res.append(("", f"  {opt}\n"))
+                                        res.append(("class:option", f"  {opt}\n"))
                                 if res:
                                     cls, txt = res[-1]
                                     res[-1] = (cls, txt.rstrip("\n"))
                                 return res
 
+                            def _render_hint():
+                                return [("class:hint", "↑↓ to select · Enter to confirm · Esc to cancel")]
+
+                            panel = Frame(
+                                Box(
+                                    HSplit([
+                                        Window(
+                                            content=FormattedTextControl(_render_question),
+                                            dont_extend_height=True,
+                                        ),
+                                        Window(height=1, char="─", style="class:divider"),
+                                        Window(
+                                            content=FormattedTextControl(_render_options),
+                                            dont_extend_height=True,
+                                        ),
+                                        Window(height=1, char="─", style="class:divider"),
+                                        Window(
+                                            content=FormattedTextControl(_render_hint),
+                                            dont_extend_height=True,
+                                        ),
+                                    ]),
+                                    padding=1,
+                                ),
+                                title=" Ask user ",
+                            )
+
                             app = Application(
-                                layout=Layout(Window(content=FormattedTextControl(get_text), dont_extend_height=True)),
+                                layout=Layout(panel),
                                 key_bindings=bindings,
                                 full_screen=False,
                                 style=Style.from_dict({
-                                    "title": "bold",
-                                    "instruction": "ansigray",
+                                    "frame.border": "ansibrightblack",
+                                    "frame.label": "ansibrightblack bold",
+                                    "question": "bold",
                                     "selected": "ansicyan bold",
+                                    "option": "",
+                                    "divider": "ansibrightblack",
+                                    "hint": "ansibrightblack",
                                 })
                             )
 
                             choice = await app.run_async()
 
-                            if choice == "Other (press Enter to type)":
+                            if choice == "__ask_user_other__":
                                 with patch_stdout():
                                     user_input = await _PROMPT_SESSION.prompt_async(HTML("<b fg='ansiblue'>Please type your custom answer: </b>"))
                                 if not (user_input or "").strip():
