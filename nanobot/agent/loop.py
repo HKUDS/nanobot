@@ -51,6 +51,7 @@ class _LoopHook(AgentHook):
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         on_tool_result: Callable[[str, str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         *,
         channel: str = "cli",
         chat_id: str = "direct",
@@ -61,6 +62,7 @@ class _LoopHook(AgentHook):
         self._on_stream = on_stream
         self._on_stream_end = on_stream_end
         self._on_tool_result = on_tool_result
+        self._on_thinking_delta = on_thinking_delta
         self._channel = channel
         self._chat_id = chat_id
         self._message_id = message_id
@@ -70,14 +72,19 @@ class _LoopHook(AgentHook):
         return self._on_stream is not None
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
-        from nanobot.utils.helpers import strip_think
+        from nanobot.utils.helpers import extract_think, strip_think
 
+        prev_think = extract_think(self._stream_buf)
         prev_clean = strip_think(self._stream_buf)
         self._stream_buf += delta
+        new_think = extract_think(self._stream_buf)
         new_clean = strip_think(self._stream_buf)
-        incremental = new_clean[len(prev_clean):]
-        if incremental and self._on_stream:
-            await self._on_stream(incremental)
+        think_delta = new_think[len(prev_think):]
+        clean_delta = new_clean[len(prev_clean):]
+        if think_delta and self._on_thinking_delta:
+            await self._on_thinking_delta(think_delta)
+        if clean_delta and self._on_stream:
+            await self._on_stream(clean_delta)
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         if self._on_stream_end:
@@ -346,6 +353,7 @@ class AgentLoop:
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         on_tool_result: Callable[[str, str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
         *,
         session: Session | None = None,
         channel: str = "cli",
@@ -365,6 +373,7 @@ class AgentLoop:
             on_stream=on_stream,
             on_stream_end=on_stream_end,
             on_tool_result=on_tool_result,
+            on_thinking_delta=on_thinking_delta,
             channel=channel,
             chat_id=chat_id,
             message_id=message_id,
@@ -525,6 +534,7 @@ class AgentLoop:
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         on_tool_result: Callable[[str, str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -602,6 +612,7 @@ class AgentLoop:
             on_stream=on_stream,
             on_stream_end=on_stream_end,
             on_tool_result=on_tool_result,
+            on_thinking_delta=on_thinking_delta,
             session=session,
             channel=msg.channel, chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
@@ -786,6 +797,7 @@ class AgentLoop:
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         on_tool_result: Callable[[str, str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
@@ -793,5 +805,5 @@ class AgentLoop:
         return await self._process_message(
             msg, session_key=session_key, on_progress=on_progress,
             on_stream=on_stream, on_stream_end=on_stream_end,
-            on_tool_result=on_tool_result,
+            on_tool_result=on_tool_result, on_thinking_delta=on_thinking_delta,
         )

@@ -660,6 +660,7 @@ async function sendMessage(text) {
 
   let tokenBuffer = '';
   let lastToolBlock = null;
+  let thinkingBlock = null;
   const collectedHints = [];
 
   // Freeze the current streaming section into a rendered-content div,
@@ -791,14 +792,43 @@ async function sendMessage(text) {
             }
           }
 
+        } else if (type === 'thinking') {
+          if (!thinkingBlock) {
+            thinkingBlock = document.createElement('div');
+            thinkingBlock.className = 'tool-block thinking-block tool-pending';
+            thinkingBlock.innerHTML = `
+              <div class="tool-header">
+                <span class="tool-spinner">💭</span>
+                <span class="tool-name">Thinking…</span>
+              </div>
+              <pre class="tool-output thinking-output"></pre>
+            `;
+            thinkingBlock.querySelector('.tool-header').addEventListener('click', () =>
+              thinkingBlock.classList.toggle('expanded')
+            );
+            bubble.insertBefore(thinkingBlock, currentStreamEl);
+          }
+          const outputEl = thinkingBlock.querySelector('.tool-output');
+          if (outputEl) {
+            outputEl.textContent += data.text;
+            thinkingBlock.classList.add('expanded');
+            scrollToBottom();
+          }
+
         } else if (type === 'progress') {
-          if (!data.tool_hint) {
-            // Non-tool progress (e.g. "Thinking...") — show briefly in stream area
+          if (!data.tool_hint && !thinkingBlock) {
+            // Non-tool progress before any thinking block — show briefly in stream area
             currentStreamEl.textContent = data.text;
             scrollToBottom();
           }
 
         } else if (type === 'done') {
+          // Finalize thinking block — collapse it and mark complete
+          if (thinkingBlock) {
+            thinkingBlock.classList.remove('tool-pending', 'expanded');
+            const spinner = thinkingBlock.querySelector('.tool-spinner');
+            if (spinner) spinner.textContent = '💭';
+          }
           // Finalize any tool blocks still showing a spinner
           bubble.querySelectorAll('.tool-pending').forEach(b => {
             b.classList.remove('tool-pending');

@@ -627,6 +627,30 @@ header {
   display: block;
 }
 
+.thinking-block {
+  border-color: var(--text-hint);
+  opacity: 0.85;
+}
+
+.thinking-block .tool-header {
+  color: var(--text-hint);
+  font-style: italic;
+}
+
+.thinking-block .tool-spinner {
+  animation: none;
+  color: var(--text-hint);
+}
+
+.thinking-output {
+  color: var(--text-dim);
+  font-style: italic;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .tool-filepath {
   color: var(--accent);
 }

@@ -536,6 +536,9 @@ class WebChannel(BaseChannel):
             _tool_active[0] = False
             await q.put(("tool_result", tool_name, output))
 
+        async def on_thinking_delta(content: str) -> None:
+            await q.put(("thinking_delta", content))
+
         session_key = f"web:{session_id}"
 
         async def run_agent() -> None:
@@ -551,6 +554,7 @@ class WebChannel(BaseChannel):
                     on_progress=on_progress,
                     on_stream=on_stream,
                     on_tool_result=on_tool_result,
+                    on_thinking_delta=on_thinking_delta,
                 )
                 final = result.content if result else ""
                 await q.put(("done", final or ""))
@@ -603,6 +607,8 @@ class WebChannel(BaseChannel):
                     await response.write(_sse("tool_stream", {"text": item[1]}))
                 elif kind == "tool_result":
                     await response.write(_sse("tool_result", {"tool": item[1], "output": item[2]}))
+                elif kind == "thinking_delta":
+                    await response.write(_sse("thinking", {"text": item[1]}))
                 elif kind == "progress":
                     await response.write(_sse("progress", {"text": item[1], "tool_hint": item[2]}))
                 elif kind == "done":
