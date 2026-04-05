@@ -627,7 +627,7 @@ class Dream:
                 model=self.model,
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
-                fail_on_tool_error=True,
+                fail_on_tool_error=False,
             ))
             logger.debug(
                 "Dream Phase 2 complete: stop_reason={}, tool_events={}",
