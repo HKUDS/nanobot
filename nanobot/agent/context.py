@@ -1,17 +1,16 @@
 """Context builder for assembling agent prompts."""
 
 import base64
+import json
 import mimetypes
 import platform
 from pathlib import Path
 from typing import Any
 
-from nanobot.utils.helpers import current_time_str
-
 from nanobot.agent.memory import MemoryStore
-from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.skills import SkillsLoader
-from nanobot.utils.helpers import build_assistant_message, detect_image_mime
+from nanobot.utils.helpers import build_assistant_message, current_time_str, detect_image_mime
+from nanobot.utils.prompt_templates import render_template
 
 
 class ContextBuilder:
@@ -26,7 +25,9 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self, skill_names: list[str] | None = None, current_message: str = ""
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
@@ -37,6 +38,9 @@ class ContextBuilder:
         memory = self.memory.get_memory_context()
         if memory:
             parts.append(f"# Memory\n\n{memory}")
+
+        if current_message and (keyword_mem := self._get_keyword_memory(current_message)):
+            parts.append(f"## Keyword Memories\n\n{keyword_mem}")
 
         always_skills = self.skills.get_always_skills()
         if always_skills:
@@ -49,6 +53,21 @@ class ContextBuilder:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
         return "\n\n---\n\n".join(parts)
+
+    def _get_keyword_memory(self, message: str) -> str:
+        config_path = self.workspace / "memory" / "keyword_memory.json"
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return ""
+        matched = []
+        msg_lower = message.lower()
+        for item in data:
+            keywords = item.get("keywords", [])
+            if any(kw.lower() in msg_lower for kw in keywords):
+                if prompt := item.get("prompt", ""):
+                    matched.append(prompt)
+        return "\n\n".join(matched) if matched else ""
 
     def _get_identity(self) -> str:
         """Get the core identity section."""
@@ -65,7 +84,9 @@ class ContextBuilder:
 
     @staticmethod
     def _build_runtime_context(
-        channel: str | None, chat_id: str | None, timezone: str | None = None,
+        channel: str | None,
+        chat_id: str | None,
+        timezone: str | None = None,
     ) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
         lines = [f"Current Time: {current_time_str(timezone)}"]
@@ -80,7 +101,10 @@ class ContextBuilder:
 
         def _to_blocks(value: Any) -> list[dict[str, Any]]:
             if isinstance(value, list):
-                return [item if isinstance(item, dict) else {"type": "text", "text": str(item)} for item in value]
+                return [
+                    item if isinstance(item, dict) else {"type": "text", "text": str(item)}
+                    for item in value
+                ]
             if value is None:
                 return []
             return [{"type": "text", "text": str(value)}]
@@ -119,8 +143,9 @@ class ContextBuilder:
             merged = f"{runtime_ctx}\n\n{user_content}"
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
+
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, current_message)},
             *history,
         ]
         if messages[-1].get("role") == current_role:
@@ -147,36 +172,46 @@ class ContextBuilder:
             if not mime or not mime.startswith("image/"):
                 continue
             b64 = base64.b64encode(raw).decode()
-            images.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{b64}"},
-                "_meta": {"path": str(p)},
-            })
+            images.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                    "_meta": {"path": str(p)},
+                }
+            )
 
         if not images:
             return text
         return images + [{"type": "text", "text": text}]
 
     def add_tool_result(
-        self, messages: list[dict[str, Any]],
-        tool_call_id: str, tool_name: str, result: Any,
+        self,
+        messages: list[dict[str, Any]],
+        tool_call_id: str,
+        tool_name: str,
+        result: Any,
     ) -> list[dict[str, Any]]:
         """Add a tool result to the message list."""
-        messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
+        messages.append(
+            {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result}
+        )
         return messages
 
     def add_assistant_message(
-        self, messages: list[dict[str, Any]],
+        self,
+        messages: list[dict[str, Any]],
         content: str | None,
         tool_calls: list[dict[str, Any]] | None = None,
         reasoning_content: str | None = None,
         thinking_blocks: list[dict] | None = None,
     ) -> list[dict[str, Any]]:
         """Add an assistant message to the message list."""
-        messages.append(build_assistant_message(
-            content,
-            tool_calls=tool_calls,
-            reasoning_content=reasoning_content,
-            thinking_blocks=thinking_blocks,
-        ))
+        messages.append(
+            build_assistant_message(
+                content,
+                tool_calls=tool_calls,
+                reasoning_content=reasoning_content,
+                thinking_blocks=thinking_blocks,
+            )
+        )
         return messages

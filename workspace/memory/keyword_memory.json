@@ -1,0 +1,10 @@
+[
+  {
+    "keywords": ["deploy", "deployment", "production"],
+    "prompt": "Production deployments must go through the full testing process and ensure all unit tests pass."
+  },
+  {
+    "keywords": ["password", "secret", "credential"],
+    "prompt": "User is sensitive about passwords and confidential information. Handle with extra care."
+  }
+]

@@ -5,6 +5,7 @@ on:
     branches: [ main, nightly ]
   pull_request:
     branches: [ main, nightly ]
+  workflow_dispatch:
 
 jobs:
   test:
