@@ -145,31 +145,63 @@ async def initialize_agent():
             async def before_iteration(self, context: AgentHookContext):
                 messages = context.messages or []
                 history_text = self._build_history(messages)
+                
+                # 构建更丰富的 state 信息
                 self.s_t = {
                     "task": TASK,
                     "history_summary": history_text,
                     "iteration": context.iteration,
+                    "message_count": len(messages),
+                    "last_user_msg": self._get_last_user_message(messages),
                 }
                 self.iteration = context.iteration
 
             async def after_iteration(self, context: AgentHookContext):
-                self.o_t = {"content": str(context.response.content) if context.response else ""}
+                # 构建更详细的 observation
+                response_content = str(context.response.content) if context.response else ""
+                self.o_t = {
+                    "content": response_content,
+                    "response_length": len(response_content),
+                }
                 self.r_t = 1.0
+
+                # 构建更详细的 action 信息
+                if context.tool_calls:
+                    self.a_t = {
+                        "type": "tool_call",
+                        "tools": [
+                            {"name": tc.get("name", "unknown"), "args": tc.get("arguments", {})}
+                            for tc in context.tool_calls
+                        ],
+                    }
+                else:
+                    self.a_t = {
+                        "type": "direct",
+                        "content": response_content[:200],  # 简要记录回复内容
+                    }
 
                 record = {
                     "iteration": self.iteration,
                     "s_t": self.s_t,
-                    "a_t": {"content": "tool_call" if context.tool_calls else "direct"},
+                    "a_t": self.a_t,
                     "o_t": self.o_t,
                     "r_t": self.r_t,
                 }
                 save_trajectory(record)
 
             def _build_history(self, messages: list) -> str:
+                """构建最近 5 条消息的摘要"""
                 return "\n".join([
                     f"{m.get('role', 'user')}: {m.get('content', '')[:100]}"
                     for m in messages[-5:]
                 ])
+
+            def _get_last_user_message(self, messages: list) -> str:
+                """获取最后一条用户消息"""
+                for m in reversed(messages):
+                    if m.get('role') == 'user':
+                        return m.get('content', '')[:200]
+                return ""
 
         trace_hook = TraceHook()
 
@@ -217,11 +249,74 @@ async def chat(req: ChatRequest):
             metadata={}
         )
 
+        # 获取调用前的消息数量
+        session_key = f"container:{CONVERSATION_ID}"
+        session = agent_loop.sessions.get_or_create(session_key)
+        messages_before = list(session.messages) if hasattr(session, 'messages') else []
+        iteration = len(messages_before) // 2 + 1
+
         # 直接调用 AgentLoop 的 _process_message 方法
         response = await agent_loop._process_message(inbound_msg)
 
         # 提取响应内容
         assistant_content = response.content if response else ""
+
+        # 获取调用后的消息（确保使用 get_or_create 获取最新会话状态）
+        session = agent_loop.sessions.get_or_create(session_key)
+        messages_after = list(session.messages) if hasattr(session, 'messages') else []
+        
+        # 手动构建并保存轨迹记录
+        history_text = "\n".join([
+            f"{m.get('role', 'user')}: {m.get('content', '')[:100]}"
+            for m in messages_after[-5:]
+        ])
+        
+        last_user_msg = ""
+        for m in reversed(messages_after):
+            if m.get('role') == 'user':
+                last_user_msg = m.get('content', '')[:200]
+                break
+        
+        # 构建 state
+        s_t = {
+            "task": TASK,
+            "history_summary": history_text,
+            "iteration": iteration,
+            "message_count": len(messages_after),
+            "last_user_msg": last_user_msg,
+        }
+        
+        # 构建 action
+        tool_calls = getattr(response, 'tool_calls', [])
+        if tool_calls:
+            a_t = {
+                "type": "tool_call",
+                "tools": [
+                    {"name": tc.get("name", "unknown"), "args": tc.get("arguments", {})}
+                    for tc in tool_calls
+                ],
+            }
+        else:
+            a_t = {
+                "type": "direct",
+                "content": assistant_content[:200],
+            }
+        
+        # 构建 observation
+        o_t = {
+            "content": assistant_content,
+            "response_length": len(assistant_content),
+        }
+        
+        # 保存轨迹
+        record = {
+            "iteration": iteration,
+            "s_t": s_t,
+            "a_t": a_t,
+            "o_t": o_t,
+            "r_t": 1.0,
+        }
+        save_trajectory(record)
 
         # 加载轨迹
         trajectory = load_trajectory()

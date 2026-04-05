@@ -271,11 +271,15 @@ async def merge_conversations(req: MergeRequest):
         target_conversation_id=req.target_conversation_id,
     )
 
+    # 完全删除源分支
     if req.source_conversation_id in conversations:
-        conversations[req.source_conversation_id]["status"] = "merged"
+        del conversations[req.source_conversation_id]
 
     if req.source_conversation_id in container_ports:
         del container_ports[req.source_conversation_id]
+
+    if req.source_conversation_id in branches:
+        del branches[req.source_conversation_id]
 
     return MergeResponse(
         status="completed",
