@@ -4,7 +4,9 @@ import asyncio
 import re
 from typing import Any
 
+import httpx
 from loguru import logger
+from pydantic import Field
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.socket_mode.websockets import SocketModeClient
@@ -13,9 +15,8 @@ from slackify_markdown import slackify_markdown
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from pydantic import Field
-
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 
 
@@ -43,6 +44,7 @@ class SlackConfig(Base):
     group_policy: str = "mention"
     group_allow_from: list[str] = Field(default_factory=list)
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
+    max_file_size: int = Field(default=26214400)  # 25MB default
 
 
 class SlackChannel(BaseChannel):
@@ -172,8 +174,9 @@ class SlackChannel(BaseChannel):
         sender_id = event.get("user")
         chat_id = event.get("channel")
 
-        # Ignore bot/system messages (any subtype = not a normal user message)
-        if event.get("subtype"):
+        # Ignore bot/system messages, but allow file_share for media support
+        subtype = event.get("subtype")
+        if subtype and subtype not in ("file_share",):
             return
         if self._bot_user_id and sender_id == self._bot_user_id:
             return
@@ -224,11 +227,29 @@ class SlackChannel(BaseChannel):
         # Thread-scoped session key for channel/group messages
         session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts and channel_type != "im" else None
 
+        # Extract media from file_share events
+        media_paths: list[str] = []
+        content_parts: list[str] = []
+        if text:
+            content_parts.append(text)
+
+        if subtype == "file_share":
+            files = event.get("files") or []
+            for file_info in files:
+                media_path, content_addition = await self._process_slack_file(file_info)
+                if media_path:
+                    media_paths.append(media_path)
+                if content_addition:
+                    content_parts.append(content_addition)
+
+        final_content = "\n".join(content_parts) if content_parts else "[empty message]"
+
         try:
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
-                content=text,
+                content=final_content,
+                media=media_paths,
                 metadata={
                     "slack": {
                         "event": event,
@@ -262,6 +283,120 @@ class SlackChannel(BaseChannel):
                 )
             except Exception as e:
                 logger.debug("Slack done reaction failed: {}", e)
+
+    async def _process_slack_file(self, file_info: dict) -> tuple[str | None, str | None]:
+        """
+        Process a Slack file: download media and transcribe if audio.
+
+        Returns:
+            tuple: (media_path or None, content_addition or None)
+        """
+        if not self._web_client:
+            return None, None
+
+        file_id = file_info.get("id", "")
+        filetype = file_info.get("filetype", "")
+        filename = file_info.get("name", "slack_file")
+        size = file_info.get("size", 0)
+        url_private = file_info.get("url_private_download")
+
+        # Check file size limit
+        if size > self.config.max_file_size:
+            logger.warning("Slack file too large ({}MB), skipping: {}", size / 1024 / 1024, filename)
+            return None, f"[📎 {filename} - 文件过大]"
+
+        if not url_private:
+            return None, None
+
+        # Supported image types
+        image_types = {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
+        # Supported audio types
+        audio_types = {"mp3", "m4a", "wav", "ogg", "flac", "aac", "webm"}
+
+        if filetype not in image_types and filetype not in audio_types:
+            logger.debug("Skipping unsupported file type: {}", filetype)
+            return None, f"[📎 {filename} - 不支持的格式]"
+
+        # Download with retry and timeout
+        media_path = await self._download_with_retry(file_id, filename, url_private)
+        if not media_path:
+            return None, f"[📎 {filename} - 下载失败]"
+
+        # Handle audio transcription
+        if filetype in audio_types:
+            transcription = await self.transcribe_audio(media_path)
+            if transcription:
+                logger.info("Transcribed audio {}: {}...", filename, transcription[:50])
+                return media_path, f"[🎤 音频转录: {transcription}]"
+            return media_path, f"[🎤 音频: {filename}]"
+
+        # Handle images
+        if filetype in image_types:
+            return media_path, f"[🖼️ 图片: {media_path}]"
+
+        return None, None
+
+    async def _download_with_retry(
+        self, file_id: str, filename: str, url_private: str, max_retries: int = 3
+    ) -> str | None:
+        """
+        Download file from Slack with retry logic and timeout protection.
+
+        Uses httpx with Authorization header to download private Slack files.
+
+        Args:
+            file_id: Slack file ID
+            filename: Original filename
+            url_private: Private download URL
+            max_retries: Number of retry attempts
+
+        Returns:
+            Local file path or None on failure
+        """
+        media_dir = get_media_dir("slack")
+        media_dir.mkdir(parents=True, exist_ok=True)
+        file_path = media_dir / f"{file_id}_{filename}"
+
+        # Prepare authorization header using bot token
+        headers = {"Authorization": f"Bearer {self.config.bot_token}"}
+
+        for attempt in range(max_retries):
+            try:
+                # Use httpx to download with timeout
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(url_private, headers=headers)
+                    response.raise_for_status()
+
+                    # Write file
+                    with open(file_path, "wb") as f:
+                        f.write(response.content)
+
+                    logger.info("Downloaded Slack file: {} as {} (attempt {})", filename, file_path, attempt + 1)
+                    return str(file_path)
+
+            except asyncio.TimeoutError:
+                logger.warning("Download timeout for {} (attempt {})", filename, attempt + 1)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1 * (attempt + 1))
+                    continue
+            except httpx.TimeoutException:
+                logger.warning("HTTP timeout for {} (attempt {})", filename, attempt + 1)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1 * (attempt + 1))
+                    continue
+            except httpx.HTTPStatusError as e:
+                logger.warning("HTTP error for {} (attempt {}): {}", filename, attempt + 1, e)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1 * (attempt + 1))
+                    continue
+            except Exception as e:
+                logger.warning("Download failed for {} (attempt {}): {}", filename, attempt + 1, e)
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1 * (attempt + 1))
+                    continue
+
+        logger.error("Failed to download {} after {} attempts", filename, max_retries)
+        return None
 
     def _is_allowed(self, sender_id: str, chat_id: str, channel_type: str) -> bool:
         if channel_type == "im":

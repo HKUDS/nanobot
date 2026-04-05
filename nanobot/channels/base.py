@@ -37,14 +37,48 @@ class BaseChannel(ABC):
         self._running = False
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
-        """Transcribe an audio file via Groq Whisper. Returns empty string on failure."""
-        if not self.transcription_api_key:
-            return ""
-        try:
-            from nanobot.providers.transcription import GroqTranscriptionProvider
+        """Transcribe an audio file via local Whisper CLI. Returns empty string on failure."""
+        import asyncio
+        import tempfile
 
-            provider = GroqTranscriptionProvider(api_key=self.transcription_api_key)
-            return await provider.transcribe(file_path)
+        path = Path(file_path)
+        if not path.exists():
+            logger.warning("{}: audio file not found: {}", self.name, file_path)
+            return ""
+
+        try:
+            # Create a temp directory for whisper output
+            with tempfile.TemporaryDirectory() as tmpdir:
+                # Run whisper CLI - output to txt format
+                proc = await asyncio.create_subprocess_exec(
+                    "whisper",
+                    str(path),
+                    "--model",
+                    "medium",
+                    "--output_format",
+                    "txt",
+                    "--output_dir",
+                    tmpdir,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await proc.communicate()
+
+                if proc.returncode != 0:
+                    logger.warning("{}: whisper failed: {}", self.name, stderr.decode())
+                    return ""
+
+                # Read the generated .txt file (same basename as input)
+                txt_file = Path(tmpdir) / f"{path.stem}.txt"
+                if txt_file.exists():
+                    return txt_file.read_text(encoding="utf-8").strip()
+                return ""
+
+        except FileNotFoundError:
+            logger.warning(
+                "{}: whisper CLI not found. Install with: brew install openai-whisper", self.name
+            )
+            return ""
         except Exception as e:
             logger.warning("{}: audio transcription failed: {}", self.name, e)
             return ""
@@ -91,7 +125,9 @@ class BaseChannel(ABC):
         """
         pass
 
-    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+    async def send_delta(
+        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+    ) -> None:
         """Deliver a streaming text chunk.
 
         Override in subclasses to enable streaming. Implementations should
@@ -107,7 +143,11 @@ class BaseChannel(ABC):
     def supports_streaming(self) -> bool:
         """True when config enables streaming AND this subclass implements send_delta."""
         cfg = self.config
-        streaming = cfg.get("streaming", False) if isinstance(cfg, dict) else getattr(cfg, "streaming", False)
+        streaming = (
+            cfg.get("streaming", False)
+            if isinstance(cfg, dict)
+            else getattr(cfg, "streaming", False)
+        )
         return bool(streaming) and type(self).send_delta is not BaseChannel.send_delta
 
     def is_allowed(self, sender_id: str) -> bool:
@@ -146,7 +186,8 @@ class BaseChannel(ABC):
             logger.warning(
                 "Access denied for sender {} on channel {}. "
                 "Add them to allowFrom list in config to grant access.",
-                sender_id, self.name,
+                sender_id,
+                self.name,
             )
             return
 
