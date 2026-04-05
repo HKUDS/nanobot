@@ -92,13 +92,13 @@ class WecomChannel(BaseChannel):
         self._generate_req_id = generate_req_id
 
         # Create WebSocket client
-        self._client = WSClient({
-            "bot_id": self.config.bot_id,
-            "secret": self.config.secret,
-            "reconnect_interval": 1000,
-            "max_reconnect_attempts": -1,  # Infinite reconnect
-            "heartbeat_interval": 30000,
-        })
+        self._client = WSClient(
+            self.config.bot_id,
+            self.config.secret,
+            reconnect_interval=1000,
+            max_reconnect_attempts=-1,  # Infinite reconnect
+            heartbeat_interval=30000,
+        )
 
         # Register event handlers
         self._client.on("connected", self._on_connected)
@@ -572,33 +572,37 @@ class WecomChannel(BaseChannel):
                     )
                     logger.info("WeCom progress stream ended for {}", msg.chat_id)
 
-                # Send final result
-                if content:
+                # Send final result based on streaming config
+                if content or msg.media:
                     if self.config.streaming:
-                        # Stream the result
-                        stream_id = self._generate_req_id("stream")
-                        await self._client.reply_stream(
-                            frame,
-                            stream_id,
-                            content,
-                            finish=True,
-                        )
-                        logger.info("WeCom streaming result sent to {}", msg.chat_id)
+                        # Streaming mode: send as new stream
+                        result_stream_id = self._generate_req_id("stream")
+                        if content:
+                            await self._client.reply_stream(
+                                frame,
+                                result_stream_id,
+                                content,
+                                finish=True,
+                            )
+                            logger.info("WeCom streaming result sent to {}", msg.chat_id)
+                        # Send media files if any
+                        if msg.media:
+                            await self._send_media_files(frame, msg.media, msg.chat_id)
                     else:
-                        # Send as normal message
-                        await self._client.reply(frame, content)
-                        logger.info("WeCom normal result sent to {}", msg.chat_id)
-
-                # Send media files if any
-                if msg.media:
-                    await self._send_media_files(frame, msg.media, msg.chat_id)
+                        # Non-streaming mode: send as normal message
+                        if content:
+                            await self._client.reply(frame, content)
+                            logger.info("WeCom normal result sent to {}", msg.chat_id)
+                        # Send media files if any
+                        if msg.media:
+                            await self._send_media_files(frame, msg.media, msg.chat_id)
 
         except Exception as e:
             logger.error("Error sending WeCom message: {}", e)
             raise
 
     async def _send_media_files(self, frame: Any, media_paths: list[str], chat_id: str) -> None:
-        """Send media files through WeCom."""
+        """Helper method to send media files."""
         logger.info("Processing {} media file(s)", len(media_paths))
         for media_path in media_paths:
             try:
@@ -619,47 +623,73 @@ class WecomChannel(BaseChannel):
             except Exception as e:
                 logger.error("Error processing media {}: {}", media_path, e)
 
-    async def send_delta(self, chat_id: str, delta: str, finish: bool = False) -> None:
-        """
-        Send streaming delta text to a chat.
-
-        This is used for streaming results when streaming is enabled.
-
+    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+        """Send streaming text chunks for real-time result display.
+        
         Args:
             chat_id: The chat ID to send to
-            delta: The text delta to send
-            finish: Whether this is the final chunk
+            delta: Text chunk to send
+            metadata: Metadata containing _stream_delta and _stream_end flags
         """
         if not self._client:
             logger.warning("WeCom client not initialized")
             return
 
+        # Get the stored frame for this chat
         frame = self._chat_frames.get(chat_id)
         if not frame:
             logger.warning("No frame found for chat {}, cannot send delta", chat_id)
             return
 
-        # Get or create stream ID for this chat
-        stream_id = self._result_stream_ids.get(chat_id)
-        if not stream_id:
+        meta = metadata or {}
+
+        # Handle stream end: send final message and clean up
+        if meta.get("_stream_end"):
+            stream_id = self._result_stream_ids.pop(chat_id, None)
+            accumulated_text = self._result_stream_bufs.pop(chat_id, None)
+
+            if not stream_id or accumulated_text is None:
+                logger.warning("No active result stream for chat {}", chat_id)
+                return
+
+            # Send final accumulated text with finish=True
+            if accumulated_text.strip():
+                try:
+                    await self._client.reply_stream(
+                        frame,
+                        stream_id,
+                        accumulated_text,
+                        finish=True,
+                    )
+                    logger.info("WeCom result stream ended for {}", chat_id)
+                except Exception as e:
+                    logger.error("Error sending final delta: {}", e)
+                    raise
+            return
+
+        # Accumulate delta text
+        if chat_id not in self._result_stream_bufs:
+            # First delta: create new stream
             stream_id = self._generate_req_id("stream")
             self._result_stream_ids[chat_id] = stream_id
             self._result_stream_bufs[chat_id] = ""
+        else:
+            stream_id = self._result_stream_ids[chat_id]
 
-        # Accumulate text
-        accumulated_text = self._result_stream_bufs[chat_id] + delta
-        self._result_stream_bufs[chat_id] = accumulated_text
+        # Append delta to buffer
+        self._result_stream_bufs[chat_id] += delta
+        accumulated_text = self._result_stream_bufs[chat_id]
 
-        # Send the accumulated text
-        await self._client.reply_stream(
-            frame,
-            stream_id,
-            accumulated_text,
-            finish=finish,
-        )
-
-        # Clean up if finished
-        if finish:
-            self._result_stream_ids.pop(chat_id, None)
-            self._result_stream_bufs.pop(chat_id, None)
-            logger.info("WeCom streaming delta ended for {}", chat_id)
+        # Send update if we have meaningful content
+        if accumulated_text.strip():
+            try:
+                await self._client.reply_stream(
+                    frame,
+                    stream_id,
+                    accumulated_text,
+                    finish=False,
+                )
+                logger.debug("WeCom result delta sent to {} ({} chars)", chat_id, len(accumulated_text))
+            except Exception as e:
+                logger.error("Error sending delta: {}", e)
+                raise

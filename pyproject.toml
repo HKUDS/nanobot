@@ -55,7 +55,7 @@ api = [
     "aiohttp>=3.9.0,<4.0.0",
 ]
 wecom = [
-    "wecom-aibot-sdk-python>=0.1.5",
+    "wecom-aibot-sdk>=1.0.6",
 ]
 weixin = [
     "qrcode[pil]>=8.0",
