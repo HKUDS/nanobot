@@ -41,9 +41,11 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        command_wrapper: str = "",
     ):
         self.timeout = timeout
         self.working_dir = working_dir
+        self.command_wrapper = command_wrapper
         self.deny_patterns = deny_patterns or [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
@@ -78,10 +80,15 @@ class ExecTool(Tool):
         self, command: str, working_dir: str | None = None,
         timeout: int | None = None, **kwargs: Any,
     ) -> str:
-        cwd = working_dir or self.working_dir or os.getcwd()
+        cwd = os.path.abspath(working_dir or self.working_dir or os.getcwd())
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
+
+        if self.command_wrapper:
+            original_command = command
+            command = self.command_wrapper.replace("{cwd}", cwd).replace("{command}", command)
+            logger.debug("command_wrapper applied: {} -> {}", original_command, command)
 
         effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
 

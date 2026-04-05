@@ -173,6 +173,7 @@ class ExecToolConfig(Base):
     enable: bool = True
     timeout: int = 60
     path_append: str = ""
+    command_wrapper: str = ""  # sandbox wrapper command template; supports {command} and {cwd}
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""

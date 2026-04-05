@@ -574,6 +574,56 @@ async def test_exec_timeout_capped_at_max() -> None:
     assert "Exit code: 0" in result
 
 
+async def test_exec_command_wrapper_applied() -> None:
+    """command_wrapper should wrap the original command."""
+    tool = ExecTool(command_wrapper="echo WRAPPED: {command}")
+    result = await tool.execute(command="hello")
+    assert "WRAPPED: hello" in result
+    assert "Exit code: 0" in result
+
+
+async def test_exec_command_wrapper_with_cwd(tmp_path) -> None:
+    """command_wrapper should substitute {cwd} with the absolute working directory."""
+    tool = ExecTool(command_wrapper="echo CWD:{cwd} CMD:{command}")
+    result = await tool.execute(command="hi", working_dir=str(tmp_path))
+    assert str(tmp_path) in result
+    assert "CMD:hi" in result
+
+
+async def test_exec_command_wrapper_empty_noop() -> None:
+    """Empty command_wrapper should leave the command unchanged."""
+    tool = ExecTool(command_wrapper="")
+    result = await tool.execute(command="echo direct")
+    assert "direct" in result
+    assert "Exit code: 0" in result
+
+
+async def test_exec_command_wrapper_guard_runs_before_wrapper() -> None:
+    """Safety guard should run before wrapper substitution."""
+    tool = ExecTool(command_wrapper="echo WRAPPED:{command}")
+    result = await tool.execute(command="rm -rf /")
+    assert "blocked by safety guard" in result
+    assert "WRAPPED:" not in result
+
+
+async def test_exec_command_wrapper_ignores_unknown_placeholders() -> None:
+    """Unknown {placeholders} in the wrapper should be left as-is, not raise KeyError."""
+    tool = ExecTool(command_wrapper="echo {command} {unknown}")
+    result = await tool.execute(command="hello")
+    assert "Exit code: 0" in result
+    assert "{unknown}" in result
+
+
+async def test_exec_command_wrapper_does_not_leak_attributes() -> None:
+    """Wrapper should not expose Python internals via attribute access."""
+    tool = ExecTool(command_wrapper="echo {command.__class__}")
+    result = await tool.execute(command="hello")
+    assert "Exit code: 0" in result
+    # {command.__class__} is not a valid placeholder; {command} gets replaced
+    # leaving {.__class__} as a literal string — no Python object is leaked.
+    assert "<class" not in result
+
+
 # --- _resolve_type and nullable param tests ---
 
 
