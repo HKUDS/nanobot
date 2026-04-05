@@ -3,6 +3,7 @@
 import asyncio
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -93,13 +94,13 @@ class ExecTool(Tool):
 
         effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
 
-        env = os.environ.copy()
-        if self.path_append:
-            env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
+        env = self._build_env()
+
+        bash = shutil.which("bash") or "/bin/bash"
 
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
+            process = await asyncio.create_subprocess_exec(
+                bash, "-l", "-c", command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
@@ -153,6 +154,25 @@ class ExecTool(Tool):
 
         except Exception as e:
             return f"Error executing command: {str(e)}"
+
+    def _build_env(self) -> dict[str, str]:
+        """Build a minimal environment for subprocess execution.
+
+        Uses HOME so that ``bash -l`` sources the user's profile (which sets
+        PATH and other essentials).  Only PATH is extended with *path_append*;
+        the parent process's environment is **not** inherited, preventing
+        secrets in env vars from leaking to LLM-generated commands.
+        """
+        home = os.environ.get("HOME", "/tmp")
+        env: dict[str, str] = {
+            "HOME": home,
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "TERM": os.environ.get("TERM", "dumb"),
+        }
+        if self.path_append:
+            # Seed PATH so the login shell can append to it.
+            env["PATH"] = self.path_append
+        return env
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
