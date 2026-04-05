@@ -671,9 +671,6 @@ class OpenAICompatProvider(LLMProvider):
                     break
                 chunks.append(chunk)
                 if on_content_delta and chunk.choices:
-                    text = getattr(chunk.choices[0].delta, "reasoning_content", None)
-                    if text:
-                        await on_content_delta(text)
                     text = getattr(chunk.choices[0].delta, "content", None)
                     if text:
                         await on_content_delta(text)
