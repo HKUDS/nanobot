@@ -4,6 +4,7 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+import nanobot.channels.msteams as msteams_module
 from nanobot.bus.events import OutboundMessage
 from nanobot.channels.msteams import ConversationRef, MSTeamsChannel, MSTeamsConfig
 
@@ -17,10 +18,13 @@ class DummyBus:
 
 
 class FakeResponse:
-    def __init__(self, payload):
-        self._payload = payload
+    def __init__(self, payload=None, *, should_raise=False):
+        self._payload = payload or {}
+        self._should_raise = should_raise
 
     def raise_for_status(self):
+        if self._should_raise:
+            raise RuntimeError("boom")
         return None
 
     def json(self):
@@ -28,30 +32,37 @@ class FakeResponse:
 
 
 class FakeHttpClient:
-    def __init__(self, payload=None):
+    def __init__(self, payload=None, *, should_raise=False):
         self.payload = payload or {"access_token": "tok", "expires_in": 3600}
+        self.should_raise = should_raise
         self.calls = []
 
     async def post(self, url, **kwargs):
         self.calls.append((url, kwargs))
-        return FakeResponse(self.payload)
+        return FakeResponse(self.payload, should_raise=self.should_raise)
 
 
-@pytest.mark.asyncio
-async def test_handle_activity_personal_message_publishes_and_stores_ref(tmp_path, monkeypatch):
+@pytest.fixture
+def make_channel(tmp_path, monkeypatch):
     monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
 
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
+    def _make_channel(**config_overrides):
+        config = {
             "enabled": True,
             "appId": "app-id",
             "appPassword": "secret",
             "tenantId": "tenant-id",
             "allowFrom": ["*"],
-        },
-        bus,
-    )
+        }
+        config.update(config_overrides)
+        return MSTeamsChannel(config, DummyBus())
+
+    return _make_channel
+
+
+@pytest.mark.asyncio
+async def test_handle_activity_personal_message_publishes_and_stores_ref(make_channel, tmp_path):
+    ch = make_channel()
 
     activity = {
         "type": "message",
@@ -78,8 +89,8 @@ async def test_handle_activity_personal_message_publishes_and_stores_ref(tmp_pat
 
     await ch._handle_activity(activity)
 
-    assert len(bus.inbound) == 1
-    msg = bus.inbound[0]
+    assert len(ch.bus.inbound) == 1
+    msg = ch.bus.inbound[0]
     assert msg.channel == "msteams"
     assert msg.sender_id == "aad-user-1"
     assert msg.chat_id == "conv-123"
@@ -93,20 +104,8 @@ async def test_handle_activity_personal_message_publishes_and_stores_ref(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_handle_activity_ignores_group_messages(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-        },
-        bus,
-    )
+async def test_handle_activity_ignores_group_messages(make_channel):
+    ch = make_channel()
 
     activity = {
         "type": "message",
@@ -130,25 +129,13 @@ async def test_handle_activity_ignores_group_messages(tmp_path, monkeypatch):
 
     await ch._handle_activity(activity)
 
-    assert bus.inbound == []
+    assert ch.bus.inbound == []
     assert ch._conversation_refs == {}
 
 
 @pytest.mark.asyncio
-async def test_handle_activity_mention_only_uses_default_response(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-        },
-        bus,
-    )
+async def test_handle_activity_mention_only_uses_default_response(make_channel):
+    ch = make_channel()
 
     activity = {
         "type": "message",
@@ -172,27 +159,14 @@ async def test_handle_activity_mention_only_uses_default_response(tmp_path, monk
 
     await ch._handle_activity(activity)
 
-    assert len(bus.inbound) == 1
-    assert bus.inbound[0].content == "Hi — what can I help with?"
+    assert len(ch.bus.inbound) == 1
+    assert ch.bus.inbound[0].content == "Hi — what can I help with?"
     assert "conv-empty" in ch._conversation_refs
 
 
 @pytest.mark.asyncio
-async def test_handle_activity_mention_only_ignores_when_response_disabled(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-            "mentionOnlyResponse": "   ",
-        },
-        bus,
-    )
+async def test_handle_activity_mention_only_ignores_when_response_disabled(make_channel):
+    ch = make_channel(mentionOnlyResponse="   ")
 
     activity = {
         "type": "message",
@@ -216,43 +190,19 @@ async def test_handle_activity_mention_only_ignores_when_response_disabled(tmp_p
 
     await ch._handle_activity(activity)
 
-    assert bus.inbound == []
+    assert ch.bus.inbound == []
     assert ch._conversation_refs == {}
 
 
-def test_strip_possible_bot_mention_removes_generic_at_tags(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-        },
-        bus,
-    )
+def test_strip_possible_bot_mention_removes_generic_at_tags(make_channel):
+    ch = make_channel()
 
     assert ch._strip_possible_bot_mention("<at>Nanobot</at> hello") == "hello"
     assert ch._strip_possible_bot_mention("hi <at>Some Bot</at> there") == "hi there"
 
 
-def test_sanitize_inbound_text_keeps_normal_inline_message(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-        },
-        bus,
-    )
+def test_sanitize_inbound_text_keeps_normal_inline_message(make_channel):
+    ch = make_channel()
 
     activity = {
         "text": "<at>Nanobot</at> normal inline message",
@@ -262,20 +212,8 @@ def test_sanitize_inbound_text_keeps_normal_inline_message(tmp_path, monkeypatch
     assert ch._sanitize_inbound_text(activity) == "normal inline message"
 
 
-def test_sanitize_inbound_text_normalizes_fwdioc_wrapper_without_reply_metadata(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-        },
-        bus,
-    )
+def test_sanitize_inbound_text_normalizes_fwdioc_wrapper_without_reply_metadata(make_channel):
+    ch = make_channel()
 
     activity = {
         "text": "FWDIOC-BOT \r\nQuoted prior message\r\n\r\nThis is a reply with quote test",
@@ -288,20 +226,8 @@ def test_sanitize_inbound_text_normalizes_fwdioc_wrapper_without_reply_metadata(
     )
 
 
-def test_sanitize_inbound_text_structures_reply_quote_prefix(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-        },
-        bus,
-    )
+def test_sanitize_inbound_text_structures_reply_quote_prefix(make_channel):
+    ch = make_channel()
 
     activity = {
         "text": "Replying to Bob Smith\nactual reply text",
@@ -312,20 +238,8 @@ def test_sanitize_inbound_text_structures_reply_quote_prefix(tmp_path, monkeypat
     assert ch._sanitize_inbound_text(activity) == "User is replying to: Bob Smith\nUser reply: actual reply text"
 
 
-def test_sanitize_inbound_text_structures_live_fwdioc_quote_shape(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-        },
-        bus,
-    )
+def test_sanitize_inbound_text_structures_live_fwdioc_quote_shape(make_channel):
+    ch = make_channel()
 
     activity = {
         "text": "FWDIOC-BOT Got it. I’ll watch for the exact text reply with quote test and then inspect that turn specifically. Reply with quote test",
@@ -339,20 +253,8 @@ def test_sanitize_inbound_text_structures_live_fwdioc_quote_shape(tmp_path, monk
     )
 
 
-def test_sanitize_inbound_text_structures_multiline_fwdioc_quote_shape(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-        },
-        bus,
-    )
+def test_sanitize_inbound_text_structures_multiline_fwdioc_quote_shape(make_channel):
+    ch = make_channel()
 
     activity = {
         "text": (
@@ -373,20 +275,8 @@ def test_sanitize_inbound_text_structures_multiline_fwdioc_quote_shape(tmp_path,
     )
 
 
-def test_sanitize_inbound_text_structures_exact_live_crlf_fwdioc_shape(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-        },
-        bus,
-    )
+def test_sanitize_inbound_text_structures_exact_live_crlf_fwdioc_shape(make_channel):
+    ch = make_channel()
 
     activity = {
         "text": (
@@ -408,21 +298,8 @@ def test_sanitize_inbound_text_structures_exact_live_crlf_fwdioc_shape(tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_get_access_token_uses_configured_tenant(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-123",
-            "allowFrom": ["*"],
-        },
-        bus,
-    )
-
+async def test_get_access_token_uses_configured_tenant(make_channel):
+    ch = make_channel(tenantId="tenant-123")
     fake_http = FakeHttpClient()
     ch._http = fake_http
 
@@ -438,22 +315,8 @@ async def test_get_access_token_uses_configured_tenant(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_send_replies_to_activity_when_reply_in_thread_enabled(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-            "replyInThread": True,
-        },
-        bus,
-    )
-
+async def test_send_replies_to_activity_when_reply_in_thread_enabled(make_channel):
+    ch = make_channel(replyInThread=True)
     fake_http = FakeHttpClient()
     ch._http = fake_http
     ch._token = "tok"
@@ -475,22 +338,8 @@ async def test_send_replies_to_activity_when_reply_in_thread_enabled(tmp_path, m
 
 
 @pytest.mark.asyncio
-async def test_send_posts_to_conversation_when_thread_reply_disabled(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-            "replyInThread": False,
-        },
-        bus,
-    )
-
+async def test_send_posts_to_conversation_when_thread_reply_disabled(make_channel):
+    ch = make_channel(replyInThread=False)
     fake_http = FakeHttpClient()
     ch._http = fake_http
     ch._token = "tok"
@@ -512,22 +361,8 @@ async def test_send_posts_to_conversation_when_thread_reply_disabled(tmp_path, m
 
 
 @pytest.mark.asyncio
-async def test_send_posts_to_conversation_when_thread_reply_enabled_but_no_activity_id(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-            "replyInThread": True,
-        },
-        bus,
-    )
-
+async def test_send_posts_to_conversation_when_thread_reply_enabled_but_no_activity_id(make_channel):
+    ch = make_channel(replyInThread=True)
     fake_http = FakeHttpClient()
     ch._http = fake_http
     ch._token = "tok"
@@ -548,6 +383,31 @@ async def test_send_posts_to_conversation_when_thread_reply_enabled_but_no_activ
     assert "replyToId" not in kwargs["json"]
 
 
+@pytest.mark.asyncio
+async def test_send_raises_when_conversation_ref_missing(make_channel):
+    ch = make_channel()
+    ch._http = FakeHttpClient()
+
+    with pytest.raises(RuntimeError, match="conversation ref not found"):
+        await ch.send(OutboundMessage(channel="msteams", chat_id="missing", content="Reply text"))
+
+
+@pytest.mark.asyncio
+async def test_send_raises_delivery_failures_for_retry(make_channel):
+    ch = make_channel()
+    ch._http = FakeHttpClient(should_raise=True)
+    ch._token = "tok"
+    ch._token_expires_at = 9999999999
+    ch._conversation_refs["conv-123"] = ConversationRef(
+        service_url="https://smba.trafficmanager.net/amer/",
+        conversation_id="conv-123",
+        activity_id="activity-1",
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await ch.send(OutboundMessage(channel="msteams", chat_id="conv-123", content="Reply text"))
+
+
 def _make_test_rsa_jwk(kid: str = "test-kid"):
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public_key = private_key.public_key()
@@ -560,21 +420,8 @@ def _make_test_rsa_jwk(kid: str = "test-kid"):
 
 
 @pytest.mark.asyncio
-async def test_validate_inbound_auth_accepts_observed_botframework_shape(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-            "validateInboundAuth": True,
-        },
-        bus,
-    )
+async def test_validate_inbound_auth_accepts_observed_botframework_shape(make_channel):
+    ch = make_channel(validateInboundAuth=True)
 
     private_key, jwk = _make_test_rsa_jwk()
     ch._botframework_jwks = {"keys": [jwk]}
@@ -601,21 +448,8 @@ async def test_validate_inbound_auth_accepts_observed_botframework_shape(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_validate_inbound_auth_rejects_service_url_mismatch(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-            "validateInboundAuth": True,
-        },
-        bus,
-    )
+async def test_validate_inbound_auth_rejects_service_url_mismatch(make_channel):
+    ch = make_channel(validateInboundAuth=True)
 
     private_key, jwk = _make_test_rsa_jwk()
     ch._botframework_jwks = {"keys": [jwk]}
@@ -642,24 +476,23 @@ async def test_validate_inbound_auth_rejects_service_url_mismatch(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_validate_inbound_auth_rejects_missing_bearer_token(tmp_path, monkeypatch):
-    monkeypatch.setattr("nanobot.channels.msteams.get_workspace_path", lambda: tmp_path)
-
-    bus = DummyBus()
-    ch = MSTeamsChannel(
-        {
-            "enabled": True,
-            "appId": "app-id",
-            "appPassword": "secret",
-            "tenantId": "tenant-id",
-            "allowFrom": ["*"],
-            "validateInboundAuth": True,
-        },
-        bus,
-    )
+async def test_validate_inbound_auth_rejects_missing_bearer_token(make_channel):
+    ch = make_channel(validateInboundAuth=True)
 
     with pytest.raises(ValueError, match="missing bearer token"):
         await ch._validate_inbound_auth("", {"serviceUrl": "https://smba.trafficmanager.net/amer/tenant/"})
+
+
+@pytest.mark.asyncio
+async def test_start_logs_install_hint_when_pyjwt_missing(make_channel, monkeypatch):
+    ch = make_channel()
+    errors = []
+    monkeypatch.setattr(msteams_module, "MSTEAMS_AVAILABLE", False)
+    monkeypatch.setattr(msteams_module.logger, "error", lambda message, *args: errors.append(message.format(*args)))
+
+    await ch.start()
+
+    assert errors == ["PyJWT not installed. Run: pip install nanobot-ai[msteams]"]
 
 
 def test_msteams_default_config_includes_restart_notify_fields():

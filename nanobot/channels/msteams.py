@@ -13,16 +13,15 @@ from __future__ import annotations
 
 import asyncio
 import html
+import importlib.util
 import json
 import re
 import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
-import jwt
 from loguru import logger
 from pydantic import Field
 
@@ -31,6 +30,14 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_workspace_path
 from nanobot.config.schema import Base
+
+MSTEAMS_AVAILABLE = importlib.util.find_spec("jwt") is not None
+
+if TYPE_CHECKING:
+    import jwt
+
+if MSTEAMS_AVAILABLE:
+    import jwt
 
 
 class MSTeamsConfig(Base):
@@ -100,6 +107,10 @@ class MSTeamsChannel(BaseChannel):
 
     async def start(self) -> None:
         """Start the Teams webhook listener."""
+        if not MSTEAMS_AVAILABLE:
+            logger.error("PyJWT not installed. Run: pip install nanobot-ai[msteams]")
+            return
+
         if not self.config.app_id or not self.config.app_password:
             logger.error("MSTeams app_id/app_password not configured")
             return
@@ -194,22 +205,16 @@ class MSTeamsChannel(BaseChannel):
     async def send(self, msg: OutboundMessage) -> None:
         """Send a plain text reply into an existing Teams conversation."""
         if not self._http:
-            logger.warning("MSTeams HTTP client not initialized")
-            return
+            raise RuntimeError("MSTeams HTTP client not initialized")
 
         ref = self._conversation_refs.get(str(msg.chat_id))
         if not ref:
-            logger.warning("MSTeams conversation ref not found for chat_id={}", msg.chat_id)
-            return
+            raise RuntimeError(f"MSTeams conversation ref not found for chat_id={msg.chat_id}")
 
         token = await self._get_access_token()
         base_url = f"{ref.service_url.rstrip('/')}/v3/conversations/{ref.conversation_id}/activities"
         use_thread_reply = self.config.reply_in_thread and bool(ref.activity_id)
-        url = (
-            f"{base_url}/{ref.activity_id}"
-            if use_thread_reply
-            else base_url
-        )
+        url = f"{base_url}/{ref.activity_id}" if use_thread_reply else base_url
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -227,6 +232,7 @@ class MSTeamsChannel(BaseChannel):
             logger.info("MSTeams message sent to {}", ref.conversation_id)
         except Exception as e:
             logger.error("MSTeams send failed: {}", e)
+            raise
 
     async def _handle_activity(self, activity: dict[str, Any]) -> None:
         """Handle inbound Teams/Bot Framework activity."""
@@ -240,7 +246,6 @@ class MSTeamsChannel(BaseChannel):
 
         sender_id = str(from_user.get("aadObjectId") or from_user.get("id") or "").strip()
         conversation_id = str(conversation.get("id") or "").strip()
-        text = str(activity.get("text") or "").strip()
         service_url = str(activity.get("serviceUrl") or "").strip()
         activity_id = str(activity.get("id") or "").strip()
         conversation_type = str(conversation.get("conversationType") or "").strip()
@@ -254,9 +259,6 @@ class MSTeamsChannel(BaseChannel):
         # DM-only MVP: ignore group/channel traffic for now
         if conversation_type and conversation_type not in ("personal", ""):
             logger.debug("MSTeams ignoring non-DM conversation {}", conversation_type)
-            return
-
-        if not self.is_allowed(sender_id):
             return
 
         text = self._sanitize_inbound_text(activity)
@@ -328,11 +330,17 @@ class MSTeamsChannel(BaseChannel):
         while lines and not lines[0]:
             lines.pop(0)
 
+        # Observed native Teams reply wrapper:
+        #   Replying to Bob Smith
+        #   actual reply text
         if len(lines) >= 2 and lines[0].lower().startswith("replying to "):
             quoted = lines[0][len("replying to ") :].strip(" :")
             reply = "\n".join(lines[1:]).strip()
             return self._format_reply_with_quote(quoted, reply)
 
+        # Observed FWDIOC relay wrapper where the quoted content is surfaced after a
+        # synthetic "FWDIOC-BOT" header, sometimes with a blank line separating quote
+        # and reply, and sometimes as a compact line-based fallback shape.
         if lines and lines[0].strip().startswith("FWDIOC-BOT"):
             body = normalized_newlines.split("\n", 1)[1] if "\n" in normalized_newlines else ""
             body = body.lstrip()
@@ -350,6 +358,8 @@ class MSTeamsChannel(BaseChannel):
                 if quoted and reply:
                     return self._format_reply_with_quote(quoted, reply)
 
+        # Observed compact fallback where the relay flattens everything into one line
+        # and appends the literal reply text marker at the end.
         compact = re.sub(r"\s+", " ", normalized_newlines).strip()
         if compact.startswith("FWDIOC-BOT "):
             compact = compact[len("FWDIOC-BOT ") :].strip()
@@ -374,6 +384,9 @@ class MSTeamsChannel(BaseChannel):
 
     async def _validate_inbound_auth(self, auth_header: str, activity: dict[str, Any]) -> None:
         """Validate inbound Bot Framework bearer token."""
+        if not MSTEAMS_AVAILABLE:
+            raise RuntimeError("PyJWT not installed. Run: pip install nanobot-ai[msteams]")
+
         if not auth_header.lower().startswith("bearer "):
             raise ValueError("missing bearer token")
 
@@ -449,6 +462,7 @@ class MSTeamsChannel(BaseChannel):
         self._botframework_jwks = resp.json()
         self._botframework_jwks_expires_at = now + 3600
         return self._botframework_jwks
+
     def _load_refs(self) -> dict[str, ConversationRef]:
         """Load stored conversation references."""
         if not self._refs_path.exists():
