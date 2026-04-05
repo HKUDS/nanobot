@@ -245,11 +245,27 @@ Configure these **two parts** in your config (other options have defaults).
   "agents": {
     "defaults": {
       "model": "anthropic/claude-opus-4-5",
-      "provider": "openrouter"
+      "provider": "openrouter",
+      "fallbackAgents": [
+        {
+          "model": "gemma-4-31b-it",
+          "provider": "gemini",
+          "contextWindowTokens": 256000
+        },
+        {
+          "model": "qwen/qwen3-32b",
+          "provider": "openrouter",
+          "contextWindowTokens": 131072
+        }
+      ]
     }
   }
 }
 ```
+
+> `fallbackAgents` is optional.
+> Failover order is: `defaults` -> each item in `fallbackAgents` (top to bottom) -> retry `defaults` once.
+> Use `contextWindowTokens` in each fallback entry when different models need different context limits.
 
 **3. Chat**
 
