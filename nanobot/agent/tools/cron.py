@@ -4,11 +4,37 @@ from contextvars import ContextVar
 from datetime import datetime
 from typing import Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronJobState, CronSchedule
 
 
+@tool_parameters(
+    tool_parameters_schema(
+        action=StringSchema("Action to perform", enum=["add", "list", "remove"]),
+        message=StringSchema(
+            "Instruction for the agent to execute when the job triggers "
+            "(e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report')"
+        ),
+        every_seconds=IntegerSchema(0, description="Interval in seconds (for recurring tasks)"),
+        cron_expr=StringSchema("Cron expression like '0 9 * * *' (for scheduled tasks)"),
+        tz=StringSchema(
+            "Optional IANA timezone for cron expressions (e.g. 'America/Vancouver'). "
+            "When omitted with cron_expr, the tool's default timezone applies."
+        ),
+        at=StringSchema(
+            "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00'). "
+            "Naive values use the tool's default timezone."
+        ),
+        deliver=BooleanSchema(
+            description="Whether to deliver the execution result to the user channel (default true)",
+            default=True,
+        ),
+        job_id=StringSchema("Job ID (for remove)"),
+        required=["action"],
+    )
+)
 class CronTool(Tool):
     """Tool to schedule reminders and recurring tasks."""
 
@@ -63,49 +89,6 @@ class CronTool(Tool):
             "Schedule reminders and recurring tasks. Actions: add, list, remove. "
             f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}."
         )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["add", "list", "remove"],
-                    "description": "Action to perform",
-                },
-                "message": {"type": "string", "description": "Instruction for the agent to execute when the job triggers (e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report')"},
-                "every_seconds": {
-                    "type": "integer",
-                    "description": "Interval in seconds (for recurring tasks)",
-                },
-                "cron_expr": {
-                    "type": "string",
-                    "description": "Cron expression like '0 9 * * *' (for scheduled tasks)",
-                },
-                "tz": {
-                    "type": "string",
-                    "description": (
-                        "Optional IANA timezone for cron expressions "
-                        f"(e.g. 'America/Vancouver'). Defaults to {self._default_timezone}."
-                    ),
-                },
-                "at": {
-                    "type": "string",
-                    "description": (
-                        "ISO datetime for one-time execution "
-                        f"(e.g. '2026-02-12T10:30:00'). Naive values default to {self._default_timezone}."
-                    ),
-                },
-                "deliver": {
-                    "type": "boolean",
-                    "description": "Whether to deliver the execution result to the user channel (default true)",
-                    "default": True
-                },
-                "job_id": {"type": "string", "description": "Job ID (for remove)"},
-            },
-            "required": ["action"],
-        }
 
     async def execute(
         self,

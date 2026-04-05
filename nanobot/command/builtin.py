@@ -93,14 +93,30 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
 
 async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     """Manually trigger a Dream consolidation run."""
+    import time
+
     loop = ctx.loop
-    try:
-        did_work = await loop.dream.run()
-        content = "Dream completed." if did_work else "Dream: nothing to process."
-    except Exception as e:
-        content = f"Dream failed: {e}"
+    msg = ctx.msg
+
+    async def _run_dream():
+        t0 = time.monotonic()
+        try:
+            did_work = await loop.dream.run()
+            elapsed = time.monotonic() - t0
+            if did_work:
+                content = f"Dream completed in {elapsed:.1f}s."
+            else:
+                content = "Dream: nothing to process."
+        except Exception as e:
+            elapsed = time.monotonic() - t0
+            content = f"Dream failed after {elapsed:.1f}s: {e}"
+        await loop.bus.publish_outbound(OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id, content=content,
+        ))
+
+    asyncio.create_task(_run_dream())
     return OutboundMessage(
-        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id, content=content,
+        channel=msg.channel, chat_id=msg.chat_id, content="Dreaming...",
     )
 
 

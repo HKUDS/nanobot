@@ -1,5 +1,14 @@
 from typing import Any
 
+from nanobot.agent.tools import (
+    ArraySchema,
+    IntegerSchema,
+    ObjectSchema,
+    Schema,
+    StringSchema,
+    tool_parameters,
+    tool_parameters_schema,
+)
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
@@ -39,6 +48,103 @@ class SampleTool(Tool):
 
     async def execute(self, **kwargs: Any) -> str:
         return "ok"
+
+
+@tool_parameters(
+    tool_parameters_schema(
+        query=StringSchema(min_length=2),
+        count=IntegerSchema(2, minimum=1, maximum=10),
+        required=["query", "count"],
+    )
+)
+class DecoratedSampleTool(Tool):
+    @property
+    def name(self) -> str:
+        return "decorated_sample"
+
+    @property
+    def description(self) -> str:
+        return "decorated sample tool"
+
+    async def execute(self, **kwargs: Any) -> str:
+        return f"ok:{kwargs['count']}"
+
+
+def test_schema_validate_value_matches_tool_validate_params() -> None:
+    """ObjectSchema.validate_value 与 validate_json_schema_value、Tool.validate_params 一致。"""
+    root = tool_parameters_schema(
+        query=StringSchema(min_length=2),
+        count=IntegerSchema(2, minimum=1, maximum=10),
+        required=["query", "count"],
+    )
+    obj = ObjectSchema(
+        query=StringSchema(min_length=2),
+        count=IntegerSchema(2, minimum=1, maximum=10),
+        required=["query", "count"],
+    )
+    params = {"query": "h", "count": 2}
+
+    class _Mini(Tool):
+        @property
+        def name(self) -> str:
+            return "m"
+
+        @property
+        def description(self) -> str:
+            return ""
+
+        @property
+        def parameters(self) -> dict[str, Any]:
+            return root
+
+        async def execute(self, **kwargs: Any) -> str:
+            return ""
+
+    expected = _Mini().validate_params(params)
+    assert Schema.validate_json_schema_value(params, root, "") == expected
+    assert obj.validate_value(params, "") == expected
+    assert IntegerSchema(0, minimum=1).validate_value(0, "n") == ["n must be >= 1"]
+
+
+def test_schema_classes_equivalent_to_sample_tool_parameters() -> None:
+    """Schema 类生成的 JSON Schema 应与手写 dict 一致，便于校验行为一致。"""
+    built = tool_parameters_schema(
+        query=StringSchema(min_length=2),
+        count=IntegerSchema(2, minimum=1, maximum=10),
+        mode=StringSchema("", enum=["fast", "full"]),
+        meta=ObjectSchema(
+            tag=StringSchema(""),
+            flags=ArraySchema(StringSchema("")),
+            required=["tag"],
+        ),
+        required=["query", "count"],
+    )
+    assert built == SampleTool().parameters
+
+
+def test_tool_parameters_returns_fresh_copy_per_access() -> None:
+    tool = DecoratedSampleTool()
+
+    first = tool.parameters
+    second = tool.parameters
+
+    assert first == second
+    assert first is not second
+    assert first["properties"] is not second["properties"]
+
+    first["properties"]["query"]["minLength"] = 99
+    assert tool.parameters["properties"]["query"]["minLength"] == 2
+
+
+async def test_registry_executes_decorated_tool_end_to_end() -> None:
+    reg = ToolRegistry()
+    reg.register(DecoratedSampleTool())
+
+    ok = await reg.execute("decorated_sample", {"query": "hello", "count": "3"})
+    assert ok == "ok:3"
+
+    err = await reg.execute("decorated_sample", {"query": "h", "count": 3})
+    assert "Invalid parameters" in err
 
 
 def test_validate_params_missing_required() -> None:

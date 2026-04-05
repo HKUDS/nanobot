@@ -11,7 +11,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import json_repair
-from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -255,8 +254,9 @@ class AnthropicProvider(LLMProvider):
     # Prompt caching
     # ------------------------------------------------------------------
 
-    @staticmethod
+    @classmethod
     def _apply_cache_control(
+        cls,
         system: str | list[dict[str, Any]],
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
@@ -283,7 +283,8 @@ class AnthropicProvider(LLMProvider):
         new_tools = tools
         if tools:
             new_tools = list(tools)
-            new_tools[-1] = {**new_tools[-1], "cache_control": marker}
+            for idx in cls._tool_cache_marker_indices(new_tools):
+                new_tools[idx] = {**new_tools[idx], "cache_control": marker}
 
         return system, new_msgs, new_tools
 

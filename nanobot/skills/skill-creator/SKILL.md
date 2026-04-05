@@ -86,7 +86,7 @@ Documentation and reference material intended to be loaded as needed into contex
 - **Examples**: `references/finance.md` for financial schemas, `references/mnda.md` for company NDA template, `references/policies.md` for company policies, `references/api_docs.md` for API specifications
 - **Use cases**: Database schemas, API documentation, domain knowledge, company policies, detailed workflow guides
 - **Benefits**: Keeps SKILL.md lean, loaded only when the agent determines it's needed
-- **Best practice**: If files are large (>10k words), include grep search patterns in SKILL.md
+- **Best practice**: If files are large (>10k words), include grep or glob patterns in SKILL.md so the agent can use built-in search tools efficiently; mention when the default `grep(output_mode="files_with_matches")`, `grep(output_mode="count")`, `grep(fixed_strings=true)`, `glob(entry_type="dirs")`, or pagination via `head_limit` / `offset` is the right first step
 - **Avoid duplication**: Information should live in either SKILL.md or references files, not both. Prefer references files for detailed information unless it's truly core to the skill—this keeps SKILL.md lean while making information discoverable without hogging the context window. Keep only essential procedural instructions and workflow guidance in SKILL.md; move detailed reference material, schemas, and examples to references files.
 
 ##### Assets (`assets/`)
