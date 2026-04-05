@@ -1,0 +1,10 @@
+---
+description: Open pull requests for code changes; integrate via PR review
+alwaysApply: true
+---
+
+# Pull requests
+
+- Work on a branch. After substantive changes, open a pull request to the default branch (use `gh pr create` with a clear title and description when available).
+- Do not push feature work directly to `main` or the repository default branch unless the user explicitly requests a hotfix or direct push.
+- Integrate changes through the PR; that is the normal path for merging.

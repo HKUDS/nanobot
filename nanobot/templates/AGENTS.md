@@ -21,3 +21,7 @@ Get USER_ID and CHANNEL from the current session (e.g., `8281248569` and `telegr
 - **Rewrite**: `write_file` to replace all tasks
 
 When the user asks for a recurring/periodic task, update `HEARTBEAT.md` instead of creating a one-time cron reminder.
+
+## Pull requests
+
+- For substantive code or config changes, work on a branch and open a pull request to the default branch (`gh pr create`) before merging. Do not push feature work directly to `main` unless the user explicitly asks.
