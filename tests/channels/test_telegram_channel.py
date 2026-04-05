@@ -451,6 +451,27 @@ def test_derive_topic_session_key_uses_thread_id() -> None:
     assert TelegramChannel._derive_topic_session_key(message) == "telegram:-100123:topic:42"
 
 
+def test_derive_topic_session_key_private_dm_thread() -> None:
+    """Private DM threads (Telegram Threaded Mode) must get their own session key."""
+    message = SimpleNamespace(
+        chat=SimpleNamespace(type="private"),
+        chat_id=999,
+        message_thread_id=7,
+    )
+    assert TelegramChannel._derive_topic_session_key(message) == "telegram:999:topic:7"
+
+
+def test_derive_topic_session_key_none_without_thread() -> None:
+    """No thread id → no topic session key, regardless of chat type."""
+    for chat_type in ("private", "supergroup", "group"):
+        message = SimpleNamespace(
+            chat=SimpleNamespace(type=chat_type),
+            chat_id=123,
+            message_thread_id=None,
+        )
+        assert TelegramChannel._derive_topic_session_key(message) is None
+
+
 def test_get_extension_falls_back_to_original_filename() -> None:
     channel = TelegramChannel(TelegramConfig(), MessageBus())
 
