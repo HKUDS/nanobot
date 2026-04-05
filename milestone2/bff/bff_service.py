@@ -88,8 +88,7 @@ class MessageResponse(BaseModel):
 
 
 class ForkRequest(BaseModel):
-    parent_conversation_id: str
-    new_branch_name: str
+    new_branch_name: str   # 只保留分支名称
 
 
 class ForkResponse(BaseModel):
@@ -174,7 +173,7 @@ async def send_message(conversation_id: str, req: MessageSend):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     url = f"{get_container_url(conversation_id)}/chat"
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=120.0) as client:  # 延长到120秒
         try:
             resp = await client.post(url, json={"content": req.content, "model": req.model})
             resp.raise_for_status()
@@ -197,7 +196,7 @@ async def get_trajectory(conversation_id: str):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     url = f"{get_container_url(conversation_id)}/trajectory"
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:  # 延长到60秒
         try:
             resp = await client.get(url)
             resp.raise_for_status()
@@ -212,7 +211,7 @@ async def get_history(conversation_id: str):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     url = f"{get_container_url(conversation_id)}/history"
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:  # 延长到60秒
         try:
             resp = await client.get(url)
             resp.raise_for_status()
@@ -226,37 +225,43 @@ async def fork_conversation(conversation_id: str, req: ForkRequest):
     if conversation_id not in conversations:
         raise HTTPException(status_code=404, detail="Parent conversation not found")
 
-    new_conversation_id = str(uuid.uuid4())[:8]
+    try:
+        container_info = await orchestrator.fork_container(
+            parent_conversation_id=conversation_id,
+            new_branch_name=req.new_branch_name,
+        )
 
-    container_info = await orchestrator.fork_container(
-        parent_conversation_id=conversation_id,
-        child_conversation_id=new_conversation_id,
-    )
+        new_conversation_id = container_info["new_conversation_id"]
+        container_ports[new_conversation_id] = container_info["port"]
 
-    container_ports[new_conversation_id] = container_info["port"]
+        conversations[new_conversation_id] = {
+            "conversation_id": new_conversation_id,
+            "title": container_info.get("branch_name", f"{conversations[conversation_id]['title']} (fork)"),
+            "model": conversations[conversation_id]["model"],
+            "status": "active",
+            "parent_id": conversation_id,
+            "container_info": container_info,
+            "created_at": datetime.now(TZ_UTC8).isoformat(),
+        }
 
-    conversations[new_conversation_id] = {
-        "conversation_id": new_conversation_id,
-        "title": f"{conversations[conversation_id]['title']} (fork)",
-        "model": conversations[conversation_id]["model"],
-        "status": "active",
-        "parent_id": conversation_id,
-        "container_info": container_info,
-        "created_at": datetime.now(TZ_UTC8).isoformat(),
-    }
+        branches[new_conversation_id] = {
+            "branch_id": new_conversation_id,
+            "conversation_id": new_conversation_id,
+            "parent_branch_id": conversation_id,
+            "status": "active",
+            "name": container_info.get("branch_name", ""),
+            "created_at": datetime.now(TZ_UTC8).isoformat(),
+        }
 
-    branches[new_conversation_id] = {
-        "branch_id": new_conversation_id,
-        "conversation_id": new_conversation_id,
-        "parent_branch_id": conversation_id,
-        "status": "active",
-    }
+        return ForkResponse(
+            new_conversation_id=new_conversation_id,
+            parent_conversation_id=conversation_id,
+            status="active"
+        )
 
-    return ForkResponse(
-        new_conversation_id=new_conversation_id,
-        parent_conversation_id=conversation_id,
-        status="active",
-    )
+    except Exception as e:
+        print(f"[BFF] Fork error: {e}")
+        raise HTTPException(status_code=500, detail=f"Fork failed: {str(e)}")
 
 
 @app.post("/merge", response_model=MergeResponse)

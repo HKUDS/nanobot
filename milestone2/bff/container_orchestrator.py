@@ -8,6 +8,8 @@ This module handles:
 """
 
 import asyncio
+import uuid
+from datetime import datetime
 import json
 import os
 import shutil
@@ -35,6 +37,7 @@ class ContainerOrchestrator:
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit
         self.active_containers: dict[str, Container] = {}
+        self.branches: dict[str, dict] = {}  # 存储分支关系信息
         self.http_proxy = os.environ.get('http_proxy')
         self.https_proxy = os.environ.get('https_proxy')
         self.no_proxy = os.environ.get('no_proxy', 'localhost,127.0.0.1,::1')
@@ -169,54 +172,82 @@ class ContainerOrchestrator:
     async def fork_container(
         self,
         parent_conversation_id: str,
-        child_conversation_id: str,
+        new_branch_name: str = None
     ) -> dict:
-        """Fork: duplicate parent workspace to child, create new container."""
-        parent_volume_name = self._get_volume_name(parent_conversation_id)
-        child_volume_name = self._get_volume_name(child_conversation_id)
-
+        """Fork: 从父容器创建新分支容器，复制工作空间数据"""
+        
+        # 生成新的conversation_id
+        child_conversation_id = str(uuid.uuid4())[:8]
+        
         try:
+            # 1. 获取父容器信息
             parent_container = self.docker_client.containers.get(
                 self._get_container_name(parent_conversation_id)
             )
-            parent_task = parent_container.attrs.get("Config", {}).get("Env", [])
-            task_val = ""
-            model_val = "deepseek-chat"
-            api_key_val = ""
-            for env in parent_task:
-                if env.startswith("TASK="):
-                    task_val = env[5:]
-                elif env.startswith("MODEL="):
-                    model_val = env[6:]
-                elif env.startswith("API_KEY="):
-                    api_key_val = env[9:]
-
-            # 如果从父容器获取的API密钥为空，使用全局配置
-            if not api_key_val:
-                from shared.config import DEEPSEEK_API_KEY
-                api_key_val = DEEPSEEK_API_KEY
-
-            parent_volume = self.docker_client.volumes.get(parent_volume_name)
-            parent_path = f"/var/lib/docker/volumes/{parent_volume_name}/_data"
-
-            child_volume = self.docker_client.volumes.create(name=child_volume_name, driver="local")
-
-            asyncio.get_event_loop().run_in_executor(
-                None, self._copy_directory, parent_path, child_volume_name
+            
+            # 2. 获取并过滤环境变量
+            parent_env_list = parent_container.attrs.get("Config", {}).get("Env", [])
+            allowed_prefixes = ['TASK', 'MODEL', 'API_KEY', 'HTTP_PROXY', 'HTTPS_PROXY']
+            child_env = [e for e in parent_env_list if any(e.startswith(p) for p in allowed_prefixes)]
+            
+            print(f"[Orchestrator] Filtered environment variables: {len(child_env)} items")
+            
+            # 3. 创建子卷
+            child_volume_name = self._get_volume_name(child_conversation_id)
+            child_volume = self.docker_client.volumes.create(name=child_volume_name)
+            
+            # 4. 创建子容器（先启动容器，再复制数据）
+            child_container = self.docker_client.containers.run(
+                image="nanobot-agent:latest",
+                name=f"nanobot_conv_{child_conversation_id}",
+                environment=child_env,
+                volumes={child_volume_name: {"bind": "/app/workspace", "mode": "rw"}},
+                detach=True,
+                ports={'8080/tcp': None}
             )
-
-            container = await self.create_container(
-                conversation_id=child_conversation_id,
-                task=task_val,
-                model=model_val,
-                api_key=api_key_val,
-            )
-
-            print(f"[Orchestrator] Forked {parent_conversation_id} -> {child_conversation_id}")
-            return container
+            
+            print(f"[Orchestrator] Created child container: {child_container.name}")
+            
+            # 5. 复制工作空间数据（使用优化的Docker API方式，包括memory传递）
+            await self._copy_workspace_via_docker_api(parent_conversation_id, child_conversation_id)
+            
+            # 6. 等待子容器就绪
+            await self._wait_until_ready(child_container)
+            
+            # 7. 记录分支元数据（增强容错处理）
+            branch_name = new_branch_name or f"分支-{datetime.now().strftime('%H%M%S')}"
+            # 确保分支名称不为空
+            if not branch_name or branch_name.strip() == "":
+                branch_name = f"分支-{datetime.now().strftime('%H%M%S')}"
+                
+            branch_info = {
+                "branch_id": child_conversation_id,
+                "parent_branch_id": parent_conversation_id,
+                "name": branch_name,
+                "created_at": datetime.now().isoformat()
+            }
+            self.branches[child_conversation_id] = branch_info
+            
+            # 8. 获取映射端口
+            child_container.reload()
+            ports = child_container.attrs.get("NetworkSettings", {}).get("Ports", {})
+            port_8080 = ports.get("8080/tcp", [{}])[0]
+            mapped_port = port_8080.get("HostPort") if port_8080 else None
+            
+            print(f"[Orchestrator] Forked {parent_conversation_id} -> {child_conversation_id} (port: {mapped_port})")
+            
+            return {
+                "new_conversation_id": child_conversation_id,
+                "parent_conversation_id": parent_conversation_id,
+                "status": "active",
+                "port": mapped_port,
+                "branch_name": branch_info["name"]
+            }
 
         except Exception as e:
-            print(f"[Orchestrator] Fork error: {e}")
+            # 错误回滚：删除已创建的子容器和卷
+            print(f"[Orchestrator] Fork error: {e}, rolling back...")
+            await self._rollback_fork(child_conversation_id)
             raise
 
     def _copy_directory(self, src_path: str, dst_volume_name: str):
@@ -300,6 +331,141 @@ class ContainerOrchestrator:
             print(f"[Orchestrator] Stopped container {conversation_id}")
         except docker.errors.NotFound:
             pass
+
+    async def _get_parent_conversation_step(self, parent_conversation_id: str) -> int:
+        """获取父对话的当前对话轮次"""
+        try:
+            # 通过父容器的历史接口获取对话轮次
+            import httpx
+            
+            # 获取父容器的端口
+            parent_container = self.docker_client.containers.get(
+                self._get_container_name(parent_conversation_id)
+            )
+            parent_container.reload()
+            ports = parent_container.attrs.get("NetworkSettings", {}).get("Ports", {})
+            port_8080 = ports.get("8080/tcp", [{}])[0]
+            mapped_port = port_8080.get("HostPort") if port_8080 else None
+            
+            if not mapped_port:
+                return 1  # 默认值
+            
+            # 调用父容器的历史接口
+            url = f"http://localhost:{mapped_port}/history"
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(url)
+                if response.status_code == 200:
+                    history_data = response.json()
+                    history = history_data.get("history", [])
+                    # 计算对话轮次（每2条消息为一轮）
+                    step = max(1, len(history) // 2)
+                    print(f"[Orchestrator] Parent conversation {parent_conversation_id} has {step} steps")
+                    return step
+                else:
+                    print(f"[Orchestrator] Failed to get parent history: {response.status_code}")
+                    return 1
+                    
+        except Exception as e:
+            print(f"[Orchestrator] Error getting parent conversation step: {e}")
+            return 1  # 默认值
+
+    async def _copy_workspace_via_docker_api(self, parent_conversation_id: str, child_conversation_id: str):
+        """使用Docker API复制工作空间数据，包括memory传递"""
+        parent_volume_name = self._get_volume_name(parent_conversation_id)
+        child_volume_name = self._get_volume_name(child_conversation_id)
+        
+        try:
+            print(f"[Orchestrator] Copying workspace from volume {parent_volume_name} to {child_volume_name}")
+            
+            # 使用 alpine 容器挂载两个卷，用 cp -a 完整复制
+            temp_container = self.docker_client.containers.run(
+                "alpine:latest",
+                command="sh -c 'cp -a /from/. /to/ && echo Copy completed'",
+                volumes={
+                    parent_volume_name: {"bind": "/from", "mode": "ro"},
+                    child_volume_name: {"bind": "/to", "mode": "rw"}
+                },
+                detach=True
+            )
+            
+            result = temp_container.wait()
+            temp_container.remove()
+            
+            if result['StatusCode'] == 0:
+                print(f"[Orchestrator] Workspace copy completed successfully")
+                
+                # 额外复制memory数据：将父容器的session数据复制到子容器的正确位置
+                await self._copy_memory_data(parent_conversation_id, child_conversation_id)
+            else:
+                # 获取错误日志
+                logs = temp_container.logs().decode()
+                raise Exception(f"Copy failed with code {result['StatusCode']}: {logs}")
+                
+        except Exception as e:
+            print(f"[Orchestrator] Workspace copy error: {e}")
+            raise
+    
+    async def _copy_memory_data(self, parent_conversation_id: str, child_conversation_id: str):
+        """复制memory数据：将父容器的session数据复制到子容器的正确位置"""
+        try:
+            parent_volume_name = self._get_volume_name(parent_conversation_id)
+            child_volume_name = self._get_volume_name(child_conversation_id)
+            
+            print(f"[Orchestrator] Copying memory data from {parent_conversation_id} to {child_conversation_id}")
+            
+            # 使用临时容器复制session数据
+            temp_container = self.docker_client.containers.run(
+                "alpine:latest",
+                command=f"sh -c 'mkdir -p /to/conv_{child_conversation_id}/ && cp -a /from/conv_{parent_conversation_id}/. /to/conv_{child_conversation_id}/ 2>/dev/null || echo No session data found'",
+                volumes={
+                    parent_volume_name: {"bind": "/from", "mode": "ro"},
+                    child_volume_name: {"bind": "/to", "mode": "rw"}
+                },
+                detach=True
+            )
+            
+            result = temp_container.wait()
+            logs = temp_container.logs().decode()
+            temp_container.remove()
+            
+            if result['StatusCode'] == 0:
+                print(f"[Orchestrator] Memory data copy completed: {logs.strip()}")
+            else:
+                print(f"[Orchestrator] Memory data copy warning: {logs.strip()}")
+                
+        except Exception as e:
+            print(f"[Orchestrator] Memory data copy error: {e}")
+            # 不抛出异常，因为memory复制是可选的
+
+    async def _rollback_fork(self, child_conversation_id: str):
+        """回滚fork操作：删除已创建的子容器和卷"""
+        try:
+            # 删除容器
+            container_name = f"nanobot_conv_{child_conversation_id}"
+            try:
+                container = self.docker_client.containers.get(container_name)
+                container.stop(timeout=5)
+                container.remove()
+                print(f"[Orchestrator] Rollback: removed container {container_name}")
+            except docker.errors.NotFound:
+                pass
+            
+            # 删除卷
+            volume_name = self._get_volume_name(child_conversation_id)
+            try:
+                volume = self.docker_client.volumes.get(volume_name)
+                volume.remove()
+                print(f"[Orchestrator] Rollback: removed volume {volume_name}")
+            except docker.errors.NotFound:
+                pass
+            
+            # 删除分支元数据
+            if child_conversation_id in self.branches:
+                del self.branches[child_conversation_id]
+                print(f"[Orchestrator] Rollback: removed branch metadata for {child_conversation_id}")
+                
+        except Exception as e:
+            print(f"[Orchestrator] Rollback error: {e}")
 
     async def destroy_container(self, conversation_id: str):
         """Completely destroy a container and its volume."""

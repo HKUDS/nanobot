@@ -2,17 +2,20 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir \
-    nanobot-ai \
-    openai \
-    httpx \
-    fastapi \
-    uvicorn \
-    aiosqlite
-
-COPY ../nanobot_agent/agent_server.py /app/agent_server.py
-
+# 设置环境变量，优化pip缓存
 ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# 先复制requirements.txt（依赖不变时这层会被缓存）
+COPY shared/requirements.txt /app/requirements.txt
+
+# 安装依赖（依赖不变时这层会被缓存）
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 最后复制代码（代码变化时只重新构建这一层）
+COPY nanobot_agent/agent_server.py /app/agent_server.py
+
 ENV WORKSPACE_DIR=/app/workspace
 
 EXPOSE 8080

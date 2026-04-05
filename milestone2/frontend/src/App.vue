@@ -271,9 +271,9 @@ import DOMPurify from 'dompurify'
 
 // 配置 marked（可选）
 marked.setOptions({
-  breaks: true,        // 支持 GFM 换行
-  gfm: true,           // 支持 GitHub Flavored Markdown
-  headerIds: false,    // 避免生成多余的 id
+  breaks: true,
+  gfm: true,
+  headerIds: false,
   mangle: false
 })
 
@@ -296,7 +296,6 @@ const expandedIdx = ref(-1)
 const graphContainer = ref(null)
 const svgCanvas = ref(null)
 
-// 存储 d3 的 zoom 行为对象，以便重置视图
 let currentZoom = null
 
 const currentBranchName = computed(() => {
@@ -308,32 +307,47 @@ const availableMergeTargets = computed(() => {
   return convList.value.filter(c => c.conversation_id !== currentConvId.value)
 })
 
-// 将对象转换为 el-tree 的 data 格式
+// 将对象转换为 el-tree 的 data 格式（安全版本）
 function objectToTreeData(obj) {
   if (obj === null || obj === undefined) return []
   if (typeof obj !== 'object') {
     return [{ label: String(obj) }]
   }
-  return Object.keys(obj).map(key => {
-    const value = obj[key]
-    let children = []
-    if (typeof value === 'object' && value !== null) {
-      children = objectToTreeData(value)
-    } else {
-      children = [{ label: String(value) }]
-    }
-    return {
-      label: key,
-      children: children
-    }
-  })
+  try {
+    return Object.keys(obj).map(key => {
+      const value = obj[key]
+      let children = []
+      if (typeof value === 'object' && value !== null) {
+        children = objectToTreeData(value)
+      } else {
+        children = [{ label: String(value) }]
+      }
+      return {
+        label: key,
+        children: children
+      }
+    })
+  } catch (error) {
+    console.error('Error converting object to tree data:', error, obj)
+    return [{ label: '数据格式错误，无法显示' }]
+  }
 }
 
+// 格式化 JSON 为字符串（安全版本）
 function formatJSON(obj) {
   try {
+    if (typeof obj === 'string') {
+      try {
+        const parsed = JSON.parse(obj)
+        return JSON.stringify(parsed, null, 2)
+      } catch {
+        return obj
+      }
+    }
     return JSON.stringify(obj, null, 2)
-  } catch {
-    return String(obj)
+  } catch (error) {
+    console.error('Error formatting JSON:', error, obj)
+    return '数据格式错误，无法显示'
   }
 }
 
@@ -359,11 +373,8 @@ async function checkHealth() {
 
 async function loadConversations() {
   try {
-    // 使用状态同步接口获取真实对话状态
     const statusRes = await getConversationsStatus()
     const statusList = statusRes.data?.conversations || []
-    
-    // 过滤出健康的对话
     const healthyConversations = statusList
       .filter(conv => conv.healthy)
       .map(conv => ({
@@ -373,24 +384,18 @@ async function loadConversations() {
         parent_id: conv.parent_id,
         created_at: conv.created_at
       }))
-    
-    // 如果有无效对话被清理，显示提示
     const invalidCount = statusList.length - healthyConversations.length
     if (invalidCount > 0) {
       console.log(`清理了 ${invalidCount} 个无效对话`)
     }
-    
     store.setConvList(healthyConversations)
     store.setActiveCount(healthyConversations.length)
-    
     if (healthyConversations.length > 0 && !currentConvId.value) {
       handleSwitchConv(healthyConversations[0])
     }
-    
     drawGraph()
   } catch (e) {
     console.error('加载对话失败:', e)
-    // 如果状态接口失败，回退到普通接口
     try {
       const res = await listConversations()
       const list = res.data?.conversations || []
@@ -410,13 +415,12 @@ function toggleExpand(idx) {
   expandedIdx.value = expandedIdx.value === idx ? -1 : idx
 }
 
-// 重置图形视图（缩放和平移）
 function resetGraphView() {
   if (svgCanvas.value && currentZoom) {
     const svg = d3.select(svgCanvas.value)
     svg.transition().duration(500).call(currentZoom.transform, d3.zoomIdentity)
   } else {
-    drawGraph() // 后备：重绘
+    drawGraph()
   }
 }
 
@@ -425,7 +429,6 @@ async function handleCreateConv() {
     ElMessage.warning('已达到 10 个会话上限')
     return
   }
-
   loading.value = true
   try {
     const res = await createConversation({
@@ -456,7 +459,6 @@ async function handleSwitchConv(conv) {
   await loadHistory(conv.conversation_id)
 }
 
-// 带重试的轨迹加载（避免新容器尚未就绪）
 async function loadTrajectoryWithRetry(convId, retries = 3, delay = 1000) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -484,24 +486,34 @@ async function loadHistoryWithRetry(convId, retries = 3, delay = 1000) {
       ])
       const history = historyRes.data?.history || []
       const trajectory = trajectoryRes.data?.trajectory || []
+      
       const formatted = []
-      for (let j = 0; j < history.length; j += 2) {
-        const userMsg = history[j]
-        const assistantMsg = history[j + 1]
-        const trajIndex = Math.floor(j / 2)
-        const trajRecord = trajectory[trajIndex] || {}
-        if (userMsg) {
+      let currentUserMsg = null
+      let turnIndex = 0
+      
+      for (let i = 0; i < history.length; i++) {
+        const msg = history[i]
+        if (msg.role === 'user') {
+          if (currentUserMsg) {
+            console.log('跳过不完整的对话轮次')
+          }
+          currentUserMsg = msg
+        } else if (msg.role === 'assistant' && currentUserMsg) {
+          const trajRecord = trajectory[turnIndex] || {}
           formatted.push({
-            user: userMsg.content,
-            assistant: assistantMsg?.content || '...',
+            user: currentUserMsg.content,
+            assistant: msg.content || '...',
             s: trajRecord.s_t || {},
             a: trajRecord.a_t || {},
             o: trajRecord.o_t || {},
             r: trajRecord.r_t || 0
           })
+          currentUserMsg = null
+          turnIndex++
         }
       }
       store.setChatList(formatted)
+      console.log(`过滤后消息轮次: ${formatted.length}, 原始消息数: ${history.length}`)
       return true
     } catch (e) {
       if (i === retries - 1) {
@@ -515,7 +527,6 @@ async function loadHistoryWithRetry(convId, retries = 3, delay = 1000) {
   }
 }
 
-// 兼容旧函数名
 async function loadTrajectory(convId) {
   await loadTrajectoryWithRetry(convId)
 }
@@ -525,22 +536,19 @@ async function loadHistory(convId) {
 
 async function handleSend() {
   if (!msgContent.value || !currentConvId.value) return
-
   loading.value = true
   const content = msgContent.value
   msgContent.value = ''
-
   try {
     const res = await sendMessage(currentConvId.value, { content })
     const data = res.data
-
     const chatItem = {
       user: content,
       assistant: data.content || '...',
-      s: data.trajectory?.[data.trajectory.length - 1]?.state || {},
-      a: data.trajectory?.[data.trajectory.length - 1]?.action || {},
-      o: data.trajectory?.[data.trajectory.length - 1]?.observation || {},
-      r: data.trajectory?.[data.trajectory.length - 1]?.reward || 0
+      s: data.trajectory?.[data.trajectory.length - 1]?.s_t || {},
+      a: data.trajectory?.[data.trajectory.length - 1]?.a_t || {},
+      o: data.trajectory?.[data.trajectory.length - 1]?.o_t || {},
+      r: data.trajectory?.[data.trajectory.length - 1]?.r_t || 0
     }
     store.appendChat(chatItem)
     expandedIdx.value = chatList.value.length - 1
@@ -554,33 +562,29 @@ async function handleSend() {
 
 async function handleFork() {
   if (!currentConvId.value) return
-
+  const branchName = prompt('请输入分支名称：', `分支-${new Date().toLocaleTimeString()}`)
+  if (!branchName) return
   loading.value = true
   try {
-    const res = await forkConversation(currentConvId.value, {
-      parent_conversation_id: currentConvId.value,
-      new_branch_name: '分支'
-    })
+    const res = await forkConversation(currentConvId.value, { new_branch_name: branchName })
     const currentConv = convList.value.find(c => c.conversation_id === currentConvId.value)
     const newConv = {
       conversation_id: res.data.new_conversation_id,
-      title: `${currentConv?.title || '对话'} (fork)`,
+      title: branchName,
       parent_id: currentConvId.value,
       status: 'active',
       model: currentConv?.model || 'deepseek-chat'
     }
     store.addConv(newConv)
     store.setActiveCount(convList.value.length)
-    ElMessage.success('Fork 成功，正在准备新容器...')
-    
-    // 等待容器完全就绪（延迟2秒再尝试加载数据）
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    await loadHistoryWithRetry(newConv.conversation_id, 3, 1000)
-    
+    ElMessage.success(`分支创建成功: ${branchName}`)
+    await new Promise(resolve => setTimeout(resolve, 3000))
+    await loadHistoryWithRetry(newConv.conversation_id, 5, 2000)
     await nextTick()
     drawGraph()
   } catch (e) {
-    ElMessage.error('Fork 失败')
+    console.error('Fork error:', e)
+    ElMessage.error('分支创建失败：' + (e.response?.data?.detail || e.message || '未知错误'))
   } finally {
     loading.value = false
   }
@@ -588,7 +592,6 @@ async function handleFork() {
 
 async function handleMerge() {
   if (!currentConvId.value || !mergeTargetId.value) return
-
   loading.value = true
   try {
     await mergeConversation({
@@ -597,10 +600,8 @@ async function handleMerge() {
     })
     ElMessage.success('合并成功')
     showMergeDialog.value = false
-    
     store.setCurrentConv(mergeTargetId.value)
     await loadConversations()
-    
     const targetConv = convList.value.find(c => c.conversation_id === mergeTargetId.value)
     if (targetConv) {
       await loadHistory(mergeTargetId.value)
@@ -616,7 +617,6 @@ async function handleMerge() {
 
 async function handleDelete() {
   if (!currentConvId.value) return
-
   try {
     await ElMessageBox.confirm('确定要删除这个对话吗？此操作不可恢复。', '确认删除', {
       confirmButtonText: '删除',
@@ -626,7 +626,6 @@ async function handleDelete() {
   } catch {
     return
   }
-
   loading.value = true
   try {
     await deleteConversation(currentConvId.value)
@@ -649,29 +648,21 @@ async function handleDelete() {
   }
 }
 
-// 绘制可缩放拖拽的分支图，并保存 zoom 对象
 function drawGraph() {
   if (!svgCanvas.value || convList.value.length === 0) return
-
   const container = graphContainer.value
   const width = container.clientWidth
   const height = container.clientHeight
-
   const svg = d3.select(svgCanvas.value)
   svg.selectAll('*').remove()
-
   const zoom = d3.zoom()
     .scaleExtent([0.2, 5])
     .on('zoom', (event) => {
       svgGroup.attr('transform', event.transform)
     })
   currentZoom = zoom
-
   svg.call(zoom)
-
   const svgGroup = svg.append('g').attr('class', 'graph-group')
-
-  // 构建节点树结构
   const nodeMap = new Map()
   convList.value.forEach(conv => {
     nodeMap.set(conv.conversation_id, {
@@ -681,21 +672,16 @@ function drawGraph() {
       children: []
     })
   })
-
   nodeMap.forEach(node => {
     if (node.parent_id && nodeMap.has(node.parent_id)) {
       nodeMap.get(node.parent_id).children.push(node)
     }
   })
-
   const rootNodes = Array.from(nodeMap.values()).filter(n => !n.parent_id)
   if (rootNodes.length === 0) return
   const root = d3.hierarchy(rootNodes[0])
-
   const treeLayout = d3.tree().size([width - 100, height - 100])
   treeLayout(root)
-
-  // 连线
   svgGroup.selectAll('.link')
     .data(root.links())
     .enter()
@@ -708,8 +694,6 @@ function drawGraph() {
     .attr('fill', 'none')
     .attr('stroke', '#999')
     .attr('stroke-width', 2)
-
-  // 节点
   const nodeGroups = svgGroup.selectAll('.node')
     .data(root.descendants())
     .enter()
@@ -722,13 +706,11 @@ function drawGraph() {
       if (conv) handleSwitchConv(conv)
     })
     .style('cursor', 'pointer')
-
   nodeGroups.append('circle')
     .attr('r', 8)
     .attr('fill', d => d.data.id === currentConvId.value ? '#007acc' : '#4caf50')
     .attr('stroke', '#fff')
     .attr('stroke-width', 2)
-
   nodeGroups.append('text')
     .attr('x', 15)
     .attr('y', 5)
@@ -872,7 +854,7 @@ function drawGraph() {
   transform: scale(1.02);
 }
 
-/* ==================== Markdown 渲染样式 ==================== */
+/* Markdown 渲染样式 */
 .markdown-body {
   line-height: 1.6;
 }

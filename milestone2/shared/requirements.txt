@@ -1,0 +1,6 @@
+nanobot-ai
+openai
+httpx
+fastapi
+uvicorn
+aiosqlite
