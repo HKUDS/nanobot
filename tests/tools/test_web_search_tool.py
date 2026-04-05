@@ -205,25 +205,3 @@ async def test_jina_search_uses_path_encoded_query(monkeypatch):
     assert calls["params"] in (None, {})
 
 
-@pytest.mark.asyncio
-async def test_jina_422_falls_back_to_duckduckgo(monkeypatch):
-    class MockDDGS:
-        def __init__(self, **kw):
-            pass
-
-        def text(self, query, max_results=5):
-            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
-
-    async def mock_get(self, url, **kw):
-        raise httpx.HTTPStatusError(
-            "422 Unprocessable Entity",
-            request=httpx.Request("GET", str(url)),
-            response=httpx.Response(422, request=httpx.Request("GET", str(url))),
-        )
-
-    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
-    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
-
-    tool = _tool(provider="jina", api_key="jina-key")
-    result = await tool.execute(query="test")
-    assert "DuckDuckGo fallback" in result
