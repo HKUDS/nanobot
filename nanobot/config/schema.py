@@ -154,6 +154,7 @@ class WebSearchConfig(Base):
     api_key: str = ""
     base_url: str = ""  # SearXNG base URL
     max_results: int = 5
+    timeout: int = 30  # Wall-clock timeout (seconds) for search operations
 
 
 class WebToolsConfig(Base):
