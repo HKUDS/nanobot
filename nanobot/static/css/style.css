@@ -168,7 +168,7 @@ body {
 .form-select {
     border-radius: 0.5rem;
     border: 1px solid var(--border-color);
-    padding: 0.6rem 0.9rem;
+    padding: 0.6rem 2rem;
     transition: all 0.2s ease;
 }
 
