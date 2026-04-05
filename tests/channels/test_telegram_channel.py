@@ -830,6 +830,91 @@ async def test_group_allow_from_does_not_block_private_chat() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dm_still_requires_allow_from_even_with_group_allow_from() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=[],
+            group_allow_from=["-100123"],
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel.bus.publish_inbound = AsyncMock()
+    channel._start_typing = lambda _chat_id: None
+
+    await channel._on_message(
+        _make_telegram_update(text="hello private", chat_type="private", chat_id=12345),
+        None,
+    )
+
+    channel.bus.publish_inbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_group_whitelist_bypasses_sender_allow_from_for_messages() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=[],
+            group_policy="open",
+            group_allow_from=["-100123"],
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel.bus.publish_inbound = AsyncMock()
+    channel._start_typing = lambda _chat_id: None
+
+    await channel._on_message(_make_telegram_update(text="hello group", chat_id=-100123), None)
+
+    channel.bus.publish_inbound.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_group_whitelist_bypasses_sender_allow_from_for_commands() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=[],
+            group_policy="open",
+            group_allow_from=["-100123"],
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel.bus.publish_inbound = AsyncMock()
+
+    await channel._forward_command(_make_telegram_update(text="/new", chat_id=-100123), None)
+
+    channel.bus.publish_inbound.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_group_without_group_allow_from_uses_legacy_sender_allow_from() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=[],
+            group_policy="open",
+            group_allow_from=[],
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel.bus.publish_inbound = AsyncMock()
+    channel._start_typing = lambda _chat_id: None
+
+    await channel._on_message(_make_telegram_update(text="hello group", chat_id=-100123), None)
+
+    channel.bus.publish_inbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_extract_reply_context_no_reply() -> None:
     """When there is no reply_to_message, _extract_reply_context returns None."""
     channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc"), MessageBus())

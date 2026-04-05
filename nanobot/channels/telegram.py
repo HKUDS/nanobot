@@ -16,7 +16,7 @@ from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
@@ -255,6 +255,43 @@ class TelegramChannel(BaseChannel):
             return False
 
         return sid in allow_list or username in allow_list
+
+    async def _handle_message(
+        self,
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        media: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        """Apply sender allowlist to DMs and to groups when group_allow_from is unset."""
+        meta = metadata or {}
+        if not meta.get("is_group") or not self.config.group_allow_from:
+            await super()._handle_message(
+                sender_id=sender_id,
+                chat_id=chat_id,
+                content=content,
+                media=media,
+                metadata=meta,
+                session_key=session_key,
+            )
+            return
+
+        if self.supports_streaming:
+            meta = {**meta, "_wants_stream": True}
+
+        await self.bus.publish_inbound(
+            InboundMessage(
+                channel=self.name,
+                sender_id=str(sender_id),
+                chat_id=str(chat_id),
+                content=content,
+                media=media or [],
+                metadata=meta,
+                session_key_override=session_key,
+            )
+        )
 
     @staticmethod
     def _normalize_telegram_command(content: str) -> str:
