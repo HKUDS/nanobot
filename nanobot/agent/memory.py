@@ -49,8 +49,9 @@ class MemoryStore:
         self.user_file = workspace / "USER.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
+        self.memory_index_file = self.memory_dir / "MEMORY_INDEX.md"
         self._git = GitStore(workspace, tracked_files=[
-            "SOUL.md", "USER.md", "memory/MEMORY.md",
+            "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/MEMORY_INDEX.md",
         ])
         self._maybe_migrate_legacy_history()
 
@@ -196,6 +197,14 @@ class MemoryStore:
     def write_memory(self, content: str) -> None:
         self.memory_file.write_text(content, encoding="utf-8")
 
+    # -- MEMORY_INDEX.md (compressed index for context injection) ------------
+
+    def read_memory_index(self) -> str:
+        return self.read_file(self.memory_index_file)
+
+    def write_memory_index(self, content: str) -> None:
+        self.memory_index_file.write_text(content, encoding="utf-8")
+
     # -- SOUL.md -------------------------------------------------------------
 
     def read_soul(self) -> str:
@@ -215,6 +224,14 @@ class MemoryStore:
     # -- context injection (used by context.py) ------------------------------
 
     def get_memory_context(self) -> str:
+        # Prefer the compressed index; fall back to full memory for
+        # backward compatibility when MEMORY_INDEX.md does not exist yet.
+        index = self.read_memory_index()
+        if index:
+            return (
+                f"## Long-term Memory (Index)\n{index}\n\n"
+                "(Use recall_memory to retrieve specific details)"
+            )
         long_term = self.read_memory()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
 
@@ -554,6 +571,43 @@ class Dream:
         tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace))
         return tools
 
+    # -- index generation -----------------------------------------------------
+
+    _INDEX_SYSTEM_PROMPT = (
+        "Generate a concise index (~200-300 tokens) of the current MEMORY.md content.\n"
+        "Rules:\n"
+        "- One line per topic/section, compressed bullet format\n"
+        "- Preserve key names, dates, and identifiers\n"
+        "- Group related items under section headers matching MEMORY.md\n"
+        "- Omit details that can be recalled via recall_memory when needed\n"
+        "- Output the index directly, no preamble\n"
+        "- If MEMORY.md is empty, output: (no memory indexed)\n"
+    )
+
+    async def _generate_index(self) -> None:
+        """Generate/update MEMORY_INDEX.md from current MEMORY.md."""
+        current_memory = self.store.read_memory()
+        if not current_memory:
+            return
+
+        try:
+            response = await self.provider.chat_with_retry(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self._INDEX_SYSTEM_PROMPT},
+                    {"role": "user", "content": f"## Current MEMORY.md\n{current_memory}"},
+                ],
+                tools=None,
+                tool_choice=None,
+                max_tokens=512,
+            )
+            index_content = (response.content or "").strip()
+            if index_content and index_content != "(no memory indexed)":
+                self.store.write_memory_index(index_content)
+                logger.info("Dream: generated MEMORY_INDEX.md ({} chars)", len(index_content))
+        except Exception:
+            logger.warning("Dream: failed to generate MEMORY_INDEX.md, skipping")
+
     # -- main entry ----------------------------------------------------------
 
     async def run(self) -> bool:
@@ -667,5 +721,9 @@ class Dream:
             sha = self.store.git.auto_commit(f"dream: {ts}, {len(changelog)} change(s)")
             if sha:
                 logger.info("Dream commit: {}", sha)
+
+        # Generate/update memory index after successful edits
+        if changelog:
+            await self._generate_index()
 
         return True

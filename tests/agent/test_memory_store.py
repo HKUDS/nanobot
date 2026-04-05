@@ -45,6 +45,25 @@ class TestMemoryStoreBasicIO:
         assert "Long-term Memory" in ctx
         assert "important fact" in ctx
 
+    def test_get_memory_context_prefers_index(self, store):
+        store.write_memory("full memory content with many details")
+        store.write_memory_index("- compressed index entry")
+        ctx = store.get_memory_context()
+        assert "compressed index entry" in ctx
+        assert "recall_memory" in ctx
+        assert "full memory content" not in ctx
+
+    def test_get_memory_context_falls_back_when_no_index(self, store):
+        store.write_memory("important fact")
+        ctx = store.get_memory_context()
+        assert "important fact" in ctx
+        # Falls back to full memory (no MEMORY_INDEX.md yet)
+        assert "Long-term Memory\n" in ctx
+
+    def test_read_write_memory_index(self, store):
+        store.write_memory_index("index content")
+        assert store.read_memory_index() == "index content"
+
 
 class TestHistoryWithCursor:
     def test_append_history_returns_cursor(self, store):

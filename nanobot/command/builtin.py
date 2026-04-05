@@ -104,6 +104,40 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_index_memory(ctx: CommandContext) -> OutboundMessage:
+    """Manually generate or refresh the memory index (MEMORY_INDEX.md).
+
+    This is useful when upgrading from an older version that didn't have the
+    index system, or when you want to regenerate the index without running a
+    full Dream cycle.
+    """
+    loop = ctx.loop
+    store = loop.dream.store
+    current_memory = store.read_memory()
+
+    if not current_memory:
+        content = "No long-term memory stored yet. Nothing to index."
+    else:
+        try:
+            await loop.dream._generate_index()
+            index = store.read_memory_index()
+            if index:
+                chars = len(index)
+                content = (
+                    f"Memory index generated ({chars} chars).\n\n"
+                    "The system prompt will now use the compressed index instead of "
+                    "the full memory file. Use `recall_memory` to retrieve details."
+                )
+            else:
+                content = "Index generation produced no output. Try again later."
+        except Exception as e:
+            content = f"Failed to generate index: {e}"
+
+    return OutboundMessage(
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id, content=content,
+    )
+
+
 def _extract_changed_files(diff: str) -> list[str]:
     """Extract changed file paths from a unified diff."""
     files: list[str] = []
@@ -292,6 +326,7 @@ def build_help_text() -> str:
         "/status — Show bot status",
         "/dream — Manually trigger Dream consolidation",
         "/dream-log — Show what the last Dream changed",
+        "/index-memory — Generate or refresh the memory index",
         "/dream-restore — Revert memory to a previous state",
         "/help — Show available commands",
     ]
@@ -306,6 +341,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
     router.exact("/dream", cmd_dream)
+    router.exact("/index-memory", cmd_index_memory)
     router.exact("/dream-log", cmd_dream_log)
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)
