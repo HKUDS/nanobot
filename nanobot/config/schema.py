@@ -90,6 +90,7 @@ class ProviderConfig(Base):
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    transcription_language: str | None = None  # Language code for Groq transcription (e.g., "en", "zh")
 
 
 class ProvidersConfig(Base):

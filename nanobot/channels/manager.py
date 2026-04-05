@@ -55,6 +55,10 @@ class ChannelManager:
             try:
                 channel = cls(section, self.bus)
                 channel.transcription_api_key = groq_key
+                # Pass transcription language from Groq provider config if available
+                groq_config = getattr(self.config.providers, "groq", None)
+                if groq_config and hasattr(groq_config, "transcription_language"):
+                    channel.transcription_language = groq_config.transcription_language
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:

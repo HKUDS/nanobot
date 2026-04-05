@@ -14,9 +14,10 @@ class GroqTranscriptionProvider:
     Groq offers extremely fast transcription with a generous free tier.
     """
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, language: str | None = None):
         self.api_key = api_key or os.environ.get("GROQ_API_KEY")
         self.api_url = "https://api.groq.com/openai/v1/audio/transcriptions"
+        self.language = language  # ISO-639-1 code (e.g., "en", "zh", "ja")
 
     async def transcribe(self, file_path: str | Path) -> str:
         """
@@ -44,6 +45,10 @@ class GroqTranscriptionProvider:
                         "file": (path.name, f),
                         "model": (None, "whisper-large-v3"),
                     }
+                    # Add language parameter if specified
+                    if self.language:
+                        files["language"] = (None, self.language)
+
                     headers = {
                         "Authorization": f"Bearer {self.api_key}",
                     }
