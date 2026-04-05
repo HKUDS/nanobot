@@ -863,6 +863,27 @@ async def test_loop_stream_filter_holds_partial_angle_bracket_until_reasoning_ta
 
 
 @pytest.mark.asyncio
+async def test_loop_stream_filter_drops_orphan_thought_closer_before_text(tmp_path):
+    loop = _make_loop(tmp_path)
+    deltas: list[str] = []
+
+    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+        await on_content_delta("</thought>")
+        await on_content_delta("Dạ thưa Master, em đã...")
+        return LLMResponse(content="</thought>Dạ thưa Master, em đã...", tool_calls=[], usage={})
+
+    loop.provider.chat_stream_with_retry = chat_stream_with_retry
+
+    async def on_stream(delta: str) -> None:
+        deltas.append(delta)
+
+    final_content, _, _ = await loop._run_agent_loop([], on_stream=on_stream)
+
+    assert final_content == "Dạ thưa Master, em đã..."
+    assert deltas == ["Dạ thưa Master, em đã..."]
+
+
+@pytest.mark.asyncio
 async def test_loop_retries_think_only_final_response(tmp_path):
     loop = _make_loop(tmp_path)
     call_count = {"n": 0}
