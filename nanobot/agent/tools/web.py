@@ -8,7 +8,7 @@ import json
 import os
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 from loguru import logger
@@ -182,10 +182,10 @@ class WebSearchTool(Tool):
             return await self._search_duckduckgo(query, n)
         try:
             headers = {"Accept": "application/json", "Authorization": f"Bearer {api_key}"}
+            encoded_query = quote(query, safe="")
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.get(
-                    f"https://s.jina.ai/",
-                    params={"q": query},
+                    f"https://s.jina.ai/{encoded_query}",
                     headers=headers,
                     timeout=15.0,
                 )
@@ -197,7 +197,8 @@ class WebSearchTool(Tool):
             ]
             return _format_results(query, items, n)
         except Exception as e:
-            return f"Error: {e}"
+            logger.warning("Jina search failed ({}), falling back to DuckDuckGo", e)
+            return await self._search_duckduckgo(query, n)
 
     async def _search_duckduckgo(self, query: str, n: int) -> str:
         try:
