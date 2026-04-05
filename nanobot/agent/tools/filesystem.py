@@ -5,8 +5,10 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
+from nanobot.config.paths import get_media_dir
 
 
 def _resolve_path(
@@ -21,7 +23,8 @@ def _resolve_path(
         p = workspace / p
     resolved = p.resolve()
     if allowed_dir:
-        all_dirs = [allowed_dir] + (extra_allowed_dirs or [])
+        media_path = get_media_dir().resolve()
+        all_dirs = [allowed_dir] + [media_path] + (extra_allowed_dirs or []) 
         if not any(_is_under(resolved, d) for d in all_dirs):
             raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
     return resolved
@@ -56,6 +59,23 @@ class _FsTool(Tool):
 # read_file
 # ---------------------------------------------------------------------------
 
+
+@tool_parameters(
+    tool_parameters_schema(
+        path=StringSchema("The file path to read"),
+        offset=IntegerSchema(
+            1,
+            description="Line number to start reading from (1-indexed, default 1)",
+            minimum=1,
+        ),
+        limit=IntegerSchema(
+            2000,
+            description="Maximum number of lines to read (default 2000)",
+            minimum=1,
+        ),
+        required=["path"],
+    )
+)
 class ReadFileTool(_FsTool):
     """Read file contents with optional line-based pagination."""
 
@@ -74,27 +94,13 @@ class ReadFileTool(_FsTool):
         )
 
     @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "The file path to read"},
-                "offset": {
-                    "type": "integer",
-                    "description": "Line number to start reading from (1-indexed, default 1)",
-                    "minimum": 1,
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of lines to read (default 2000)",
-                    "minimum": 1,
-                },
-            },
-            "required": ["path"],
-        }
+    def read_only(self) -> bool:
+        return True
 
-    async def execute(self, path: str, offset: int = 1, limit: int | None = None, **kwargs: Any) -> Any:
+    async def execute(self, path: str | None = None, offset: int = 1, limit: int | None = None, **kwargs: Any) -> Any:
         try:
+            if not path:
+                return "Error reading file: Unknown path"
             fp = self._resolve(path)
             if not fp.exists():
                 return f"Error: File not found: {path}"
@@ -152,6 +158,14 @@ class ReadFileTool(_FsTool):
 # write_file
 # ---------------------------------------------------------------------------
 
+
+@tool_parameters(
+    tool_parameters_schema(
+        path=StringSchema("The file path to write to"),
+        content=StringSchema("The content to write"),
+        required=["path", "content"],
+    )
+)
 class WriteFileTool(_FsTool):
     """Write content to a file."""
 
@@ -163,19 +177,12 @@ class WriteFileTool(_FsTool):
     def description(self) -> str:
         return "Write content to a file at the given path. Creates parent directories if needed."
 
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "The file path to write to"},
-                "content": {"type": "string", "description": "The content to write"},
-            },
-            "required": ["path", "content"],
-        }
-
-    async def execute(self, path: str, content: str, **kwargs: Any) -> str:
+    async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
         try:
+            if not path:
+                raise ValueError("Unknown path")
+            if content is None:
+                raise ValueError("Unknown content")
             fp = self._resolve(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
@@ -216,6 +223,15 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
     return None, 0
 
 
+@tool_parameters(
+    tool_parameters_schema(
+        path=StringSchema("The file path to edit"),
+        old_text=StringSchema("The text to find and replace"),
+        new_text=StringSchema("The text to replace with"),
+        replace_all=BooleanSchema(description="Replace all occurrences (default false)"),
+        required=["path", "old_text", "new_text"],
+    )
+)
 class EditFileTool(_FsTool):
     """Edit a file by replacing text with fallback matching."""
 
@@ -231,27 +247,19 @@ class EditFileTool(_FsTool):
             "Set replace_all=true to replace every occurrence."
         )
 
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "The file path to edit"},
-                "old_text": {"type": "string", "description": "The text to find and replace"},
-                "new_text": {"type": "string", "description": "The text to replace with"},
-                "replace_all": {
-                    "type": "boolean",
-                    "description": "Replace all occurrences (default false)",
-                },
-            },
-            "required": ["path", "old_text", "new_text"],
-        }
-
     async def execute(
-        self, path: str, old_text: str, new_text: str,
+        self, path: str | None = None, old_text: str | None = None,
+        new_text: str | None = None,
         replace_all: bool = False, **kwargs: Any,
     ) -> str:
         try:
+            if not path:
+                raise ValueError("Unknown path")
+            if old_text is None:
+                raise ValueError("Unknown old_text")
+            if new_text is None:
+                raise ValueError("Unknown new_text")
+
             fp = self._resolve(path)
             if not fp.exists():
                 return f"Error: File not found: {path}"
@@ -308,6 +316,18 @@ class EditFileTool(_FsTool):
 # list_dir
 # ---------------------------------------------------------------------------
 
+@tool_parameters(
+    tool_parameters_schema(
+        path=StringSchema("The directory path to list"),
+        recursive=BooleanSchema(description="Recursively list all files (default false)"),
+        max_entries=IntegerSchema(
+            200,
+            description="Maximum entries to return (default 200)",
+            minimum=1,
+        ),
+        required=["path"],
+    )
+)
 class ListDirTool(_FsTool):
     """List directory contents with optional recursion."""
 
@@ -331,29 +351,16 @@ class ListDirTool(_FsTool):
         )
 
     @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "The directory path to list"},
-                "recursive": {
-                    "type": "boolean",
-                    "description": "Recursively list all files (default false)",
-                },
-                "max_entries": {
-                    "type": "integer",
-                    "description": "Maximum entries to return (default 200)",
-                    "minimum": 1,
-                },
-            },
-            "required": ["path"],
-        }
+    def read_only(self) -> bool:
+        return True
 
     async def execute(
-        self, path: str, recursive: bool = False,
+        self, path: str | None = None, recursive: bool = False,
         max_entries: int | None = None, **kwargs: Any,
     ) -> str:
         try:
+            if path is None:
+                raise ValueError("Unknown path")
             dp = self._resolve(path)
             if not dp.exists():
                 return f"Error: Directory not found: {path}"

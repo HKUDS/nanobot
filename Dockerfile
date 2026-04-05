@@ -27,10 +27,10 @@ COPY web/ web/
 RUN uv pip install --system --no-cache ".[web]"
 
 # Build the WhatsApp bridge
-RUN git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
-
 WORKDIR /app/bridge
-RUN npm install && npm run build
+RUN git config --global --add url."https://github.com/".insteadOf ssh://git@github.com/ && \
+    git config --global --add url."https://github.com/".insteadOf git@github.com: && \
+    npm install && npm run build
 WORKDIR /app
 
 # Create config directory
