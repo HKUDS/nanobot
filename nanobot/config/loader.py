@@ -1,6 +1,7 @@
 """Configuration loading utilities."""
 
 import json
+import os
 from pathlib import Path
 
 import pydantic
@@ -10,6 +11,14 @@ from nanobot.config.schema import Config
 
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
+
+
+def get_nanobot_home() -> Path:
+    """Get the Nanobot home directory, respecting NANOBOT_HOME environment variable."""
+    env_home = os.environ.get("NANOBOT_HOME")
+    if env_home:
+        return Path(env_home).expanduser()
+    return Path.home() / ".nanobot"
 
 
 def set_config_path(path: Path) -> None:
@@ -22,7 +31,7 @@ def get_config_path() -> Path:
     """Get the configuration file path."""
     if _current_config_path:
         return _current_config_path
-    return Path.home() / ".nanobot" / "config.json"
+    return get_nanobot_home() / "config.json"
 
 
 def load_config(config_path: Path | None = None) -> Config:
