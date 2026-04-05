@@ -424,6 +424,23 @@ async def test_send_delta_incremental_edit_treats_not_modified_as_success() -> N
     assert channel._stream_bufs["123"].last_edit > 0.0
 
 
+@pytest.mark.asyncio
+async def test_send_delta_initial_send_keeps_message_in_thread() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send_delta(
+        "123",
+        "hello",
+        {"_stream_delta": True, "_stream_id": "s:0", "message_thread_id": 42},
+    )
+
+    assert channel._app.bot.sent_messages[0]["message_thread_id"] == 42
+
+
 def test_derive_topic_session_key_uses_thread_id() -> None:
     message = SimpleNamespace(
         chat=SimpleNamespace(type="supergroup"),
@@ -432,6 +449,27 @@ def test_derive_topic_session_key_uses_thread_id() -> None:
     )
 
     assert TelegramChannel._derive_topic_session_key(message) == "telegram:-100123:topic:42"
+
+
+def test_derive_topic_session_key_private_dm_thread() -> None:
+    """Private DM threads (Telegram Threaded Mode) must get their own session key."""
+    message = SimpleNamespace(
+        chat=SimpleNamespace(type="private"),
+        chat_id=999,
+        message_thread_id=7,
+    )
+    assert TelegramChannel._derive_topic_session_key(message) == "telegram:999:topic:7"
+
+
+def test_derive_topic_session_key_none_without_thread() -> None:
+    """No thread id → no topic session key, regardless of chat type."""
+    for chat_type in ("private", "supergroup", "group"):
+        message = SimpleNamespace(
+            chat=SimpleNamespace(type=chat_type),
+            chat_id=123,
+            message_thread_id=None,
+        )
+        assert TelegramChannel._derive_topic_session_key(message) is None
 
 
 def test_get_extension_falls_back_to_original_filename() -> None:
