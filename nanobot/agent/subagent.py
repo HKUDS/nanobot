@@ -38,6 +38,14 @@ class _SubagentHook(AgentHook):
                 self._task_id, tool_call.name, args_str,
             )
 
+    def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+        from nanobot.utils.helpers import strip_think
+
+        if not content:
+            return content
+        cleaned = strip_think(content)
+        return cleaned or None
+
 
 class SubagentManager:
     """Manages background subagent execution."""
