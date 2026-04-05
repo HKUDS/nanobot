@@ -328,17 +328,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="11434",
         default_api_base="http://localhost:11434/v1",
     ),
-    # === OpenVINO Model Server (direct, local, OpenAI-compatible at /v3) ===
-    ProviderSpec(
-        name="ovms",
-        keywords=("openvino", "ovms"),
-        env_key="",
-        display_name="OpenVINO Model Server",
-        backend="openai_compat",
-        is_direct=True,
-        is_local=True,
-        default_api_base="http://localhost:8000/v3",
-    ),
     # === Auxiliary (not a primary LLM provider) ============================
     # Groq: mainly used for Whisper voice transcription, also usable for LLM
     ProviderSpec(

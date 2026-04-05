@@ -14,75 +14,6 @@
 
 📏 Real-time line count: run `bash core_agent_lines.sh` to verify anytime.
 
-## 📢 News
-
-- **2026-04-02** 🧱 **Long-running tasks** run more reliably — core runtime hardening.
-- **2026-04-01** 🔑 GitHub Copilot auth restored; stricter workspace paths; OpenRouter Claude caching fix.
-- **2026-03-31** 🛰️ Multimodal channel alignment, Python SDK facade, MCP and tool fixes.
-- **2026-03-30** 🧩 OpenAI-compatible API tightened; composable agent lifecycle hooks.
-- **2026-03-29** 💬 Voice, typing, and media resilience; fixed-session OpenAI-compatible API.
-- **2026-03-28** 📚 Provider docs refresh; skill template wording fix.
-- **2026-03-27** 🚀 Released **v0.1.4.post6** — architecture decoupling, litellm removal, end-to-end streaming, channel improvements, and a security fix. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post6) for details.
-- **2026-03-26** 🏗️ Agent runner extracted and lifecycle hooks unified; stream delta coalescing at boundaries.
-- **2026-03-25** 🌏 StepFun provider, configurable timezone, Gemini thought signatures.
-- **2026-03-24** 🔧 Channel compatibility, streaming cards, test suite restructured.
-
-<details>
-<summary>Earlier news</summary>
-
-- **2026-03-23** 🔧 Command routing refactored for plugins, WhatsApp media, unified channel login CLI.
-- **2026-03-22** ⚡ End-to-end streaming, channel improvements, Anthropic cache optimization, `/status` command.
-- **2026-03-21** 🔒 Replace `litellm` with native `openai` + `anthropic` SDKs. Please see [commit](https://github.com/HKUDS/nanobot/commit/3dfdab7).
-- **2026-03-20** 🧙 Interactive setup wizard — pick your provider, model autocomplete, and you're good to go.
-- **2026-03-19** 💬 Telegram gets more resilient under load; richer code block rendering in chat.
-- **2026-03-18** 📷 Telegram can now send media via URL. Cron schedules show human-readable details.
-- **2026-03-17** ✨ Richer chat formatting, custom endpoints support extra headers, and image handling is more reliable.
-- **2026-03-16** 🚀 Released **v0.1.4.post5** — a refinement-focused release with stronger reliability and channel support, and a more dependable day-to-day experience. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post5) for details.
-- **2026-03-15** 🧩 Richer built-in skills and cleaner model compatibility.
-- **2026-03-14** 💬 Channel plugins, threaded replies, and steadier MCP and media handling.
-- **2026-03-13** 🌐 Multi-provider web search, LangSmith, and broader reliability improvements.
-- **2026-03-12** 🚀 VolcEngine support, Telegram reply context, `/restart`, and sturdier memory.
-- **2026-03-11** 🔌 Ollama, cleaner discovery, and safer tool behavior.
-- **2026-03-10** 🧠 Token-based memory, shared retries, and cleaner gateway and Telegram behavior.
-- **2026-03-09** 💬 Thread polish and better audio handling in chat.
-- **2026-03-08** 🚀 Released **v0.1.4.post4** — a reliability-packed release with safer defaults, better multi-instance support, sturdier MCP, and major channel and provider improvements. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post4) for details.
-- **2026-03-07** 🚀 Azure OpenAI provider, WhatsApp media, and more Telegram polish.
-- **2026-03-06** 🪄 Lighter providers, smarter media handling, and sturdier memory and CLI compatibility.
-- **2026-03-05** ⚡️ Telegram draft streaming, MCP SSE support, and broader channel reliability fixes.
-- **2026-03-04** 🛠️ Dependency cleanup, safer file reads, and another round of test and Cron fixes.
-- **2026-03-03** 🧠 Cleaner user-message merging, safer multimodal saves, and stronger Cron guards.
-- **2026-03-02** 🛡️ Safer default access control, sturdier Cron reloads, and cleaner media handling.
-- **2026-03-01** 🌐 Web proxy support, smarter Cron reminders, and richer chat text parsing.
-- **2026-02-28** 🚀 Released **v0.1.4.post3** — cleaner context, hardened session history, and smarter agent. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post3) for details.
-- **2026-02-27** 🧠 Experimental thinking mode support and media message fixes.
-- **2026-02-26** 🛡️ Session poisoning fix, WhatsApp dedup, Windows path guard, Mistral compatibility.
-- **2026-02-25** 🧹 Cleaner session context, auto workspace template sync.
-- **2026-02-24** 🚀 Released **v0.1.4.post2** — a reliability-focused release with a redesigned heartbeat, prompt cache optimization, and hardened provider & channel stability. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post2) for details.
-- **2026-02-23** 🔧 Virtual tool-call heartbeat, prompt cache optimization, and chat formatting fixes.
-- **2026-02-22** 🛡️ Thread isolation, typing indicator fixes, agent reliability improvements.
-- **2026-02-21** 🎉 Released **v0.1.4.post1** — new providers, media support across channels, and major stability improvements. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post1) for details.
-- **2026-02-20** 🐦 Chat channels receive multimodal files from users more reliably. More reliable memory under the hood.
-- **2026-02-19** ✨ File sends, long-message splitting, and subagents work in CLI mode.
-- **2026-02-18** ⚡️ janniebot now supports VolcEngine, MCP custom auth headers, and Anthropic prompt caching.
-- **2026-02-17** 🎉 Released **v0.1.4** — MCP support, progress streaming, new providers, and multiple channel improvements. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4) for details.
-- **2026-02-16** 🦞 janniebot now integrates a [ClawHub](https://clawhub.ai) skill — search and install public agent skills.
-- **2026-02-15** 🔑 janniebot now supports OpenAI Codex provider with OAuth login support.
-- **2026-02-14** 🔌 janniebot now supports MCP! See [MCP section](#mcp-model-context-protocol) for details.
-- **2026-02-13** 🎉 Released **v0.1.3.post7** — includes security hardening and multiple improvements. **Please upgrade to the latest version to address security issues**. See [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post7) for more details.
-- **2026-02-12** 🧠 Redesigned memory system — Less code, more reliable. Join the [discussion](https://github.com/HKUDS/nanobot/discussions/566) about it!
-- **2026-02-11** ✨ Enhanced CLI experience and added MiniMax support!
-- **2026-02-10** 🎉 Released **v0.1.3.post6** with improvements! Check the updates [notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post6) and our [roadmap](https://github.com/HKUDS/nanobot/discussions/431).
-- **2026-02-09** 💬 Added Email support — janniebot now supports multiple chat platforms!
-- **2026-02-08** 🔧 Refactored Providers—adding a new LLM provider now takes just 2 simple steps! Check [here](#providers).
-- **2026-02-07** 🚀 Released **v0.1.3.post5** with Qwen support & several key improvements! Check [here](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post5) for details.
-- **2026-02-06** ✨ Added Moonshot/Kimi provider and enhanced security hardening!
-- **2026-02-05** ✨ Added DeepSeek provider and enhanced scheduled tasks support!
-- **2026-02-04** 🚀 Released **v0.1.3.post4** with multi-provider & Docker support! Check [here](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post4) for details.
-- **2026-02-03** ⚡ Integrated vLLM for local LLM support and improved natural language task scheduling!
-- **2026-02-02** 🎉 janniebot officially launched! Welcome to try 🐈 janniebot!
-
-</details>
-
 > 🐈 janniebot is for educational, research, and technical exchange purposes only. It is unrelated to crypto and does not involve any official token or coin.
 
 ## Key Features of janniebot:
@@ -103,7 +34,6 @@
 
 ## Table of Contents
 
-- [News](#-news)
 - [Key Features](#key-features-of-janniebot)
 - [Architecture](#️-architecture)
 - [Features](#-features)
@@ -112,6 +42,7 @@
 - [Chat Apps](#-chat-apps)
 - [Agent Social Network](#-agent-social-network)
 - [Configuration](#️-configuration)
+  - [Environment variables and `.env`](#environment-variables-and-env)
 - [Multiple Instances](#-multiple-instances)
 - [Memory](#-memory)
 - [CLI Reference](#-cli-reference)
@@ -202,7 +133,7 @@ janniebot channels login whatsapp
 ## 🚀 Quick Start
 
 > [!TIP]
-> Set your API key in `~/.janniebot/config.json`.
+> Set your API key in `~/.janniebot/config.json`, **or** in a `.env` file (project root or `~/.janniebot/.env`) — for example `OPENROUTER_API_KEY=sk-or-v1-...`. See [Environment variables and `.env`](#environment-variables-and-env).
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global)
 >
 > For other LLM providers, please see the [Providers](#providers) section.
@@ -243,6 +174,20 @@ Configure these **two parts** in your config (other options have defaults).
   }
 }
 ```
+
+**Alternative: `.env` instead of JSON for keys and overrides**
+
+If you prefer not to put secrets in `config.json`, create `.env` in the project directory (when developing from source) or `~/.janniebot/.env`. Typical entries:
+
+```bash
+# Standard names (same as upstream SDKs); janniebot maps these into provider config
+OPENROUTER_API_KEY=sk-or-v1-your-key
+
+# Any setting from config.json can be overridden with JANNIEBOT_ + nested __ segments
+JANNIEBOT_AGENTS__DEFAULTS__MODEL=openrouter/anthropic/claude-sonnet-4
+```
+
+When you use a routing prefix like `openrouter/…` in the model field, janniebot strips that segment before calling the gateway so the remote API receives a valid model id (e.g. `anthropic/claude-sonnet-4`).
 
 **3. Chat**
 
@@ -397,7 +342,16 @@ Simply send the command above to your janniebot (via CLI or any chat channel), a
 
 ## ⚙️ Configuration
 
-Config file: `~/.janniebot/config.json`
+Primary config file: `~/.janniebot/config.json`
+
+Optional **`.env` files** are loaded (via `python-dotenv`) before settings are resolved: first `./.env` (current working directory), then `~/.janniebot/.env`. Variables **already set in the shell** are not overwritten by `.env` — so a bad `export OPENROUTER_API_KEY=…` in your shell profile will mask values from `.env` until you `unset` it or open a new session.
+
+### Environment variables and `.env`
+
+- **Provider API keys:** You can use the usual env names from each vendor (`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …). janniebot copies them into the internal `JANNIEBOT_PROVIDERS__…__API_KEY` form so CLI checks and `config.json` merging behave the same as if you had set keys in JSON.
+- **Structured overrides:** Any field under the Pydantic config tree can be set with prefix `JANNIEBOT_` and nested segments joined by `__`, for example `JANNIEBOT_GATEWAY__PORT=18791` or `JANNIEBOT_PROVIDERS__OPENROUTER__API_KEY=…`.
+- **CLI and SDK:** The Typer CLI loads dotenv on startup; `Janniebot.from_config()` loads dotenv before reading `config.json`, so library use picks up `.env` when your process cwd is the project (or when you rely on `~/.janniebot/.env`).
+- **Web search / fetch:** Keys such as `BRAVE_API_KEY`, `TAVILY_API_KEY`, `SEARXNG_BASE_URL`, and `JINA_API_KEY` are read from the environment (including values injected by `.env`).
 
 > [!NOTE]
 > If your config file is older than the current schema, you can refresh it without overwriting your existing values:
@@ -437,7 +391,6 @@ Config file: `~/.janniebot/config.json`
 | `ollama` | LLM (local, Ollama) | — |
 | `mistral` | LLM | [docs.mistral.ai](https://docs.mistral.ai/) |
 | `stepfun` | LLM (Step Fun/阶跃星辰) | [platform.stepfun.com](https://platform.stepfun.com) |
-| `ovms` | LLM (local, OpenVINO Model Server) | [docs.openvino.ai](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html) |
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `openai_codex` | LLM (Codex, OAuth) | `janniebot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `janniebot provider login github-copilot` |
@@ -571,81 +524,6 @@ ollama run llama3.2
 
 > `provider: "auto"` also works when `providers.ollama.apiBase` is configured, but setting `"provider": "ollama"` is the clearest option.
 
-</details>
-
-<details>
-<summary><b>OpenVINO Model Server (local / OpenAI-compatible)</b></summary>
-
-Run LLMs locally on Intel GPUs using [OpenVINO Model Server](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html). OVMS exposes an OpenAI-compatible API at `/v3`.
-
-> Requires Docker and an Intel GPU with driver access (`/dev/dri`).
-
-**1. Pull the model** (example):
-
-```bash
-mkdir -p ov/models && cd ov
-
-docker run -d \
-  --rm \
-  --user $(id -u):$(id -g) \
-  -v $(pwd)/models:/models \
-  openvino/model_server:latest-gpu \
-  --pull \
-  --model_name openai/gpt-oss-20b \
-  --model_repository_path /models \
-  --source_model OpenVINO/gpt-oss-20b-int4-ov \
-  --task text_generation \
-  --tool_parser gptoss \
-  --reasoning_parser gptoss \
-  --enable_prefix_caching true \
-  --target_device GPU
-```
-
-> This downloads the model weights. Wait for the container to finish before proceeding.
-
-**2. Start the server** (example):
-
-```bash
-docker run -d \
-  --rm \
-  --name ovms \
-  --user $(id -u):$(id -g) \
-  -p 8000:8000 \
-  -v $(pwd)/models:/models \
-  --device /dev/dri \
-  --group-add=$(stat -c "%g" /dev/dri/render* | head -n 1) \
-  openvino/model_server:latest-gpu \
-  --rest_port 8000 \
-  --model_name openai/gpt-oss-20b \
-  --model_repository_path /models \
-  --source_model OpenVINO/gpt-oss-20b-int4-ov \
-  --task text_generation \
-  --tool_parser gptoss \
-  --reasoning_parser gptoss \
-  --enable_prefix_caching true \
-  --target_device GPU
-```
-
-**3. Add to config** (partial — merge into `~/.janniebot/config.json`):
-
-```json
-{
-  "providers": {
-    "ovms": {
-      "apiBase": "http://localhost:8000/v3"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "provider": "ovms",
-      "model": "openai/gpt-oss-20b"
-    }
-  }
-}
-```
-
-> OVMS is a local server — no API key required. Supports tool calling (`--tool_parser gptoss`), reasoning (`--reasoning_parser gptoss`), and streaming.
-> See the [official OVMS docs](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html) for more details.
 </details>
 
 <details>
@@ -1202,12 +1080,14 @@ The agent can also manage this file itself — ask it to "add a periodic task" a
 Use janniebot as a library — no CLI, no gateway, just Python:
 
 ```python
-from janniebot import Nanobot
+from janniebot import Janniebot
 
-bot = Nanobot.from_config()
+bot = Janniebot.from_config()
 result = await bot.run("Summarize the README")
 print(result.content)
 ```
+
+`from_config()` loads `.env` from the current working directory and from `~/.janniebot/.env` before merging `config.json`, so the same env-based setup as the CLI applies to scripts.
 
 Each call carries a `session_key` for conversation isolation — different keys get independent history:
 
@@ -1240,7 +1120,7 @@ pip install "janniebot[api]"
 janniebot serve
 ```
 
-By default, the API binds to `127.0.0.1:8900`. You can change this in `config.json`.
+By default, the API binds to `127.0.0.1:8900`. You can change this in `config.json` or with `JANNIEBOT_API__HOST` / `JANNIEBOT_API__PORT` in `.env`.
 
 ### Behavior
 
@@ -1310,9 +1190,11 @@ print(resp.choices[0].message.content)
 
 ```bash
 docker compose run --rm janniebot-cli onboard   # first-time setup
-vim ~/.janniebot/config.json                     # add API keys
+vim ~/.janniebot/config.json                     # add API keys (or use ~/.janniebot/.env on the host)
 docker compose up -d janniebot-gateway           # start gateway
 ```
+
+You can keep secrets in `~/.janniebot/.env` on the host; the default compose mount `~/.janniebot:/root/.janniebot` makes that file visible inside the container. Alternatively, add `env_file: .env` to a service if you keep a `.env` next to `docker-compose.yml`.
 
 ```bash
 docker compose run --rm janniebot-cli agent -m "Hello!"   # run CLI
@@ -1354,7 +1236,7 @@ which janniebot   # e.g. /home/user/.local/bin/janniebot
 
 ```ini
 [Unit]
-Description=Nanobot Gateway
+Description=janniebot Gateway
 After=network.target
 
 [Service]
