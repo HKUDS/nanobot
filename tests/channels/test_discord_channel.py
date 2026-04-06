@@ -145,10 +145,16 @@ def _make_message(
     mentions: list[object] | None = None,
     attachments: list[object] | None = None,
     reply_to: int | None = None,
+    message_reference_type: object | None = None,
+    referenced_message: object | None = None,
 ):
     # Factory for incoming Discord message objects with optional guild/reply/attachments.
     guild = SimpleNamespace(id=guild_id) if guild_id is not None else None
-    reference = SimpleNamespace(message_id=reply_to) if reply_to is not None else None
+    reference = (
+        SimpleNamespace(message_id=reply_to, type=message_reference_type)
+        if reply_to is not None or message_reference_type is not None
+        else None
+    )
     return SimpleNamespace(
         author=SimpleNamespace(id=author_id, bot=author_bot),
         channel=_FakeChannel(channel_id),
@@ -157,6 +163,7 @@ def _make_message(
         mentions=mentions or [],
         attachments=attachments or [],
         reference=reference,
+        referenced_message=referenced_message,
         id=message_id,
     )
 
@@ -356,6 +363,64 @@ async def test_on_message_downloads_attachments(tmp_path, monkeypatch) -> None:
     assert len(handled) == 1
     assert handled[0]["media"] == [str(tmp_path / "12_photo.png")]
     assert "[attachment:" in handled[0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_on_message_includes_forwarded_referenced_message_content(tmp_path, monkeypatch) -> None:
+    # Forwarded messages should surface referenced text and attachments when Discord omits snapshots.
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+    monkeypatch.setattr("nanobot.channels.discord.get_media_dir", lambda _name: tmp_path)
+
+    forwarded_attachment = _FakeAttachment(99, "forwarded.png")
+    await channel._on_message(
+        _make_message(
+            content="",
+            message_reference_type=1,
+            referenced_message=SimpleNamespace(
+                content="forwarded body",
+                attachments=[forwarded_attachment],
+            ),
+        )
+    )
+
+    assert len(handled) == 1
+    assert handled[0]["media"] == [str(tmp_path / "99_forwarded.png")]
+    assert handled[0]["content"] == "[forwarded message]\nforwarded body\n[attachment: 99_forwarded.png]"
+
+
+@pytest.mark.asyncio
+async def test_on_message_does_not_treat_ordinary_reply_as_forward(tmp_path, monkeypatch) -> None:
+    # Ordinary replies must keep their current behavior even if referenced_message is present.
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+    monkeypatch.setattr("nanobot.channels.discord.get_media_dir", lambda _name: tmp_path)
+
+    await channel._on_message(
+        _make_message(
+            content="reply body",
+            reply_to=321,
+            referenced_message=SimpleNamespace(
+                content="should be ignored",
+                attachments=[_FakeAttachment(101, "ignored.png")],
+            ),
+        )
+    )
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == "reply body"
+    assert handled[0]["media"] == []
+    assert handled[0]["metadata"]["reply_to"] == "321"
 
 
 @pytest.mark.asyncio

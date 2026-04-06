@@ -328,12 +328,27 @@ class DiscordChannel(BaseChannel):
         sender_id = str(message.author.id)
         channel_id = self._channel_key(message.channel)
         content = message.content or ""
+        forwarded_message = self._resolve_forwarded_message(message)
 
         if not self._should_accept_inbound(message, sender_id, content):
             return
 
         media_paths, attachment_markers = await self._download_attachments(message.attachments)
         full_content = self._compose_inbound_content(content, attachment_markers)
+        if forwarded_message is not None:
+            forwarded_media_paths, forwarded_attachment_markers = await self._download_attachments(
+                forwarded_message.attachments,
+            )
+            media_paths.extend(forwarded_media_paths)
+            forwarded_content = self._compose_forwarded_content(
+                forwarded_message.content or "",
+                forwarded_attachment_markers,
+            )
+            if forwarded_content:
+                if full_content == "[empty message]":
+                    full_content = forwarded_content
+                else:
+                    full_content = "\n".join(part for part in [full_content, forwarded_content] if part)
         metadata = self._build_inbound_metadata(message)
 
         await self._start_typing(message.channel)
@@ -421,6 +436,14 @@ class DiscordChannel(BaseChannel):
         return "\n".join(part for part in content_parts if part) or "[empty message]"
 
     @staticmethod
+    def _compose_forwarded_content(content: str, attachment_markers: list[str]) -> str:
+        """Combine forwarded message text with a visible forwarded prefix."""
+        forwarded_content = DiscordChannel._compose_inbound_content(content, attachment_markers)
+        if not forwarded_content:
+            return ""
+        return "\n".join(("[forwarded message]", forwarded_content))
+
+    @staticmethod
     def _build_inbound_metadata(message: discord.Message) -> dict[str, str | None]:
         """Build metadata for inbound Discord messages."""
         reply_to = str(message.reference.message_id) if message.reference and message.reference.message_id else None
@@ -429,6 +452,30 @@ class DiscordChannel(BaseChannel):
             "guild_id": str(message.guild.id) if message.guild else None,
             "reply_to": reply_to,
         }
+
+    @staticmethod
+    def _resolve_forwarded_message(message: discord.Message) -> discord.Message | None:
+        """Return the referenced forward payload when Discord marks the message as forwarded."""
+        reference = getattr(message, "reference", None)
+        if reference is None:
+            return None
+        if not DiscordChannel._is_forward_reference_type(getattr(reference, "type", None)):
+            return None
+        referenced_message = getattr(message, "referenced_message", None)
+        return referenced_message if referenced_message is not None else None
+
+    @staticmethod
+    def _is_forward_reference_type(reference_type: object) -> bool:
+        """Check whether a Discord message reference represents a forward."""
+        if reference_type is None:
+            return False
+        if reference_type == 1:
+            return True
+        name = getattr(reference_type, "name", None)
+        if isinstance(name, str):
+            return name.lower() == "forward"
+        type_name = str(reference_type).lower()
+        return type_name.endswith("forward")
 
     def _should_respond_in_group(self, message: discord.Message, content: str) -> bool:
         """Check if the bot should respond in a guild channel based on policy."""
