@@ -1,7 +1,7 @@
 """Matrix (Element) channel — inbound sync + outbound message/media delivery."""
 
-import json
 import asyncio
+import json
 import logging
 import mimetypes
 import time
@@ -277,11 +277,11 @@ class MatrixChannel(BaseChannel):
 
         if self.config.password:
             if self.config.access_token or self.config.device_id:
-                logger.warning("You are using password-based Matrix login. The access_token and device_id fields will be ignored.")
+                logger.warning("Password-based Matrix login active; access_token and device_id fields will be ignored.")
 
             create_new_session = True
             if self.session_path.exists():
-                logger.info(f"Found session.json at {self.session_path}; attempting to use existing session...")
+                logger.info("Found session.json at {}; attempting to use existing session...", self.session_path)
                 try:
                     with open(self.session_path, "r", encoding="utf-8") as f:
                         session = json.load(f)
@@ -292,7 +292,7 @@ class MatrixChannel(BaseChannel):
                     logger.info("Successfully loaded from existing session")
                     create_new_session = False
                 except Exception as e:
-                    logger.warning(f"Failed to load from existing session: {e}")
+                    logger.warning("Failed to load from existing session: {}", e)
                     logger.info("Falling back to password login...")
 
             if create_new_session:
@@ -302,7 +302,8 @@ class MatrixChannel(BaseChannel):
                     logger.info("Logged in using a password; saving details to disk")
                     self._write_session_to_disk(resp)
                 else:
-                    logger.error(f"Failed to log in: {resp}")
+                    logger.error("Failed to log in: {}", resp)
+                    return
 
         elif self.config.access_token and self.config.device_id:
             try:
@@ -312,10 +313,10 @@ class MatrixChannel(BaseChannel):
                 self.client.load_store()
                 logger.info("Successfully loaded from existing session")
             except Exception as e:
-                logger.warning(f"Failed to load from existing session: {e}")
-        
+                logger.warning("Failed to load from existing session: {}", e)
+
         else:
-            logger.warning("Unable to load a Matrix session due to missing password, access_token, or device_id, encryption may not work")
+            logger.warning("Unable to load a Matrix session due to missing password, access_token, or device_id; encryption may not work")
             return
 
         self._sync_task = asyncio.create_task(self._sync_loop())
@@ -349,9 +350,9 @@ class MatrixChannel(BaseChannel):
         try:
             with open(self.session_path, "w", encoding="utf-8") as f:
                 json.dump(session, f, indent=2)
-            logger.info(f"session saved to {self.session_path}")
+            logger.info("Session saved to {}", self.session_path)
         except Exception as e:
-            logger.warning(f"Failed to save session: {e}")
+            logger.warning("Failed to save session: {}", e)
 
     def _is_workspace_path_allowed(self, path: Path) -> bool:
         """Check path is inside workspace (when restriction enabled)."""
