@@ -18,6 +18,7 @@ x-common-config: &common-config
 services:
   init-config:
     image: busybox
+    restart: "no"
     volumes:
       - nanobot_data:/home/nanobot/.nanobot
     environment:
@@ -109,11 +110,6 @@ services:
     command:
       - gateway
     restart: always
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:18790/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
     depends_on:
       init-config:
         condition: service_completed_successfully
@@ -134,11 +130,9 @@ services:
     restart: unless-stopped
     ports:
       - 127.0.0.1:8900:8900
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8900/v1/models"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    depends_on:
+      init-config:
+        condition: service_completed_successfully
     deploy:
       resources:
         limits:
