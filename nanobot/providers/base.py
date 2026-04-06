@@ -6,6 +6,8 @@ import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 from loguru import logger
@@ -49,9 +51,10 @@ class LLMResponse:
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     finish_reason: str = "stop"
     usage: dict[str, int] = field(default_factory=dict)
-    reasoning_content: str | None = None  # Kimi, DeepSeek-R1 etc.
+    retry_after: float | None = None  # Provider supplied retry wait in seconds.
+    reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
     thinking_blocks: list[dict] | None = None  # Anthropic extended thinking
-    
+
     @property
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls."""
@@ -146,6 +149,38 @@ class LLMProvider(ABC):
         return result
 
     @staticmethod
+    def _tool_name(tool: dict[str, Any]) -> str:
+        """Extract tool name from either OpenAI or Anthropic-style tool schemas."""
+        name = tool.get("name")
+        if isinstance(name, str):
+            return name
+        fn = tool.get("function")
+        if isinstance(fn, dict):
+            fname = fn.get("name")
+            if isinstance(fname, str):
+                return fname
+        return ""
+
+    @classmethod
+    def _tool_cache_marker_indices(cls, tools: list[dict[str, Any]]) -> list[int]:
+        """Return cache marker indices: builtin/MCP boundary and tail index."""
+        if not tools:
+            return []
+
+        tail_idx = len(tools) - 1
+        last_builtin_idx: int | None = None
+        for i in range(tail_idx, -1, -1):
+            if not cls._tool_name(tools[i]).startswith("mcp_"):
+                last_builtin_idx = i
+                break
+
+        ordered_unique: list[int] = []
+        for idx in (last_builtin_idx, tail_idx):
+            if idx is not None and idx not in ordered_unique:
+                ordered_unique.append(idx)
+        return ordered_unique
+
+    @staticmethod
     def _sanitize_request_messages(
         messages: list[dict[str, Any]],
         allowed_keys: frozenset[str],
@@ -172,7 +207,7 @@ class LLMProvider(ABC):
     ) -> LLMResponse:
         """
         Send a chat completion request.
-        
+
         Args:
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions.
@@ -180,7 +215,7 @@ class LLMProvider(ABC):
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
             tool_choice: Tool selection strategy ("auto", "required", or specific tool dict).
-        
+
         Returns:
             LLMResponse with content and/or tool calls.
         """
@@ -334,16 +369,57 @@ class LLMProvider(ABC):
     @classmethod
     def _extract_retry_after(cls, content: str | None) -> float | None:
         text = (content or "").lower()
-        match = re.search(r"retry after\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds|s|sec|secs|seconds|m|min|minutes)?", text)
-        if not match:
-            return None
-        value = float(match.group(1))
-        unit = (match.group(2) or "s").lower()
-        if unit in {"ms", "milliseconds"}:
+        patterns = (
+            r"retry after\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds|s|sec|secs|seconds|m|min|minutes)?",
+            r"try again in\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds|s|sec|secs|seconds|m|min|minutes)",
+            r"wait\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds|s|sec|secs|seconds|m|min|minutes)\s*before retry",
+            r"retry[_-]?after[\"'\s:=]+(\d+(?:\.\d+)?)",
+        )
+        for idx, pattern in enumerate(patterns):
+            match = re.search(pattern, text)
+            if not match:
+                continue
+            value = float(match.group(1))
+            unit = match.group(2) if idx < 3 else "s"
+            return cls._to_retry_seconds(value, unit)
+        return None
+
+    @classmethod
+    def _to_retry_seconds(cls, value: float, unit: str | None = None) -> float:
+        normalized_unit = (unit or "s").lower()
+        if normalized_unit in {"ms", "milliseconds"}:
             return max(0.1, value / 1000.0)
-        if unit in {"m", "min", "minutes"}:
-            return value * 60.0
-        return value
+        if normalized_unit in {"m", "min", "minutes"}:
+            return max(0.1, value * 60.0)
+        return max(0.1, value)
+
+    @classmethod
+    def _extract_retry_after_from_headers(cls, headers: Any) -> float | None:
+        if not headers:
+            return None
+        retry_after: Any = None
+        if hasattr(headers, "get"):
+            retry_after = headers.get("retry-after") or headers.get("Retry-After")
+        if retry_after is None and isinstance(headers, dict):
+            for key, value in headers.items():
+                if isinstance(key, str) and key.lower() == "retry-after":
+                    retry_after = value
+                    break
+        if retry_after is None:
+            return None
+        retry_after_text = str(retry_after).strip()
+        if not retry_after_text:
+            return None
+        if re.fullmatch(r"\d+(?:\.\d+)?", retry_after_text):
+            return cls._to_retry_seconds(float(retry_after_text), "s")
+        try:
+            retry_at = parsedate_to_datetime(retry_after_text)
+        except Exception:
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        remaining = (retry_at - datetime.now(retry_at.tzinfo)).total_seconds()
+        return max(0.1, remaining)
 
     async def _sleep_with_heartbeat(
         self,
@@ -416,7 +492,7 @@ class LLMProvider(ABC):
                 break
 
             base_delay = delays[min(attempt - 1, len(delays) - 1)]
-            delay = self._extract_retry_after(response.content) or base_delay
+            delay = response.retry_after or self._extract_retry_after(response.content) or base_delay
             if persistent:
                 delay = min(delay, self._PERSISTENT_MAX_DELAY)
 

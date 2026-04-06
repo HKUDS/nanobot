@@ -1,5 +1,7 @@
 # Python SDK
 
+> **Note:** This interface is currently an experiment in the latest source code version and is planned to officially ship in `v0.1.5`.
+
 Use nanobot programmatically — load config, run the agent, get results.
 
 ## Quick Start

@@ -58,6 +58,7 @@ class AzureOpenAIProvider(LLMProvider):
             api_key=api_key,
             base_url=base_url,
             default_headers={"x-session-affinity": uuid.uuid4().hex},
+            max_retries=0,
         )
 
     # ------------------------------------------------------------------
@@ -113,9 +114,14 @@ class AzureOpenAIProvider(LLMProvider):
 
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
-        body = getattr(e, "body", None) or getattr(getattr(e, "response", None), "text", None)
-        msg = f"Error: {str(body).strip()[:500]}" if body else f"Error calling Azure OpenAI: {e}"
-        return LLMResponse(content=msg, finish_reason="error")
+        response = getattr(e, "response", None)
+        body = getattr(e, "body", None) or getattr(response, "text", None)
+        body_text = str(body).strip() if body is not None else ""
+        msg = f"Error: {body_text[:500]}" if body_text else f"Error calling Azure OpenAI: {e}"
+        retry_after = LLMProvider._extract_retry_after_from_headers(getattr(response, "headers", None))
+        if retry_after is None:
+            retry_after = LLMProvider._extract_retry_after(msg)
+        return LLMResponse(content=msg, finish_reason="error", retry_after=retry_after)
 
     # ------------------------------------------------------------------
     # Public API

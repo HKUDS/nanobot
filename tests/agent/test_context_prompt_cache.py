@@ -47,6 +47,19 @@ def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) ->
     assert prompt1 == prompt2
 
 
+def test_system_prompt_reflects_current_dream_memory_contract(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt = builder.build_system_prompt()
+
+    assert "memory/history.jsonl" in prompt
+    assert "automatically managed by Dream" in prompt
+    assert "do not edit directly" in prompt
+    assert "memory/HISTORY.md" not in prompt
+    assert "write important facts here" not in prompt
+
+
 def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     """Runtime metadata should be merged with the user message."""
     workspace = _make_workspace(tmp_path)

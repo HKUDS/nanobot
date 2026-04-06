@@ -2,10 +2,23 @@
 
 from typing import Any, Awaitable, Callable
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 from nanobot.bus.events import OutboundMessage
 
 
+@tool_parameters(
+    tool_parameters_schema(
+        content=StringSchema("The message content to send"),
+        channel=StringSchema("Optional: target channel (telegram, discord, etc.)"),
+        chat_id=StringSchema("Optional: target chat/user ID"),
+        media=ArraySchema(
+            StringSchema(""),
+            description="Optional: list of file paths to attach (images, audio, documents)",
+        ),
+        required=["content"],
+    )
+)
 class MessageTool(Tool):
     """Tool to send messages to users on chat channels."""
 
@@ -49,32 +62,6 @@ class MessageTool(Tool):
             "Do NOT use read_file to send files — that only reads content for your own analysis."
         )
 
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string",
-                    "description": "The message content to send"
-                },
-                "channel": {
-                    "type": "string",
-                    "description": "Optional: target channel (telegram, discord, etc.)"
-                },
-                "chat_id": {
-                    "type": "string",
-                    "description": "Optional: target chat/user ID"
-                },
-                "media": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional: list of file paths to attach (images, audio, documents)"
-                }
-            },
-            "required": ["content"]
-        }
-
     async def execute(
         self,
         content: str,
@@ -84,6 +71,9 @@ class MessageTool(Tool):
         media: list[str] | None = None,
         **kwargs: Any
     ) -> str:
+        from nanobot.utils.helpers import strip_think
+        content = strip_think(content)
+        
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
         # Only inherit default message_id when targeting the same channel+chat.

@@ -11,7 +11,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import json_repair
-from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -49,6 +48,8 @@ class AnthropicProvider(LLMProvider):
             client_kw["base_url"] = api_base
         if extra_headers:
             client_kw["default_headers"] = extra_headers
+        # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
+        client_kw["max_retries"] = 0
         self._client = AsyncAnthropic(**client_kw)
 
     @staticmethod
@@ -253,8 +254,9 @@ class AnthropicProvider(LLMProvider):
     # Prompt caching
     # ------------------------------------------------------------------
 
-    @staticmethod
+    @classmethod
     def _apply_cache_control(
+        cls,
         system: str | list[dict[str, Any]],
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
@@ -281,7 +283,8 @@ class AnthropicProvider(LLMProvider):
         new_tools = tools
         if tools:
             new_tools = list(tools)
-            new_tools[-1] = {**new_tools[-1], "cache_control": marker}
+            for idx in cls._tool_cache_marker_indices(new_tools):
+                new_tools[idx] = {**new_tools[idx], "cache_control": marker}
 
         return system, new_msgs, new_tools
 
@@ -401,6 +404,15 @@ class AnthropicProvider(LLMProvider):
     # Public API
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _handle_error(e: Exception) -> LLMResponse:
+        msg = f"Error calling LLM: {e}"
+        response = getattr(e, "response", None)
+        retry_after = LLMProvider._extract_retry_after_from_headers(getattr(response, "headers", None))
+        if retry_after is None:
+            retry_after = LLMProvider._extract_retry_after(msg)
+        return LLMResponse(content=msg, finish_reason="error", retry_after=retry_after)
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -419,7 +431,7 @@ class AnthropicProvider(LLMProvider):
             response = await self._client.messages.create(**kwargs)
             return self._parse_response(response)
         except Exception as e:
-            return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
+            return self._handle_error(e)
 
     async def chat_stream(
         self,
@@ -464,7 +476,7 @@ class AnthropicProvider(LLMProvider):
                 finish_reason="error",
             )
         except Exception as e:
-            return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
+            return self._handle_error(e)
 
     def get_default_model(self) -> str:
         return self.default_model

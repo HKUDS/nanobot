@@ -1,12 +1,18 @@
 """Tests for WhatsApp channel outbound media support."""
 
 import json
+import os
+import sys
+import types
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.bus.events import OutboundMessage
-from nanobot.channels.whatsapp import WhatsAppChannel
+from nanobot.channels.whatsapp import (
+    WhatsAppChannel,
+    _load_or_create_bridge_token,
+)
 
 
 def _make_channel() -> WhatsAppChannel:
@@ -155,3 +161,96 @@ async def test_group_policy_mention_accepts_mentioned_group_message():
     kwargs = ch._handle_message.await_args.kwargs
     assert kwargs["chat_id"] == "12345@g.us"
     assert kwargs["sender_id"] == "user"
+
+
+def test_load_or_create_bridge_token_persists_generated_secret(tmp_path):
+    token_path = tmp_path / "whatsapp-auth" / "bridge-token"
+
+    first = _load_or_create_bridge_token(token_path)
+    second = _load_or_create_bridge_token(token_path)
+
+    assert first == second
+    assert token_path.read_text(encoding="utf-8") == first
+    assert len(first) >= 32
+    if os.name != "nt":
+        assert token_path.stat().st_mode & 0o777 == 0o600
+
+
+def test_configured_bridge_token_skips_local_token_file(monkeypatch, tmp_path):
+    token_path = tmp_path / "whatsapp-auth" / "bridge-token"
+    monkeypatch.setattr("nanobot.channels.whatsapp._bridge_token_path", lambda: token_path)
+    ch = WhatsAppChannel({"enabled": True, "bridgeToken": "manual-secret"}, MagicMock())
+
+    assert ch._effective_bridge_token() == "manual-secret"
+    assert not token_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_login_exports_effective_bridge_token(monkeypatch, tmp_path):
+    token_path = tmp_path / "whatsapp-auth" / "bridge-token"
+    bridge_dir = tmp_path / "bridge"
+    bridge_dir.mkdir()
+    calls = []
+
+    monkeypatch.setattr("nanobot.channels.whatsapp._bridge_token_path", lambda: token_path)
+    monkeypatch.setattr("nanobot.channels.whatsapp._ensure_bridge_setup", lambda: bridge_dir)
+    monkeypatch.setattr("nanobot.channels.whatsapp.shutil.which", lambda _: "/usr/bin/npm")
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return MagicMock()
+
+    monkeypatch.setattr("nanobot.channels.whatsapp.subprocess.run", fake_run)
+    ch = WhatsAppChannel({"enabled": True}, MagicMock())
+
+    assert await ch.login() is True
+    assert len(calls) == 1
+
+    _, kwargs = calls[0]
+    assert kwargs["cwd"] == bridge_dir
+    assert kwargs["env"]["AUTH_DIR"] == str(token_path.parent)
+    assert kwargs["env"]["BRIDGE_TOKEN"] == token_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_start_sends_auth_message_with_generated_token(monkeypatch, tmp_path):
+    token_path = tmp_path / "whatsapp-auth" / "bridge-token"
+    sent_messages: list[str] = []
+
+    class FakeWS:
+        def __init__(self) -> None:
+            self.close = AsyncMock()
+
+        async def send(self, message: str) -> None:
+            sent_messages.append(message)
+            ch._running = False
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    class FakeConnect:
+        def __init__(self, ws):
+            self.ws = ws
+
+        async def __aenter__(self):
+            return self.ws
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr("nanobot.channels.whatsapp._bridge_token_path", lambda: token_path)
+    monkeypatch.setitem(
+        sys.modules,
+        "websockets",
+        types.SimpleNamespace(connect=lambda url: FakeConnect(FakeWS())),
+    )
+
+    ch = WhatsAppChannel({"enabled": True, "bridgeUrl": "ws://localhost:3001"}, MagicMock())
+    await ch.start()
+
+    assert sent_messages == [
+        json.dumps({"type": "auth", "token": token_path.read_text(encoding="utf-8")})
+    ]

@@ -200,6 +200,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         env_key="OPENAI_API_KEY",
         display_name="OpenAI",
         backend="openai_compat",
+        supports_max_completion_tokens=True,
     ),
     # OpenAI Codex: OAuth-based, dedicated provider
     ProviderSpec(
@@ -297,6 +298,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.stepfun.com/v1",
     ),
+    # Xiaomi MIMO (小米): OpenAI-compatible API
+    ProviderSpec(
+        name="xiaomi_mimo",
+        keywords=("xiaomi_mimo", "mimo"),
+        env_key="XIAOMIMIMO_API_KEY",
+        display_name="Xiaomi MIMO",
+        backend="openai_compat",
+        default_api_base="https://api.xiaomimimo.com/v1",
+    ),
     # === Local deployment (matched by config key, NOT by api_base) =========
     # vLLM / any OpenAI-compatible local server
     ProviderSpec(
@@ -338,6 +348,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Groq",
         backend="openai_compat",
         default_api_base="https://api.groq.com/openai/v1",
+    ),
+    # Qianfan (百度千帆): OpenAI-compatible API
+    ProviderSpec(
+        name="qianfan",
+        keywords=("qianfan", "ernie"),
+        env_key="QIANFAN_API_KEY",
+        display_name="Qianfan",
+        backend="openai_compat",
+        default_api_base="https://qianfan.baidubce.com/v2"
     ),
 )
 
