@@ -12,7 +12,7 @@
   </p>
 </div>
 
-🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw).
+🐈 **nanobot** is an **ultra-lightweight** personal AI agent inspired by [OpenClaw](https://github.com/openclaw/openclaw).
 
 ⚡️ Delivers core agent functionality with **99% fewer lines of code**.
 
@@ -252,7 +252,7 @@ Configure these **two parts** in your config (other options have defaults).
 nanobot agent
 ```
 
-That's it! You have a working AI assistant in 2 minutes.
+That's it! You have a working AI agent in 2 minutes.
 
 ## 💬 Chat Apps
 
