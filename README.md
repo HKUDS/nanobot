@@ -740,7 +740,8 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
       "smtpUsername": "my-nanobot@gmail.com",
       "smtpPassword": "your-app-password",
       "fromAddress": "my-nanobot@gmail.com",
-      "allowFrom": ["your-real-email@gmail.com"]
+      "allowFrom": ["your-real-email@gmail.com"],
+      "allowedAttachmentTypes": ["application/pdf", "image/*"]
     }
   }
 }
