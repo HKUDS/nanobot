@@ -69,7 +69,7 @@ class WebhookChannel(BaseChannel):
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
-        return {"enabled": False, "port": 9000, "allowFrom": []}
+        return WebhookConfig().model_dump(by_alias=True)
 
     async def start(self) -> None:
         """Start an HTTP server that listens for incoming messages.
@@ -401,10 +401,10 @@ Override `default_config()` so `nanobot onboard` auto-populates `config.json`:
 ```python
 @classmethod
 def default_config(cls) -> dict[str, Any]:
-    return {"enabled": False, "port": 9000, "allowFrom": []}
+    return WebhookConfig().model_dump(by_alias=True)
 ```
 
-> **Note:** `default_config()` still returns a plain `dict` (not a Pydantic model) because it's used to serialize into `config.json`. Use camelCase keys (`allowFrom`) to match the JSON convention.
+> **Note:** `default_config()` returns a plain `dict` (not a Pydantic model) because it's used to serialize into `config.json`. The recommended way is to instantiate your config model and call `model_dump(by_alias=True)` — this automatically uses camelCase keys (`allowFrom`) and keeps defaults in a single source of truth.
 
 If not overridden, the base class returns `{"enabled": false}`.
 
