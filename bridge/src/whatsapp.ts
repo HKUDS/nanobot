@@ -301,12 +301,13 @@ export class WhatsAppClient {
     }
   }
 
-  async sendMessage(to: string, text: string): Promise<void> {
+  async sendMessage(to: string, text: string): Promise<{ lid?: string }> {
     if (!this.sock) {
       throw new Error('Not connected');
     }
 
-    await this.sock.sendMessage(to, { text });
+    const sent = await this.sock.sendMessage(to, { text });
+    return { lid: sent?.key?.remoteJid || undefined };
   }
 
   async sendMedia(
@@ -315,24 +316,26 @@ export class WhatsAppClient {
     mimetype: string,
     caption?: string,
     fileName?: string,
-  ): Promise<void> {
+  ): Promise<{ lid?: string }> {
     if (!this.sock) {
       throw new Error('Not connected');
     }
 
     const buffer = await readFile(filePath);
     const category = mimetype.split('/')[0];
+    let sent: any;
 
     if (category === 'image') {
-      await this.sock.sendMessage(to, { image: buffer, caption: caption || undefined, mimetype });
+      sent = await this.sock.sendMessage(to, { image: buffer, caption: caption || undefined, mimetype });
     } else if (category === 'video') {
-      await this.sock.sendMessage(to, { video: buffer, caption: caption || undefined, mimetype });
+      sent = await this.sock.sendMessage(to, { video: buffer, caption: caption || undefined, mimetype });
     } else if (category === 'audio') {
-      await this.sock.sendMessage(to, { audio: buffer, mimetype });
+      sent = await this.sock.sendMessage(to, { audio: buffer, mimetype });
     } else {
       const name = fileName || basename(filePath);
-      await this.sock.sendMessage(to, { document: buffer, mimetype, fileName: name });
+      sent = await this.sock.sendMessage(to, { document: buffer, mimetype, fileName: name });
     }
+    return { lid: sent?.key?.remoteJid || undefined };
   }
 
   async disconnect(): Promise<void> {

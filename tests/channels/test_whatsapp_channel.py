@@ -268,6 +268,175 @@ async def test_typing_task_cancelled_on_stop():
     assert "chat1@lid" not in ch._typing_tasks
 
 
+# ── Identity resolution tests ────────────────────────────────────────────────
+
+
+def _make_identity_channel(lid_map=None, sender_map=None, allow_from=None):
+    """Create a channel with identity_resolution enabled and pre-loaded maps."""
+    bus = MagicMock()
+    config = {
+        "enabled": True,
+        "identity_resolution": True,
+        "allow_from": allow_from or [],
+    }
+    ch = WhatsAppChannel(config, bus)
+    ch._ws = AsyncMock()
+    ch._connected = True
+    ch._lid_map = lid_map or {}
+    ch._sender_map = sender_map or {}
+    ch._lid_map_loaded = True
+    return ch
+
+
+class TestIsAllowedWithLid:
+    def test_phone_in_allow_from(self):
+        ch = _make_identity_channel(allow_from=["14125550002"])
+        assert ch.is_allowed("14125550002") is True
+
+    def test_lid_maps_to_allowed_phone(self):
+        ch = _make_identity_channel(
+            allow_from=["14125550002"],
+            lid_map={"914125550002": {"phone": "14125550002"}},
+        )
+        assert ch.is_allowed("914125550002") is True
+
+    def test_lid_maps_to_disallowed_phone(self):
+        ch = _make_identity_channel(
+            allow_from=["14125550002"],
+            lid_map={"999999": {"phone": "99999999"}},
+        )
+        assert ch.is_allowed("999999") is False
+
+    def test_unknown_lid_denied(self):
+        ch = _make_identity_channel(allow_from=["14125550002"])
+        assert ch.is_allowed("999999") is False
+
+
+class TestResolveSenderName:
+    def test_resolves_from_sender_map(self):
+        ch = _make_identity_channel(sender_map={"14125550002": "Emeka"})
+        assert ch._resolve_sender_name("14125550002", "s1") == "Emeka"
+
+    def test_resolves_lid_via_cross_reference(self):
+        ch = _make_identity_channel(
+            sender_map={"14125550002": "Emeka"},
+            lid_map={"914125550002": {"phone": "14125550002"}},
+        )
+        assert ch._resolve_sender_name("914125550002", "s1") == "Emeka"
+
+    def test_resolves_lid_with_direct_name(self):
+        ch = _make_identity_channel(
+            lid_map={"914125550002": {"phone": "14125550002", "name": "Emeka Direct"}},
+        )
+        assert ch._resolve_sender_name("914125550002", "s1") == "Emeka Direct"
+
+    def test_returns_none_for_unknown(self):
+        ch = _make_identity_channel()
+        assert ch._resolve_sender_name("999999", "s1") is None
+
+    def test_only_injects_once_per_session(self):
+        ch = _make_identity_channel(sender_map={"14125550002": "Emeka"})
+        assert ch._resolve_sender_name("14125550002", "s1") == "Emeka"
+        assert ch._resolve_sender_name("14125550002", "s1") is None  # second time
+
+    def test_no_greet_mark_when_name_not_found(self):
+        """If name isn't found, session should NOT be marked as greeted."""
+        ch = _make_identity_channel()
+        assert ch._resolve_sender_name("999999", "s1") is None
+        # Now add the mapping — should resolve on retry
+        ch._sender_map["999999"] = "Late Joiner"
+        assert ch._resolve_sender_name("999999", "s1") == "Late Joiner"
+
+
+@pytest.mark.asyncio
+async def test_sender_name_injected_in_content():
+    """When identity_resolution is on, first message should have [Sender:] prefix."""
+    ch = _make_identity_channel(
+        allow_from=["14125550002"],
+        sender_map={"14125550002": "Emeka"},
+    )
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(json.dumps({
+        "type": "message",
+        "id": "m1",
+        "sender": "14125550002@s.whatsapp.net",
+        "pn": "",
+        "content": "Hello!",
+        "timestamp": 1,
+    }))
+
+    ch._handle_message.assert_awaited_once()
+    content = ch._handle_message.await_args.kwargs["content"]
+    assert content.startswith("[Sender: Emeka]")
+    assert "Hello!" in content
+
+
+@pytest.mark.asyncio
+async def test_sender_name_not_injected_for_commands():
+    """Slash commands should not get [Sender:] prefix."""
+    ch = _make_identity_channel(
+        allow_from=["14125550002"],
+        sender_map={"14125550002": "Emeka"},
+    )
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(json.dumps({
+        "type": "message",
+        "id": "m2",
+        "sender": "14125550002@s.whatsapp.net",
+        "pn": "",
+        "content": "/status",
+        "timestamp": 1,
+    }))
+
+    ch._handle_message.assert_awaited_once()
+    content = ch._handle_message.await_args.kwargs["content"]
+    assert content == "/status"
+
+
+@pytest.mark.asyncio
+async def test_sender_name_not_injected_for_media_only():
+    """Media-only messages (empty content) should not get phantom text."""
+    ch = _make_identity_channel(
+        allow_from=["14125550002"],
+        sender_map={"14125550002": "Emeka"},
+    )
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(json.dumps({
+        "type": "message",
+        "id": "m3",
+        "sender": "14125550002@s.whatsapp.net",
+        "pn": "",
+        "content": "",
+        "timestamp": 1,
+    }))
+
+    ch._handle_message.assert_awaited_once()
+    content = ch._handle_message.await_args.kwargs["content"]
+    assert "[Sender:" not in content
+
+
+@pytest.mark.asyncio
+async def test_lid_learned_from_inbound_pn():
+    """When pn and sender differ, lid_map should be updated."""
+    ch = _make_identity_channel(allow_from=["14125550002"])
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(json.dumps({
+        "type": "message",
+        "id": "m4",
+        "sender": "914125550002@lid",
+        "pn": "14125550002@s.whatsapp.net",
+        "content": "hello",
+        "timestamp": 1,
+    }))
+
+    assert "914125550002" in ch._lid_map
+    assert ch._lid_map["914125550002"]["phone"] == "14125550002"
+
+
 @pytest.mark.asyncio
 async def test_typing_not_started_for_disallowed_sender():
     """Typing indicator should NOT start for senders not in allow_from."""

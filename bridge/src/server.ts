@@ -93,8 +93,8 @@ export class BridgeServer {
       let cmd: Partial<BridgeCommand> & { msg_id?: string } = {};
       try {
         cmd = JSON.parse(data.toString()) as BridgeCommand & { msg_id?: string };
-        await this.handleCommand(cmd as BridgeCommand);
-        ws.send(JSON.stringify({ type: 'sent', to: cmd.to, msg_id: cmd.msg_id }));
+        const result = await this.handleCommand(cmd as BridgeCommand);
+        ws.send(JSON.stringify({ type: 'sent', to: cmd.to, lid: result?.lid, msg_id: cmd.msg_id }));
       } catch (error) {
         console.error('Error handling command:', error);
         ws.send(JSON.stringify({ type: 'error', error: String(error), msg_id: cmd.msg_id }));
@@ -112,16 +112,17 @@ export class BridgeServer {
     });
   }
 
-  private async handleCommand(cmd: BridgeCommand): Promise<void> {
-    if (!this.wa) return;
+  private async handleCommand(cmd: BridgeCommand): Promise<{ lid?: string } | undefined> {
+    if (!this.wa) return undefined;
 
     if (cmd.type === 'send') {
-      await this.wa.sendMessage(cmd.to, cmd.text);
+      return await this.wa.sendMessage(cmd.to, cmd.text);
     } else if (cmd.type === 'send_media') {
-      await this.wa.sendMedia(cmd.to, cmd.filePath, cmd.mimetype, cmd.caption, cmd.fileName);
+      return await this.wa.sendMedia(cmd.to, cmd.filePath, cmd.mimetype, cmd.caption, cmd.fileName);
     } else if (cmd.type === 'typing') {
       await this.wa.sendTyping(cmd.to, cmd.composing);
     }
+    return undefined;
   }
 
   private broadcast(msg: BridgeMessage): void {

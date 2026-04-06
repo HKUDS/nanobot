@@ -29,6 +29,7 @@ class WhatsAppConfig(Base):
     bridge_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention"] = "open"
+    identity_resolution: bool = False  # Enable LID→name resolution via sender_map/lid_map
 
 
 class WhatsAppChannel(BaseChannel):
@@ -57,6 +58,12 @@ class WhatsAppChannel(BaseChannel):
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._pending_acks: dict[str, asyncio.Future[None]] = {}
         self._msg_id_counter = 0
+        # LID identity resolution state
+        self._lid_map: dict[str, dict] = {}  # in-memory cache of lid_map.json
+        self._lid_map_lock = asyncio.Lock()
+        self._lid_map_loaded = False
+        self._sender_map: dict[str, str] = {}  # in-memory cache of sender_map.json
+        self._greeted_sessions: OrderedDict[str, None] = OrderedDict()  # tracks first-message injection
 
     async def login(self, force: bool = False) -> bool:
         """
@@ -92,6 +99,10 @@ class WhatsAppChannel(BaseChannel):
     async def start(self) -> None:
         """Start the WhatsApp channel by connecting to the bridge."""
         import websockets
+
+        # Load identity maps eagerly if identity resolution is enabled
+        if self.config.identity_resolution:
+            await self._ensure_maps_loaded()
 
         bridge_url = self.config.bridge_url
 
@@ -245,9 +256,7 @@ class WhatsAppChannel(BaseChannel):
 
         if msg_type == "message":
             # Incoming message from WhatsApp
-            # Deprecated by whatsapp: old phone number style typically: <phone>@s.whatspp.net
             pn = data.get("pn", "")
-            # New LID sytle typically:
             sender = data.get("sender", "")
             content = data.get("content", "")
             message_id = data.get("id", "")
@@ -259,7 +268,6 @@ class WhatsAppChannel(BaseChannel):
                 while len(self._processed_message_ids) > 1000:
                     self._processed_message_ids.popitem(last=False)
 
-            # Extract just the phone number or lid as chat_id
             is_group = data.get("isGroup", False)
             was_mentioned = data.get("wasMentioned", False)
 
@@ -267,9 +275,23 @@ class WhatsAppChannel(BaseChannel):
                 if not was_mentioned:
                     return
 
-            user_id = pn if pn else sender
-            sender_id = user_id.split("@")[0] if "@" in user_id else user_id
-            logger.info("Sender {}", sender)
+            # When identity_resolution is enabled, always use LID (sender) as
+            # canonical identifier. Otherwise, prefer pn for backward compat
+            # with existing allow_from lists that use phone numbers.
+            if self.config.identity_resolution:
+                sender_id = sender.split("@")[0] if "@" in sender else sender
+            else:
+                user_id = pn if pn else sender
+                sender_id = user_id.split("@")[0] if "@" in user_id else user_id
+            logger.info("Sender {} (pn={})", sender, pn or "none")
+
+            # Load identity maps on first message (if enabled)
+            if self.config.identity_resolution:
+                await self._ensure_maps_loaded()
+                # Learn LID↔phone from inbound messages (handles case where
+                # user messages bot before bot has ever messaged them)
+                if pn and sender and pn != sender:
+                    await self._save_lid_mapping(pn, sender)
 
             # Handle voice/audio message transcription
             audio_data = data.get("audio")
@@ -289,6 +311,14 @@ class WhatsAppChannel(BaseChannel):
 
             if self.is_allowed(sender_id):
                 await self._start_typing(sender)
+
+            # Resolve sender name and inject on first message in session.
+            # Skip for: media-only (empty content), slash commands (starts with /)
+            if self.config.identity_resolution and content and not content.startswith("/"):
+                session_key = f"whatsapp:{sender}"
+                sender_name = self._resolve_sender_name(sender_id, session_key)
+                if sender_name:
+                    content = f"[Sender: {sender_name}]\n{content}"
 
             await self._handle_message(
                 sender_id=sender_id,
@@ -318,6 +348,10 @@ class WhatsAppChannel(BaseChannel):
 
         elif msg_type == "sent":
             msg_id = data.get("msg_id")
+            lid = data.get("lid", "")
+            to = data.get("to", "")
+            if self.config.identity_resolution and lid and to and lid != to:
+                await self._save_lid_mapping(to, lid)
             if msg_id and msg_id in self._pending_acks:
                 self._pending_acks[msg_id].set_result(None)
 
@@ -329,6 +363,162 @@ class WhatsAppChannel(BaseChannel):
                 self._pending_acks[msg_id].set_exception(
                     RuntimeError(f"WhatsApp bridge error: {error_text}")
                 )
+
+    def is_allowed(self, sender_id: str) -> bool:
+        """Check if sender_id is permitted, including dynamic LID resolution.
+
+        Extends base is_allowed to also check the in-memory lid_map: if this
+        sender_id is a LID that maps to an authorized phone, allow it.
+        Evaluates allow_from on every call so config changes take effect.
+        """
+        if super().is_allowed(sender_id):
+            return True
+        info = self._lid_map.get(sender_id)
+        if isinstance(info, dict):
+            phone = info.get("phone", "")
+            if phone and super().is_allowed(phone):
+                return True
+        return False
+
+    def _resolve_sender_name(self, sender_id: str, session_key: str) -> str | None:
+        """Resolve sender_id to a guest name using sender_map + lid_map.
+
+        Only returns a name on the first message in a session to avoid the LLM
+        parroting the name in every response. Bounded to 500 sessions max.
+        Only marks session as greeted if a name is actually resolved.
+        """
+        if session_key in self._greeted_sessions:
+            return None  # Already injected for this session
+
+        name: str | None = None
+
+        # Check sender_map (build-time: phone/LID → name)
+        if sender_id in self._sender_map:
+            name = self._sender_map[sender_id]
+
+        # Check lid_map (runtime: LID → {phone, name?})
+        if not name:
+            info = self._lid_map.get(sender_id)
+            if isinstance(info, dict):
+                name = info.get("name") or None
+                if not name:
+                    phone = info.get("phone", "")
+                    if phone and phone in self._sender_map:
+                        name = self._sender_map[phone]
+
+        # Only mark as greeted if we actually resolved a name
+        if name:
+            self._greeted_sessions[session_key] = None
+            while len(self._greeted_sessions) > 500:
+                self._greeted_sessions.popitem(last=False)
+
+        return name
+
+    async def _ensure_maps_loaded(self) -> None:
+        """Load sender_map.json and lid_map.json into memory on first use."""
+        if not self._lid_map_loaded:
+            async with self._lid_map_lock:
+                if not self._lid_map_loaded:
+                    lid_map, sender_map = await asyncio.to_thread(self._read_maps_from_disk)
+                    # Merge disk data with in-memory entries (preserve both sides)
+                    for k, v in lid_map.items():
+                        if k not in self._lid_map:
+                            self._lid_map[k] = v
+                        elif isinstance(v, dict) and isinstance(self._lid_map[k], dict):
+                            # Deep merge: disk fields fill in gaps in memory
+                            for field, val in v.items():
+                                self._lid_map[k].setdefault(field, val)
+                    self._sender_map = sender_map
+                    self._lid_map_loaded = True
+
+    def _read_maps_from_disk(self) -> tuple[dict, dict[str, str]]:
+        """Synchronous disk reads, called via asyncio.to_thread.
+
+        Returns (lid_map, sender_map) — does NOT mutate instance state
+        to avoid thread-safety issues.
+        """
+        from nanobot.config.paths import get_data_dir
+
+        lid_map: dict = {}
+        sender_map: dict[str, str] = {}
+
+        # lid_map.json
+        lid_map_path = get_data_dir() / "lid_map.json"
+        if lid_map_path.exists():
+            try:
+                raw = json.loads(lid_map_path.read_text(encoding="utf-8"))
+                lid_map = {k: v for k, v in raw.items() if isinstance(v, dict)} if isinstance(raw, dict) else {}
+                logger.debug("Loaded lid_map with {} entries", len(lid_map))
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Failed to load lid_map.json: {}", e)
+
+        # sender_map.json — check workspace paths
+        for candidate in self._sender_map_paths():
+            if candidate.exists():
+                try:
+                    data = json.loads(candidate.read_text(encoding="utf-8"))
+                    if isinstance(data, dict):
+                        sender_map = {k: v for k, v in data.items() if isinstance(v, str)}
+                        logger.debug("Loaded sender_map with {} entries from {}", len(sender_map), candidate)
+                        break
+                except (json.JSONDecodeError, OSError) as e:
+                    logger.warning("Failed to load sender_map from {}: {}", candidate, e)
+
+        return lid_map, sender_map
+
+    @staticmethod
+    def _sender_map_paths() -> list[Path]:
+        """Return candidate sender_map.json paths."""
+        from nanobot.config.paths import get_data_dir
+        return [get_data_dir() / "sender_map.json"]
+
+    async def _save_lid_mapping(self, phone_jid: str, lid: str) -> None:
+        """Persist a phone→LID mapping learned from an outbound send ack.
+
+        Updates in-memory cache immediately and persists to disk asynchronously
+        under a lock to prevent concurrent write corruption.
+        """
+        lid_prefix = lid.split("@")[0] if "@" in lid else lid
+        phone_digits = phone_jid.split("@")[0] if "@" in phone_jid else phone_jid
+
+        existing = self._lid_map.get(lid_prefix)
+        if isinstance(existing, dict) and existing.get("phone") == phone_digits:
+            return  # Already mapped
+
+        # Update in-memory cache — merge to preserve existing fields (e.g. name)
+        if not isinstance(existing, dict):
+            self._lid_map[lid_prefix] = {"phone": phone_digits}
+        else:
+            existing["phone"] = phone_digits
+
+        # Snapshot under lock, write outside lock (atomic write is safe without lock)
+        async with self._lid_map_lock:
+            snapshot = dict(self._lid_map)
+        await asyncio.to_thread(self._write_lid_map, snapshot)
+        logger.info("LID mapping saved: {} → {}", lid_prefix, phone_digits)
+
+    @staticmethod
+    def _write_lid_map(data: dict) -> None:
+        """Synchronous atomic disk write, called via asyncio.to_thread under lock."""
+        import tempfile
+        from nanobot.config.paths import get_data_dir
+        map_path = get_data_dir() / "lid_map.json"
+        map_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            fd, tmp_path = tempfile.mkstemp(dir=map_path.parent, suffix=".tmp")
+            os.close(fd)  # Close fd immediately; reopen with standard open
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+                Path(tmp_path).replace(map_path)
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
+        except OSError as e:
+            logger.warning("Failed to save LID mapping: {}", e)
 
     async def _transcribe_audio(self, audio_data: dict, sender_id: str) -> str:
         """Transcribe a voice/audio message using base channel transcription.
