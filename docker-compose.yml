@@ -36,7 +36,7 @@ services:
       ["serve", "--host", "0.0.0.0", "-w", "/home/nanobot/.nanobot/api-workspace"]
     restart: unless-stopped
     ports:
-      - 8900:8900
+      - 127.0.0.1:8900:8900
     deploy:
       resources:
         limits:
