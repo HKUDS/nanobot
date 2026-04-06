@@ -116,7 +116,10 @@ class BaseChannel(ABC):
 
     def is_allowed(self, sender_id: str) -> bool:
         """Check if *sender_id* is permitted.  Empty list → deny all; ``"*"`` → allow all."""
-        allow_list = getattr(self.config, "allow_from", [])
+        if isinstance(self.config, dict):
+            allow_list = self.config.get("allow_from", self.config.get("allowFrom", []))
+        else:
+            allow_list = getattr(self.config, "allow_from", getattr(self.config, "allowFrom", []))
         if not allow_list:
             logger.warning("{}: allow_from is empty — all access denied", self.name)
             return False
