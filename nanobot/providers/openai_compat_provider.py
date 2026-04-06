@@ -297,6 +297,23 @@ class OpenAICompatProvider(LLMProvider):
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
 
+        # Provider-specific thinking parameters
+        if spec:
+            # Refer: https://docs.byteplus.com/en/docs/ModelArk/1449737#adjust-reasoning-length
+            # The agent will stop thinking if reasoning_effort is minimal or None. Otherwise, it will think.
+            thinking_enabled = (
+                reasoning_effort is not None and reasoning_effort.lower() != "minimal"
+            )
+            if spec.name == "dashscope":
+                # Qwen: extra_body={"enable_thinking": True/False}
+                kwargs["extra_body"] = {"enable_thinking": thinking_enabled}
+            elif spec.name in ("volcengine", "volcengine_coding_plan"):
+                # VolcEngine/Byteplus ModelArk: extra_body={"thinking": {"type": "enabled"/"disabled"}}
+                kwargs["extra_body"] = {
+                    "thinking": {"type": "enabled" if thinking_enabled else "disabled"}
+                }
+
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
