@@ -22,7 +22,7 @@ services:
       - nanobot_data:/home/nanobot/.nanobot
     environment:
       - PROVIDER_NAME=${PROVIDER_NAME:-custom}
-      - PROVIDER_API_KEY=${PROVIDER_API_KEY}
+      - PROVIDER_API_KEY=${PROVIDER_API_KEY:-${ZAI_API_KEY}}
       - PROVIDER_API_BASE=${PROVIDER_API_BASE:-https://api.openai.com/v1}
       - LLM_MODEL=${LLM_MODEL}
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
@@ -36,10 +36,17 @@ services:
       - -c
       - |
         mkdir -p /home/nanobot/.nanobot
+        P_NAME=$(echo "${PROVIDER_NAME}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+        echo "Configuring providers: custom and ${P_NAME}..."
+        
         cat <<EOF > /home/nanobot/.nanobot/config.json
         {
           "providers": {
-            "${PROVIDER_NAME}": {
+            "custom": {
+              "apiKey": "${PROVIDER_API_KEY}",
+              "apiBase": "${PROVIDER_API_BASE}"
+            },
+            "${P_NAME}": {
               "apiKey": "${PROVIDER_API_KEY}",
               "apiBase": "${PROVIDER_API_BASE}"
             }
@@ -89,6 +96,8 @@ services:
         }
         EOF
         chown -R 1000:1000 /home/nanobot/.nanobot
+        chmod -R 755 /home/nanobot/.nanobot
+        echo "Done."
 
   nanobot-gateway:
     container_name: nanobot-gateway
@@ -100,6 +109,11 @@ services:
     command:
       - gateway
     restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:18790/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     depends_on:
       init-config:
         condition: service_completed_successfully
@@ -120,6 +134,11 @@ services:
     restart: unless-stopped
     ports:
       - 127.0.0.1:8900:8900
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8900/v1/models"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     deploy:
       resources:
         limits:
