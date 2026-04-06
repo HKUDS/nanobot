@@ -81,10 +81,8 @@ async def fetch_search_usage(
 
     if p == "tavily":
         return await _fetch_tavily_usage(api_key)
-    elif p == "brave":
-        return await _fetch_brave_usage(api_key)
     else:
-        # duckduckgo, searxng, jina, unknown — no usage API
+        # brave, duckduckgo, searxng, jina, unknown — no usage API
         return SearchUsageInfo(provider=p, supported=False)
 
 
@@ -171,13 +169,3 @@ def _parse_tavily_usage(data: dict[str, Any]) -> SearchUsageInfo:
     )
 
 
-# ---------------------------------------------------------------------------
-# Brave
-# ---------------------------------------------------------------------------
-
-async def _fetch_brave_usage(api_key: str | None) -> SearchUsageInfo:
-    """
-    Brave Search does not have a public usage/quota endpoint.
-    Rate-limit headers are returned per-request, not queryable standalone.
-    """
-    return SearchUsageInfo(provider="brave", supported=False)

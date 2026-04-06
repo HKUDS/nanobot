@@ -64,7 +64,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     # Fetch web search provider usage (best-effort, never blocks the response)
     search_usage_text: str | None = None
     try:
-        from nanobot.agent.tools.search_usage import fetch_search_usage
+        from nanobot.utils.searchusage import fetch_search_usage
         web_cfg = getattr(getattr(loop, "config", None), "tools", None)
         web_cfg = getattr(web_cfg, "web", None) if web_cfg else None
         search_cfg = getattr(web_cfg, "search", None) if web_cfg else None
