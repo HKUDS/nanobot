@@ -3,15 +3,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+pytest.importorskip("nio")
+pytest.importorskip("nh3")
+pytest.importorskip("mistune")
 from nio import RoomSendResponse
 
 from nanobot.channels.matrix import _build_matrix_text_content
-
-# Check optional matrix dependencies before importing
-try:
-    import nh3  # noqa: F401
-except ImportError:
-    pytest.skip("Matrix dependencies not installed (nh3)", allow_module_level=True)
 
 import nanobot.channels.matrix as matrix_module
 from nanobot.bus.events import OutboundMessage

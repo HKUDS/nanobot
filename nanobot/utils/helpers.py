@@ -3,12 +3,15 @@
 import base64
 import json
 import re
+import shutil
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import tiktoken
+from loguru import logger
 
 
 def strip_think(text: str) -> str:
@@ -56,11 +59,7 @@ def timestamp() -> str:
 
 
 def current_time_str(timezone: str | None = None) -> str:
-    """Human-readable current time with weekday and UTC offset.
-
-    When *timezone* is a valid IANA name (e.g. ``"Asia/Shanghai"``), the time
-    is converted to that zone.  Otherwise falls back to the host local time.
-    """
+    """Return the current time string."""
     from zoneinfo import ZoneInfo
 
     try:
@@ -76,10 +75,162 @@ def current_time_str(timezone: str | None = None) -> str:
 
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
+_TOOL_RESULT_PREVIEW_CHARS = 1200
+_TOOL_RESULTS_DIR = ".nanobot/tool-results"
+_TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
+_TOOL_RESULT_MAX_BUCKETS = 32
 
 def safe_filename(name: str) -> str:
     """Replace unsafe path characters with underscores."""
     return _UNSAFE_CHARS.sub("_", name).strip()
+
+
+def image_placeholder_text(path: str | None, *, empty: str = "[image]") -> str:
+    """Build an image placeholder string."""
+    return f"[image: {path}]" if path else empty
+
+
+def truncate_text(text: str, max_chars: int) -> str:
+    """Truncate text with a stable suffix."""
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return text[:max_chars] + "\n... (truncated)"
+
+
+def find_legal_message_start(messages: list[dict[str, Any]]) -> int:
+    """Find the first index whose tool results have matching assistant calls."""
+    declared: set[str] = set()
+    start = 0
+    for i, msg in enumerate(messages):
+        role = msg.get("role")
+        if role == "assistant":
+            for tc in msg.get("tool_calls") or []:
+                if isinstance(tc, dict) and tc.get("id"):
+                    declared.add(str(tc["id"]))
+        elif role == "tool":
+            tid = msg.get("tool_call_id")
+            if tid and str(tid) not in declared:
+                start = i + 1
+                declared.clear()
+                for prev in messages[start : i + 1]:
+                    if prev.get("role") == "assistant":
+                        for tc in prev.get("tool_calls") or []:
+                            if isinstance(tc, dict) and tc.get("id"):
+                                declared.add(str(tc["id"]))
+    return start
+
+
+def stringify_text_blocks(content: list[dict[str, Any]]) -> str | None:
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            return None
+        if block.get("type") != "text":
+            return None
+        text = block.get("text")
+        if not isinstance(text, str):
+            return None
+        parts.append(text)
+    return "\n".join(parts)
+
+
+def _render_tool_result_reference(
+    filepath: Path,
+    *,
+    original_size: int,
+    preview: str,
+    truncated_preview: bool,
+) -> str:
+    result = (
+        f"[tool output persisted]\n"
+        f"Full output saved to: {filepath}\n"
+        f"Original size: {original_size} chars\n"
+        f"Preview:\n{preview}"
+    )
+    if truncated_preview:
+        result += "\n...\n(Read the saved file if you need the full output.)"
+    return result
+
+
+def _bucket_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _cleanup_tool_result_buckets(root: Path, current_bucket: Path) -> None:
+    siblings = [path for path in root.iterdir() if path.is_dir() and path != current_bucket]
+    cutoff = time.time() - _TOOL_RESULT_RETENTION_SECS
+    for path in siblings:
+        if _bucket_mtime(path) < cutoff:
+            shutil.rmtree(path, ignore_errors=True)
+    keep = max(_TOOL_RESULT_MAX_BUCKETS - 1, 0)
+    siblings = [path for path in siblings if path.exists()]
+    if len(siblings) <= keep:
+        return
+    siblings.sort(key=_bucket_mtime, reverse=True)
+    for path in siblings[keep:]:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _write_text_atomic(path: Path, content: str) -> None:
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(path)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+def maybe_persist_tool_result(
+    workspace: Path | None,
+    session_key: str | None,
+    tool_call_id: str,
+    content: Any,
+    *,
+    max_chars: int,
+) -> Any:
+    """Persist oversized tool output and replace it with a stable reference string."""
+    if workspace is None or max_chars <= 0:
+        return content
+
+    text_payload: str | None = None
+    suffix = "txt"
+    if isinstance(content, str):
+        text_payload = content
+    elif isinstance(content, list):
+        text_payload = stringify_text_blocks(content)
+        if text_payload is None:
+            return content
+        suffix = "json"
+    else:
+        return content
+
+    if len(text_payload) <= max_chars:
+        return content
+
+    root = ensure_dir(workspace / _TOOL_RESULTS_DIR)
+    bucket = ensure_dir(root / safe_filename(session_key or "default"))
+    try:
+        _cleanup_tool_result_buckets(root, bucket)
+    except Exception as exc:
+        logger.warning("Failed to clean stale tool result buckets in {}: {}", root, exc)
+    path = bucket / f"{safe_filename(tool_call_id)}.{suffix}"
+    if not path.exists():
+        if suffix == "json" and isinstance(content, list):
+            _write_text_atomic(path, json.dumps(content, ensure_ascii=False, indent=2))
+        else:
+            _write_text_atomic(path, text_payload)
+
+    preview = text_payload[:_TOOL_RESULT_PREVIEW_CHARS]
+    return _render_tool_result_reference(
+        path,
+        original_size=len(text_payload),
+        preview=preview,
+        truncated_preview=len(text_payload) > _TOOL_RESULT_PREVIEW_CHARS,
+    )
 
 
 def split_message(content: str, max_len: int = 2000) -> list[str]:
@@ -245,8 +396,15 @@ def build_status_content(
     context_window_tokens: int,
     session_msg_count: int,
     context_tokens_estimate: int,
+    search_usage_text: str | None = None,
 ) -> str:
-    """Build a human-readable runtime status snapshot."""
+    """Build a human-readable runtime status snapshot.
+    
+    Args:
+        search_usage_text: Optional pre-formatted web search usage string
+                           (produced by SearchUsageInfo.format()). When provided
+                           it is appended as an extra section.
+    """
     uptime_s = int(time.time() - start_time)
     uptime = (
         f"{uptime_s // 3600}h {(uptime_s % 3600) // 60}m"
@@ -255,18 +413,25 @@ def build_status_content(
     )
     last_in = last_usage.get("prompt_tokens", 0)
     last_out = last_usage.get("completion_tokens", 0)
+    cached = last_usage.get("cached_tokens", 0)
     ctx_total = max(context_window_tokens, 0)
     ctx_pct = int((context_tokens_estimate / ctx_total) * 100) if ctx_total > 0 else 0
     ctx_used_str = f"{context_tokens_estimate // 1000}k" if context_tokens_estimate >= 1000 else str(context_tokens_estimate)
     ctx_total_str = f"{ctx_total // 1024}k" if ctx_total > 0 else "n/a"
-    return "\n".join([
+    token_line = f"\U0001f4ca Tokens: {last_in} in / {last_out} out"
+    if cached and last_in:
+        token_line += f" ({cached * 100 // last_in}% cached)"
+    lines = [
         f"\U0001f408 nanobot v{version}",
         f"\U0001f9e0 Model: {model}",
-        f"\U0001f4ca Tokens: {last_in} in / {last_out} out",
+        token_line,
         f"\U0001f4da Context: {ctx_used_str}/{ctx_total_str} ({ctx_pct}%)",
         f"\U0001f4ac Session: {session_msg_count} messages",
         f"\u23f1 Uptime: {uptime}",
-    ])
+    ]
+    if search_usage_text:
+        lines.append(search_usage_text)
+    return "\n".join(lines)    
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
@@ -292,11 +457,22 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         if item.name.endswith(".md") and not item.name.startswith("."):
             _write(item, workspace / item.name)
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
-    _write(None, workspace / "memory" / "HISTORY.md")
+    _write(None, workspace / "memory" / "history.jsonl")
     (workspace / "skills").mkdir(exist_ok=True)
 
     if added and not silent:
         from rich.console import Console
         for name in added:
             Console().print(f"  [dim]Created {name}[/dim]")
+
+    # Initialize git for memory version control
+    try:
+        from nanobot.utils.gitstore import GitStore
+        gs = GitStore(workspace, tracked_files=[
+            "SOUL.md", "USER.md", "memory/MEMORY.md",
+        ])
+        gs.init()
+    except Exception:
+        logger.warning("Failed to initialize git store for {}", workspace)
+
     return added

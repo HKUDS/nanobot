@@ -1,6 +1,8 @@
 """Configuration loading utilities."""
 
 import json
+import os
+import re
 from pathlib import Path
 
 import pydantic
@@ -37,17 +39,26 @@ def load_config(config_path: Path | None = None) -> Config:
     """
     path = config_path or get_config_path()
 
+    config = Config()
     if path.exists():
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            return Config.model_validate(data)
+            config = Config.model_validate(data)
         except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
             logger.warning(f"Failed to load config from {path}: {e}")
             logger.warning("Using default configuration.")
 
-    return Config()
+    _apply_ssrf_whitelist(config)
+    return config
+
+
+def _apply_ssrf_whitelist(config: Config) -> None:
+    """Apply SSRF whitelist from config to the network security module."""
+    from nanobot.security.network import configure_ssrf_whitelist
+
+    configure_ssrf_whitelist(config.tools.ssrf_whitelist)
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
@@ -65,6 +76,38 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def resolve_config_env_vars(config: Config) -> Config:
+    """Return a copy of *config* with ``${VAR}`` env-var references resolved.
+
+    Only string values are affected; other types pass through unchanged.
+    Raises :class:`ValueError` if a referenced variable is not set.
+    """
+    data = config.model_dump(mode="json", by_alias=True)
+    data = _resolve_env_vars(data)
+    return Config.model_validate(data)
+
+
+def _resolve_env_vars(obj: object) -> object:
+    """Recursively resolve ``${VAR}`` patterns in string values."""
+    if isinstance(obj, str):
+        return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", _env_replace, obj)
+    if isinstance(obj, dict):
+        return {k: _resolve_env_vars(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_resolve_env_vars(v) for v in obj]
+    return obj
+
+
+def _env_replace(match: re.Match[str]) -> str:
+    name = match.group(1)
+    value = os.environ.get(name)
+    if value is None:
+        raise ValueError(
+            f"Environment variable '{name}' referenced in config is not set"
+        )
+    return value
 
 
 def _migrate_config(data: dict) -> dict:
