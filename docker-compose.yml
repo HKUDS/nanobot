@@ -5,7 +5,8 @@ x-common-config: &common-config
     context: .
     dockerfile: Dockerfile
   volumes:
-    - ~/.nanobot:/home/nanobot/.nanobot
+    - nanobot_data:/home/nanobot/.nanobot
+  user: "1000:1000"
   cap_drop:
     - ALL
   cap_add:
@@ -18,11 +19,11 @@ services:
   init-config:
     image: busybox
     volumes:
-      - nanobot_data:/root/.nanobot
+      - nanobot_data:/home/nanobot/.nanobot
     environment:
       - PROVIDER_NAME=${PROVIDER_NAME:-custom}
       - PROVIDER_API_KEY=${PROVIDER_API_KEY}
-      - "PROVIDER_API_BASE=${PROVIDER_API_BASE:-https://api.openai.com/v1}"
+      - PROVIDER_API_BASE=${PROVIDER_API_BASE:-https://api.openai.com/v1}
       - LLM_MODEL=${LLM_MODEL}
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
       - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS:-[]}
@@ -34,7 +35,8 @@ services:
       - sh
       - -c
       - |
-        cat <<EOF > /root/.nanobot/config.json
+        mkdir -p /home/nanobot/.nanobot
+        cat <<EOF > /home/nanobot/.nanobot/config.json
         {
           "providers": {
             "${PROVIDER_NAME}": {
@@ -86,6 +88,7 @@ services:
           }
         }
         EOF
+        chown -R 1000:1000 /home/nanobot/.nanobot
 
   nanobot-gateway:
     container_name: nanobot-gateway
@@ -93,10 +96,13 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - nanobot_data:/root/.nanobot
+      - nanobot_data:/home/nanobot/.nanobot
     command:
       - gateway
     restart: always
+    depends_on:
+      init-config:
+        condition: service_completed_successfully
     deploy:
       resources:
         limits:
