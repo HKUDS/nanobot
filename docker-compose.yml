@@ -33,7 +33,7 @@ services:
     container_name: nanobot-api
     <<: *common-config
     command:
-      ["serve", "--host", "0.0.0.0", "-w", "/root/.nanobot/api-workspace"]
+      ["serve", "--host", "0.0.0.0", "-w", "/home/nanobot/.nanobot/api-workspace"]
     restart: unless-stopped
     ports:
       - 8900:8900
