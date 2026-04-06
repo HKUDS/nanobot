@@ -91,6 +91,14 @@ services:
                   "https://fencode-blog-mcp.vercel.app/mcp"
                 ],
                 "disabled": false
+              },
+              "minimax": {
+                "command": "uvx",
+                "args": ["minimax-coding-plan-mcp", "-y"],
+                "env": {
+                  "MINIMAX_API_KEY": "$${PROVIDER_API_KEY}",
+                  "MINIMAX_API_HOST": "https://api.minimax.io"
+                }
               }
             }
           }
