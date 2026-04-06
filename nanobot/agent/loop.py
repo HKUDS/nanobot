@@ -323,14 +323,55 @@ class AgentLoop:
         from nanobot.utils.helpers import strip_think
         return strip_think(text) or None
 
-    @staticmethod
-    def _tool_hint(tool_calls: list) -> str:
+    def _tool_hint(self, tool_calls: list) -> str:
         """Format tool calls as concise hint, e.g. 'web_search("query")'."""
+        import os
+        workspace_str = str(self.workspace)
+        # Normalized lower-case version for case-insensitive matching (Windows)
+        workspace_lower = workspace_str.lower()
+        
         def _fmt(tc):
             args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
-            val = next(iter(args.values()), None) if isinstance(args, dict) else None
+            
+            val = None
+            if isinstance(args, dict):
+                # Prioritize specific keys for better hints
+                for key in ["command", "query", "task", "path", "url"]:
+                    if key in args and isinstance(args[key], str):
+                        val = args[key]
+                        break
+                
+                # Fallback to the first string value
+                if val is None:
+                    for v in args.values():
+                        if isinstance(v, str):
+                            val = v
+                            break
             if not isinstance(val, str):
                 return tc.name
+            
+            # Hide absolute workspace paths in tool hints
+            if os.path.isabs(val):
+                val = os.path.normpath(val)
+            val_lower = val.lower()
+            if workspace_lower and workspace_lower in val_lower:
+                # Case-insensitive replacement
+                idx = val_lower.index(workspace_lower)
+                val = val[:idx] + val[idx + len(workspace_str):]
+                val = val.lstrip("\\/")
+                # Clean up common shell artifacts after path removal
+                if val.startswith("&& "):
+                    val = val[3:]
+                elif val.startswith("& "):
+                    val = val[2:]
+                # Handle "cd [workspace]" leaving empty cd or "cd  && ..."
+                if val.startswith("cd "):
+                    after_cd = val[3:].strip()
+                    if not after_cd or after_cd.startswith("&&"):
+                        val = after_cd.lstrip("& ").strip()
+                    else:
+                        val = after_cd
+                
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
