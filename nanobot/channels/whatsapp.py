@@ -491,10 +491,10 @@ class WhatsAppChannel(BaseChannel):
         else:
             existing["phone"] = phone_digits
 
-        # Snapshot under lock, write outside lock (atomic write is safe without lock)
+        # Deep copy under lock, disk write inside lock to strictly order writes
         async with self._lid_map_lock:
-            snapshot = dict(self._lid_map)
-        await asyncio.to_thread(self._write_lid_map, snapshot)
+            snapshot = {k: dict(v) for k, v in self._lid_map.items()}
+            await asyncio.to_thread(self._write_lid_map, snapshot)
         logger.info("LID mapping saved: {} → {}", lid_prefix, phone_digits)
 
     @staticmethod
