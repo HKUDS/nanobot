@@ -2,7 +2,9 @@
 nanobot - A lightweight AI agent framework
 """
 
-__version__ = "0.1.5"
+from importlib.metadata import version as _pkg_version
+
+__version__ = _pkg_version("nanobot-ai")
 __logo__ = "🐈"
 
 from nanobot.nanobot import Nanobot, RunResult
