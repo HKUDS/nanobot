@@ -73,6 +73,9 @@ matrix = [
 discord = [
     "discord.py>=2.5.2,<3.0.0",
 ]
+web = [
+    "aiohttp>=3.9.0,<4.0.0",
+]
 langsmith = [
     "langsmith>=0.1.0",
 ]

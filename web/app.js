@@ -1,0 +1,984 @@
+/* ── API helpers ──────────────────────────────────────────────────────── */
+
+async function apiCall(method, path, body = null) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== null) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  if (!res.ok) throw new Error(`API ${method} ${path}: ${res.status}`);
+  return res.json();
+}
+
+/* ── Session cache (in-memory, hydrated from API on init) ─────────────── */
+
+let sessions    = [];   // [{id, name, created, updated, pinned}]
+let historyCache = {};  // id -> [{role, content, hints?, pinned?}]
+let sessionId   = null;
+
+function getSessionMeta(id) {
+  return sessions.find(s => s.id === id) || null;
+}
+
+/** Synchronous read from cache (always populated after ensureHistory). */
+function getHistory(id) {
+  return historyCache[id] || [];
+}
+
+async function loadSessions() {
+  sessions = await apiCall('GET', '/api/sessions');
+}
+
+/** Load history for a session if not already cached. */
+async function ensureHistory(id) {
+  if (historyCache[id]) return historyCache[id];
+  try {
+    const data = await apiCall('GET', `/api/sessions/${id}`);
+    historyCache[id] = data.history || [];
+  } catch {
+    historyCache[id] = [];
+  }
+  return historyCache[id];
+}
+
+async function createSession(name = 'New chat') {
+  const s = await apiCall('POST', '/api/sessions', { name });
+  sessions.unshift(s);
+  historyCache[s.id] = [];
+  return s.id;
+}
+
+function renameSession(id, name) {
+  const s = getSessionMeta(id);
+  if (s) {
+    s.name = name;
+    s.updated = Date.now();
+    apiCall('PATCH', `/api/sessions/${id}`, { name }).catch(() => {});
+  }
+}
+
+function touchSession(id) {
+  const s = getSessionMeta(id);
+  if (s) {
+    s.updated = Date.now();
+    apiCall('PATCH', `/api/sessions/${id}`, { touch: true }).catch(() => {});
+  }
+}
+
+async function pinSession(id) {
+  const s = getSessionMeta(id);
+  if (!s) return;
+  s.pinned = !s.pinned;
+  await apiCall('PATCH', `/api/sessions/${id}`, { pinned: s.pinned }).catch(() => {});
+  renderSidebar();
+}
+
+async function deleteSession(id) {
+  sessions = sessions.filter(s => s.id !== id);
+  delete historyCache[id];
+  await apiCall('DELETE', `/api/sessions/${id}`).catch(() => {});
+  if (id === sessionId) {
+    if (sessions.length > 0) {
+      sessionId = sessions[0].id;
+    } else {
+      sessionId = await createSession('New chat');
+    }
+    localStorage.setItem('nanobot_session', sessionId);
+    await replayHistory(sessionId);
+  }
+  renderSidebar();
+}
+
+/** Update in-memory cache and persist to server (fire-and-forget). */
+function saveHistory(id, history) {
+  historyCache[id] = history;
+  apiCall('PUT', `/api/sessions/${id}`, { history }).catch(() => {});
+}
+
+/* ── Migrate old localStorage data to the API (first load only) ───────── */
+
+async function migrateLegacyData() {
+  let legacy;
+  try {
+    legacy = JSON.parse(localStorage.getItem('nanobot_sessions') || '[]');
+  } catch { return; }
+  if (legacy.length === 0) return;
+
+  for (const ls of legacy) {
+    let history = [];
+    try {
+      history = JSON.parse(localStorage.getItem('nanobot_history_' + ls.id) || '[]');
+    } catch {}
+    try {
+      await apiCall('POST', '/api/sessions', {
+        id:      ls.id,
+        name:    ls.name,
+        created: ls.created,
+        updated: ls.updated,
+        pinned:  ls.pinned || false,
+        history,
+      });
+    } catch {}
+    localStorage.removeItem('nanobot_history_' + ls.id);
+  }
+  localStorage.removeItem('nanobot_sessions');
+}
+
+/* ── Attachment state ─────────────────────────────────────────────────── */
+
+let pendingAttachments = [];
+// Each entry: {id, name, mime, url, previewUrl?, pending: bool}
+
+async function uploadFile(file) {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch('/api/upload', { method: 'POST', body: fd });
+  if (!res.ok) throw new Error('Upload failed');
+  return res.json(); // {id, name, mime, url}
+}
+
+async function addFiles(fileList) {
+  for (const file of fileList) {
+    const tempId = 'tmp_' + Math.random().toString(36).slice(2);
+    const entry = { id: tempId, name: file.name, mime: file.type, url: null, pending: true };
+    if (file.type.startsWith('image/')) {
+      entry.previewUrl = URL.createObjectURL(file);
+    }
+    pendingAttachments.push(entry);
+    renderUploadPreview();
+
+    uploadFile(file)
+      .then(result => {
+        const idx = pendingAttachments.findIndex(a => a.id === tempId);
+        if (idx >= 0) {
+          pendingAttachments[idx] = {
+            ...result,
+            previewUrl: entry.previewUrl,
+            pending: false,
+          };
+          renderUploadPreview();
+        }
+      })
+      .catch(() => {
+        pendingAttachments = pendingAttachments.filter(a => a.id !== tempId);
+        renderUploadPreview();
+      });
+  }
+}
+
+function removeAttachment(id) {
+  const att = pendingAttachments.find(a => a.id === id);
+  if (att && att.previewUrl) URL.revokeObjectURL(att.previewUrl);
+  pendingAttachments = pendingAttachments.filter(a => a.id !== id);
+  renderUploadPreview();
+}
+
+function renderUploadPreview() {
+  const bar = document.getElementById('upload-preview');
+  if (pendingAttachments.length === 0) {
+    bar.classList.add('hidden');
+    bar.innerHTML = '';
+    return;
+  }
+  bar.classList.remove('hidden');
+  bar.innerHTML = '';
+  for (const att of pendingAttachments) {
+    const item = document.createElement('div');
+    item.className = 'upload-item' + (att.pending ? ' pending' : '');
+
+    const thumb = document.createElement('div');
+    thumb.className = 'upload-thumb';
+    if (att.previewUrl) {
+      const img = document.createElement('img');
+      img.src = att.previewUrl;
+      img.alt = att.name;
+      thumb.appendChild(img);
+    } else {
+      thumb.textContent = '📄';
+      thumb.className += ' upload-thumb-icon';
+    }
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'upload-name';
+    nameEl.textContent = att.name;
+    nameEl.title = att.name;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'upload-remove';
+    removeBtn.title = 'Remove';
+    removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      removeAttachment(att.id);
+    });
+
+    item.appendChild(thumb);
+    item.appendChild(nameEl);
+    item.appendChild(removeBtn);
+    bar.appendChild(item);
+  }
+}
+
+/* ── State ────────────────────────────────────────────────────────────── */
+
+let isStreaming = false;
+let abortController = null;
+
+/* ── DOM refs ─────────────────────────────────────────────────────────── */
+
+const messagesEl     = document.getElementById('messages');
+const form           = document.getElementById('chat-form');
+const input          = document.getElementById('input');
+const btnSend        = document.getElementById('btn-send');
+const btnNew         = document.getElementById('btn-new');
+const btnMenu        = document.getElementById('btn-menu');
+const btnAttach      = document.getElementById('btn-attach');
+const fileInput      = document.getElementById('file-input');
+const sidebar        = document.getElementById('sidebar');
+const sidebarOverlay = document.getElementById('sidebar-overlay');
+const sessionListEl  = document.getElementById('session-list');
+
+/* ── marked config ────────────────────────────────────────────────────── */
+
+marked.setOptions({ breaks: true, gfm: true });
+
+/* ── Base64 image rendering ───────────────────────────────────────────── */
+
+// Magic-byte prefixes after base64 encoding
+const _IMG_PREFIXES = [
+  { p: 'iVBORw0', mime: 'image/png'  },
+  { p: '/9j/',    mime: 'image/jpeg' },
+  { p: 'R0lGOD',  mime: 'image/gif'  },
+  { p: 'UklGR',   mime: 'image/webp' },
+];
+
+/** Detect whether a string is a raw base64-encoded image. */
+function isBase64Image(str) {
+  const s = str.trim();
+  return s.length > 80 && _IMG_PREFIXES.some(({ p }) => s.startsWith(p));
+}
+
+/** Return the data-URI MIME type for a raw base64 image string. */
+function base64ImageMime(str) {
+  return _IMG_PREFIXES.find(({ p }) => str.trim().startsWith(p))?.mime ?? 'image/png';
+}
+
+/**
+ * Pre-process text before markdown rendering:
+ *   1. Bare data: URIs not already in markdown image syntax → wrap them
+ *   2. Raw base64 image strings (e.g. from tool results) → wrap them
+ */
+function unwrapBase64Images(text) {
+  // 1. Bare data: URIs that aren't already inside ](...)
+  text = text.replace(
+    /(?<!\]\()(data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+)/g,
+    '![image]($1)'
+  );
+  // 2. Raw base64 image strings (no data: prefix)
+  for (const { p, mime } of _IMG_PREFIXES) {
+    text = text.replace(
+      new RegExp(`(?<![A-Za-z0-9+/=])(${p}[A-Za-z0-9+/\\r\\n=]{80,})(?![A-Za-z0-9+/=])`, 'g'),
+      (_, b64) => `\n![image](data:${mime};base64,${b64.replace(/[\r\n]/g, '')})\n`
+    );
+  }
+  return text;
+}
+
+/** Render markdown with base64 image detection. */
+function renderMarkdown(text) {
+  return marked.parse(unwrapBase64Images(text));
+}
+
+/* ── Sidebar toggle (mobile) ──────────────────────────────────────────── */
+
+function openSidebar() {
+  sidebar.classList.add('open');
+  sidebarOverlay.classList.add('visible');
+}
+
+function closeSidebar() {
+  sidebar.classList.remove('open');
+  sidebarOverlay.classList.remove('visible');
+}
+
+btnMenu.addEventListener('click', () =>
+  sidebar.classList.contains('open') ? closeSidebar() : openSidebar()
+);
+sidebarOverlay.addEventListener('click', closeSidebar);
+
+/* ── Helpers ──────────────────────────────────────────────────────────── */
+
+function scrollToBottom() {
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function setStreaming(active) {
+  isStreaming = active;
+  input.disabled = active;
+  if (active) {
+    btnSend.classList.add('stopping');
+    btnSend.setAttribute('aria-label', 'Stop');
+  } else {
+    btnSend.classList.remove('stopping');
+    btnSend.setAttribute('aria-label', 'Send');
+    abortController = null;
+  }
+}
+
+function stopGeneration() {
+  if (abortController) abortController.abort();
+  fetch('/api/stop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId }),
+  }).catch(() => {});
+}
+
+function resizeInput() {
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+}
+
+function clearEmptyState() {
+  const empty = document.getElementById('empty-state');
+  if (empty) empty.remove();
+}
+
+function escapeHtml(str) {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────────────── */
+
+function renderSidebar() {
+  const sorted = [...sessions].sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
+    return (b.updated || 0) - (a.updated || 0);
+  });
+  sessionListEl.innerHTML = '';
+  for (const s of sorted) {
+    const item = document.createElement('div');
+    item.className = 'session-item' + (s.id === sessionId ? ' active' : '') + (s.pinned ? ' pinned' : '');
+
+    const nameBtn = document.createElement('button');
+    nameBtn.className = 'session-name';
+    nameBtn.textContent = (s.pinned ? '📌 ' : '') + s.name;
+    nameBtn.title = s.name;
+    nameBtn.addEventListener('click', () => switchSession(s.id));
+
+    const menuBtn = document.createElement('button');
+    menuBtn.className = 'session-menu-btn';
+    menuBtn.setAttribute('aria-label', 'Session options');
+    menuBtn.textContent = '⋮';
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'session-dropdown hidden';
+
+    const pinItem = document.createElement('button');
+    pinItem.className = 'session-dropdown-item';
+    pinItem.textContent = s.pinned ? '📌 Unpin' : '📌 Pin';
+
+    const deleteItem = document.createElement('button');
+    deleteItem.className = 'session-dropdown-item danger';
+    deleteItem.textContent = '🗑 Delete';
+
+    dropdown.appendChild(pinItem);
+    dropdown.appendChild(deleteItem);
+
+    menuBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.querySelectorAll('.session-dropdown:not(.hidden)').forEach(d => {
+        if (d !== dropdown) d.classList.add('hidden');
+      });
+      dropdown.classList.toggle('hidden');
+    });
+
+    pinItem.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await pinSession(s.id);
+      dropdown.classList.add('hidden');
+    });
+
+    deleteItem.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await deleteSession(s.id);
+    });
+
+    item.appendChild(nameBtn);
+    item.appendChild(menuBtn);
+    item.appendChild(dropdown);
+    sessionListEl.appendChild(item);
+  }
+}
+
+async function switchSession(id) {
+  if (id === sessionId || isStreaming) return;
+  sessionId = id;
+  localStorage.setItem('nanobot_session', id);
+  closeSidebar();
+  renderSidebar();
+  await replayHistory(id);
+}
+
+/* ── Message builders ─────────────────────────────────────────────────── */
+
+function appendUserMessage(text, attachments = []) {
+  clearEmptyState();
+  const div = document.createElement('div');
+  div.className = 'message user';
+
+  let attachHtml = '';
+  if (attachments.length > 0) {
+    attachHtml = '<div class="msg-attachments">';
+    for (const att of attachments) {
+      if (att.mime && att.mime.startsWith('image/') && att.url) {
+        attachHtml += `<img src="${att.url}" class="msg-image" loading="lazy" alt="${escapeHtml(att.name)}">`;
+      } else {
+        attachHtml += `<span class="msg-file">📄 ${escapeHtml(att.name)}</span>`;
+      }
+    }
+    attachHtml += '</div>';
+  }
+
+  div.innerHTML = `
+    <div class="avatar">👤</div>
+    <div class="bubble">${attachHtml}${text ? escapeHtml(text) : ''}</div>
+  `;
+  messagesEl.appendChild(div);
+  scrollToBottom();
+  return div;
+}
+
+function appendBotSkeleton() {
+  clearEmptyState();
+  const wrapper = document.createElement('div');
+  wrapper.className = 'message bot';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  wrapper.innerHTML = `<div class="avatar">🐱</div>`;
+  wrapper.appendChild(bubble);
+  messagesEl.appendChild(wrapper);
+  scrollToBottom();
+  return { wrapper, bubble };
+}
+
+/* ── Message actions (⋮ dropdown) ─────────────────────────────────────── */
+
+function addMessageActions(el, index) {
+  const btn = document.createElement('button');
+  btn.className = 'msg-actions-btn';
+  btn.setAttribute('aria-label', 'Message options');
+  btn.textContent = '⋮';
+
+  const dropdown = document.createElement('div');
+  dropdown.className = 'msg-dropdown hidden';
+
+  const pinItem = document.createElement('button');
+  pinItem.className = 'msg-dropdown-item';
+
+  const deleteItem = document.createElement('button');
+  deleteItem.className = 'msg-dropdown-item danger';
+  deleteItem.innerHTML = '<span>🗑</span> Delete';
+
+  dropdown.appendChild(pinItem);
+  dropdown.appendChild(deleteItem);
+  el.appendChild(btn);
+  el.appendChild(dropdown);
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.msg-dropdown:not(.hidden)').forEach(d => {
+      if (d !== dropdown) d.classList.add('hidden');
+    });
+    const opening = dropdown.classList.contains('hidden');
+    dropdown.classList.toggle('hidden');
+    if (opening) {
+      const h = getHistory(sessionId);
+      pinItem.innerHTML = h[index]?.pinned
+        ? '<span>📌</span> Unpin'
+        : '<span>📌</span> Pin';
+    }
+  });
+
+  pinItem.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const h = getHistory(sessionId);
+    if (h[index]) {
+      h[index].pinned = !h[index].pinned;
+      saveHistory(sessionId, h);
+      el.classList.toggle('pinned', !!h[index].pinned);
+    }
+    dropdown.classList.add('hidden');
+  });
+
+  deleteItem.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (isStreaming) return;
+    const h = getHistory(sessionId);
+    h.splice(index, 1);
+    saveHistory(sessionId, h);
+    dropdown.classList.add('hidden');
+    await replayHistory(sessionId);
+  });
+}
+
+/* ── Hint chips ───────────────────────────────────────────────────────── */
+
+function setupHintChip(chip, toolName, fullText) {
+  chip.className = 'hint';
+  chip.textContent = '⚙ ' + toolName;
+  chip.title = 'Click to expand';
+  chip.addEventListener('click', () => {
+    if (chip.classList.contains('expanded')) {
+      chip.classList.remove('expanded');
+      chip.textContent = '⚙ ' + toolName;
+      chip.title = 'Click to expand';
+    } else {
+      chip.classList.add('expanded');
+      chip.textContent = fullText;
+      chip.title = 'Click to collapse';
+    }
+  });
+}
+
+function appendHint(text, wrapper) {
+  const bubble = wrapper.querySelector('.bubble');
+  let hintsEl = bubble.querySelector('.hints');
+  if (!hintsEl) {
+    hintsEl = document.createElement('div');
+    hintsEl.className = 'hints';
+    bubble.insertBefore(hintsEl, bubble.firstChild);
+  }
+  const chip = document.createElement('span');
+  const toolName = text.includes('(') ? text.slice(0, text.indexOf('(')).trim() : text;
+  setupHintChip(chip, toolName, text);
+  hintsEl.appendChild(chip);
+  scrollToBottom();
+  return { toolName, fullText: text };
+}
+
+/* ── History replay ───────────────────────────────────────────────────── */
+
+async function replayHistory(id) {
+  messagesEl.innerHTML = '';
+  const history = await ensureHistory(id);
+
+  if (history.length === 0) {
+    messagesEl.innerHTML = `
+      <div id="empty-state">
+        <div class="big-logo">🐱</div>
+        <p>How can I help you today?</p>
+      </div>
+    `;
+    return;
+  }
+
+  for (let i = 0; i < history.length; i++) {
+    const msg = history[i];
+    if (msg.role === 'user') {
+      const div = appendUserMessage(msg.content, msg.attachments || []);
+      if (msg.pinned) div.classList.add('pinned');
+      addMessageActions(div, i);
+    } else {
+      const { wrapper, bubble } = appendBotSkeleton();
+      if (msg.hints && msg.hints.length > 0) {
+        const hintsEl = document.createElement('div');
+        hintsEl.className = 'hints';
+        for (const h of msg.hints) {
+          const chip = document.createElement('span');
+          setupHintChip(chip, h.toolName, h.fullText);
+          hintsEl.appendChild(chip);
+        }
+        bubble.appendChild(hintsEl);
+      }
+      const rendered = document.createElement('div');
+      rendered.className = 'rendered-content';
+      rendered.innerHTML = renderMarkdown(msg.content);
+      bubble.appendChild(rendered);
+      if (msg.pinned) wrapper.classList.add('pinned');
+      addMessageActions(wrapper, i);
+    }
+  }
+  scrollToBottom();
+}
+
+/* ── SSE stream parser ────────────────────────────────────────────────── */
+
+function parseSSEChunk(buffer) {
+  const events = [];
+  const blocks = buffer.split('\n\n');
+  const remaining = blocks.pop();
+  for (const block of blocks) {
+    if (!block.trim()) continue;
+    let type = 'message';
+    let dataStr = '';
+    for (const line of block.split('\n')) {
+      if (line.startsWith('event: '))      type    = line.slice(7).trim();
+      else if (line.startsWith('data: '))  dataStr = line.slice(6).trim();
+    }
+    try {
+      events.push({ type, data: JSON.parse(dataStr) });
+    } catch { }
+  }
+  return { events, remaining };
+}
+
+/* ── Core send ────────────────────────────────────────────────────────── */
+
+async function sendMessage(text) {
+  const readyAttachments = pendingAttachments.filter(a => !a.pending);
+  if (!text.trim() && readyAttachments.length === 0) return;
+  if (isStreaming) return;
+
+  // Capture and clear pending attachments before async work
+  pendingAttachments = [];
+  renderUploadPreview();
+
+  // Persist user turn first so we know the index before rendering
+  const history = getHistory(sessionId);
+  const attachmentsMeta = readyAttachments.map(a => ({ id: a.id, name: a.name, mime: a.mime, url: a.url }));
+  if (history.length === 0 && text.trim()) {
+    renameSession(sessionId, text.length > 35 ? text.slice(0, 32) + '…' : text);
+    renderSidebar();
+  }
+  history.push({ role: 'user', content: text, attachments: attachmentsMeta });
+  saveHistory(sessionId, history);
+  const userMsgIdx = history.length - 1;
+
+  setStreaming(true);
+  const userDiv = appendUserMessage(text, attachmentsMeta);
+  addMessageActions(userDiv, userMsgIdx);
+  const { wrapper, bubble } = appendBotSkeleton();
+
+  // Active streaming section — always appended at end of bubble
+  let currentStreamEl = document.createElement('div');
+  currentStreamEl.className = 'streaming-content';
+  bubble.appendChild(currentStreamEl);
+
+  let tokenBuffer = '';
+  let lastToolBlock = null;
+  const collectedHints = [];
+
+  // Freeze the current streaming section into a rendered-content div,
+  // then add a fresh streaming section at the end of bubble.
+  function freezeCurrentSection() {
+    if (tokenBuffer.trim()) {
+      const rendered = document.createElement('div');
+      rendered.className = 'rendered-content';
+      rendered.innerHTML = renderMarkdown(tokenBuffer);
+      if (currentStreamEl.parentNode === bubble) {
+        bubble.replaceChild(rendered, currentStreamEl);
+      } else {
+        bubble.appendChild(rendered);
+      }
+    } else {
+      currentStreamEl.remove();
+    }
+    tokenBuffer = '';
+    currentStreamEl = document.createElement('div');
+    currentStreamEl.className = 'streaming-content';
+    bubble.appendChild(currentStreamEl);
+  }
+
+  try {
+    abortController = new AbortController();
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: text,
+        session_id: sessionId,
+        attachments: attachmentsMeta,
+      }),
+      signal: abortController.signal,
+    });
+
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
+
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let   sseBuffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      sseBuffer += decoder.decode(value, { stream: true });
+      const { events, remaining } = parseSSEChunk(sseBuffer);
+      sseBuffer = remaining;
+
+      for (const { type, data } of events) {
+        if (type === 'token') {
+          tokenBuffer += data.text;
+          currentStreamEl.textContent = tokenBuffer;
+          scrollToBottom();
+
+        } else if (type === 'progress') {
+          if (data.tool_hint && data.text) {
+            // A tool call is starting — freeze current text and insert a tool indicator block
+            freezeCurrentSection();
+            const block = document.createElement('div');
+            block.className = 'tool-block tool-pending';
+            block.innerHTML = `
+              <div class="tool-header">
+                <span class="tool-spinner">⟳</span>
+                <span class="tool-name">${escapeHtml(data.text)}</span>
+              </div>
+            `;
+            block.querySelector('.tool-header').addEventListener('click', () =>
+              block.classList.toggle('expanded')
+            );
+            bubble.insertBefore(block, currentStreamEl);
+            lastToolBlock = block;
+            const toolName = data.text.split('(')[0].trim();
+            collectedHints.push({ toolName, fullText: data.text });
+            scrollToBottom();
+          } else if (!data.tool_hint && data.text) {
+            // Non-tool status (e.g. "Thinking...") — show briefly in stream area
+            currentStreamEl.textContent = data.text;
+            scrollToBottom();
+          }
+
+        } else if (type === 'done') {
+          // Finalize any tool blocks still showing a spinner
+          bubble.querySelectorAll('.tool-pending').forEach(b => {
+            b.classList.remove('tool-pending');
+            const spinner = b.querySelector('.tool-spinner');
+            if (spinner) spinner.textContent = '✓';
+          });
+
+          const finalText = data.text || tokenBuffer;
+          if (finalText.trim()) {
+            const rendered = document.createElement('div');
+            rendered.className = 'rendered-content';
+            rendered.innerHTML = renderMarkdown(finalText);
+            if (currentStreamEl.parentNode === bubble) {
+              bubble.replaceChild(rendered, currentStreamEl);
+            } else {
+              bubble.appendChild(rendered);
+            }
+          } else {
+            currentStreamEl.remove();
+          }
+          scrollToBottom();
+
+          // Persist bot turn
+          const h = getHistory(sessionId);
+          h.push({ role: 'bot', content: finalText, hints: collectedHints });
+          saveHistory(sessionId, h);
+          addMessageActions(wrapper, h.length - 1);
+          touchSession(sessionId);
+          renderSidebar();
+          return;
+
+        } else if (type === 'error') {
+          currentStreamEl.remove();
+          const err = document.createElement('div');
+          err.className = 'error-bubble';
+          err.textContent = '⚠ ' + (data.message || 'Unknown error');
+          bubble.appendChild(err);
+          scrollToBottom();
+          return;
+        }
+      }
+    }
+
+    // Stream ended without a 'done' event — render whatever we have
+    if (tokenBuffer) {
+      const rendered = document.createElement('div');
+      rendered.className = 'rendered-content';
+      rendered.innerHTML = renderMarkdown(tokenBuffer);
+      if (currentStreamEl.parentNode === bubble) {
+        bubble.replaceChild(rendered, currentStreamEl);
+      } else {
+        bubble.appendChild(rendered);
+      }
+      scrollToBottom();
+    }
+
+  } catch (err) {
+    currentStreamEl.remove();
+    if (err.name === 'AbortError') {
+      // User stopped — render whatever was streamed so far
+      if (tokenBuffer.trim()) {
+        const rendered = document.createElement('div');
+        rendered.className = 'rendered-content';
+        rendered.innerHTML = renderMarkdown(tokenBuffer);
+        bubble.appendChild(rendered);
+      }
+    } else {
+      const errEl = document.createElement('div');
+      errEl.className = 'error-bubble';
+      errEl.textContent = '⚠ ' + err.message;
+      bubble.appendChild(errEl);
+    }
+    scrollToBottom();
+  } finally {
+    setStreaming(false);
+    input.focus();
+  }
+}
+
+/* ── New conversation ─────────────────────────────────────────────────── */
+
+async function newConversation() {
+  if (isStreaming) return;
+  sessionId = await createSession('New chat');
+  localStorage.setItem('nanobot_session', sessionId);
+  renderSidebar();
+  messagesEl.innerHTML = `
+    <div id="empty-state">
+      <div class="big-logo">🐱</div>
+      <p>New conversation started.</p>
+    </div>
+  `;
+  input.focus();
+}
+
+/* ── Event listeners ──────────────────────────────────────────────────── */
+
+btnSend.addEventListener('click', (e) => {
+  if (isStreaming) {
+    e.preventDefault();
+    stopGeneration();
+  }
+});
+
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = input.value;
+  input.value = '';
+  resizeInput();
+  sendMessage(text);
+});
+
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    form.dispatchEvent(new Event('submit'));
+  }
+});
+
+input.addEventListener('input', resizeInput);
+
+btnNew.addEventListener('click', newConversation);
+
+/* ── File attach & drag-drop ──────────────────────────────────────────── */
+
+fileInput.addEventListener('change', async () => {
+  if (fileInput.files.length > 0) {
+    await addFiles([...fileInput.files]);
+    fileInput.value = '';
+  }
+});
+
+const mainEl = document.getElementById('main');
+
+mainEl.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  mainEl.classList.add('dragover');
+});
+mainEl.addEventListener('dragleave', (e) => {
+  if (!mainEl.contains(e.relatedTarget)) {
+    mainEl.classList.remove('dragover');
+  }
+});
+mainEl.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  mainEl.classList.remove('dragover');
+  const files = [...(e.dataTransfer.files || [])];
+  if (files.length > 0) {
+    await addFiles(files);
+    input.focus();
+  }
+});
+
+/* ── Lightbox ─────────────────────────────────────────────────────────── */
+
+const lightbox      = document.getElementById('lightbox');
+const lightboxImg   = document.getElementById('lightbox-img');
+const lightboxClose = document.getElementById('lightbox-close');
+
+function openLightbox(src, alt) {
+  lightboxImg.src = src;
+  lightboxImg.alt = alt || '';
+  lightbox.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox() {
+  lightbox.classList.add('hidden');
+  lightboxImg.src = '';
+  document.body.style.overflow = '';
+}
+
+lightboxClose.addEventListener('click', closeLightbox);
+
+lightbox.addEventListener('click', (e) => {
+  if (e.target === lightbox) closeLightbox();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !lightbox.classList.contains('hidden')) closeLightbox();
+});
+
+// Event delegation — catches all images added dynamically to the messages area
+messagesEl.addEventListener('click', (e) => {
+  const img = e.target.closest(
+    'img.msg-image, .rendered-content img, .streaming-content img, img.tool-result-image'
+  );
+  if (img) {
+    e.stopPropagation();
+    openLightbox(img.src, img.alt);
+  }
+});
+
+/* ── Init ─────────────────────────────────────────────────────────────── */
+
+document.addEventListener('click', () => {
+  document.querySelectorAll('.msg-dropdown:not(.hidden), .session-dropdown:not(.hidden)').forEach(d => d.classList.add('hidden'));
+});
+
+async function init() {
+  // Migrate any existing localStorage sessions to the API
+  try { await migrateLegacyData(); } catch {}
+
+  // Load sessions from API
+  try {
+    await loadSessions();
+  } catch {
+    sessions = [];
+  }
+
+  // Restore last active session, or pick the first, or create new
+  const lastId = localStorage.getItem('nanobot_session');
+  if (lastId && sessions.find(s => s.id === lastId)) {
+    sessionId = lastId;
+  } else if (sessions.length > 0) {
+    sessionId = sessions[0].id;
+    localStorage.setItem('nanobot_session', sessionId);
+  } else {
+    sessionId = await createSession('New chat');
+    localStorage.setItem('nanobot_session', sessionId);
+  }
+
+  renderSidebar();
+  await replayHistory(sessionId);
+  input.focus();
+}
+
+init();
+
+/* ── Service worker ───────────────────────────────────────────────────── */
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data && e.data.type === 'AUTH_REDIRECT') {
+      window.location.reload();
+    }
+  });
+}
