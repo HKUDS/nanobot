@@ -12,6 +12,10 @@
   </p>
 </div>
 
+<p align="center">
+  <b>Language:</b> English | <a href="./README.zh-CN.md">简体中文</a>
+</p>
+
 🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw).
 
 ⚡️ Delivers core agent functionality with **99% fewer lines of code**.
