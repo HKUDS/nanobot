@@ -510,7 +510,7 @@ class AgentLoop:
             )
             # skip +1 to exclude the injected system message from session
             # history — it's ephemeral context, not a real user turn.
-            self._save_turn(session, all_msgs, 1 + len(history) + 1)
+            self._save_turn(session, all_msgs, 1 + len(history) + 1, usage=self._last_usage)
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -574,7 +574,7 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        self._save_turn(session, all_msgs, 1 + len(history), usage=self._last_usage)
         self.sessions.save(session)
         self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
 
@@ -638,9 +638,15 @@ class AgentLoop:
 
         return filtered
 
-    def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
-        """Save new-turn messages into session, truncating large tool results."""
+    def _save_turn(self, session: Session, messages: list[dict], skip: int,
+                    usage: dict[str, int] | None = None) -> None:
+        """Save new-turn messages into session, truncating large tool results.
+
+        If *usage* is provided it is attached to the **last** assistant message
+        so downstream analytics can read actual token counts from the session log.
+        """
         from datetime import datetime
+        last_assistant_entry: dict | None = None
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
@@ -668,7 +674,12 @@ class AgentLoop:
                         continue
                     entry["content"] = filtered
             entry.setdefault("timestamp", datetime.now().isoformat())
+            if role == "assistant":
+                last_assistant_entry = entry
             session.messages.append(entry)
+        # Attach usage to the final assistant message of this turn
+        if usage and last_assistant_entry is not None:
+            last_assistant_entry["usage"] = usage
         session.updated_at = datetime.now()
 
     async def process_direct(
