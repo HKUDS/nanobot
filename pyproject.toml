@@ -85,8 +85,6 @@ dev = [
     "aiohttp>=3.9.0,<4.0.0",
     "pytest-cov>=6.0.0,<7.0.0",
     "ruff>=0.1.0",
-    "PyJWT>=2.0,<3.0",
-    "cryptography>=41.0",
 ]
 
 [project.scripts]

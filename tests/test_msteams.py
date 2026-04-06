@@ -1,7 +1,18 @@
 import json
 
-import jwt
 import pytest
+
+# Check optional msteams dependencies before running tests
+try:
+    from nanobot.channels import msteams
+    MSTEAMS_AVAILABLE = getattr(msteams, "MSTEAMS_AVAILABLE", False)
+except ImportError:
+    MSTEAMS_AVAILABLE = False
+
+if not MSTEAMS_AVAILABLE:
+    pytest.skip("MSTeams dependencies not installed (PyJWT, cryptography). Run: pip install nanobot-ai[msteams]", allow_module_level=True)
+
+import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 import nanobot.channels.msteams as msteams_module
