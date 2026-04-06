@@ -51,6 +51,7 @@ class DueTask:
 
 
 MODEL_PRESETS: dict[str, str] = {
+    "flash25": "gemini/gemini-2.5-flash",
     "flash": "gemini/gemini-3-flash-preview",
     "pro": "gemini/gemini-3.1-pro-preview",
     "sonnet": "claude-sonnet-4-6",
