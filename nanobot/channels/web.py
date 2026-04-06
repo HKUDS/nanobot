@@ -77,6 +77,11 @@ class WebChannel(BaseChannel):
     # BaseChannel interface
     # ------------------------------------------------------------------
 
+    def is_allowed(self, sender_id: str) -> bool:
+        if not self._allow_from or "*" in self._allow_from:
+            return True
+        return str(sender_id) in self._allow_from
+
     async def send(self, msg: OutboundMessage) -> None:
         """Route bus outbound messages into the waiting SSE queue."""
         q = self._queues.get(msg.chat_id)
@@ -160,8 +165,13 @@ class WebChannel(BaseChannel):
     def _get_static_dir(self) -> Path:
         if self._static_path:
             return Path(self._static_path).expanduser().resolve()
-        pkg_root = Path(__file__).parent.parent.parent
-        candidate = pkg_root / "web"
+        # Bundled inside the installed package (nanobot/web/)
+        pkg_web = Path(__file__).parent.parent / "web"
+        if pkg_web.is_dir():
+            return pkg_web
+        # Development fallback: web/ at the repo root
+        repo_root = Path(__file__).parent.parent.parent
+        candidate = repo_root / "web"
         return candidate if candidate.is_dir() else Path.cwd() / "web"
 
     async def _handle_index(self, request: web.Request) -> web.Response:
@@ -272,7 +282,6 @@ class WebChannel(BaseChannel):
             chat_id=session_id,
             content=message,
             media=media_paths,
-            metadata={"_wants_stream": True},
         ))
 
         # Set up the SSE response
@@ -300,16 +309,7 @@ class WebChannel(BaseChannel):
                 # OutboundMessage from the bus
                 meta = item.metadata or {}
 
-                if meta.get("_stream_delta"):
-                    await response.write(_sse("token", {"text": item.content}))
-
-                elif meta.get("_stream_end"):
-                    # A stream segment ended. If resuming=True, a tool call is next;
-                    # if False, the final response will arrive as a plain outbound message.
-                    if meta.get("_resuming"):
-                        await response.write(_sse("progress", {"text": "", "tool_hint": False}))
-
-                elif meta.get("_progress"):
+                if meta.get("_progress"):
                     await response.write(_sse("progress", {
                         "text": item.content,
                         "tool_hint": bool(meta.get("_tool_hint")),
