@@ -20,23 +20,26 @@ services:
     volumes:
       - nanobot_data:/root/.nanobot
     environment:
-      - ZAI_API_KEY=${ZAI_API_KEY}
+      - PROVIDER_NAME=${PROVIDER_NAME:-custom}
+      - PROVIDER_API_KEY=${PROVIDER_API_KEY}
+      - "PROVIDER_API_BASE=${PROVIDER_API_BASE:-https://api.openai.com/v1}"
       - LLM_MODEL=${LLM_MODEL}
       - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
-      - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS}
+      - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS:-[]}
       - DISCORD_TOKEN=${DISCORD_TOKEN}
-      - DISCORD_ALLOWED_USERS=${DISCORD_ALLOWED_USERS}
+      - DISCORD_ALLOWED_USERS=${DISCORD_ALLOWED_USERS:-[]}
       - BRAVE_API_KEY=${BRAVE_API_KEY}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
     command:
       - sh
       - -c
       - |
-        echo '{
+        cat <<EOF > /root/.nanobot/config.json
+        {
           "providers": {
-            "custom": {
-              "apiKey": "${ZAI_API_KEY}",
-              "apiBase": "https://api.z.ai/api/coding/paas/v4"
+            "${PROVIDER_NAME}": {
+              "apiKey": "${PROVIDER_API_KEY}",
+              "apiBase": "${PROVIDER_API_BASE}"
             }
           },
           "agents": {
@@ -81,7 +84,8 @@ services:
               }
             }
           }
-        }' > /root/.nanobot/config.json
+        }
+        EOF
 
   nanobot-gateway:
     container_name: nanobot-gateway
