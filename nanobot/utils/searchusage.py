@@ -129,32 +129,30 @@ def _parse_tavily_usage(data: dict[str, Any]) -> SearchUsageInfo:
     """
     Parse Tavily /usage response.
 
-    Expected shape (may vary by plan):
+    Actual API response shape:
     {
-      "used": 142,
-      "limit": 1000,
-      "remaining": 858,
-      "reset_date": "2026-05-01",
-      "breakdown": {
-        "search": 120,
-        "extract": 15,
-        "crawl": 7
+      "account": {
+        "current_plan": "Researcher",
+        "plan_usage": 20,
+        "plan_limit": 1000,
+        "search_usage": 20,
+        "crawl_usage": 0,
+        "extract_usage": 0,
+        "map_usage": 0,
+        "research_usage": 0,
+        "paygo_usage": 0,
+        "paygo_limit": null
       }
     }
     """
-    used = data.get("used")
-    limit = data.get("limit")
-    remaining = data.get("remaining")
-    reset_date = data.get("reset_date") or data.get("resetDate")
+    account = data.get("account") or {}
+    used = account.get("plan_usage")
+    limit = account.get("plan_limit")
 
-    # Compute remaining if not provided
-    if remaining is None and used is not None and limit is not None:
+    # Compute remaining
+    remaining = None
+    if used is not None and limit is not None:
         remaining = max(0, limit - used)
-
-    breakdown = data.get("breakdown") or {}
-    search_used = breakdown.get("search")
-    extract_used = breakdown.get("extract")
-    crawl_used = breakdown.get("crawl")
 
     return SearchUsageInfo(
         provider="tavily",
@@ -162,10 +160,9 @@ def _parse_tavily_usage(data: dict[str, Any]) -> SearchUsageInfo:
         used=used,
         limit=limit,
         remaining=remaining,
-        reset_date=str(reset_date) if reset_date else None,
-        search_used=search_used,
-        extract_used=extract_used,
-        crawl_used=crawl_used,
+        search_used=account.get("search_usage"),
+        extract_used=account.get("extract_usage"),
+        crawl_used=account.get("crawl_usage"),
     )
 
 
