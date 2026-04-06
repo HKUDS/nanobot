@@ -116,30 +116,10 @@ class ExecTool(Tool):
                     timeout=effective_timeout,
                 )
             except asyncio.TimeoutError:
-                process.kill()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    pass
-                finally:
-                    if sys.platform != "win32":
-                        try:
-                            os.waitpid(process.pid, os.WNOHANG)
-                        except (ProcessLookupError, ChildProcessError) as e:
-                            logger.debug("Process already reaped or not found: {}", e)
+                await self._kill_process(process)
                 return f"Error: Command timed out after {effective_timeout} seconds"
             except asyncio.CancelledError:
-                process.kill()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    pass
-                finally:
-                    if sys.platform != "win32":
-                        try:
-                            os.waitpid(process.pid, os.WNOHANG)
-                        except (ProcessLookupError, ChildProcessError) as e:
-                            logger.debug("Process already reaped or not found: {}", e)
+                await self._kill_process(process)
                 raise
 
             output_parts = []
@@ -170,6 +150,21 @@ class ExecTool(Tool):
 
         except Exception as e:
             return f"Error executing command: {str(e)}"
+
+    @staticmethod
+    async def _kill_process(process: asyncio.subprocess.Process) -> None:
+        """Kill a subprocess and reap it to prevent zombies."""
+        process.kill()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            if sys.platform != "win32":
+                try:
+                    os.waitpid(process.pid, os.WNOHANG)
+                except (ProcessLookupError, ChildProcessError) as e:
+                    logger.debug("Process already reaped or not found: {}", e)
 
     def _build_env(self) -> dict[str, str]:
         """Build a minimal environment for subprocess execution.
