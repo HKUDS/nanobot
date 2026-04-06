@@ -1,12 +1,14 @@
+.worktrees/
 .assets
+.docs
 .env
+.web
 *.pyc
 dist/
 build/
-docs/
 *.egg-info/
 *.egg
-*.pyc
+*.pycs
 *.pyo
 *.pyd
 *.pyw
@@ -19,4 +21,6 @@ __pycache__/
 poetry.lock
 .pytest_cache/
 botpy.log
-tests/
+nano.*.save
+.DS_Store
+uv.lock

@@ -11,11 +11,12 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 from loguru import logger
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import DingTalkConfig
+from nanobot.config.schema import Base
 
 try:
     from dingtalk_stream import (
@@ -57,8 +58,53 @@ class NanobotDingTalkHandler(CallbackHandler):
             content = ""
             if chatbot_msg.text:
                 content = chatbot_msg.text.content.strip()
+            elif chatbot_msg.extensions.get("content", {}).get("recognition"):
+                content = chatbot_msg.extensions["content"]["recognition"].strip()
             if not content:
                 content = message.data.get("text", {}).get("content", "").strip()
+
+            # Handle file/image messages
+            file_paths = []
+            if chatbot_msg.message_type == "picture" and chatbot_msg.image_content:
+                download_code = chatbot_msg.image_content.download_code
+                if download_code:
+                    sender_uid = chatbot_msg.sender_staff_id or chatbot_msg.sender_id or "unknown"
+                    fp = await self.channel._download_dingtalk_file(download_code, "image.jpg", sender_uid)
+                    if fp:
+                        file_paths.append(fp)
+                        content = content or "[Image]"
+
+            elif chatbot_msg.message_type == "file":
+                download_code = message.data.get("content", {}).get("downloadCode") or message.data.get("downloadCode")
+                fname = message.data.get("content", {}).get("fileName") or message.data.get("fileName") or "file"
+                if download_code:
+                    sender_uid = chatbot_msg.sender_staff_id or chatbot_msg.sender_id or "unknown"
+                    fp = await self.channel._download_dingtalk_file(download_code, fname, sender_uid)
+                    if fp:
+                        file_paths.append(fp)
+                        content = content or "[File]"
+
+            elif chatbot_msg.message_type == "richText" and chatbot_msg.rich_text_content:
+                rich_list = chatbot_msg.rich_text_content.rich_text_list or []
+                for item in rich_list:
+                    if not isinstance(item, dict):
+                        continue
+                    if item.get("type") == "text":
+                        t = item.get("text", "").strip()
+                        if t:
+                            content = (content + " " + t).strip() if content else t
+                    elif item.get("downloadCode"):
+                        dc = item["downloadCode"]
+                        fname = item.get("fileName") or "file"
+                        sender_uid = chatbot_msg.sender_staff_id or chatbot_msg.sender_id or "unknown"
+                        fp = await self.channel._download_dingtalk_file(dc, fname, sender_uid)
+                        if fp:
+                            file_paths.append(fp)
+                            content = content or "[File]"
+
+            if file_paths:
+                file_list = "\n".join("- " + p for p in file_paths)
+                content = content + "\n\nReceived files:\n" + file_list
 
             if not content:
                 logger.warning(
@@ -70,12 +116,24 @@ class NanobotDingTalkHandler(CallbackHandler):
             sender_id = chatbot_msg.sender_staff_id or chatbot_msg.sender_id
             sender_name = chatbot_msg.sender_nick or "Unknown"
 
+            conversation_type = message.data.get("conversationType")
+            conversation_id = (
+                message.data.get("conversationId")
+                or message.data.get("openConversationId")
+            )
+
             logger.info("Received DingTalk message from {} ({}): {}", sender_name, sender_id, content)
 
             # Forward to Nanobot via _on_message (non-blocking).
             # Store reference to prevent GC before task completes.
             task = asyncio.create_task(
-                self.channel._on_message(content, sender_id, sender_name)
+                self.channel._on_message(
+                    content,
+                    sender_id,
+                    sender_name,
+                    conversation_type,
+                    conversation_id,
+                )
             )
             self.channel._background_tasks.add(task)
             task.add_done_callback(self.channel._background_tasks.discard)
@@ -88,6 +146,15 @@ class NanobotDingTalkHandler(CallbackHandler):
             return AckMessage.STATUS_OK, "Error"
 
 
+class DingTalkConfig(Base):
+    """DingTalk channel configuration using Stream mode."""
+
+    enabled: bool = False
+    client_id: str = ""
+    client_secret: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+
+
 class DingTalkChannel(BaseChannel):
     """
     DingTalk channel using Stream Mode.
@@ -95,16 +162,23 @@ class DingTalkChannel(BaseChannel):
     Uses WebSocket to receive events via `dingtalk-stream` SDK.
     Uses direct HTTP API to send messages (SDK is mainly for receiving).
 
-    Note: Currently only supports private (1:1) chat. Group messages are
-    received but replies are sent back as private messages to the sender.
+    Supports both private (1:1) and group chats.
+    Group chat_id is stored with a "group:" prefix to route replies back.
     """
 
     name = "dingtalk"
+    display_name = "DingTalk"
     _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
     _AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg", ".m4a", ".aac"}
     _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
-    def __init__(self, config: DingTalkConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return DingTalkConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = DingTalkConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: DingTalkConfig = config
         self._client: Any = None
@@ -301,14 +375,25 @@ class DingTalkChannel(BaseChannel):
             logger.warning("DingTalk HTTP client not initialized, cannot send")
             return False
 
-        url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
         headers = {"x-acs-dingtalk-access-token": token}
-        payload = {
-            "robotCode": self.config.client_id,
-            "userIds": [chat_id],
-            "msgKey": msg_key,
-            "msgParam": json.dumps(msg_param, ensure_ascii=False),
-        }
+        if chat_id.startswith("group:"):
+            # Group chat
+            url = "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
+            payload = {
+                "robotCode": self.config.client_id,
+                "openConversationId": chat_id[6:],  # Remove "group:" prefix,
+                "msgKey": msg_key,
+                "msgParam": json.dumps(msg_param, ensure_ascii=False),
+            }
+        else:
+            # Private chat
+            url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
+            payload = {
+                "robotCode": self.config.client_id,
+                "userIds": [chat_id],
+                "msgKey": msg_key,
+                "msgParam": json.dumps(msg_param, ensure_ascii=False),
+            }
 
         try:
             resp = await self._http.post(url, json=payload, headers=headers)
@@ -417,7 +502,14 @@ class DingTalkChannel(BaseChannel):
                 f"[Attachment send failed: {filename}]",
             )
 
-    async def _on_message(self, content: str, sender_id: str, sender_name: str) -> None:
+    async def _on_message(
+        self,
+        content: str,
+        sender_id: str,
+        sender_name: str,
+        conversation_type: str | None = None,
+        conversation_id: str | None = None,
+    ) -> None:
         """Handle incoming message (called by NanobotDingTalkHandler).
 
         Delegates to BaseChannel._handle_message() which enforces allow_from
@@ -425,14 +517,64 @@ class DingTalkChannel(BaseChannel):
         """
         try:
             logger.info("DingTalk inbound: {} from {}", content, sender_name)
+            is_group = conversation_type == "2" and conversation_id
+            chat_id = f"group:{conversation_id}" if is_group else sender_id
             await self._handle_message(
                 sender_id=sender_id,
-                chat_id=sender_id,  # For private chat, chat_id == sender_id
+                chat_id=chat_id,
                 content=str(content),
                 metadata={
                     "sender_name": sender_name,
                     "platform": "dingtalk",
+                    "conversation_type": conversation_type,
                 },
             )
         except Exception as e:
             logger.error("Error publishing DingTalk message: {}", e)
+
+    async def _download_dingtalk_file(
+        self,
+        download_code: str,
+        filename: str,
+        sender_id: str,
+    ) -> str | None:
+        """Download a DingTalk file to the media directory, return local path."""
+        from nanobot.config.paths import get_media_dir
+
+        try:
+            token = await self._get_access_token()
+            if not token or not self._http:
+                logger.error("DingTalk file download: no token or http client")
+                return None
+
+            # Step 1: Exchange downloadCode for a temporary download URL
+            api_url = "https://api.dingtalk.com/v1.0/robot/messageFiles/download"
+            headers = {"x-acs-dingtalk-access-token": token, "Content-Type": "application/json"}
+            payload = {"downloadCode": download_code, "robotCode": self.config.client_id}
+            resp = await self._http.post(api_url, json=payload, headers=headers)
+            if resp.status_code != 200:
+                logger.error("DingTalk get download URL failed: status={}, body={}", resp.status_code, resp.text)
+                return None
+
+            result = resp.json()
+            download_url = result.get("downloadUrl")
+            if not download_url:
+                logger.error("DingTalk download URL not found in response: {}", result)
+                return None
+
+            # Step 2: Download the file content
+            file_resp = await self._http.get(download_url, follow_redirects=True)
+            if file_resp.status_code != 200:
+                logger.error("DingTalk file download failed: status={}", file_resp.status_code)
+                return None
+
+            # Save to media directory (accessible under workspace)
+            download_dir = get_media_dir("dingtalk") / sender_id
+            download_dir.mkdir(parents=True, exist_ok=True)
+            file_path = download_dir / filename
+            await asyncio.to_thread(file_path.write_bytes, file_resp.content)
+            logger.info("DingTalk file saved: {}", file_path)
+            return str(file_path)
+        except Exception as e:
+            logger.error("DingTalk file download error: {}", e)
+            return None
