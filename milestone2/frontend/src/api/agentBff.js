@@ -26,7 +26,7 @@ export const forkConversation = (conversationId, data) =>
   request.post(`/conversations/${conversationId}/fork`, data)
 
 export const mergeConversation = (data) =>
-  request.post('/merge', data)
+  request.post('/conversations/merge', data)
 
 export const getConversationsStatus = () => request.get('/conversations/status')
 

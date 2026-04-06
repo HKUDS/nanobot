@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # BFF 后端服务
+  nanobot-bff:
+    build:
+      context: .
+      dockerfile: shared/Dockerfile.bff
+    ports:
+      - "8000:8000"
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
+      - HTTP_PROXY=${HTTP_PROXY}
+      - HTTPS_PROXY=${HTTPS_PROXY}
+    volumes:
+      - ./shared:/app/shared
+      - ./bff:/app/bff
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+
+  # 前端服务
+  nanobot-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      - nanobot-bff
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.3'
+
+  # Nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deployment/nginx.conf:/etc/nginx/nginx.conf
+      - ./deployment/ssl:/etc/nginx/ssl
+    depends_on:
+      - nanobot-bff
+      - nanobot-frontend
+    restart: unless-stopped
+
+volumes:
+  nanobot-workspace:
+    driver: local
+
+networks:
+  default:
+    driver: bridge

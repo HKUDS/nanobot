@@ -241,10 +241,79 @@
             :value="conv.conversation_id"
           />
         </el-select>
+        <div class="mt-3">
+          <el-checkbox v-model="autoMerge" label="自动合并（检测到冲突时使用LLM智能融合）" />
+        </div>
       </div>
       <template #footer>
         <el-button @click="showMergeDialog = false">取消</el-button>
         <el-button type="primary" @click="handleMerge" :loading="loading">确认合并</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 冲突解决对话框 -->
+    <el-dialog v-model="showConflictDialog" title="合并冲突解决" width="800px" :close-on-click-modal="false">
+      <div v-if="currentConflicts && currentConflicts.length > 0">
+        <p class="text-sm text-gray-600 mb-4">检测到 {{ currentConflicts.length }} 个冲突，请选择解决方式：</p>
+        
+        <el-tabs type="border-card">
+          <el-tab-pane v-for="(conflict, index) in currentConflicts" :key="index" :label="`冲突 ${index + 1}`">
+            <div class="p-4">
+              <p class="text-sm font-medium mb-2">位置: {{ conflict.position }}</p>
+              
+              <div class="grid grid-cols-2 gap-4">
+                <!-- 源分支内容 -->
+                <div class="border rounded-lg p-3">
+                  <div class="text-sm font-medium text-blue-600 mb-2">源分支内容</div>
+                  <div class="text-xs bg-blue-50 p-2 rounded">
+                    <pre>{{ formatConflictContent(conflict.source_content || conflict.source_step) }}</pre>
+                  </div>
+                  <el-button 
+                    size="small" 
+                    type="primary" 
+                    @click="resolveConflict(index, 'source')"
+                    class="mt-2"
+                  >
+                    保留此内容
+                  </el-button>
+                </div>
+                
+                <!-- 目标分支内容 -->
+                <div class="border rounded-lg p-3">
+                  <div class="text-sm font-medium text-green-600 mb-2">目标分支内容</div>
+                  <div class="text-xs bg-green-50 p-2 rounded">
+                    <pre>{{ formatConflictContent(conflict.target_content || conflict.target_step) }}</pre>
+                  </div>
+                  <el-button 
+                    size="small" 
+                    type="success" 
+                    @click="resolveConflict(index, 'target')"
+                    class="mt-2"
+                  >
+                    保留此内容
+                  </el-button>
+                </div>
+              </div>
+              
+              <div class="mt-4">
+                <el-button 
+                  size="small" 
+                  type="warning" 
+                  @click="resolveConflict(index, 'merge')"
+                >
+                  智能合并（使用LLM）
+                </el-button>
+              </div>
+            </div>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+      
+      <template #footer>
+        <el-button @click="showConflictDialog = false">取消合并</el-button>
+        <el-button type="primary" @click="applyConflictResolutions" :loading="loading">
+          应用所有解决方案
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -291,10 +360,14 @@ const healthOk = ref(false)
 const msgContent = ref('')
 const loading = ref(false)
 const showMergeDialog = ref(false)
+const showConflictDialog = ref(false)
 const mergeTargetId = ref('')
+const autoMerge = ref(true)
 const expandedIdx = ref(-1)
 const graphContainer = ref(null)
 const svgCanvas = ref(null)
+const currentConflicts = ref([])
+const conflictResolutions = ref({})
 
 let currentZoom = null
 
@@ -594,22 +667,86 @@ async function handleMerge() {
   if (!currentConvId.value || !mergeTargetId.value) return
   loading.value = true
   try {
-    await mergeConversation({
+    const res = await mergeConversation({
       source_conversation_id: currentConvId.value,
-      target_conversation_id: mergeTargetId.value
+      target_conversation_id: mergeTargetId.value,
+      auto_merge: autoMerge.value
     })
-    ElMessage.success('合并成功')
-    showMergeDialog.value = false
-    store.setCurrentConv(mergeTargetId.value)
-    await loadConversations()
-    const targetConv = convList.value.find(c => c.conversation_id === mergeTargetId.value)
-    if (targetConv) {
-      await loadHistory(mergeTargetId.value)
+    
+    if (res.data.status === 'conflict') {
+      // 显示冲突解决界面
+      currentConflicts.value = res.data.conflicts || []
+      conflictResolutions.value = {}
+      showConflictDialog.value = true
+      ElMessage.warning('检测到合并冲突，请手动解决')
+    } else if (res.data.status === 'merged') {
+      // 合并成功
+      ElMessage.success(res.data.message || '合并成功')
+      showMergeDialog.value = false
+      store.setCurrentConv(mergeTargetId.value)
+      await loadConversations()
+      const targetConv = convList.value.find(c => c.conversation_id === mergeTargetId.value)
+      if (targetConv) {
+        await loadHistory(mergeTargetId.value)
+      }
+      await nextTick()
+      drawGraph()
+    } else {
+      // 合并失败
+      ElMessage.error(res.data.message || '合并失败')
     }
-    await nextTick()
-    drawGraph()
   } catch (e) {
-    ElMessage.error('合并失败')
+    ElMessage.error('合并失败：' + (e.message || '未知错误'))
+  } finally {
+    loading.value = false
+  }
+}
+
+function formatConflictContent(content) {
+  if (typeof content === 'object') {
+    return JSON.stringify(content, null, 2)
+  }
+  return String(content || '')
+}
+
+function resolveConflict(index, resolution) {
+  conflictResolutions.value[index] = resolution
+  ElMessage.success(`冲突 ${index + 1} 已标记为 ${resolution === 'source' ? '保留源分支' : resolution === 'target' ? '保留目标分支' : '智能合并'}`)
+}
+
+async function applyConflictResolutions() {
+  if (Object.keys(conflictResolutions.value).length === 0) {
+    ElMessage.warning('请先为所有冲突选择解决方案')
+    return
+  }
+  
+  loading.value = true
+  try {
+    // 将用户选择的冲突解决方案发送给后端
+    const res = await mergeConversation({
+      source_conversation_id: currentConvId.value,
+      target_conversation_id: mergeTargetId.value,
+      auto_merge: false,  // 不使用自动合并，使用用户选择的方案
+      conflict_resolutions: conflictResolutions.value
+    })
+    
+    if (res.data.status === 'merged') {
+      ElMessage.success('冲突已解决，合并成功')
+      showConflictDialog.value = false
+      showMergeDialog.value = false
+      store.setCurrentConv(mergeTargetId.value)
+      await loadConversations()
+      const targetConv = convList.value.find(c => c.conversation_id === mergeTargetId.value)
+      if (targetConv) {
+        await loadHistory(mergeTargetId.value)
+      }
+      await nextTick()
+      drawGraph()
+    } else {
+      ElMessage.error('冲突解决失败：' + (res.data.message || '未知错误'))
+    }
+  } catch (e) {
+    ElMessage.error('冲突解决失败：' + (e.message || '未知错误'))
   } finally {
     loading.value = false
   }
