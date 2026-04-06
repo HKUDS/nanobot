@@ -175,7 +175,12 @@ class ExecTool(Tool):
             if "..\\" in cmd or "../" in cmd:
                 return "Error: Command blocked by safety guard (path traversal detected)"
 
+            # If a base working_dir is configured, it acts as the workspace boundary.
+            workspace = Path(self.working_dir).resolve() if self.working_dir else None
             cwd_path = Path(cwd).resolve()
+
+            if workspace and workspace != cwd_path and workspace not in cwd_path.parents:
+                return "Error: Command blocked by safety guard (working_dir outside workspace)"
 
             for raw in self._extract_absolute_paths(cmd):
                 try:
@@ -185,9 +190,10 @@ class ExecTool(Tool):
                     continue
 
                 media_path = get_media_dir().resolve()
+                boundary = workspace or cwd_path
                 if (p.is_absolute() 
-                    and cwd_path not in p.parents 
-                    and p != cwd_path
+                    and boundary not in p.parents 
+                    and p != boundary
                     and media_path not in p.parents
                     and p != media_path
                 ):
