@@ -5,15 +5,22 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import weakref
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from loguru import logger
 
 from nanobot.utils.prompt_templates import render_template
-from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, strip_think
+from nanobot.utils.helpers import (
+    ensure_dir,
+    estimate_message_tokens,
+    estimate_prompt_tokens_chain,
+    strip_think,
+    today_date,
+)
 
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.registry import ToolRegistry
@@ -22,6 +29,85 @@ from nanobot.utils.gitstore import GitStore
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session, SessionManager
+
+
+# ---------------------------------------------------------------------------
+# Topic memory (plan1): index + categorized topic files
+# ---------------------------------------------------------------------------
+
+INDEX_MAX_LINES = 200
+POINTER_MAX_CHARS = 150
+CONSOLIDATION_COOLDOWN_H = 24
+CONSOLIDATION_MIN_SESSIONS = 5
+MEMORY_CATEGORIES = ("user", "feedback", "project", "reference")
+_TOPIC_ENTRY_RE = re.compile(
+    r"---\s*\n"
+    r"category:\s*(\w+)\s*\n"
+    r"timestamp:\s*([^\n]+)\s*\n"
+    r"---\s*\n"
+    r"(.*?)(?=\n---\s*\n|\Z)",
+    re.S,
+)
+
+
+def _utc_ts() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _trim_pointer(text: str, max_chars: int = POINTER_MAX_CHARS) -> str:
+    text = text.replace("\n", " ").strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1] + "…"
+
+
+def _safe_append(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(content)
+
+
+class MemoryEntry:
+    """One atomic memory note with YAML front matter."""
+
+    def __init__(
+        self,
+        content: str,
+        category: str = "project",
+        topic: str = "general",
+        timestamp: Optional[str] = None,
+    ):
+        self.content = content.strip()
+        self.category = category if category in MEMORY_CATEGORIES else "project"
+        self.topic = re.sub(r"[^\w\-]", "_", topic.lower().strip()) or "general"
+        self.timestamp = timestamp or _utc_ts()
+
+    def to_md(self) -> str:
+        return (
+            f"---\n"
+            f"category: {self.category}\n"
+            f"timestamp: {self.timestamp}\n"
+            f"---\n"
+            f"{self.content}\n\n"
+        )
+
+    def as_pointer(self) -> str:
+        short = _trim_pointer(self.content)
+        return f"- [{self.category}] ({self.topic}) {short}"
+
+
+def _parse_topic_entries(raw: str, topic: str) -> list[MemoryEntry]:
+    entries: list[MemoryEntry] = []
+    for match in _TOPIC_ENTRY_RE.finditer(raw):
+        entries.append(
+            MemoryEntry(
+                content=match.group(3).strip(),
+                category=match.group(1),
+                topic=topic,
+                timestamp=match.group(2).strip(),
+            )
+        )
+    return entries
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +135,9 @@ class MemoryStore:
         self.user_file = workspace / "USER.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
+        self.topics_dir = ensure_dir(self.memory_dir / "topics")
+        self.meta_file = self.memory_dir / "meta.txt"
+        self.global_dir = Path.home() / ".nanobot" / "memory"
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md",
         ])
@@ -215,8 +304,174 @@ class MemoryStore:
     # -- context injection (used by context.py) ------------------------------
 
     def get_memory_context(self) -> str:
-        long_term = self.read_memory()
-        return f"## Long-term Memory\n{long_term}" if long_term else ""
+        """Long-term block for the system prompt: index + daily notes."""
+        block = self.build_context_block()
+        if not block.strip():
+            return ""
+        return f"## Long-term Memory\n\n{block}"
+
+    # -- topic memory (index + topics/) ------------------------------------
+
+    def get_today_file(self) -> Path:
+        return self.memory_dir / f"{today_date()}.md"
+
+    def read_today(self) -> str:
+        return self.read_file(self.get_today_file())
+
+    def append_today(self, content: str) -> None:
+        _safe_append(self.get_today_file(), content)
+
+    def read_index(self) -> str:
+        """Concise memory index: global ~/.nanobot/memory + project MEMORY.md."""
+        local = self.read_file(self.memory_file)
+        globe = (
+            self.read_file(self.global_dir / "MEMORY.md")
+            if self.global_dir.is_dir()
+            else ""
+        )
+        parts: list[str] = []
+        if globe.strip():
+            parts.append(f"## Global Memory\n{globe.strip()}")
+        if local.strip():
+            parts.append(f"## Project Memory\n{local.strip()}")
+        return "\n\n".join(parts)
+
+    def _trim_index_file(self) -> None:
+        """If MEMORY.md exceeds INDEX_MAX_LINES, keep the newest lines."""
+        text = self.read_file(self.memory_file)
+        lines = text.splitlines()
+        if len(lines) <= INDEX_MAX_LINES:
+            return
+        kept = lines[-INDEX_MAX_LINES:]
+        self.memory_file.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+    def _rebuild_index_from_topics(self) -> None:
+        """Regenerate MEMORY.md pointers from topic files (topic store only)."""
+        lines: list[str] = [f"# Memory Index (auto-generated {_utc_ts()})"]
+        for topic_file in sorted(self.topics_dir.glob("*.md")):
+            topic = topic_file.stem
+            raw = topic_file.read_text(encoding="utf-8")
+            for entry in _parse_topic_entries(raw, topic):
+                lines.append(entry.as_pointer())
+        if len(lines) > INDEX_MAX_LINES:
+            lines = lines[:1] + lines[-(INDEX_MAX_LINES - 1) :]
+        self.memory_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def _topic_path(self, topic: str) -> Path:
+        safe = re.sub(r"[^\w\-]", "_", topic.lower().strip()) or "general"
+        return self.topics_dir / f"{safe}.md"
+
+    def read_topic(self, topic: str) -> str:
+        return self.read_file(self._topic_path(topic))
+
+    def list_topics(self) -> list[str]:
+        return sorted(p.stem for p in self.topics_dir.glob("*.md"))
+
+    def remember(
+        self,
+        content: str,
+        category: str = "project",
+        topic: str = "general",
+    ) -> MemoryEntry:
+        """Append a structured entry to *topics* and a one-line pointer to MEMORY.md."""
+        entry = MemoryEntry(content, category=category, topic=topic)
+        _safe_append(self._topic_path(entry.topic), entry.to_md())
+        _safe_append(self.memory_file, entry.as_pointer() + "\n")
+        self._trim_index_file()
+        return entry
+
+    def search(self, query: str, max_results: int = 10) -> list[str]:
+        """Substring search across topic files (line hits with topic label)."""
+        query_lower = query.lower()
+        hits: list[str] = []
+        for topic_file in self.topics_dir.glob("*.md"):
+            topic = topic_file.stem
+            for line in topic_file.read_text(encoding="utf-8").splitlines():
+                if query_lower in line.lower():
+                    hits.append(f"[{topic}] {line.strip()}")
+                    if len(hits) >= max_results:
+                        return hits
+        return hits
+
+    def _read_meta(self) -> dict[str, str]:
+        raw = self.read_file(self.meta_file)
+        meta: dict[str, str] = {}
+        for line in raw.splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                meta[key.strip()] = value.strip()
+        return meta
+
+    def _write_meta(self, meta: dict[str, str]) -> None:
+        self.meta_file.write_text(
+            "\n".join(f"{k}={v}" for k, v in meta.items()) + "\n",
+            encoding="utf-8",
+        )
+
+    def should_consolidate(self) -> bool:
+        """True when cooldown elapsed and enough sessions since last run."""
+        meta = self._read_meta()
+        last = float(meta.get("last_consolidation", "0"))
+        sessions = int(meta.get("sessions_since", "0"))
+        hours_since = (time.time() - last) / 3600.0
+        return (
+            hours_since >= CONSOLIDATION_COOLDOWN_H
+            and sessions >= CONSOLIDATION_MIN_SESSIONS
+        )
+
+    def bump_session_count(self) -> None:
+        meta = self._read_meta()
+        meta["sessions_since"] = str(int(meta.get("sessions_since", "0")) + 1)
+        self._write_meta(meta)
+
+    def consolidate(self) -> str:
+        """Prune old daily notes, optionally rebuild index from topics, reset meta."""
+        if any(self.topics_dir.glob("*.md")):
+            self._rebuild_index_from_topics()
+
+        cutoff = time.time() - 30 * 86400
+        pruned = 0
+        for daily in self.memory_dir.glob("????-??-??.md"):
+            try:
+                if daily.stat().st_mtime < cutoff:
+                    daily.unlink()
+                    pruned += 1
+            except OSError:
+                logger.warning("Failed to prune daily note {}", daily)
+
+        meta = self._read_meta()
+        meta["last_consolidation"] = str(time.time())
+        meta["sessions_since"] = "0"
+        self._write_meta(meta)
+
+        topics = self.list_topics()
+        return (
+            f"Memory consolidation complete: index rebuilt from topics if any, "
+            f"{pruned} stale daily notes pruned. "
+            f"Active topics ({len(topics)}): {', '.join(topics) or '(none)'}. "
+            f"Consider merging contradictory entries in each topic file."
+        )
+
+    def build_context_block(self) -> str:
+        """Session-start block: memory index + today's notes (no outer heading)."""
+        parts: list[str] = []
+        index = self.read_index()
+        if index.strip():
+            parts.append(index)
+        today = self.read_today()
+        if today.strip():
+            parts.append(f"## Today's Notes ({today_date()})\n{today.strip()}")
+        return "\n\n".join(parts) if parts else ""
+
+    def stats(self) -> dict[str, Any]:
+        """Lightweight diagnostics for hooks and tooling."""
+        idx = self.read_file(self.memory_file)
+        return {
+            "topics_count": len(self.list_topics()),
+            "index_chars": len(idx),
+            "index_lines": idx.count("\n") + (1 if idx else 0),
+            "meta": self._read_meta(),
+        }
 
     # -- history.jsonl — append-only, JSONL format ---------------------------
 

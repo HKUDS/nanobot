@@ -20,6 +20,7 @@
 
 ## 📢 News
 
+- **2026-04-06** 🧠 **Topic memory, compactor & delegation** — `memory/topics/`, global index, `ContextCompactor`, and in-process `SubagentOrchestrator` / `ScopedDelegationRunner` with `FileScope` (see [Memory](#-memory)); background spawn remains `SubagentManager`.
 - **2026-04-02** 🧱 **Long-running tasks** run more reliably — core runtime hardening.
 - **2026-04-01** 🔑 GitHub Copilot auth restored; stricter workspace paths; OpenRouter Claude caching fix.
 - **2026-03-31** 🛰️ WeChat multimodal alignment, Discord/Matrix polish, Python SDK facade, MCP and tool fixes.
@@ -1637,10 +1638,36 @@ time.
 
 - `memory/history.jsonl` stores append-only summarized history
 - `SOUL.md`, `USER.md`, and `memory/MEMORY.md` store long-term knowledge managed by Dream
+- **Topic store** (optional structured notes): `memory/topics/<topic>.md` entries with front
+  matter (`category`, `timestamp`), one-line pointers appended to `memory/MEMORY.md`, and
+  `memory/meta.txt` for consolidation scheduling. Use `MemoryStore.remember()`,
+  `read_topic()`, `search()`, and `build_context_block()` from `nanobot.agent.memory`.
+- **Global index**: if present, `~/.nanobot/memory/MEMORY.md` is merged into the in-context
+  index via `read_index()` (same filename as the project index, different directory).
+- **Daily notes**: `memory/YYYY-MM-DD.md` for per-day scratch content (`read_today` /
+  `append_today`).
+- **Context compactor** (`nanobot.agent.compactor.ContextCompactor`): optional tiered
+  L0→L1→L2→L3 compression for long synthetic transcripts; can flush digests to persistent
+  memory via `remember()`. The main agent loop still uses the existing token-based
+  `Consolidator` for session history — use the compactor where you assemble a custom
+  context pipeline (e.g. subagents or future integrations).
+- **Scoped delegation** (`nanobot.agent.delegation`): `SubagentOrchestrator` and
+  `ScopedDelegationRunner` split work into `SubagentTask` waves with `FileScope`
+  (glob-based read/write limits on real tools), run tasks in parallel, merge file
+  outputs via `merge_results()`, and optionally push summaries into the compactor.
+  This is a **library API** for custom pipelines — distinct from chat **spawn**
+  (`SubagentManager`), which runs a background agent and posts results on the bus.
 - `Dream` runs on a schedule and can also be triggered manually
 - memory changes can be inspected and restored with built-in commands
 
 If you want the full design, see [docs/MEMORY.md](docs/MEMORY.md).
+
+> **Library stack smoke (topic memory + compactor + delegation):** combined wiring is
+> exercised in `tests/agent/test_library_stack_integration.py`. Run
+> `pytest tests/agent/test_library_stack_integration.py -q` after changing
+> `nanobot.agent.memory`, `compactor`, or `delegation`. Full agent package:
+> `pytest tests/agent/ -q` (use `--ignore=tests/agent/test_git_store.py` if Dulwich/git
+> init fails in your environment).
 
 ## 💻 CLI Reference
 
@@ -1904,7 +1931,9 @@ nanobot/
 ├── agent/          # 🧠 Core agent logic
 │   ├── loop.py     #    Agent loop (LLM ↔ tool execution)
 │   ├── context.py  #    Prompt builder
-│   ├── memory.py   #    Persistent memory
+│   ├── memory.py   #    Persistent memory (history, topics, Dream)
+│   ├── compactor.py #   Optional tiered context (library)
+│   ├── delegation.py #  Scoped subagent orchestration (library)
 │   ├── skills.py   #    Skills loader
 │   ├── subagent.py #    Background task execution
 │   └── tools/      #    Built-in tools (incl. spawn)

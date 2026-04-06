@@ -58,6 +58,11 @@ def timestamp() -> str:
     return datetime.now().isoformat()
 
 
+def today_date() -> str:
+    """Local calendar date as YYYY-MM-DD (for daily note filenames)."""
+    return datetime.now().strftime("%Y-%m-%d")
+
+
 def current_time_str(timezone: str | None = None) -> str:
     """Return the current time string."""
     from zoneinfo import ZoneInfo

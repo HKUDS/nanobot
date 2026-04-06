@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory import MemoryEntry, MemoryStore
 
 
 @pytest.fixture
@@ -265,3 +265,98 @@ class TestLegacyHistoryMigration:
         assert entries[0]["timestamp"] == "2026-04-01 10:00"
         assert "Broken" in entries[0]["content"]
         assert "migration." in entries[0]["content"]
+
+
+class TestReadIndexGlobal:
+    def test_read_index_includes_global_memory(self, tmp_path, monkeypatch):
+        home = Path(tmp_path) / "home"
+        home.mkdir()
+        gdir = home / ".nanobot" / "memory"
+        gdir.mkdir(parents=True)
+        (gdir / "MEMORY.md").write_text("global fact", encoding="utf-8")
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        store = MemoryStore(ws)
+        idx = store.read_index()
+        assert "Global Memory" in idx
+        assert "global fact" in idx
+
+    def test_read_index_combines_global_and_project(self, tmp_path, monkeypatch):
+        home = Path(tmp_path) / "home"
+        home.mkdir()
+        gdir = home / ".nanobot" / "memory"
+        gdir.mkdir(parents=True)
+        (gdir / "MEMORY.md").write_text("g", encoding="utf-8")
+        monkeypatch.setattr(Path, "home", lambda: home)
+
+        store = MemoryStore(tmp_path / "ws")
+        store.write_memory("local line")
+        idx = store.read_index()
+        assert "Global Memory" in idx
+        assert "Project Memory" in idx
+        assert "local line" in idx
+
+
+class TestTopicMemory:
+    def test_remember_writes_topic_and_pointer(self, store):
+        entry = store.remember(
+            "Prefer single quotes in JS",
+            category="user",
+            topic="code_style",
+        )
+        assert entry.topic == "code_style"
+        topic_path = store.memory_dir / "topics" / "code_style.md"
+        assert topic_path.exists()
+        assert "Prefer single quotes" in topic_path.read_text(encoding="utf-8")
+        mem = store.read_memory()
+        assert "[user]" in mem
+        assert "code_style" in mem
+
+    def test_search_finds_line(self, store):
+        store.remember("Auth uses JWT", category="project", topic="auth")
+        hits = store.search("JWT")
+        assert len(hits) == 1
+        assert "auth" in hits[0].lower()
+
+    def test_stats(self, store):
+        store.write_memory("idx")
+        store.remember("note", topic="general")
+        s = store.stats()
+        assert s["topics_count"] >= 1
+        assert "meta" in s
+
+    def test_consolidate_skips_rebuild_without_topic_files(self, tmp_path):
+        store = MemoryStore(tmp_path)
+        store.write_memory("manual only")
+        store.consolidate()
+        assert store.read_memory() == "manual only"
+
+    def test_build_context_includes_today(self, store):
+        store.append_today("- task A\n")
+        store.write_memory("fact")
+        block = store.build_context_block()
+        assert "Today's Notes" in block
+        assert "task A" in block
+        assert "Project Memory" in block or "fact" in block
+
+    def test_memory_entry_to_md_roundtrip(self):
+        entry = MemoryEntry(
+            "Hello world",
+            category="project",
+            topic="demo",
+            timestamp="2026-04-06T00:00:00Z",
+        )
+        raw = entry.to_md()
+        assert "category: project" in raw
+        assert "Hello world" in raw
+
+    def test_should_consolidate_false_when_new(self, store):
+        assert store.should_consolidate() is False
+
+    def test_bump_session_count_increments_meta(self, store):
+        store.bump_session_count()
+        assert int(store._read_meta().get("sessions_since", "0")) == 1
+        store.bump_session_count()
+        assert int(store._read_meta().get("sessions_since", "0")) == 2
