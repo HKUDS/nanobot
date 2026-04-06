@@ -1,6 +1,8 @@
 """Matrix (Element) channel — inbound sync + outbound message/media delivery."""
 
 import asyncio
+from html import escape as _html_escape
+from html.parser import HTMLParser
 import json
 import logging
 import mimetypes
@@ -101,6 +103,135 @@ MATRIX_HTML_CLEANER = nh3.Cleaner(
     link_rel="noopener noreferrer",
 )
 
+
+@dataclass
+class _ListItemHTMLState:
+    parts: list[str]
+    depth: int = 0
+    top_level_p_count: int = 0
+    has_other_top_level_content: bool = False
+
+
+class _CompactLooseListHTMLParser(HTMLParser):
+    """Remove a single paragraph wrapper from simple list items.
+
+    Matrix clients render loose list items with default paragraph margins.
+    We only compact the safe case where the entire list item is one paragraph,
+    which keeps nested lists and multi-paragraph items unchanged.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.parts: list[str] = []
+        self._stack: list[_ListItemHTMLState] = []
+
+    def _start_tag(self, tag: str, attrs: list[tuple[str, str | None]]) -> str:
+        chunks = [f"<{tag}"]
+        for attr_name, attr_value in attrs:
+            if attr_value is None:
+                chunks.append(f" {attr_name}")
+            else:
+                chunks.append(f' {attr_name}="{_html_escape(attr_value, quote=True)}"')
+        chunks.append(">")
+        return "".join(chunks)
+
+    def _start_end_tag(self, tag: str, attrs: list[tuple[str, str | None]]) -> str:
+        chunks = [f"<{tag}"]
+        for attr_name, attr_value in attrs:
+            if attr_value is None:
+                chunks.append(f" {attr_name}")
+            else:
+                chunks.append(f' {attr_name}="{_html_escape(attr_value, quote=True)}"')
+        chunks.append(" />")
+        return "".join(chunks)
+
+    def _append(self, fragment: str) -> None:
+        if self._stack:
+            self._stack[-1].parts.append(fragment)
+        else:
+            self.parts.append(fragment)
+
+    def _current_state(self) -> _ListItemHTMLState | None:
+        if not self._stack:
+            return None
+        return self._stack[-1]
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "li":
+            self._stack.append(_ListItemHTMLState(parts=[self._start_tag(tag, attrs)]))
+            return
+
+        state = self._current_state()
+        fragment = self._start_tag(tag, attrs)
+        self._append(fragment)
+        if state is None:
+            return
+        if state.depth == 0:
+            if tag == "p":
+                state.top_level_p_count += 1
+            else:
+                state.has_other_top_level_content = True
+        state.depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "li":
+            if not self._stack:
+                return
+            state = self._stack.pop()
+            state.parts.append("</li>")
+            html = "".join(state.parts)
+            if (
+                state.top_level_p_count == 1
+                and not state.has_other_top_level_content
+                and html.startswith("<li><p>")
+                and html.endswith("</p></li>")
+            ):
+                html = "<li>" + html[len("<li><p>") : -len("</p></li>")] + "</li>"
+            self._append(html)
+            return
+
+        state = self._current_state()
+        self._append(f"</{tag}>")
+        if state is None:
+            return
+        if state.depth > 0:
+            state.depth -= 1
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        state = self._current_state()
+        self._append(self._start_end_tag(tag, attrs))
+        if state is not None and state.depth == 0:
+            state.has_other_top_level_content = True
+
+    def handle_data(self, data: str) -> None:
+        state = self._current_state()
+        self._append(data)
+        if state is not None and state.depth == 0 and data.strip():
+            state.has_other_top_level_content = True
+
+    def handle_entityref(self, name: str) -> None:
+        self._append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        self._append(f"&#{name};")
+
+    def handle_comment(self, data: str) -> None:
+        state = self._current_state()
+        self._append(f"<!--{data}-->")
+        if state is not None and state.depth == 0:
+            state.has_other_top_level_content = True
+
+
+def _compact_loose_list_html(html: str) -> str:
+    """Collapse loose list paragraph wrappers without changing other HTML."""
+    parser = _CompactLooseListHTMLParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        return html
+    return "".join(parser.parts)
+
 @dataclass
 class _StreamBuf:
     """
@@ -121,7 +252,9 @@ class _StreamBuf:
 def _render_markdown_html(text: str) -> str | None:
     """Render markdown to sanitized HTML; returns None for plain text."""
     try:
-        formatted = MATRIX_HTML_CLEANER.clean(MATRIX_MARKDOWN(text)).strip()
+        formatted = _compact_loose_list_html(
+            MATRIX_HTML_CLEANER.clean(MATRIX_MARKDOWN(text)).strip()
+        )
     except Exception:
         return None
     if not formatted:
