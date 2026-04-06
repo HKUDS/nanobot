@@ -16,12 +16,29 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
+          cpus: "1"
           memory: 1G
         reservations:
-          cpus: '0.25'
+          cpus: "0.25"
           memory: 256M
-  
+
+  nanobot-api:
+    container_name: nanobot-api
+    <<: *common-config
+    command:
+      ["serve", "--host", "0.0.0.0", "-w", "/root/.nanobot/api-workspace"]
+    restart: unless-stopped
+    ports:
+      - 8900:8900
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
   nanobot-cli:
     <<: *common-config
     profiles:
