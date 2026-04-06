@@ -738,7 +738,7 @@ class ContainerOrchestrator:
         }
         
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=300)) as resp:
                 if resp.status != 200:
                     text = await resp.text()
                     raise Exception(f"Nanobot merge failed: {resp.status} - {text}")

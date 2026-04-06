@@ -196,7 +196,7 @@ async def send_message(conversation_id: str, req: MessageSend):
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     url = f"{get_container_url(conversation_id)}/chat"
-    async with httpx.AsyncClient(timeout=120.0) as client:  # 延长到120秒
+    async with httpx.AsyncClient(timeout=300.0) as client:  # 延长到300秒（5分钟）
         try:
             resp = await client.post(url, json={"content": req.content, "model": req.model})
             resp.raise_for_status()
