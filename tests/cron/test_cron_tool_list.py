@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from nanobot.agent.tools.cron import CronTool
 from nanobot.cron.service import CronService
-from nanobot.cron.types import CronJobState, CronSchedule
+from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
 
 
 def _make_tool(tmp_path) -> CronTool:
@@ -262,6 +262,39 @@ def test_list_shows_next_run(tmp_path) -> None:
     assert "(UTC)" in result
 
 
+def test_list_includes_protected_dream_system_job_with_memory_purpose(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool._cron.register_system_job(CronJob(
+        id="dream",
+        name="dream",
+        schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
+        payload=CronPayload(kind="system_event"),
+    ))
+
+    result = tool._list_jobs()
+
+    assert "- dream (id: dream, cron: 0 */2 * * * (UTC))" in result
+    assert "Dream memory consolidation for long-term memory." in result
+    assert "cannot be removed" in result
+
+
+def test_remove_protected_dream_job_returns_clear_feedback(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool._cron.register_system_job(CronJob(
+        id="dream",
+        name="dream",
+        schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
+        payload=CronPayload(kind="system_event"),
+    ))
+
+    result = tool._remove_job("dream")
+
+    assert "Cannot remove job `dream`." in result
+    assert "Dream memory consolidation job for long-term memory" in result
+    assert "cannot be removed" in result
+    assert tool._cron.get_job("dream") is not None
+
+
 def test_add_cron_job_defaults_to_tool_timezone(tmp_path) -> None:
     tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
     tool.set_context("telegram", "chat-1")
@@ -283,6 +316,28 @@ def test_add_at_job_uses_default_timezone_for_naive_datetime(tmp_path) -> None:
     job = tool._cron.list_jobs()[0]
     expected = int(datetime(2026, 3, 25, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
     assert job.schedule.at_ms == expected
+
+
+def test_add_job_delivers_by_default(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool.set_context("telegram", "chat-1")
+
+    result = tool._add_job("Morning standup", 60, None, None, None)
+
+    assert result.startswith("Created job")
+    job = tool._cron.list_jobs()[0]
+    assert job.payload.deliver is True
+
+
+def test_add_job_can_disable_delivery(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool.set_context("telegram", "chat-1")
+
+    result = tool._add_job("Background refresh", 60, None, None, None, deliver=False)
+
+    assert result.startswith("Created job")
+    job = tool._cron.list_jobs()[0]
+    assert job.payload.deliver is False
 
 
 def test_list_excludes_disabled_jobs(tmp_path) -> None:

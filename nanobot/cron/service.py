@@ -6,7 +6,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine, Literal
 
 from loguru import logger
 
@@ -351,9 +351,30 @@ class CronService:
         logger.info("Cron: added job '{}' ({})", name, job.id)
         return job
 
-    def remove_job(self, job_id: str) -> bool:
-        """Remove a job by ID."""
+    def register_system_job(self, job: CronJob) -> CronJob:
+        """Register an internal system job (idempotent on restart)."""
         store = self._load_store()
+        now = _now_ms()
+        job.state = CronJobState(next_run_at_ms=_compute_next_run(job.schedule, now))
+        job.created_at_ms = now
+        job.updated_at_ms = now
+        store.jobs = [j for j in store.jobs if j.id != job.id]
+        store.jobs.append(job)
+        self._save_store()
+        self._arm_timer()
+        logger.info("Cron: registered system job '{}' ({})", job.name, job.id)
+        return job
+
+    def remove_job(self, job_id: str) -> Literal["removed", "protected", "not_found"]:
+        """Remove a job by ID, unless it is a protected system job."""
+        store = self._load_store()
+        job = next((j for j in store.jobs if j.id == job_id), None)
+        if job is None:
+            return "not_found"
+        if job.payload.kind == "system_event":
+            logger.info("Cron: refused to remove protected system job {}", job_id)
+            return "protected"
+
         before = len(store.jobs)
         store.jobs = [j for j in store.jobs if j.id != job_id]
         removed = len(store.jobs) < before
@@ -362,8 +383,9 @@ class CronService:
             self._save_store()
             self._arm_timer()
             logger.info("Cron: removed job {}", job_id)
+            return "removed"
 
-        return removed
+        return "not_found"
 
     def enable_job(self, job_id: str, enabled: bool = True) -> CronJob | None:
         """Enable or disable a job."""

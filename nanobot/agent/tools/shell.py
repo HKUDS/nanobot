@@ -3,15 +3,35 @@
 import asyncio
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.sandbox import wrap_command
+from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
+from nanobot.config.paths import get_media_dir
 
 
+@tool_parameters(
+    tool_parameters_schema(
+        command=StringSchema("The shell command to execute"),
+        working_dir=StringSchema("Optional working directory for the command"),
+        timeout=IntegerSchema(
+            60,
+            description=(
+                "Timeout in seconds. Increase for long-running commands "
+                "like compilation or installation (default 60, max 600)."
+            ),
+            minimum=1,
+            maximum=600,
+        ),
+        required=["command"],
+    )
+)
 class ExecTool(Tool):
     """Tool to execute shell commands."""
 
@@ -22,10 +42,12 @@ class ExecTool(Tool):
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
+        sandbox: str = "",
         path_append: str = "",
     ):
         self.timeout = timeout
         self.working_dir = working_dir
+        self.sandbox = sandbox
         self.deny_patterns = deny_patterns or [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
@@ -53,30 +75,8 @@ class ExecTool(Tool):
         return "Execute a shell command and return its output. Use with caution."
 
     @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command to execute",
-                },
-                "working_dir": {
-                    "type": "string",
-                    "description": "Optional working directory for the command",
-                },
-                "timeout": {
-                    "type": "integer",
-                    "description": (
-                        "Timeout in seconds. Increase for long-running commands "
-                        "like compilation or installation (default 60, max 600)."
-                    ),
-                    "minimum": 1,
-                    "maximum": 600,
-                },
-            },
-            "required": ["command"],
-        }
+    def exclusive(self) -> bool:
+        return True
 
     async def execute(
         self, command: str, working_dir: str | None = None,
@@ -87,15 +87,23 @@ class ExecTool(Tool):
         if guard_error:
             return guard_error
 
+        if self.sandbox:
+            workspace = self.working_dir or cwd
+            command = wrap_command(self.sandbox, command, workspace, cwd)
+            cwd = str(Path(workspace).resolve())
+
         effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
 
-        env = os.environ.copy()
+        env = self._build_env()
+
         if self.path_append:
-            env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
+            command = f'export PATH="$PATH:{self.path_append}"; {command}'
+
+        bash = shutil.which("bash") or "/bin/bash"
 
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
+            process = await asyncio.create_subprocess_exec(
+                bash, "-l", "-c", command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
@@ -108,18 +116,11 @@ class ExecTool(Tool):
                     timeout=effective_timeout,
                 )
             except asyncio.TimeoutError:
-                process.kill()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    pass
-                finally:
-                    if sys.platform != "win32":
-                        try:
-                            os.waitpid(process.pid, os.WNOHANG)
-                        except (ProcessLookupError, ChildProcessError) as e:
-                            logger.debug("Process already reaped or not found: {}", e)
+                await self._kill_process(process)
                 return f"Error: Command timed out after {effective_timeout} seconds"
+            except asyncio.CancelledError:
+                await self._kill_process(process)
+                raise
 
             output_parts = []
 
@@ -150,6 +151,36 @@ class ExecTool(Tool):
         except Exception as e:
             return f"Error executing command: {str(e)}"
 
+    @staticmethod
+    async def _kill_process(process: asyncio.subprocess.Process) -> None:
+        """Kill a subprocess and reap it to prevent zombies."""
+        process.kill()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            if sys.platform != "win32":
+                try:
+                    os.waitpid(process.pid, os.WNOHANG)
+                except (ProcessLookupError, ChildProcessError) as e:
+                    logger.debug("Process already reaped or not found: {}", e)
+
+    def _build_env(self) -> dict[str, str]:
+        """Build a minimal environment for subprocess execution.
+
+        Uses HOME so that ``bash -l`` sources the user's profile (which sets
+        PATH and other essentials).  Only PATH is extended with *path_append*;
+        the parent process's environment is **not** inherited, preventing
+        secrets in env vars from leaking to LLM-generated commands.
+        """
+        home = os.environ.get("HOME", "/tmp")
+        return {
+            "HOME": home,
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "TERM": os.environ.get("TERM", "dumb"),
+        }
+
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
         cmd = command.strip()
@@ -179,14 +210,23 @@ class ExecTool(Tool):
                     p = Path(expanded).expanduser().resolve()
                 except Exception:
                     continue
-                if p.is_absolute() and cwd_path not in p.parents and p != cwd_path:
+
+                media_path = get_media_dir().resolve()
+                if (p.is_absolute() 
+                    and cwd_path not in p.parents 
+                    and p != cwd_path
+                    and media_path not in p.parents
+                    and p != media_path
+                ):
                     return "Error: Command blocked by safety guard (path outside working dir)"
 
         return None
 
     @staticmethod
     def _extract_absolute_paths(command: str) -> list[str]:
-        win_paths = re.findall(r"[A-Za-z]:\\[^\s\"'|><;]+", command)   # Windows: C:\...
+        # Windows: match drive-root paths like `C:\` as well as `C:\path\to\file`
+        # NOTE: `*` is required so `C:\` (nothing after the slash) is still extracted.
+        win_paths = re.findall(r"[A-Za-z]:\\[^\s\"'|><;]*", command)
         posix_paths = re.findall(r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
         home_paths = re.findall(r"(?:^|[\s|>'\"])(~[^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~
         return win_paths + posix_paths + home_paths
