@@ -296,3 +296,113 @@ async def test_persistent_retry_aborts_after_ten_identical_transient_errors(monk
     assert provider.calls == 10
     assert delays == [1, 2, 4, 4, 4, 4, 4, 4, 4]
 
+
+# ---------------------------------------------------------------------------
+# Fallback provider tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_uses_fallback_on_429(monkeypatch) -> None:
+    """When primary fails with 429, tries fallback before sleeping."""
+    primary = ScriptedProvider([
+        LLMResponse(content="429 rate limit", finish_reason="error"),
+    ])
+    fallback = ScriptedProvider([LLMResponse(content="ok from fallback")])
+    primary.fallback_providers = [fallback]
+
+    delays: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await primary.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.content == "ok from fallback"
+    assert primary.calls == 1
+    assert fallback.calls == 1
+    assert delays == []  # no sleep: fallback succeeded immediately
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_fallback_uses_own_default_model(monkeypatch) -> None:
+    """Fallback is called with model=None so it uses its own default, not the primary's."""
+    primary = ScriptedProvider([
+        LLMResponse(content="429 rate limit", finish_reason="error"),
+    ])
+    fallback = ScriptedProvider([LLMResponse(content="ok")])
+    primary.fallback_providers = [fallback]
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", lambda _: None)
+
+    await primary.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        model="primary-model-v2",
+    )
+
+    assert fallback.last_kwargs["model"] is None
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_sleeps_if_all_fallbacks_also_rate_limited(monkeypatch) -> None:
+    """If every fallback is also rate-limited, falls back to the existing sleep+retry."""
+    primary = ScriptedProvider([
+        LLMResponse(content="429 rate limit", finish_reason="error"),
+        LLMResponse(content="ok after retry"),
+    ])
+    fallback = ScriptedProvider([
+        LLMResponse(content="429 fallback limited", finish_reason="error"),
+    ])
+    primary.fallback_providers = [fallback]
+
+    delays: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await primary.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.content == "ok after retry"
+    assert primary.calls == 2
+    assert fallback.calls == 1
+    assert delays == [1]
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_returns_fallback_non_transient_error(monkeypatch) -> None:
+    """A non-transient error from a fallback is returned immediately (no further retries)."""
+    primary = ScriptedProvider([
+        LLMResponse(content="429 rate limit", finish_reason="error"),
+    ])
+    fallback = ScriptedProvider([
+        LLMResponse(content="401 unauthorized", finish_reason="error"),
+    ])
+    primary.fallback_providers = [fallback]
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", lambda _: None)
+
+    response = await primary.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.content == "401 unauthorized"
+    assert primary.calls == 1
+    assert fallback.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_tries_multiple_fallbacks_in_order(monkeypatch) -> None:
+    """With multiple fallbacks, they are tried in order until one succeeds."""
+    primary = ScriptedProvider([
+        LLMResponse(content="429 rate limit", finish_reason="error"),
+    ])
+    fallback1 = ScriptedProvider([LLMResponse(content="429 also limited", finish_reason="error")])
+    fallback2 = ScriptedProvider([LLMResponse(content="ok from fallback2")])
+    primary.fallback_providers = [fallback1, fallback2]
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", lambda _: None)
+
+    response = await primary.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.content == "ok from fallback2"
+    assert primary.calls == 1
+    assert fallback1.calls == 1
+    assert fallback2.calls == 1
