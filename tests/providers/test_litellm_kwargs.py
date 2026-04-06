@@ -8,6 +8,7 @@ Validates that:
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -53,11 +54,59 @@ def _fake_tool_call_response() -> SimpleNamespace:
     return SimpleNamespace(choices=[choice], usage=usage)
 
 
+class _StalledStream:
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        await asyncio.sleep(3600)
+        raise StopAsyncIteration
+
+
 def test_openrouter_spec_is_gateway() -> None:
     spec = find_by_name("openrouter")
     assert spec is not None
     assert spec.is_gateway is True
     assert spec.default_api_base == "https://openrouter.ai/api/v1"
+
+
+def test_openrouter_sets_default_attribution_headers() -> None:
+    spec = find_by_name("openrouter")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        OpenAICompatProvider(
+            api_key="sk-or-test-key",
+            api_base="https://openrouter.ai/api/v1",
+            default_model="anthropic/claude-sonnet-4-5",
+            spec=spec,
+        )
+
+    headers = MockClient.call_args.kwargs["default_headers"]
+    assert headers["HTTP-Referer"] == "https://github.com/HKUDS/nanobot"
+    assert headers["X-OpenRouter-Title"] == "nanobot"
+    assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
+    assert "x-session-affinity" in headers
+
+
+def test_openrouter_user_headers_override_default_attribution() -> None:
+    spec = find_by_name("openrouter")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        OpenAICompatProvider(
+            api_key="sk-or-test-key",
+            api_base="https://openrouter.ai/api/v1",
+            default_model="anthropic/claude-sonnet-4-5",
+            extra_headers={
+                "HTTP-Referer": "https://nanobot.ai",
+                "X-OpenRouter-Title": "Nanobot Pro",
+                "X-Custom-App": "enabled",
+            },
+            spec=spec,
+        )
+
+    headers = MockClient.call_args.kwargs["default_headers"]
+    assert headers["HTTP-Referer"] == "https://nanobot.ai"
+    assert headers["X-OpenRouter-Title"] == "Nanobot Pro"
+    assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
+    assert headers["X-Custom-App"] == "enabled"
 
 
 @pytest.mark.asyncio
@@ -175,3 +224,86 @@ def test_openai_model_passthrough() -> None:
             spec=spec,
         )
     assert provider.get_default_model() == "gpt-4o"
+
+
+def test_openai_compat_supports_temperature_matches_reasoning_model_rules() -> None:
+    assert OpenAICompatProvider._supports_temperature("gpt-4o") is True
+    assert OpenAICompatProvider._supports_temperature("gpt-5-chat") is False
+    assert OpenAICompatProvider._supports_temperature("o3-mini") is False
+    assert OpenAICompatProvider._supports_temperature("gpt-4o", reasoning_effort="medium") is False
+
+
+def test_openai_compat_build_kwargs_uses_gpt5_safe_parameters() -> None:
+    spec = find_by_name("openai")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-5-chat",
+            spec=spec,
+        )
+
+    kwargs = provider._build_kwargs(
+        messages=[{"role": "user", "content": "hello"}],
+        tools=None,
+        model="gpt-5-chat",
+        max_tokens=4096,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    assert kwargs["model"] == "gpt-5-chat"
+    assert kwargs["max_completion_tokens"] == 4096
+    assert "max_tokens" not in kwargs
+    assert "temperature" not in kwargs
+
+
+def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    sanitized = provider._sanitize_messages([
+        {
+            "role": "assistant",
+            "content": "done",
+            "reasoning_content": "hidden",
+            "extra_content": {"debug": True},
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "fn", "arguments": "{}"},
+                    "extra_content": {"google": {"thought_signature": "sig"}},
+                }
+            ],
+        }
+    ])
+
+    assert sanitized[0]["reasoning_content"] == "hidden"
+    assert sanitized[0]["extra_content"] == {"debug": True}
+    assert sanitized[0]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "sig"}}
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_stream_watchdog_returns_error_on_stall(monkeypatch) -> None:
+    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "0")
+    mock_create = AsyncMock(return_value=_StalledStream())
+    spec = find_by_name("openai")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_create
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-4o",
+            spec=spec,
+        )
+        result = await provider.chat_stream(
+            messages=[{"role": "user", "content": "hello"}],
+            model="gpt-4o",
+        )
+
+    assert result.finish_reason == "error"
+    assert result.content is not None
+    assert "stream stalled" in result.content

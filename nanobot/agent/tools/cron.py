@@ -4,11 +4,37 @@ from contextvars import ContextVar
 from datetime import datetime
 from typing import Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.cron.service import CronService
-from nanobot.cron.types import CronJobState, CronSchedule
+from nanobot.cron.types import CronJob, CronJobState, CronSchedule
 
 
+@tool_parameters(
+    tool_parameters_schema(
+        action=StringSchema("Action to perform", enum=["add", "list", "remove"]),
+        message=StringSchema(
+            "Instruction for the agent to execute when the job triggers "
+            "(e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report')"
+        ),
+        every_seconds=IntegerSchema(0, description="Interval in seconds (for recurring tasks)"),
+        cron_expr=StringSchema("Cron expression like '0 9 * * *' (for scheduled tasks)"),
+        tz=StringSchema(
+            "Optional IANA timezone for cron expressions (e.g. 'America/Vancouver'). "
+            "When omitted with cron_expr, the tool's default timezone applies."
+        ),
+        at=StringSchema(
+            "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00'). "
+            "Naive values use the tool's default timezone."
+        ),
+        deliver=BooleanSchema(
+            description="Whether to deliver the execution result to the user channel (default true)",
+            default=True,
+        ),
+        job_id=StringSchema("Job ID (for remove)"),
+        required=["action"],
+    )
+)
 class CronTool(Tool):
     """Tool to schedule reminders and recurring tasks."""
 
@@ -64,44 +90,6 @@ class CronTool(Tool):
             f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}."
         )
 
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "action": {
-                    "type": "string",
-                    "enum": ["add", "list", "remove"],
-                    "description": "Action to perform",
-                },
-                "message": {"type": "string", "description": "Reminder message (for add)"},
-                "every_seconds": {
-                    "type": "integer",
-                    "description": "Interval in seconds (for recurring tasks)",
-                },
-                "cron_expr": {
-                    "type": "string",
-                    "description": "Cron expression like '0 9 * * *' (for scheduled tasks)",
-                },
-                "tz": {
-                    "type": "string",
-                    "description": (
-                        "Optional IANA timezone for cron expressions "
-                        f"(e.g. 'America/Vancouver'). Defaults to {self._default_timezone}."
-                    ),
-                },
-                "at": {
-                    "type": "string",
-                    "description": (
-                        "ISO datetime for one-time execution "
-                        f"(e.g. '2026-02-12T10:30:00'). Naive values default to {self._default_timezone}."
-                    ),
-                },
-                "job_id": {"type": "string", "description": "Job ID (for remove)"},
-            },
-            "required": ["action"],
-        }
-
     async def execute(
         self,
         action: str,
@@ -111,12 +99,13 @@ class CronTool(Tool):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
+        deliver: bool = True,
         **kwargs: Any,
     ) -> str:
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(message, every_seconds, cron_expr, tz, at)
+            return self._add_job(message, every_seconds, cron_expr, tz, at, deliver)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -130,6 +119,7 @@ class CronTool(Tool):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
+        deliver: bool = True,
     ) -> str:
         if not message:
             return "Error: message is required for add"
@@ -171,7 +161,7 @@ class CronTool(Tool):
             name=message[:30],
             schedule=schedule,
             message=message,
-            deliver=True,
+            deliver=deliver,
             channel=self._channel,
             to=self._chat_id,
             delete_after_run=delete_after,
@@ -212,6 +202,12 @@ class CronTool(Tool):
             lines.append(f"  Next run: {self._format_timestamp(state.next_run_at_ms, display_tz)}")
         return lines
 
+    @staticmethod
+    def _system_job_purpose(job: CronJob) -> str:
+        if job.name == "dream":
+            return "Dream memory consolidation for long-term memory."
+        return "System-managed internal job."
+
     def _list_jobs(self) -> str:
         jobs = self._cron.list_jobs()
         if not jobs:
@@ -220,6 +216,9 @@ class CronTool(Tool):
         for j in jobs:
             timing = self._format_timing(j.schedule)
             parts = [f"- {j.name} (id: {j.id}, {timing})"]
+            if j.payload.kind == "system_event":
+                parts.append(f"  Purpose: {self._system_job_purpose(j)}")
+                parts.append("  Protected: visible for inspection, but cannot be removed.")
             parts.extend(self._format_state(j.state, j.schedule))
             lines.append("\n".join(parts))
         return "Scheduled jobs:\n" + "\n".join(lines)
@@ -227,6 +226,19 @@ class CronTool(Tool):
     def _remove_job(self, job_id: str | None) -> str:
         if not job_id:
             return "Error: job_id is required for remove"
-        if self._cron.remove_job(job_id):
+        result = self._cron.remove_job(job_id)
+        if result == "removed":
             return f"Removed job {job_id}"
+        if result == "protected":
+            job = self._cron.get_job(job_id)
+            if job and job.name == "dream":
+                return (
+                    "Cannot remove job `dream`.\n"
+                    "This is a system-managed Dream memory consolidation job for long-term memory.\n"
+                    "It remains visible so you can inspect it, but it cannot be removed."
+                )
+            return (
+                f"Cannot remove job `{job_id}`.\n"
+                "This is a protected system-managed cron job."
+            )
         return f"Job {job_id} not found"
