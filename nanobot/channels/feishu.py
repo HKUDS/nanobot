@@ -431,8 +431,13 @@ class FeishuChannel(BaseChannel):
             if not mid:
                 continue
             mention_open_id = getattr(mid, "open_id", None) or ""
-            if self._bot_open_id and mention_open_id == self._bot_open_id:
-                return True
+            if self._bot_open_id:
+                if mention_open_id == self._bot_open_id:
+                    return True
+            else:
+                # Fallback heuristic when bot open_id is unavailable
+                if not getattr(mid, "user_id", None) and mention_open_id.startswith("ou_"):
+                    return True
         return False
 
     def _is_group_message_for_bot(self, message: Any) -> bool:
