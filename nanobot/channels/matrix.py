@@ -1,6 +1,7 @@
 """Matrix (Element) channel — inbound sync + outbound message/media delivery."""
 
 import asyncio
+import json
 import logging
 import mimetypes
 import time
@@ -21,6 +22,7 @@ try:
         DownloadError,
         InviteEvent,
         JoinError,
+        LoginResponse,
         MatrixRoom,
         MemoryDownloadResponse,
         RoomEncryptedMedia,
@@ -203,8 +205,9 @@ class MatrixConfig(Base):
 
     enabled: bool = False
     homeserver: str = "https://matrix.org"
-    access_token: str = ""
     user_id: str = ""
+    password: str = ""
+    access_token: str = ""
     device_id: str = ""
     e2ee_enabled: bool = True
     sync_stop_grace_seconds: int = 2
@@ -256,17 +259,15 @@ class MatrixChannel(BaseChannel):
         self._running = True
         _configure_nio_logging_bridge()
 
-        store_path = get_data_dir() / "matrix-store"
-        store_path.mkdir(parents=True, exist_ok=True)
+        self.store_path = get_data_dir() / "matrix-store"
+        self.store_path.mkdir(parents=True, exist_ok=True)
+        self.session_path = self.store_path / "session.json"
 
         self.client = AsyncClient(
             homeserver=self.config.homeserver, user=self.config.user_id,
-            store_path=store_path,
+            store_path=self.store_path,
             config=AsyncClientConfig(store_sync_tokens=True, encryption_enabled=self.config.e2ee_enabled),
         )
-        self.client.user_id = self.config.user_id
-        self.client.access_token = self.config.access_token
-        self.client.device_id = self.config.device_id
 
         self._register_event_callbacks()
         self._register_response_callbacks()
@@ -274,13 +275,49 @@ class MatrixChannel(BaseChannel):
         if not self.config.e2ee_enabled:
             logger.warning("Matrix E2EE disabled; encrypted rooms may be undecryptable.")
 
-        if self.config.device_id:
+        if self.config.password:
+            if self.config.access_token or self.config.device_id:
+                logger.warning("Password-based Matrix login active; access_token and device_id fields will be ignored.")
+
+            create_new_session = True
+            if self.session_path.exists():
+                logger.info("Found session.json at {}; attempting to use existing session...", self.session_path)
+                try:
+                    with open(self.session_path, "r", encoding="utf-8") as f:
+                        session = json.load(f)
+                    self.client.user_id = self.config.user_id
+                    self.client.access_token = session["access_token"]
+                    self.client.device_id = session["device_id"]
+                    self.client.load_store()
+                    logger.info("Successfully loaded from existing session")
+                    create_new_session = False
+                except Exception as e:
+                    logger.warning("Failed to load from existing session: {}", e)
+                    logger.info("Falling back to password login...")
+
+            if create_new_session:
+                logger.info("Using password login...")
+                resp = await self.client.login(self.config.password)
+                if isinstance(resp, LoginResponse):
+                    logger.info("Logged in using a password; saving details to disk")
+                    self._write_session_to_disk(resp)
+                else:
+                    logger.error("Failed to log in: {}", resp)
+                    return
+
+        elif self.config.access_token and self.config.device_id:
             try:
+                self.client.user_id = self.config.user_id
+                self.client.access_token = self.config.access_token
+                self.client.device_id = self.config.device_id
                 self.client.load_store()
-            except Exception:
-                logger.exception("Matrix store load failed; restart may replay recent messages.")
+                logger.info("Successfully loaded from existing session")
+            except Exception as e:
+                logger.warning("Failed to load from existing session: {}", e)
+
         else:
-            logger.warning("Matrix device_id empty; restart may replay recent messages.")
+            logger.warning("Unable to load a Matrix session due to missing password, access_token, or device_id; encryption may not work")
+            return
 
         self._sync_task = asyncio.create_task(self._sync_loop())
 
@@ -303,6 +340,19 @@ class MatrixChannel(BaseChannel):
                     pass
         if self.client:
             await self.client.close()
+
+    def _write_session_to_disk(self, resp: LoginResponse) -> None:
+        """Save login session to disk for persistence across restarts."""
+        session = {
+            "access_token": resp.access_token,
+            "device_id": resp.device_id,
+        }
+        try:
+            with open(self.session_path, "w", encoding="utf-8") as f:
+                json.dump(session, f, indent=2)
+            logger.info("Session saved to {}", self.session_path)
+        except Exception as e:
+            logger.warning("Failed to save session: {}", e)
 
     def _is_workspace_path_allowed(self, path: Path) -> bool:
         """Check path is inside workspace (when restriction enabled)."""

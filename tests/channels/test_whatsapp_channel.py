@@ -163,6 +163,107 @@ async def test_group_policy_mention_accepts_mentioned_group_message():
     assert kwargs["sender_id"] == "user"
 
 
+@pytest.mark.asyncio
+async def test_sender_id_prefers_phone_jid_over_lid():
+    """sender_id should resolve to phone number when @s.whatsapp.net JID is present."""
+    ch = WhatsAppChannel({"enabled": True}, MagicMock())
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "lid1",
+            "sender": "ABC123@lid.whatsapp.net",
+            "pn": "5551234@s.whatsapp.net",
+            "content": "hi",
+            "timestamp": 1,
+        })
+    )
+
+    kwargs = ch._handle_message.await_args.kwargs
+    assert kwargs["sender_id"] == "5551234"
+
+
+@pytest.mark.asyncio
+async def test_lid_to_phone_cache_resolves_lid_only_messages():
+    """When only LID is present, a cached LID→phone mapping should be used."""
+    ch = WhatsAppChannel({"enabled": True}, MagicMock())
+    ch._handle_message = AsyncMock()
+
+    # First message: both phone and LID → builds cache
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "c1",
+            "sender": "LID99@lid.whatsapp.net",
+            "pn": "5559999@s.whatsapp.net",
+            "content": "first",
+            "timestamp": 1,
+        })
+    )
+    # Second message: only LID, no phone
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "c2",
+            "sender": "LID99@lid.whatsapp.net",
+            "pn": "",
+            "content": "second",
+            "timestamp": 2,
+        })
+    )
+
+    second_kwargs = ch._handle_message.await_args_list[1].kwargs
+    assert second_kwargs["sender_id"] == "5559999"
+
+
+@pytest.mark.asyncio
+async def test_voice_message_transcription_uses_media_path():
+    """Voice messages are transcribed when media path is available."""
+    ch = WhatsAppChannel({"enabled": True}, MagicMock())
+    ch.transcription_provider = "openai"
+    ch.transcription_api_key = "sk-test"
+    ch._handle_message = AsyncMock()
+    ch.transcribe_audio = AsyncMock(return_value="Hello world")
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "v1",
+            "sender": "12345@s.whatsapp.net",
+            "pn": "",
+            "content": "[Voice Message]",
+            "timestamp": 1,
+            "media": ["/tmp/voice.ogg"],
+        })
+    )
+
+    ch.transcribe_audio.assert_awaited_once_with("/tmp/voice.ogg")
+    kwargs = ch._handle_message.await_args.kwargs
+    assert kwargs["content"].startswith("Hello world")
+
+
+@pytest.mark.asyncio
+async def test_voice_message_no_media_shows_not_available():
+    """Voice messages without media produce a fallback placeholder."""
+    ch = WhatsAppChannel({"enabled": True}, MagicMock())
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "v2",
+            "sender": "12345@s.whatsapp.net",
+            "pn": "",
+            "content": "[Voice Message]",
+            "timestamp": 1,
+        })
+    )
+
+    kwargs = ch._handle_message.await_args.kwargs
+    assert kwargs["content"] == "[Voice Message: Audio not available]"
+
+
 def test_load_or_create_bridge_token_persists_generated_secret(tmp_path):
     token_path = tmp_path / "whatsapp-auth" / "bridge-token"
 

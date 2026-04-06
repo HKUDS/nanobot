@@ -3,6 +3,7 @@
 import asyncio
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.sandbox import wrap_command
 from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.config.paths import get_media_dir
 
@@ -40,10 +42,12 @@ class ExecTool(Tool):
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
+        sandbox: str = "",
         path_append: str = "",
     ):
         self.timeout = timeout
         self.working_dir = working_dir
+        self.sandbox = sandbox
         self.deny_patterns = deny_patterns or [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
@@ -83,15 +87,23 @@ class ExecTool(Tool):
         if guard_error:
             return guard_error
 
+        if self.sandbox:
+            workspace = self.working_dir or cwd
+            command = wrap_command(self.sandbox, command, workspace, cwd)
+            cwd = str(Path(workspace).resolve())
+
         effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
 
-        env = os.environ.copy()
+        env = self._build_env()
+
         if self.path_append:
-            env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
+            command = f'export PATH="$PATH:{self.path_append}"; {command}'
+
+        bash = shutil.which("bash") or "/bin/bash"
 
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
+            process = await asyncio.create_subprocess_exec(
+                bash, "-l", "-c", command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
@@ -104,18 +116,11 @@ class ExecTool(Tool):
                     timeout=effective_timeout,
                 )
             except asyncio.TimeoutError:
-                process.kill()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5.0)
-                except asyncio.TimeoutError:
-                    pass
-                finally:
-                    if sys.platform != "win32":
-                        try:
-                            os.waitpid(process.pid, os.WNOHANG)
-                        except (ProcessLookupError, ChildProcessError) as e:
-                            logger.debug("Process already reaped or not found: {}", e)
+                await self._kill_process(process)
                 return f"Error: Command timed out after {effective_timeout} seconds"
+            except asyncio.CancelledError:
+                await self._kill_process(process)
+                raise
 
             output_parts = []
 
@@ -145,6 +150,36 @@ class ExecTool(Tool):
 
         except Exception as e:
             return f"Error executing command: {str(e)}"
+
+    @staticmethod
+    async def _kill_process(process: asyncio.subprocess.Process) -> None:
+        """Kill a subprocess and reap it to prevent zombies."""
+        process.kill()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except asyncio.TimeoutError:
+            pass
+        finally:
+            if sys.platform != "win32":
+                try:
+                    os.waitpid(process.pid, os.WNOHANG)
+                except (ProcessLookupError, ChildProcessError) as e:
+                    logger.debug("Process already reaped or not found: {}", e)
+
+    def _build_env(self) -> dict[str, str]:
+        """Build a minimal environment for subprocess execution.
+
+        Uses HOME so that ``bash -l`` sources the user's profile (which sets
+        PATH and other essentials).  Only PATH is extended with *path_append*;
+        the parent process's environment is **not** inherited, preventing
+        secrets in env vars from leaking to LLM-generated commands.
+        """
+        home = os.environ.get("HOME", "/tmp")
+        return {
+            "HOME": home,
+            "LANG": os.environ.get("LANG", "C.UTF-8"),
+            "TERM": os.environ.get("TERM", "dumb"),
+        }
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""

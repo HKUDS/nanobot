@@ -298,6 +298,7 @@ class FeishuChannel(BaseChannel):
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stream_bufs: dict[str, _FeishuStreamBuf] = {}
+        self._bot_open_id: str | None = None
 
     @staticmethod
     def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
@@ -378,6 +379,15 @@ class FeishuChannel(BaseChannel):
         self._ws_thread = threading.Thread(target=run_ws, daemon=True)
         self._ws_thread.start()
 
+        # Fetch bot's own open_id for accurate @mention matching
+        self._bot_open_id = await asyncio.get_running_loop().run_in_executor(
+            None, self._fetch_bot_open_id
+        )
+        if self._bot_open_id:
+            logger.info("Feishu bot open_id: {}", self._bot_open_id)
+        else:
+            logger.warning("Could not fetch bot open_id; @mention matching may be inaccurate")
+
         logger.info("Feishu bot started with WebSocket long connection")
         logger.info("No public IP required - using WebSocket to receive events")
 
@@ -396,6 +406,20 @@ class FeishuChannel(BaseChannel):
         self._running = False
         logger.info("Feishu bot stopped")
 
+    def _fetch_bot_open_id(self) -> str | None:
+        """Fetch the bot's own open_id via GET /open-apis/bot/v3/info."""
+        from lark_oapi.api.bot.v3 import GetBotInfoRequest
+        try:
+            request = GetBotInfoRequest.builder().build()
+            response = self._client.bot.v3.bot_info.get(request)
+            if response.success() and response.data and response.data.bot:
+                return getattr(response.data.bot, "open_id", None)
+            logger.warning("Failed to get bot info: code={}, msg={}", response.code, response.msg)
+            return None
+        except Exception as e:
+            logger.warning("Error fetching bot info: {}", e)
+            return None
+
     def _is_bot_mentioned(self, message: Any) -> bool:
         """Check if the bot is @mentioned in the message."""
         raw_content = message.content or ""
@@ -406,9 +430,14 @@ class FeishuChannel(BaseChannel):
             mid = getattr(mention, "id", None)
             if not mid:
                 continue
-            # Bot mentions have no user_id (None or "") but a valid open_id
-            if not getattr(mid, "user_id", None) and (getattr(mid, "open_id", None) or "").startswith("ou_"):
-                return True
+            mention_open_id = getattr(mid, "open_id", None) or ""
+            if self._bot_open_id:
+                if mention_open_id == self._bot_open_id:
+                    return True
+            else:
+                # Fallback heuristic when bot open_id is unavailable
+                if not getattr(mid, "user_id", None) and mention_open_id.startswith("ou_"):
+                    return True
         return False
 
     def _is_group_message_for_bot(self, message: Any) -> bool:
@@ -417,7 +446,7 @@ class FeishuChannel(BaseChannel):
             return True
         return self._is_bot_mentioned(message)
 
-    def _add_reaction_sync(self, message_id: str, emoji_type: str) -> None:
+    def _add_reaction_sync(self, message_id: str, emoji_type: str) -> str | None:
         """Sync helper for adding reaction (runs in thread pool)."""
         from lark_oapi.api.im.v1 import CreateMessageReactionRequest, CreateMessageReactionRequestBody, Emoji
         try:
@@ -433,22 +462,54 @@ class FeishuChannel(BaseChannel):
 
             if not response.success():
                 logger.warning("Failed to add reaction: code={}, msg={}", response.code, response.msg)
+                return None
             else:
                 logger.debug("Added {} reaction to message {}", emoji_type, message_id)
+                return response.data.reaction_id if response.data else None
         except Exception as e:
             logger.warning("Error adding reaction: {}", e)
+            return None
 
-    async def _add_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> None:
+    async def _add_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> str | None:
         """
         Add a reaction emoji to a message (non-blocking).
 
         Common emoji types: THUMBSUP, OK, EYES, DONE, OnIt, HEART
         """
         if not self._client:
+            return None
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+
+    def _remove_reaction_sync(self, message_id: str, reaction_id: str) -> None:
+        """Sync helper for removing reaction (runs in thread pool)."""
+        from lark_oapi.api.im.v1 import DeleteMessageReactionRequest
+        try:
+            request = DeleteMessageReactionRequest.builder() \
+                .message_id(message_id) \
+                .reaction_id(reaction_id) \
+                .build()
+
+            response = self._client.im.v1.message_reaction.delete(request)
+            if response.success():
+                logger.debug("Removed reaction {} from message {}", reaction_id, message_id)
+            else:
+                logger.debug("Failed to remove reaction: code={}, msg={}", response.code, response.msg)
+        except Exception as e:
+            logger.debug("Error removing reaction: {}", e)
+
+    async def _remove_reaction(self, message_id: str, reaction_id: str) -> None:
+        """
+        Remove a reaction emoji from a message (non-blocking).
+
+        Used to clear the "processing" indicator after bot replies.
+        """
+        if not self._client or not reaction_id:
             return
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._add_reaction_sync, message_id, emoji_type)
+        await loop.run_in_executor(None, self._remove_reaction_sync, message_id, reaction_id)
 
     # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(
@@ -783,9 +844,9 @@ class FeishuChannel(BaseChannel):
         """Download a file/audio/media from a Feishu message by message_id and file_key."""
         from lark_oapi.api.im.v1 import GetMessageResourceRequest
 
-        # Feishu API only accepts 'image' or 'file' as type parameter
-        # Convert 'audio' to 'file' for API compatibility
-        if resource_type == "audio":
+        # Feishu resource download API only accepts 'image' or 'file' as type.
+        # Both 'audio' and 'media' (video) messages use type='file' for download.
+        if resource_type in ("audio", "media"):
             resource_type = "file"
 
         try:
@@ -1046,6 +1107,9 @@ class FeishuChannel(BaseChannel):
 
         # --- stream end: final update or fallback ---
         if meta.get("_stream_end"):
+            if (message_id := meta.get("message_id")) and (reaction_id := meta.get("reaction_id")):
+                await self._remove_reaction(message_id, reaction_id)
+
             buf = self._stream_bufs.pop(chat_id, None)
             if not buf or not buf.text:
                 return
@@ -1227,7 +1291,7 @@ class FeishuChannel(BaseChannel):
                 return
 
             # Add reaction
-            await self._add_reaction(message_id, self.config.react_emoji)
+            reaction_id = await self._add_reaction(message_id, self.config.react_emoji)
 
             # Parse content
             content_parts = []
@@ -1305,6 +1369,7 @@ class FeishuChannel(BaseChannel):
                 media=media_paths,
                 metadata={
                     "message_id": message_id,
+                    "reaction_id": reaction_id,
                     "chat_type": chat_type,
                     "msg_type": msg_type,
                     "parent_id": parent_id,
