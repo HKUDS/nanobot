@@ -36,42 +36,42 @@ services:
       - -c
       - |
         mkdir -p /home/nanobot/.nanobot
-        P_NAME=$(echo "${PROVIDER_NAME}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
-        echo "Configuring providers: custom and ${P_NAME}..."
+        P_NAME=$$(echo "$${PROVIDER_NAME}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+        echo "Configuring providers: custom and $${P_NAME}..."
         
         cat <<EOF > /home/nanobot/.nanobot/config.json
         {
           "providers": {
             "custom": {
-              "apiKey": "${PROVIDER_API_KEY}",
-              "apiBase": "${PROVIDER_API_BASE}"
+              "apiKey": "$${PROVIDER_API_KEY}",
+              "apiBase": "$${PROVIDER_API_BASE}"
             },
-            "${P_NAME}": {
-              "apiKey": "${PROVIDER_API_KEY}",
-              "apiBase": "${PROVIDER_API_BASE}"
+            "$${P_NAME}": {
+              "apiKey": "$${PROVIDER_API_KEY}",
+              "apiBase": "$${PROVIDER_API_BASE}"
             }
           },
           "agents": {
             "defaults": {
-              "model": "${LLM_MODEL}"
+              "model": "$${LLM_MODEL}"
             }
           },
           "channels": {
             "telegram": {
               "enabled": true,
-              "token": "${TELEGRAM_TOKEN}",
-              "allowFrom": ${TELEGRAM_ALLOWED_USERS}
+              "token": "$${TELEGRAM_TOKEN}",
+              "allowFrom": $${TELEGRAM_ALLOWED_USERS}
             },
             "discord": {
               "enabled": true,
-              "token": "${DISCORD_TOKEN}",
-              "allowFrom": ${DISCORD_ALLOWED_USERS}
+              "token": "$${DISCORD_TOKEN}",
+              "allowFrom": $${DISCORD_ALLOWED_USERS}
             }
           },
           "tools": {
             "web": {
               "search": {
-                "apiKey": "${BRAVE_API_KEY}",
+                "apiKey": "$${BRAVE_API_KEY}",
                 "maxResults": 5
               }
             },
@@ -79,7 +79,7 @@ services:
               "stripe": {
                 "url": "https://mcp.stripe.com/",
                 "headers": {
-                  "Authorization": "Bearer ${STRIPE_SECRET_KEY}"
+                  "Authorization": "Bearer $${STRIPE_SECRET_KEY}"
                 }
               },
               "fencode_blog_mcp": {
