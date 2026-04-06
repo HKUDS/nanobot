@@ -443,6 +443,7 @@ def _make_provider(config: Config):
             api_base=config.get_api_base(model),
             default_model=model,
             extra_headers=p.extra_headers if p else None,
+            stream_idle_timeout_s=config.runtime.stream_idle_timeout_s,
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
@@ -453,6 +454,7 @@ def _make_provider(config: Config):
             default_model=model,
             extra_headers=p.extra_headers if p else None,
             spec=spec,
+            stream_idle_timeout_s=config.runtime.stream_idle_timeout_s,
         )
 
     defaults = config.agents.defaults
@@ -572,11 +574,13 @@ def serve(
         provider_retry_mode=runtime_config.agents.defaults.provider_retry_mode,
         web_config=runtime_config.tools.web,
         exec_config=runtime_config.tools.exec,
+        file_config=runtime_config.tools.file,
         restrict_to_workspace=runtime_config.tools.restrict_to_workspace,
         session_manager=session_manager,
         mcp_servers=runtime_config.tools.mcp_servers,
         channels_config=runtime_config.channels,
         timezone=runtime_config.agents.defaults.timezone,
+        max_concurrent_requests=runtime_config.agents.defaults.max_concurrent_requests,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -662,12 +666,14 @@ def gateway(
         max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
         provider_retry_mode=config.agents.defaults.provider_retry_mode,
         exec_config=config.tools.exec,
+        file_config=config.tools.file,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        max_concurrent_requests=config.agents.defaults.max_concurrent_requests,
     )
 
     # Set cron callback (needs agent)
@@ -894,11 +900,13 @@ def agent(
         max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
         provider_retry_mode=config.agents.defaults.provider_retry_mode,
         exec_config=config.tools.exec,
+        file_config=config.tools.file,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        max_concurrent_requests=config.agents.defaults.max_concurrent_requests,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):

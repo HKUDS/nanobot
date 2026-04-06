@@ -285,8 +285,7 @@ def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_compat_stream_watchdog_returns_error_on_stall(monkeypatch) -> None:
-    monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "0")
+async def test_openai_compat_stream_watchdog_returns_error_on_stall() -> None:
     mock_create = AsyncMock(return_value=_StalledStream())
     spec = find_by_name("openai")
 
@@ -298,6 +297,7 @@ async def test_openai_compat_stream_watchdog_returns_error_on_stall(monkeypatch)
             api_key="sk-test-key",
             default_model="gpt-4o",
             spec=spec,
+            stream_idle_timeout_s=0,
         )
         result = await provider.chat_stream(
             messages=[{"role": "user", "content": "hello"}],

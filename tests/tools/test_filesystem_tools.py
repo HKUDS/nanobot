@@ -89,7 +89,7 @@ class TestReadFileTool:
         # Each line is ~110 chars, 2000 lines ≈ 220 KB > 128 KB limit
         f.write_text("\n".join("x" * 110 for _ in range(2000)), encoding="utf-8")
         result = await tool.execute(path=str(f))
-        assert len(result) <= ReadFileTool._MAX_CHARS + 500  # small margin for footer
+        assert len(result) <= tool.max_chars + 500  # small margin for footer
         assert "Use offset=" in result
 
 

@@ -77,6 +77,7 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    max_concurrent_requests: int = 3  # Max parallel LLM requests per loop; <=0 = unlimited
 
 
 class AgentsConfig(Base):
@@ -176,6 +177,23 @@ class ExecToolConfig(Base):
     timeout: int = 60
     path_append: str = ""
     sandbox: str = ""  # sandbox backend: "" (none) or "bwrap"
+    max_timeout: int = 600
+    max_output: int = 10_000
+
+
+class FileToolConfig(Base):
+    """Filesystem tool configuration."""
+
+    max_chars: int = 128_000      # read_file: max characters returned per call
+    default_limit: int = 2_000   # read_file: default line limit when not specified
+    default_max: int = 200        # list_dir: default max entries returned
+
+
+class RuntimeConfig(Base):
+    """Runtime tuning knobs that do not belong to a specific subsystem."""
+
+    stream_idle_timeout_s: int = 90  # Seconds before a stalled LLM stream is aborted
+
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
@@ -194,7 +212,8 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
-    restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
+    file: FileToolConfig = Field(default_factory=FileToolConfig)
+    restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
@@ -208,6 +227,7 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
 
     @property
     def workspace_path(self) -> Path:

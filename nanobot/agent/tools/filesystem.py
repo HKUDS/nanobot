@@ -79,8 +79,17 @@ class _FsTool(Tool):
 class ReadFileTool(_FsTool):
     """Read file contents with optional line-based pagination."""
 
-    _MAX_CHARS = 128_000
-    _DEFAULT_LIMIT = 2000
+    def __init__(
+        self,
+        max_chars: int = 128_000,
+        default_limit: int = 2000,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        extra_allowed_dirs: list[Path] | None = None,
+    ):
+        super().__init__(workspace=workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_allowed_dirs)
+        self.max_chars = max_chars
+        self.default_limit = default_limit
 
     @property
     def name(self) -> str:
@@ -129,15 +138,15 @@ class ReadFileTool(_FsTool):
                 return f"Error: offset {offset} is beyond end of file ({total} lines)"
 
             start = offset - 1
-            end = min(start + (limit or self._DEFAULT_LIMIT), total)
+            end = min(start + (limit or self.default_limit), total)
             numbered = [f"{start + i + 1}| {line}" for i, line in enumerate(all_lines[start:end])]
             result = "\n".join(numbered)
 
-            if len(result) > self._MAX_CHARS:
+            if len(result) > self.max_chars:
                 trimmed, chars = [], 0
                 for line in numbered:
                     chars += len(line) + 1
-                    if chars > self._MAX_CHARS:
+                    if chars > self.max_chars:
                         break
                     trimmed.append(line)
                 end = start + len(trimmed)
@@ -331,12 +340,21 @@ class EditFileTool(_FsTool):
 class ListDirTool(_FsTool):
     """List directory contents with optional recursion."""
 
-    _DEFAULT_MAX = 200
     _IGNORE_DIRS = {
         ".git", "node_modules", "__pycache__", ".venv", "venv",
         "dist", "build", ".tox", ".mypy_cache", ".pytest_cache",
         ".ruff_cache", ".coverage", "htmlcov",
     }
+
+    def __init__(
+        self,
+        default_max: int = 200,
+        workspace: Path | None = None,
+        allowed_dir: Path | None = None,
+        extra_allowed_dirs: list[Path] | None = None,
+    ):
+        super().__init__(workspace=workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_allowed_dirs)
+        self.default_max = default_max
 
     @property
     def name(self) -> str:
@@ -367,7 +385,7 @@ class ListDirTool(_FsTool):
             if not dp.is_dir():
                 return f"Error: Not a directory: {path}"
 
-            cap = max_entries or self._DEFAULT_MAX
+            cap = max_entries or self.default_max
             items: list[str] = []
             total = 0
 

@@ -10,34 +10,20 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.sandbox import wrap_command
 from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.config.paths import get_media_dir
 
 
-@tool_parameters(
-    tool_parameters_schema(
-        command=StringSchema("The shell command to execute"),
-        working_dir=StringSchema("Optional working directory for the command"),
-        timeout=IntegerSchema(
-            60,
-            description=(
-                "Timeout in seconds. Increase for long-running commands "
-                "like compilation or installation (default 60, max 600)."
-            ),
-            minimum=1,
-            maximum=600,
-        ),
-        required=["command"],
-    )
-)
 class ExecTool(Tool):
     """Tool to execute shell commands."""
 
     def __init__(
         self,
         timeout: int = 60,
+        max_timeout: int = 600,
+        max_output: int = 10_000,
         working_dir: str | None = None,
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
@@ -46,6 +32,8 @@ class ExecTool(Tool):
         path_append: str = "",
     ):
         self.timeout = timeout
+        self.max_timeout = max_timeout
+        self.max_output = max_output
         self.working_dir = working_dir
         self.sandbox = sandbox
         self.deny_patterns = deny_patterns or [
@@ -67,9 +55,6 @@ class ExecTool(Tool):
     def name(self) -> str:
         return "exec"
 
-    _MAX_TIMEOUT = 600
-    _MAX_OUTPUT = 10_000
-
     @property
     def description(self) -> str:
         return "Execute a shell command and return its output. Use with caution."
@@ -77,6 +62,23 @@ class ExecTool(Tool):
     @property
     def exclusive(self) -> bool:
         return True
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return tool_parameters_schema(
+            command=StringSchema("The shell command to execute"),
+            working_dir=StringSchema("Optional working directory for the command"),
+            timeout=IntegerSchema(
+                self.timeout,
+                description=(
+                    f"Timeout in seconds. Increase for long-running commands "
+                    f"like compilation or installation (default {self.timeout}, max {self.max_timeout})."
+                ),
+                minimum=1,
+                maximum=self.max_timeout,
+            ),
+            required=["command"],
+        )
 
     async def execute(
         self, command: str, working_dir: str | None = None,
@@ -92,7 +94,7 @@ class ExecTool(Tool):
             command = wrap_command(self.sandbox, command, workspace, cwd)
             cwd = str(Path(workspace).resolve())
 
-        effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
+        effective_timeout = min(timeout or self.timeout, self.max_timeout)
 
         env = self._build_env()
 
@@ -137,7 +139,7 @@ class ExecTool(Tool):
             result = "\n".join(output_parts) if output_parts else "(no output)"
 
             # Head + tail truncation to preserve both start and end of output
-            max_len = self._MAX_OUTPUT
+            max_len = self.max_output
             if len(result) > max_len:
                 half = max_len // 2
                 result = (
