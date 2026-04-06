@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import re
 import secrets
 import string
@@ -9,7 +11,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import json_repair
-from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
@@ -47,6 +48,8 @@ class AnthropicProvider(LLMProvider):
             client_kw["base_url"] = api_base
         if extra_headers:
             client_kw["default_headers"] = extra_headers
+        # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
+        client_kw["max_retries"] = 0
         self._client = AsyncAnthropic(**client_kw)
 
     @staticmethod
@@ -251,8 +254,9 @@ class AnthropicProvider(LLMProvider):
     # Prompt caching
     # ------------------------------------------------------------------
 
-    @staticmethod
+    @classmethod
     def _apply_cache_control(
+        cls,
         system: str | list[dict[str, Any]],
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
@@ -279,7 +283,8 @@ class AnthropicProvider(LLMProvider):
         new_tools = tools
         if tools:
             new_tools = list(tools)
-            new_tools[-1] = {**new_tools[-1], "cache_control": marker}
+            for idx in cls._tool_cache_marker_indices(new_tools):
+                new_tools[idx] = {**new_tools[idx], "cache_control": marker}
 
         return system, new_msgs, new_tools
 
@@ -370,17 +375,20 @@ class AnthropicProvider(LLMProvider):
 
         usage: dict[str, int] = {}
         if response.usage:
+            input_tokens = response.usage.input_tokens
+            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            total_prompt_tokens = input_tokens + cache_creation + cache_read
             usage = {
-                "prompt_tokens": response.usage.input_tokens,
+                "prompt_tokens": total_prompt_tokens,
                 "completion_tokens": response.usage.output_tokens,
-                "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+                "total_tokens": total_prompt_tokens + response.usage.output_tokens,
             }
             for attr in ("cache_creation_input_tokens", "cache_read_input_tokens"):
                 val = getattr(response.usage, attr, 0)
                 if val:
                     usage[attr] = val
             # Normalize to cached_tokens for downstream consistency.
-            cache_read = usage.get("cache_read_input_tokens", 0)
             if cache_read:
                 usage["cached_tokens"] = cache_read
 
@@ -395,6 +403,15 @@ class AnthropicProvider(LLMProvider):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _handle_error(e: Exception) -> LLMResponse:
+        msg = f"Error calling LLM: {e}"
+        response = getattr(e, "response", None)
+        retry_after = LLMProvider._extract_retry_after_from_headers(getattr(response, "headers", None))
+        if retry_after is None:
+            retry_after = LLMProvider._extract_retry_after(msg)
+        return LLMResponse(content=msg, finish_reason="error", retry_after=retry_after)
 
     async def chat(
         self,
@@ -414,7 +431,7 @@ class AnthropicProvider(LLMProvider):
             response = await self._client.messages.create(**kwargs)
             return self._parse_response(response)
         except Exception as e:
-            return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
+            return self._handle_error(e)
 
     async def chat_stream(
         self,
@@ -431,15 +448,35 @@ class AnthropicProvider(LLMProvider):
             messages, tools, model, max_tokens, temperature,
             reasoning_effort, tool_choice,
         )
+        idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
             async with self._client.messages.stream(**kwargs) as stream:
                 if on_content_delta:
-                    async for text in stream.text_stream:
+                    stream_iter = stream.text_stream.__aiter__()
+                    while True:
+                        try:
+                            text = await asyncio.wait_for(
+                                stream_iter.__anext__(),
+                                timeout=idle_timeout_s,
+                            )
+                        except StopAsyncIteration:
+                            break
                         await on_content_delta(text)
-                response = await stream.get_final_message()
+                response = await asyncio.wait_for(
+                    stream.get_final_message(),
+                    timeout=idle_timeout_s,
+                )
             return self._parse_response(response)
+        except asyncio.TimeoutError:
+            return LLMResponse(
+                content=(
+                    f"Error calling LLM: stream stalled for more than "
+                    f"{idle_timeout_s} seconds"
+                ),
+                finish_reason="error",
+            )
         except Exception as e:
-            return LLMResponse(content=f"Error calling LLM: {e}", finish_reason="error")
+            return self._handle_error(e)
 
     def get_default_model(self) -> str:
         return self.default_model

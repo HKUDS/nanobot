@@ -132,7 +132,11 @@ def _render_markdown_html(text: str) -> str | None:
     return formatted
 
 
-def _build_matrix_text_content(text: str, event_id: str | None = None) -> dict[str, object]:
+def _build_matrix_text_content(
+    text: str,
+    event_id: str | None = None,
+    thread_relates_to: dict[str, object] | None = None,
+) -> dict[str, object]:
     """
     Constructs and returns a dictionary representing the matrix text content with optional
     HTML formatting and reference to an existing event for replacement. This function is 
@@ -144,6 +148,9 @@ def _build_matrix_text_content(text: str, event_id: str | None = None) -> dict[s
         include information indicating that the message is a replacement of the specified 
         event.
     :type event_id: str | None
+    :param thread_relates_to: Optional Matrix thread relation metadata. For edits this is
+        stored in ``m.new_content`` so the replacement remains in the same thread.
+    :type thread_relates_to: dict[str, object] | None
     :return: A dictionary containing the matrix text content, potentially enriched with 
         HTML formatting and replacement metadata if applicable.
     :rtype: dict[str, object]
@@ -153,14 +160,18 @@ def _build_matrix_text_content(text: str, event_id: str | None = None) -> dict[s
         content["format"] = MATRIX_HTML_FORMAT
         content["formatted_body"] = html
     if event_id:
-        content["m.new_content"] =  {
+        content["m.new_content"] = {
             "body": text,
-            "msgtype": "m.text"
+            "msgtype": "m.text",
         }
         content["m.relates_to"] = {
             "rel_type": "m.replace",
-            "event_id": event_id
+            "event_id": event_id,
         }
+        if thread_relates_to:
+            content["m.new_content"]["m.relates_to"] = thread_relates_to
+    elif thread_relates_to:
+        content["m.relates_to"] = thread_relates_to
 
     return content
 
@@ -475,9 +486,11 @@ class MatrixChannel(BaseChannel):
 
             await self._stop_typing_keepalive(chat_id, clear_typing=True)
             
-            content = _build_matrix_text_content(buf.text, buf.event_id)
-            if relates_to:
-                content["m.relates_to"] = relates_to
+            content = _build_matrix_text_content(
+                buf.text,
+                buf.event_id,
+                thread_relates_to=relates_to,
+            )
             await self._send_room_content(chat_id, content)
             return
 
@@ -494,14 +507,18 @@ class MatrixChannel(BaseChannel):
 
         if not buf.last_edit or (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
             try:
-                content = _build_matrix_text_content(buf.text, buf.event_id)
+                content = _build_matrix_text_content(
+                    buf.text,
+                    buf.event_id,
+                    thread_relates_to=relates_to,
+                )
                 response = await self._send_room_content(chat_id, content)
                 buf.last_edit = now
                 if not buf.event_id:
                     # we are editing the same message all the time, so only the first time the event id needs to be set
                     buf.event_id = response.event_id
             except Exception:
-                await self._stop_typing_keepalive(metadata["room_id"], clear_typing=True)
+                await self._stop_typing_keepalive(chat_id, clear_typing=True)
                 pass
 
 

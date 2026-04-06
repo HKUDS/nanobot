@@ -22,6 +22,7 @@ if sys.platform == "win32":
             pass
 
 import typer
+from loguru import logger
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.formatted_text import ANSI, HTML
@@ -37,6 +38,11 @@ from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.restart import (
+    consume_restart_notice_from_env,
+    format_restart_completed_message,
+    should_show_cli_restart_notice,
+)
 
 app = typer.Typer(
     name="nanobot",
@@ -415,6 +421,9 @@ def _make_provider(config: Config):
             api_base=p.api_base,
             default_model=model,
         )
+    elif backend == "github_copilot":
+        from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+        provider = GitHubCopilotProvider(default_model=model)
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
         provider = AnthropicProvider(
@@ -539,8 +548,10 @@ def serve(
         model=runtime_config.agents.defaults.model,
         max_iterations=runtime_config.agents.defaults.max_tool_iterations,
         context_window_tokens=runtime_config.agents.defaults.context_window_tokens,
-        web_search_config=runtime_config.tools.web.search,
-        web_proxy=runtime_config.tools.web.proxy or None,
+        context_block_limit=runtime_config.agents.defaults.context_block_limit,
+        max_tool_result_chars=runtime_config.agents.defaults.max_tool_result_chars,
+        provider_retry_mode=runtime_config.agents.defaults.provider_retry_mode,
+        web_config=runtime_config.tools.web,
         exec_config=runtime_config.tools.exec,
         restrict_to_workspace=runtime_config.tools.restrict_to_workspace,
         session_manager=session_manager,
@@ -626,8 +637,10 @@ def gateway(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
-        web_search_config=config.tools.web.search,
-        web_proxy=config.tools.web.proxy or None,
+        web_config=config.tools.web,
+        context_block_limit=config.agents.defaults.context_block_limit,
+        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
+        provider_retry_mode=config.agents.defaults.provider_retry_mode,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -640,6 +653,15 @@ def gateway(
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
+        # Dream is an internal job — run directly, not through the agent loop.
+        if job.name == "dream":
+            try:
+                await agent.dream.run()
+                logger.info("Dream cron job completed")
+            except Exception:
+                logger.exception("Dream cron job failed")
+            return None
+
         from nanobot.agent.tools.cron import CronTool
         from nanobot.agent.tools.message import MessageTool
         from nanobot.utils.evaluator import evaluate_response
@@ -759,6 +781,21 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
+    # Register Dream system job (always-on, idempotent on restart)
+    dream_cfg = config.agents.defaults.dream
+    if dream_cfg.model_override:
+        agent.dream.model = dream_cfg.model_override
+    agent.dream.max_batch_size = dream_cfg.max_batch_size
+    agent.dream.max_iterations = dream_cfg.max_iterations
+    from nanobot.cron.types import CronJob, CronPayload
+    cron.register_system_job(CronJob(
+        id="dream",
+        name="dream",
+        schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
+        payload=CronPayload(kind="system_event"),
+    ))
+    console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
+
     async def run():
         try:
             await cron.start()
@@ -832,8 +869,10 @@ def agent(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
-        web_search_config=config.tools.web.search,
-        web_proxy=config.tools.web.proxy or None,
+        web_config=config.tools.web,
+        context_block_limit=config.agents.defaults.context_block_limit,
+        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
+        provider_retry_mode=config.agents.defaults.provider_retry_mode,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -841,6 +880,12 @@ def agent(
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
     )
+    restart_notice = consume_restart_notice_from_env()
+    if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
+        _print_agent_response(
+            format_restart_completed_message(restart_notice.started_at_raw),
+            render_markdown=False,
+        )
 
     # Shared reference for progress callbacks
     _thinking: ThinkingSpinner | None = None
@@ -959,6 +1004,9 @@ def agent(
                 while True:
                     try:
                         _flush_pending_tty_input()
+                        # Stop spinner before user input to avoid prompt_toolkit conflicts
+                        if renderer:
+                            renderer.stop_for_input()
                         user_input = await _read_interactive_input_async()
                         command = user_input.strip()
                         if not command:
@@ -1020,12 +1068,18 @@ app.add_typer(channels_app, name="channels")
 
 
 @channels_app.command("status")
-def channels_status():
+def channels_status(
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
     """Show channel status."""
     from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config
+    from nanobot.config.loader import load_config, set_config_path
 
-    config = load_config()
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
+
+    config = load_config(resolved_config_path)
 
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
@@ -1112,12 +1166,17 @@ def _get_bridge_dir() -> Path:
 def channels_login(
     channel_name: str = typer.Argument(..., help="Channel name (e.g. weixin, whatsapp)"),
     force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with a channel via QR code or other interactive login."""
     from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config
+    from nanobot.config.loader import load_config, set_config_path
 
-    config = load_config()
+    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
+    if resolved_config_path is not None:
+        set_config_path(resolved_config_path)
+
+    config = load_config(resolved_config_path)
     channel_cfg = getattr(config.channels, channel_name, None) or {}
 
     # Validate channel exists
@@ -1289,26 +1348,16 @@ def _login_openai_codex() -> None:
 
 @_register_login("github_copilot")
 def _login_github_copilot() -> None:
-    import asyncio
-
-    from openai import AsyncOpenAI
-
-    console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
-
-    async def _trigger():
-        client = AsyncOpenAI(
-            api_key="dummy",
-            base_url="https://api.githubcopilot.com",
-        )
-        await client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=1,
-        )
-
     try:
-        asyncio.run(_trigger())
-        console.print("[green]✓ Authenticated with GitHub Copilot[/green]")
+        from nanobot.providers.github_copilot_provider import login_github_copilot
+
+        console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
+        token = login_github_copilot(
+            print_fn=lambda s: console.print(s),
+            prompt_fn=lambda s: typer.prompt(s),
+        )
+        account = token.account_id or "GitHub"
+        console.print(f"[green]✓ Authenticated with GitHub Copilot[/green]  [dim]{account}[/dim]")
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)

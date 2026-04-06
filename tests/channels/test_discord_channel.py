@@ -4,8 +4,8 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-import discord
 import pytest
+discord = pytest.importorskip("discord")
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -594,7 +594,7 @@ async def test_send_stops_typing_after_send() -> None:
     typing_channel.typing_enter_hook = slow_typing
 
     await channel._start_typing(typing_channel)
-    await start.wait()
+    await asyncio.wait_for(start.wait(), timeout=1.0)
 
     await channel.send(OutboundMessage(channel="discord", chat_id="123", content="hello"))
     release.set()
@@ -614,7 +614,7 @@ async def test_send_stops_typing_after_send() -> None:
     typing_channel.typing_enter_hook = slow_typing_progress
 
     await channel._start_typing(typing_channel)
-    await start.wait()
+    await asyncio.wait_for(start.wait(), timeout=1.0)
 
     await channel.send(
         OutboundMessage(
@@ -665,7 +665,7 @@ async def test_start_typing_uses_typing_context_when_trigger_typing_missing() ->
 
     typing_channel = _NoTriggerChannel(channel_id=123)
     await channel._start_typing(typing_channel)  # type: ignore[arg-type]
-    await entered.wait()
+    await asyncio.wait_for(entered.wait(), timeout=1.0)
 
     assert "123" in channel._typing_tasks
 
