@@ -153,6 +153,9 @@ class BaseChannel(ABC):
         meta = metadata or {}
         if self.supports_streaming:
             meta = {**meta, "_wants_stream": True}
+        extra_prompt = getattr(self.config, "channel_extra_system_prompt", "")
+        if extra_prompt:
+            meta = {**meta, "_channel_extra_system_prompt": extra_prompt}
 
         msg = InboundMessage(
             channel=self.name,

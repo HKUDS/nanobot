@@ -957,3 +957,93 @@ async def test_notify_restart_done_enqueues_outbound_message():
     assert sent_msg.channel == "feishu"
     assert sent_msg.chat_id == "oc_123"
     assert sent_msg.content.startswith("Restart completed")
+
+
+# ---------------------------------------------------------------------------
+# channel_extra_system_prompt
+# ---------------------------------------------------------------------------
+
+class _VoiceChannel(BaseChannel):
+    """Mock voice channel with channel_extra_system_prompt in config."""
+    name = "voice"
+    display_name = "Voice"
+
+    def __init__(self, config, bus):
+        if isinstance(config, dict):
+            from types import SimpleNamespace as _NS
+            config = _NS(**{"channel_extra_system_prompt": "", "allow_from": ["*"], **config})
+        super().__init__(config, bus)
+
+    async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    async def send(self, msg: OutboundMessage) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_channel_extra_system_prompt_injected_into_metadata():
+    """_handle_message should inject channel_extra_system_prompt from config into metadata."""
+    bus = MessageBus()
+    config = SimpleNamespace(
+        channel_extra_system_prompt="Keep responses short. No markdown.",
+        allow_from=["*"],
+    )
+    ch = _VoiceChannel(config, bus)
+
+    published = []
+    original_publish = bus.publish_inbound
+
+    async def capture(msg):
+        published.append(msg)
+        await original_publish(msg)
+
+    bus.publish_inbound = capture
+
+    await ch._handle_message("user1", "chat1", "hello")
+
+    assert len(published) == 1
+    assert published[0].metadata.get("_channel_extra_system_prompt") == "Keep responses short. No markdown."
+
+
+@pytest.mark.asyncio
+async def test_no_channel_extra_system_prompt_when_empty():
+    """_handle_message should not add _channel_extra_system_prompt to metadata when not configured."""
+    bus = MessageBus()
+    config = SimpleNamespace(allow_from=["*"])
+    ch = _VoiceChannel(config, bus)
+
+    published = []
+    original_publish = bus.publish_inbound
+
+    async def capture(msg):
+        published.append(msg)
+        await original_publish(msg)
+
+    bus.publish_inbound = capture
+
+    await ch._handle_message("user1", "chat1", "hello")
+
+    assert len(published) == 1
+    assert "_channel_extra_system_prompt" not in published[0].metadata
+
+
+def test_channel_extra_system_prompt_included_in_runtime_context():
+    """_build_runtime_context should include channel_extra_system_prompt when provided."""
+    from nanobot.agent.context import ContextBuilder
+
+    ctx = ContextBuilder._build_runtime_context(
+        "voice", "chat1", channel_extra_system_prompt="No markdown. Spell out abbreviations.",
+    )
+    assert "No markdown. Spell out abbreviations." in ctx
+
+
+def test_runtime_context_without_extra_prompt():
+    """_build_runtime_context should work fine without channel_extra_system_prompt."""
+    from nanobot.agent.context import ContextBuilder
+
+    ctx = ContextBuilder._build_runtime_context("telegram", "chat1")
+    assert "Channel: telegram" in ctx
