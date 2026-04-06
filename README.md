@@ -563,7 +563,8 @@ Uses **WebSocket** long connection — no public IP required.
       "reactEmoji": "OnIt",
       "doneEmoji": "DONE",
       "toolHintPrefix": "🔧",
-      "streaming": true
+      "streaming": true,
+      "domain": "feishu"
     }
   }
 }
@@ -576,6 +577,7 @@ Uses **WebSocket** long connection — no public IP required.
 > `reactEmoji`: Emoji for "processing" status (default: `OnIt`). See [available emojis](https://open.larkoffice.com/document/server-docs/im-v1/message-reaction/emojis-introduce).
 > `doneEmoji`: Optional emoji for "completed" status (e.g., `DONE`, `OK`, `HEART`). When set, bot adds this reaction after removing `reactEmoji`.
 > `toolHintPrefix`: Prefix for inline tool hints in streaming cards (default: `🔧`).
+> `domain`: `"feishu"` (default) for China (open.feishu.cn), `"lark"` for international Lark (open.larksuite.com).
 
 **3. Run**
 

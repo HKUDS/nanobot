@@ -22,6 +22,8 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 
+from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
+
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 
 # Message type display mapping
@@ -255,6 +257,7 @@ class FeishuConfig(Base):
     group_policy: Literal["open", "mention"] = "mention"
     reply_to_message: bool = False  # If True, bot replies quote the user's original message
     streaming: bool = True
+    domain: Literal["feishu", "lark"] = "feishu"  # Set to "lark" for international Lark
 
 
 _STREAM_ELEMENT_ID = "streaming_md"
@@ -328,10 +331,12 @@ class FeishuChannel(BaseChannel):
         self._loop = asyncio.get_running_loop()
 
         # Create Lark client for sending messages
+        domain = LARK_DOMAIN if self.config.domain == "lark" else FEISHU_DOMAIN
         self._client = (
             lark.Client.builder()
             .app_id(self.config.app_id)
             .app_secret(self.config.app_secret)
+            .domain(domain)
             .log_level(lark.LogLevel.INFO)
             .build()
         )
@@ -359,6 +364,7 @@ class FeishuChannel(BaseChannel):
         self._ws_client = lark.ws.Client(
             self.config.app_id,
             self.config.app_secret,
+            domain=domain,
             event_handler=event_handler,
             log_level=lark.LogLevel.INFO,
         )
