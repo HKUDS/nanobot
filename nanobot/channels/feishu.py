@@ -410,15 +410,19 @@ class FeishuChannel(BaseChannel):
         """Fetch the bot's own open_id via GET /open-apis/bot/v3/info."""
         try:
             import lark_oapi as lark
-            request = lark.RawRequest.builder() \
-                .http_method(lark.HttpMethod.GET) \
-                .uri("/open-apis/bot/v3/info") \
+
+            request = (
+                lark.BaseRequest.builder()
+                .http_method(lark.HttpMethod.GET)
+                .uri("/open-apis/bot/v3/info")
+                .token_types({lark.AccessTokenType.TENANT})
                 .build()
+            )
             response = self._client.request(request)
             if response.success():
                 import json
                 data = json.loads(response.raw.content)
-                bot = (data.get("data") or data).get("bot") or data.get("bot") or {}
+                bot = data.get("bot", {})
                 return bot.get("open_id")
             logger.warning("Failed to get bot info: code={}, msg={}", response.code, response.msg)
             return None
