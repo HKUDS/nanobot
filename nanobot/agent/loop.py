@@ -182,6 +182,7 @@ class AgentLoop:
         skills_config=None,  # SkillsConfig | None
         hooks: list[AgentHook] | None = None,
         config: Any = None,
+        layout: WorkspaceLayout | None = None,
     ):
         from nanobot.config.schema import ContextPruningConfig, ExecToolConfig, WebSearchConfig
 
@@ -189,6 +190,7 @@ class AgentLoop:
         self.channels_config = channels_config
         self.provider = provider
         self.workspace = workspace
+        self.layout = layout
         self.model = model or provider.get_default_model()
         self._config = config                    # 原始 Config 对象，用于构建新 provider
         self._config_model = self.model          # config 中的默认 model，不可变
