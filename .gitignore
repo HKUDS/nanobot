@@ -4,17 +4,13 @@
 .docs
 .env
 .web
-nano.*.save
 
 # Python bytecode & caches
 *.pyc
-*.pycs
 *.pyo
 *.pyd
 *.pyw
 *.pyz
-*.pywz
-*.pyzz
 __pycache__/
 *.egg-info/
 *.egg
@@ -76,6 +72,7 @@ Desktop.ini
 *.swp
 *.swo
 *~
+nano.*.save
 
 # Environment & secrets (keep examples tracked if needed)
 .env.*
