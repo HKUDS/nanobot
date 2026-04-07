@@ -87,6 +87,8 @@ class AgentsConfig(Base):
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
+    model_config = ConfigDict(extra="allow")
+
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
@@ -135,6 +137,15 @@ class ProvidersConfig(Base):
             to_snake(str(key).replace("-", "_")): provider_config
             for key, provider_config in value.items()
         }
+
+    @model_validator(mode="after")
+    def _coerce_extra_provider_sections(self) -> "ProvidersConfig":
+        """Coerce extra plugin provider sections from raw dicts to ProviderConfig."""
+        if self.model_extra:
+            for key, value in self.model_extra.items():
+                if isinstance(value, dict):
+                    self.model_extra[key] = ProviderConfig.model_validate(value)
+        return self
 
 
 class HeartbeatConfig(Base):

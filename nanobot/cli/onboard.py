@@ -652,7 +652,7 @@ def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None
 
 
 def _get_provider_info() -> dict[str, tuple[str, bool, bool, str]]:
-    """Get provider info from registry (cached)."""
+    """Get provider info from registry."""
     from nanobot.providers.registry import get_provider_specs
 
     return {

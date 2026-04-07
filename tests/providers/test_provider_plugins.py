@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nanobot.config.schema import Config, ProvidersConfig
+from nanobot.config.schema import Config, ProviderConfig, ProvidersConfig
 from nanobot.plugins.providers import (
     ProviderSpec,
     apply_generation_defaults,
@@ -96,9 +96,9 @@ def test_providers_config_accepts_plugin_sections_and_extra_fields():
     )
 
     section = getattr(cfg, "demo_cloud", None)
-    assert isinstance(section, dict)
-    assert section["apiKey"] == "plugin-key"
-    assert section["region"] == "cn-hz"
+    assert isinstance(section, ProviderConfig)
+    assert section.api_key == "plugin-key"
+    assert section.region == "cn-hz"
 
 
 def test_register_and_unregister_provider_spec_normalizes_name():
@@ -183,7 +183,8 @@ def test_create_provider_uses_plugin_factory_and_applies_defaults():
     factory_kwargs = factory.call_args.kwargs
     assert factory_kwargs["model"] == "demo-cloud/chat-pro"
     assert factory_kwargs["spec"].name == "demo_cloud"
-    assert factory_kwargs["config"]["region"] == "cn-hz"
+    assert factory_kwargs["config"].api_key == "plugin-key"
+    assert factory_kwargs["config"].region == "cn-hz"
 
 
 def test_create_provider_falls_back_to_native_factory_on_plugin_error():

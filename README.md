@@ -122,7 +122,7 @@
 - [In-Chat Commands](#-in-chat-commands)
 - [Python SDK](#-python-sdk)
 - [OpenAI-Compatible API](#-openai-compatible-api)
-- [Plugin Guides](#-plugin-guides)
+- [Documentation Index](#-documentation-index)
 - [Docker](#-docker)
 - [Linux Service](#-linux-service)
 - [Project Structure](#-project-structure)

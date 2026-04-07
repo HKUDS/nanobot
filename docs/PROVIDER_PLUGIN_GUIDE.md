@@ -2,9 +2,9 @@
 
 Build a custom nanobot provider plugin with a public, supported registry surface.
 
-This guide covers the PR 1 provider plugin API introduced under `nanobot.plugins.providers`.
+This guide covers the public provider plugin API introduced under `nanobot.plugins.providers`.
 
-## What PR 1 Provides
+## What the Provider Plugin API Provides
 
 nanobot now exposes a small public provider extension surface:
 
