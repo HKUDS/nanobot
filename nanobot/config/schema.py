@@ -103,8 +103,11 @@ class AgentDefaults(Base):
     )
     max_tokens: int = 8192
     context_window_tokens: int = 0  # 0 = auto-detect at startup
+    context_block_limit: int | None = None
     temperature: float = 0.1
-    max_tool_iterations: int = 40
+    max_tool_iterations: int = 200
+    max_tool_result_chars: int = 16_000
+    provider_retry_mode: Literal["standard", "persistent"] = "standard"
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     fallback_models: list[str] = Field(default_factory=list)  # e.g. ["openrouter/anthropic/claude-sonnet-4"]
