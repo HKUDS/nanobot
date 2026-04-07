@@ -30,5 +30,8 @@ jobs:
     - name: Install all dependencies
       run: uv sync --all-extras
 
+    - name: Lint with ruff
+      run: uv run ruff check nanobot --select F401,F841
+
     - name: Run tests
       run: uv run pytest tests/
