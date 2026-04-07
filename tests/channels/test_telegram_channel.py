@@ -135,6 +135,7 @@ def _make_telegram_update(
     entities=None,
     caption_entities=None,
     reply_to_message=None,
+    location=None,
 ):
     user = SimpleNamespace(id=12345, username="alice", first_name="Alice")
     message = SimpleNamespace(
@@ -149,6 +150,7 @@ def _make_telegram_update(
         voice=None,
         audio=None,
         document=None,
+        location=location,
         media_group_id=None,
         message_thread_id=None,
         message_id=1,
@@ -1112,3 +1114,48 @@ async def test_on_help_includes_restart_command() -> None:
     assert "/dream" in help_text
     assert "/dream-log" in help_text
     assert "/dream-restore" in help_text
+
+
+@pytest.mark.asyncio
+async def test_on_message_location_content() -> None:
+    """Location messages are forwarded as [location: lat, lon] content."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    location = SimpleNamespace(latitude=48.8566, longitude=2.3522)
+    update = _make_telegram_update(location=location)
+    await channel._on_message(update, None)
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == "[location: 48.8566, 2.3522]"
+
+
+@pytest.mark.asyncio
+async def test_on_message_location_with_text() -> None:
+    """Location messages with accompanying text include both in content."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    location = SimpleNamespace(latitude=51.5074, longitude=-0.1278)
+    update = _make_telegram_update(text="meet me here", location=location)
+    await channel._on_message(update, None)
+
+    assert len(handled) == 1
+    assert "meet me here" in handled[0]["content"]
+    assert "[location: 51.5074, -0.1278]" in handled[0]["content"]
