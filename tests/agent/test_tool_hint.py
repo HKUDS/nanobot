@@ -4,7 +4,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.providers.base import ToolCallRequest
 
 
-def _tc(name: str, args: dict) -> ToolCallRequest:
+def _tc(name: str, args) -> ToolCallRequest:
     return ToolCallRequest(id="c1", name=name, arguments=args)
 
 
@@ -147,3 +147,51 @@ class TestToolHintMultipleCalls:
         assert 'grep "TODO"' in result
         assert "read main.py" in result
         assert ", " in result
+
+
+class TestToolHintEdgeCases:
+    """Test edge cases and defensive handling (G1, G2)."""
+
+    def test_known_tool_empty_list_args(self):
+        """C1/G1: Empty list arguments should not crash."""
+        result = AgentLoop._tool_hint([_tc("read_file", [])])
+        assert result == "read_file"
+
+    def test_known_tool_none_args(self):
+        """G2: None arguments should not crash."""
+        result = AgentLoop._tool_hint([_tc("read_file", None)])
+        assert result == "read_file"
+
+    def test_fallback_empty_list_args(self):
+        """C1: Empty list args in fallback should not crash."""
+        result = AgentLoop._tool_hint([_tc("custom_tool", [])])
+        assert result == "custom_tool"
+
+    def test_fallback_none_args(self):
+        """G2: None args in fallback should not crash."""
+        result = AgentLoop._tool_hint([_tc("custom_tool", None)])
+        assert result == "custom_tool"
+
+    def test_list_dir_registered(self):
+        """S2: list_dir should use 'ls' format."""
+        result = AgentLoop._tool_hint([_tc("list_dir", {"path": "/tmp"})])
+        assert result == "ls /tmp"
+
+
+class TestToolHintMixedFolding:
+    """G4: Mixed folding groups with interleaved same-tool segments."""
+
+    def test_read_read_grep_grep_read(self):
+        """read×2, grep×2, read — should produce two separate groups."""
+        calls = [
+            _tc("read_file", {"path": "a.py"}),
+            _tc("read_file", {"path": "b.py"}),
+            _tc("grep", {"pattern": "x"}),
+            _tc("grep", {"pattern": "y"}),
+            _tc("read_file", {"path": "c.py"}),
+        ]
+        result = AgentLoop._tool_hint(calls)
+        assert "\u00d7 2" in result
+        # Should have 3 groups: read×2, grep×2, read
+        parts = result.split(", ")
+        assert len(parts) == 3

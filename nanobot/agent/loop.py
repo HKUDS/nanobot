@@ -323,6 +323,19 @@ class AgentLoop:
         from nanobot.utils.helpers import strip_think
         return strip_think(text) or None
 
+    # Registry: tool_name -> (key_args, template, is_path, is_command)
+    _TOOL_HINT_FORMATS: dict[str, tuple[list[str], str, bool, bool]] = {
+        "read_file":  (["path", "file_path"],              "read {}",     True,  False),
+        "write_file": (["path", "file_path"],              "write {}",    True,  False),
+        "edit":       (["file_path", "path"],              "edit {}",     True,  False),
+        "glob":       (["pattern"],                        'glob "{}"',   False, False),
+        "grep":       (["pattern"],                        'grep "{}"',   False, False),
+        "exec":       (["command"],                        "$ {}",        False, True),
+        "web_search": (["query"],                          'search "{}"', False, False),
+        "web_fetch":  (["url"],                            "fetch {}",    True,  False),
+        "list_dir":   (["path"],                           "ls {}",       True,  False),
+    }
+
     @staticmethod
     def _tool_hint(tool_calls: list) -> str:
         """Format tool calls as concise hints with smart abbreviation."""
@@ -330,6 +343,16 @@ class AgentLoop:
             return ""
 
         from nanobot.utils.path import abbreviate_path
+
+        def _get_args(tc) -> dict:
+            """Extract args dict from tc.arguments, handling list/dict/None/empty."""
+            if tc.arguments is None:
+                return {}
+            if isinstance(tc.arguments, list):
+                return tc.arguments[0] if tc.arguments else {}
+            if isinstance(tc.arguments, dict):
+                return tc.arguments
+            return {}
 
         def _group_consecutive(calls):
             """Group consecutive calls to the same tool: [(name, count, first), ...]."""
@@ -343,7 +366,7 @@ class AgentLoop:
 
         def _extract_arg(tc, key_args):
             """Extract the first available value from preferred key names."""
-            args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
+            args = _get_args(tc)
             if not isinstance(args, dict):
                 return None
             for key in key_args:
@@ -365,10 +388,7 @@ class AgentLoop:
                 val = abbreviate_path(val)
             elif fmt[3]:  # is_command
                 val = val[:40] + "\u2026" if len(val) > 40 else val
-            template = fmt[1]
-            if '"{}"' in template:
-                return template.format(val)
-            return template.format(val)
+            return fmt[1].format(val)
 
         def _fmt_mcp(tc):
             """Format MCP tool as server::tool."""
@@ -385,7 +405,7 @@ class AgentLoop:
                 tool = parts[1] if len(parts) > 1 else ""
             if not tool:
                 return name
-            args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
+            args = _get_args(tc)
             val = next((v for v in args.values() if isinstance(v, str) and v), None)
             if val is None:
                 return f"{server}::{tool}"
@@ -393,27 +413,15 @@ class AgentLoop:
 
         def _fmt_fallback(tc):
             """Original formatting logic for unregistered tools."""
-            args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
+            args = _get_args(tc)
             val = next(iter(args.values()), None) if isinstance(args, dict) else None
             if not isinstance(val, str):
                 return tc.name
             return f'{tc.name}("{abbreviate_path(val, 40)}")' if len(val) > 40 else f'{tc.name}("{val}")'
 
-        # Registry: tool_name -> (key_args, template, is_path, is_command)
-        FORMATS: dict[str, tuple[list[str], str, bool, bool]] = {
-            "read_file":  (["path", "file_path"],              "read {}",     True,  False),
-            "write_file": (["path", "file_path"],              "write {}",    True,  False),
-            "edit":       (["file_path", "path"],              "edit {}",     True,  False),
-            "glob":       (["pattern"],                        'glob "{}"',   False, False),
-            "grep":       (["pattern"],                        'grep "{}"',   False, False),
-            "exec":       (["command"],                        "$ {}",        False, True),
-            "web_search": (["query"],                          'search "{}"', False, False),
-            "web_fetch":  (["url"],                            "fetch {}",    True,  False),
-        }
-
         hints = []
         for name, count, example_tc in _group_consecutive(tool_calls):
-            fmt = FORMATS.get(name)
+            fmt = AgentLoop._TOOL_HINT_FORMATS.get(name)
             if fmt:
                 hint = _fmt_known(example_tc, fmt)
             elif name.startswith("mcp_"):

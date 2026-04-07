@@ -77,3 +77,29 @@ class TestAbbreviatePathURLs:
     def test_short_url_unchanged(self):
         url = "https://example.com/api"
         assert abbreviate_path(url) == url
+
+    def test_url_no_path_just_domain(self):
+        """G3: URL with no path should return as-is if short enough."""
+        url = "https://example.com"
+        assert abbreviate_path(url) == url
+
+    def test_url_with_query_string(self):
+        """G3: URL with query params should abbreviate path part."""
+        url = "https://example.com/api/v2/endpoint?key=value&other=123"
+        result = abbreviate_path(url, max_len=40)
+        assert "example.com" in result
+        assert "\u2026" in result
+
+    def test_url_very_long_basename(self):
+        """G3: URL with very long basename should truncate basename."""
+        url = "https://example.com/path/very_long_resource_name_file.json"
+        result = abbreviate_path(url, max_len=35)
+        assert "example.com" in result
+        assert "\u2026" in result
+
+    def test_url_negative_budget_consistent_format(self):
+        """I3: Negative budget should still produce domain/…/basename format."""
+        url = "https://a.co/very/deep/path/with/lots/of/segments/and/a/long/basename.txt"
+        result = abbreviate_path(url, max_len=20)
+        assert "a.co" in result
+        assert "/\u2026/" in result

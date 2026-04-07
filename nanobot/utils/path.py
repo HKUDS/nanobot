@@ -89,7 +89,8 @@ def _abbreviate_url(url: str, max_len: int = 40) -> str:
 
     budget = max_len - len(domain) - len(basename) - 4  # "…/" + "/"
     if budget < 0:
-        return domain + "/\u2026" + basename[: max_len - len(domain) - 4]
+        trunc = max_len - len(domain) - 5  # "…/" + "/"
+        return domain + "/\u2026/" + (basename[:trunc] if trunc > 0 else "")
 
     # Build abbreviated path
     kept: list[str] = []
