@@ -575,13 +575,15 @@ class Dream:
         )
 
         # Current file contents
+        current_date = datetime.now().strftime("%Y-%m-%d")
         current_memory = self.store.read_memory() or "(empty)"
         current_soul = self.store.read_soul() or "(empty)"
         current_user = self.store.read_user() or "(empty)"
         file_context = (
-            f"## Current MEMORY.md\n{current_memory}\n\n"
-            f"## Current SOUL.md\n{current_soul}\n\n"
-            f"## Current USER.md\n{current_user}"
+            f"## Current Date\n{current_date}\n\n"
+            f"## Current MEMORY.md ({len(current_memory)} chars)\n{current_memory}\n\n"
+            f"## Current SOUL.md ({len(current_soul)} chars)\n{current_soul}\n\n"
+            f"## Current USER.md ({len(current_user)} chars)\n{current_user}"
         )
 
         # Phase 1: Analyze
@@ -603,7 +605,7 @@ class Dream:
                 tool_choice=None,
             )
             analysis = phase1_response.content or ""
-            logger.debug("Dream Phase 1 complete ({} chars)", len(analysis))
+            logger.debug("Dream Phase 1 analysis ({} chars): {}", len(analysis), analysis[:500])
         except Exception:
             logger.exception("Dream Phase 1 failed")
             return False
@@ -633,6 +635,8 @@ class Dream:
                 "Dream Phase 2 complete: stop_reason={}, tool_events={}",
                 result.stop_reason, len(result.tool_events),
             )
+            for ev in (result.tool_events or []):
+                logger.info("Dream tool_event: name={}, status={}, detail={}", ev.get("name"), ev.get("status"), ev.get("detail", "")[:200])
         except Exception:
             logger.exception("Dream Phase 2 failed")
             result = None
