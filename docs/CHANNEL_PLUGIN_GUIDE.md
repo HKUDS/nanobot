@@ -353,6 +353,27 @@ def default_config(cls) -> dict[str, Any]:
 
 If not overridden, the base class returns `{"enabled": false}`.
 
+### Extra System Prompt
+
+Any channel can inject additional instructions into the LLM system prompt by setting `channel_extra_system_prompt` in its config. This is useful for adapting the agent's behaviour to the channel's capabilities — for example, telling the LLM to avoid markdown on a voice channel, or to keep responses short for SMS.
+
+```json
+{
+  "channels": {
+    "alexa": {
+      "enabled": true,
+      "channel_extra_system_prompt": "This is a voice channel. Keep responses under 30 words. No markdown, no emojis. Spell out abbreviations."
+    },
+    "telegram": {
+      "enabled": true,
+      "channel_extra_system_prompt": "Use Telegram-flavoured markdown for formatting."
+    }
+  }
+}
+```
+
+The prompt text is appended to the runtime context block that precedes each user message. It is not persisted in session history — it is injected fresh on every turn, so config changes take effect immediately.
+
 ## Naming Convention
 
 | What | Format | Example |
