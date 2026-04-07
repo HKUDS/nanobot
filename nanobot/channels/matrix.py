@@ -162,8 +162,10 @@ def _build_matrix_text_content(
         content["formatted_body"] = html
     if event_id:
         content["m.new_content"] = {
-            "body": text,
             "msgtype": "m.text",
+            "body": text,
+            "format": MATRIX_HTML_FORMAT,
+            "formatted_body": html
         }
         content["m.relates_to"] = {
             "rel_type": "m.replace",
