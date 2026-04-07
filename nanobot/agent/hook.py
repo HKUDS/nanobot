@@ -58,11 +58,14 @@ class TraceHook(AgentHook):
     token usage, and tool calls. Output is JSON Lines format.
     """
 
-    __slots__ = ("_log_path", "_session_key")
+    __slots__ = ("_log_path", "_session_key", "_start_time", "_llm_start_time", "_current_entry")
 
     def __init__(self, log_path: Any | None = None) -> None:
         self._log_path: Any | None = log_path
         self._session_key: str | None = None
+        self._start_time: float | None = None
+        self._llm_start_time: float | None = None
+        self._current_entry: dict[str, Any] | None = None
 
     def set_log_path(self, path: Any) -> None:
         """Set or update the log file path (e.g., when session changes)."""
@@ -76,27 +79,62 @@ class TraceHook(AgentHook):
     def session_key(self, value: str) -> None:
         self._session_key = value
 
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        """Start timing and capture request messages."""
+        import time
+        self._start_time = time.monotonic()
+        self._llm_start_time = None
+        self._current_entry = {
+            "iteration": context.iteration,
+            "messages": self._truncate_messages(context.messages),
+        }
+
+    async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+        """Track that streaming was used."""
+        if self._current_entry is not None:
+            self._current_entry["streaming"] = True
+
     async def after_iteration(self, context: AgentHookContext) -> None:
-        """Log the iteration details after completion."""
+        """Log the complete iteration details after completion."""
         if not self._log_path:
             return
 
         import json
+        import time
         from datetime import datetime
 
+        # Calculate timing
+        elapsed_ms = None
+        llm_elapsed_ms = None
+        if self._start_time is not None:
+            elapsed_ms = int((time.monotonic() - self._start_time) * 1000)
+
+        # Build complete log entry
         log_entry = {
             "timestamp": datetime.now().isoformat(),
             "session_key": self._session_key,
             "iteration": context.iteration,
             "stop_reason": context.stop_reason,
+            "elapsed_ms": elapsed_ms,
             "usage": context.usage,
+            "request": self._current_entry.get("messages", []) if self._current_entry else [],
+            "response": {
+                "content": context.final_content,
+                "reasoning_content": context.response.reasoning_content if context.response else None,
+                "thinking_blocks": context.response.thinking_blocks if context.response else None,
+            } if context.response else {"content": context.final_content},
             "tool_calls": [
                 {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
                 for tc in context.tool_calls
             ] if context.tool_calls else [],
             "tool_results_count": len(context.tool_results) if context.tool_results else 0,
-            "final_content_length": len(context.final_content) if context.final_content else 0,
+            "tool_events": context.tool_events if context.tool_events else [],
         }
+
+        # Reset state
+        self._start_time = None
+        self._llm_start_time = None
+        self._current_entry = None
 
         try:
             # Append to log file (JSON Lines format)
@@ -104,6 +142,24 @@ class TraceHook(AgentHook):
                 f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
         except Exception as e:
             logger.debug("TraceHook failed to write to {}: {}", self._log_path, e)
+
+    def _truncate_messages(self, messages: list[dict[str, Any]], max_chars: int = 10000) -> list[dict[str, Any]]:
+        """Truncate messages to avoid overly large log entries."""
+        import json
+        result = []
+        total_chars = 0
+        for msg in messages:
+            msg_copy = dict(msg)
+            content = msg_copy.get("content", "")
+            if isinstance(content, str) and len(content) > 2000:
+                msg_copy["content"] = content[:2000] + "... [truncated]"
+            msg_str = json.dumps(msg_copy, ensure_ascii=False)
+            total_chars += len(msg_str)
+            if total_chars > max_chars:
+                result.append({"role": "system", "content": "... [earlier messages truncated]"})
+                break
+            result.append(msg_copy)
+        return result
 
 
 class CompositeHook(AgentHook):
