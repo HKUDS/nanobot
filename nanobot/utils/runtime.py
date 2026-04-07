@@ -16,8 +16,7 @@ EMPTY_FINAL_RESPONSE_MESSAGE = (
 )
 
 FINALIZATION_RETRY_PROMPT = (
-    "You have already finished the tool work. Do not call any more tools. "
-    "Using only the conversation and tool results above, provide the final answer for the user now."
+    "Please provide your response to the user based on the conversation above."
 )
 
 

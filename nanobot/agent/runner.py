@@ -30,6 +30,7 @@ from nanobot.utils.runtime import (
 )
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
+_MAX_EMPTY_RETRIES = 2
 _SNIP_SAFETY_BUFFER = 1024
 @dataclass(slots=True)
 class AgentRunSpec:
@@ -86,6 +87,7 @@ class AgentRunner:
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
+        empty_content_retries = 0
 
         for iteration in range(spec.max_iterations):
             try:
@@ -178,15 +180,30 @@ class AgentRunner:
                         "pending_tool_calls": [],
                     },
                 )
+                empty_content_retries = 0
                 await hook.after_iteration(context)
                 continue
 
             clean = hook.finalize_content(context, response.content)
             if response.finish_reason != "error" and is_blank_text(clean):
+                empty_content_retries += 1
+                if empty_content_retries < _MAX_EMPTY_RETRIES:
+                    logger.warning(
+                        "Empty response on turn {} for {} ({}/{}); retrying",
+                        iteration,
+                        spec.session_key or "default",
+                        empty_content_retries,
+                        _MAX_EMPTY_RETRIES,
+                    )
+                    if hook.wants_streaming():
+                        await hook.on_stream_end(context, resuming=False)
+                    await hook.after_iteration(context)
+                    continue
                 logger.warning(
-                    "Empty final response on turn {} for {}; retrying with explicit finalization prompt",
+                    "Empty response on turn {} for {} after {} retries; attempting finalization",
                     iteration,
                     spec.session_key or "default",
+                    empty_content_retries,
                 )
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
