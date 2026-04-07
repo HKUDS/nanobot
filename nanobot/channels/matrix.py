@@ -116,6 +116,7 @@ class _StreamBuf:
     text: str = ""
     event_id: str | None = None
     last_edit: float = 0.0
+    edits: int = 0
 
 def _render_markdown_html(text: str) -> str | None:
     """Render markdown to sanitized HTML; returns None for plain text."""
@@ -226,6 +227,7 @@ class MatrixChannel(BaseChannel):
     name = "matrix"
     display_name = "Matrix"
     _STREAM_EDIT_INTERVAL = 2 # min seconds between edit_message_text calls
+    _STREAM_EDIT_LIMIT = 200 # max number of edits of a single message during streaming
     monotonic_time = time.monotonic
 
     @classmethod
@@ -556,7 +558,8 @@ class MatrixChannel(BaseChannel):
 
         now = self.monotonic_time()
 
-        if not buf.last_edit or (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
+        if (not buf.last_edit or (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL) \
+                and buf.edits < self._STREAM_EDIT_LIMIT:
             try:
                 content = _build_matrix_text_content(
                     buf.text,
@@ -565,6 +568,7 @@ class MatrixChannel(BaseChannel):
                 )
                 response = await self._send_room_content(chat_id, content)
                 buf.last_edit = now
+                buf.edits += 1
                 if not buf.event_id:
                     # we are editing the same message all the time, so only the first time the event id needs to be set
                     buf.event_id = response.event_id
