@@ -27,6 +27,7 @@ class CronPayload:
     deliver: bool = False
     channel: str | None = None  # e.g. "whatsapp"
     to: str | None = None  # e.g. phone number
+    model: str | None = None  # e.g. "anthropic/claude-3-haiku"
 
 
 @dataclass
