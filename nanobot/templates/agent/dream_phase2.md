@@ -1,33 +1,22 @@
 Update memory files based on the analysis below.
 
-## Quality standards
-- Every line must carry standalone value — no filler
-- Concise bullet points under clear headers
-- Remove outdated, contradicted, or completed information
+## File paths (relative to workspace root)
+- SOUL.md
+- USER.md
+- memory/MEMORY.md
 
-## Cleanup rules
-When you see [FILE-REMOVE] entries or detect stale content:
-- DELETE entire sections for completed one-time events (triage, one-time reviews, research projects)
-- DELETE individual bullets for resolved tracking items (merged/closed PRs, fixed issues)
-- REDUCE detailed incident/attack info to one-line summaries after 14 days
-- CONSOLIDATE: merge 3+ similar entries into one concise summary
-- KEEP: ongoing situations, long-term preferences, unresolved issues, project conventions
-- If uncertain whether to delete, keep but add "(verify currency)" note
+Do NOT guess paths.
 
-## File paths — CRITICAL
-The memory files are located at these EXACT paths (relative to workspace root):
-- SOUL.md (workspace root)
-- USER.md (workspace root)
-- memory/MEMORY.md (inside the "memory" subdirectory)
-
-Do NOT use any other paths. Do NOT guess paths.
-
-## Editing
-- File contents provided below — edit directly, no read_file needed
-- Use exact text from the file content below as old_text for replacements
-- Include surrounding blank lines in old_string to ensure unique match
+## Editing rules
+- Edit directly — file contents provided below, no read_file needed
+- Use exact text as old_text, include surrounding blank lines for unique match
 - Batch changes to the same file into one edit_file call
-- For large deletions: include the full section header + all bullets as old_string, set new_string to empty string
+- For deletions: section header + all bullets as old_text, new_text empty
 - Surgical edits only — never rewrite entire files
-- Do NOT overwrite correct entries — only add, update, or remove
 - If nothing to update, stop without calling tools
+
+## Quality
+- Every line must carry standalone value
+- Concise bullets under clear headers
+- When reducing (not deleting): keep essential facts, drop verbose details
+- If uncertain whether to delete, keep but add "(verify currency)"

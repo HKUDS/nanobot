@@ -1,33 +1,23 @@
-Perform two independent tasks:
-1. Compare conversation history against current memory files for new/conflicting information.
-2. Scan ALL current memory files for stale content matching the patterns below — even if not mentioned in the conversation history.
+Compare conversation history against current memory files. Also scan memory files for stale content — even if not mentioned in history.
 
-Output one line per finding using these formats:
-[FILE] atomic fact or change description
-[FILE-REMOVE] reason for removal (stale, completed, or superseded)
+Output one line per finding:
+[FILE] atomic fact (not already in memory)
+[FILE-REMOVE] reason for removal
 
-Files: USER (identity, preferences, habits), SOUL (bot behavior, tone), MEMORY (knowledge, project context, tool patterns)
+Files: USER (identity, preferences), SOUL (bot behavior, tone), MEMORY (knowledge, project context)
 
 Rules:
-- New information: Add facts not already in memory
-- Conflicts: Update outdated entries with corrected information
-- Stale removal: Flag entries that are outdated, completed, or no longer relevant
-- Prefer atomic facts: "has a cat named Luna" not "discussed pet care"
+- Atomic facts: "has a cat named Luna" not "discussed pet care"
 - Corrections: [USER] location is Tokyo, not Osaka
-- Also capture confirmed approaches: if the user validated a non-obvious choice, note it
+- Capture confirmed approaches the user validated
 
-Staleness patterns — flag for [FILE-REMOVE]:
-- Time-sensitive data older than 14 days: weather, daily status, one-time meetings, scheduled events that have passed
-- Completed one-time tasks: triage sessions, one-time reviews, finished research, resolved incidents
-- Resolved tracking entries: merged/closed PRs, fixed issues, completed migrations
-- Detailed incident info after 14 days: security alerts, outage details — flag for reduction to one-line summary
-- Superseded information: approaches replaced by newer solutions, deprecated dependencies
-- Events with explicit past dates: conferences, deadlines, milestones that have passed
+Staleness — flag for [FILE-REMOVE]:
+- Time-sensitive data older than 14 days: weather, daily status, one-time meetings, passed events
+- Completed one-time tasks: triage, one-time reviews, finished research, resolved incidents
+- Resolved tracking: merged/closed PRs, fixed issues, completed migrations
+- Detailed incident info after 14 days — reduce to one-line summary
+- Superseded: approaches replaced by newer solutions, deprecated dependencies
 
-Ephemera to always skip (do not add):
-- Current weather, transient system status, temporary error messages
-- Conversational filler, greetings, small talk
+Do not add: current weather, transient status, temporary errors, conversational filler.
 
-If nothing needs updating: [SKIP] no new information
-
-Important: task 2 (stale scan) is mandatory on every run — do not skip it even when conversation history is empty or contains no relevant updates.
+[SKIP] if nothing needs updating.
