@@ -130,6 +130,7 @@ class CronService:
                         delete_after_run=j.get("deleteAfterRun", False),
                     ))
                 self._store = CronStore(jobs=jobs)
+                self._last_mtime = self.store_path.stat().st_mtime
             except Exception as e:
                 logger.warning("Failed to load cron store: {}", e)
                 self._store = CronStore()
@@ -190,8 +191,7 @@ class CronService:
         }
 
         self.store_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        self._last_mtime = self.store_path.stat().st_mtime
-    
+
     async def start(self) -> None:
         """Start the cron service."""
         self._running = True

@@ -380,9 +380,15 @@ class AnthropicProvider(LLMProvider):
         if system:
             kwargs["system"] = system
 
-        if thinking_enabled:
+        if reasoning_effort == "adaptive":
+            # Adaptive thinking: model decides when and how much to think
+            # Supported on claude-sonnet-4-6 and claude-opus-4-6.
+            # Also auto-enables interleaved thinking between tool calls.
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["temperature"] = 1.0
+        elif thinking_enabled:
             budget_map = {"low": 1024, "medium": 4096, "high": max(8192, max_tokens)}
-            budget = budget_map.get(reasoning_effort.lower(), 4096)  # type: ignore[union-attr]
+            budget = budget_map.get(reasoning_effort.lower(), 4096)
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
             kwargs["max_tokens"] = max(max_tokens, budget + 4096)
             kwargs["temperature"] = 1.0
