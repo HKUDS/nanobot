@@ -122,6 +122,7 @@
 - [In-Chat Commands](#-in-chat-commands)
 - [Python SDK](#-python-sdk)
 - [OpenAI-Compatible API](#-openai-compatible-api)
+- [Plugin Guides](#-plugin-guides)
 - [Docker](#-docker)
 - [Linux Service](#-linux-service)
 - [Project Structure](#-project-structure)
@@ -253,6 +254,13 @@ nanobot agent
 ```
 
 That's it! You have a working AI assistant in 2 minutes.
+
+## 🔌 Documentation Index
+
+Plugin development and integration docs live under `docs/`.
+
+- Channel plugin guide: [docs/CHANNEL_PLUGIN_GUIDE.md](docs/CHANNEL_PLUGIN_GUIDE.md)
+- Provider plugin guide: [docs/PROVIDER_PLUGIN_GUIDE.md](docs/PROVIDER_PLUGIN_GUIDE.md)
 
 ## 💬 Chat Apps
 

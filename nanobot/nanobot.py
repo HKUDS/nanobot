@@ -114,6 +114,13 @@ class Nanobot:
 
 
 def _make_provider(config: Any) -> Any:
+    """Create the LLM provider from config with plugin fallback support."""
+    from nanobot.plugins.providers import create_provider
+
+    return create_provider(config, native_factory=_make_native_provider)
+
+
+def _make_native_provider(config: Any) -> Any:
     """Create the LLM provider from config (extracted from CLI)."""
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.registry import find_by_name

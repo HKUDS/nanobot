@@ -651,10 +651,9 @@ def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None
 # --- Provider Configuration ---
 
 
-@lru_cache(maxsize=1)
 def _get_provider_info() -> dict[str, tuple[str, bool, bool, str]]:
     """Get provider info from registry (cached)."""
-    from nanobot.providers.registry import PROVIDERS
+    from nanobot.providers.registry import get_provider_specs
 
     return {
         spec.name: (
@@ -663,7 +662,7 @@ def _get_provider_info() -> dict[str, tuple[str, bool, bool, str]]:
             spec.is_local,
             spec.default_api_base,
         )
-        for spec in PROVIDERS
+        for spec in get_provider_specs()
         if not spec.is_oauth
     }
 

@@ -12,9 +12,11 @@ Every entry writes out all fields so you can copy-paste as a template.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, replace
+from importlib.metadata import entry_points
+from typing import Any, Protocol
 
+from loguru import logger
 from pydantic.alias_generators import to_snake
 
 
@@ -66,6 +68,13 @@ class ProviderSpec:
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
+
+
+class ProviderFactory(Protocol):
+    """Factory used by provider plugins to create provider instances."""
+
+    def __call__(self, *, config: Any, model: str, spec: ProviderSpec | None) -> Any:
+        ...
 
 
 # ---------------------------------------------------------------------------
@@ -360,15 +369,117 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     ),
 )
 
+_BUILTIN_PROVIDER_NAMES = frozenset(spec.name for spec in PROVIDERS)
+_RUNTIME_PROVIDER_FACTORIES: dict[str, ProviderFactory] = {}
+_PLUGINS_DISCOVERED = False
+_EP_FACTORIES = "nanobot.providers"
+_EP_SPECS = "nanobot.provider_specs"
+
 
 # ---------------------------------------------------------------------------
 # Lookup helpers
 # ---------------------------------------------------------------------------
 
 
-def find_by_name(name: str) -> ProviderSpec | None:
+def normalize_provider_name(name: str) -> str:
+    """Normalize provider names from entry points, config, and runtime registration."""
+    return to_snake(name.replace("-", "_"))
+
+
+def register_provider_spec(spec: ProviderSpec) -> ProviderSpec:
+    """Register a runtime provider spec and return the normalized spec."""
+    global PROVIDERS
+
+    normalized_name = normalize_provider_name(spec.name)
+    if normalized_name != spec.name:
+        spec = replace(spec, name=normalized_name)
+
+    if find_by_name(normalized_name, ensure_discovered=False) is not None:
+        raise ValueError(f"Provider spec '{normalized_name}' already registered")
+
+    PROVIDERS = (*PROVIDERS, spec)
+    return spec
+
+
+def unregister_provider_spec(name: str) -> None:
+    """Unregister a runtime provider spec. Built-ins cannot be removed."""
+    global PROVIDERS
+
+    normalized_name = normalize_provider_name(name)
+    if normalized_name in _BUILTIN_PROVIDER_NAMES:
+        return
+    PROVIDERS = tuple(spec for spec in PROVIDERS if spec.name != normalized_name)
+
+
+def register_provider_factory(name: str, factory: ProviderFactory) -> None:
+    """Register a runtime provider factory."""
+    _RUNTIME_PROVIDER_FACTORIES[normalize_provider_name(name)] = factory
+
+
+def unregister_provider_factory(name: str) -> None:
+    """Unregister a runtime provider factory."""
+    _RUNTIME_PROVIDER_FACTORIES.pop(normalize_provider_name(name), None)
+
+
+def get_provider_factory(name: str | None) -> ProviderFactory | None:
+    """Look up a provider factory by name."""
+    if not name:
+        return None
+    ensure_provider_plugins_loaded()
+    return _RUNTIME_PROVIDER_FACTORIES.get(normalize_provider_name(name))
+
+
+def get_provider_specs() -> tuple[ProviderSpec, ...]:
+    """Return built-in and discovered runtime provider specs."""
+    ensure_provider_plugins_loaded()
+    return PROVIDERS
+
+
+def ensure_provider_plugins_loaded() -> None:
+    """Load provider specs and factories from entry points exactly once."""
+    global _PLUGINS_DISCOVERED
+
+    if _PLUGINS_DISCOVERED:
+        return
+    _PLUGINS_DISCOVERED = True
+
+    for ep in entry_points(group=_EP_SPECS):
+        try:
+            spec = ep.load()
+            if not isinstance(spec, ProviderSpec):
+                raise TypeError("entry point must resolve to ProviderSpec")
+            register_provider_spec(spec)
+        except ValueError as exc:
+            logger.warning("Skipping provider spec plugin '{}': {}", ep.name, exc)
+        except Exception as exc:
+            logger.warning("Failed to load provider spec plugin '{}': {}", ep.name, exc)
+
+    for ep in entry_points(group=_EP_FACTORIES):
+        try:
+            factory = ep.load()
+            if not callable(factory):
+                raise TypeError("entry point must resolve to a callable factory")
+            register_provider_factory(ep.name, factory)
+        except Exception as exc:
+            logger.warning("Failed to load provider factory plugin '{}': {}", ep.name, exc)
+
+
+def discover_provider_plugins(force: bool = False) -> None:
+    """Public hook for forcing provider plugin entry-point discovery."""
+    global _PLUGINS_DISCOVERED
+
+    if force:
+        _PLUGINS_DISCOVERED = False
+    ensure_provider_plugins_loaded()
+
+
+def find_by_name(name: str | None, *, ensure_discovered: bool = True) -> ProviderSpec | None:
     """Find a provider spec by config field name, e.g. "dashscope"."""
-    normalized = to_snake(name.replace("-", "_"))
+    if not name:
+        return None
+    if ensure_discovered:
+        ensure_provider_plugins_loaded()
+    normalized = normalize_provider_name(name)
     for spec in PROVIDERS:
         if spec.name == normalized:
             return spec

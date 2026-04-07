@@ -382,6 +382,13 @@ def _onboard_plugins(config_path: Path) -> None:
 
 
 def _make_provider(config: Config):
+    """Create the configured provider with plugin fallback support."""
+    from nanobot.plugins.providers import create_provider
+
+    return create_provider(config, native_factory=_make_native_provider)
+
+
+def _make_native_provider(config: Config):
     """Create the appropriate LLM provider from config.
 
     Routing is driven by ``ProviderSpec.backend`` in the registry.
@@ -1259,12 +1266,12 @@ def status():
     console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
 
     if config_path.exists():
-        from nanobot.providers.registry import PROVIDERS
+        from nanobot.providers.registry import get_provider_specs
 
         console.print(f"Model: {config.agents.defaults.model}")
 
         # Check API keys from registry
-        for spec in PROVIDERS:
+        for spec in get_provider_specs():
             p = getattr(config.providers, spec.name, None)
             if p is None:
                 continue
@@ -1304,12 +1311,13 @@ def provider_login(
     provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
 ):
     """Authenticate with an OAuth provider."""
-    from nanobot.providers.registry import PROVIDERS
+    from nanobot.providers.registry import get_provider_specs
 
+    provider_specs = get_provider_specs()
     key = provider.replace("-", "_")
-    spec = next((s for s in PROVIDERS if s.name == key and s.is_oauth), None)
+    spec = next((s for s in provider_specs if s.name == key and s.is_oauth), None)
     if not spec:
-        names = ", ".join(s.name.replace("_", "-") for s in PROVIDERS if s.is_oauth)
+        names = ", ".join(s.name.replace("_", "-") for s in provider_specs if s.is_oauth)
         console.print(f"[red]Unknown OAuth provider: {provider}[/red]  Supported: {names}")
         raise typer.Exit(1)
 

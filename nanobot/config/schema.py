@@ -3,8 +3,8 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
-from pydantic.alias_generators import to_camel
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic.alias_generators import to_camel, to_snake
 from pydantic_settings import BaseSettings
 
 from nanobot.cron.types import CronSchedule
@@ -95,6 +95,8 @@ class ProviderConfig(Base):
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
+    model_config = ConfigDict(extra="allow")
+
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -122,6 +124,17 @@ class ProvidersConfig(Base):
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
     qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Qianfan (百度千帆)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_provider_keys(cls, value: object) -> object:
+        """Normalize provider section names so plugin configs can use hyphen/camelCase keys."""
+        if not isinstance(value, dict):
+            return value
+        return {
+            to_snake(str(key).replace("-", "_")): provider_config
+            for key, provider_config in value.items()
+        }
 
 
 class HeartbeatConfig(Base):
@@ -215,7 +228,9 @@ class Config(BaseSettings):
         self, model: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
-        from nanobot.providers.registry import PROVIDERS, find_by_name
+        from nanobot.providers.registry import find_by_name, get_provider_specs
+
+        provider_specs = get_provider_specs()
 
         forced = self.agents.defaults.provider
         if forced != "auto":
@@ -235,14 +250,14 @@ class Config(BaseSettings):
             return kw in model_lower or kw.replace("-", "_") in model_normalized
 
         # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
-        for spec in PROVIDERS:
+        for spec in provider_specs:
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or p.api_key:
                     return p, spec.name
 
         # Match by keyword (order follows PROVIDERS registry)
-        for spec in PROVIDERS:
+        for spec in provider_specs:
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
                 if spec.is_oauth or spec.is_local or p.api_key:
@@ -253,7 +268,7 @@ class Config(BaseSettings):
         # Prefer providers whose detect_by_base_keyword matches the configured api_base
         # (e.g. Ollama's "11434" in "http://localhost:11434") over plain registry order.
         local_fallback: tuple[ProviderConfig, str] | None = None
-        for spec in PROVIDERS:
+        for spec in provider_specs:
             if not spec.is_local:
                 continue
             p = getattr(self.providers, spec.name, None)
@@ -268,7 +283,7 @@ class Config(BaseSettings):
 
         # Fallback: gateways first, then others (follows registry order)
         # OAuth providers are NOT valid fallbacks — they require explicit model selection
-        for spec in PROVIDERS:
+        for spec in provider_specs:
             if spec.is_oauth:
                 continue
             p = getattr(self.providers, spec.name, None)
