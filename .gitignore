@@ -75,6 +75,7 @@ Desktop.ini
 .cursor/
 .idea/
 .fleet/
+.claude/
 *.code-workspace
 *.sublime-project
 *.sublime-workspace
