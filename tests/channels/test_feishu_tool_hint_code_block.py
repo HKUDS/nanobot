@@ -127,6 +127,79 @@ async def test_tool_hint_multiple_tools_in_one_message(mock_feishu_channel):
 
 
 @mark.asyncio
+async def test_tool_hint_new_format_basic(mock_feishu_channel):
+    """New format hints (read path, grep "pattern") should parse correctly."""
+    msg = OutboundMessage(
+        channel="feishu",
+        chat_id="oc_123456",
+        content='read src/main.py, grep "TODO"',
+        metadata={"_tool_hint": True}
+    )
+
+    with patch.object(mock_feishu_channel, '_send_message_sync') as mock_send:
+        await mock_feishu_channel.send(msg)
+
+        content = json.loads(mock_send.call_args[0][3])
+        md = content["elements"][0]["content"]
+        assert "read src/main.py" in md
+        assert 'grep "TODO"' in md
+
+
+@mark.asyncio
+async def test_tool_hint_new_format_with_comma_in_quotes(mock_feishu_channel):
+    """Commas inside quoted arguments must not cause incorrect line splits."""
+    msg = OutboundMessage(
+        channel="feishu",
+        chat_id="oc_123456",
+        content='grep "hello, world", $ echo test',
+        metadata={"_tool_hint": True}
+    )
+
+    with patch.object(mock_feishu_channel, '_send_message_sync') as mock_send:
+        await mock_feishu_channel.send(msg)
+
+        content = json.loads(mock_send.call_args[0][3])
+        md = content["elements"][0]["content"]
+        # The comma inside quotes should NOT cause a line break
+        assert 'grep "hello, world"' in md
+        assert "$ echo test" in md
+
+
+@mark.asyncio
+async def test_tool_hint_new_format_with_folding(mock_feishu_channel):
+    """Folded calls (× N) should display on separate lines."""
+    msg = OutboundMessage(
+        channel="feishu",
+        chat_id="oc_123456",
+        content='read path × 3, grep "pattern"',
+        metadata={"_tool_hint": True}
+    )
+
+    with patch.object(mock_feishu_channel, '_send_message_sync') as mock_send:
+        await mock_feishu_channel.send(msg)
+
+        content = json.loads(mock_send.call_args[0][3])
+        md = content["elements"][0]["content"]
+        assert "\u00d7 3" in md
+        assert 'grep "pattern"' in md
+
+
+@mark.asyncio
+async def test_tool_hint_new_format_mcp(mock_feishu_channel):
+    """MCP tool format (server::tool) should parse correctly."""
+    msg = OutboundMessage(
+        channel="feishu",
+        chat_id="oc_123456",
+        content='4_5v::analyze_image("photo.jpg")',
+        metadata={"_tool_hint": True}
+    )
+
+    with patch.object(mock_feishu_channel, '_send_message_sync') as mock_send:
+        await mock_feishu_channel.send(msg)
+
+        content = json.loads(mock_send.call_args[0][3])
+        md = content["elements"][0]["content"]
+        assert "4_5v::analyze_image" in md
 async def test_tool_hint_keeps_commas_inside_arguments(mock_feishu_channel):
     """Commas inside a single tool argument must not be split onto a new line."""
     msg = OutboundMessage(
