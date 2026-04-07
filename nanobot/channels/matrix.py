@@ -6,6 +6,7 @@ from html.parser import HTMLParser
 import json
 import logging
 import mimetypes
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -103,7 +104,6 @@ MATRIX_HTML_CLEANER = nh3.Cleaner(
     link_rel="noopener noreferrer",
 )
 
-
 @dataclass
 class _ListItemHTMLState:
     parts: list[str]
@@ -180,6 +180,7 @@ class _CompactLooseListHTMLParser(HTMLParser):
             state = self._stack.pop()
             state.parts.append("</li>")
             html = "".join(state.parts)
+            html = re.sub(r"</p>\s*</li>$", "</p></li>", html)
             if (
                 state.top_level_p_count == 1
                 and not state.has_other_top_level_content
