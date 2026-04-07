@@ -1187,6 +1187,34 @@ That's it! Environment variables, model routing, config matching, and `nanobot s
 
 </details>
 
+### Agent Defaults
+
+Default agent behavior is configured under `agents.defaults` in `~/.nanobot/config.json`:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-opus-4-5",
+      "provider": "auto",
+      "maxTokens": 8192,
+      "temperature": 0.1,
+      "maxToolIterations": 200,
+      "providerRetryMode": "standard"
+    }
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `model` | `string` | `anthropic/claude-opus-4-5` | Default LLM model |
+| `provider` | `string` | `auto` | Provider name or `auto` for auto-detection |
+| `maxTokens` | `int` | `8192` | Max tokens per response |
+| `temperature` | `float` | `0.1` | Sampling temperature |
+| `maxToolIterations` | `int` | `200` | Max tool calls per agent loop |
+| `providerRetryMode` | `string` | `standard` | `"standard"` (3 retries) or `"persistent"` (indefinite). See [Provider Retry Behavior](docs/PROVIDER_RETRY.md). |
+
 ### Channel Settings
 
 Global settings that apply to all channels. Configure under the `channels` section in `~/.nanobot/config.json`:
