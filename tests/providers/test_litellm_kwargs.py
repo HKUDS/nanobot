@@ -307,3 +307,54 @@ async def test_openai_compat_stream_watchdog_returns_error_on_stall(monkeypatch)
     assert result.finish_reason == "error"
     assert result.content is not None
     assert "stream stalled" in result.content
+
+
+# ---------------------------------------------------------------------------
+# Provider-specific thinking parameters (extra_body)
+# ---------------------------------------------------------------------------
+
+def _build_kwargs_for(provider_name: str, model: str, reasoning_effort=None):
+    spec = find_by_name(provider_name)
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        p = OpenAICompatProvider(api_key="k", default_model=model, spec=spec)
+    return p._build_kwargs(
+        messages=[{"role": "user", "content": "hi"}],
+        tools=None, model=model, max_tokens=1024, temperature=0.7,
+        reasoning_effort=reasoning_effort, tool_choice=None,
+    )
+
+
+def test_dashscope_thinking_enabled_with_reasoning_effort() -> None:
+    kw = _build_kwargs_for("dashscope", "qwen3-plus", reasoning_effort="medium")
+    assert kw["extra_body"] == {"enable_thinking": True}
+
+
+def test_dashscope_thinking_disabled_for_minimal() -> None:
+    kw = _build_kwargs_for("dashscope", "qwen3-plus", reasoning_effort="minimal")
+    assert kw["extra_body"] == {"enable_thinking": False}
+
+
+def test_dashscope_no_extra_body_when_reasoning_effort_none() -> None:
+    kw = _build_kwargs_for("dashscope", "qwen-turbo", reasoning_effort=None)
+    assert "extra_body" not in kw
+
+
+def test_volcengine_thinking_enabled() -> None:
+    kw = _build_kwargs_for("volcengine", "doubao-seed-2-0-pro", reasoning_effort="high")
+    assert kw["extra_body"] == {"thinking": {"type": "enabled"}}
+
+
+def test_byteplus_thinking_disabled_for_minimal() -> None:
+    kw = _build_kwargs_for("byteplus", "doubao-seed-2-0-pro", reasoning_effort="minimal")
+    assert kw["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+def test_byteplus_no_extra_body_when_reasoning_effort_none() -> None:
+    kw = _build_kwargs_for("byteplus", "doubao-seed-2-0-pro", reasoning_effort=None)
+    assert "extra_body" not in kw
+
+
+def test_openai_no_thinking_extra_body() -> None:
+    """Non-thinking providers should never get extra_body for thinking."""
+    kw = _build_kwargs_for("openai", "gpt-4o", reasoning_effort="medium")
+    assert "extra_body" not in kw

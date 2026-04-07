@@ -60,6 +60,20 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         pass
     if ctx_est <= 0:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
+    
+    # Fetch web search provider usage (best-effort, never blocks the response)
+    search_usage_text: str | None = None
+    try:
+        from nanobot.utils.searchusage import fetch_search_usage
+        web_cfg = getattr(loop, "web_config", None)
+        search_cfg = getattr(web_cfg, "search", None) if web_cfg else None
+        if search_cfg is not None:
+            provider = getattr(search_cfg, "provider", "duckduckgo")
+            api_key = getattr(search_cfg, "api_key", "") or None
+            usage = await fetch_search_usage(provider=provider, api_key=api_key)
+            search_usage_text = usage.format()
+    except Exception:
+        pass  # Never let usage fetch break /status
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
@@ -69,6 +83,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             context_window_tokens=loop.context_window_tokens,
             session_msg_count=len(session.get_history(max_messages=0)),
             context_tokens_estimate=ctx_est,
+            search_usage_text=search_usage_text,
         ),
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
@@ -93,14 +108,30 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
 
 async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     """Manually trigger a Dream consolidation run."""
+    import time
+
     loop = ctx.loop
-    try:
-        did_work = await loop.dream.run()
-        content = "Dream completed." if did_work else "Dream: nothing to process."
-    except Exception as e:
-        content = f"Dream failed: {e}"
+    msg = ctx.msg
+
+    async def _run_dream():
+        t0 = time.monotonic()
+        try:
+            did_work = await loop.dream.run()
+            elapsed = time.monotonic() - t0
+            if did_work:
+                content = f"Dream completed in {elapsed:.1f}s."
+            else:
+                content = "Dream: nothing to process."
+        except Exception as e:
+            elapsed = time.monotonic() - t0
+            content = f"Dream failed after {elapsed:.1f}s: {e}"
+        await loop.bus.publish_outbound(OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id, content=content,
+        ))
+
+    asyncio.create_task(_run_dream())
     return OutboundMessage(
-        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id, content=content,
+        channel=msg.channel, chat_id=msg.chat_id, content="Dreaming...",
     )
 
 

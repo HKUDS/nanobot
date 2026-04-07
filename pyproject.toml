@@ -1,6 +1,6 @@
 [project]
 name = "nanobot-ai"
-version = "0.1.4.post6"
+version = "0.1.5"
 description = "A lightweight personal AI assistant framework"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"

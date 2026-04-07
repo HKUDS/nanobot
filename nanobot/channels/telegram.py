@@ -6,14 +6,14 @@ import asyncio
 import re
 import time
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
 from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
 from telegram.error import BadRequest, NetworkError, TimedOut
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
@@ -558,8 +558,10 @@ class TelegramChannel(BaseChannel):
                     await self._remove_reaction(chat_id, int(reply_to_message_id))
                 except ValueError:
                     pass
+            chunks = split_message(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
+            primary_text = chunks[0] if chunks else buf.text
             try:
-                html = _markdown_to_telegram_html(buf.text)
+                html = _markdown_to_telegram_html(primary_text)
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
@@ -575,15 +577,18 @@ class TelegramChannel(BaseChannel):
                     await self._call_with_retry(
                         self._app.bot.edit_message_text,
                         chat_id=int_chat_id, message_id=buf.message_id,
-                        text=buf.text,
+                        text=primary_text,
                     )
                 except Exception as e2:
                     if self._is_not_modified_error(e2):
                         logger.debug("Final stream plain edit already applied for {}", chat_id)
-                        self._stream_bufs.pop(chat_id, None)
-                        return
-                    logger.warning("Final stream edit failed: {}", e2)
-                    raise  # Let ChannelManager handle retry
+                    else:
+                        logger.warning("Final stream edit failed: {}", e2)
+                        raise  # Let ChannelManager handle retry
+            # If final content exceeds Telegram limit, keep the first chunk in
+            # the edited stream message and send the rest as follow-up messages.
+            for extra_chunk in chunks[1:]:
+                await self._send_text(int_chat_id, extra_chunk)
             self._stream_bufs.pop(chat_id, None)
             return
 
@@ -599,11 +604,15 @@ class TelegramChannel(BaseChannel):
             return
 
         now = time.monotonic()
+        thread_kwargs = {}
+        if message_thread_id := meta.get("message_thread_id"):
+            thread_kwargs["message_thread_id"] = message_thread_id
         if buf.message_id is None:
             try:
                 sent = await self._call_with_retry(
                     self._app.bot.send_message,
                     chat_id=int_chat_id, text=buf.text,
+                    **thread_kwargs,
                 )
                 buf.message_id = sent.message_id
                 buf.last_edit = now
@@ -651,9 +660,9 @@ class TelegramChannel(BaseChannel):
 
     @staticmethod
     def _derive_topic_session_key(message) -> str | None:
-        """Derive topic-scoped session key for non-private Telegram chats."""
+        """Derive topic-scoped session key for Telegram chats with threads."""
         message_thread_id = getattr(message, "message_thread_id", None)
-        if message.chat.type == "private" or message_thread_id is None:
+        if message_thread_id is None:
             return None
         return f"telegram:{message.chat_id}:topic:{message_thread_id}"
 
@@ -815,7 +824,7 @@ class TelegramChannel(BaseChannel):
         return bool(bot_id and reply_user and reply_user.id == bot_id)
 
     def _remember_thread_context(self, message) -> None:
-        """Cache topic thread id by chat/message id for follow-up replies."""
+        """Cache Telegram thread context by chat/message id for follow-up replies."""
         message_thread_id = getattr(message, "message_thread_id", None)
         if message_thread_id is None:
             return

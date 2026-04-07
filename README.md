@@ -1,39 +1,44 @@
 <div align="center">
   <img src="nanobot_logo.png" alt="nanobot" width="500">
-  <h1>nanobot: Ultra-Lightweight Personal AI Assistant</h1>
+  <h1>nanobot: Ultra-Lightweight Personal AI Agent</h1>
   <p>
     <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/pypi/v/nanobot-ai" alt="PyPI"></a>
     <a href="https://pepy.tech/project/nanobot-ai"><img src="https://static.pepy.tech/badge/nanobot-ai" alt="Downloads"></a>
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+    <a href="https://nanobot.wiki/docs/0.1.5/getting-started/nanobot-overview"><img src="https://img.shields.io/badge/Docs-nanobot.wiki-blue?style=flat&logo=readthedocs&logoColor=white" alt="Docs"></a>
     <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/Feishu-Group-E9DBFC?style=flat&logo=feishu&logoColor=white" alt="Feishu"></a>
     <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/WeChat-Group-C5EAB4?style=flat&logo=wechat&logoColor=white" alt="WeChat"></a>
     <a href="https://discord.gg/MnCvHqpUGB"><img src="https://img.shields.io/badge/Discord-Community-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
   </p>
 </div>
 
-🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw).
+🐈 **nanobot** is an **ultra-lightweight** personal AI agent inspired by [OpenClaw](https://github.com/openclaw/openclaw).
 
-⚡️ Delivers core agent functionality with **99% fewer lines of code** than OpenClaw.
+⚡️ Delivers core agent functionality with **99% fewer lines of code**.
 
 📏 Real-time line count: run `bash core_agent_lines.sh` to verify anytime.
 
 ## 📢 News
 
-- **2026-04-02** 🧱 **Long-running tasks** run more reliably — core runtime hardening.
+- **2026-04-05** 🚀 Released **v0.1.5** — sturdier long-running tasks, Dream two-stage memory, production-ready sandboxing and programming Agent SDK. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.5) for details.
+- **2026-04-04** 🚀 Jinja2 response templates, Dream memory hardened, smarter retry handling.
+- **2026-04-03** 🧠 Xiaomi MiMo provider, chain-of-thought reasoning visible, Telegram UX polish.
+- **2026-04-02** 🧱 Long-running tasks run more reliably — core runtime hardening.
 - **2026-04-01** 🔑 GitHub Copilot auth restored; stricter workspace paths; OpenRouter Claude caching fix.
 - **2026-03-31** 🛰️ WeChat multimodal alignment, Discord/Matrix polish, Python SDK facade, MCP and tool fixes.
 - **2026-03-30** 🧩 OpenAI-compatible API tightened; composable agent lifecycle hooks.
 - **2026-03-29** 💬 WeChat voice, typing, QR/media resilience; fixed-session OpenAI-compatible API.
 - **2026-03-28** 📚 Provider docs refresh; skill template wording fix.
 - **2026-03-27** 🚀 Released **v0.1.4.post6** — architecture decoupling, litellm removal, end-to-end streaming, WeChat channel, and a security fix. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post6) for details.
-- **2026-03-26** 🏗️ Agent runner extracted and lifecycle hooks unified; stream delta coalescing at boundaries.
-- **2026-03-25** 🌏 StepFun provider, configurable timezone, Gemini thought signatures.
-- **2026-03-24** 🔧 WeChat compatibility, Feishu CardKit streaming, test suite restructured.
+
 
 <details>
 <summary>Earlier news</summary>
 
+- **2026-03-26** 🏗️ Agent runner extracted and lifecycle hooks unified; stream delta coalescing at boundaries.
+- **2026-03-25** 🌏 StepFun provider, configurable timezone, Gemini thought signatures.
+- **2026-03-24** 🔧 WeChat compatibility, Feishu CardKit streaming, test suite restructured.
 - **2026-03-23** 🔧 Command routing refactored for plugins, WhatsApp/WeChat media, unified channel login CLI.
 - **2026-03-22** ⚡ End-to-end streaming, WeChat channel, Anthropic cache optimization, `/status` command.
 - **2026-03-21** 🔒 Replace `litellm` with native `openai` + `anthropic` SDKs. Please see [commit](https://github.com/HKUDS/nanobot/commit/3dfdab7).
@@ -91,7 +96,7 @@
 
 ## Key Features of nanobot:
 
-🪶 **Ultra-Lightweight**: A super lightweight implementation of OpenClaw — 99% smaller, significantly faster.
+🪶 **Ultra-Lightweight**: A lightweight implementation built for stable, long-running AI agents.
 
 🔬 **Research-Ready**: Clean, readable code that's easy to understand, modify, and extend for research.
 
@@ -140,7 +145,7 @@
   <tr>
     <td align="center"><p align="center"><img src="case/search.gif" width="180" height="400"></p></td>
     <td align="center"><p align="center"><img src="case/code.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/scedule.gif" width="180" height="400"></p></td>
+    <td align="center"><p align="center"><img src="case/schedule.gif" width="180" height="400"></p></td>
     <td align="center"><p align="center"><img src="case/memory.gif" width="180" height="400"></p></td>
   </tr>
   <tr>
@@ -252,7 +257,7 @@ Configure these **two parts** in your config (other options have defaults).
 nanobot agent
 ```
 
-That's it! You have a working AI assistant in 2 minutes.
+That's it! You have a working AI agent in 2 minutes.
 
 ## 💬 Chat Apps
 
@@ -433,9 +438,11 @@ pip install nanobot-ai[matrix]
 
 - You need:
   - `userId` (example: `@nanobot:matrix.org`)
-  - `accessToken`
-  - `deviceId` (recommended so sync tokens can be restored across restarts)
-- You can obtain these from your homeserver login API (`/_matrix/client/v3/login`) or from your client's advanced session settings.
+  - `password`
+
+(Note: `accessToken` and `deviceId` are still supported for legacy reasons, but
+for reliable encryption, password login is recommended instead. If the
+`password` is provided, `accessToken` and `deviceId` will be ignored.)
 
 **3. Configure**
 
@@ -446,8 +453,7 @@ pip install nanobot-ai[matrix]
       "enabled": true,
       "homeserver": "https://matrix.org",
       "userId": "@nanobot:matrix.org",
-      "accessToken": "syt_xxx",
-      "deviceId": "NANOBOT01",
+      "password": "mypasswordhere",
       "e2eeEnabled": true,
       "allowFrom": ["@your_user:matrix.org"],
       "groupPolicy": "open",
@@ -459,7 +465,7 @@ pip install nanobot-ai[matrix]
 }
 ```
 
-> Keep a persistent `matrix-store` and stable `deviceId` — encrypted session state is lost if these change across restarts.
+> Keep a persistent `matrix-store` — encrypted session state is lost if these change across restarts.
 
 | Option | Description |
 |--------|-------------|
@@ -720,6 +726,9 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 > - `allowFrom`: Add your email address. Use `["*"]` to accept emails from anyone.
 > - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
 > - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
+> - `allowedAttachmentTypes`: Save inbound attachments matching these MIME types — `["*"]` for all, e.g. `["application/pdf", "image/*"]` (default `[]` = disabled).
+> - `maxAttachmentSize`: Max size per attachment in bytes (default `2000000` / 2MB).
+> - `maxAttachmentsPerEmail`: Max attachments to save per email (default `5`).
 
 ```json
 {
@@ -736,7 +745,8 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
       "smtpUsername": "my-nanobot@gmail.com",
       "smtpPassword": "your-app-password",
       "fromAddress": "my-nanobot@gmail.com",
-      "allowFrom": ["your-real-email@gmail.com"]
+      "allowFrom": ["your-real-email@gmail.com"],
+      "allowedAttachmentTypes": ["application/pdf", "image/*"]
     }
   }
 }
@@ -861,10 +871,45 @@ Config file: `~/.nanobot/config.json`
 > run `nanobot onboard`, then answer `N` when asked whether to overwrite the config.
 > nanobot will merge in missing default fields and keep your current settings.
 
+### Environment Variables for Secrets
+
+Instead of storing secrets directly in `config.json`, you can use `${VAR_NAME}` references that are resolved from environment variables at startup:
+
+```json
+{
+  "channels": {
+    "telegram": { "token": "${TELEGRAM_TOKEN}" },
+    "email": {
+      "imapPassword": "${IMAP_PASSWORD}",
+      "smtpPassword": "${SMTP_PASSWORD}"
+    }
+  },
+  "providers": {
+    "groq": { "apiKey": "${GROQ_API_KEY}" }
+  }
+}
+```
+
+For **systemd** deployments, use `EnvironmentFile=` in the service unit to load variables from a file that only the deploying user can read:
+
+```ini
+# /etc/systemd/system/nanobot.service (excerpt)
+[Service]
+EnvironmentFile=/home/youruser/nanobot_secrets.env
+User=nanobot
+ExecStart=...
+```
+
+```bash
+# /home/youruser/nanobot_secrets.env (mode 600, owned by youruser)
+TELEGRAM_TOKEN=your-token-here
+IMAP_PASSWORD=your-password-here
+```
+
 ### Providers
 
 > [!TIP]
-> - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
+> - **Voice transcription**: Voice messages (Telegram, WhatsApp) are automatically transcribed using Whisper. By default Groq is used (free tier). Set `"transcriptionProvider": "openai"` under `channels` to use OpenAI Whisper instead — the API key is picked from the matching provider config.
 > - **MiniMax Coding Plan**: Exclusive discount links for the nanobot community: [Overseas](https://platform.minimax.io/subscribe/coding-plan?code=9txpdXw04g&source=link) · [Mainland China](https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link)
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
 > - **VolcEngine / BytePlus Coding Plan**: Use dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan` instead of the pay-per-use `volcengine` / `byteplus` providers.
@@ -880,9 +925,9 @@ Config file: `~/.nanobot/config.json`
 | `byteplus` | LLM (VolcEngine international, pay-per-use) | [Coding Plan](https://www.byteplus.com/en/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [byteplus.com](https://www.byteplus.com) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `azure_openai` | LLM (Azure OpenAI) | [portal.azure.com](https://portal.azure.com) |
-| `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
+| `openai` | LLM + Voice transcription (Whisper) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
-| `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
+| `groq` | LLM + Voice transcription (Whisper, default) | [console.groq.com](https://console.groq.com) |
 | `minimax` | LLM (MiniMax direct) | [platform.minimaxi.com](https://platform.minimaxi.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
@@ -1197,6 +1242,7 @@ Global settings that apply to all channels. Configure under the `channels` secti
     "sendProgress": true,
     "sendToolHints": false,
     "sendMaxRetries": 3,
+    "transcriptionProvider": "groq",
     "telegram": { ... }
   }
 }
@@ -1207,6 +1253,7 @@ Global settings that apply to all channels. Configure under the `channels` secti
 | `sendProgress` | `true` | Stream agent's text progress to the channel |
 | `sendToolHints` | `false` | Stream tool-call hints (e.g. `read_file("…")`) |
 | `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
+| `transcriptionProvider` | `"groq"` | Voice transcription backend: `"groq"` (free tier, default) or `"openai"`. API key is auto-resolved from the matching provider config. |
 
 #### Retry Behavior
 
@@ -1434,15 +1481,18 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 ### Security
 
 > [!TIP]
-> For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
+> For production deployments, set `"restrictToWorkspace": true` and `"tools.exec.sandbox": "bwrap"` in your config to sandbox the agent.
 > In `v0.1.4.post3` and earlier, an empty `allowFrom` allowed all senders. Since `v0.1.4.post4`, empty `allowFrom` denies all access by default. To allow all senders, set `"allowFrom": ["*"]`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
+| `tools.exec.sandbox` | `""` | Sandbox backend for shell commands. Set to `"bwrap"` to wrap exec calls in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox — the process can only see the workspace (read-write) and media directory (read-only); config files and API keys are hidden. Automatically enables `restrictToWorkspace` for file tools. **Linux only** — requires `bwrap` installed (`apt install bubblewrap`; pre-installed in the Docker image). Not available on macOS or Windows (bwrap depends on Linux kernel namespaces). |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
+
+**Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
 
 
 ### Timezone
@@ -1763,7 +1813,8 @@ print(resp.choices[0].message.content)
 ## 🐳 Docker
 
 > [!TIP]
-> The `-v ~/.nanobot:/root/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
+> The `-v ~/.nanobot:/home/nanobot/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
+> The container runs as user `nanobot` (UID 1000). If you get **Permission denied**, fix ownership on the host first: `sudo chown -R 1000:1000 ~/.nanobot`, or pass `--user $(id -u):$(id -g)` to match your host UID. Podman users can use `--userns=keep-id` instead.
 
 ### Docker Compose
 
@@ -1786,17 +1837,17 @@ docker compose down                                      # stop
 docker build -t nanobot .
 
 # Initialize config (first time only)
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot onboard
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
 
 # Edit config on host to add API keys
 vim ~/.nanobot/config.json
 
 # Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat)
-docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
+docker run -v ~/.nanobot:/home/nanobot/.nanobot -p 18790:18790 nanobot gateway
 
 # Or run a single command
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot agent -m "Hello!"
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot status
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot agent -m "Hello!"
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot status
 ```
 
 ## 🐧 Linux Service

@@ -111,7 +111,7 @@ class SubagentManager:
         try:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
-            allowed_dir = self.workspace if self.restrict_to_workspace else None
+            allowed_dir = self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
             extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
             tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
             tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
@@ -124,6 +124,7 @@ class SubagentManager:
                     working_dir=str(self.workspace),
                     timeout=self.exec_config.timeout,
                     restrict_to_workspace=self.restrict_to_workspace,
+                    sandbox=self.exec_config.sandbox,
                     path_append=self.exec_config.path_append,
                 ))
             if self.web_config.enable:

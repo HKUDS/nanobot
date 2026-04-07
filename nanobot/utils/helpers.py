@@ -396,8 +396,15 @@ def build_status_content(
     context_window_tokens: int,
     session_msg_count: int,
     context_tokens_estimate: int,
+    search_usage_text: str | None = None,
 ) -> str:
-    """Build a human-readable runtime status snapshot."""
+    """Build a human-readable runtime status snapshot.
+    
+    Args:
+        search_usage_text: Optional pre-formatted web search usage string
+                           (produced by SearchUsageInfo.format()). When provided
+                           it is appended as an extra section.
+    """
     uptime_s = int(time.time() - start_time)
     uptime = (
         f"{uptime_s // 3600}h {(uptime_s % 3600) // 60}m"
@@ -414,14 +421,17 @@ def build_status_content(
     token_line = f"\U0001f4ca Tokens: {last_in} in / {last_out} out"
     if cached and last_in:
         token_line += f" ({cached * 100 // last_in}% cached)"
-    return "\n".join([
+    lines = [
         f"\U0001f408 nanobot v{version}",
         f"\U0001f9e0 Model: {model}",
         token_line,
         f"\U0001f4da Context: {ctx_used_str}/{ctx_total_str} ({ctx_pct}%)",
         f"\U0001f4ac Session: {session_msg_count} messages",
         f"\u23f1 Uptime: {uptime}",
-    ])
+    ]
+    if search_usage_text:
+        lines.append(search_usage_text)
+    return "\n".join(lines)    
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
