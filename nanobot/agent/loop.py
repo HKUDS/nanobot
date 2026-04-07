@@ -218,9 +218,9 @@ class AgentLoop:
             workspace=workspace,
             bus=bus,
             model=self.model,
-            web_search_config=self.web_search_config,
-            web_proxy=web_proxy,
-            exec_config=self.exec_config,
+            max_tool_result_chars=self._TOOL_RESULT_MAX_CHARS,
+            web_config=web_search_config,
+            exec_config=exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
 
@@ -237,8 +237,10 @@ class AgentLoop:
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
         )
+        from nanobot.agent.memory import MemoryStore
+        self._memory_store = MemoryStore(workspace, layout=self.layout)
         self.memory_consolidator = MemoryConsolidator(
-            workspace=workspace,
+            store=self._memory_store,
             provider=provider,
             model=self.model,
             sessions=self.sessions,
