@@ -238,7 +238,7 @@ const sessionListEl  = document.getElementById('session-list');
 
 /* ── marked config ────────────────────────────────────────────────────── */
 
-marked.setOptions({ breaks: true, gfm: true });
+marked.use({ breaks: true, gfm: true });
 
 /* ── Base64 image rendering ───────────────────────────────────────────── */
 
@@ -282,9 +282,55 @@ function unwrapBase64Images(text) {
   return text;
 }
 
+/** Expand ```markdown blocks into rendered HTML before marked sees them. */
+function preprocessMarkdown(text) {
+  return text.replace(/^```markdown[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/gm, (_, inner) => {
+    return '<div class="markdown-embed rendered-content">' + marked.parse(inner) + '</div>\n\n';
+  });
+}
+
 /** Render markdown with base64 image detection. */
 function renderMarkdown(text) {
-  return marked.parse(unwrapBase64Images(text));
+  return marked.parse(preprocessMarkdown(unwrapBase64Images(text)));
+}
+
+/**
+ * Split the token buffer into a safely-renderable portion and a pending tail.
+ *
+ * Strategy: render the entire buffer as markdown immediately — paragraphs,
+ * headings, bold, lists all look fine even when partially typed. The only
+ * exception is an *unclosed* code fence: a partial ``` block would render
+ * incorrectly, so we hold back everything from the opening fence onward and
+ * show it as plain text until the closing fence arrives.
+ *
+ * Returns { rendered: string, pending: string }
+ */
+function getRenderedPortion(text) {
+  const lines = text.split('\n');
+  let fenceOpen = false;
+  let fenceStartLine = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (/^`{3,}/.test(lines[i].trimStart())) {
+      if (!fenceOpen) {
+        fenceOpen = true;
+        fenceStartLine = i;
+      } else {
+        fenceOpen = false;
+        fenceStartLine = -1;
+      }
+    }
+  }
+
+  if (!fenceOpen) {
+    // No unclosed fence — render everything immediately
+    return { rendered: text, pending: '' };
+  }
+
+  // Unclosed fence — render only the text before it opens
+  if (fenceStartLine === 0) return { rendered: '', pending: text };
+  const cutAt = lines.slice(0, fenceStartLine).join('\n') + '\n';
+  return { rendered: cutAt, pending: text.slice(cutAt.length) };
 }
 
 /* ── Sidebar toggle (mobile) ──────────────────────────────────────────── */
@@ -658,9 +704,23 @@ async function sendMessage(text) {
   currentStreamEl.className = 'streaming-content';
   bubble.appendChild(currentStreamEl);
 
+  // Progressive markdown: rendered completed blocks + plain-text pending tail
+  let streamedRendered = document.createElement('div');
+  streamedRendered.className = 'rendered-content';
+  let streamedPending  = document.createElement('div');
+  streamedPending.className = 'streaming-text';
+  currentStreamEl.appendChild(streamedRendered);
+  currentStreamEl.appendChild(streamedPending);
+
   let tokenBuffer = '';
   let lastToolBlock = null;
   const collectedHints = [];
+
+  function progressiveRender() {
+    const { rendered, pending } = getRenderedPortion(tokenBuffer);
+    streamedRendered.innerHTML = rendered ? renderMarkdown(rendered) : '';
+    streamedPending.textContent = pending;
+  }
 
   // Freeze the current streaming section into a rendered-content div,
   // then add a fresh streaming section at the end of bubble.
@@ -680,6 +740,12 @@ async function sendMessage(text) {
     tokenBuffer = '';
     currentStreamEl = document.createElement('div');
     currentStreamEl.className = 'streaming-content';
+    streamedRendered = document.createElement('div');
+    streamedRendered.className = 'rendered-content';
+    streamedPending  = document.createElement('div');
+    streamedPending.className = 'streaming-text';
+    currentStreamEl.appendChild(streamedRendered);
+    currentStreamEl.appendChild(streamedPending);
     bubble.appendChild(currentStreamEl);
   }
 
@@ -713,7 +779,7 @@ async function sendMessage(text) {
       for (const { type, data } of events) {
         if (type === 'token') {
           tokenBuffer += data.text;
-          currentStreamEl.textContent = tokenBuffer;
+          progressiveRender();
           scrollToBottom();
 
         } else if (type === 'progress') {

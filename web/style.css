@@ -407,7 +407,6 @@ header {
 
 /* ── Streaming cursor ───────────────────────────────────────────────────── */
 .streaming-content {
-  white-space: pre-wrap;
   word-break: break-word;
 }
 
@@ -418,6 +417,11 @@ header {
   color: var(--accent);
   margin-left: 1px;
   font-size: 0.9em;
+}
+
+.streaming-text {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 @keyframes blink {
@@ -466,6 +470,15 @@ header {
   background: none;
   padding: 0;
   font-size: 13px;
+}
+
+.markdown-embed {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 10px 0;
+  font-family: inherit;
 }
 
 .rendered-content table {

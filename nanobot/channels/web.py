@@ -89,6 +89,15 @@ class WebChannel(BaseChannel):
             return
         await q.put(msg)
 
+    async def send_delta(self, chat_id: str, content: str, metadata: dict) -> None:
+        """Route streaming token deltas and stream-end signals into the SSE queue."""
+        q = self._queues.get(chat_id)
+        if q is None:
+            return
+        await q.put(OutboundMessage(
+            channel=self.name, chat_id=chat_id, content=content, metadata=metadata,
+        ))
+
     async def start(self) -> None:
         self._running = True
 
@@ -188,7 +197,11 @@ class WebChannel(BaseChannel):
         if not path.exists() or not path.is_file():
             raise web.HTTPNotFound()
         mime, _ = mimetypes.guess_type(str(path))
-        return web.Response(body=path.read_bytes(), content_type=mime or "application/octet-stream")
+        return web.Response(
+            body=path.read_bytes(),
+            content_type=mime or "application/octet-stream",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     # ------------------------------------------------------------------
     # Health + stop
@@ -282,6 +295,7 @@ class WebChannel(BaseChannel):
             chat_id=session_id,
             content=message,
             media=media_paths,
+            metadata={"_wants_stream": True},
         ))
 
         # Set up the SSE response
@@ -294,6 +308,7 @@ class WebChannel(BaseChannel):
         await response.prepare(request)
 
         try:
+            accumulated = ""
             while True:
                 try:
                     item = await asyncio.wait_for(q.get(), timeout=120)
@@ -309,14 +324,29 @@ class WebChannel(BaseChannel):
                 # OutboundMessage from the bus
                 meta = item.metadata or {}
 
-                if meta.get("_progress"):
+                if meta.get("_stream_delta"):
+                    # Token chunk — accumulate and forward
+                    accumulated += item.content or ""
+                    await response.write(_sse("token", {"text": item.content}))
+
+                elif meta.get("_stream_end"):
+                    if meta.get("_resuming"):
+                        # Tool call next — reset accumulation
+                        accumulated = ""
+                        await response.write(_sse("progress", {"text": "", "tool_hint": False}))
+                    else:
+                        # Streaming complete — send full accumulated text as done
+                        await response.write(_sse("done", {"text": accumulated}))
+                        break
+
+                elif meta.get("_progress"):
                     await response.write(_sse("progress", {
                         "text": item.content,
                         "tool_hint": bool(meta.get("_tool_hint")),
                     }))
 
                 else:
-                    # Final complete response
+                    # Non-streaming fallback (provider without chat_stream support)
                     await response.write(_sse("done", {"text": item.content}))
                     break
 
