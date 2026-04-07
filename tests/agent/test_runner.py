@@ -458,6 +458,7 @@ async def test_runner_uses_raw_messages_when_context_governance_fails():
 
 @pytest.mark.asyncio
 async def test_runner_retries_empty_final_response_with_summary_prompt():
+    """Empty responses get 2 silent retries before finalization kicks in."""
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
 
     provider = MagicMock()
@@ -465,11 +466,11 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
 
     async def chat_with_retry(*, messages, tools=None, **kwargs):
         calls.append({"messages": messages, "tools": tools})
-        if len(calls) == 1:
+        if len(calls) <= 2:
             return LLMResponse(
                 content=None,
                 tool_calls=[],
-                usage={"prompt_tokens": 10, "completion_tokens": 1},
+                usage={"prompt_tokens": 5, "completion_tokens": 1},
             )
         return LLMResponse(
             content="final answer",
@@ -486,20 +487,23 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
         initial_messages=[{"role": "user", "content": "do task"}],
         tools=tools,
         model="test-model",
-        max_iterations=1,
+        max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == "final answer"
-    assert len(calls) == 2
-    assert calls[1]["tools"] is None
-    assert "Do not call any more tools" in calls[1]["messages"][-1]["content"]
+    # 2 silent retries (iterations 0,1) + finalization on iteration 1
+    assert len(calls) == 3
+    assert calls[0]["tools"] is not None
+    assert calls[1]["tools"] is not None
+    assert calls[2]["tools"] is None
     assert result.usage["prompt_tokens"] == 13
-    assert result.usage["completion_tokens"] == 8
+    assert result.usage["completion_tokens"] == 9
 
 
 @pytest.mark.asyncio
 async def test_runner_uses_specific_message_after_empty_finalization_retry():
+    """After silent retries + finalization all return empty, stop_reason is empty_final_response."""
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
     from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
@@ -517,12 +521,72 @@ async def test_runner_uses_specific_message_after_empty_finalization_retry():
         initial_messages=[{"role": "user", "content": "do task"}],
         tools=tools,
         model="test-model",
-        max_iterations=1,
+        max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == EMPTY_FINAL_RESPONSE_MESSAGE
     assert result.stop_reason == "empty_final_response"
+
+
+@pytest.mark.asyncio
+async def test_runner_empty_response_does_not_break_tool_chain():
+    """An empty intermediate response must not kill an ongoing tool chain.
+
+    Sequence: tool_call → empty → tool_call → final text.
+    The runner should recover via silent retry and complete normally.
+    """
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    call_count = 0
+
+    async def chat_with_retry(*, messages, tools=None, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return LLMResponse(
+                content=None,
+                tool_calls=[ToolCallRequest(id="tc1", name="read_file", arguments={"path": "a.txt"})],
+                usage={"prompt_tokens": 10, "completion_tokens": 5},
+            )
+        if call_count == 2:
+            return LLMResponse(content=None, tool_calls=[], usage={"prompt_tokens": 10, "completion_tokens": 1})
+        if call_count == 3:
+            return LLMResponse(
+                content=None,
+                tool_calls=[ToolCallRequest(id="tc2", name="read_file", arguments={"path": "b.txt"})],
+                usage={"prompt_tokens": 10, "completion_tokens": 5},
+            )
+        return LLMResponse(
+            content="Here are the results.",
+            tool_calls=[],
+            usage={"prompt_tokens": 10, "completion_tokens": 10},
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_with_retry
+
+    async def fake_tool(name, args, **kw):
+        return "file content"
+
+    tool_registry = MagicMock()
+    tool_registry.get_definitions.return_value = [{"type": "function", "function": {"name": "read_file"}}]
+    tool_registry.execute = AsyncMock(side_effect=fake_tool)
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "read both files"}],
+        tools=tool_registry,
+        model="test-model",
+        max_iterations=10,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "Here are the results."
+    assert result.stop_reason == "completed"
+    assert call_count == 4
+    assert "read_file" in result.tools_used
 
 
 def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch):
