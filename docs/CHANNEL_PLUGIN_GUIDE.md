@@ -352,7 +352,7 @@ When `streaming` is `false` (default) or omitted, only `send()` is called — no
 
 ### Why Pydantic model is required
 
-`BaseChannel.is_allowed()` and the `supports_streaming` property access config fields via `getattr()` (e.g. `getattr(self.config, "allow_from", [])`). This works for Pydantic models where `allow_from` is a real Python attribute, but **fails silently for plain `dict`** — `dict` has no `allow_from` attribute, so `getattr` always returns the default `[]`, causing all messages to be denied.
+`BaseChannel.is_allowed()` reads the permission list via `getattr(self.config, "allow_from", [])`. This works for Pydantic models where `allow_from` is a real Python attribute, but **fails silently for plain `dict`** — `dict` has no `allow_from` attribute, so `getattr` always returns the default `[]`, causing all messages to be denied.
 
 Built-in channels use Pydantic config models (subclassing `Base` from `nanobot.config.schema`). Plugin channels **must do the same**.
 
