@@ -121,7 +121,7 @@ def test_parse_chunks_dict_stepfun_reasoning_fallback() -> None:
         {
             "choices": [{
                 "finish_reason": None,
-                "delta": {"content": None, "reasoning": "step 2. "},
+                "delta": {"content": None, "reasoning": "step 2."},
             }],
         },
         {
@@ -136,6 +136,48 @@ def test_parse_chunks_dict_stepfun_reasoning_fallback() -> None:
 
     assert result.content == "final answer"
     assert result.reasoning_content == "Thinking step 1... step 2."
+
+
+# ── Regression: normal models unaffected ────────────────────────────────────
+
+
+def test_parse_dict_normal_model_with_reasoning_content_unaffected() -> None:
+    """Models that use reasoning_content (e.g. DeepSeek-R1) are not affected."""
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    response = {
+        "choices": [{
+            "message": {
+                "content": "The answer is 42.",
+                "reasoning_content": "Let me think step by step...",
+            },
+            "finish_reason": "stop",
+        }],
+    }
+
+    result = provider._parse(response)
+
+    assert result.content == "The answer is 42."
+    assert result.reasoning_content == "Let me think step by step..."
+
+
+def test_parse_dict_standard_model_no_reasoning_unaffected() -> None:
+    """Standard models (no reasoning fields at all) work exactly as before."""
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    response = {
+        "choices": [{
+            "message": {"content": "Hello!"},
+            "finish_reason": "stop",
+        }],
+    }
+
+    result = provider._parse(response)
+
+    assert result.content == "Hello!"
+    assert result.reasoning_content is None
 
 
 def test_parse_chunks_dict_reasoning_precedence() -> None:
