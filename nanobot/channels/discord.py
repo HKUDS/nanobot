@@ -265,23 +265,34 @@ class DiscordChannel(BaseChannel):
                 self._bot_user_id = user_data.get("id")
                 logger.info("Discord bot connected as user {}", self._bot_user_id)
                 # 注册 slash commands
-                if self.config.slash_commands:
-                    from nanobot.command.discord_slash import (
-                        extract_app_id,
-                        register_all_commands,
-                    )
-                    try:
-                        self._app_id = extract_app_id(self.config.token)
-                    except Exception as e:
-                        logger.warning("Failed to extract app_id: {}", e)
-                    guild_ids = [str(g["id"]) for g in payload.get("guilds", [])]
-                    if guild_ids and self._app_id:
+                from nanobot.command.discord_slash import (
+                    extract_app_id,
+                    register_all_commands,
+                    register_guild_commands,
+                )
+                try:
+                    self._app_id = extract_app_id(self.config.token)
+                except Exception as e:
+                    logger.warning("Failed to extract app_id: {}", e)
+                guild_ids = [str(g["id"]) for g in payload.get("guilds", [])]
+                if guild_ids and self._app_id:
+                    if self.config.slash_commands:
                         # 尝试构造 SkillsLoader 以注册 skill commands
                         skills_loader = self._make_skills_loader()
+                        # 从 config 读取模型列表供 /model 下拉框使用
+                        model_choices = self._load_model_choices()
                         asyncio.create_task(register_all_commands(
                             self._http, self.config.token, guild_ids,
                             skills_loader=skills_loader,
+                            model_choices=model_choices,
                         ))
+                    else:
+                        # slash_commands 关闭时，PUT 空列表清除已注册的命令
+                        for gid in guild_ids:
+                            asyncio.create_task(register_guild_commands(
+                                self._http, self._app_id, gid,
+                                self.config.token, [],
+                            ))
             elif op == 0 and event_type == "INTERACTION_CREATE":
                 await self._handle_interaction(payload)
             elif op == 0 and event_type == "MESSAGE_CREATE":
@@ -533,6 +544,17 @@ class DiscordChannel(BaseChannel):
             return SkillsLoader(config.workspace_path)
         except Exception as e:
             logger.debug("Could not create SkillsLoader for slash commands: {}", e)
+            return None
+
+    def _load_model_choices(self) -> list[str] | None:
+        """从 config 读取 model + fallbackModels 供 slash command choices 使用。"""
+        try:
+            from nanobot.config.loader import load_config
+            config = load_config()
+            defaults = config.agents.defaults
+            return [defaults.model] + list(defaults.fallback_models or [])
+        except Exception as e:
+            logger.debug("Could not load model choices: {}", e)
             return None
 
     # ── Slash Command / Interaction 处理 ─────────────────────

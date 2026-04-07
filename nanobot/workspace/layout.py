@@ -23,9 +23,9 @@ class WorkspaceLayout:
 
     @property
     def _dir_name(self) -> str:
-        """目录名：{scope_id}_{channel_name} 或纯 channel_name（无 scope_id 时）。"""
+        """目录名：{channel_name}_{scope_id} 或纯 channel_name（无 scope_id 时）。"""
         if self.scope_id and self.scope_id != self.channel_name:
-            return f"{self.scope_id}_{self.channel_name}"
+            return f"{self.channel_name}_{self.scope_id}"
         return self.channel_name
 
     @property

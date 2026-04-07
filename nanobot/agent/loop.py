@@ -181,6 +181,7 @@ class AgentLoop:
         context_pruning_config=None,  # ContextPruningConfig | None
         skills_config=None,  # SkillsConfig | None
         hooks: list[AgentHook] | None = None,
+        config: Any = None,
     ):
         from nanobot.config.schema import ContextPruningConfig, ExecToolConfig, WebSearchConfig
 
@@ -189,6 +190,9 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self._config = config                    # 原始 Config 对象，用于构建新 provider
+        self._config_model = self.model          # config 中的默认 model，不可变
+        self._config_provider = self.provider    # config 中的默认 provider（含 fallback），不可变
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
         self.web_search_config = web_search_config or WebSearchConfig()
@@ -272,6 +276,33 @@ class AgentLoop:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
             )
+
+    def switch_model(self, model: str) -> str:
+        """运行时切换模型（无 fallback）。失败时抛出 ValueError。"""
+        from nanobot.nanobot import _make_single_provider
+
+        new_provider = _make_single_provider(self._config, model)
+        new_provider.generation = self._config_provider.generation
+        self.provider = new_provider
+        self.model = model
+        self.runner.provider = new_provider
+        logger.info("Model switched to: {}", model)
+        return model
+
+    def reset_model(self) -> str:
+        """恢复到 config 默认 model + provider（含 fallback chain）。"""
+        self.provider = self._config_provider
+        self.model = self._config_model
+        self.runner.provider = self._config_provider
+        logger.info("Model reset to default: {}", self._config_model)
+        return self._config_model
+
+    def get_model_choices(self) -> list[str]:
+        """返回可切换的模型列表：config model + fallback models。"""
+        if not self._config:
+            return [self._config_model]
+        fb = self._config.agents.defaults.fallback_models or []
+        return [self._config_model] + list(fb)
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""

@@ -22,7 +22,7 @@ DISCORD_API_BASE = "https://discord.com/api/v10"
 _CMD_NAME_RE = re.compile(r"^[\w-]{1,32}$")
 
 # builtin 命令名集合，skill 同名时跳过
-_BUILTIN_NAMES = {"status", "new", "stop", "help", "tts"}
+_BUILTIN_NAMES = {"status", "new", "stop", "help", "tts", "model"}
 
 
 # ── App ID 提取 ──────────────────────────────────────────────
@@ -50,7 +50,19 @@ def _sanitize_command_name(name: str) -> str:
 
 # ── Builtin 命令定义 ─────────────────────────────────────────
 
-def build_builtin_commands() -> list[dict]:
+def _build_model_choices(model_choices: list[str] | None) -> list[dict]:
+    """构建 /model 的 Discord choices 列表。"""
+    choices = []
+    if model_choices:
+        for m in model_choices:
+            # Discord choice name 限 100 字符，取最后一段作为显示名
+            display = m.split("/")[-1] if "/" in m else m
+            choices.append({"name": display, "value": m})
+    choices.append({"name": "↩ reset to default", "value": "reset"})
+    return choices[:25]  # Discord 限制最多 25 个 choices
+
+
+def build_builtin_commands(model_choices: list[str] | None = None) -> list[dict]:
     """构造 builtin commands 的 Discord Application Command payload。"""
     return [
         {
@@ -87,6 +99,20 @@ def build_builtin_commands() -> list[dict]:
                         {"name": "on", "value": "on"},
                         {"name": "off", "value": "off"},
                     ],
+                }
+            ],
+        },
+        {
+            "name": "model",
+            "description": "View or switch the LLM model",
+            "type": 1,
+            "options": [
+                {
+                    "name": "target",
+                    "description": "Model to switch to, or 'reset'",
+                    "type": 3,
+                    "required": False,
+                    "choices": _build_model_choices(model_choices),
                 }
             ],
         },
@@ -167,6 +193,7 @@ async def register_all_commands(
     token: str,
     guild_ids: list[str],
     skills_loader: SkillsLoader | None = None,
+    model_choices: list[str] | None = None,
 ) -> None:
     """注册所有命令（builtin + skills）到所有已知 guild。"""
     try:
@@ -175,7 +202,7 @@ async def register_all_commands(
         logger.error("Failed to extract app_id from token: {}", e)
         return
 
-    commands = build_builtin_commands()
+    commands = build_builtin_commands(model_choices=model_choices)
     if skills_loader:
         skill_cmds = build_skill_commands(skills_loader)
         commands.extend(skill_cmds)

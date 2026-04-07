@@ -578,6 +578,7 @@ def serve(
         channels_config=runtime_config.channels,
         timezone=runtime_config.agents.defaults.timezone,
         skills_config=runtime_config.agents.defaults.skills,
+        config=runtime_config,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -681,6 +682,7 @@ def gateway(
         context_pruning_config=config.agents.defaults.context_pruning,
         skills_config=config.agents.defaults.skills,
         hooks=hooks,
+        config=config,
     )
 
     # Set cron callback (needs agent)
@@ -904,6 +906,7 @@ def agent(
         context_pruning_config=config.agents.defaults.context_pruning,
         skills_config=config.agents.defaults.skills,
         hooks=cli_hooks,
+        config=config,
     )
 
     # Shared reference for progress callbacks

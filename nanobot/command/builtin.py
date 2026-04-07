@@ -108,6 +108,46 @@ async def cmd_tts(ctx: CommandContext) -> OutboundMessage:
     return ctx.make_response(content)
 
 
+async def cmd_model(ctx: CommandContext) -> OutboundMessage:
+    """切换或查看当前 LLM 模型。"""
+    loop = ctx.loop
+    args = (ctx.args or "").strip()
+
+    # /model（无参数）→ 显示当前状态
+    if not args:
+        is_override = loop.model != loop._config_model
+        lines = [
+            f"🧠 Current model: `{loop.model}`",
+            f"📋 Config default: `{loop._config_model}`",
+        ]
+        if is_override:
+            lines.append("⚡ Status: **overridden** (use `reset` to restore)")
+        else:
+            lines.append("✅ Status: using config default")
+
+        # fallback chain 状态
+        from nanobot.providers.fallback import FallbackProvider
+        if isinstance(loop._config_provider, FallbackProvider):
+            fb_models = [m for _, m in loop._config_provider.fallbacks]
+            lines.append(f"🔄 Fallback chain: {' → '.join(fb_models)}")
+            if loop._config_provider._in_cooldown():
+                lines.append("⚠️ Primary in cooldown — fallback active")
+
+        return ctx.make_response("\n".join(lines))
+
+    # /model reset → 恢复默认
+    if args.lower() == "reset":
+        model = loop.reset_model()
+        return ctx.make_response(f"↩️ Model reset to default: `{model}`")
+
+    # /model <model_name> → 切换
+    try:
+        model = loop.switch_model(args)
+        return ctx.make_response(f"✅ Model switched to: `{model}`")
+    except Exception as e:
+        return ctx.make_response(f"❌ Failed to switch model: {e}")
+
+
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
     lines = [
@@ -117,6 +157,7 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
         "/restart — Restart the bot",
         "/status — Show bot status",
         "/tts — Toggle text-to-speech (on/off)",
+        "/model — View or switch the LLM model",
         "/help — Show available commands",
     ]
     return ctx.make_response("\n".join(lines), metadata={"render_as": "text"})
@@ -131,4 +172,6 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/status", cmd_status)
     router.prefix("/tts ", cmd_tts)
     router.exact("/tts", cmd_tts)
+    router.prefix("/model ", cmd_model)
+    router.exact("/model", cmd_model)
     router.exact("/help", cmd_help)

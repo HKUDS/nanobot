@@ -246,9 +246,17 @@ class CronService:
 
     async def _on_timer(self) -> None:
         """Handle timer tick - run due jobs."""
+        had_store = self._store is not None
         self._load_store()
         if not self._store:
             return
+        # If store was reloaded from disk (e.g. external edit), recompute next runs
+        # so that jobs with null nextRunAtMs get scheduled properly.
+        if not had_store or any(
+            j.enabled and j.state.next_run_at_ms is None and j.schedule.kind in ("cron", "every")
+            for j in self._store.jobs
+        ):
+            self._recompute_next_runs()
 
         now = _now_ms()
         due_jobs = [

@@ -17,7 +17,9 @@ from pathlib import Path
 import httpx
 from loguru import logger
 
-_DEFAULT_STORE_PATH = Path.home() / ".nanobot" / "oauth_credentials.json"
+def _get_default_store_path() -> Path:
+    from nanobot.config.paths import get_data_dir
+    return get_data_dir() / "oauth_credentials.json"
 _DEFAULT_CLI_CREDS_PATH = Path.home() / ".claude" / ".credentials.json"
 
 
@@ -44,7 +46,7 @@ class OAuthCredentialStore:
         store_path: Path | None = None,
         claude_cli_creds_path: Path | None = None,
     ) -> None:
-        self._store_path = store_path or _DEFAULT_STORE_PATH
+        self._store_path = store_path or _get_default_store_path()
         self._cli_path = claude_cli_creds_path or _DEFAULT_CLI_CREDS_PATH
 
     def load(self) -> OAuthCredentials | None:
