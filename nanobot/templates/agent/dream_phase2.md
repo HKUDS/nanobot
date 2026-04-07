@@ -1,4 +1,6 @@
 Update memory files based on the analysis below.
+- [FILE] entries: add the described content to the appropriate file
+- [FILE-REMOVE] entries: delete the corresponding content from memory files
 
 ## File paths (relative to workspace root)
 - SOUL.md
