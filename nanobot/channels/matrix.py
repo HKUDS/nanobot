@@ -18,7 +18,6 @@ try:
     from nio import (
         AsyncClient,
         AsyncClientConfig,
-        ContentRepositoryConfigError,
         DownloadError,
         InviteEvent,
         JoinError,
@@ -209,7 +208,7 @@ class MatrixConfig(Base):
     password: str = ""
     access_token: str = ""
     device_id: str = ""
-    e2ee_enabled: bool = True
+    e2ee_enabled: bool = Field(default=True, alias="e2eeEnabled")
     sync_stop_grace_seconds: int = 2
     max_media_bytes: int = 20 * 1024 * 1024
     allow_from: list[str] = Field(default_factory=list)
