@@ -1,4 +1,7 @@
-Compare conversation history against current memory files.
+Perform two independent tasks:
+1. Compare conversation history against current memory files for new/conflicting information.
+2. Scan ALL current memory files for stale content matching the patterns below — even if not mentioned in the conversation history.
+
 Output one line per finding using these formats:
 [FILE] atomic fact or change description
 [FILE-REMOVE] reason for removal (stale, completed, or superseded)
@@ -26,3 +29,5 @@ Ephemera to always skip (do not add):
 - Conversational filler, greetings, small talk
 
 If nothing needs updating: [SKIP] no new information
+
+Important: task 2 (stale scan) is mandatory on every run — do not skip it even when conversation history is empty or contains no relevant updates.
