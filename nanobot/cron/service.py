@@ -84,7 +84,6 @@ class CronService:
             if mtime != self._last_mtime:
                 logger.info("Cron: jobs.json modified externally, reloading")
                 self._store = None
-                self._last_mtime = mtime
         if self._store:
             return self._store
 
@@ -131,6 +130,7 @@ class CronService:
                         delete_after_run=j.get("deleteAfterRun", False),
                     ))
                 self._store = CronStore(jobs=jobs)
+                self._last_mtime = self.store_path.stat().st_mtime
             except Exception as e:
                 logger.warning("Failed to load cron store: {}", e)
                 self._store = CronStore()
