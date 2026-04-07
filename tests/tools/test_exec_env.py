@@ -1,10 +1,15 @@
 """Tests for exec tool environment isolation."""
 
+import sys
+
 import pytest
 
 from nanobot.agent.tools.shell import ExecTool
 
+_UNIX_ONLY = pytest.mark.skipif(sys.platform == "win32", reason="Unix shell commands")
 
+
+@_UNIX_ONLY
 @pytest.mark.asyncio
 async def test_exec_does_not_leak_parent_env(monkeypatch):
     """Env vars from the parent process must not be visible to commands."""
@@ -22,6 +27,7 @@ async def test_exec_has_working_path():
     assert "hello" in result
 
 
+@_UNIX_ONLY
 @pytest.mark.asyncio
 async def test_exec_path_append():
     """The pathAppend config should be available in the command's PATH."""
@@ -30,6 +36,7 @@ async def test_exec_path_append():
     assert "/opt/custom/bin" in result
 
 
+@_UNIX_ONLY
 @pytest.mark.asyncio
 async def test_exec_path_append_preserves_system_path():
     """pathAppend must not clobber standard system paths."""
