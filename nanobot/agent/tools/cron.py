@@ -31,6 +31,10 @@ from nanobot.cron.types import CronJob, CronJobState, CronSchedule
             description="Whether to deliver the execution result to the user channel (default true)",
             default=True,
         ),
+        model=StringSchema(
+            "Optional LLM model to use for this job (e.g., 'anthropic/claude-3-haiku'). "
+            "Uses the default model if not specified."
+        ),
         job_id=StringSchema("Job ID (for remove)"),
         required=["action"],
     )
@@ -100,12 +104,13 @@ class CronTool(Tool):
         at: str | None = None,
         job_id: str | None = None,
         deliver: bool = True,
+        model: str | None = None,
         **kwargs: Any,
     ) -> str:
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(message, every_seconds, cron_expr, tz, at, deliver)
+            return self._add_job(message, every_seconds, cron_expr, tz, at, deliver, model)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -120,6 +125,7 @@ class CronTool(Tool):
         tz: str | None,
         at: str | None,
         deliver: bool = True,
+        model: str | None = None,
     ) -> str:
         if not message:
             return "Error: message is required for add"
@@ -164,6 +170,7 @@ class CronTool(Tool):
             deliver=deliver,
             channel=self._channel,
             to=self._chat_id,
+            model=model,
             delete_after_run=delete_after,
         )
         return f"Created job '{job.name}' (id: {job.id})"
