@@ -48,6 +48,10 @@ class ContextBuilder:
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
+        entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
+        if entries:
+            parts.append("# Recent History\n\n" + "\n".join(f"- {entry['content']}" for entry in entries))
+
         return "\n\n---\n\n".join(parts)
 
     def _get_identity(self) -> str:
