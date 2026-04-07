@@ -180,6 +180,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
+        unified_session: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 
@@ -226,7 +227,7 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
-
+        self._unified_session = unified_session
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
@@ -427,6 +428,9 @@ class AgentLoop:
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
+        if self._unified_session and not msg.session_key_override:
+            import dataclasses
+            msg = dataclasses.replace(msg, session_key_override="unified:default")
         lock = self._session_locks.setdefault(msg.session_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
         async with lock, gate:
