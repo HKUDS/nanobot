@@ -228,7 +228,10 @@ class MCPPromptWrapper(Tool):
         properties: dict[str, Any] = {}
         required: list[str] = []
         for arg in prompt_def.arguments or []:
-            properties[arg.name] = {"type": "string"}
+            prop: dict[str, Any] = {"type": "string"}
+            if getattr(arg, "description", None):
+                prop["description"] = arg.description
+            properties[arg.name] = prop
             if arg.required:
                 required.append(arg.name)
         self._parameters: dict[str, Any] = {
@@ -284,7 +287,7 @@ class MCPPromptWrapper(Tool):
                 "MCP prompt '{}' failed: {}: {}",
                 self._name, type(exc).__name__, exc,
             )
-            return f"(MCP prompt call failed: {type(exc).__name__}: {exc})"
+            return f"(MCP prompt call failed: {type(exc).__name__})"
 
         parts: list[str] = []
         for message in result.messages:
