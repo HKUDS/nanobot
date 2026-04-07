@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -70,6 +71,8 @@ class AgentRunResult:
     stop_reason: str = "completed"
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
+    elapsed_ms: int | None = None
+    llm_elapsed_ms: int | None = None
 
 
 class AgentRunner:
@@ -88,6 +91,8 @@ class AgentRunner:
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
+        total_llm_ms = 0
+        start_time = time.monotonic()
 
         for iteration in range(spec.max_iterations):
             try:
@@ -103,7 +108,9 @@ class AgentRunner:
                 messages_for_model = messages
             context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
+            llm_start = time.monotonic()
             response = await self._request_model(spec, messages_for_model, hook, context)
+            total_llm_ms += int((time.monotonic() - llm_start) * 1000)
             raw_usage = self._usage_dict(response.usage)
             context.response = response
             context.usage = dict(raw_usage)
@@ -260,6 +267,7 @@ class AgentRunner:
                 )
             self._append_final_message(messages, final_content)
 
+        elapsed_ms = int((time.monotonic() - start_time) * 1000)
         return AgentRunResult(
             final_content=final_content,
             messages=messages,
@@ -268,6 +276,8 @@ class AgentRunner:
             stop_reason=stop_reason,
             error=error,
             tool_events=tool_events,
+            elapsed_ms=elapsed_ms,
+            llm_elapsed_ms=total_llm_ms,
         )
 
     def _build_request_kwargs(

@@ -209,6 +209,11 @@ class AgentLoop:
         self.pruner: ContextPruner | None = ContextPruner(_pruning_cfg) if _pruning_cfg.enabled else None
         self._extra_hooks: list[AgentHook] = hooks or []
 
+        # Add TraceHook for LLM call logging
+        from nanobot.agent.hook import TraceHook
+        self._trace_hook = TraceHook()
+        self._extra_hooks.append(self._trace_hook)
+
         self.context = ContextBuilder(workspace, timezone=timezone, skills_config=skills_config)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
