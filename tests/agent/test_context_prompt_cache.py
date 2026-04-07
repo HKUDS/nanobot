@@ -86,6 +86,32 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Return exactly: OK" in user_content
 
 
+def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None:
+    """Entries in history.jsonl not yet consumed by Dream appear in the prompt."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    builder.memory.append_history("User asked about weather in Tokyo")
+    builder.memory.append_history("Agent fetched forecast via web_search")
+
+    prompt = builder.build_system_prompt()
+    assert "# Recent History" in prompt
+    assert "User asked about weather in Tokyo" in prompt
+    assert "Agent fetched forecast via web_search" in prompt
+
+
+def test_no_recent_history_when_dream_has_processed_all(tmp_path) -> None:
+    """If Dream has consumed everything, no Recent History section should appear."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    cursor = builder.memory.append_history("already processed entry")
+    builder.memory.set_last_dream_cursor(cursor)
+
+    prompt = builder.build_system_prompt()
+    assert "# Recent History" not in prompt
+
+
 def test_subagent_result_does_not_create_consecutive_assistant_messages(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
