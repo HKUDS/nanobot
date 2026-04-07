@@ -101,7 +101,16 @@ class AgentRunner:
                     exc,
                 )
                 messages_for_model = messages
-            context = AgentHookContext(iteration=iteration, messages=messages)
+            from nanobot.agent.loop import _channel, _chat_id, _session_key, _message_id, _sender_id
+            context = AgentHookContext(
+                iteration=iteration,
+                messages=messages,
+                channel=_channel.get(),
+                chat_id=_chat_id.get(),
+                session_key=_session_key.get(),
+                message_id=_message_id.get(),
+                sender_id=_sender_id.get(),
+            )
             await hook.before_iteration(context)
             response = await self._request_model(spec, messages_for_model, hook, context)
             raw_usage = self._usage_dict(response.usage)
