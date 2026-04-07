@@ -10,9 +10,16 @@ import string
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+import importlib.util
 import json_repair
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+
+_LANGSMITH_ENABLED = bool(
+    os.environ.get("LANGSMITH_API_KEY")
+    and os.environ.get("LANGSMITH_TRACING", "").lower() == "true"
+    and importlib.util.find_spec("langsmith")
+)
 
 _ALNUM = string.ascii_letters + string.digits
 
@@ -51,6 +58,9 @@ class AnthropicProvider(LLMProvider):
         # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
         client_kw["max_retries"] = 0
         self._client = AsyncAnthropic(**client_kw)
+        if _LANGSMITH_ENABLED:
+            from langsmith.wrappers import wrap_anthropic
+            self._client = wrap_anthropic(self._client)
 
     @classmethod
     def _handle_error(cls, e: Exception) -> LLMResponse:

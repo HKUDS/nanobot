@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
+import os
 from dataclasses import dataclass, field
 import inspect
 from pathlib import Path
@@ -46,7 +48,32 @@ _COMPACTABLE_TOOLS = frozenset({
 })
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 
+_LANGSMITH_ENABLED = bool(
+    os.environ.get("LANGSMITH_API_KEY")
+    and os.environ.get("LANGSMITH_TRACING", "").lower() == "true"
+    and importlib.util.find_spec("langsmith")
+)
 
+if (
+    os.environ.get("LANGSMITH_API_KEY")
+    and os.environ.get("LANGSMITH_TRACING", "").lower() == "true"
+    and not _LANGSMITH_ENABLED
+):
+    import logging
+    logging.getLogger(__name__).warning(
+        "LANGSMITH_API_KEY and LANGSMITH_TRACING are set but langsmith is not installed; "
+        "install with: pip install 'nanobot-ai[langsmith]'"
+    )
+
+
+def _ls_traceable(**kwargs):
+    """Return @traceable(...) when LangSmith is enabled, identity decorator otherwise."""
+    if _LANGSMITH_ENABLED:
+        from langsmith import traceable
+        return traceable(**kwargs)
+    def _identity(fn):
+        return fn
+    return _identity
 
 @dataclass(slots=True)
 class AgentRunSpec:
@@ -611,6 +638,7 @@ class AgentRunner:
             merged[key] = merged.get(key, 0) + value
         return merged
 
+    @_ls_traceable(run_type="chain", name="tool_execution", tags=["nanobot"])
     async def _execute_tools(
         self,
         spec: AgentRunSpec,

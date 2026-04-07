@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
+import importlib.metadata
 import json
 import os
+import re
 import time
+import uuid
 from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -17,7 +21,7 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
-from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunSpec, AgentRunner
+from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunSpec, AgentRunner, _LANGSMITH_ENABLED, _ls_traceable
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
@@ -41,6 +45,11 @@ from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
     from nanobot.cron.service import CronService
+
+try:
+    _NANOBOT_VERSION = importlib.metadata.version("nanobot-ai")
+except Exception:
+    _NANOBOT_VERSION = "unknown"
 
 
 UNIFIED_SESSION_KEY = "unified:default"
@@ -333,6 +342,7 @@ class AgentLoop:
             return UNIFIED_SESSION_KEY
         return msg.session_key
 
+    @_ls_traceable(run_type="chain", name="agent_turn", tags=["nanobot"])
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -714,6 +724,33 @@ class AgentLoop:
             self.sessions.save(session)
             user_persisted_early = True
 
+        # LangSmith: correlation IDs, version metadata, and join keys.
+        _ls_extra: dict[str, Any] | None = None
+        _trace_id: str | None = None
+        if _LANGSMITH_ENABLED:
+            sys_content = initial_messages[0].get("content", "") if initial_messages else ""
+            if isinstance(sys_content, list):
+                sys_content = " ".join(
+                    b.get("text", "") for b in sys_content if isinstance(b, dict)
+                )
+            prompt_hash = hashlib.sha256(sys_content.encode()).hexdigest()[:8]
+            _trace_id = str(uuid.uuid4())
+            _ls_extra = {
+                "metadata": {
+                    "session_id": key,
+                    "channel": msg.channel,
+                    "chat_id": msg.chat_id,
+                    "nanobot_version": _NANOBOT_VERSION,
+                    "prompt_hash": prompt_hash,
+                },
+                "run_id": _trace_id,
+                "parent_run_id": session.metadata.get("last_trace_id"),
+            }
+
+        _loop_kwargs: dict[str, Any] = {}
+        if _ls_extra is not None:
+            _loop_kwargs["langsmith_extra"] = _ls_extra
+
         final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
@@ -724,7 +761,11 @@ class AgentLoop:
             chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
             pending_queue=pending_queue,
+            **_loop_kwargs,
         )
+
+        if _trace_id is not None:
+            session.metadata["last_trace_id"] = _trace_id
 
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE

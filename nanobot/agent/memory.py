@@ -15,7 +15,7 @@ from loguru import logger
 from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, strip_think
 
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.runner import AgentRunSpec, AgentRunner, _ls_traceable
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.utils.gitstore import GitStore
 
@@ -433,6 +433,7 @@ class Consolidator:
             self._get_tool_definitions(),
         )
 
+    @_ls_traceable(run_type="chain", name="memory_consolidation", tags=["nanobot"])
     async def archive(self, messages: list[dict]) -> str | None:
         """Summarize messages via LLM and append to history.jsonl.
 
