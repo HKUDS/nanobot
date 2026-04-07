@@ -24,7 +24,7 @@ Do NOT use any other paths. Do NOT guess paths.
 
 ## Editing
 - File contents provided below — edit directly, no read_file needed
-- Use exact text from the file content below as old_string for replacements
+- Use exact text from the file content below as old_text for replacements
 - Include surrounding blank lines in old_string to ensure unique match
 - Batch changes to the same file into one edit_file call
 - For large deletions: include the full section header + all bullets as old_string, set new_string to empty string
