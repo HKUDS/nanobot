@@ -142,8 +142,9 @@ class GlobTool(_SearchTool):
     @property
     def description(self) -> str:
         return (
-            "Find files matching a glob pattern. "
-            "Simple patterns like '*.py' match by filename recursively."
+            "Find files matching a glob pattern (e.g. '*.py', 'tests/**/test_*.py'). "
+            "Results are sorted by modification time (newest first). "
+            "Skips .git, node_modules, __pycache__, and other noise directories."
         )
 
     @property
@@ -261,9 +262,10 @@ class GrepTool(_SearchTool):
     @property
     def description(self) -> str:
         return (
-            "Search file contents with a regex-like pattern. "
-            "Supports optional glob filtering, structured output modes, "
-            "type filters, pagination, and surrounding context lines."
+            "Search file contents with a regex pattern. "
+            "Default output_mode is files_with_matches (file paths only); "
+            "use content mode for matching lines with context. "
+            "Skips binary and files >2 MB. Supports glob/type filtering."
         )
 
     @property

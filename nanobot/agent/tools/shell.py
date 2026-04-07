@@ -74,7 +74,13 @@ class ExecTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Execute a shell command and return its output. Use with caution."
+        return (
+            "Execute a shell command and return its output. "
+            "Prefer read_file/write_file/edit_file over cat/echo/sed, "
+            "and grep/glob over shell find/grep. "
+            "Use -y or --yes flags to avoid interactive prompts. "
+            "Output is truncated at 10 000 chars; timeout defaults to 60s."
+        )
 
     @property
     def exclusive(self) -> bool:
