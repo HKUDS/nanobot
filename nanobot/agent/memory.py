@@ -24,6 +24,17 @@ if TYPE_CHECKING:
     from nanobot.session.manager import Session, SessionManager
 
 
+def _dream_debug(workspace: Path, message: str) -> None:
+    """Append a line to dream-debug.log in the workspace for observability."""
+    try:
+        log_path = workspace / "dream-debug.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().isoformat()}] {message}\n")
+    except Exception as e:
+        logger.warning("Dream debug write failed: {}", e)
+
+
 # ---------------------------------------------------------------------------
 # MemoryStore — pure file I/O layer
 # ---------------------------------------------------------------------------
@@ -564,6 +575,7 @@ class Dream:
             return False
 
         batch = entries[: self.max_batch_size]
+        _dream_debug(self.store.workspace, f"Dream starting: workspace={self.store.workspace}, entries={len(entries)}")
         logger.info(
             "Dream: processing {} entries (cursor {}→{}), batch={}",
             len(entries), last_cursor, batch[-1]["cursor"], len(batch),
@@ -575,13 +587,15 @@ class Dream:
         )
 
         # Current file contents
+        current_date = datetime.now().strftime("%Y-%m-%d")
         current_memory = self.store.read_memory() or "(empty)"
         current_soul = self.store.read_soul() or "(empty)"
         current_user = self.store.read_user() or "(empty)"
         file_context = (
-            f"## Current MEMORY.md\n{current_memory}\n\n"
-            f"## Current SOUL.md\n{current_soul}\n\n"
-            f"## Current USER.md\n{current_user}"
+            f"## Current Date\n{current_date}\n\n"
+            f"## Current MEMORY.md ({len(current_memory)} chars)\n{current_memory}\n\n"
+            f"## Current SOUL.md ({len(current_soul)} chars)\n{current_soul}\n\n"
+            f"## Current USER.md ({len(current_user)} chars)\n{current_user}"
         )
 
         # Phase 1: Analyze
@@ -604,6 +618,8 @@ class Dream:
             )
             analysis = phase1_response.content or ""
             logger.debug("Dream Phase 1 complete ({} chars)", len(analysis))
+            # Write Phase 1 analysis to dream debug log
+            _dream_debug(self.store.workspace, f"=== Phase 1 Analysis ({len(analysis)} chars) ===\n{analysis}")
         except Exception:
             logger.exception("Dream Phase 1 failed")
             return False
@@ -633,6 +649,13 @@ class Dream:
                 "Dream Phase 2 complete: stop_reason={}, tool_events={}",
                 result.stop_reason, len(result.tool_events),
             )
+            for ev in (result.tool_events or []):
+                logger.info("Dream tool_event: name={}, status={}, detail={}", ev.get("name"), ev.get("status"), ev.get("detail", "")[:200])
+            # Write Phase 2 tool events to dream debug log
+            _dream_debug(self.store.workspace, "=== Phase 2 Tool Events ===")
+            for ev in (result.tool_events or []):
+                _dream_debug(self.store.workspace, f"  {ev.get('name')}: status={ev.get('status')}, detail={ev.get('detail', '')[:500]}")
+            _dream_debug(self.store.workspace, f"=== Phase 2 Done: stop_reason={result.stop_reason} ===\n")
         except Exception:
             logger.exception("Dream Phase 2 failed")
             result = None
