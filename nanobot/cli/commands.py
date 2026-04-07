@@ -118,8 +118,17 @@ def _init_prompt_session() -> None:
     history_file = get_cli_history_path()
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
+    # Wrap FileHistory to sanitize surrogate characters on write.
+    # Without this, special Unicode input (emoji, mixed-script) crashes
+    # prompt_toolkit's history file write on Windows with UnicodeEncodeError.
+    # See issue #2846.
+    class _SafeFileHistory(FileHistory):
+        def store_string(self, string: str) -> None:
+            safe = string.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
+            super().store_string(safe)
+
     _PROMPT_SESSION = PromptSession(
-        history=FileHistory(str(history_file)),
+        history=_SafeFileHistory(str(history_file)),
         enable_open_in_editor=False,
         multiline=False,  # Enter submits (single line mode)
     )
