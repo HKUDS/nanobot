@@ -24,17 +24,6 @@ if TYPE_CHECKING:
     from nanobot.session.manager import Session, SessionManager
 
 
-def _dream_debug(workspace: Path, message: str) -> None:
-    """Append a line to dream-debug.log in the workspace for observability."""
-    try:
-        log_path = workspace / "dream-debug.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(f"[{datetime.now().isoformat()}] {message}\n")
-    except Exception as e:
-        logger.warning("Dream debug write failed: {}", e)
-
-
 # ---------------------------------------------------------------------------
 # MemoryStore — pure file I/O layer
 # ---------------------------------------------------------------------------
@@ -575,7 +564,6 @@ class Dream:
             return False
 
         batch = entries[: self.max_batch_size]
-        _dream_debug(self.store.workspace, f"Dream starting: workspace={self.store.workspace}, entries={len(entries)}")
         logger.info(
             "Dream: processing {} entries (cursor {}→{}), batch={}",
             len(entries), last_cursor, batch[-1]["cursor"], len(batch),
@@ -617,9 +605,7 @@ class Dream:
                 tool_choice=None,
             )
             analysis = phase1_response.content or ""
-            logger.debug("Dream Phase 1 complete ({} chars)", len(analysis))
-            # Write Phase 1 analysis to dream debug log
-            _dream_debug(self.store.workspace, f"=== Phase 1 Analysis ({len(analysis)} chars) ===\n{analysis}")
+            logger.debug("Dream Phase 1 analysis ({} chars): {}", len(analysis), analysis)
         except Exception:
             logger.exception("Dream Phase 1 failed")
             return False
@@ -651,11 +637,6 @@ class Dream:
             )
             for ev in (result.tool_events or []):
                 logger.info("Dream tool_event: name={}, status={}, detail={}", ev.get("name"), ev.get("status"), ev.get("detail", "")[:200])
-            # Write Phase 2 tool events to dream debug log
-            _dream_debug(self.store.workspace, "=== Phase 2 Tool Events ===")
-            for ev in (result.tool_events or []):
-                _dream_debug(self.store.workspace, f"  {ev.get('name')}: status={ev.get('status')}, detail={ev.get('detail', '')[:500]}")
-            _dream_debug(self.store.workspace, f"=== Phase 2 Done: stop_reason={result.stop_reason} ===\n")
         except Exception:
             logger.exception("Dream Phase 2 failed")
             result = None
