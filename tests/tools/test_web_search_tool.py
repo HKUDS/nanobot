@@ -229,3 +229,28 @@ async def test_duckduckgo_timeout_returns_error(monkeypatch):
     assert "Error" in result
 
 
+def test_is_available_requires_credentials_per_provider(monkeypatch):
+    assert _tool(provider="duckduckgo").is_available() is True
+
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+    assert _tool(provider="brave", api_key="").is_available() is False
+    assert _tool(provider="brave", api_key="k").is_available() is True
+    monkeypatch.setenv("BRAVE_API_KEY", "env-key")
+    assert _tool(provider="brave", api_key="").is_available() is True
+
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    assert _tool(provider="tavily", api_key="").is_available() is False
+    assert _tool(provider="tavily", api_key="tv").is_available() is True
+
+    monkeypatch.delenv("JINA_API_KEY", raising=False)
+    assert _tool(provider="jina", api_key="").is_available() is False
+
+    monkeypatch.delenv("SEARXNG_BASE_URL", raising=False)
+    assert _tool(provider="searxng", base_url="").is_available() is False
+    assert _tool(provider="searxng", base_url="https://sx.example").is_available() is True
+
+    assert _tool(provider="unknown").is_available() is False
+
+
+def test_is_available_respects_enable_flag():
+    assert WebSearchTool(config=WebSearchConfig(provider="duckduckgo"), enable=False).is_available() is False

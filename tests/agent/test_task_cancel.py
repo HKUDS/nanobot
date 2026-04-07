@@ -101,12 +101,14 @@ class TestHandleStop:
 
 
 class TestDispatch:
-    def test_exec_tool_not_registered_when_disabled(self):
+    def test_exec_tool_unavailable_when_disabled(self):
         from nanobot.config.schema import ExecToolConfig
 
         loop, _bus = _make_loop(exec_config=ExecToolConfig(enable=False))
 
-        assert loop.tools.get("exec") is None
+        exec_tool = loop.tools.get("exec")
+        assert exec_tool is not None
+        assert exec_tool.is_available() is False
 
     @pytest.mark.asyncio
     async def test_dispatch_processes_and_publishes(self):
@@ -280,7 +282,7 @@ class TestSubagentCancellation:
         assert assistant_messages[0]["thinking_blocks"] == [{"type": "thinking", "thinking": "step"}]
 
     @pytest.mark.asyncio
-    async def test_subagent_exec_tool_not_registered_when_disabled(self, tmp_path):
+    async def test_subagent_exec_tool_unavailable_when_disabled(self, tmp_path):
         from nanobot.agent.subagent import SubagentManager
         from nanobot.bus.queue import MessageBus
         from nanobot.config.schema import ExecToolConfig
@@ -298,7 +300,9 @@ class TestSubagentCancellation:
         mgr._announce_result = AsyncMock()
 
         async def fake_run(spec):
-            assert spec.tools.get("exec") is None
+            exec_tool = spec.tools.get("exec")
+            assert exec_tool is not None
+            assert exec_tool.is_available() is False
             return SimpleNamespace(
                 stop_reason="done",
                 final_content="done",

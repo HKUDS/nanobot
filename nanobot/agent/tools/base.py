@@ -117,6 +117,10 @@ class Schema(ABC):
 class Tool(ABC):
     """Agent capability: read files, run commands, etc."""
 
+    def __init__(self, enable: bool = True) -> None:
+        """If ``enable`` is False, the tool is omitted from definitions and cannot be executed."""
+        self.enable = enable
+
     _TYPE_MAP = {
         "string": str,
         "integer": int,
@@ -176,6 +180,10 @@ class Tool(ABC):
             return obj
         props = schema.get("properties", {})
         return {k: self._cast_value(v, props[k]) if k in props else v for k, v in obj.items()}
+
+    def is_available(self) -> bool:
+        """Whether this tool is usable in the current environment (not per-call argument checks)."""
+        return self.enable
 
     def cast_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """Apply safe schema-driven casts before validation."""

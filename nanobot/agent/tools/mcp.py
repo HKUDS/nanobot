@@ -77,7 +77,15 @@ def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
 class MCPToolWrapper(Tool):
     """Wraps a single MCP server tool as a nanobot Tool."""
 
-    def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
+    def __init__(
+        self,
+        session,
+        server_name: str,
+        tool_def,
+        tool_timeout: int = 30,
+        enable: bool = True,
+    ):
+        super().__init__(enable=enable)
         self._session = session
         self._original_name = tool_def.name
         self._name = f"mcp_{server_name}_{tool_def.name}"

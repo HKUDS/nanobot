@@ -12,8 +12,8 @@ class ToolRegistry:
     Allows dynamic registration and execution of tools.
     """
 
-    def __init__(self):
-        self._tools: dict[str, Tool] = {}
+    def __init__(self, tools: list[Tool] | None = None):
+        self._tools: dict[str, Tool] = {} if tools is None else {tool.name: tool for tool in tools}
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
@@ -45,10 +45,12 @@ class ToolRegistry:
     def get_definitions(self) -> list[dict[str, Any]]:
         """Get tool definitions with stable ordering for cache-friendly prompts.
 
-        Built-in tools are sorted first as a stable prefix, then MCP tools are
-        sorted and appended.
+        Only enabled and available tools are included. Built-in tools are sorted
+        first as a stable prefix, then MCP tools are sorted and appended.
         """
-        definitions = [tool.to_schema() for tool in self._tools.values()]
+        definitions = [
+            tool.to_schema() for tool in self._tools.values() if tool.is_available()
+        ]
         builtins: list[dict[str, Any]] = []
         mcp_tools: list[dict[str, Any]] = []
         for schema in definitions:
@@ -73,6 +75,9 @@ class ToolRegistry:
             return None, params, (
                 f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
             )
+
+        if not tool.is_available():
+            return None, params, f"Error: Tool '{name}' is not available."
 
         cast_params = tool.cast_params(params)
         errors = tool.validate_params(cast_params)

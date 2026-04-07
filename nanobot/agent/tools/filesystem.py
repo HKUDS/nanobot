@@ -46,7 +46,9 @@ class _FsTool(Tool):
         workspace: Path | None = None,
         allowed_dir: Path | None = None,
         extra_allowed_dirs: list[Path] | None = None,
+        enable: bool = True,
     ):
+        super().__init__(enable=enable)
         self._workspace = workspace
         self._allowed_dir = allowed_dir
         self._extra_allowed_dirs = extra_allowed_dirs

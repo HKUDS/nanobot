@@ -678,7 +678,16 @@ async def test_runner_keeps_going_when_tool_result_persistence_fails():
 
 
 class _DelayTool(Tool):
-    def __init__(self, name: str, *, delay: float, read_only: bool, shared_events: list[str]):
+    def __init__(
+        self,
+        name: str,
+        *,
+        delay: float,
+        read_only: bool,
+        shared_events: list[str],
+        enable: bool = True,
+    ):
+        super().__init__(enable=enable)
         self._name = name
         self._delay = delay
         self._read_only = read_only

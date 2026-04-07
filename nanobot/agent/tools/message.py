@@ -28,7 +28,9 @@ class MessageTool(Tool):
         default_channel: str = "",
         default_chat_id: str = "",
         default_message_id: str | None = None,
+        enable: bool = True,
     ):
+        super().__init__(enable=enable)
         self._send_callback = send_callback
         self._default_channel = default_channel
         self._default_chat_id = default_chat_id

@@ -198,6 +198,19 @@ async def test_registry_returns_validation_error() -> None:
     assert "Invalid parameters" in result
 
 
+def test_tool_disable_omits_from_definitions() -> None:
+    reg = ToolRegistry()
+    reg.register(SampleTool(enable=False))
+    assert reg.get_definitions() == []
+
+
+async def test_tool_disable_execute_returns_error() -> None:
+    reg = ToolRegistry()
+    reg.register(SampleTool(enable=False))
+    result = await reg.execute("sample", {"query": "hi", "count": 2})
+    assert "not available" in result
+
+
 def test_exec_extract_absolute_paths_keeps_full_windows_path() -> None:
     cmd = r"type C:\user\workspace\txt"
     paths = ExecTool._extract_absolute_paths(cmd)
@@ -309,7 +322,8 @@ def test_exec_guard_blocks_windows_drive_root_outside_workspace(monkeypatch) -> 
 class CastTestTool(Tool):
     """Minimal tool for testing cast_params."""
 
-    def __init__(self, schema: dict[str, Any]) -> None:
+    def __init__(self, schema: dict[str, Any], enable: bool = True) -> None:
+        super().__init__(enable=enable)
         self._schema = schema
 
     @property

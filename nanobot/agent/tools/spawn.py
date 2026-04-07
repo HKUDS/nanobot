@@ -19,7 +19,8 @@ if TYPE_CHECKING:
 class SpawnTool(Tool):
     """Tool to spawn a subagent for background task execution."""
 
-    def __init__(self, manager: "SubagentManager"):
+    def __init__(self, manager: "SubagentManager", enable: bool = True):
+        super().__init__(enable=enable)
         self._manager = manager
         self._origin_channel = "cli"
         self._origin_chat_id = "direct"

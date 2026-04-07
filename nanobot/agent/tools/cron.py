@@ -42,7 +42,13 @@ from nanobot.cron.types import CronJob, CronJobState, CronSchedule
 class CronTool(Tool):
     """Tool to schedule reminders and recurring tasks."""
 
-    def __init__(self, cron_service: CronService, default_timezone: str = "UTC"):
+    def __init__(
+        self,
+        cron_service: CronService,
+        default_timezone: str = "UTC",
+        enable: bool = True,
+    ):
+        super().__init__(enable=enable)
         self._cron = cron_service
         self._default_timezone = default_timezone
         self._channel = ""

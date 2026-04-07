@@ -86,9 +86,15 @@ class WebSearchTool(Tool):
     name = "web_search"
     description = "Search the web. Returns titles, URLs, and snippets."
 
-    def __init__(self, config: WebSearchConfig | None = None, proxy: str | None = None):
+    def __init__(
+        self,
+        config: WebSearchConfig | None = None,
+        proxy: str | None = None,
+        enable: bool = True,
+    ):
         from nanobot.config.schema import WebSearchConfig
 
+        super().__init__(enable=enable)
         self.config = config if config is not None else WebSearchConfig()
         self.proxy = proxy
 
@@ -222,6 +228,28 @@ class WebSearchTool(Tool):
             logger.warning("DuckDuckGo search failed: {}", e)
             return f"Error: DuckDuckGo search failed ({e})"
 
+    def _provider_credentials_configured(self) -> bool:
+        """True when config + env provide required secrets/URLs for the resolved provider."""
+        provider = (self.config.provider or "").strip().lower() or "brave"
+        api = (self.config.api_key or "").strip()
+        if provider == "duckduckgo":
+            return True
+        if provider == "brave":
+            return bool(api or (os.environ.get("BRAVE_API_KEY") or "").strip())
+        if provider == "tavily":
+            return bool(api or (os.environ.get("TAVILY_API_KEY") or "").strip())
+        if provider == "jina":
+            return bool(api or (os.environ.get("JINA_API_KEY") or "").strip())
+        if provider == "searxng":
+            base = (self.config.base_url or os.environ.get("SEARXNG_BASE_URL", "")).strip()
+            return bool(base)
+        return False
+
+    def is_available(self) -> bool:
+        if not super().is_available():
+            return False
+        return self._provider_credentials_configured()
+
 
 @tool_parameters(
     tool_parameters_schema(
@@ -241,7 +269,8 @@ class WebFetchTool(Tool):
     name = "web_fetch"
     description = "Fetch URL and extract readable content (HTML → markdown/text)."
 
-    def __init__(self, max_chars: int = 50000, proxy: str | None = None):
+    def __init__(self, max_chars: int = 50000, proxy: str | None = None, enable: bool = True):
+        super().__init__(enable=enable)
         self.max_chars = max_chars
         self.proxy = proxy
 
@@ -374,3 +403,15 @@ class WebFetchTool(Tool):
         text = re.sub(r'</(p|div|section|article)>', '\n\n', text, flags=re.I)
         text = re.sub(r'<(br|hr)\s*/?>', '\n', text, flags=re.I)
         return _normalize(_strip_tags(text))
+
+    def _provider_credentials_configured(self) -> bool:
+        """True when config + env provide required secrets/URLs for the resolved provider."""
+        jina_key = os.environ.get("JINA_API_KEY", "")
+        if not jina_key:
+            return False
+        return True
+
+    def is_available(self) -> bool:
+        if not super().is_available():
+            return False
+        return self._provider_credentials_configured()

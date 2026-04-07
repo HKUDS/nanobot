@@ -19,13 +19,9 @@ from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
-from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
-from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.agent.tools.search import GlobTool, GrepTool
-from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.builtin import build_default_tool_registry
 from nanobot.agent.tools.spawn import SpawnTool
-from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
@@ -214,7 +210,6 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace, timezone=timezone)
         self.sessions = session_manager or SessionManager(workspace)
-        self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
         self.subagents = SubagentManager(
             provider=provider,
@@ -226,7 +221,6 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
-
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
@@ -239,6 +233,27 @@ class AgentLoop:
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
+        )
+        allowed_dir = (
+            self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
+        )
+        extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
+        self.tools = build_default_tool_registry(
+            self.workspace,
+            allowed_dir=allowed_dir,
+            extra_read=extra_read,
+            exec_config=self.exec_config,
+            web_config=self.web_config,
+            restrict_to_workspace=self.restrict_to_workspace,
+            extra_tools=[
+                MessageTool(send_callback=self.bus.publish_outbound),
+                SpawnTool(manager=self.subagents),
+                CronTool(
+                    self.cron_service,
+                    default_timezone=self.context.timezone or "UTC",
+                    enable=self.cron_service is not None,
+                ),
+            ],
         )
         self.consolidator = Consolidator(
             store=self.context.memory,
@@ -255,36 +270,8 @@ class AgentLoop:
             provider=provider,
             model=self.model,
         )
-        self._register_default_tools()
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
-
-    def _register_default_tools(self) -> None:
-        """Register the default set of tools."""
-        allowed_dir = self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
-        extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-        self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
-        for cls in (WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        for cls in (GlobTool, GrepTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        if self.exec_config.enable:
-            self.tools.register(ExecTool(
-                working_dir=str(self.workspace),
-                timeout=self.exec_config.timeout,
-                restrict_to_workspace=self.restrict_to_workspace,
-                sandbox=self.exec_config.sandbox,
-                path_append=self.exec_config.path_append,
-            ))
-        if self.web_config.enable:
-            self.tools.register(WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy))
-            self.tools.register(WebFetchTool(proxy=self.web_config.proxy))
-        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
-        self.tools.register(SpawnTool(manager=self.subagents))
-        if self.cron_service:
-            self.tools.register(
-                CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
-            )
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""

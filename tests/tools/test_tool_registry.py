@@ -8,6 +8,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 
 class _FakeTool(Tool):
     def __init__(self, name: str):
+        super().__init__()
         self._name = name
 
     @property

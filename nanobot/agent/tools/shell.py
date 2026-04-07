@@ -44,7 +44,9 @@ class ExecTool(Tool):
         restrict_to_workspace: bool = False,
         sandbox: str = "",
         path_append: str = "",
+        enable: bool = True,
     ):
+        super().__init__(enable=enable)
         self.timeout = timeout
         self.working_dir = working_dir
         self.sandbox = sandbox
