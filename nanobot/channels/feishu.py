@@ -250,6 +250,7 @@ class FeishuConfig(Base):
     verification_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
     react_emoji: str = "THUMBSUP"
+    done_emoji: str | None = None  # Emoji to show when task is completed (e.g., "DONE", "OK")
     group_policy: Literal["open", "mention"] = "mention"
     reply_to_message: bool = False  # If True, bot replies quote the user's original message
     streaming: bool = True
@@ -1274,6 +1275,9 @@ class FeishuChannel(BaseChannel):
         if meta.get("_stream_end"):
             if (message_id := meta.get("message_id")) and (reaction_id := meta.get("reaction_id")):
                 await self._remove_reaction(message_id, reaction_id)
+                # Add completion emoji if configured
+                if self.config.done_emoji and message_id:
+                    await self._add_reaction(message_id, self.config.done_emoji)
 
             buf = self._stream_bufs.pop(chat_id, None)
             if not buf or not buf.text:
