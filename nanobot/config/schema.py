@@ -3,9 +3,11 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
+
+from nanobot.cron.types import CronSchedule
 
 
 class Base(BaseModel):
@@ -34,6 +36,34 @@ class ContextPruningConfig(Base):
     min_prunable_tool_chars: int = 50_000
     soft_trim: SoftTrimConfig = Field(default_factory=SoftTrimConfig)
     hard_clear: HardClearConfig = Field(default_factory=HardClearConfig)
+
+
+class DreamConfig(Base):
+    """Dream memory consolidation configuration."""
+
+    _HOUR_MS = 3_600_000
+
+    interval_h: int = Field(default=2, ge=1)  # Every 2 hours by default
+    cron: str | None = Field(default=None, exclude=True)  # Legacy compatibility override
+    model_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("modelOverride", "model", "model_override"),
+    )  # Optional Dream-specific model override
+    max_batch_size: int = Field(default=20, ge=1)  # Max history entries per run
+    max_iterations: int = Field(default=10, ge=1)  # Max tool calls per Phase 2
+
+    def build_schedule(self, timezone: str) -> CronSchedule:
+        """Build the runtime schedule, preferring the legacy cron override if present."""
+        if self.cron:
+            return CronSchedule(kind="cron", expr=self.cron, tz=timezone)
+        return CronSchedule(kind="every", every_ms=self.interval_h * self._HOUR_MS)
+
+    def describe_schedule(self) -> str:
+        """Return a human-readable summary for logs and startup output."""
+        if self.cron:
+            return f"cron {self.cron} (legacy)"
+        hours = self.interval_h
+        return f"every {hours}h"
 
 
 class ChannelsConfig(Base):
@@ -81,6 +111,7 @@ class AgentDefaults(Base):
     fallback_cooldown_s: int = 60  # seconds to skip a failed provider before retrying
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     context_pruning: ContextPruningConfig = Field(default_factory=ContextPruningConfig)
+    dream: DreamConfig = Field(default_factory=DreamConfig)
 
 
 class AgentsConfig(Base):

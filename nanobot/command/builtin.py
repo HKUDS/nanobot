@@ -148,19 +148,49 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
         return ctx.make_response(f"❌ Failed to switch model: {e}")
 
 
+async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
+    """Manually trigger Dream consolidation."""
+    loop = ctx.loop
+    if hasattr(loop, 'dream') and loop.dream:
+        asyncio.create_task(loop.dream.run_once())
+        return ctx.make_response("🌙 Dream consolidation triggered.")
+    return ctx.make_response("❌ Dream not available.")
+
+
+async def cmd_dream_log(ctx: CommandContext) -> OutboundMessage:
+    """Show what the last Dream changed."""
+    # TODO: Implement dream log retrieval
+    return ctx.make_response("🌙 Dream log not yet implemented.")
+
+
+async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
+    """Revert memory to a previous state."""
+    # TODO: Implement dream restore
+    return ctx.make_response("🌙 Dream restore not yet implemented.")
+
+
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
+    content = build_help_text()
+    return ctx.make_response(content, metadata={"render_as": "text"})
+
+
+def build_help_text() -> str:
+    """Build canonical help text shared across channels."""
     lines = [
         "🐈 nanobot commands:",
         "/new — Start a new conversation",
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",
+        "/dream — Manually trigger Dream consolidation",
+        "/dream-log — Show what the last Dream changed",
+        "/dream-restore — Revert memory to a previous state",
         "/tts — Toggle text-to-speech (on/off)",
         "/model — View or switch the LLM model",
         "/help — Show available commands",
     ]
-    return ctx.make_response("\n".join(lines), metadata={"render_as": "text"})
+    return "\n".join(lines)
 
 
 def register_builtin_commands(router: CommandRouter) -> None:
@@ -170,6 +200,11 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
+    router.exact("/dream", cmd_dream)
+    router.exact("/dream-log", cmd_dream_log)
+    router.prefix("/dream-log ", cmd_dream_log)
+    router.exact("/dream-restore", cmd_dream_restore)
+    router.prefix("/dream-restore ", cmd_dream_restore)
     router.prefix("/tts ", cmd_tts)
     router.exact("/tts", cmd_tts)
     router.prefix("/model ", cmd_model)
