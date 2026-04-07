@@ -698,10 +698,23 @@ def gateway(
             f"Scheduled instruction: {job.payload.message}"
         )
 
+        # Switch model if specified
+        original_model = None
+        if job.payload.model:
+            original_model = agent.model
+            try:
+                agent.switch_model(job.payload.model)
+                logger.info("Cron job '{}' switched to model: {}", job.name, job.payload.model)
+            except Exception as e:
+                logger.warning("Failed to switch to model {} for cron job '{}': {}", 
+                              job.payload.model, job.name, e)
+                # Continue with current model if switch fails
+
         cron_tool = agent.tools.get("cron")
         cron_token = None
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
+        
         try:
             resp = await agent.process_direct(
                 reminder_note,
@@ -712,6 +725,15 @@ def gateway(
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
                 cron_tool.reset_cron_context(cron_token)
+            
+            # Restore original model if we switched
+            if original_model and agent.model != original_model:
+                try:
+                    agent.switch_model(original_model)
+                    logger.info("Cron job '{}' restored to model: {}", job.name, original_model)
+                except Exception as e:
+                    logger.warning("Failed to restore model after cron job '{}': {}", 
+                                  job.name, e)
 
         response = resp.content if resp else ""
 
