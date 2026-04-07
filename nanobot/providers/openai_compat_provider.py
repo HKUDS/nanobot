@@ -31,6 +31,12 @@ else:
         )
     from openai import AsyncOpenAI
 
+_LANGSMITH_ENABLED = bool(
+    os.environ.get("LANGSMITH_API_KEY")
+    and os.environ.get("LANGSMITH_TRACING", "").lower() == "true"
+    and importlib.util.find_spec("langsmith")
+)
+
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.openai_responses import (
     consume_sdk_stream,
@@ -309,6 +315,9 @@ class OpenAICompatProvider(LLMProvider):
             timeout=timeout_s,
             http_client=http_client,
         )
+        if _LANGSMITH_ENABLED:
+            from langsmith.wrappers import wrap_openai
+            self._client = wrap_openai(self._client)
 
         # Responses API circuit breaker: skip after repeated failures,
         # probe again after _RESPONSES_PROBE_INTERVAL_S seconds.
