@@ -16,6 +16,12 @@ class AgentHookContext:
 
     iteration: int
     messages: list[dict[str, Any]]
+    # Routing fields (set from contextvars by the runner)
+    channel: str = "cli"
+    chat_id: str = "direct"
+    session_key: str | None = None
+    message_id: str | None = None
+    sender_id: str | None = None
     response: LLMResponse | None = None
     usage: dict[str, int] = field(default_factory=dict)
     tool_calls: list[ToolCallRequest] = field(default_factory=list)

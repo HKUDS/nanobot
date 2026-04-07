@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import os
 import time
@@ -38,6 +39,12 @@ from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
     from nanobot.cron.service import CronService
+
+_channel: contextvars.ContextVar[str] = contextvars.ContextVar("_channel", default="cli")
+_chat_id: contextvars.ContextVar[str] = contextvars.ContextVar("_chat_id", default="direct")
+_session_key: contextvars.ContextVar[str | None] = contextvars.ContextVar("_session_key", default=None)
+_message_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_message_id", default=None)
+_sender_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_sender_id", default=None)
 
 
 class _LoopHook(AgentHook):
@@ -210,7 +217,10 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
-        self._extra_hooks: list[AgentHook] = hooks or []
+        from nanobot.agent.hooks_registry import discover_hooks
+
+        discovered = discover_hooks()
+        self._extra_hooks: list[AgentHook] = (hooks or []) + discovered
 
         self.context = ContextBuilder(workspace, timezone=timezone)
         self.sessions = session_manager or SessionManager(workspace)
@@ -349,6 +359,11 @@ class AgentLoop:
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
         """
+        _channel.set(channel)
+        _chat_id.set(chat_id)
+        _session_key.set(session.key if session else None)
+        _message_id.set(message_id)
+
         loop_hook = _LoopHook(
             self,
             on_progress=on_progress,
