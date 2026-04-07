@@ -872,6 +872,12 @@ class TelegramChannel(BaseChannel):
 
         return str(message.chat_id) in allowed_groups
 
+    def _is_update_group_allowed(self, update: Update) -> bool:
+        """Apply groupAllowFrom gating consistently for any handler working from an Update."""
+        message = getattr(update, "effective_message", None)
+        if message is None:
+            return True
+        return self._is_group_allowed(message)
     def _remember_thread_context(self, message) -> None:
         """Cache Telegram thread context by chat/message id for follow-up replies."""
         message_thread_id = getattr(message, "message_thread_id", None)
