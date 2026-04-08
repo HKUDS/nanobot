@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from nanobot.utils.path import abbreviate_path
-
-# Registry: tool_name -> (key_args, template, is_path, is_command)
-_TOOL_FORMATS: dict[str, tuple[list[str], str, bool, bool]] = {
-    "read_file":  (["path", "file_path"],              "read {}",     True,  False),
-    "write_file": (["path", "file_path"],              "write {}",    True,  False),
-    "edit":       (["file_path", "path"],              "edit {}",     True,  False),
-    "glob":       (["pattern"],                        'glob "{}"',   False, False),
-    "grep":       (["pattern"],                        'grep "{}"',   False, False),
-    "exec":       (["command"],                        "$ {}",        False, True),
-    "web_search": (["query"],                          'search "{}"', False, False),
-    "web_fetch":  (["url"],                            "fetch {}",    True,  False),
-    "list_dir":   (["path"],                           "ls {}",       True,  False),
+# Registry: tool_name -> (key_args, template)
+_TOOL_FORMATS: dict[str, tuple[list[str], str]] = {
+    "read_file":  (["path", "file_path"],              "read {}"),
+    "write_file": (["path", "file_path"],              "write {}"),
+    "edit":       (["file_path", "path"],              "edit {}"),
+    "glob":       (["pattern"],                        'glob "{}"'),
+    "grep":       (["pattern"],                        'grep "{}"'),
+    "exec":       (["command"],                        "$ {}"),
+    "web_search": (["query"],                          'search "{}"'),
+    "web_fetch":  (["url"],                            "fetch {}"),
+    "list_dir":   (["path"],                           "ls {}"),
 }
 
 
@@ -82,10 +80,6 @@ def _fmt_known(tc, fmt: tuple) -> str:
     val = _extract_arg(tc, fmt[0])
     if val is None:
         return tc.name
-    if fmt[2]:  # is_path
-        val = abbreviate_path(val)
-    elif fmt[3]:  # is_command
-        val = val[:40] + "\u2026" if len(val) > 40 else val
     return fmt[1].format(val)
 
 
@@ -107,7 +101,7 @@ def _fmt_mcp(tc) -> str:
     val = next((v for v in args.values() if isinstance(v, str) and v), None)
     if val is None:
         return f"{server}::{tool}"
-    return f'{server}::{tool}("{abbreviate_path(val, 40)}")'
+    return f'{server}::{tool}("{val}")'
 
 
 def _fmt_fallback(tc) -> str:
@@ -116,4 +110,4 @@ def _fmt_fallback(tc) -> str:
     val = next(iter(args.values()), None) if isinstance(args, dict) else None
     if not isinstance(val, str):
         return tc.name
-    return f'{tc.name}("{abbreviate_path(val, 40)}")' if len(val) > 40 else f'{tc.name}("{val}")'
+    return f'{tc.name}("{val}")'
