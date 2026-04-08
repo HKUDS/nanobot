@@ -653,8 +653,10 @@ def gateway(
     # LLM trace logging
     hooks: list = []
     if config.trace.enabled:
-        from nanobot.agent.trace import TraceHook
-        hooks.append(TraceHook(traces_dir=config.workspace_path / "traces"))
+        from nanobot.agent.hook import TraceHook
+        traces_dir = config.workspace_path / "traces"
+        traces_dir.mkdir(parents=True, exist_ok=True)
+        hooks.append(TraceHook(log_path=traces_dir / "trace.jsonl"))
 
     # Create agent with cron service
     from nanobot.providers.context_window import resolve_context_window_sync
@@ -901,8 +903,10 @@ def agent(
     # LLM trace logging
     cli_hooks: list = []
     if config.trace.enabled:
-        from nanobot.agent.trace import TraceHook
-        cli_hooks.append(TraceHook(traces_dir=config.workspace_path / "traces"))
+        from nanobot.agent.hook import TraceHook
+        traces_dir = config.workspace_path / "traces"
+        traces_dir.mkdir(parents=True, exist_ok=True)
+        cli_hooks.append(TraceHook(log_path=traces_dir / "trace.jsonl"))
 
     from nanobot.providers.context_window import resolve_context_window_sync
     _ctx_tokens, _ctx_src = resolve_context_window_sync(

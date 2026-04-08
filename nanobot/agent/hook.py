@@ -86,7 +86,7 @@ class TraceHook(AgentHook):
         self._llm_start_time = None
         self._current_entry = {
             "iteration": context.iteration,
-            "messages": self._truncate_messages(context.messages),
+            "messages": self._sanitize_messages(context.messages),
         }
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
@@ -143,9 +143,28 @@ class TraceHook(AgentHook):
         except Exception as e:
             logger.debug("TraceHook failed to write to {}: {}", self._log_path, e)
 
-    def _truncate_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Return messages as-is without truncation for complete logging."""
-        return list(messages)
+    def _sanitize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Replace base64 image payloads with placeholders for cleaner logs."""
+        out: list[dict[str, Any]] = []
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                sanitized: list[dict[str, Any]] = []
+                for block in content:
+                    if (
+                        isinstance(block, dict)
+                        and block.get("type") == "image_url"
+                        and isinstance(block.get("image_url"), dict)
+                        and str(block["image_url"].get("url", "")).startswith("data:")
+                    ):
+                        path = (block.get("_meta") or {}).get("path", "")
+                        sanitized.append({"type": "text", "text": f"[image: {path}]" if path else "[image]"})
+                    else:
+                        sanitized.append(block)
+                out.append({**msg, "content": sanitized})
+            else:
+                out.append(msg)
+        return out
 
 
 class CompositeHook(AgentHook):
