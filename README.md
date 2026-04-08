@@ -1304,6 +1304,7 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
 | `brave` | `apiKey` | `BRAVE_API_KEY` | No |
 | `tavily` | `apiKey` | `TAVILY_API_KEY` | No |
 | `jina` | `apiKey` | `JINA_API_KEY` | Free tier (10M tokens) |
+| `kagi` | `apiKey` | `KAGI_API_KEY` | No |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
 | `duckduckgo` (default) | — | — | Yes |
 
@@ -1354,6 +1355,20 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
       "search": {
         "provider": "jina",
         "apiKey": "jina_..."
+      }
+    }
+  }
+}
+```
+
+**Kagi:**
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "kagi",
+        "apiKey": "your-kagi-api-key"
       }
     }
   }
