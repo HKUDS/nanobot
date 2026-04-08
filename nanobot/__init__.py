@@ -1,9 +1,9 @@
 """
-nanobot - A lightweight AI agent framework
+hackclaw - AI-powered hackathon assistant built on nanobot
 """
 
-__version__ = "0.1.5"
-__logo__ = "🐈"
+__version__ = "0.1.0"
+__logo__ = "🦞"
 
 from nanobot.nanobot import Nanobot, RunResult
 

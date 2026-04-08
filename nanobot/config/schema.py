@@ -97,48 +97,7 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
-    azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
-    anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
-    openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
-    deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
-    groq: ProviderConfig = Field(default_factory=ProviderConfig)
-    zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
-    dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
-    vllm: ProviderConfig = Field(default_factory=ProviderConfig)
-    ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
-    ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
-    gemini: ProviderConfig = Field(default_factory=ProviderConfig)
-    moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
-    minimax: ProviderConfig = Field(default_factory=ProviderConfig)
-    mistral: ProviderConfig = Field(default_factory=ProviderConfig)
-    stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰)
-    xiaomi_mimo: ProviderConfig = Field(default_factory=ProviderConfig)  # Xiaomi MIMO (小米)
-    aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
-    siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
-    volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
-    volcengine_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine Coding Plan
-    byteplus: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus (VolcEngine international)
-    byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
-    openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
-    github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
-    qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Qianfan (百度千帆)
-
-
-class HeartbeatConfig(Base):
-    """Heartbeat service configuration."""
-
-    enabled: bool = True
-    interval_s: int = 30 * 60  # 30 minutes
-    keep_recent_messages: int = 8
-
-
-class ApiConfig(Base):
-    """OpenAI-compatible API server configuration."""
-
-    host: str = "127.0.0.1"  # Safer default: local-only bind.
-    port: int = 8900
-    timeout: float = 120.0  # Per-request timeout in seconds.
 
 
 class GatewayConfig(Base):
@@ -146,7 +105,6 @@ class GatewayConfig(Base):
 
     host: str = "0.0.0.0"
     port: int = 18790
-    heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
 class WebSearchConfig(Base):
@@ -205,7 +163,6 @@ class Config(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
-    api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
 
@@ -237,7 +194,7 @@ class Config(BaseSettings):
             kw = kw.lower()
             return kw in model_lower or kw.replace("-", "_") in model_normalized
 
-        # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
+        # Explicit provider prefix wins.
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:

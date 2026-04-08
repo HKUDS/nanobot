@@ -1,4 +1,4 @@
-"""CLI commands for nanobot."""
+"""CLI commands for hackclaw."""
 
 import asyncio
 import os
@@ -44,9 +44,9 @@ from nanobot.utils.restart import (
 )
 
 app = typer.Typer(
-    name="nanobot",
+    name="hackclaw",
     context_settings={"help_option_names": ["-h", "--help"]},
-    help=f"{__logo__} nanobot - Personal AI Assistant",
+    help=f"{__logo__} hackclaw - Hackathon AI Assistant",
     no_args_is_help=True,
 )
 
@@ -151,7 +151,7 @@ def _print_agent_response(
     content = response or ""
     body = _response_renderable(content, render_markdown, metadata)
     console.print()
-    console.print(f"[cyan]{__logo__} nanobot[/cyan]")
+    console.print(f"[cyan]{__logo__} hackclaw[/cyan]")
     console.print(body)
     console.print()
 
@@ -187,7 +187,7 @@ async def _print_interactive_response(
         ansi = _render_interactive_ansi(
             lambda c: (
                 c.print(),
-                c.print(f"[cyan]{__logo__} nanobot[/cyan]"),
+                c.print(f"[cyan]{__logo__} hackclaw[/cyan]"),
                 c.print(_response_renderable(content, render_markdown, metadata)),
                 c.print(),
             )
@@ -235,7 +235,7 @@ async def _read_interactive_input_async() -> str:
 
 def version_callback(value: bool):
     if value:
-        console.print(f"{__logo__} nanobot v{__version__}")
+        console.print(f"{__logo__} hackclaw v{__version__}")
         raise typer.Exit()
 
 
@@ -245,7 +245,7 @@ def main(
         None, "--version", "-v", callback=version_callback, is_eager=True
     ),
 ):
-    """nanobot - Personal AI Assistant."""
+    """hackclaw - Hackathon AI Assistant."""
     pass
 
 
@@ -260,7 +260,7 @@ def onboard(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
     wizard: bool = typer.Option(False, "--wizard", help="Use interactive wizard"),
 ):
-    """Initialize nanobot configuration and workspace."""
+    """Initialize hackclaw configuration and workspace."""
     from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
     from nanobot.config.schema import Config
 
@@ -320,7 +320,7 @@ def onboard(
             console.print(f"[green]✓[/green] Config saved at {config_path}")
         except Exception as e:
             console.print(f"[red]✗[/red] Error during configuration: {e}")
-            console.print("[yellow]Please run 'nanobot onboard' again to complete setup.[/yellow]")
+            console.print("[yellow]Please run 'hackclaw onboard' again to complete setup.[/yellow]")
             raise typer.Exit(1)
     _onboard_plugins(config_path)
 
@@ -332,13 +332,13 @@ def onboard(
 
     sync_workspace_templates(workspace_path)
 
-    agent_cmd = 'nanobot agent -m "Hello!"'
-    gateway_cmd = "nanobot gateway"
+    agent_cmd = 'hackclaw agent -m "Hello!"'
+    gateway_cmd = "hackclaw gateway"
     if config:
         agent_cmd += f" --config {config_path}"
         gateway_cmd += f" --config {config_path}"
 
-    console.print(f"\n{__logo__} nanobot is ready!")
+    console.print(f"\n{__logo__} hackclaw is ready!")
     console.print("\nNext steps:")
     if wizard:
         console.print(f"  1. Chat: [cyan]{agent_cmd}[/cyan]")
@@ -347,9 +347,7 @@ def onboard(
         console.print(f"  1. Add your API key to [cyan]{config_path}[/cyan]")
         console.print("     Get one at: https://openrouter.ai/keys")
         console.print(f"  2. Chat: [cyan]{agent_cmd}[/cyan]")
-    console.print(
-        "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]"
-    )
+    console.print()
 
 
 def _merge_missing_defaults(existing: Any, defaults: Any) -> Any:
@@ -402,58 +400,23 @@ def _make_provider(config: Config):
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
     spec = find_by_name(provider_name) if provider_name else None
-    backend = spec.backend if spec else "openai_compat"
 
-    # --- validation ---
-    if backend == "azure_openai":
-        if not p or not p.api_key or not p.api_base:
-            console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
-            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
-            console.print("Use the model field to specify the deployment name.")
-            raise typer.Exit(1)
-    elif backend == "openai_compat" and not model.startswith("bedrock/"):
-        needs_key = not (p and p.api_key)
-        exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
-        if needs_key and not exempt:
-            console.print("[red]Error: No API key configured.[/red]")
-            console.print("Set one in ~/.nanobot/config.json under providers section")
-            raise typer.Exit(1)
+    needs_key = not (p and p.api_key)
+    exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
+    if needs_key and not exempt:
+        console.print("[red]Error: No API key configured.[/red]")
+        console.print("Set one in ~/.nanobot/config.json under providers section")
+        raise typer.Exit(1)
 
-    # --- instantiation by backend ---
-    if backend == "openai_codex":
-        from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+    from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
-        provider = OpenAICodexProvider(default_model=model)
-    elif backend == "azure_openai":
-        from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
-
-        provider = AzureOpenAIProvider(
-            api_key=p.api_key,
-            api_base=p.api_base,
-            default_model=model,
-        )
-    elif backend == "github_copilot":
-        from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
-        provider = GitHubCopilotProvider(default_model=model)
-    elif backend == "anthropic":
-        from nanobot.providers.anthropic_provider import AnthropicProvider
-
-        provider = AnthropicProvider(
-            api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model),
-            default_model=model,
-            extra_headers=p.extra_headers if p else None,
-        )
-    else:
-        from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-
-        provider = OpenAICompatProvider(
-            api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model),
-            default_model=model,
-            extra_headers=p.extra_headers if p else None,
-            spec=spec,
-        )
+    provider = OpenAICompatProvider(
+        api_key=p.api_key if p else None,
+        api_base=config.get_api_base(model),
+        default_model=model,
+        extra_headers=p.extra_headers if p else None,
+        spec=spec,
+    )
 
     defaults = config.agents.defaults
     provider.generation = GenerationSettings(
@@ -520,93 +483,6 @@ def _migrate_cron_store(config: "Config") -> None:
 
 
 # ============================================================================
-# OpenAI-Compatible API Server
-# ============================================================================
-
-
-@app.command()
-def serve(
-    port: int | None = typer.Option(None, "--port", "-p", help="API server port"),
-    host: str | None = typer.Option(None, "--host", "-H", help="Bind address"),
-    timeout: float | None = typer.Option(None, "--timeout", "-t", help="Per-request timeout (seconds)"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show nanobot runtime logs"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-):
-    """Start the OpenAI-compatible API server (/v1/chat/completions)."""
-    try:
-        from aiohttp import web  # noqa: F401
-    except ImportError:
-        console.print("[red]aiohttp is required. Install with: pip install 'nanobot-ai[api]'[/red]")
-        raise typer.Exit(1)
-
-    from loguru import logger
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.api.server import create_app
-    from nanobot.bus.queue import MessageBus
-    from nanobot.session.manager import SessionManager
-
-    if verbose:
-        logger.enable("nanobot")
-    else:
-        logger.disable("nanobot")
-
-    runtime_config = _load_runtime_config(config, workspace)
-    api_cfg = runtime_config.api
-    host = host if host is not None else api_cfg.host
-    port = port if port is not None else api_cfg.port
-    timeout = timeout if timeout is not None else api_cfg.timeout
-    sync_workspace_templates(runtime_config.workspace_path)
-    bus = MessageBus()
-    provider = _make_provider(runtime_config)
-    session_manager = SessionManager(runtime_config.workspace_path)
-    agent_loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=runtime_config.workspace_path,
-        model=runtime_config.agents.defaults.model,
-        max_iterations=runtime_config.agents.defaults.max_tool_iterations,
-        context_window_tokens=runtime_config.agents.defaults.context_window_tokens,
-        context_block_limit=runtime_config.agents.defaults.context_block_limit,
-        max_tool_result_chars=runtime_config.agents.defaults.max_tool_result_chars,
-        provider_retry_mode=runtime_config.agents.defaults.provider_retry_mode,
-        web_config=runtime_config.tools.web,
-        exec_config=runtime_config.tools.exec,
-        restrict_to_workspace=runtime_config.tools.restrict_to_workspace,
-        session_manager=session_manager,
-        mcp_servers=runtime_config.tools.mcp_servers,
-        channels_config=runtime_config.channels,
-        timezone=runtime_config.agents.defaults.timezone,
-    )
-
-    model_name = runtime_config.agents.defaults.model
-    console.print(f"{__logo__} Starting OpenAI-compatible API server")
-    console.print(f"  [cyan]Endpoint[/cyan] : http://{host}:{port}/v1/chat/completions")
-    console.print(f"  [cyan]Model[/cyan]    : {model_name}")
-    console.print("  [cyan]Session[/cyan]  : api:default")
-    console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
-    if host in {"0.0.0.0", "::"}:
-        console.print(
-            "[yellow]Warning:[/yellow] API is bound to all interfaces. "
-            "Only do this behind a trusted network boundary, firewall, or reverse proxy."
-        )
-    console.print()
-
-    api_app = create_app(agent_loop, model_name=model_name, request_timeout=timeout)
-
-    async def on_startup(_app):
-        await agent_loop._connect_mcp()
-
-    async def on_cleanup(_app):
-        await agent_loop.close_mcp()
-
-    api_app.on_startup.append(on_startup)
-    api_app.on_cleanup.append(on_cleanup)
-
-    web.run_app(api_app, host=host, port=port, print=lambda msg: logger.info(msg))
-
-
-# ============================================================================
 # Gateway / Server
 # ============================================================================
 
@@ -618,13 +494,12 @@ def gateway(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
-    """Start the nanobot gateway."""
+    """Start the hackclaw gateway."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
-    from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
 
     if verbose:
@@ -635,7 +510,7 @@ def gateway(
     config = _load_runtime_config(config, workspace)
     port = port if port is not None else config.gateway.port
 
-    console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
+    console.print(f"{__logo__} Starting hackclaw gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
@@ -731,66 +606,6 @@ def gateway(
     # Create channel manager
     channels = ChannelManager(config, bus)
 
-    def _pick_heartbeat_target() -> tuple[str, str]:
-        """Pick a routable channel/chat target for heartbeat-triggered messages."""
-        enabled = set(channels.enabled_channels)
-        # Prefer the most recently updated non-internal session on an enabled channel.
-        for item in session_manager.list_sessions():
-            key = item.get("key") or ""
-            if ":" not in key:
-                continue
-            channel, chat_id = key.split(":", 1)
-            if channel in {"cli", "system"}:
-                continue
-            if channel in enabled and chat_id:
-                return channel, chat_id
-        # Fallback keeps prior behavior but remains explicit.
-        return "cli", "direct"
-
-    # Create heartbeat service
-    async def on_heartbeat_execute(tasks: str) -> str:
-        """Phase 2: execute heartbeat tasks through the full agent loop."""
-        channel, chat_id = _pick_heartbeat_target()
-
-        async def _silent(*_args, **_kwargs):
-            pass
-
-        resp = await agent.process_direct(
-            tasks,
-            session_key="heartbeat",
-            channel=channel,
-            chat_id=chat_id,
-            on_progress=_silent,
-        )
-
-        # Keep a small tail of heartbeat history so the loop stays bounded
-        # without losing all short-term context between runs.
-        session = agent.sessions.get_or_create("heartbeat")
-        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-        agent.sessions.save(session)
-
-        return resp.content if resp else ""
-
-    async def on_heartbeat_notify(response: str) -> None:
-        """Deliver a heartbeat response to the user's channel."""
-        from nanobot.bus.events import OutboundMessage
-        channel, chat_id = _pick_heartbeat_target()
-        if channel == "cli":
-            return  # No external channel available to deliver to
-        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
-
-    hb_cfg = config.gateway.heartbeat
-    heartbeat = HeartbeatService(
-        workspace=config.workspace_path,
-        provider=provider,
-        model=agent.model,
-        on_execute=on_heartbeat_execute,
-        on_notify=on_heartbeat_notify,
-        interval_s=hb_cfg.interval_s,
-        enabled=hb_cfg.enabled,
-        timezone=config.agents.defaults.timezone,
-    )
-
     if channels.enabled_channels:
         console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
     else:
@@ -799,8 +614,6 @@ def gateway(
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
-
-    console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
     # Register Dream system job (always-on, idempotent on restart)
     dream_cfg = config.agents.defaults.dream
@@ -820,7 +633,6 @@ def gateway(
     async def run():
         try:
             await cron.start()
-            await heartbeat.start()
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
@@ -834,7 +646,6 @@ def gateway(
             console.print(traceback.format_exc())
         finally:
             await agent.close_mcp()
-            heartbeat.stop()
             cron.stop()
             agent.stop()
             await channels.stop_all()
@@ -854,7 +665,7 @@ def agent(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
-    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show hackclaw runtime logs during chat"),
 ):
     """Interact with the agent directly."""
     from loguru import logger
@@ -1121,67 +932,6 @@ def channels_status(
     console.print(table)
 
 
-def _get_bridge_dir() -> Path:
-    """Get the bridge directory, setting it up if needed."""
-    import shutil
-    import subprocess
-
-    # User's bridge location
-    from nanobot.config.paths import get_bridge_install_dir
-
-    user_bridge = get_bridge_install_dir()
-
-    # Check if already built
-    if (user_bridge / "dist" / "index.js").exists():
-        return user_bridge
-
-    # Check for npm
-    npm_path = shutil.which("npm")
-    if not npm_path:
-        console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
-        raise typer.Exit(1)
-
-    # Find source bridge: first check package data, then source dir
-    pkg_bridge = Path(__file__).parent.parent / "bridge"  # nanobot/bridge (installed)
-    src_bridge = Path(__file__).parent.parent.parent / "bridge"  # repo root/bridge (dev)
-
-    source = None
-    if (pkg_bridge / "package.json").exists():
-        source = pkg_bridge
-    elif (src_bridge / "package.json").exists():
-        source = src_bridge
-
-    if not source:
-        console.print("[red]Bridge source not found.[/red]")
-        console.print("Try reinstalling: pip install --force-reinstall nanobot")
-        raise typer.Exit(1)
-
-    console.print(f"{__logo__} Setting up bridge...")
-
-    # Copy to user directory
-    user_bridge.parent.mkdir(parents=True, exist_ok=True)
-    if user_bridge.exists():
-        shutil.rmtree(user_bridge)
-    shutil.copytree(source, user_bridge, ignore=shutil.ignore_patterns("node_modules", "dist"))
-
-    # Install and build
-    try:
-        console.print("  Installing dependencies...")
-        subprocess.run([npm_path, "install"], cwd=user_bridge, check=True, capture_output=True)
-
-        console.print("  Building...")
-        subprocess.run([npm_path, "run", "build"], cwd=user_bridge, check=True, capture_output=True)
-
-        console.print("[green]✓[/green] Bridge ready\n")
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]Build failed: {e}[/red]")
-        if e.stderr:
-            console.print(f"[dim]{e.stderr.decode()[:500]}[/dim]")
-        raise typer.Exit(1)
-
-    return user_bridge
-
-
 @channels_app.command("login")
 def channels_login(
     channel_name: str = typer.Argument(..., help="Channel name (e.g. weixin, whatsapp)"),
@@ -1266,14 +1016,14 @@ def plugins_list():
 
 @app.command()
 def status():
-    """Show nanobot status."""
+    """Show hackclaw status."""
     from nanobot.config.loader import get_config_path, load_config
 
     config_path = get_config_path()
     config = load_config()
     workspace = config.workspace_path
 
-    console.print(f"{__logo__} nanobot Status\n")
+    console.print(f"{__logo__} hackclaw Status\n")
 
     console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
     console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
@@ -1341,48 +1091,6 @@ def provider_login(
 
     console.print(f"{__logo__} OAuth Login - {spec.label}\n")
     handler()
-
-
-@_register_login("openai_codex")
-def _login_openai_codex() -> None:
-    try:
-        from oauth_cli_kit import get_token, login_oauth_interactive
-
-        token = None
-        try:
-            token = get_token()
-        except Exception:
-            pass
-        if not (token and token.access):
-            console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
-            token = login_oauth_interactive(
-                print_fn=lambda s: console.print(s),
-                prompt_fn=lambda s: typer.prompt(s),
-            )
-        if not (token and token.access):
-            console.print("[red]✗ Authentication failed[/red]")
-            raise typer.Exit(1)
-        console.print(f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]")
-    except ImportError:
-        console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
-        raise typer.Exit(1)
-
-
-@_register_login("github_copilot")
-def _login_github_copilot() -> None:
-    try:
-        from nanobot.providers.github_copilot_provider import login_github_copilot
-
-        console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")
-        token = login_github_copilot(
-            print_fn=lambda s: console.print(s),
-            prompt_fn=lambda s: typer.prompt(s),
-        )
-        account = token.account_id or "GitHub"
-        console.print(f"[green]✓ Authenticated with GitHub Copilot[/green]  [dim]{account}[/dim]")
-    except Exception as e:
-        console.print(f"[red]Authentication error: {e}[/red]")
-        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

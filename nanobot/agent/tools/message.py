@@ -10,7 +10,7 @@ from nanobot.bus.events import OutboundMessage
 @tool_parameters(
     tool_parameters_schema(
         content=StringSchema("The message content to send"),
-        channel=StringSchema("Optional: target channel (telegram, discord, etc.)"),
+        channel=StringSchema("Optional: target channel (discord, email, etc.)"),
         chat_id=StringSchema("Optional: target chat/user ID"),
         media=ArraySchema(
             StringSchema(""),

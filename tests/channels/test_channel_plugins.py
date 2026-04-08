@@ -42,10 +42,10 @@ class _FakePlugin(BaseChannel):
         return True
 
 
-class _FakeTelegram(BaseChannel):
-    """Plugin that tries to shadow built-in telegram."""
-    name = "telegram"
-    display_name = "Fake Telegram"
+class _FakeDiscord(BaseChannel):
+    """Plugin that tries to shadow built-in discord."""
+    name = "discord"
+    display_name = "Fake Discord"
 
     async def start(self) -> None:
         pass
@@ -87,7 +87,7 @@ def test_channels_config_getattr_returns_extra():
 def test_channels_config_builtin_fields_removed():
     """After decoupling, ChannelsConfig has no explicit channel fields."""
     cfg = ChannelsConfig()
-    assert not hasattr(cfg, "telegram")
+    assert not hasattr(cfg, "discord")
     assert cfg.send_progress is True
     assert cfg.send_tool_hints is False
 
@@ -154,12 +154,12 @@ def test_discover_all_includes_external_plugin():
 def test_discover_all_builtin_shadows_plugin():
     from nanobot.channels.registry import discover_all
 
-    ep = _make_entry_point("telegram", _FakeTelegram)
+    ep = _make_entry_point("discord", _FakeDiscord)
     with patch(_EP_TARGET, return_value=[ep]):
         result = discover_all()
 
-    assert "telegram" in result
-    assert result["telegram"] is not _FakeTelegram
+    assert "discord" in result
+    assert result["discord"] is not _FakeDiscord
 
 
 # ---------------------------------------------------------------------------
@@ -301,8 +301,8 @@ async def test_manager_skips_disabled_plugin():
 
 def test_builtin_channel_default_config():
     """Built-in channels expose default_config() returning a dict with 'enabled': False."""
-    from nanobot.channels.telegram import TelegramChannel
-    cfg = TelegramChannel.default_config()
+    from nanobot.channels.discord import DiscordChannel
+    cfg = DiscordChannel.default_config()
     assert isinstance(cfg, dict)
     assert cfg["enabled"] is False
     assert "token" in cfg
@@ -310,9 +310,9 @@ def test_builtin_channel_default_config():
 
 def test_builtin_channel_init_from_dict():
     """Built-in channels accept a raw dict and convert to Pydantic internally."""
-    from nanobot.channels.telegram import TelegramChannel
+    from nanobot.channels.discord import DiscordChannel
     bus = MessageBus()
-    ch = TelegramChannel({"enabled": False, "token": "test-tok", "allowFrom": ["*"]}, bus)
+    ch = DiscordChannel({"enabled": False, "token": "test-tok", "allowFrom": ["*"]}, bus)
     assert ch.config.token == "test-tok"
     assert ch.config.allow_from == ["*"]
 
@@ -725,10 +725,10 @@ async def test_get_channel_returns_channel_if_exists():
     mgr = ChannelManager.__new__(ChannelManager)
     mgr.config = fake_config
     mgr.bus = MessageBus()
-    mgr.channels = {"telegram": _StartableChannel(fake_config, mgr.bus)}
+    mgr.channels = {"discord": _StartableChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
 
-    assert mgr.get_channel("telegram") is not None
+    assert mgr.get_channel("discord") is not None
     assert mgr.get_channel("nonexistent") is None
 
 
@@ -765,15 +765,15 @@ async def test_enabled_channels_returns_channel_names():
     mgr.config = fake_config
     mgr.bus = MessageBus()
     mgr.channels = {
-        "telegram": _StartableChannel(fake_config, mgr.bus),
-        "slack": _StartableChannel(fake_config, mgr.bus),
+        "discord": _StartableChannel(fake_config, mgr.bus),
+        "email": _StartableChannel(fake_config, mgr.bus),
     }
     mgr._dispatch_task = None
 
     enabled = mgr.enabled_channels
 
-    assert "telegram" in enabled
-    assert "slack" in enabled
+    assert "discord" in enabled
+    assert "email" in enabled
     assert len(enabled) == 2
 
 
@@ -942,18 +942,18 @@ async def test_notify_restart_done_enqueues_outbound_message():
     mgr = ChannelManager.__new__(ChannelManager)
     mgr.config = fake_config
     mgr.bus = MessageBus()
-    mgr.channels = {"feishu": _StartableChannel(fake_config, mgr.bus)}
+    mgr.channels = {"discord": _StartableChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
     mgr._send_with_retry = AsyncMock()
 
-    notice = RestartNotice(channel="feishu", chat_id="oc_123", started_at_raw="100.0")
+    notice = RestartNotice(channel="discord", chat_id="ch_123", started_at_raw="100.0")
     with patch("nanobot.channels.manager.consume_restart_notice_from_env", return_value=notice):
         mgr._notify_restart_done_if_needed()
 
     await asyncio.sleep(0)
     mgr._send_with_retry.assert_awaited_once()
     sent_channel, sent_msg = mgr._send_with_retry.await_args.args
-    assert sent_channel is mgr.channels["feishu"]
-    assert sent_msg.channel == "feishu"
-    assert sent_msg.chat_id == "oc_123"
+    assert sent_channel is mgr.channels["discord"]
+    assert sent_msg.channel == "discord"
+    assert sent_msg.chat_id == "ch_123"
     assert sent_msg.content.startswith("Restart completed")
