@@ -662,7 +662,7 @@ def gateway(
         provider=provider,
         model=agent.model,
         on_execute=on_heartbeat_execute,
-        on_notify=on_heartbeat_notify if hb_cfg.send_reasoning else None,
+        on_notify=on_heartbeat_notify,
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
         last_run_tracking=hb_cfg.last_run_tracking,
