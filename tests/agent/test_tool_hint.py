@@ -72,6 +72,22 @@ class TestToolHintKnownTools:
         result = _hint([_tc("exec", {"command": cmd})])
         assert "\u2026/" in result
 
+    def test_exec_abbreviates_quoted_linux_paths_with_spaces(self):
+        """Quoted Unix paths with spaces should still be folded."""
+        cmd = 'cd "/home/user/My Documents/project" && pytest tests/'
+        result = _hint([_tc("exec", {"command": cmd})])
+        assert "\u2026/" in result
+        assert '"/home/user/My Documents/project"' not in result
+        assert '"' in result
+
+    def test_exec_abbreviates_quoted_windows_paths_with_spaces(self):
+        """Quoted Windows paths with spaces should still be folded."""
+        cmd = 'cd "C:/Program Files/Git/project" && git status'
+        result = _hint([_tc("exec", {"command": cmd})])
+        assert "\u2026/" in result
+        assert '"C:/Program Files/Git/project"' not in result
+        assert '"' in result
+
     def test_exec_short_command_unchanged(self):
         result = _hint([_tc("exec", {"command": "npm install typescript"})])
         assert result == "$ npm install typescript"

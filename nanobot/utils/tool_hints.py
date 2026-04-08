@@ -19,9 +19,11 @@ _TOOL_FORMATS: dict[str, tuple[list[str], str, bool, bool]] = {
     "list_dir":   (["path"],                           "ls {}",       True,  False),
 }
 
-# Matches file paths embedded in shell commands (Windows drive, ~/, or absolute after space)
+# Matches file paths embedded in shell commands, including quoted paths with spaces.
 _PATH_IN_CMD_RE = re.compile(
-    r"(?:[A-Za-z]:[/\\]|~/|(?<=\s)/)[^\s;&|<>\"']+"
+    r'"(?P<double>(?:[A-Za-z]:[/\\]|~/|/)[^"]+)"'
+    r"|'(?P<single>(?:[A-Za-z]:[/\\]|~/|/)[^']+)'"
+    r"|(?P<bare>(?:[A-Za-z]:[/\\]|~/|(?<=\s)/)[^\s;&|<>\"']+)"
 )
 
 
@@ -92,9 +94,14 @@ def _fmt_known(tc, fmt: tuple) -> str:
 
 def _abbreviate_command(cmd: str, max_len: int = 40) -> str:
     """Abbreviate paths in a command string, then truncate."""
-    abbreviated = _PATH_IN_CMD_RE.sub(
-        lambda m: abbreviate_path(m.group(), max_len=25), cmd
-    )
+    def _replace_path(match: re.Match[str]) -> str:
+        if match.group("double") is not None:
+            return f'"{abbreviate_path(match.group("double"), max_len=25)}"'
+        if match.group("single") is not None:
+            return f"'{abbreviate_path(match.group('single'), max_len=25)}'"
+        return abbreviate_path(match.group("bare"), max_len=25)
+
+    abbreviated = _PATH_IN_CMD_RE.sub(_replace_path, cmd)
     if len(abbreviated) <= max_len:
         return abbreviated
     return abbreviated[:max_len - 1] + "\u2026"
