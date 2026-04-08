@@ -723,6 +723,7 @@ def gateway(
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                on_progress=lambda *_a, **_kw: asyncio.sleep(0),  # Suppress progress to avoid spam
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
