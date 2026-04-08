@@ -25,7 +25,7 @@ class ChannelsConfig(Base):
 
     model_config = ConfigDict(extra="allow")
 
-    send_progress: bool = True  # stream agent's text progress to the channel
+    send_progress: bool = False  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
     transcription_provider: str = "groq"  # Voice transcription backend: "groq" or "openai"
@@ -62,7 +62,7 @@ class DreamConfig(Base):
 class AgentDefaults(Base):
     """Default agent configuration."""
 
-    workspace: str = "~/.nanobot/workspace"
+    workspace: str = "~/.hiperone/workspace"
     model: str = "anthropic/claude-opus-4-5"
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
@@ -84,6 +84,38 @@ class AgentsConfig(Base):
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
 
+class OpenVikingConfig(Base):
+    """OpenViking semantic memory configuration."""
+
+    enabled: bool = False
+    mode: str = "local"  # "local" (embedded) or "remote" (HTTP server)
+    server_url: str = ""
+    account_id: str = ""
+    user_id: str = ""
+    api_key: str = ""
+    data_dir: str = "~/.hiperone/openviking"
+    vlm_api_key: str = ""
+    vlm_base_url: str = ""
+    vlm_model: str = ""
+    embedding_model: str = ""
+    embedding_api_key: str = ""
+    embedding_base_url: str = ""
+    embedding_dimension: int = 1024
+    max_concurrent_commits: int = 1
+    memory_recall_limit: int = 5
+
+
+class WebConfig(BaseModel):
+    """Web channel configuration (WebSocket-based)."""
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 18080
+    allow_from: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+    send_progress: bool = False  # stream agent's text progress to the channel (avoids duplicate replies)
+    send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
 
 class ProviderConfig(Base):
     """LLM provider configuration."""
@@ -208,6 +240,7 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    openviking: OpenVikingConfig = Field(default_factory=OpenVikingConfig)
 
     @property
     def workspace_path(self) -> Path:

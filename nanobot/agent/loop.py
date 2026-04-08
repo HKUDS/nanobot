@@ -36,7 +36,7 @@ from nanobot.utils.helpers import image_placeholder_text, truncate_text
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, OpenVikingConfig, WebToolsConfig
     from nanobot.cron.service import CronService
 
 
@@ -178,6 +178,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        openviking_config: OpenVikingConfig | None = None,
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
     ):
@@ -226,6 +227,10 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
+
+        self.openviking_config = openviking_config
+        self._current_session_key: str = "default"
+        self._viking_client_initialized = False
 
         self._running = False
         self._mcp_servers = mcp_servers or {}
@@ -285,6 +290,67 @@ class AgentLoop:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
             )
+
+        if self.openviking_config and self.openviking_config.enabled:
+            self._register_openviking_tools()
+
+    async def _ensure_viking_client(self) -> None:
+        """Lazily create VikingClient and inject into ContextBuilder and tools."""
+        if self._viking_client_initialized:
+            return
+        self._viking_client_initialized = True
+        if not (self.openviking_config and self.openviking_config.enabled):
+            return
+        try:
+            from nanobot.openviking import HAS_OPENVIKING
+            if not HAS_OPENVIKING:
+                return
+            from nanobot.openviking.client import VikingClient
+            client = await VikingClient.from_config()
+
+            max_commits = getattr(self.openviking_config, "max_concurrent_commits", 1)
+            client.set_max_concurrent_commits(max_commits)
+
+            self.context.set_viking_client(client)
+
+            from nanobot.agent.tools.openviking import _OVTool
+            _OVTool._shared_client = client
+
+            logger.info("OpenViking client initialised (mode={})", self.openviking_config.mode)
+        except Exception:
+            logger.exception("Failed to initialise OpenViking client — continuing without it")
+
+    def _register_openviking_tools(self) -> None:
+        """Register OpenViking tools when enabled."""
+        try:
+            from nanobot.openviking import HAS_OPENVIKING
+            if not HAS_OPENVIKING:
+                logger.warning("OpenViking enabled in config but package not installed")
+                return
+
+            from nanobot.agent.tools.openviking import (
+                OVReadTool,
+                OVListTool,
+                OVSearchTool,
+                OVGrepTool,
+                OVGlobTool,
+                OVUserMemorySearchTool,
+                OVMemoryCommitTool,
+                OVAddResourceTool,
+            )
+
+            for cls in (OVReadTool, OVListTool, OVSearchTool, OVGrepTool, OVGlobTool,
+                        OVUserMemorySearchTool, OVAddResourceTool):
+                self.tools.register(cls(ov_config=self.openviking_config))
+
+            self.tools.register(OVMemoryCommitTool(
+                ov_config=self.openviking_config,
+                session_key_fn=lambda: self._current_session_key,
+                background_task_scheduler=self._schedule_background,
+            ))
+            logger.info("Registered {} OpenViking tools", 8)
+        except Exception:
+            logger.exception("Failed to register OpenViking tools")
 
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
@@ -397,6 +463,7 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
+        await self._ensure_viking_client()
         logger.info("Agent loop started")
 
         while self._running:
@@ -528,7 +595,7 @@ class AgentLoop:
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
-            messages = self.context.build_messages(
+            messages = await self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
@@ -548,6 +615,7 @@ class AgentLoop:
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         key = session_key or msg.session_key
+        self._current_session_key = key
         session = self.sessions.get_or_create(key)
         if self._restore_runtime_checkpoint(session):
             self.sessions.save(session)
@@ -566,11 +634,13 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=0)
-        initial_messages = self.context.build_messages(
+        initial_messages = await self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            sender_id=msg.sender_id,
+            sender_name=msg.metadata.get("sender_name"),
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -660,6 +730,8 @@ class AgentLoop:
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
+            if role == "system":
+                continue  # skip system messages (prompts, OpenViking memory injection)
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":

@@ -76,7 +76,7 @@ def current_time_str(timezone: str | None = None) -> str:
 
 _UNSAFE_CHARS = re.compile(r'[<>:"/\\|?*]')
 _TOOL_RESULT_PREVIEW_CHARS = 1200
-_TOOL_RESULTS_DIR = ".nanobot/tool-results"
+_TOOL_RESULTS_DIR = ".hiperone/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
 
@@ -459,6 +459,10 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
     _write(None, workspace / "memory" / "history.jsonl")
     (workspace / "skills").mkdir(exist_ok=True)
+
+    for name in ("ERRORS.md", "LEARNINGS.md", "FEATURE_REQUESTS.md"):
+        src = tpl / ".learnings" / name
+        _write(src if src.is_file() else None, workspace / ".learnings" / name)
 
     if added and not silent:
         from rich.console import Console

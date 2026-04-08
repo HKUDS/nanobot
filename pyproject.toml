@@ -32,6 +32,7 @@ dependencies = [
     "rich>=14.0.0,<15.0.0",
     "croniter>=6.0.0,<7.0.0",
     "dingtalk-stream>=0.24.0,<1.0.0",
+    "wecom-aibot-sdk-python>=0.1.5",
     "python-telegram-bot[socks]>=22.6,<23.0",
     "lark-oapi>=1.5.0,<2.0.0",
     "socksio>=1.0.0,<2.0.0",
@@ -50,6 +51,9 @@ dependencies = [
     "tiktoken>=0.12.0,<1.0.0",
     "jinja2>=3.1.0,<4.0.0",
     "dulwich>=0.22.0,<1.0.0",
+    "fastapi>=0.115.0,<1.0.0",
+    "uvicorn[standard]>=0.34.0,<1.0.0",
+    "openviking>=0.3.3",
 ]
 
 [project.optional-dependencies]
@@ -68,6 +72,9 @@ matrix = [
     "matrix-nio[e2e]>=0.25.2",
     "mistune>=3.0.0,<4.0.0",
     "nh3>=0.2.17,<1.0.0",
+]
+openviking = [
+    "openviking>=0.3.3",
 ]
 discord = [
     "discord.py>=2.5.2,<3.0.0",
