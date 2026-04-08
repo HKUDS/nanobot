@@ -654,7 +654,7 @@ def gateway(
     hooks: list = []
     if config.trace.enabled:
         from nanobot.agent.hook import TraceHook
-        traces_dir = config.workspace_path / "traces"
+        traces_dir = config.workspace_path / "discord" / "cli" / "llm_logs"
         traces_dir.mkdir(parents=True, exist_ok=True)
         hooks.append(TraceHook(log_path=traces_dir / "trace.jsonl"))
 
@@ -904,7 +904,7 @@ def agent(
     cli_hooks: list = []
     if config.trace.enabled:
         from nanobot.agent.hook import TraceHook
-        traces_dir = config.workspace_path / "traces"
+        traces_dir = config.workspace_path / "discord" / "cli" / "llm_logs"
         traces_dir.mkdir(parents=True, exist_ok=True)
         cli_hooks.append(TraceHook(log_path=traces_dir / "trace.jsonl"))
 
