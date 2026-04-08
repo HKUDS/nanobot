@@ -447,10 +447,12 @@ class AnthropicProvider(LLMProvider):
             )
 
         max_tokens = max(1, max_tokens)
-        # claude-opus-4+ requires extended thinking (temperature must be 1.0).
-        # Auto-enable medium thinking if caller didn't specify reasoning_effort.
-        _OPUS4_PATTERN = re.compile(r"claude-opus-4", re.IGNORECASE)
-        if not reasoning_effort and _OPUS4_PATTERN.search(model_name):
+
+        # Opus 4.6 / Sonnet 4.6+ use adaptive thinking — auto-enable if caller
+        # didn't specify reasoning_effort.
+        _ADAPTIVE_PATTERN = re.compile(r"claude-(opus|sonnet)-4[-.]6", re.IGNORECASE)
+        _adaptive = bool(_ADAPTIVE_PATTERN.search(model_name))
+        if not reasoning_effort and _adaptive:
             reasoning_effort = "medium"
         thinking_enabled = bool(reasoning_effort)
 
@@ -474,11 +476,24 @@ class AnthropicProvider(LLMProvider):
             kwargs["system"] = system
 
         if thinking_enabled:
-            budget_map = {"low": 1024, "medium": 4096, "high": max(8192, max_tokens)}
-            budget = budget_map.get(reasoning_effort.lower(), 4096)  # type: ignore[union-attr]
-            kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
-            kwargs["max_tokens"] = max(max_tokens, budget + 4096)
-            kwargs["temperature"] = 1.0
+            effort = (reasoning_effort or "medium").lower()
+            if _adaptive:
+                # Opus 4.6 / Sonnet 4.6: adaptive thinking — Claude decides when/how much to think.
+                # effort "max" is only valid on Opus 4.6.
+                _OPUS_PATTERN = re.compile(r"claude-opus-4[-.]6", re.IGNORECASE)
+                if effort == "high" and not _OPUS_PATTERN.search(model_name):
+                    effort = "high"  # sonnet caps at high, not max
+                kwargs["thinking"] = {"type": "adaptive"}
+                kwargs["output_config"] = {"effort": effort}
+                kwargs["max_tokens"] = max_tokens
+                # temperature must NOT be set with adaptive thinking
+            else:
+                # Older models (3.7 Sonnet etc.): budget-based thinking.
+                budget_map = {"low": 1024, "medium": 4096, "high": max(8192, max_tokens)}
+                budget = budget_map.get(effort, 4096)
+                kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+                kwargs["max_tokens"] = max(max_tokens, budget + 4096)
+                kwargs["temperature"] = 1.0
         else:
             kwargs["temperature"] = temperature
 
