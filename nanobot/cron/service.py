@@ -71,7 +71,7 @@ class CronService:
         self,
         store_path: Path,
         on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None,
-        max_sleep_ms: int = 300_000 # 5 minutes
+        max_sleep_ms: int = 300_000,  # 5 minutes
     ):
         self.store_path = store_path
         self._action_path = store_path.parent / "action.jsonl"
@@ -272,8 +272,11 @@ class CronService:
         if not self._running:
             return
 
-        next_wake = self._get_next_wake_ms() or 0
-        delay_ms = min(self.max_sleep_ms ,max(1000, next_wake - _now_ms()))
+        next_wake = self._get_next_wake_ms()
+        if next_wake is None:
+            delay_ms = self.max_sleep_ms
+        else:
+            delay_ms = min(self.max_sleep_ms, max(0, next_wake - _now_ms()))
         delay_s = delay_ms / 1000
 
         async def tick():
@@ -458,23 +461,23 @@ class CronService:
         return None
 
     async def run_job(self, job_id: str, force: bool = False) -> bool:
-        """Manually run a job. For testing purposes
-         - It's not that the gateway instance cannot run because it doesn't have the on_job method.
-         - There may be concurrency issues.
-        """
+        """Manually run a job without disturbing the service's running state."""
+        was_running = self._running
         self._running = True
-        store = self._load_store()
-        for job in store.jobs:
-            if job.id == job_id:
-                if not force and not job.enabled:
-                    return False
-                await self._execute_job(job)
-                self._save_store()
-                self._running = False
+        try:
+            store = self._load_store()
+            for job in store.jobs:
+                if job.id == job_id:
+                    if not force and not job.enabled:
+                        return False
+                    await self._execute_job(job)
+                    self._save_store()
+                    return True
+            return False
+        finally:
+            self._running = was_running
+            if was_running:
                 self._arm_timer()
-                return True
-        self._running = False
-        return False
 
     def get_job(self, job_id: str) -> CronJob | None:
         """Get a job by ID."""
