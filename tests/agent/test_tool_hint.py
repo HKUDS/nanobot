@@ -136,22 +136,30 @@ class TestToolHintFolding:
         result = _hint(calls)
         assert "\u00d7" not in result
 
-    def test_two_consecutive_same_folded(self):
+    def test_two_consecutive_different_args_not_folded(self):
         calls = [
             _tc("grep", {"pattern": "*.py"}),
             _tc("grep", {"pattern": "*.ts"}),
         ]
         result = _hint(calls)
+        assert "\u00d7" not in result
+
+    def test_two_consecutive_same_args_folded(self):
+        calls = [
+            _tc("grep", {"pattern": "TODO"}),
+            _tc("grep", {"pattern": "TODO"}),
+        ]
+        result = _hint(calls)
         assert "\u00d7 2" in result
 
-    def test_three_consecutive_same_folded(self):
+    def test_three_consecutive_different_args_not_folded(self):
         calls = [
             _tc("read_file", {"path": "a.py"}),
             _tc("read_file", {"path": "b.py"}),
             _tc("read_file", {"path": "c.py"}),
         ]
         result = _hint(calls)
-        assert "\u00d7 3" in result
+        assert "\u00d7" not in result
 
     def test_different_tools_not_folded(self):
         calls = [
@@ -218,7 +226,7 @@ class TestToolHintMixedFolding:
     """G4: Mixed folding groups with interleaved same-tool segments."""
 
     def test_read_read_grep_grep_read(self):
-        """read×2, grep×2, read — should produce two separate groups."""
+        """All different args — each hint listed separately."""
         calls = [
             _tc("read_file", {"path": "a.py"}),
             _tc("read_file", {"path": "b.py"}),
@@ -227,7 +235,6 @@ class TestToolHintMixedFolding:
             _tc("read_file", {"path": "c.py"}),
         ]
         result = _hint(calls)
-        assert "\u00d7 2" in result
-        # Should have 3 groups: read×2, grep×2, read
+        assert "\u00d7" not in result
         parts = result.split(", ")
-        assert len(parts) == 3
+        assert len(parts) == 5

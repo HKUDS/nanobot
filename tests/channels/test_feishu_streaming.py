@@ -309,7 +309,7 @@ class TestToolHintInlineStreaming:
         await ch.send(msg)
 
         buf = ch._stream_bufs["oc_chat1"]
-        assert buf.text.endswith('🔧 web_fetch("https://example.com")')
+        assert '🔧 web_fetch("https://example.com")' in buf.text
         assert buf.tool_hint_len > 0
         assert buf.sequence == 3
         ch._client.cardkit.v1.card_element.content.assert_called_once()
@@ -319,7 +319,7 @@ class TestToolHintInlineStreaming:
     async def test_tool_hint_preserved_on_next_delta(self):
         """When new delta arrives, the tool hint is kept as permanent content and delta appends after it."""
         ch = _make_channel()
-        suffix = "\n\n---\n🔧 web_fetch(\"url\")"
+        suffix = "\n\n🔧 web_fetch(\"url\")\n\n"
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Partial answer" + suffix,
             card_id="card_1", sequence=3, last_edit=0.0,
@@ -376,13 +376,13 @@ class TestToolHintInlineStreaming:
         assert buf.text.count("$ cd /project") == 0
         assert buf.text.count("$ git status") == 1
         assert buf.text.startswith("Partial answer")
-        assert buf.text.endswith("🔧 $ git status")
+        assert "🔧 $ git status" in buf.text
 
     @pytest.mark.asyncio
     async def test_tool_hint_preserved_on_resuming_flush(self):
         """When _resuming flushes the buffer, tool hint is kept as permanent content."""
         ch = _make_channel()
-        suffix = "\n\n---\n🔧 $ cd /project"
+        suffix = "\n\n🔧 $ cd /project\n\n"
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Partial answer" + suffix,
             card_id="card_1", sequence=2, last_edit=0.0,
@@ -401,7 +401,7 @@ class TestToolHintInlineStreaming:
     async def test_tool_hint_preserved_on_final_stream_end(self):
         """When final _stream_end closes the card, tool hint is kept in the final text."""
         ch = _make_channel()
-        suffix = "\n\n---\n🔧 web_fetch(\"url\")"
+        suffix = "\n\n🔧 web_fetch(\"url\")\n\n"
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Final content" + suffix,
             card_id="card_1", sequence=3, last_edit=0.0,

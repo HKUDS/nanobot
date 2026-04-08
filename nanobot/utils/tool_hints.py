@@ -30,21 +30,26 @@ def format_tool_hints(tool_calls: list) -> str:
     if not tool_calls:
         return ""
 
-    hints = []
-    for name, count, example_tc in _group_consecutive(tool_calls):
-        fmt = _TOOL_FORMATS.get(name)
+    formatted = []
+    for tc in tool_calls:
+        fmt = _TOOL_FORMATS.get(tc.name)
         if fmt:
-            hint = _fmt_known(example_tc, fmt)
-        elif name.startswith("mcp_"):
-            hint = _fmt_mcp(example_tc)
+            formatted.append(_fmt_known(tc, fmt))
+        elif tc.name.startswith("mcp_"):
+            formatted.append(_fmt_mcp(tc))
         else:
-            hint = _fmt_fallback(example_tc)
+            formatted.append(_fmt_fallback(tc))
 
-        if count > 1:
-            hint = f"{hint} \u00d7 {count}"
-        hints.append(hint)
+    hints = []
+    for hint in formatted:
+        if hints and hints[-1][0] == hint:
+            hints[-1] = (hint, hints[-1][1] + 1)
+        else:
+            hints.append((hint, 1))
 
-    return ", ".join(hints)
+    return ", ".join(
+        f"{h} \u00d7 {c}" if c > 1 else h for h, c in hints
+    )
 
 
 def _get_args(tc) -> dict:
