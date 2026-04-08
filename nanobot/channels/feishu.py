@@ -1312,6 +1312,9 @@ class FeishuChannel(BaseChannel):
             if resuming:
                 buf = self._stream_bufs.get(chat_id)
                 if buf and buf.card_id and buf.text:
+                    if buf.tool_hint_len > 0:
+                        buf.text = buf.text[:-buf.tool_hint_len]
+                        buf.tool_hint_len = 0
                     buf.sequence += 1
                     await loop.run_in_executor(
                         None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
@@ -1324,6 +1327,9 @@ class FeishuChannel(BaseChannel):
             buf = self._stream_bufs.pop(chat_id, None)
             if not buf or not buf.text:
                 return
+            if buf.tool_hint_len > 0:
+                buf.text = buf.text[:-buf.tool_hint_len]
+                buf.tool_hint_len = 0
             if buf.card_id:
                 buf.sequence += 1
                 await loop.run_in_executor(
@@ -1404,6 +1410,8 @@ class FeishuChannel(BaseChannel):
                     return
                 buf = self._stream_bufs.get(msg.chat_id)
                 if buf and buf.card_id:
+                    if buf.tool_hint_len > 0:
+                        buf.text = buf.text[:-buf.tool_hint_len]
                     suffix = f"\n\n---\n🔧 {hint}"
                     buf.text += suffix
                     buf.tool_hint_len = len(suffix)

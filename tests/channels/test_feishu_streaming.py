@@ -349,6 +349,70 @@ class TestToolHintInlineStreaming:
         assert "oc_chat1" not in ch._stream_bufs
         ch._client.im.v1.message.create.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_consecutive_tool_hints_replace_previous(self):
+        """When multiple tool hints arrive consecutively, each replaces the previous one."""
+        ch = _make_channel()
+        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
+            text="Partial answer", card_id="card_1", sequence=2, last_edit=0.0,
+        )
+        ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
+
+        msg1 = OutboundMessage(
+            channel="feishu", chat_id="oc_chat1",
+            content='$ cd /project', metadata={"_tool_hint": True},
+        )
+        await ch.send(msg1)
+
+        msg2 = OutboundMessage(
+            channel="feishu", chat_id="oc_chat1",
+            content='$ git status', metadata={"_tool_hint": True},
+        )
+        await ch.send(msg2)
+
+        buf = ch._stream_bufs["oc_chat1"]
+        assert buf.text.count("$ cd /project") == 0
+        assert buf.text.count("$ git status") == 1
+        assert buf.text.startswith("Partial answer")
+        assert buf.text.endswith("🔧 $ git status")
+
+    @pytest.mark.asyncio
+    async def test_tool_hint_stripped_on_resuming_flush(self):
+        """When _resuming flushes the buffer, tool hint suffix is cleaned."""
+        ch = _make_channel()
+        suffix = "\n\n---\n🔧 $ cd /project"
+        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
+            text="Partial answer" + suffix,
+            card_id="card_1", sequence=2, last_edit=0.0,
+            tool_hint_len=len(suffix),
+        )
+        ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
+
+        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True, "_resuming": True})
+
+        buf = ch._stream_bufs["oc_chat1"]
+        assert buf.text == "Partial answer"
+        assert buf.tool_hint_len == 0
+
+    @pytest.mark.asyncio
+    async def test_tool_hint_stripped_on_final_stream_end(self):
+        """When final _stream_end closes the card, tool hint suffix is cleaned from text."""
+        ch = _make_channel()
+        suffix = "\n\n---\n🔧 web_fetch(\"url\")"
+        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
+            text="Final content" + suffix,
+            card_id="card_1", sequence=3, last_edit=0.0,
+            tool_hint_len=len(suffix),
+        )
+        ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
+        ch._client.cardkit.v1.card.settings.return_value = _mock_content_response()
+
+        await ch.send_delta("oc_chat1", "", metadata={"_stream_end": True})
+
+        assert "oc_chat1" not in ch._stream_bufs
+        update_call = ch._client.cardkit.v1.card_element.content.call_args[0][0]
+        assert "🔧" not in update_call.body.content
+
 
 class TestSendMessageReturnsId:
     def test_returns_message_id_on_success(self):
