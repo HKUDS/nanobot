@@ -1379,7 +1379,9 @@ class FeishuChannel(BaseChannel):
                 if buf and buf.card_id:
                     if buf.tool_hint_len > 0:
                         buf.text = buf.text[:-buf.tool_hint_len]
-                    suffix = f"\n\n---\n🔧 {hint}"
+                    lines = self._format_tool_hint_lines(hint).split("\n")
+                    formatted = "\n".join(f"🔧 {ln}" for ln in lines if ln.strip())
+                    suffix = f"\n\n{formatted}\n\n"
                     buf.text += suffix
                     buf.tool_hint_len = len(suffix)
                     buf.sequence += 1
