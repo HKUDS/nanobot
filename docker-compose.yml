@@ -3,7 +3,7 @@ x-common-config: &common-config
     context: .
     dockerfile: Dockerfile
   volumes:
-    - ~/.nanobot:/home/nanobot/.nanobot
+    - ~/.hiperone:/root/.hiperone
   cap_drop:
     - ALL
   cap_add:
@@ -33,7 +33,7 @@ services:
     container_name: nanobot-api
     <<: *common-config
     command:
-      ["serve", "--host", "0.0.0.0", "-w", "/home/nanobot/.nanobot/api-workspace"]
+      ["serve", "--host", "0.0.0.0", "-w", "/root/.hiperone/api-workspace"]
     restart: unless-stopped
     ports:
       - 127.0.0.1:8900:8900
