@@ -358,17 +358,19 @@ class MSTeamsChannel(BaseChannel):
                 if quoted and reply:
                     return self._format_reply_with_quote(quoted, reply)
 
-        # Observed compact fallback where the relay flattens everything into one line
-        # and appends the literal reply text marker at the end.
+        # Observed compact fallback where the relay flattens quote and reply into
+        # a single line after the synthetic FWDIOC-BOT prefix.
         compact = re.sub(r"\s+", " ", normalized_newlines).strip()
         if compact.startswith("FWDIOC-BOT "):
             compact = compact[len("FWDIOC-BOT ") :].strip()
-
-        marker = " Reply with quote test"
-        if compact.endswith(marker):
-            quoted = compact[: -len(marker)].strip()
-            reply = marker.strip()
-            return self._format_reply_with_quote(quoted, reply)
+            for boundary in (". ", "! ", "? ", "… "):
+                idx = compact.rfind(boundary)
+                if idx == -1:
+                    continue
+                quoted = compact[: idx + 1].strip()
+                reply = compact[idx + len(boundary) :].strip()
+                if quoted and reply and len(reply) <= 160:
+                    return self._format_reply_with_quote(quoted, reply)
 
         return cleaned
 

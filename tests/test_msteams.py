@@ -264,6 +264,14 @@ def test_sanitize_inbound_text_structures_live_fwdioc_quote_shape(make_channel):
     )
 
 
+def test_normalize_teams_reply_quote_leaves_plain_text_test_phrase_untouched(make_channel):
+    ch = make_channel()
+
+    text = "Normal message ending with Reply with quote test"
+
+    assert ch._normalize_teams_reply_quote(text) == text
+
+
 def test_sanitize_inbound_text_structures_multiline_fwdioc_quote_shape(make_channel):
     ch = make_channel()
 
