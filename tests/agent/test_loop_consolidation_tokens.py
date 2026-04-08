@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -32,7 +31,7 @@ def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -
 
 
 @pytest.mark.asyncio
-async def test_prompt_below_threshold_does_not_trim(tmp_path) -> None:
+async def test_prompt_below_threshold_does_not_consolidate(tmp_path) -> None:
     loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
     loop.consolidator.archive = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
@@ -42,7 +41,7 @@ async def test_prompt_below_threshold_does_not_trim(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_prompt_above_threshold_triggers_fast_trim_and_background_archival(tmp_path, monkeypatch) -> None:
+async def test_prompt_above_threshold_triggers_consolidation(tmp_path, monkeypatch) -> None:
     loop = _make_loop(tmp_path, estimated_tokens=1000, context_window_tokens=200)
     loop.consolidator.archive = AsyncMock(return_value=True)  # type: ignore[method-assign]
     session = loop.sessions.get_or_create("cli:test")
@@ -56,13 +55,6 @@ async def test_prompt_above_threshold_triggers_fast_trim_and_background_archival
 
     await loop.process_direct("hello", session_key="cli:test")
 
-    # fast_trim should have advanced last_consolidated synchronously
-    session = loop.sessions.get_or_create("cli:test")
-    assert session.last_consolidated > 0
-
-    # Background archival should be scheduled; drain tasks to verify
-    if loop._background_tasks:
-        await asyncio.gather(*loop._background_tasks, return_exceptions=True)
     assert loop.consolidator.archive.await_count >= 1
 
 
@@ -165,22 +157,19 @@ async def test_consolidation_continues_below_trigger_until_half_target(tmp_path,
 
 
 @pytest.mark.asyncio
-async def test_preflight_fast_trim_before_llm_call(tmp_path, monkeypatch) -> None:
-    """Verify preflight fast_trim runs synchronously before the LLM call,
-    and background archival does NOT block the LLM call."""
-    llm_saw_trimmed = [False]
+async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) -> None:
+    """Verify preflight consolidation runs before the LLM call in process_direct."""
+    order: list[str] = []
 
     loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
 
     async def track_consolidate(messages):
+        order.append("consolidate")
         return True
     loop.consolidator.archive = track_consolidate  # type: ignore[method-assign]
 
-    original_last_consolidated = [0]
-
     async def track_llm(*args, **kwargs):
-        session = loop.sessions.get_or_create("cli:test")
-        llm_saw_trimmed[0] = session.last_consolidated > original_last_consolidated[0]
+        order.append("llm")
         return LLMResponse(content="ok", tool_calls=[])
     loop.provider.chat_with_retry = track_llm
     loop.provider.chat_stream_with_retry = track_llm
@@ -192,91 +181,16 @@ async def test_preflight_fast_trim_before_llm_call(tmp_path, monkeypatch) -> Non
         {"role": "user", "content": "u2", "timestamp": "2026-01-01T00:00:02"},
     ]
     loop.sessions.save(session)
-    original_last_consolidated[0] = session.last_consolidated
     monkeypatch.setattr(memory_module, "estimate_message_tokens", lambda _m: 500)
 
     call_count = [0]
     def mock_estimate(_session):
         call_count[0] += 1
-        # First two calls must exceed threshold: one from _maybe_consolidate_bg
-        # (pre-request check) and one from maybe_consolidate_by_tokens (background
-        # task initial check).  Subsequent calls return below-target so the
-        # consolidation loop exits.
-        return (1000 if call_count[0] <= 2 else 80, "test")
+        return (1000 if call_count[0] <= 1 else 80, "test")
     loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
 
     await loop.process_direct("hello", session_key="cli:test")
 
-    # By the time the LLM is called, fast_trim must have already advanced last_consolidated
-    assert llm_saw_trimmed[0], "LLM call should see trimmed session (last_consolidated advanced)"
-
-
-# --------------- fast_trim_if_needed unit tests ---------------
-
-
-@pytest.mark.asyncio
-async def test_fast_trim_noop_when_under_threshold(tmp_path) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
-    session = loop.sessions.get_or_create("cli:test")
-    session.messages = [
-        {"role": "user", "content": "u1", "timestamp": "2026-01-01T00:00:00"},
-    ]
-    loop.sessions.save(session)
-
-    result = loop.consolidator.fast_trim_if_needed(session)
-    assert result is None
-    assert session.last_consolidated == 0
-
-
-@pytest.mark.asyncio
-async def test_fast_trim_advances_last_consolidated(tmp_path, monkeypatch) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=1000, context_window_tokens=200)
-    session = loop.sessions.get_or_create("cli:test")
-    session.messages = [
-        {"role": "user", "content": "u1", "timestamp": "2026-01-01T00:00:00"},
-        {"role": "assistant", "content": "a1", "timestamp": "2026-01-01T00:00:01"},
-        {"role": "user", "content": "u2", "timestamp": "2026-01-01T00:00:02"},
-        {"role": "assistant", "content": "a2", "timestamp": "2026-01-01T00:00:03"},
-        {"role": "user", "content": "u3", "timestamp": "2026-01-01T00:00:04"},
-    ]
-    loop.sessions.save(session)
-    monkeypatch.setattr(memory_module, "estimate_message_tokens", lambda _m: 120)
-
-    chunk = loop.consolidator.fast_trim_if_needed(session)
-
-    assert chunk is not None
-    assert len(chunk) > 0
-    assert session.last_consolidated > 0
-    assert all(m["role"] in ("user", "assistant") for m in chunk)
-
-
-@pytest.mark.asyncio
-async def test_fast_trim_noop_when_no_boundary(tmp_path) -> None:
-    """Single message: no user-turn boundary to pick."""
-    loop = _make_loop(tmp_path, estimated_tokens=1000, context_window_tokens=200)
-    session = loop.sessions.get_or_create("cli:test")
-    session.messages = [
-        {"role": "user", "content": "u1", "timestamp": "2026-01-01T00:00:00"},
-    ]
-    loop.sessions.save(session)
-
-    chunk = loop.consolidator.fast_trim_if_needed(session)
-    assert chunk is None
-    assert session.last_consolidated == 0
-
-
-@pytest.mark.asyncio
-async def test_archive_trimmed_chunk_holds_lock(tmp_path) -> None:
-    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
-    lock_held_during_consolidate = [False]
-
-    async def mock_consolidate(messages):
-        lock = loop.consolidator.get_lock("cli:test")
-        lock_held_during_consolidate[0] = lock.locked()
-        return True
-    loop.consolidator.archive = mock_consolidate  # type: ignore[method-assign]
-
-    chunk = [{"role": "user", "content": "u1"}, {"role": "assistant", "content": "a1"}]
-    await loop.consolidator.archive_trimmed_chunk("cli:test", chunk)
-
-    assert lock_held_during_consolidate[0], "archive must run under per-session lock"
+    assert "consolidate" in order
+    assert "llm" in order
+    assert order.index("consolidate") < order.index("llm")

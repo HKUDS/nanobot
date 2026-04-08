@@ -1,3 +1,6 @@
+import shlex
+import subprocess
+import sys
 from typing import Any
 
 from nanobot.agent.tools import (
@@ -542,14 +545,19 @@ async def test_exec_always_returns_exit_code() -> None:
     assert "hello" in result
 
 
-async def test_exec_head_tail_truncation() -> None:
+async def test_exec_head_tail_truncation(tmp_path) -> None:
     """Long output should preserve both head and tail."""
     tool = ExecTool()
-    # Generate output that exceeds _MAX_OUTPUT (10_000 chars)
-    # Use python to generate output to avoid command line length limits
-    result = await tool.execute(
-        command="python -c \"print('A' * 6000 + '\\n' + 'B' * 6000)\""
+    # Generate output that exceeds _MAX_OUTPUT (10_000 chars).
+    # Use current interpreter (PATH may not have ``python``).  Write the
+    # script to a file to avoid shell-quoting issues on both POSIX and Windows.
+    script_file = tmp_path / "gen.py"
+    script_file.write_text(
+        "import sys;sys.stdout.write(chr(65)*6000);sys.stdout.write(chr(10));sys.stdout.write(chr(66)*6000)",
+        encoding="utf-8",
     )
+    command = f"{sys.executable} {script_file}"
+    result = await tool.execute(command=command)
     assert "chars truncated" in result
     # Head portion should start with As
     assert result.startswith("A")

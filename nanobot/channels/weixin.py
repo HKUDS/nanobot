@@ -484,7 +484,7 @@ class WeixinChannel(BaseChannel):
             except httpx.TimeoutException:
                 # Normal for long-poll, just retry
                 continue
-            except Exception as e:
+            except Exception:
                 if not self._running:
                     break
                 consecutive_failures += 1

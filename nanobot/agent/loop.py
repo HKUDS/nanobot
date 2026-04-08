@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext
@@ -55,6 +54,7 @@ class _LoopHook(AgentHook):
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        on_turn_saved: Callable[[list[dict]], None] | None = None,
     ) -> None:
         self._loop = agent_loop
         self._on_progress = on_progress
@@ -63,6 +63,7 @@ class _LoopHook(AgentHook):
         self._channel = channel
         self._chat_id = chat_id
         self._message_id = message_id
+        self._on_turn_saved = on_turn_saved
         self._stream_buf = ""
 
     def wants_streaming(self) -> bool:
@@ -99,6 +100,8 @@ class _LoopHook(AgentHook):
         self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
+        if self._on_turn_saved and context.tool_calls:
+            self._on_turn_saved(context.messages)
         u = context.usage or {}
         logger.debug(
             "LLM usage: prompt={} completion={} cached={}",
@@ -264,7 +267,7 @@ class AgentLoop:
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
-        allowed_dir = self.workspace if self.restrict_to_workspace else None
+        allowed_dir = self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
         extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
         self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
@@ -276,6 +279,7 @@ class AgentLoop:
                 working_dir=str(self.workspace),
                 timeout=self.exec_config.timeout,
                 restrict_to_workspace=self.restrict_to_workspace,
+                sandbox=self.exec_config.sandbox,
                 path_append=self.exec_config.path_append,
             ))
         if self.web_config.enable:
@@ -327,14 +331,10 @@ class AgentLoop:
 
     @staticmethod
     def _tool_hint(tool_calls: list) -> str:
-        """Format tool calls as concise hint, e.g. 'web_search("query")'."""
-        def _fmt(tc):
-            args = (tc.arguments[0] if isinstance(tc.arguments, list) else tc.arguments) or {}
-            val = next(iter(args.values()), None) if isinstance(args, dict) else None
-            if not isinstance(val, str):
-                return tc.name
-            return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
-        return ", ".join(_fmt(tc) for tc in tool_calls)
+        """Format tool calls as concise hints with smart abbreviation."""
+        from nanobot.utils.tool_hints import format_tool_hints
+
+        return format_tool_hints(tool_calls)
 
     async def _run_agent_loop(
         self,
@@ -348,6 +348,7 @@ class AgentLoop:
         chat_id: str = "direct",
         message_id: str | None = None,
         extra_hooks: list[AgentHook] | None = None,
+        on_turn_saved: Callable[[list[dict]], None] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop.
 
@@ -356,6 +357,9 @@ class AgentLoop:
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
         *extra_hooks*: per-call hooks (e.g. SteeringHook) merged with instance hooks.
+        *on_turn_saved*, when provided, is called with the full message list
+        after each tool-call iteration so the caller can persist intermediate
+        state (e.g. /stop, crash).
         """
         loop_hook = _LoopHook(
             self,
@@ -365,6 +369,7 @@ class AgentLoop:
             channel=channel,
             chat_id=chat_id,
             message_id=message_id,
+            on_turn_saved=on_turn_saved,
         )
         all_extra = self._extra_hooks + (extra_hooks or [])
         hook: AgentHook = (
@@ -558,12 +563,20 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
+            save_offset = [1 + len(history)]
+
+            def _incremental_save(msgs: list[dict]) -> None:
+                self._save_turn(session, msgs, save_offset[0])
+                save_offset[0] = len(msgs)
+                self.sessions.save(session)
+
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
                 extra_hooks=extra_hooks,
+                on_turn_saved=_incremental_save,
             )
-            self._save_turn(session, all_msgs, 1 + len(history))
+            self._save_turn(session, all_msgs, save_offset[0])
             self._clear_runtime_checkpoint(session)
             self.sessions.save(session)
             self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
@@ -611,6 +624,13 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
+        save_offset = [1 + len(history)]
+
+        def _incremental_save(msgs: list[dict]) -> None:
+            self._save_turn(session, msgs, save_offset[0])
+            save_offset[0] = len(msgs)
+            self.sessions.save(session)
+
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
@@ -620,12 +640,13 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
             extra_hooks=extra_hooks,
+            on_turn_saved=_incremental_save,
         )
 
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        self._save_turn(session, all_msgs, save_offset[0])
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
         self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
