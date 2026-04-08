@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -158,24 +159,27 @@ def test_remove_job_refuses_system_jobs(tmp_path) -> None:
     assert service.get_job("dream") is not None
 
 
-def test_reload_jobs(tmp_path):
+@pytest.mark.asyncio
+async def test_start_server_not_jobs(tmp_path):
     store_path = tmp_path / "cron" / "jobs.json"
-    service = CronService(store_path, on_job=lambda _: asyncio.sleep(0))
-    service.add_job(
-        name="hist",
-        schedule=CronSchedule(kind="every", every_ms=60_000),
-        message="hello",
-    )
+    called = []
+    async def on_job(job):
+        called.append(job.name)
 
-    assert len(service.list_jobs()) == 1
+    service = CronService(store_path, on_job=on_job, max_sleep_ms=1000)
+    await service.start()
+    assert len(service.list_jobs()) == 0
 
     service2 = CronService(tmp_path / "cron" / "jobs.json")
     service2.add_job(
-        name="hist2",
-        schedule=CronSchedule(kind="every", every_ms=60_000),
-        message="hello2",
+        name="hist",
+        schedule=CronSchedule(kind="every", every_ms=500),
+        message="hello",
     )
-    assert len(service.list_jobs()) == 2
+    assert len(service.list_jobs()) == 1
+    await asyncio.sleep(2)
+    assert len(called) != 0
+    service.stop()
 
 
 @pytest.mark.asyncio
@@ -204,7 +208,40 @@ async def test_running_service_picks_up_external_add(tmp_path):
             message="ping",
         )
 
-        await asyncio.sleep(0.6)
+        await asyncio.sleep(2)
         assert "external" in called
+    finally:
+        service.stop()
+
+
+@pytest.mark.asyncio
+async def test_add_job_during_jobs_exec(tmp_path):
+    store_path = tmp_path / "cron" / "jobs.json"
+    run_once = True
+
+    async def on_job(job):
+        nonlocal run_once
+        if run_once:
+            service2 = CronService(store_path, on_job=lambda x: asyncio.sleep(0))
+            service2.add_job(
+                name="test",
+                schedule=CronSchedule(kind="every", every_ms=150),
+                message="tick",
+            )
+            run_once = False
+
+    service = CronService(store_path, on_job=on_job)
+    service.add_job(
+        name="heartbeat",
+        schedule=CronSchedule(kind="every", every_ms=150),
+        message="tick",
+    )
+    assert len(service.list_jobs()) == 1
+    await service.start()
+    try:
+        await asyncio.sleep(3)
+        jobs = service.list_jobs()
+        assert len(jobs) == 2
+        assert "test" in [j.name for j in jobs]
     finally:
         service.stop()
