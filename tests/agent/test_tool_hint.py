@@ -46,11 +46,10 @@ class TestToolHintKnownTools:
         result = _hint([_tc("exec", {"command": "npm install typescript"})])
         assert result == "$ npm install typescript"
 
-    def test_exec_truncates_long_command(self):
+    def test_exec_shows_full_command(self):
         cmd = "cd /very/long/path && cat file && echo done && sleep 1 && ls -la"
         result = _hint([_tc("exec", {"command": cmd})])
-        assert result.startswith("$ ")
-        assert len(result) <= 50  # reasonable limit
+        assert result == f"$ {cmd}"
 
     def test_web_search(self):
         result = _hint([_tc("web_search", {"query": "Claude 4 vs GPT-4"})])
@@ -82,11 +81,10 @@ class TestToolHintFallback:
         result = _hint([_tc("custom_tool", {"data": "hello world"})])
         assert result == 'custom_tool("hello world")'
 
-    def test_unknown_tool_with_long_arg_truncates(self):
+    def test_unknown_tool_with_long_arg_shows_full(self):
         long_val = "a" * 60
         result = _hint([_tc("custom_tool", {"data": long_val})])
-        assert len(result) < 80
-        assert "\u2026" in result
+        assert result == f'custom_tool("{long_val}")'
 
     def test_unknown_tool_no_string_arg(self):
         result = _hint([_tc("custom_tool", {"count": 42})])
@@ -105,22 +103,30 @@ class TestToolHintFolding:
         result = _hint(calls)
         assert "\u00d7" not in result
 
-    def test_two_consecutive_same_folded(self):
+    def test_two_consecutive_different_args_not_folded(self):
         calls = [
             _tc("grep", {"pattern": "*.py"}),
             _tc("grep", {"pattern": "*.ts"}),
         ]
         result = _hint(calls)
+        assert result == 'grep "*.py", grep "*.ts"'
+
+    def test_two_consecutive_same_args_folded(self):
+        calls = [
+            _tc("grep", {"pattern": "TODO"}),
+            _tc("grep", {"pattern": "TODO"}),
+        ]
+        result = _hint(calls)
         assert "\u00d7 2" in result
 
-    def test_three_consecutive_same_folded(self):
+    def test_three_consecutive_different_args_not_folded(self):
         calls = [
             _tc("read_file", {"path": "a.py"}),
             _tc("read_file", {"path": "b.py"}),
             _tc("read_file", {"path": "c.py"}),
         ]
         result = _hint(calls)
-        assert "\u00d7 3" in result
+        assert result == "read a.py, read b.py, read c.py"
 
     def test_different_tools_not_folded(self):
         calls = [
@@ -187,7 +193,7 @@ class TestToolHintMixedFolding:
     """G4: Mixed folding groups with interleaved same-tool segments."""
 
     def test_read_read_grep_grep_read(self):
-        """read×2, grep×2, read — should produce two separate groups."""
+        """All different args — each hint is listed separately."""
         calls = [
             _tc("read_file", {"path": "a.py"}),
             _tc("read_file", {"path": "b.py"}),
@@ -196,7 +202,4 @@ class TestToolHintMixedFolding:
             _tc("read_file", {"path": "c.py"}),
         ]
         result = _hint(calls)
-        assert "\u00d7 2" in result
-        # Should have 3 groups: read×2, grep×2, read
-        parts = result.split(", ")
-        assert len(parts) == 3
+        assert result == 'read a.py, read b.py, grep "x", grep "y", read c.py'

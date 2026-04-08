@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-# Registry: tool_name -> (key_args, template)
-_TOOL_FORMATS: dict[str, tuple[list[str], str]] = {
-    "read_file":  (["path", "file_path"],              "read {}"),
-    "write_file": (["path", "file_path"],              "write {}"),
-    "edit":       (["file_path", "path"],              "edit {}"),
-    "glob":       (["pattern"],                        'glob "{}"'),
-    "grep":       (["pattern"],                        'grep "{}"'),
-    "exec":       (["command"],                        "$ {}"),
-    "web_search": (["query"],                          'search "{}"'),
-    "web_fetch":  (["url"],                            "fetch {}"),
-    "list_dir":   (["path"],                           "ls {}"),
+
+# Registry: tool_name -> (key_args, template, is_path, is_command)
+_TOOL_FORMATS: dict[str, tuple[list[str], str, bool, bool]] = {
+    "read_file":  (["path", "file_path"],              "read {}",     True,  False),
+    "write_file": (["path", "file_path"],              "write {}",    True,  False),
+    "edit":       (["file_path", "path"],              "edit {}",     True,  False),
+    "glob":       (["pattern"],                        'glob "{}"',   False, False),
+    "grep":       (["pattern"],                        'grep "{}"',   False, False),
+    "exec":       (["command"],                        "$ {}",        False, True),
+    "web_search": (["query"],                          'search "{}"', False, False),
+    "web_fetch":  (["url"],                            "fetch {}",    True,  False),
+    "list_dir":   (["path"],                           "ls {}",       True,  False),
 }
 
 

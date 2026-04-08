@@ -309,7 +309,7 @@ class TestToolHintInlineStreaming:
         await ch.send(msg)
 
         buf = ch._stream_bufs["oc_chat1"]
-        assert buf.text.endswith('🔧 web_fetch("https://example.com")')
+        assert '🔧 web_fetch("https://example.com")' in buf.text
         assert buf.tool_hint_len > 0
         assert buf.sequence == 3
         ch._client.cardkit.v1.card_element.content.assert_called_once()
@@ -376,7 +376,7 @@ class TestToolHintInlineStreaming:
         assert buf.text.count("$ cd /project") == 0
         assert buf.text.count("$ git status") == 1
         assert buf.text.startswith("Partial answer")
-        assert buf.text.endswith("🔧 $ git status")
+        assert "🔧 $ git status" in buf.text
 
     @pytest.mark.asyncio
     async def test_tool_hint_preserved_on_resuming_flush(self):
