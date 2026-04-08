@@ -238,6 +238,7 @@ class AgentLoop:
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
+        self._pending_summaries: dict[str, str] = {}  # session_key → summary (one-shot)
         self._session_locks: dict[str, asyncio.Lock] = {}
         # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
@@ -519,12 +520,16 @@ class AgentLoop:
         elapsed_s = (datetime.now() - session.updated_at).total_seconds()
         return elapsed_s >= self._session_ttl_minutes * 60
 
-    async def _auto_new(self, session_key: str) -> None:
-        """Archive un-consolidated messages, clear session, inject summary."""
+    async def _auto_new(self, session_key: str) -> str | None:
+        """Archive un-consolidated messages and clear session.
+
+        Returns the summary text (or None), caller is responsible for
+        delivering it to the next user message via runtime context.
+        """
         session = self.sessions.get_or_create(session_key)
         unconsolidated = session.messages[session.last_consolidated:]
         if not unconsolidated:
-            return
+            return None
 
         logger.info("Auto session new for {} (idle {} min)", session_key, self._session_ttl_minutes)
 
@@ -534,20 +539,15 @@ class AgentLoop:
         # Read the latest history entry as summary
         entries = self.consolidator.store.read_unprocessed_history(since_cursor=0)
         summary_text = entries[-1]["content"] if entries else ""
+        if not summary_text or summary_text == "(nothing)":
+            summary_text = ""
 
         # Clear session (same as /new)
         session.clear()
         self.sessions.save(session)
         self.sessions.invalidate(session_key)
 
-        # Inject summary as first user message in the new session
-        if summary_text and summary_text != "(nothing)":
-            fresh = self.sessions.get_or_create(session_key)
-            fresh.add_message(
-                "user",
-                f"{self._SESSION_RESUMED_TAG} Previous conversation summary:\n{summary_text}",
-            )
-            self.sessions.save(fresh)
+        return summary_text or None
 
     async def _process_message(
         self,
@@ -570,16 +570,23 @@ class AgentLoop:
 
             # Auto session new for system messages
             if self._should_auto_new(session):
-                await self._auto_new(key)
+                summary = await self._auto_new(key)
+                if summary:
+                    self._pending_summaries[key] = summary
                 session = self.sessions.get_or_create(key)
 
             await self.consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
+
+            # Inject resumed-session summary as ephemeral runtime context
+            pending = self._pending_summaries.pop(key, None)
+
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
+                session_summary=pending,
                 current_role=current_role,
             )
             final_content, _, all_msgs = await self._run_agent_loop(
@@ -603,7 +610,9 @@ class AgentLoop:
 
         # --- Auto session new: reset stale sessions ---
         if self._should_auto_new(session):
-            await self._auto_new(key)
+            summary = await self._auto_new(key)
+            if summary:
+                self._pending_summaries[key] = summary
             session = self.sessions.get_or_create(key)
 
         # Slash commands
@@ -620,9 +629,14 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=0)
+
+        # Inject resumed-session summary as ephemeral runtime context (one-shot, not persisted)
+        pending = self._pending_summaries.pop(key, None)
+
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
+            session_summary=pending,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
         )
@@ -726,10 +740,14 @@ class AgentLoop:
                     entry["content"] = filtered
             elif role == "user":
                 if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                    # Strip the runtime-context prefix, keep only the user text.
-                    parts = content.split("\n\n", 1)
-                    if len(parts) > 1 and parts[1].strip():
-                        entry["content"] = parts[1]
+                    # Strip the entire runtime-context block (including any session summary).
+                    # The block ends at the last blank-line separator before user text.
+                    after_tag = content[len(ContextBuilder._RUNTIME_CONTEXT_TAG):].lstrip("\n")
+                    sep = after_tag.rfind("\n\n")
+                    if sep >= 0:
+                        entry["content"] = after_tag[sep + 2:]
+                    elif after_tag.strip():
+                        entry["content"] = after_tag
                     else:
                         continue
                 if isinstance(content, list):

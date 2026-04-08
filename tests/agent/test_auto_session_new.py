@@ -96,8 +96,8 @@ class TestAutoNew:
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_auto_new_injects_summary(self, tmp_path):
-        """_auto_new should inject the archive result as a user message."""
+    async def test_auto_new_returns_summary(self, tmp_path):
+        """_auto_new should return the archive summary, not inject into session."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         session.add_message("user", "hello")
@@ -112,12 +112,12 @@ class TestAutoNew:
             {"cursor": 1, "timestamp": "2026-01-01 00:00", "content": "User said hello, assistant said hi there."},
         ]
 
-        await loop._auto_new("cli:test")
+        result = await loop._auto_new("cli:test")
 
+        # Summary is returned, not stored in session
+        assert result == "User said hello, assistant said hi there."
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == 1
-        assert session_after.messages[0]["role"] == "user"
-        assert "[Session Resumed]" in session_after.messages[0]["content"]
+        assert len(session_after.messages) == 0
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -248,8 +248,8 @@ class TestAutoNewIdleDetection:
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_auto_new_does_not_fire_on_exact_slash_new(self, tmp_path):
-        """Manual /new should still work as before (no double auto-new)."""
+    async def test_auto_new_with_slash_new(self, tmp_path):
+        """Auto-new fires before /new dispatches; session is cleared twice but idempotent."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         for i in range(4):
@@ -270,7 +270,7 @@ class TestAutoNewIdleDetection:
         assert "new session started" in response.content.lower()
 
         session_after = loop.sessions.get_or_create("cli:test")
-        # /new clears without injecting summary (manual /new behavior preserved)
+        # Session is empty (auto-new archived and cleared, /new cleared again)
         assert len(session_after.messages) == 0
         await loop.close_mcp()
 
@@ -342,13 +342,13 @@ class TestAutoNewEdgeCases:
         loop.provider.chat_with_retry = AsyncMock(side_effect=Exception("API down"))
 
         # Should not raise
-        await loop._auto_new("cli:test")
+        summary = await loop._auto_new("cli:test")
 
         session_after = loop.sessions.get_or_create("cli:test")
-        # Session should still be cleared (archive falls back to raw dump)
-        # Old messages should be gone, but raw archive summary is injected
-        assert not any(m["content"] == "important data" for m in session_after.messages)
-        assert any("[Session Resumed]" in m["content"] for m in session_after.messages)
+        # Session should be cleared (archive falls back to raw dump)
+        assert len(session_after.messages) == 0
+        # Summary is returned (from raw archive), not injected into session
+        assert summary is not None
 
         await loop.close_mcp()
 
@@ -389,7 +389,7 @@ class TestAutoNewIntegration:
     @pytest.mark.asyncio
     async def test_full_lifecycle(self, tmp_path):
         """
-        Full lifecycle: messages -> idle -> auto-new -> archive -> clear -> summary inject -> new message processed.
+        Full lifecycle: messages -> idle -> auto-new -> archive -> clear -> summary injected as runtime context.
         """
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -427,10 +427,13 @@ class TestAutoNewIntegration:
             "past tense is used" in str(m.get("content", "")) for m in session_after.messages
         )
 
-        # Summary should be injected
-        assert any(
-            "[Session Resumed]" in str(m.get("content", "")) for m in session_after.messages
+        # Summary should NOT be persisted in session (ephemeral, one-shot)
+        assert not any(
+            "[Resumed Session]" in str(m.get("content", "")) for m in session_after.messages
         )
+
+        # Pending summary should be consumed (one-shot)
+        assert "cli:test" not in loop._pending_summaries
 
         # The new message should be processed (response exists)
         assert response is not None
