@@ -457,6 +457,16 @@ class Consolidator:
             self.store.raw_archive(messages)
             return True
 
+    async def archive_messages(self, messages: list[dict]) -> bool:
+        """Alias for archive() - summarize messages and append to history.jsonl.
+
+        This method is called by /new command to archive the current session
+        before starting a new one.
+
+        Returns True on success (or degraded success), False if nothing to do.
+        """
+        return await self.archive(messages)
+
     async def maybe_consolidate_by_tokens(self, session: Session) -> None:
         """Loop: archive old messages until prompt fits within safe budget.
 
