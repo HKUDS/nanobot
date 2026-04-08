@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import mimetypes
 import platform
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -27,6 +29,8 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     _MAX_RECENT_HISTORY = 50
+    _VIKING_TIMEOUT = 5.0       # seconds before giving up on a Viking API call
+    _PROFILE_CACHE_TTL = 300.0  # seconds to reuse a cached user profile
 
     def __init__(self, workspace: Path, timezone: str | None = None, viking_client: VikingClient | None = None):
         self.workspace = workspace
@@ -34,17 +38,38 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
         self._viking_client = viking_client
+        self._cached_profile: str | None = None
+        self._profile_cache_time: float = 0.0
 
     def set_viking_client(self, client: VikingClient) -> None:
         self._viking_client = client
+        self._cached_profile = None  # invalidate cache when client changes
+        self._profile_cache_time = 0.0
+
+    async def _get_cached_profile(self) -> str:
+        """Return user profile from cache, refreshing if stale. Timeout-protected."""
+        now = time.monotonic()
+        if self._cached_profile is not None and now - self._profile_cache_time < self._PROFILE_CACHE_TTL:
+            return self._cached_profile
+        try:
+            profile = await asyncio.wait_for(
+                self.memory.get_viking_user_profile(self._viking_client),
+                timeout=self._VIKING_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("OpenViking user profile fetch timed out ({}s)", self._VIKING_TIMEOUT)
+            return self._cached_profile or ""
+        self._cached_profile = profile
+        self._profile_cache_time = now
+        return profile
 
     async def build_system_prompt(self, skill_names: list[str] | None = None,channel: str | None = None,) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity(channel=channel)]
 
-        # Semantic user profile
+        # Semantic user profile (cached, with timeout)
         if self._viking_client:
-            profile = await self.memory.get_viking_user_profile(self._viking_client)
+            profile = await self._get_cached_profile()
             if profile:
                 parts.append(profile)
 
@@ -156,10 +181,14 @@ class ContextBuilder:
         system_prompt = await self.build_system_prompt(skill_names, channel=channel)
 
         if self._viking_client and current_message:
-            viking_mem = await self.memory.get_viking_memory_context(
-                current_message,
-                self._viking_client,
-            )
+            try:
+                viking_mem = await asyncio.wait_for(
+                    self.memory.get_viking_memory_context(current_message, self._viking_client),
+                    timeout=self._VIKING_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("OpenViking memory context fetch timed out ({}s)", self._VIKING_TIMEOUT)
+                viking_mem = ""
             if viking_mem:
                 logger.info("OpenViking User Memory : {}", str(viking_mem)[:100])
                 system_prompt += (

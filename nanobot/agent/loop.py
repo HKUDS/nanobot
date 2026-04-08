@@ -306,7 +306,7 @@ class AgentLoop:
             if not HAS_OPENVIKING:
                 return
             from nanobot.openviking.client import VikingClient
-            client = await VikingClient.from_config()
+            client = await VikingClient.from_openviking_config(self.openviking_config)
 
             max_commits = getattr(self.openviking_config, "max_concurrent_commits", 1)
             client.set_max_concurrent_commits(max_commits)
@@ -339,8 +339,9 @@ class AgentLoop:
                 OVAddResourceTool,
             )
 
-            for cls in (OVReadTool, OVListTool, OVSearchTool, OVGrepTool, OVGlobTool,
-                        OVUserMemorySearchTool, OVAddResourceTool):
+            tool_classes = (OVReadTool, OVListTool, OVSearchTool, OVGrepTool, OVGlobTool,
+                            OVUserMemorySearchTool, OVAddResourceTool)
+            for cls in tool_classes:
                 self.tools.register(cls(ov_config=self.openviking_config))
 
             self.tools.register(OVMemoryCommitTool(
@@ -348,7 +349,7 @@ class AgentLoop:
                 session_key_fn=lambda: self._current_session_key,
                 background_task_scheduler=self._schedule_background,
             ))
-            logger.info("Registered {} OpenViking tools", 8)
+            logger.info("Registered {} OpenViking tools", len(tool_classes) + 1)
         except Exception:
             logger.exception("Failed to register OpenViking tools")
 

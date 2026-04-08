@@ -105,7 +105,7 @@ class OpenVikingConfig(Base):
     memory_recall_limit: int = 5
 
 
-class WebConfig(BaseModel):
+class WebConfig(Base):
     """Web channel configuration (WebSocket-based)."""
     enabled: bool = False
     host: str = "0.0.0.0"

@@ -302,7 +302,7 @@ class FeishuChannel(BaseChannel):
         self._ws_thread: threading.Thread | None = None
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()  # Ordered dedup cache
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._user_name_cache: dict[str, str] = {}
+        self._user_name_cache: dict[str, tuple[str, float]] = {}  # open_id -> (name, cached_at)
         self._stream_bufs: dict[str, _FeishuStreamBuf] = {}
         self._bot_open_id: str | None = None
 
@@ -669,36 +669,6 @@ class FeishuChannel(BaseChannel):
             elements.extend(self._split_headings(remaining))
         return elements or [{"tag": "markdown", "content": content}]
 
-    @staticmethod
-    def _split_elements_by_table_limit(
-        elements: list[dict], max_tables: int = 1
-    ) -> list[list[dict]]:
-        """Split card elements into groups with at most *max_tables* table elements each.
-
-        Feishu cards have a hard limit of one table per card (API error 11310).
-        When the rendered content contains multiple markdown tables each table is
-        placed in a separate card message so every table reaches the user.
-        """
-        if not elements:
-            return [[]]
-        groups: list[list[dict]] = []
-        current: list[dict] = []
-        table_count = 0
-        for el in elements:
-            if el.get("tag") == "table":
-                if table_count >= max_tables:
-                    if current:
-                        groups.append(current)
-                    current = []
-                    table_count = 0
-                current.append(el)
-                table_count += 1
-            else:
-                current.append(el)
-        if current:
-            groups.append(current)
-        return groups or [[]]
-
     def _split_headings(self, content: str) -> list[dict]:
         """Split content by headings, converting headings to div elements."""
         protected = content
@@ -1040,9 +1010,17 @@ class FeishuChannel(BaseChannel):
 
 
     def _get_user_name_sync(self, open_id: str) -> str:
-        """Look up a user's display name by open_id via Contact API, with in-memory cache."""
-        if open_id in self._user_name_cache:
-            return self._user_name_cache[open_id]
+        """Look up a user's display name by open_id via Contact API, with in-memory cache.
+
+        Successful lookups are cached indefinitely for the session lifetime.
+        Failed lookups are cached for _USER_NAME_FAILURE_TTL seconds so that
+        transient API errors do not permanently suppress the user's display name.
+        """
+        cached = self._user_name_cache.get(open_id)
+        if cached is not None:
+            name, cached_at = cached
+            if name or (time.monotonic() - cached_at < self._USER_NAME_FAILURE_TTL):
+                return name
         try:
             from lark_oapi.api.contact.v3 import GetUserRequest as ContactGetUserRequest
             request = ContactGetUserRequest.builder() \
@@ -1052,11 +1030,11 @@ class FeishuChannel(BaseChannel):
             response = self._client.contact.v3.user.get(request)
             if response.success() and response.data and response.data.user:
                 name = response.data.user.name or ""
-                self._user_name_cache[open_id] = name
+                self._user_name_cache[open_id] = (name, time.monotonic())
                 return name
         except Exception as e:
             logger.debug("Failed to fetch user name for {}: {}", open_id, e)
-        self._user_name_cache[open_id] = ""
+        self._user_name_cache[open_id] = ("", time.monotonic())
         return ""
 
     def _get_message_sync(self, message_id: str) -> dict | None:
@@ -1102,53 +1080,7 @@ class FeishuChannel(BaseChannel):
         return f"[{msg_type}]"
 
     _REPLY_CONTEXT_MAX_LEN = 200
-
-    def _get_message_content_sync(self, message_id: str) -> str | None:
-        """Fetch the text content of a Feishu message by ID (synchronous).
-
-        Returns a "[Reply to: ...]" context string, or None on failure.
-        """
-        from lark_oapi.api.im.v1 import GetMessageRequest
-
-        try:
-            request = GetMessageRequest.builder().message_id(message_id).build()
-            response = self._client.im.v1.message.get(request)
-            if not response.success():
-                logger.debug(
-                    "Feishu: could not fetch parent message {}: code={}, msg={}",
-                    message_id,
-                    response.code,
-                    response.msg,
-                )
-                return None
-            items = getattr(response.data, "items", None)
-            if not items:
-                return None
-            msg_obj = items[0]
-            raw_content = getattr(msg_obj, "body", None)
-            raw_content = getattr(raw_content, "content", None) if raw_content else None
-            if not raw_content:
-                return None
-            try:
-                content_json = json.loads(raw_content)
-            except (json.JSONDecodeError, TypeError):
-                return None
-            msg_type = getattr(msg_obj, "msg_type", "")
-            if msg_type == "text":
-                text = content_json.get("text", "").strip()
-            elif msg_type == "post":
-                text, _ = _extract_post_content(content_json)
-                text = text.strip()
-            else:
-                text = ""
-            if not text:
-                return None
-            if len(text) > self._REPLY_CONTEXT_MAX_LEN:
-                text = text[: self._REPLY_CONTEXT_MAX_LEN] + "..."
-            return f"[Reply to: {text}]"
-        except Exception as e:
-            logger.debug("Feishu: error fetching parent message {}: {}", message_id, e)
-            return None
+    _USER_NAME_FAILURE_TTL = 60.0  # seconds before retrying a failed name lookup
 
     def _reply_message_sync(self, parent_message_id: str, msg_type: str, content: str) -> bool:
         """Reply to an existing Feishu message using the Reply API (synchronous)."""
@@ -1368,16 +1300,18 @@ class FeishuChannel(BaseChannel):
                     buf.sequence,
                 )
             else:
-                for chunk in self._split_elements_by_table_limit(
-                    self._build_card_elements(buf.text)
-                ):
-                    card = json.dumps(
-                        {"config": {"wide_screen_mode": True}, "elements": chunk},
-                        ensure_ascii=False,
-                    )
-                    await loop.run_in_executor(
-                        None, self._send_message_sync, rid_type, chat_id, "interactive", card
-                    )
+                raw_table_count = len(self._TABLE_RE.findall(buf.text))
+                if raw_table_count > 1:
+                    elements = [{"tag": "markdown", "content": buf.text}]
+                else:
+                    elements = self._build_card_elements(buf.text)
+                card = json.dumps(
+                    {"config": {"wide_screen_mode": True}, "elements": elements},
+                    ensure_ascii=False,
+                )
+                await loop.run_in_executor(
+                    None, self._send_message_sync, rid_type, chat_id, "interactive", card
+                )
             return
 
         # --- accumulate delta ---
@@ -1501,12 +1435,13 @@ class FeishuChannel(BaseChannel):
                 else:
                     # Complex / long content – send as interactive card.
                     # Feishu limits cards to 1 native table element (API error 11310).
-                    # When content has multiple tables we render everything as a
-                    # single markdown-only card to preserve reply completeness.
-                    elements = self._build_card_elements(msg.content)
-                    table_count = sum(1 for el in elements if el.get("tag") == "table")
-                    if table_count > 1:
+                    # When the source content has multiple markdown tables, render
+                    # everything as a single markdown-only card to preserve completeness.
+                    raw_table_count = len(self._TABLE_RE.findall(msg.content))
+                    if raw_table_count > 1:
                         elements = [{"tag": "markdown", "content": msg.content}]
+                    else:
+                        elements = self._build_card_elements(msg.content)
                     card = {"config": {"wide_screen_mode": True}, "elements": elements}
                     await loop.run_in_executor(
                         None, _do_send,
@@ -1555,13 +1490,14 @@ class FeishuChannel(BaseChannel):
             msg_type = message.message_type
 
             loop = asyncio.get_running_loop()
-            sender_name = await loop.run_in_executor(
-                None, self._get_user_name_sync, sender_id,
-            ) if sender_id != "unknown" else ""
 
             if chat_type == "group" and not self._is_group_message_for_bot(message):
                 logger.debug("Feishu: skipping group message (not mentioned)")
                 return
+
+            sender_name = await loop.run_in_executor(
+                None, self._get_user_name_sync, sender_id,
+            ) if sender_id != "unknown" else ""
 
             # Add reaction
             reaction_id = await self._add_reaction(message_id, self.config.react_emoji)
@@ -1577,7 +1513,6 @@ class FeishuChannel(BaseChannel):
             quote_text = ""
             quote_media: list[str] = []
             if message.parent_id:
-                loop = asyncio.get_running_loop()
                 parent_data = await loop.run_in_executor(
                     None, self._get_message_sync, message.parent_id
                 )

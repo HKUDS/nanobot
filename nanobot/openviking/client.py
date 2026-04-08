@@ -208,20 +208,29 @@ class VikingClient:
         return instance
 
     @classmethod
-    async def from_config(cls, agent_id: str | None = None) -> "VikingClient":
-        """Create a VikingClient from the global nanobot config."""
+    async def from_openviking_config(
+        cls,
+        cfg: Any,
+        agent_id: str | None = None,
+    ) -> "VikingClient":
+        """Create a VikingClient from an OpenVikingConfig instance.
+
+        Uses the provided config object directly, so runtime changes (e.g. from
+        the web command) are respected without re-reading the config file.
+        Provider credentials are still resolved against the full config when
+        an explicit key/base is not set on the OpenVikingConfig itself.
+        """
         from nanobot.config.loader import load_config
 
-        config = load_config()
-        cfg = config.openviking
+        full_config = load_config()
         embedding_api_key, embedding_base_url = cls._resolve_provider_credentials(
-            config=config,
+            config=full_config,
             model=cfg.embedding_model,
             api_key=cfg.embedding_api_key,
             api_base=cfg.embedding_base_url,
         )
         vlm_api_key, vlm_base_url = cls._resolve_provider_credentials(
-            config=config,
+            config=full_config,
             model=cfg.vlm_model,
             api_key=cfg.vlm_api_key,
             api_base=cfg.vlm_base_url,
@@ -231,7 +240,7 @@ class VikingClient:
             data_dir=cfg.data_dir,
             server_url=cfg.server_url,
             api_key=cfg.api_key,
-            account_id=getattr(cfg, "account_id", ""),
+            account_id=cfg.account_id,
             user_id=cfg.user_id,
             agent_id=agent_id,
             vlm_api_key=vlm_api_key,
@@ -243,6 +252,14 @@ class VikingClient:
             embedding_dimension=cfg.embedding_dimension,
             memory_recall_limit=cfg.memory_recall_limit,
         )
+
+    @classmethod
+    async def from_config(cls, agent_id: str | None = None) -> "VikingClient":
+        """Create a VikingClient from the global nanobot config."""
+        from nanobot.config.loader import load_config
+
+        config = load_config()
+        return await cls.from_openviking_config(config.openviking, agent_id=agent_id)
 
     # ------------------------------------------------------------------
     # User management (remote mode)
