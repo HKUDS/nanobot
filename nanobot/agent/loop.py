@@ -35,7 +35,12 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.workspace.layout import WorkspaceLayout, make_layout
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
+    from nanobot.config.schema import (
+        ChannelsConfig,
+        CommandRewriteConfig,
+        ExecToolConfig,
+        WebToolsConfig,
+    )
     from nanobot.cron.service import CronService
 
 
@@ -168,9 +173,13 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 40,
         context_window_tokens: int = 65_536,
+        context_block_limit: int | None = None,
+        max_tool_result_chars: int | None = None,
+        provider_retry_mode: str = "standard",
         web_config: WebToolsConfig | None = None,
         web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
+        command_rewrite_config: CommandRewriteConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         extra_allowed_paths: list[str] | None = None,
@@ -184,7 +193,12 @@ class AgentLoop:
         config: Any = None,
         layout: WorkspaceLayout | None = None,
     ):
-        from nanobot.config.schema import ContextPruningConfig, ExecToolConfig, WebToolsConfig
+        from nanobot.config.schema import (
+            CommandRewriteConfig,
+            ContextPruningConfig,
+            ExecToolConfig,
+            WebToolsConfig,
+        )
 
         self.bus = bus
         self.channels_config = channels_config
@@ -197,9 +211,13 @@ class AgentLoop:
         self._config_provider = self.provider    # config 中的默认 provider（含 fallback），不可变
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
+        self.context_block_limit = context_block_limit
+        self.max_tool_result_chars = max_tool_result_chars or self._TOOL_RESULT_MAX_CHARS
+        self.provider_retry_mode = provider_retry_mode
         self.web_config = web_config or WebToolsConfig()
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
+        self.command_rewrite_config = command_rewrite_config or CommandRewriteConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self.extra_allowed_paths = [Path(p).expanduser().resolve() for p in (extra_allowed_paths or [])]
@@ -208,6 +226,20 @@ class AgentLoop:
         _pruning_cfg = context_pruning_config or ContextPruningConfig()
         self._pruner: ContextPruner | None = ContextPruner(_pruning_cfg) if _pruning_cfg.enabled else None
         self._extra_hooks: list[AgentHook] = hooks or []
+
+        # Cross-cutting command rewrite hook (e.g. rtk token compression).
+        # Enabled via config.tools.command_rewrite; fail-safe passthrough when rtk absent.
+        if self.command_rewrite_config.enabled:
+            from nanobot.agent.hooks.rewrite import CommandRewriteHook
+            self._command_rewrite_hook: CommandRewriteHook | None = CommandRewriteHook(
+                enabled=True,
+                verbose=self.command_rewrite_config.verbose,
+                timeout=self.command_rewrite_config.timeout,
+                path_append=self.exec_config.path_append,
+            )
+            self._extra_hooks.append(self._command_rewrite_hook)
+        else:
+            self._command_rewrite_hook = None
 
         # Add TraceHook for LLM call logging
         from nanobot.agent.hook import TraceHook
@@ -223,7 +255,7 @@ class AgentLoop:
             workspace=workspace,
             bus=bus,
             model=self.model,
-            max_tool_result_chars=self._TOOL_RESULT_MAX_CHARS,
+            max_tool_result_chars=self.max_tool_result_chars,
             web_config=self.web_config,
             exec_config=exec_config,
             restrict_to_workspace=restrict_to_workspace,
@@ -418,12 +450,14 @@ class AgentLoop:
             tools=self.tools,
             model=self.model,
             max_iterations=self.max_iterations,
-            max_tool_result_chars=self._TOOL_RESULT_MAX_CHARS,
+            max_tool_result_chars=self.max_tool_result_chars,
             hook=hook,
             error_message="Sorry, I encountered an error calling the AI model.",
             concurrent_tools=True,
             pruner=self._pruner,
             context_window_tokens=self.context_window_tokens,
+            context_block_limit=self.context_block_limit,
+            provider_retry_mode=self.provider_retry_mode,
         ))
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":

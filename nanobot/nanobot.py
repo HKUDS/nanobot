@@ -82,6 +82,7 @@ class Nanobot:
             web_config=config.tools.web,
             web_proxy=config.tools.web.proxy or None,
             exec_config=config.tools.exec,
+            command_rewrite_config=config.tools.command_rewrite,
             restrict_to_workspace=config.tools.restrict_to_workspace,
             mcp_servers=config.tools.mcp_servers,
             timezone=defaults.timezone,
