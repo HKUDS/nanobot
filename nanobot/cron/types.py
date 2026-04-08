@@ -61,6 +61,13 @@ class CronJob:
     updated_at_ms: int = 0
     delete_after_run: bool = False
 
+    @classmethod
+    def from_dict(cls, kwargs: dict):
+        kwargs["schedule"] = CronSchedule(**kwargs.get("schedule", {"kind": "every"}))
+        kwargs["payload"] = CronPayload(**kwargs.get("payload", {}))
+        kwargs["state"] = CronJobState(**kwargs.get("state", {}))
+        return cls(**kwargs)
+
 
 @dataclass
 class CronStore:
