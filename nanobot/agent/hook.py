@@ -143,23 +143,9 @@ class TraceHook(AgentHook):
         except Exception as e:
             logger.debug("TraceHook failed to write to {}: {}", self._log_path, e)
 
-    def _truncate_messages(self, messages: list[dict[str, Any]], max_chars: int = 10000) -> list[dict[str, Any]]:
-        """Truncate messages to avoid overly large log entries."""
-        import json
-        result = []
-        total_chars = 0
-        for msg in messages:
-            msg_copy = dict(msg)
-            content = msg_copy.get("content", "")
-            if isinstance(content, str) and len(content) > 2000:
-                msg_copy["content"] = content[:2000] + "... [truncated]"
-            msg_str = json.dumps(msg_copy, ensure_ascii=False)
-            total_chars += len(msg_str)
-            if total_chars > max_chars:
-                result.append({"role": "system", "content": "... [earlier messages truncated]"})
-                break
-            result.append(msg_copy)
-        return result
+    def _truncate_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return messages as-is without truncation for complete logging."""
+        return list(messages)
 
 
 class CompositeHook(AgentHook):

@@ -66,7 +66,7 @@ class TraceHook(AgentHook):
             "iteration": context.iteration,
             "request": self._call_kwargs,
             "response": {
-                "content": (resp.content or "")[:2000] if resp else None,
+                "content": (resp.content or "") if resp else None,
                 "tool_calls": [
                     {"name": tc.name, "arguments": tc.arguments}
                     for tc in (context.tool_calls or [])
