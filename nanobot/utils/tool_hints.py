@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from nanobot.utils.path import abbreviate_path
 
 # Registry: tool_name -> (key_args, template, is_path, is_command)
@@ -17,27 +19,39 @@ _TOOL_FORMATS: dict[str, tuple[list[str], str, bool, bool]] = {
     "list_dir":   (["path"],                           "ls {}",       True,  False),
 }
 
+# Matches file paths embedded in shell commands, including quoted paths with spaces.
+_PATH_IN_CMD_RE = re.compile(
+    r'"(?P<double>(?:[A-Za-z]:[/\\]|~/|/)[^"]+)"'
+    r"|'(?P<single>(?:[A-Za-z]:[/\\]|~/|/)[^']+)'"
+    r"|(?P<bare>(?:[A-Za-z]:[/\\]|~/|(?<=\s)/)[^\s;&|<>\"']+)"
+)
+
 
 def format_tool_hints(tool_calls: list) -> str:
     """Format tool calls as concise hints with smart abbreviation."""
     if not tool_calls:
         return ""
 
-    hints = []
-    for name, count, example_tc in _group_consecutive(tool_calls):
-        fmt = _TOOL_FORMATS.get(name)
+    formatted = []
+    for tc in tool_calls:
+        fmt = _TOOL_FORMATS.get(tc.name)
         if fmt:
-            hint = _fmt_known(example_tc, fmt)
-        elif name.startswith("mcp_"):
-            hint = _fmt_mcp(example_tc)
+            formatted.append(_fmt_known(tc, fmt))
+        elif tc.name.startswith("mcp_"):
+            formatted.append(_fmt_mcp(tc))
         else:
-            hint = _fmt_fallback(example_tc)
+            formatted.append(_fmt_fallback(tc))
 
-        if count > 1:
-            hint = f"{hint} \u00d7 {count}"
-        hints.append(hint)
+    hints = []
+    for hint in formatted:
+        if hints and hints[-1][0] == hint:
+            hints[-1] = (hint, hints[-1][1] + 1)
+        else:
+            hints.append((hint, 1))
 
-    return ", ".join(hints)
+    return ", ".join(
+        f"{h} \u00d7 {c}" if c > 1 else h for h, c in hints
+    )
 
 
 def _get_args(tc) -> dict:
@@ -49,17 +63,6 @@ def _get_args(tc) -> dict:
     if isinstance(tc.arguments, dict):
         return tc.arguments
     return {}
-
-
-def _group_consecutive(calls: list) -> list[tuple[str, int, object]]:
-    """Group consecutive calls to the same tool: [(name, count, first), ...]."""
-    groups: list[tuple[str, int, object]] = []
-    for tc in calls:
-        if groups and groups[-1][0] == tc.name:
-            groups[-1] = (groups[-1][0], groups[-1][1] + 1, groups[-1][2])
-        else:
-            groups.append((tc.name, 1, tc))
-    return groups
 
 
 def _extract_arg(tc, key_args: list[str]) -> str | None:
@@ -85,8 +88,23 @@ def _fmt_known(tc, fmt: tuple) -> str:
     if fmt[2]:  # is_path
         val = abbreviate_path(val)
     elif fmt[3]:  # is_command
-        val = val[:40] + "\u2026" if len(val) > 40 else val
+        val = _abbreviate_command(val)
     return fmt[1].format(val)
+
+
+def _abbreviate_command(cmd: str, max_len: int = 40) -> str:
+    """Abbreviate paths in a command string, then truncate."""
+    def _replace_path(match: re.Match[str]) -> str:
+        if match.group("double") is not None:
+            return f'"{abbreviate_path(match.group("double"), max_len=25)}"'
+        if match.group("single") is not None:
+            return f"'{abbreviate_path(match.group('single'), max_len=25)}'"
+        return abbreviate_path(match.group("bare"), max_len=25)
+
+    abbreviated = _PATH_IN_CMD_RE.sub(_replace_path, cmd)
+    if len(abbreviated) <= max_len:
+        return abbreviated
+    return abbreviated[:max_len - 1] + "\u2026"
 
 
 def _fmt_mcp(tc) -> str:

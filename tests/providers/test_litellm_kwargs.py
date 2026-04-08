@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -52,6 +52,57 @@ def _fake_tool_call_response() -> SimpleNamespace:
     choice = SimpleNamespace(message=message, finish_reason="tool_calls")
     usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
     return SimpleNamespace(choices=[choice], usage=usage)
+
+
+def _fake_responses_response(content: str = "ok") -> MagicMock:
+    """Build a minimal Responses API response object."""
+    resp = MagicMock()
+    resp.model_dump.return_value = {
+        "output": [{
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": content}],
+        }],
+        "status": "completed",
+        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+    }
+    return resp
+
+
+def _fake_responses_stream(text: str = "ok"):
+    async def _stream():
+        yield SimpleNamespace(type="response.output_text.delta", delta=text)
+        yield SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(
+                status="completed",
+                usage=SimpleNamespace(input_tokens=10, output_tokens=5, total_tokens=15),
+                output=[],
+            ),
+        )
+
+    return _stream()
+
+
+def _fake_chat_stream(text: str = "ok"):
+    async def _stream():
+        yield SimpleNamespace(
+            choices=[SimpleNamespace(finish_reason=None, delta=SimpleNamespace(content=text, reasoning_content=None, tool_calls=None))],
+            usage=None,
+        )
+        yield SimpleNamespace(
+            choices=[SimpleNamespace(finish_reason="stop", delta=SimpleNamespace(content=None, reasoning_content=None, tool_calls=None))],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+
+    return _stream()
+
+
+class _FakeResponsesError(Exception):
+    def __init__(self, status_code: int, text: str):
+        super().__init__(text)
+        self.status_code = status_code
+        self.response = SimpleNamespace(status_code=status_code, text=text, headers={})
 
 
 class _StalledStream:
@@ -224,6 +275,224 @@ def test_openai_model_passthrough() -> None:
             spec=spec,
         )
     assert provider.get_default_model() == "gpt-4o"
+
+
+@pytest.mark.asyncio
+async def test_direct_openai_gpt5_uses_responses_api() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_response())
+    mock_responses = AsyncMock(return_value=_fake_responses_response("from responses"))
+    spec = find_by_name("openai")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_chat
+        client_instance.responses.create = mock_responses
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-5-chat",
+            spec=spec,
+        )
+        result = await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="gpt-5-chat",
+        )
+
+    assert result.content == "from responses"
+    mock_responses.assert_awaited_once()
+    mock_chat.assert_not_awaited()
+    call_kwargs = mock_responses.call_args.kwargs
+    assert call_kwargs["model"] == "gpt-5-chat"
+    assert call_kwargs["max_output_tokens"] == 4096
+    assert "input" in call_kwargs
+    assert "messages" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_direct_openai_reasoning_prefers_responses_api() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_response())
+    mock_responses = AsyncMock(return_value=_fake_responses_response("reasoned"))
+    spec = find_by_name("openai")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_chat
+        client_instance.responses.create = mock_responses
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-4o",
+            spec=spec,
+        )
+        await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="gpt-4o",
+            reasoning_effort="medium",
+        )
+
+    mock_responses.assert_awaited_once()
+    mock_chat.assert_not_awaited()
+    call_kwargs = mock_responses.call_args.kwargs
+    assert call_kwargs["reasoning"] == {"effort": "medium"}
+    assert call_kwargs["include"] == ["reasoning.encrypted_content"]
+
+
+@pytest.mark.asyncio
+async def test_direct_openai_gpt4o_stays_on_chat_completions() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_response())
+    mock_responses = AsyncMock(return_value=_fake_responses_response())
+    spec = find_by_name("openai")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_chat
+        client_instance.responses.create = mock_responses
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-4o",
+            spec=spec,
+        )
+        await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="gpt-4o",
+        )
+
+    mock_chat.assert_awaited_once()
+    mock_responses.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_openrouter_gpt5_stays_on_chat_completions() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_response())
+    mock_responses = AsyncMock(return_value=_fake_responses_response())
+    spec = find_by_name("openrouter")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_chat
+        client_instance.responses.create = mock_responses
+
+        provider = OpenAICompatProvider(
+            api_key="sk-or-test-key",
+            api_base="https://openrouter.ai/api/v1",
+            default_model="openai/gpt-5",
+            spec=spec,
+        )
+        await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="openai/gpt-5",
+        )
+
+    mock_chat.assert_awaited_once()
+    mock_responses.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_direct_openai_streaming_gpt5_uses_responses_api() -> None:
+    mock_chat = AsyncMock(return_value=_StalledStream())
+    mock_responses = AsyncMock(return_value=_fake_responses_stream("hi"))
+    spec = find_by_name("openai")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_chat
+        client_instance.responses.create = mock_responses
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-5-chat",
+            spec=spec,
+        )
+        result = await provider.chat_stream(
+            messages=[{"role": "user", "content": "hello"}],
+            model="gpt-5-chat",
+        )
+
+    assert result.content == "hi"
+    assert result.finish_reason == "stop"
+    mock_responses.assert_awaited_once()
+    mock_chat.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_direct_openai_responses_404_falls_back_to_chat_completions() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_response("from chat"))
+    mock_responses = AsyncMock(side_effect=_FakeResponsesError(404, "Responses endpoint not supported"))
+    spec = find_by_name("openai")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_chat
+        client_instance.responses.create = mock_responses
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-5-chat",
+            spec=spec,
+        )
+        result = await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="gpt-5-chat",
+        )
+
+    assert result.content == "from chat"
+    mock_responses.assert_awaited_once()
+    mock_chat.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_direct_openai_stream_responses_unsupported_param_falls_back() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_stream("fallback stream"))
+    mock_responses = AsyncMock(
+        side_effect=_FakeResponsesError(400, "Unknown parameter: max_output_tokens for Responses API")
+    )
+    spec = find_by_name("openai")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_chat
+        client_instance.responses.create = mock_responses
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-5-chat",
+            spec=spec,
+        )
+        result = await provider.chat_stream(
+            messages=[{"role": "user", "content": "hello"}],
+            model="gpt-5-chat",
+        )
+
+    assert result.content == "fallback stream"
+    mock_responses.assert_awaited_once()
+    mock_chat.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_direct_openai_responses_rate_limit_does_not_fallback() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_response("from chat"))
+    mock_responses = AsyncMock(side_effect=_FakeResponsesError(429, "rate limit"))
+    spec = find_by_name("openai")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_chat
+        client_instance.responses.create = mock_responses
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-5-chat",
+            spec=spec,
+        )
+        result = await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="gpt-5-chat",
+        )
+
+    assert result.finish_reason == "error"
+    mock_responses.assert_awaited_once()
+    mock_chat.assert_not_awaited()
 
 
 def test_openai_compat_supports_temperature_matches_reasoning_model_rules() -> None:
