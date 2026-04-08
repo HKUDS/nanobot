@@ -9,7 +9,7 @@ discord = pytest.importorskip("discord")
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.discord import DiscordBotClient, DiscordChannel, DiscordConfig
+from nanobot.channels.discord import MAX_MESSAGE_LEN, DiscordBotClient, DiscordChannel, DiscordConfig
 from nanobot.command.builtin import build_help_text
 
 
@@ -468,6 +468,33 @@ async def test_send_delta_streams_by_editing_message(monkeypatch) -> None:
 
     assert target.sent_payloads[0] == {"content": "hel"}
     assert target.sent_messages[0].edits == [{"content": "hello"}, {"content": "hello"}]
+    assert owner._stream_bufs == {}
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_splits_oversized_reply(monkeypatch) -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _FakeDiscordClient(owner, intents=None)
+    owner._client = client
+    owner._running = True
+    target = _FakeChannel(channel_id=123)
+    client.channels[123] = target
+
+    prefix = "a" * (MAX_MESSAGE_LEN - 100)
+    suffix = "b" * 150
+    full_text = prefix + suffix
+    chunks = DiscordBotClient._build_chunks(full_text, [], False)
+    assert len(chunks) == 2
+
+    times = iter([1.0, 3.0])
+    monkeypatch.setattr("nanobot.channels.discord.time.monotonic", lambda: next(times, 3.0))
+
+    await owner.send_delta("123", prefix, {"_stream_delta": True, "_stream_id": "s1"})
+    await owner.send_delta("123", suffix, {"_stream_delta": True, "_stream_id": "s1"})
+    await owner.send_delta("123", "", {"_stream_end": True, "_stream_id": "s1"})
+
+    assert target.sent_payloads == [{"content": prefix}, {"content": chunks[1]}]
+    assert target.sent_messages[0].edits == [{"content": chunks[0]}, {"content": chunks[0]}]
     assert owner._stream_bufs == {}
 
 
