@@ -35,7 +35,7 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.workspace.layout import WorkspaceLayout, make_layout
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
     from nanobot.cron.service import CronService
 
 
@@ -168,7 +168,7 @@ class AgentLoop:
         model: str | None = None,
         max_iterations: int = 40,
         context_window_tokens: int = 65_536,
-        web_search_config: WebSearchConfig | None = None,
+        web_config: WebToolsConfig | None = None,
         web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -184,7 +184,7 @@ class AgentLoop:
         config: Any = None,
         layout: WorkspaceLayout | None = None,
     ):
-        from nanobot.config.schema import ContextPruningConfig, ExecToolConfig, WebSearchConfig
+        from nanobot.config.schema import ContextPruningConfig, ExecToolConfig, WebToolsConfig
 
         self.bus = bus
         self.channels_config = channels_config
@@ -197,7 +197,7 @@ class AgentLoop:
         self._config_provider = self.provider    # config 中的默认 provider（含 fallback），不可变
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
-        self.web_search_config = web_search_config or WebSearchConfig()
+        self.web_config = web_config or WebToolsConfig()
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -224,7 +224,7 @@ class AgentLoop:
             bus=bus,
             model=self.model,
             max_tool_result_chars=self._TOOL_RESULT_MAX_CHARS,
-            web_config=web_search_config,
+            web_config=self.web_config,
             exec_config=exec_config,
             restrict_to_workspace=restrict_to_workspace,
         )
@@ -282,7 +282,7 @@ class AgentLoop:
                 rtk_enabled=self.exec_config.rtk_enabled,
                 rtk_verbose=self.exec_config.rtk_verbose,
             ))
-        self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
+        self.tools.register(WebSearchTool(config=self.web_config.search, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))

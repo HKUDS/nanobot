@@ -79,7 +79,7 @@ class Nanobot:
             model=defaults.model,
             max_iterations=defaults.max_tool_iterations,
             context_window_tokens=ctx_tokens,
-            web_search_config=config.tools.web.search,
+            web_config=config.tools.web,
             web_proxy=config.tools.web.proxy or None,
             exec_config=config.tools.exec,
             restrict_to_workspace=config.tools.restrict_to_workspace,
