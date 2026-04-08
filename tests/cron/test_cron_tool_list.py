@@ -2,9 +2,12 @@
 
 from datetime import datetime, timezone
 
+import pytest
+
 from nanobot.agent.tools.cron import CronTool
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
+from tests.test_openai_api import pytest_plugins
 
 
 def _make_tool(tmp_path) -> CronTool:
@@ -215,8 +218,10 @@ def test_list_at_job_shows_iso_timestamp(tmp_path) -> None:
     assert "Asia/Shanghai" in result
 
 
-def test_list_shows_last_run_state(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_list_shows_last_run_state(tmp_path) -> None:
     tool = _make_tool(tmp_path)
+    tool._cron._running = True
     job = tool._cron.add_job(
         name="Stateful job",
         schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"),
@@ -232,9 +237,10 @@ def test_list_shows_last_run_state(tmp_path) -> None:
     assert "ok" in result
     assert "(UTC)" in result
 
-
-def test_list_shows_error_message(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_list_shows_error_message(tmp_path) -> None:
     tool = _make_tool(tmp_path)
+    tool._cron._running = True
     job = tool._cron.add_job(
         name="Failed job",
         schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"),
