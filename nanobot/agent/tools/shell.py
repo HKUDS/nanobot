@@ -220,11 +220,54 @@ class ExecTool(Tool):
                 "PATH": os.environ.get("PATH", f"{sr}\\system32;{sr}"),
             }
         home = os.environ.get("HOME", "/tmp")
-        return {
+        env = {
             "HOME": home,
             "LANG": os.environ.get("LANG", "C.UTF-8"),
             "TERM": os.environ.get("TERM", "dumb"),
         }
+        if sys.platform == "win32":
+            for key in (
+                "APPDATA",
+                "ComSpec",
+                "LOCALAPPDATA",
+                "PATHEXT",
+                "ProgramData",
+                "ProgramFiles",
+                "ProgramFiles(x86)",
+                "ProgramW6432",
+                "PSModulePath",
+                "SystemRoot",
+                "TEMP",
+                "TMP",
+                "USERPROFILE",
+                "WINDIR",
+            ):
+                value = os.environ.get(key)
+                if value:
+                    env[key] = value
+        return env
+
+    def _build_shell_invocation(self, command: str, env: dict[str, str]) -> tuple[str, list[str]]:
+        """Choose a shell wrapper that matches the current platform.
+
+        On Windows, the built-in ``bash.exe`` launcher can route through WSL
+        and fail with RPC/service errors on machines where WSL is unavailable
+        or unhealthy. PowerShell is the native shell and can run Docker Desktop
+        commands directly, so we prefer it there.
+        """
+        if sys.platform == "win32":
+            path_parts = [os.environ.get("PATH", "")]
+            if self.path_append:
+                path_parts.append(self.path_append)
+            env["PATH"] = os.pathsep.join(part for part in path_parts if part)
+            shell = shutil.which("powershell.exe") or "powershell.exe"
+            return shell, ["-NoLogo", "-NoProfile", "-Command", command]
+
+        if self.path_append:
+            command = f'export PATH="$PATH:{self.path_append}"; {command}'
+
+        shell = shutil.which("bash") or "/bin/bash"
+        return shell, ["-l", "-c", command]
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""

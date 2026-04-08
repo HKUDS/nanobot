@@ -66,4 +66,9 @@
     ├── 记录 25：将“普通消息进入 `nanobot` 时 system prompt 的真实组成图”写入 `docs/project-structure.md`，方便后续理解 bootstrap files、memory、always skill 和 skills summary 的装配关系。
     ├── 记录 26：核查本机 Apifox 是否命中过近期供应链风险指标，并结合官方公开信息判断当前版本风险状态。
     ├── 记录 27：按用户提供的 CSDN blog《Apifox 被投毒！你的 SSH 密钥正在被上传》的原始排查口径，重新核查本机 Apifox 风险状态。
-    └── 记录 28：讲解 Heartbeat 心跳巡检机制的设计原理，并将内容写入 `docs/code-principle.md`。
+    ├── 记录 28：讲解 Heartbeat 心跳巡检机制的设计原理，并将内容写入 `docs/code-principle.md`。
+    ├── 记录 29：新增 PostToolUse hook，在每次完成小任务后自动追踪文件变更，经用户确认后写入 `docs/codex-worklog.md`。
+    ├── 记录 30：将本机 `nanobot` 默认模型从智谱切换为 `OpenAI Codex OAuth`，并完成本地配置校验。
+    ├── 记录 31：将本机 `nanobot` 的 Codex 默认模型切换为 `gpt-5.4-mini`。
+    ├── 记录 32：将 `oauth-cli-kit` 的 Codex 缓存从失效 workspace 切回当前 Plus 账号，并验证 `nanobot` 可正常响应。
+    └── 记录 33：使用 `skillhub` 安装 `model-deploy` skill 到当前 workspace，并确认可被 `SkillsLoader` 识别。

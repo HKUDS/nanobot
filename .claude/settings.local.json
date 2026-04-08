@@ -45,7 +45,18 @@
       "Bash(fc-list :lang=zh:*)",
       "Bash(powershell:*)",
       "Bash(start:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git stash:*)",
+      "Bash(git pull:*)",
+      "Bash(rm \"D:/nanobot/docs/project-structure-converted.md\")",
+      "Bash(rm -rf \"D:/nanobot/docs/images\")",
+      "Bash(rm:*)",
+      "Bash(cp \"D:/nanobot/.claude/skills/pdf2md/scripts/convert.py\" \"C:/Users/jj/.agents/skills/mineru-ocr/scripts/convert.py\")",
+      "Bash(cp \"D:/nanobot/.claude/skills/pdf2md/config/.env\" \"C:/Users/jj/.agents/skills/mineru-ocr/config/.env\")",
+      "Bash(cp \"D:/nanobot/.claude/skills/pdf2md/SKILL.md\" \"C:/Users/jj/.agents/skills/mineru-ocr/SKILL.md\")",
+      "Bash(rm -rf docs/pymupdf4llm_images docs/images_hires docs/pymupdf4llm-test.md docs/pymupdf4llm-with-images.md)",
+      "Read(//d/downloads/**)"
     ],
     "additionalDirectories": [
       "C:\\Users\\jj\\.nanobot",

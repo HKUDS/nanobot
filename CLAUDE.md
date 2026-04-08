@@ -117,7 +117,10 @@
 
 ### 5.4 工作记录写入规则
 
-- 每次完成一个可独立记录的任务后，更新 `docs/codex-worklog.md`。
+- PostToolUse hook 会自动追踪每次 Edit/Write 修改的文件到 `.claude/worklog_pending.txt`。
+- 每次完成一个可独立记录的任务后，必须先执行 `python scripts/append_worklog.py show` 展示待记录的变更，问我是否写入。
+- 我明确同意后，执行 `python scripts/append_worklog.py flush` 写入 `docs/codex-worklog.md`。
+- 我不同意，执行 `python scripts/append_worklog.py clean` 丢弃待记录的变更。
 - “可独立记录的任务”指已经形成明确结果的任务单元，例如：
   - 完成一轮项目结构梳理
   - 完成一次代码修改

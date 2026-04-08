@@ -17,6 +17,10 @@
           {
             "type": "command",
             "command": "cd D:/nanobot && python scripts/update_docs_nav.py"
+          },
+          {
+            "type": "command",
+            "command": "cd D:/nanobot && python scripts/append_worklog.py track"
           }
         ]
       }

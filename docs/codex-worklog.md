@@ -297,3 +297,83 @@
 - 执行命令: 无
 - 测试结果: 文档写入成功，目录树已同步。
 - 风险/待办: 无
+
+### 记录 29
+- 日期时间: 2026-04-02 15:45:00 (Asia/Shanghai)
+- 任务目标: 新增 PostToolUse hook，在每次完成小任务后自动追踪文件变更，经用户确认后写入 `docs/codex-worklog.md`。
+- 输入说明: 用户要求添加一个 hook，每次更新时把工作记录写到 codex-worklog 中，且必须在用户同意后才写入。
+- 实际操作: 创建了 `scripts/append_worklog.py`，支持 `track`（追踪变更）、`show`（展示待记录）、`flush`（写入记录）、`clean`（丢弃）四个子命令；在 `.claude/settings.json` 中配置 PostToolUse hook 调用 `track` 模式自动累积 Edit/Write 的文件路径；更新 `CLAUDE.md` 5.4 节为确认流程；在 `.gitignore` 中排除临时文件 `.claude/worklog_pending.txt`。
+- 修改文件: `scripts/append_worklog.py`、`.claude/settings.json`、`CLAUDE.md`、`.gitignore`
+- 执行命令: `python scripts/append_worklog.py track/show/flush/clean`
+- 测试结果: hook 追踪和四个子命令均测试通过，确认流程符合预期。
+- 风险/待办: 当前 flush 写入的记录中"任务目标"等字段为 `[待补充]`，后续可考虑自动填充。
+
+### 记录 30
+- 日期时间: 2026-04-07 14:51:08 (Asia/Shanghai)
+- 任务目标: 将本机 `nanobot` 默认模型配置切换为 `OpenAI Codex` 的 OAuth 认证链路。
+- 输入说明: 用户明确要求“帮我把 nanobot 模型配置改成 codex 认证”；当前机器上的 `~/.nanobot/config.json` 中默认模型为 `glm-5`，且 `agents.defaults.provider` 被固定为 `zhipu`，因此不能只改模型名，还需要解除这个 provider 绑定。
+- 实际操作: 先复查仓库中的 `README.md`、`nanobot/config/schema.py`、`nanobot/providers/registry.py`、`nanobot/providers/openai_codex_provider.py` 与 `nanobot/cli/commands.py`，确认 Codex 走的是 `nanobot provider login openai-codex` + `openai_codex` provider 链路；随后备份原配置为 `C:\Users\jj\.nanobot\config.json.bak-20260407-000000`，再把 `C:\Users\jj\.nanobot\config.json` 中 `agents.defaults.model` 从 `glm-5` 改为 `openai-codex/gpt-5.1-codex`，并把 `agents.defaults.provider` 从 `zhipu` 改为 `auto`，让运行时按模型前缀匹配到 `openai_codex`。
+- 修改文件: `C:\Users\jj\.nanobot\config.json`、`docs\README.md`、`docs\codex-worklog.md`
+- 执行命令: `Get-Content README.md`; `Get-Content nanobot/config/schema.py`; `Get-Content nanobot/providers/registry.py`; `Get-Content nanobot/providers/openai_codex_provider.py`; `Get-Content nanobot/cli/commands.py`; `Copy-Item C:\Users\jj\.nanobot\config.json C:\Users\jj\.nanobot\config.json.bak-20260407-000000`
+- 测试结果: 已将本机默认模型与 provider 配置切换到 Codex OAuth 方案；后续只要当前机器上存在有效的 Codex OAuth 登录态，`nanobot` 就会走 `openai_codex` provider，而不是继续走智谱。
+- 风险/待办: 当前默认 provider 已恢复为 `auto`；如果以后你又手动把 `agents.defaults.provider` 固定到其他供应商，即使模型名仍写成 `openai-codex/...`，也可能再次绕开 Codex OAuth 链路。若本机 OAuth 缓存失效，还需要单独执行 `nanobot provider login openai-codex` 重新登录。
+
+### 记录 31
+- 日期时间: 2026-04-07 14:53:50 (Asia/Shanghai)
+- 任务目标: 将本机 `nanobot` 的 Codex 默认模型从 `gpt-5.1-codex` 切换到 `gpt-5.4-mini`。
+- 输入说明: 用户进一步要求“模型改成 GPT-5..4-Mini”，结合当前 Codex provider 约定，按 `openai-codex/gpt-5.4-mini` 处理更符合仓库现有模型前缀规则。
+- 实际操作: 在保留 `agents.defaults.provider = auto` 的前提下，把 `C:\Users\jj\.nanobot\config.json` 中 `agents.defaults.model` 从 `openai-codex/gpt-5.1-codex` 更新为 `openai-codex/gpt-5.4-mini`，并同步备份当前配置为 `C:\Users\jj\.nanobot\config.json.bak-20260407-151500`；同时把这次变化追加进 `docs\README.md` 的目录树与 `docs\codex-worklog.md`。
+- 修改文件: `C:\Users\jj\.nanobot\config.json`、`docs\README.md`、`docs\codex-worklog.md`
+- 执行命令: `Copy-Item C:\Users\jj\.nanobot\config.json C:\Users\jj\.nanobot\config.json.bak-20260407-151500`
+- 测试结果: 配置层会继续匹配到 `openai_codex` provider，只是默认模型换成了 `gpt-5.4-mini`。
+- 风险/待办: 如果你的意思不是 `gpt-5.4-mini` 而是别的 Codex 模型名，我们再把 `agents.defaults.model` 精确改成你想要的字符串即可。
+
+### 记录 32
+- 日期时间: 2026-04-07 15:02:47 (Asia/Shanghai)
+- 任务目标: 将 `oauth-cli-kit` 的 Codex 缓存从失效 workspace 切回当前 Plus 账号，并验证 `nanobot` 可正常响应。
+- 输入说明: 用户反馈 `HTTP 402: {"detail":{"code":"deactivated_workspace"}}`，并明确表示要“退出这个 workspace，使用 plus 账号登录”；本机 `.codex/auth.json` 已显示当前账号为 Plus，但 `oauth-cli-kit` 的 `codex.json` 仍停留在旧 workspace。
+- 实际操作: 先阅读 `oauth_cli_kit` 的本地源码，确认其 `get_token()` 在缺少 `codex.json` 时会自动从 `~/.codex/auth.json` 导入登录态；随后把 `C:\Users\jj\AppData\Local\oauth-cli-kit\auth\codex.json` 备份为 `codex.json.bak-20260407-150000` 并移除旧缓存，再调用 `get_token()` 让它基于当前 `.codex\auth.json` 重新生成缓存，最终 `account_id` 回到当前 Plus 账号；最后用 `D:\anaconda\envs\nanobot\python.exe -m nanobot.cli.commands agent -m \"Reply with OK\" --no-markdown` 做了端到端验证。
+- 修改文件: `docs\README.md`、`docs\codex-worklog.md`
+- 执行命令: `Get-Content C:\Users\jj\.codex\auth.json`; `Get-Content C:\Users\jj\AppData\Local\oauth-cli-kit\auth\codex.json`; `D:\anaconda\envs\nanobot\python.exe -c "from oauth_cli_kit import get_token; ..."`; `Move-Item C:\Users\jj\AppData\Local\oauth-cli-kit\auth\codex.json C:\Users\jj\AppData\Local\oauth-cli-kit\auth\codex.json.bak-20260407-150000`; `D:\anaconda\envs\nanobot\python.exe -m nanobot.cli.commands agent -m "Reply with OK" --no-markdown`
+- 测试结果: `get_token()` 返回的 `account_id` 已切回当前 Plus 账号 `350bcf2a-8798-4406-818d-71d63a290794`，`nanobot agent` 也成功返回 `OK`，没有再出现 `deactivated_workspace`。
+- 风险/待办: 旧 workspace 的缓存已备份；如果以后你再次切换 ChatGPT 账号或 workspace，而 `oauth-cli-kit` 又指向旧缓存，重复同样的“备份旧 `codex.json` -> 触发 `get_token()` 导入 `.codex/auth.json`”流程即可。
+
+### 记录 33
+- 日期时间: 2026-04-07 15:13:47 (Asia/Shanghai)
+- 任务目标: 使用 `skillhub` 安装 `model-deploy` skill 到当前 workspace，并确认可被 `SkillsLoader` 识别。
+- 输入说明: 用户先要求“使用find-skill寻找”，随后确认“可以”，因此本次落地动作是把已经搜索到的 `model-deploy` skill 安装到当前 `nanobot` workspace，而不是只停留在搜索结果。
+- 实际操作: 先用 `C:\Users\jj\.nanobot\workspace\skills\skillhub\skills_store_cli.py` 按 slug `model-deploy` 发起安装；安装成功后生成 `C:\Users\jj\.nanobot\workspace\skills\model-deploy`，其中包含 `SKILL.md`、`_meta.json` 和 `scripts/deploy.sh`；随后用 `SkillsLoader` 复核，确认该 skill 已被当前 workspace 识别。
+- 修改文件: `docs\README.md`、`docs\codex-worklog.md`
+- 执行命令: `Test-Path C:\Users\jj\.nanobot\workspace\skills\model-deploy`; `D:\anaconda\envs\nanobot\python.exe C:\Users\jj\.nanobot\workspace\skills\skillhub\skills_store_cli.py --skip-self-upgrade --dir C:\Users\jj\.nanobot\workspace\skills install model-deploy`; `Get-Content C:\Users\jj\.nanobot\workspace\skills\model-deploy\SKILL.md`; `D:\anaconda\envs\nanobot\python.exe -c "from pathlib import Path; from nanobot.agent.skills import SkillsLoader; ..."` 
+- 测试结果: `model-deploy` 已成功安装到当前 workspace，且 `SkillsLoader` 返回中可以看到 `model-deploy`。
+- 风险/待办: 这个 skill 主要面向 GPU 服务器上的 vLLM 部署；实际执行前还要准备目标机 SSH、Miniconda、GPU 环境以及可用的 ModelScope 下载权限。
+
+### 记录 34
+- 日期时间: 2026-04-07 17:48:24 (Asia/Shanghai)
+- 任务目标: 在 `nanobot` 配置里补上 Docker 可执行路径，方便 shell 工具在当前环境里直接找到 `docker`。
+- 输入说明: 用户明确要求“在 nanobot 权限里面加一下”；我先确认了 `~/.nanobot/config.json` 里 `tools.exec.enable=true` 已经开着，真正缺的是 shell 进程的 PATH；随后在本机确认 Docker 位于 `D:\Docker\resources\bin\docker.exe`，并验证 bash 能通过 `/mnt/d/Docker/resources/bin/docker.exe` 访问到它。
+- 实际操作: 在 `C:\Users\jj\.nanobot\config.json` 的 `tools.exec.pathAppend` 中加入 `/mnt/d/Docker/resources/bin`，让 `nanobot` 启动 shell 命令时自动把 Docker 目录拼进 PATH。
+- 修改文件: `C:\Users\jj\.nanobot\config.json`、`docs\codex-worklog.md`
+- 执行命令: `Get-Command docker`; `where.exe docker`; `bash -lc 'ls /d/Docker/resources/bin/docker.exe 2>/dev/null || ls /mnt/d/Docker/resources/bin/docker.exe 2>/dev/null || true'`
+- 测试结果: 本机 bash 已能看到 `/mnt/d/Docker/resources/bin/docker.exe`，因此这条 `pathAppend` 应该能让 `nanobot` 的 shell 工具直接找到 Docker。
+- 风险/待办: 这次改的是 `nanobot` 的 shell PATH，不是外层 Codex 桌面环境的命令白名单；如果你说的“不能启动 Docker 容器”仍然发生在外层工作区权限层，还需要另外补 `.claude/settings.local.json` 的 `Bash(docker:*)` 白名单。
+
+### 记录 35
+- 日期时间: 2026-04-07 18:02:41 (Asia/Shanghai)
+- 任务目标: 修复 `nanobot` 在 Windows 上执行 Docker 命令时误判为“无法真正执行”的问题。
+- 输入说明: 用户给出截图，要求“解决并说明理由”；我先验证了 Docker Desktop 在本机可用，但 `ExecTool` 通过系统 `bash.exe` 执行时会触发 WSL / RPC 相关失败，而不是 Docker 命令本身错误。
+- 实际操作: 调整 `nanobot/agent/tools/shell.py`，让 Windows 下的 `ExecTool` 改用 PowerShell 作为执行后端，并补齐启动 PowerShell 所需的 Windows 系统环境变量；同时保留 POSIX 平台继续走 bash。补充更新 `tests/tools/test_exec_env.py`，让测试按平台使用对应的环境变量语法，并增加 Windows 下 Docker 可执行验证。
+- 修改文件: `nanobot/agent/tools/shell.py`、`tests/tools/test_exec_env.py`、`docs/codex-worklog.md`
+- 执行命令: `docker version`; `powershell.exe -NoProfile -Command "docker version --format '{{.Server.Version}}'"`; `ExecTool(path_append='/mnt/d/Docker/resources/bin').execute(...)` 的最小验证脚本；`ExecTool(path_append='/opt/custom/bin').execute('echo hello')`
+- 测试结果: `ExecTool` 现在可以在 Windows 上直接返回 `29.3.1`，`echo hello` 也正常；`pathAppend` 仍然生效，且父进程变量不会泄露。
+- 风险/待办: 这次修复只覆盖了 `ExecTool` 的 Windows 执行路径；如果后续还要支持更复杂的 bash 语法，需要再评估是否要加一层命令兼容或语法转换。
+
+### 记录 36
+- 日期时间: 2026-04-07 18:11:34 (Asia/Shanghai)
+- 任务目标: 清理 `nanobot` 配置里不再需要的 Docker `pathAppend`。
+- 输入说明: 用户确认“直接删掉”；我复查后发现这台机器上的 `docker` 已经能直接从系统路径解析到，`pathAppend` 只是先前为了兼容性临时加的附加目录，不再是必需项。
+- 实际操作: 从 `C:\Users\jj\.nanobot\config.json` 中删除 `tools.exec.pathAppend`，保留 `tools.exec.enable=true` 和其它默认执行配置。
+- 修改文件: `C:\Users\jj\.nanobot\config.json`、`docs\codex-worklog.md`
+- 执行命令: 复查 `Get-Command docker`、`where.exe docker` 和 `docker version` 的可用性后，确认无需额外 PATH 追加。
+- 测试结果: 配置已回归为不带额外 Docker 路径的默认状态，避免把 WSL 风格路径固定进 Windows 配置。
+- 风险/待办: 如果以后 Docker 安装路径变化，仍可按需再加回 `pathAppend`，但默认应优先依赖系统 PATH。
