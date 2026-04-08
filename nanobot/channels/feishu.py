@@ -251,6 +251,7 @@ class FeishuConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     react_emoji: str = "THUMBSUP"
     done_emoji: str | None = None  # Emoji to show when task is completed (e.g., "DONE", "OK")
+    tool_hint_prefix: str = "\U0001f527"  # Prefix for inline tool hints (default: 🔧)
     group_policy: Literal["open", "mention"] = "mention"
     reply_to_message: bool = False  # If True, bot replies quote the user's original message
     streaming: bool = True
@@ -267,7 +268,6 @@ class _FeishuStreamBuf:
     card_id: str | None = None
     sequence: int = 0
     last_edit: float = 0.0
-    tool_hint_len: int = 0
 
 
 class FeishuChannel(BaseChannel):
@@ -1265,7 +1265,15 @@ class FeishuChannel(BaseChannel):
     async def send_delta(
         self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
     ) -> None:
-        """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent."""
+        """Progressive streaming via CardKit: create card on first delta, stream-update on subsequent.
+
+        Supported metadata keys:
+            _stream_end: Finalize the streaming card.
+            _resuming:   Mid-turn pause – flush but keep the buffer alive.
+            _tool_hint:  Delta is a formatted tool hint (for display only).
+            message_id:  Original message id (used with _stream_end for reaction cleanup).
+            reaction_id: Reaction id to remove on stream end.
+        """
         if not self._client:
             return
         meta = metadata or {}
@@ -1287,7 +1295,6 @@ class FeishuChannel(BaseChannel):
                 # next segment appends to the same card.
                 buf = self._stream_bufs.get(chat_id)
                 if buf and buf.card_id and buf.text:
-                    buf.tool_hint_len = 0
                     buf.sequence += 1
                     await loop.run_in_executor(
                         None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
@@ -1297,7 +1304,6 @@ class FeishuChannel(BaseChannel):
             buf = self._stream_bufs.pop(chat_id, None)
             if not buf or not buf.text:
                 return
-            buf.tool_hint_len = 0
             if buf.card_id:
                 buf.sequence += 1
                 await loop.run_in_executor(
@@ -1333,8 +1339,6 @@ class FeishuChannel(BaseChannel):
         if buf is None:
             buf = _FeishuStreamBuf()
             self._stream_bufs[chat_id] = buf
-        if buf.tool_hint_len > 0:
-            buf.tool_hint_len = 0
         buf.text += delta
         if not buf.text.strip():
             return
@@ -1377,22 +1381,17 @@ class FeishuChannel(BaseChannel):
                     return
                 buf = self._stream_bufs.get(msg.chat_id)
                 if buf and buf.card_id:
-                    if buf.tool_hint_len > 0:
-                        buf.text = buf.text[:-buf.tool_hint_len]
-                    lines = self._format_tool_hint_lines(hint).split("\n")
-                    formatted = "\n".join(f"🔧 {ln}" for ln in lines if ln.strip())
-                    suffix = f"\n\n{formatted}\n\n"
-                    buf.text += suffix
-                    buf.tool_hint_len = len(suffix)
-                    buf.sequence += 1
-                    await loop.run_in_executor(
-                        None, self._stream_update_text_sync,
-                        buf.card_id, buf.text, buf.sequence,
-                    )
-                else:
-                    await self._send_tool_hint_card(
-                        receive_id_type, msg.chat_id, hint
-                    )
+                    # Delegate to send_delta so tool hints get the same
+                    # throttling (and card creation) as regular text deltas.
+                    lines = self.__class__._format_tool_hint_lines(hint).split("\n")
+                    delta = "\n\n" + "\n".join(
+                        f"{self.config.tool_hint_prefix} {ln}" for ln in lines if ln.strip()
+                    ) + "\n\n"
+                    await self.send_delta(msg.chat_id, delta)
+                    return
+                await self._send_tool_hint_card(
+                    receive_id_type, msg.chat_id, hint
+                )
                 return
 
             # Determine whether the first message should quote the user's message.
@@ -1701,7 +1700,7 @@ class FeishuChannel(BaseChannel):
         loop = asyncio.get_running_loop()
 
         # Put each top-level tool call on its own line without altering commas inside arguments.
-        formatted_code = self._format_tool_hint_lines(tool_hint)
+        formatted_code = self.__class__._format_tool_hint_lines(tool_hint)
 
         card = {
             "config": {"wide_screen_mode": True},

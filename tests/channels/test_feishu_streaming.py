@@ -310,7 +310,6 @@ class TestToolHintInlineStreaming:
 
         buf = ch._stream_bufs["oc_chat1"]
         assert '🔧 web_fetch("https://example.com")' in buf.text
-        assert buf.tool_hint_len > 0
         assert buf.sequence == 3
         ch._client.cardkit.v1.card_element.content.assert_called_once()
         ch._client.im.v1.message.create.assert_not_called()
@@ -319,11 +318,9 @@ class TestToolHintInlineStreaming:
     async def test_tool_hint_preserved_on_next_delta(self):
         """When new delta arrives, the tool hint is kept as permanent content and delta appends after it."""
         ch = _make_channel()
-        suffix = "\n\n🔧 web_fetch(\"url\")\n\n"
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
-            text="Partial answer" + suffix,
+            text="Partial answer\n\n🔧 web_fetch(\"url\")\n\n",
             card_id="card_1", sequence=3, last_edit=0.0,
-            tool_hint_len=len(suffix),
         )
         ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
 
@@ -333,7 +330,6 @@ class TestToolHintInlineStreaming:
         assert "Partial answer" in buf.text
         assert "🔧 web_fetch" in buf.text
         assert buf.text.endswith(" continued")
-        assert buf.tool_hint_len == 0
 
     @pytest.mark.asyncio
     async def test_tool_hint_fallback_when_no_stream(self):
@@ -352,8 +348,8 @@ class TestToolHintInlineStreaming:
         ch._client.im.v1.message.create.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_consecutive_tool_hints_replace_previous(self):
-        """When multiple tool hints arrive consecutively, each replaces the previous one."""
+    async def test_consecutive_tool_hints_append(self):
+        """When multiple tool hints arrive consecutively, each appends to the card."""
         ch = _make_channel()
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Partial answer", card_id="card_1", sequence=2, last_edit=0.0,
@@ -373,20 +369,19 @@ class TestToolHintInlineStreaming:
         await ch.send(msg2)
 
         buf = ch._stream_bufs["oc_chat1"]
-        assert buf.text.count("$ cd /project") == 0
-        assert buf.text.count("$ git status") == 1
+        assert "$ cd /project" in buf.text
+        assert "$ git status" in buf.text
         assert buf.text.startswith("Partial answer")
+        assert "🔧 $ cd /project" in buf.text
         assert "🔧 $ git status" in buf.text
 
     @pytest.mark.asyncio
     async def test_tool_hint_preserved_on_resuming_flush(self):
         """When _resuming flushes the buffer, tool hint is kept as permanent content."""
         ch = _make_channel()
-        suffix = "\n\n🔧 $ cd /project\n\n"
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
-            text="Partial answer" + suffix,
+            text="Partial answer\n\n🔧 $ cd /project\n\n",
             card_id="card_1", sequence=2, last_edit=0.0,
-            tool_hint_len=len(suffix),
         )
         ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
 
@@ -395,17 +390,14 @@ class TestToolHintInlineStreaming:
         buf = ch._stream_bufs["oc_chat1"]
         assert "Partial answer" in buf.text
         assert "🔧 $ cd /project" in buf.text
-        assert buf.tool_hint_len == 0
 
     @pytest.mark.asyncio
     async def test_tool_hint_preserved_on_final_stream_end(self):
         """When final _stream_end closes the card, tool hint is kept in the final text."""
         ch = _make_channel()
-        suffix = "\n\n🔧 web_fetch(\"url\")\n\n"
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
-            text="Final content" + suffix,
+            text="Final content\n\n🔧 web_fetch(\"url\")\n\n",
             card_id="card_1", sequence=3, last_edit=0.0,
-            tool_hint_len=len(suffix),
         )
         ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
         ch._client.cardkit.v1.card.settings.return_value = _mock_content_response()
@@ -415,6 +407,26 @@ class TestToolHintInlineStreaming:
         assert "oc_chat1" not in ch._stream_bufs
         update_call = ch._client.cardkit.v1.card_element.content.call_args[0][0]
         assert "🔧" in update_call.body.content
+
+    @pytest.mark.asyncio
+    async def test_empty_tool_hint_is_noop(self):
+        """Empty or whitespace-only tool hint content is silently ignored."""
+        ch = _make_channel()
+        ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
+            text="Partial answer", card_id="card_1", sequence=2, last_edit=0.0,
+        )
+
+        for content in ("", "   ", "\t\n"):
+            msg = OutboundMessage(
+                channel="feishu", chat_id="oc_chat1",
+                content=content, metadata={"_tool_hint": True},
+            )
+            await ch.send(msg)
+
+        buf = ch._stream_bufs["oc_chat1"]
+        assert buf.text == "Partial answer"
+        assert buf.sequence == 2
+        ch._client.cardkit.v1.card_element.content.assert_not_called()
 
 
 class TestSendMessageReturnsId:

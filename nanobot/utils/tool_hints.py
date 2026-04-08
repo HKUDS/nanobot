@@ -63,17 +63,6 @@ def _get_args(tc) -> dict:
     return {}
 
 
-def _group_consecutive(calls: list) -> list[tuple[str, int, object]]:
-    """Group consecutive calls to the same tool: [(name, count, first), ...]."""
-    groups: list[tuple[str, int, object]] = []
-    for tc in calls:
-        if groups and groups[-1][0] == tc.name:
-            groups[-1] = (groups[-1][0], groups[-1][1] + 1, groups[-1][2])
-        else:
-            groups.append((tc.name, 1, tc))
-    return groups
-
-
 def _extract_arg(tc, key_args: list[str]) -> str | None:
     """Extract the first available value from preferred key names."""
     args = _get_args(tc)
