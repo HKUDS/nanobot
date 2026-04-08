@@ -152,7 +152,7 @@ class GatewayConfig(Base):
 class WebSearchConfig(Base):
     """Web search tool configuration."""
 
-    provider: str = "duckduckgo"  # brave, tavily, duckduckgo, searxng, jina
+    provider: str = "duckduckgo"  # brave, tavily, duckduckgo, searxng, jina, kagi
     api_key: str = ""
     base_url: str = ""  # SearXNG base URL
     max_results: int = 5
