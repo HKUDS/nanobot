@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
+import re
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext
@@ -40,6 +42,8 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
 
 
+# Named constant for unified session key, used across multiple locations
+UNIFIED_SESSION_KEY = "unified:default"
 class _LoopHook(AgentHook):
     """Core hook for the main loop."""
 
@@ -422,15 +426,17 @@ class AgentLoop:
                 if result:
                     await self.bus.publish_outbound(result)
                 continue
+            # Compute the effective session key before dispatching
+            # This ensures /stop command can find tasks correctly when unified session is enabled
+            effective_key = UNIFIED_SESSION_KEY if self._unified_session and not msg.session_key_override else msg.session_key
             task = asyncio.create_task(self._dispatch(msg))
-            self._active_tasks.setdefault(msg.session_key, []).append(task)
-            task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
+            self._active_tasks.setdefault(effective_key, []).append(task)
+            task.add_done_callback(lambda t, k=effective_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
         if self._unified_session and not msg.session_key_override:
-            import dataclasses
-            msg = dataclasses.replace(msg, session_key_override="unified:default")
+            msg = dataclasses.replace(msg, session_key_override=UNIFIED_SESSION_KEY)
         lock = self._session_locks.setdefault(msg.session_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
         async with lock, gate:
