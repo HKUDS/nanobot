@@ -7,6 +7,7 @@ import json
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -159,6 +160,7 @@ class AgentLoop:
     """
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
+    _SESSION_RESUMED_TAG = "[Session Resumed]"
 
     def __init__(
         self,
@@ -508,6 +510,36 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
 
+    async def _auto_new(self, session_key: str) -> None:
+        """Archive un-consolidated messages, clear session, inject summary."""
+        session = self.sessions.get_or_create(session_key)
+        unconsolidated = session.messages[session.last_consolidated:]
+        if not unconsolidated:
+            return
+
+        # Archive via existing Consolidator (writes to history.jsonl)
+        archived = await self.consolidator.archive(unconsolidated)
+        if not archived:
+            return
+
+        # Read the latest history entry as summary
+        entries = self.consolidator.store.read_unprocessed_history(since_cursor=0)
+        summary_text = entries[-1]["content"] if entries else ""
+
+        # Clear session (same as /new)
+        session.clear()
+        self.sessions.save(session)
+        self.sessions.invalidate(session_key)
+
+        # Inject summary as first user message in the new session
+        if summary_text and summary_text != "(nothing)":
+            fresh = self.sessions.get_or_create(session_key)
+            fresh.add_message(
+                "user",
+                f"{self._SESSION_RESUMED_TAG} Previous conversation summary:\n{summary_text}",
+            )
+            self.sessions.save(fresh)
+
     async def _process_message(
         self,
         msg: InboundMessage,
@@ -526,6 +558,16 @@ class AgentLoop:
             session = self.sessions.get_or_create(key)
             if self._restore_runtime_checkpoint(session):
                 self.sessions.save(session)
+
+            # Auto session new for system messages
+            if (
+                self._session_ttl_minutes > 0
+                and session.updated_at
+                and (datetime.now() - session.updated_at).total_seconds() >= self._session_ttl_minutes * 60
+            ):
+                await self._auto_new(key)
+                session = self.sessions.get_or_create(key)
+
             await self.consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
@@ -553,6 +595,15 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
         if self._restore_runtime_checkpoint(session):
             self.sessions.save(session)
+
+        # --- Auto session new: reset stale sessions ---
+        if (
+            self._session_ttl_minutes > 0
+            and session.updated_at
+            and (datetime.now() - session.updated_at).total_seconds() >= self._session_ttl_minutes * 60
+        ):
+            await self._auto_new(key)
+            session = self.sessions.get_or_create(key)
 
         # Slash commands
         raw = msg.content.strip()
