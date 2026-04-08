@@ -319,7 +319,7 @@ class TestToolHintInlineStreaming:
     async def test_tool_hint_preserved_on_next_delta(self):
         """When new delta arrives, the tool hint is kept as permanent content and delta appends after it."""
         ch = _make_channel()
-        suffix = "\n\n---\n🔧 web_fetch(\"url\")"
+        suffix = "\n\n🔧 web_fetch(\"url\")\n\n"
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Partial answer" + suffix,
             card_id="card_1", sequence=3, last_edit=0.0,
@@ -382,7 +382,7 @@ class TestToolHintInlineStreaming:
     async def test_tool_hint_preserved_on_resuming_flush(self):
         """When _resuming flushes the buffer, tool hint is kept as permanent content."""
         ch = _make_channel()
-        suffix = "\n\n---\n🔧 $ cd /project"
+        suffix = "\n\n🔧 $ cd /project\n\n"
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Partial answer" + suffix,
             card_id="card_1", sequence=2, last_edit=0.0,
@@ -401,7 +401,7 @@ class TestToolHintInlineStreaming:
     async def test_tool_hint_preserved_on_final_stream_end(self):
         """When final _stream_end closes the card, tool hint is kept in the final text."""
         ch = _make_channel()
-        suffix = "\n\n---\n🔧 web_fetch(\"url\")"
+        suffix = "\n\n🔧 web_fetch(\"url\")\n\n"
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Final content" + suffix,
             card_id="card_1", sequence=3, last_edit=0.0,

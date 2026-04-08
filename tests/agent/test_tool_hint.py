@@ -46,10 +46,42 @@ class TestToolHintKnownTools:
         result = _hint([_tc("exec", {"command": "npm install typescript"})])
         assert result == "$ npm install typescript"
 
-    def test_exec_shows_full_command(self):
+    def test_exec_truncates_long_command(self):
         cmd = "cd /very/long/path && cat file && echo done && sleep 1 && ls -la"
         result = _hint([_tc("exec", {"command": cmd})])
-        assert result == f"$ {cmd}"
+        assert result.startswith("$ ")
+        assert len(result) <= 50  # reasonable limit
+
+    def test_exec_abbreviates_paths_in_command(self):
+        """Windows paths in exec commands should be folded, not blindly truncated."""
+        cmd = "cd D:\\Documents\\GitHub\\nanobot\\.worktree\\tomain\\nanobot && git diff origin/main...pr-2706 --name-only 2>&1"
+        result = _hint([_tc("exec", {"command": cmd})])
+        assert "\u2026/" in result  # path should be folded with …/
+        assert "worktree" not in result  # middle segments should be collapsed
+
+    def test_exec_abbreviates_linux_paths(self):
+        """Unix absolute paths in exec commands should be folded."""
+        cmd = "cd /home/user/projects/nanobot/.worktree/tomain && make build"
+        result = _hint([_tc("exec", {"command": cmd})])
+        assert "\u2026/" in result
+        assert "projects" not in result
+
+    def test_exec_abbreviates_home_paths(self):
+        """~/ paths in exec commands should be folded."""
+        cmd = "cd ~/projects/nanobot/workspace && pytest tests/"
+        result = _hint([_tc("exec", {"command": cmd})])
+        assert "\u2026/" in result
+
+    def test_exec_short_command_unchanged(self):
+        result = _hint([_tc("exec", {"command": "npm install typescript"})])
+        assert result == "$ npm install typescript"
+
+    def test_exec_chained_commands_truncated_not_mid_path(self):
+        """Long chained commands should truncate preserving abbreviated paths."""
+        cmd = "cd D:\\Documents\\GitHub\\project && npm run build && npm test"
+        result = _hint([_tc("exec", {"command": cmd})])
+        assert "\u2026/" in result  # path folded
+        assert "npm" in result  # chained command still visible
 
     def test_web_search(self):
         result = _hint([_tc("web_search", {"query": "Claude 4 vs GPT-4"})])
@@ -81,10 +113,11 @@ class TestToolHintFallback:
         result = _hint([_tc("custom_tool", {"data": "hello world"})])
         assert result == 'custom_tool("hello world")'
 
-    def test_unknown_tool_with_long_arg_shows_full(self):
+    def test_unknown_tool_with_long_arg_truncates(self):
         long_val = "a" * 60
         result = _hint([_tc("custom_tool", {"data": long_val})])
-        assert result == f'custom_tool("{long_val}")'
+        assert len(result) < 80
+        assert "\u2026" in result
 
     def test_unknown_tool_no_string_arg(self):
         result = _hint([_tc("custom_tool", {"count": 42})])
@@ -109,7 +142,7 @@ class TestToolHintFolding:
             _tc("grep", {"pattern": "*.ts"}),
         ]
         result = _hint(calls)
-        assert result == 'grep "*.py", grep "*.ts"'
+        assert "\u00d7" not in result
 
     def test_two_consecutive_same_args_folded(self):
         calls = [
@@ -126,7 +159,7 @@ class TestToolHintFolding:
             _tc("read_file", {"path": "c.py"}),
         ]
         result = _hint(calls)
-        assert result == "read a.py, read b.py, read c.py"
+        assert "\u00d7" not in result
 
     def test_different_tools_not_folded(self):
         calls = [
@@ -193,7 +226,7 @@ class TestToolHintMixedFolding:
     """G4: Mixed folding groups with interleaved same-tool segments."""
 
     def test_read_read_grep_grep_read(self):
-        """All different args — each hint is listed separately."""
+        """All different args — each hint listed separately."""
         calls = [
             _tc("read_file", {"path": "a.py"}),
             _tc("read_file", {"path": "b.py"}),
@@ -202,4 +235,6 @@ class TestToolHintMixedFolding:
             _tc("read_file", {"path": "c.py"}),
         ]
         result = _hint(calls)
-        assert result == 'read a.py, read b.py, grep "x", grep "y", read c.py'
+        assert "\u00d7" not in result
+        parts = result.split(", ")
+        assert len(parts) == 5

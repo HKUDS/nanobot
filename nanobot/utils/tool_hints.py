@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+
+from nanobot.utils.path import abbreviate_path
 
 # Registry: tool_name -> (key_args, template, is_path, is_command)
 _TOOL_FORMATS: dict[str, tuple[list[str], str, bool, bool]] = {
@@ -16,9 +19,14 @@ _TOOL_FORMATS: dict[str, tuple[list[str], str, bool, bool]] = {
     "list_dir":   (["path"],                           "ls {}",       True,  False),
 }
 
+# Matches file paths embedded in shell commands (Windows drive, ~/, or absolute after space)
+_PATH_IN_CMD_RE = re.compile(
+    r"(?:[A-Za-z]:[/\\]|~/|(?<=\s)/)[^\s;&|<>\"']+"
+)
+
 
 def format_tool_hints(tool_calls: list) -> str:
-    """Format tool calls as concise hints with smart deduplication."""
+    """Format tool calls as concise hints with smart abbreviation."""
     if not tool_calls:
         return ""
 
@@ -32,15 +40,15 @@ def format_tool_hints(tool_calls: list) -> str:
         else:
             formatted.append(_fmt_fallback(tc))
 
-    groups: list[tuple[str, int]] = []
+    hints = []
     for hint in formatted:
-        if groups and groups[-1][0] == hint:
-            groups[-1] = (hint, groups[-1][1] + 1)
+        if hints and hints[-1][0] == hint:
+            hints[-1] = (hint, hints[-1][1] + 1)
         else:
-            groups.append((hint, 1))
+            hints.append((hint, 1))
 
     return ", ".join(
-        f"{h} \u00d7 {c}" if c > 1 else h for h, c in groups
+        f"{h} \u00d7 {c}" if c > 1 else h for h, c in hints
     )
 
 
@@ -54,6 +62,16 @@ def _get_args(tc) -> dict:
         return tc.arguments
     return {}
 
+
+def _group_consecutive(calls: list) -> list[tuple[str, int, object]]:
+    """Group consecutive calls to the same tool: [(name, count, first), ...]."""
+    groups: list[tuple[str, int, object]] = []
+    for tc in calls:
+        if groups and groups[-1][0] == tc.name:
+            groups[-1] = (groups[-1][0], groups[-1][1] + 1, groups[-1][2])
+        else:
+            groups.append((tc.name, 1, tc))
+    return groups
 
 
 def _extract_arg(tc, key_args: list[str]) -> str | None:
@@ -76,7 +94,21 @@ def _fmt_known(tc, fmt: tuple) -> str:
     val = _extract_arg(tc, fmt[0])
     if val is None:
         return tc.name
+    if fmt[2]:  # is_path
+        val = abbreviate_path(val)
+    elif fmt[3]:  # is_command
+        val = _abbreviate_command(val)
     return fmt[1].format(val)
+
+
+def _abbreviate_command(cmd: str, max_len: int = 40) -> str:
+    """Abbreviate paths in a command string, then truncate."""
+    abbreviated = _PATH_IN_CMD_RE.sub(
+        lambda m: abbreviate_path(m.group(), max_len=25), cmd
+    )
+    if len(abbreviated) <= max_len:
+        return abbreviated
+    return abbreviated[:max_len - 1] + "\u2026"
 
 
 def _fmt_mcp(tc) -> str:
@@ -97,7 +129,7 @@ def _fmt_mcp(tc) -> str:
     val = next((v for v in args.values() if isinstance(v, str) and v), None)
     if val is None:
         return f"{server}::{tool}"
-    return f'{server}::{tool}("{val}")'
+    return f'{server}::{tool}("{abbreviate_path(val, 40)}")'
 
 
 def _fmt_fallback(tc) -> str:
@@ -106,4 +138,4 @@ def _fmt_fallback(tc) -> str:
     val = next(iter(args.values()), None) if isinstance(args, dict) else None
     if not isinstance(val, str):
         return tc.name
-    return f'{tc.name}("{val}")'
+    return f'{tc.name}("{abbreviate_path(val, 40)}")' if len(val) > 40 else f'{tc.name}("{val}")'
