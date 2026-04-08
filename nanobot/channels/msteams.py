@@ -430,6 +430,19 @@ class MSTeamsChannel(BaseChannel):
             logger.warning("Failed to clear MSTeams restart notice state: {}", e)
         return payload
 
+    def _format_restart_post_message(self, started_at_raw: Any) -> str:
+        """Build the post-restart text, including elapsed time when available."""
+        message = self.config.restart_notify_post_message.strip()
+        if not message:
+            return ""
+        if started_at_raw in (None, ""):
+            return message
+        try:
+            elapsed_s = max(0.0, time.time() - float(started_at_raw))
+        except (TypeError, ValueError):
+            return message
+        return f"{message} Restart took {elapsed_s:.1f} seconds."
+
     async def _maybe_send_restart_pre_message(self) -> None:
         """Send the configured pre-restart Teams notice and persist pending restart state."""
         if not self.config.restart_notify_enabled:
@@ -471,7 +484,7 @@ class MSTeamsChannel(BaseChannel):
             logger.warning("MSTeams restart post-notice skipped: conversation ref missing for {}", chat_id)
             return
 
-        message = self.config.restart_notify_post_message.strip()
+        message = self._format_restart_post_message(notice.get("started_at"))
         if not message:
             logger.debug("MSTeams restart post-notice skipped: post message empty")
             return

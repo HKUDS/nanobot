@@ -469,7 +469,7 @@ async def test_restart_pre_message_writes_pending_notice_and_sends_to_latest_con
 
 
 @pytest.mark.asyncio
-async def test_restart_post_message_consumes_pending_notice_and_sends(make_channel, tmp_path):
+async def test_restart_post_message_consumes_pending_notice_and_sends(make_channel, monkeypatch, tmp_path):
     ch = make_channel(restartNotifyEnabled=True)
     fake_http = FakeHttpClient()
     ch._http = fake_http
@@ -483,6 +483,7 @@ async def test_restart_post_message_consumes_pending_notice_and_sends(make_chann
         json.dumps({"chat_id": "conv-123", "started_at": 123.0}),
         encoding="utf-8",
     )
+    monkeypatch.setattr(msteams_module.time, "time", lambda: 130.5)
 
     await ch._maybe_send_restart_post_message()
 
@@ -490,7 +491,9 @@ async def test_restart_post_message_consumes_pending_notice_and_sends(make_chann
     assert len(fake_http.calls) == 1
     url, kwargs = fake_http.calls[0]
     assert url == "https://smba.trafficmanager.net/amer/v3/conversations/conv-123/activities"
-    assert kwargs["json"]["text"] == ch.config.restart_notify_post_message
+    assert kwargs["json"]["text"] == (
+        f"{ch.config.restart_notify_post_message} Restart took 7.5 seconds."
+    )
 
 
 @pytest.mark.asyncio
