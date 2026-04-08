@@ -19,6 +19,7 @@ class ContextBuilder:
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
+    _MAX_RECENT_HISTORY = 50
 
     def __init__(self, workspace: Path, timezone: str | None = None):
         self.workspace = workspace
@@ -26,9 +27,13 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        channel: str | None = None,
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
-        parts = [self._get_identity()]
+        parts = [self._get_identity(channel=channel)]
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -48,9 +53,16 @@ class ContextBuilder:
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
+        entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
+        if entries:
+            capped = entries[-self._MAX_RECENT_HISTORY:]
+            parts.append("# Recent History\n\n" + "\n".join(
+                f"- [{e['timestamp']}] {e['content']}" for e in capped
+            ))
+
         return "\n\n---\n\n".join(parts)
 
-    def _get_identity(self) -> str:
+    def _get_identity(self, channel: str | None = None) -> str:
         """Get the core identity section."""
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
@@ -61,6 +73,7 @@ class ContextBuilder:
             workspace_path=workspace_path,
             runtime=runtime,
             platform_policy=render_template("agent/platform_policy.md", system=system),
+            channel=channel or "",
         )
 
     @staticmethod
@@ -120,7 +133,7 @@ class ContextBuilder:
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel)},
             *history,
         ]
         if messages[-1].get("role") == current_role:
