@@ -82,7 +82,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         is_direct=True,
     ),
-
+    # === Custom Responses (direct OpenAI Responses endpoint) ===============
+    ProviderSpec(
+        name="custom_responses",
+        keywords=(),
+        env_key="",
+        display_name="Custom Responses",
+        backend="custom_responses",
+        is_direct=True,
+    ),
     # === Azure OpenAI (direct API calls with API version 2024-10-21) =====
     ProviderSpec(
         name="azure_openai",
