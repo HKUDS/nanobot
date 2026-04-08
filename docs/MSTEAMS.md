@@ -9,6 +9,7 @@ This repository includes a built-in `msteams` channel MVP for Microsoft Teams di
 - Conversation reference persistence for replies
 - Public HTTPS webhook support through a tunnel or reverse proxy
 - Optional restart notifications across gateway stop/start when enabled
+- Optional native agent-triggered gateway restart when explicitly enabled
 
 ## Not yet included
 
@@ -38,6 +39,17 @@ This repository includes a built-in `msteams` channel MVP for Microsoft Teams di
       "restartNotifyPreMessage": "Nanobot agent initiated a gateway restart. I will message again when the gateway is back online.",
       "restartNotifyPostMessage": "Nanobot gateway is back online."
     }
+  },
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 18790,
+    "agentRestartEnabled": false,
+    "agentRestartCommand": "",
+    "heartbeat": {
+      "enabled": true,
+      "intervalS": 1800,
+      "keepRecentMessages": 8
+    }
   }
 }
 ```
@@ -55,6 +67,33 @@ This repository includes a built-in `msteams` channel MVP for Microsoft Teams di
 - `restartNotifyEnabled: true` enables native Teams restart notifications.
 - When restart notifications are enabled, the channel sends `restartNotifyPreMessage` during gateway shutdown and persists a pending marker.
 - On the next successful startup, the channel consumes that marker and sends `restartNotifyPostMessage` back to the same most recently active Teams DM.
+- The post-restart message includes elapsed restart time when the pending marker contains a valid start timestamp.
+
+## Native agent restart
+
+Nanobot also includes a native `restart` tool for agent-triggered gateway restarts.
+
+This tool is **disabled by default**.
+
+It will only run when both of these gateway settings are configured:
+
+- `gateway.agentRestartEnabled: true`
+- `gateway.agentRestartCommand: "..."`
+
+When the tool is disabled or the command is blank, the tool returns an error and does nothing.
+
+When enabled, the tool launches the configured restart command and relies on the normal gateway shutdown/startup lifecycle to produce the Teams restart notifications described above.
+
+### Example
+
+```json
+{
+  "gateway": {
+    "agentRestartEnabled": true,
+    "agentRestartCommand": "systemctl --user restart nanobot-gateway.service"
+  }
+}
+```
 
 ## Setup notes
 
@@ -68,3 +107,4 @@ nanobot gateway
 ```
 
 5. Optional: enable restart announcements with `restartNotifyEnabled: true` if you want Teams users to see a shutdown message before gateway restart and a back-online message after startup completes.
+6. Optional: enable agent-triggered restarts with `gateway.agentRestartEnabled: true` and set `gateway.agentRestartCommand` to the exact restart command you want the agent to invoke.
