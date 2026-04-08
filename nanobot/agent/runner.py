@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.pruner import ContextPruner
 from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, ToolCallRequest
@@ -58,6 +59,7 @@ class AgentRunSpec:
     provider_retry_mode: str = "standard"
     progress_callback: Any | None = None
     checkpoint_callback: Any | None = None
+    pruner: ContextPruner | None = None
 
 
 @dataclass(slots=True)
@@ -97,6 +99,12 @@ class AgentRunner:
         for iteration in range(spec.max_iterations):
             try:
                 messages = self._apply_tool_result_budget(spec, messages)
+                # Apply context pruning if enabled (transient, doesn't affect stored history)
+                if spec.pruner:
+                    messages = spec.pruner.prune(
+                        messages,
+                        context_window_chars=spec.context_window_tokens or 128_000,
+                    )
                 messages_for_model = self._snip_history(spec, messages)
             except Exception as exc:
                 logger.warning(

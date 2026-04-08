@@ -206,7 +206,7 @@ class AgentLoop:
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         _pruning_cfg = context_pruning_config or ContextPruningConfig()
-        self.pruner: ContextPruner | None = ContextPruner(_pruning_cfg) if _pruning_cfg.enabled else None
+        self._pruner: ContextPruner | None = ContextPruner(_pruning_cfg) if _pruning_cfg.enabled else None
         self._extra_hooks: list[AgentHook] = hooks or []
 
         # Add TraceHook for LLM call logging
@@ -417,6 +417,8 @@ class AgentLoop:
             hook=hook,
             error_message="Sorry, I encountered an error calling the AI model.",
             concurrent_tools=True,
+            pruner=self._pruner,
+            context_window_tokens=self.context_window_tokens,
         ))
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
