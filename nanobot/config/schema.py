@@ -259,7 +259,6 @@ class ToolsConfig(Base):
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     command_rewrite: CommandRewriteConfig = Field(default_factory=CommandRewriteConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
-    extra_allowed_paths: list[str] = Field(default_factory=list)  # Additional paths allowed when restrict_to_workspace=True
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking
 
