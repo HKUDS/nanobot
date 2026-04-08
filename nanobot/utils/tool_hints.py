@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from nanobot.utils.path import abbreviate_path
 
 # Registry: tool_name -> (key_args, template, is_path, is_command)
@@ -16,6 +18,11 @@ _TOOL_FORMATS: dict[str, tuple[list[str], str, bool, bool]] = {
     "web_fetch":  (["url"],                            "fetch {}",    True,  False),
     "list_dir":   (["path"],                           "ls {}",       True,  False),
 }
+
+# Matches file paths embedded in shell commands (Windows drive, ~/, or absolute after space)
+_PATH_IN_CMD_RE = re.compile(
+    r"(?:[A-Za-z]:[/\\]|~/|(?<=\s)/)[^\s;&|<>\"']+"
+)
 
 
 def format_tool_hints(tool_calls: list) -> str:
@@ -85,8 +92,18 @@ def _fmt_known(tc, fmt: tuple) -> str:
     if fmt[2]:  # is_path
         val = abbreviate_path(val)
     elif fmt[3]:  # is_command
-        val = val[:40] + "\u2026" if len(val) > 40 else val
+        val = _abbreviate_command(val)
     return fmt[1].format(val)
+
+
+def _abbreviate_command(cmd: str, max_len: int = 40) -> str:
+    """Abbreviate paths in a command string, then truncate."""
+    abbreviated = _PATH_IN_CMD_RE.sub(
+        lambda m: abbreviate_path(m.group(), max_len=25), cmd
+    )
+    if len(abbreviated) <= max_len:
+        return abbreviated
+    return abbreviated[:max_len - 1] + "\u2026"
 
 
 def _fmt_mcp(tc) -> str:
