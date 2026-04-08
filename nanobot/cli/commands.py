@@ -831,13 +831,50 @@ def gateway(
     console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
 
     async def run():
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        registered_signals: list[signal.Signals] = []
+
+        def _request_shutdown(sig_name: str) -> None:
+            if not stop_event.is_set():
+                logger.info("Gateway shutdown requested via {}", sig_name)
+                stop_event.set()
+
+        if hasattr(loop, "add_signal_handler"):
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                try:
+                    loop.add_signal_handler(sig, _request_shutdown, sig.name)
+                    registered_signals.append(sig)
+                except (NotImplementedError, RuntimeError, ValueError):
+                    pass
+
+        agent_task: asyncio.Task | None = None
+        channels_task: asyncio.Task | None = None
+        stop_task: asyncio.Task | None = None
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
-                agent.run(),
-                channels.start_all(),
+            agent_task = asyncio.create_task(agent.run(), name="agent.run")
+            channels_task = asyncio.create_task(channels.start_all(), name="channels.start_all")
+            stop_task = asyncio.create_task(stop_event.wait(), name="gateway.stop_event")
+
+            done, pending = await asyncio.wait(
+                {agent_task, channels_task, stop_task},
+                return_when=asyncio.FIRST_COMPLETED,
             )
+
+            if stop_task in done:
+                console.print("\nShutting down...")
+            else:
+                for task in (agent_task, channels_task):
+                    if task in done:
+                        exc = task.exception()
+                        if exc:
+                            raise exc
+
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         except Exception:
@@ -846,6 +883,11 @@ def gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
+            for sig in registered_signals:
+                try:
+                    loop.remove_signal_handler(sig)
+                except Exception:
+                    pass
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
