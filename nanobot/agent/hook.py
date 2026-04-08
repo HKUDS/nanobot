@@ -29,6 +29,9 @@ class AgentHookContext:
 class AgentHook:
     """Minimal lifecycle surface for shared runner customization."""
 
+    def __init__(self, reraise: bool = False) -> None:
+        self._reraise = reraise
+
     def wants_streaming(self) -> bool:
         return False
 
@@ -69,6 +72,10 @@ class CompositeHook(AgentHook):
 
     async def _for_each_hook_safe(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         for h in self._hooks:
+            if h._reraise:
+                await getattr(h, method_name)(*args, **kwargs)
+                continue
+
             try:
                 await getattr(h, method_name)(*args, **kwargs)
             except Exception:
