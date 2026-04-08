@@ -7,6 +7,7 @@ import os
 import select
 import signal
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -720,10 +721,10 @@ def gateway(
         try:
             resp = await agent.process_direct(
                 reminder_note,
-                session_key=f"cron:{job.id}",
+                session_key=f"cron:{job.id}:{int(time.time())}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
-                on_progress=lambda _c: None,  # Suppress progress to avoid spam
+                on_progress=lambda _c: asyncio.sleep(0),  # async no-op
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
