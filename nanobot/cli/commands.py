@@ -697,6 +697,10 @@ def gateway(
     )
 
     # Set cron callback (needs agent)
+    async def _cron_noop_progress(content: str, *, tool_hint: bool = False) -> None:
+        """No-op progress callback matching the canonical on_progress signature."""
+        return None
+
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
         from nanobot.agent.tools.cron import CronTool
@@ -732,7 +736,7 @@ def gateway(
                 session_key=f"cron:{job.id}:{int(time.time())}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
-                on_progress=lambda _c: asyncio.sleep(0),  # async no-op
+                on_progress=_cron_noop_progress,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
