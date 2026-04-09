@@ -15,9 +15,12 @@ from loguru import logger
 
 
 def strip_think(text: str) -> str:
-    """Remove <think>…</think> blocks and any unclosed trailing <think> tag."""
+    """Remove thinking blocks and any unclosed trailing tag."""
     text = re.sub(r"<think>[\s\S]*?</think>", "", text)
     text = re.sub(r"<think>[\s\S]*$", "", text)
+    # Gemma 4 and similar models use <thought>...</thought> blocks
+    text = re.sub(r"<thought>[\s\S]*?</thought>", "", text)
+    text = re.sub(r"<thought>[\s\S]*$", "", text)
     return text.strip()
 
 
