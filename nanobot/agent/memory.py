@@ -347,6 +347,7 @@ class Consolidator:
     """Lightweight consolidation: summarizes evicted messages into history.jsonl."""
 
     _MAX_CONSOLIDATION_ROUNDS = 5
+    _MAX_UNCONSOLIDATED_MESSAGES = 150  # trigger consolidation by message count too
 
     _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
 
@@ -464,21 +465,25 @@ class Consolidator:
             estimated, source = self.estimate_session_prompt_tokens(session)
             if estimated <= 0:
                 return
-            if estimated < budget:
+            unconsolidated_count = len(session.messages) - session.last_consolidated
+            if estimated < budget and unconsolidated_count < self._MAX_UNCONSOLIDATED_MESSAGES:
                 logger.debug(
-                    "Token consolidation idle {}: {}/{} via {}",
+                    "Token consolidation idle {}: {}/{} via {}, msgs={}",
                     session.key,
                     estimated,
                     self.context_window_tokens,
                     source,
+                    unconsolidated_count,
                 )
                 return
 
             for round_num in range(self._MAX_CONSOLIDATION_ROUNDS):
-                if estimated <= target:
+                remaining_unconsolidated = len(session.messages) - session.last_consolidated
+                if estimated <= target and remaining_unconsolidated < self._MAX_UNCONSOLIDATED_MESSAGES:
                     return
 
-                boundary = self.pick_consolidation_boundary(session, max(1, estimated - target))
+                tokens_to_remove = max(1, estimated - target) if estimated > target else max(1, estimated // 4)
+                boundary = self.pick_consolidation_boundary(session, tokens_to_remove)
                 if boundary is None:
                     logger.debug(
                         "Token consolidation: no safe boundary for {} (round {})",
