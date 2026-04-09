@@ -218,6 +218,12 @@ class ExecTool(Tool):
                 "TMP": os.environ.get("TMP", f"{sr}\\Temp"),
                 "PATHEXT": os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD"),
                 "PATH": os.environ.get("PATH", f"{sr}\\system32;{sr}"),
+                "APPDATA": os.environ.get("APPDATA", ""),
+                "LOCALAPPDATA": os.environ.get("LOCALAPPDATA", ""),
+                "ProgramData": os.environ.get("ProgramData", ""),
+                "ProgramFiles": os.environ.get("ProgramFiles", ""),
+                "ProgramFiles(x86)": os.environ.get("ProgramFiles(x86)", ""),
+                "ProgramW6432": os.environ.get("ProgramW6432", ""),
             }
         home = os.environ.get("HOME", "/tmp")
         return {

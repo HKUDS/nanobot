@@ -27,6 +27,7 @@ class _SubagentHook(AgentHook):
     """Logging-only hook for subagent execution."""
 
     def __init__(self, task_id: str) -> None:
+        super().__init__()
         self._task_id = task_id
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
