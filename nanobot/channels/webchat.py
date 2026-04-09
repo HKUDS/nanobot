@@ -303,8 +303,10 @@ class WebChatChannel(BaseChannel):
             else:
                 media_urls.append(str(item))
 
+        msg_type = "tool_call" if msg.metadata.get("_tool_hint") else "message"
+
         payload = {
-            "type": "message",
+            "type": msg_type,
             "content": msg.content,
             "media": media_urls,
             "metadata": msg.metadata,
