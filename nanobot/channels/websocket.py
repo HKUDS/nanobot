@@ -18,6 +18,7 @@ from loguru import logger
 from pydantic import Field, field_validator, model_validator
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.datastructures import Headers
+from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest, Response
 
 from nanobot.bus.events import OutboundMessage
@@ -52,6 +53,8 @@ class WebSocketConfig(Base):
       ``X-Nanobot-Auth: <secret>``.
     - ``websocket_requires_token``: If True, the handshake must include a valid token (static or issued and not expired).
     - Each connection has its own session: a unique ``chat_id`` maps to the agent session internally.
+    - ``media`` field in outbound messages contains local filesystem paths; remote clients need a
+      shared filesystem or an HTTP file server to access these files.
     """
 
     enabled: bool = False
@@ -385,6 +388,9 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(payload, ensure_ascii=False)
         try:
             await connection.send(raw)
+        except ConnectionClosed:
+            self._connections.pop(msg.chat_id, None)
+            logger.warning("websocket: connection gone for chat_id={}", msg.chat_id)
         except Exception as e:
             logger.error("websocket send failed: {}", e)
             raise
@@ -413,6 +419,9 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         try:
             await connection.send(raw)
+        except ConnectionClosed:
+            self._connections.pop(chat_id, None)
+            logger.warning("websocket: stream connection gone for chat_id={}", chat_id)
         except Exception as e:
             logger.error("websocket stream send failed: {}", e)
             raise
