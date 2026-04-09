@@ -1,6 +1,9 @@
 """MCP client: connects to MCP servers and wraps their tools as native nanobot tools."""
 
 import asyncio
+import base64
+import os
+import tempfile
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -130,6 +133,13 @@ class MCPToolWrapper(Tool):
         for block in result.content:
             if isinstance(block, types.TextContent):
                 parts.append(block.text)
+            elif isinstance(block, types.ImageContent):
+                ext = (block.mimeType or "image/png").split("/")[-1]
+                fd, path = tempfile.mkstemp(suffix=f".{ext}", prefix="mcp_img_")
+                os.write(fd, base64.b64decode(block.data))
+                os.close(fd)
+                parts.append(path)
+                logger.debug("MCP tool '{}': saved image to {}", self._name, path)
             else:
                 parts.append(str(block))
         return "\n".join(parts) or "(no output)"
