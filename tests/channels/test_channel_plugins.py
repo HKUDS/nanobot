@@ -13,6 +13,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
 from nanobot.config.schema import ChannelsConfig
+from nanobot.utils.restart import RestartNotice
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +209,7 @@ def test_channels_login_uses_discovered_plugin_class(monkeypatch):
             seen["config"] = self.config
             return True
 
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: Config())
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: Config())
     monkeypatch.setattr(
         "nanobot.channels.registry.discover_all",
         lambda: {"fakeplugin": _LoginPlugin},
@@ -218,6 +219,57 @@ def test_channels_login_uses_discovered_plugin_class(monkeypatch):
 
     assert result.exit_code == 0
     assert seen["force"] is True
+
+
+def test_channels_login_sets_custom_config_path(monkeypatch, tmp_path):
+    from nanobot.cli.commands import app
+    from nanobot.config.schema import Config
+    from typer.testing import CliRunner
+
+    runner = CliRunner()
+    seen: dict[str, object] = {}
+    config_path = tmp_path / "custom-config.json"
+
+    class _LoginPlugin(_FakePlugin):
+        async def login(self, force: bool = False) -> bool:
+            return True
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: Config())
+    monkeypatch.setattr(
+        "nanobot.config.loader.set_config_path",
+        lambda path: seen.__setitem__("config_path", path),
+    )
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_all",
+        lambda: {"fakeplugin": _LoginPlugin},
+    )
+
+    result = runner.invoke(app, ["channels", "login", "fakeplugin", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert seen["config_path"] == config_path.resolve()
+
+
+def test_channels_status_sets_custom_config_path(monkeypatch, tmp_path):
+    from nanobot.cli.commands import app
+    from nanobot.config.schema import Config
+    from typer.testing import CliRunner
+
+    runner = CliRunner()
+    seen: dict[str, object] = {}
+    config_path = tmp_path / "custom-config.json"
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda config_path=None: Config())
+    monkeypatch.setattr(
+        "nanobot.config.loader.set_config_path",
+        lambda path: seen.__setitem__("config_path", path),
+    )
+    monkeypatch.setattr("nanobot.channels.registry.discover_all", lambda: {})
+
+    result = runner.invoke(app, ["channels", "status", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert seen["config_path"] == config_path.resolve()
 
 
 @pytest.mark.asyncio
@@ -878,3 +930,30 @@ async def test_start_all_creates_dispatch_task():
     # Dispatch task should have been created
     assert mgr._dispatch_task is not None
 
+
+@pytest.mark.asyncio
+async def test_notify_restart_done_enqueues_outbound_message():
+    """Restart notice should schedule send_with_retry for target channel."""
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {"feishu": _StartableChannel(fake_config, mgr.bus)}
+    mgr._dispatch_task = None
+    mgr._send_with_retry = AsyncMock()
+
+    notice = RestartNotice(channel="feishu", chat_id="oc_123", started_at_raw="100.0")
+    with patch("nanobot.channels.manager.consume_restart_notice_from_env", return_value=notice):
+        mgr._notify_restart_done_if_needed()
+
+    await asyncio.sleep(0)
+    mgr._send_with_retry.assert_awaited_once()
+    sent_channel, sent_msg = mgr._send_with_retry.await_args.args
+    assert sent_channel is mgr.channels["feishu"]
+    assert sent_msg.channel == "feishu"
+    assert sent_msg.chat_id == "oc_123"
+    assert sent_msg.content.startswith("Restart completed")

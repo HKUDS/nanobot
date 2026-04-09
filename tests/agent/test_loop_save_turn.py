@@ -5,7 +5,9 @@ from nanobot.session.manager import Session
 
 def _mk_loop() -> AgentLoop:
     loop = AgentLoop.__new__(AgentLoop)
-    loop._TOOL_RESULT_MAX_CHARS = AgentLoop._TOOL_RESULT_MAX_CHARS
+    from nanobot.config.schema import AgentDefaults
+
+    loop.max_tool_result_chars = AgentDefaults().max_tool_result_chars
     return loop
 
 
@@ -72,3 +74,129 @@ def test_save_turn_keeps_tool_results_under_16k() -> None:
     )
 
     assert session.messages[0]["content"] == content
+
+
+def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> None:
+    loop = _mk_loop()
+    session = Session(
+        key="test:checkpoint",
+        metadata={
+            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": "working",
+                    "tool_calls": [
+                        {
+                            "id": "call_done",
+                            "type": "function",
+                            "function": {"name": "read_file", "arguments": "{}"},
+                        },
+                        {
+                            "id": "call_pending",
+                            "type": "function",
+                            "function": {"name": "exec", "arguments": "{}"},
+                        },
+                    ],
+                },
+                "completed_tool_results": [
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_done",
+                        "name": "read_file",
+                        "content": "ok",
+                    }
+                ],
+                "pending_tool_calls": [
+                    {
+                        "id": "call_pending",
+                        "type": "function",
+                        "function": {"name": "exec", "arguments": "{}"},
+                    }
+                ],
+            }
+        },
+    )
+
+    restored = loop._restore_runtime_checkpoint(session)
+
+    assert restored is True
+    assert session.metadata.get(AgentLoop._RUNTIME_CHECKPOINT_KEY) is None
+    assert session.messages[0]["role"] == "assistant"
+    assert session.messages[1]["tool_call_id"] == "call_done"
+    assert session.messages[2]["tool_call_id"] == "call_pending"
+    assert "interrupted before this tool finished" in session.messages[2]["content"].lower()
+
+
+def test_restore_runtime_checkpoint_dedupes_overlapping_tail() -> None:
+    loop = _mk_loop()
+    session = Session(
+        key="test:checkpoint-overlap",
+        messages=[
+            {
+                "role": "assistant",
+                "content": "working",
+                "tool_calls": [
+                    {
+                        "id": "call_done",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    },
+                    {
+                        "id": "call_pending",
+                        "type": "function",
+                        "function": {"name": "exec", "arguments": "{}"},
+                    },
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call_done",
+                "name": "read_file",
+                "content": "ok",
+            },
+        ],
+        metadata={
+            AgentLoop._RUNTIME_CHECKPOINT_KEY: {
+                "assistant_message": {
+                    "role": "assistant",
+                    "content": "working",
+                    "tool_calls": [
+                        {
+                            "id": "call_done",
+                            "type": "function",
+                            "function": {"name": "read_file", "arguments": "{}"},
+                        },
+                        {
+                            "id": "call_pending",
+                            "type": "function",
+                            "function": {"name": "exec", "arguments": "{}"},
+                        },
+                    ],
+                },
+                "completed_tool_results": [
+                    {
+                        "role": "tool",
+                        "tool_call_id": "call_done",
+                        "name": "read_file",
+                        "content": "ok",
+                    }
+                ],
+                "pending_tool_calls": [
+                    {
+                        "id": "call_pending",
+                        "type": "function",
+                        "function": {"name": "exec", "arguments": "{}"},
+                    }
+                ],
+            }
+        },
+    )
+
+    restored = loop._restore_runtime_checkpoint(session)
+
+    assert restored is True
+    assert session.metadata.get(AgentLoop._RUNTIME_CHECKPOINT_KEY) is None
+    assert len(session.messages) == 3
+    assert session.messages[0]["role"] == "assistant"
+    assert session.messages[1]["tool_call_id"] == "call_done"
+    assert session.messages[2]["tool_call_id"] == "call_pending"
