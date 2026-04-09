@@ -354,6 +354,42 @@ class LLMProvider(ABC):
         return True
 
     @staticmethod
+    def _enforce_role_alternation(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Merge consecutive same-role messages and drop trailing assistant messages.
+
+        Some providers (OpenAI-compat, Azure, vLLM, Ollama, etc.) reject requests
+        where the last message is 'assistant' (prefill not supported) or two
+        consecutive non-system messages share the same role.
+        """
+        if not messages:
+            return messages
+
+        merged: list[dict[str, Any]] = []
+        for msg in messages:
+            role = msg.get("role")
+            if (
+                merged
+                and role != "system"
+                and role not in ("tool",)
+                and merged[-1].get("role") == role
+                and role in ("user", "assistant")
+            ):
+                prev = merged[-1]
+                prev_content = prev.get("content") or ""
+                curr_content = msg.get("content") or ""
+                if isinstance(prev_content, str) and isinstance(curr_content, str):
+                    prev["content"] = (prev_content + "\n\n" + curr_content).strip()
+                else:
+                    merged[-1] = dict(msg)
+            else:
+                merged.append(dict(msg))
+
+        while merged and merged[-1].get("role") == "assistant":
+            merged.pop()
+
+        return merged
+
+    @staticmethod
     def _strip_image_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
         """Replace image_url blocks with text placeholder. Returns None if no images found."""
         found = False

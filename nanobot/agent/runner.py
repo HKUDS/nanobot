@@ -257,7 +257,6 @@ class AgentRunner:
                 final_content = clean or spec.error_message or _DEFAULT_ERROR_MESSAGE
                 stop_reason = "error"
                 error = final_content
-                self._append_final_message(messages, final_content)
                 context.final_content = final_content
                 context.error = error
                 context.stop_reason = stop_reason

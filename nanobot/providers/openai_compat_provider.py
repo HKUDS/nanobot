@@ -245,7 +245,7 @@ class OpenAICompatProvider(LLMProvider):
                 clean["tool_calls"] = normalized
             if "tool_call_id" in clean and clean["tool_call_id"]:
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
-        return sanitized
+        return self._enforce_role_alternation(sanitized)
 
     # ------------------------------------------------------------------
     # Build kwargs

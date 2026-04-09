@@ -532,6 +532,7 @@ def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
         provider = OpenAICompatProvider()
 
     sanitized = provider._sanitize_messages([
+        {"role": "user", "content": "hi"},
         {
             "role": "assistant",
             "content": "done",
@@ -545,12 +546,13 @@ def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
                     "extra_content": {"google": {"thought_signature": "sig"}},
                 }
             ],
-        }
+        },
+        {"role": "user", "content": "thanks"},
     ])
 
-    assert sanitized[0]["reasoning_content"] == "hidden"
-    assert sanitized[0]["extra_content"] == {"debug": True}
-    assert sanitized[0]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "sig"}}
+    assert sanitized[1]["reasoning_content"] == "hidden"
+    assert sanitized[1]["extra_content"] == {"debug": True}
+    assert sanitized[1]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "sig"}}
 
 
 @pytest.mark.asyncio
