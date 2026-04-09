@@ -90,9 +90,16 @@ def create_app(config_path: Path | None = None, workspace_path: Path | None = No
     if static_path.exists():
         app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 
-    # Mount HTML templates as static files (catches all other routes)
-    if template_path.exists():
-        app.mount("/", StaticFiles(directory=str(template_path), html=True), name="templates")
+    # SPA catch-all route: serve index.html for all non-API paths
+    async def serve_spa(request: Request):
+        """Serve the SPA index.html for client-side routing."""
+        index_file = template_path / "index.html"
+        if index_file.exists():
+            return FileResponse(str(index_file))
+        return Response(content="SPA index.html not found", status_code=404)
+
+    # Mount this route AFTER static files so static assets are served first
+    app.get("/{full_path:path}")(serve_spa)
 
     return app
 
@@ -443,8 +450,10 @@ async def stream_agent_message(message: str, session_id: str, config_path: Path)
             nonlocal accumulated_content, final_metadata
             try:
                 response = await agent_loop.process_direct(
-                    message,
-                    session_id,
+                    content=message,
+                    session_key=session_id,
+                    channel="web",
+                    chat_id=session_id,
                     on_progress=lambda c, t=False: None,
                     on_stream=on_stream_cb,
                     on_stream_end=on_stream_end_cb,
