@@ -41,8 +41,8 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
 
 
-# Named constant for unified session key, used across multiple locations
 UNIFIED_SESSION_KEY = "unified:default"
+
 class _LoopHook(AgentHook):
     """Core hook for the main loop."""
 
