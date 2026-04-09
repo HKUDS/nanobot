@@ -22,13 +22,13 @@ We aim to respond to security reports within 48 hours.
 
 ```bash
 # ✅ Good: Store in config file with restricted permissions
-chmod 600 ~/.nanobot/config.json
+chmod 600 ~/.hiperone/config.json
 
 # ❌ Bad: Hardcoding keys in code or committing them
 ```
 
 **Recommendations:**
-- Store API keys in `~/.nanobot/config.json` with file permissions set to `0600`
+- Store API keys in `~/.hiperone/config.json` with file permissions set to `0600`
 - Consider using environment variables for sensitive keys
 - Use OS keyring/credential manager for production deployments
 - Rotate API keys regularly
@@ -79,7 +79,7 @@ On Linux, set `"tools.exec.sandbox": "bwrap"` to wrap every shell command in a [
 - Workspace directory → **read-write** (agent works normally)
 - Media directory → **read-only** (can read uploaded attachments)
 - System directories (`/usr`, `/bin`, `/lib`) → **read-only** (commands still work)
-- Config files and API keys (`~/.nanobot/config.json`) → **hidden** (masked by tmpfs)
+- Config files and API keys (`~/.hiperone/config.json`) → **hidden** (masked by tmpfs)
 
 Requires `bwrap` installed (`apt install bubblewrap`). Pre-installed in the official Docker image. **Not available on macOS or Windows** — bubblewrap depends on Linux kernel namespaces.
 
@@ -112,7 +112,7 @@ File operations have path traversal protection, but:
 **WhatsApp Bridge:**
 - The bridge binds to `127.0.0.1:3001` (localhost only, not accessible from external network)
 - Set `bridgeToken` in config to enable shared-secret authentication between Python and Node.js
-- Keep authentication data in `~/.nanobot/whatsapp-auth` secure (mode 0700)
+- Keep authentication data in `~/.hiperone/whatsapp-auth` secure (mode 0700)
 
 ### 6. Dependency Security
 
@@ -159,15 +159,15 @@ For production use:
 
 3. **Set Proper Permissions**
    ```bash
-   chmod 700 ~/.nanobot
-   chmod 600 ~/.nanobot/config.json
-   chmod 700 ~/.nanobot/whatsapp-auth
+   chmod 700 ~/.hiperone
+   chmod 600 ~/.hiperone/config.json
+   chmod 700 ~/.hiperone/whatsapp-auth
    ```
 
 4. **Enable Logging**
    ```bash
    # Configure log monitoring
-   tail -f ~/.nanobot/logs/nanobot.log
+   tail -f ~/.hiperone/logs/nanobot.log
    ```
 
 5. **Use Rate Limiting**
@@ -200,7 +200,7 @@ For production use:
 
 - **Logs may contain sensitive information** - secure log files appropriately
 - **LLM providers see your prompts** - review their privacy policies
-- **Chat history is stored locally** - protect the `~/.nanobot` directory
+- **Chat history is stored locally** - protect the `~/.hiperone` directory
 - **API keys are in plain text** - use OS keyring for production
 
 ### 10. Incident Response
@@ -210,7 +210,7 @@ If you suspect a security breach:
 1. **Immediately revoke compromised API keys**
 2. **Review logs for unauthorized access**
    ```bash
-   grep "Access denied" ~/.nanobot/logs/nanobot.log
+   grep "Access denied" ~/.hiperone/logs/nanobot.log
    ```
 3. **Check for unexpected file modifications**
 4. **Rotate all credentials**

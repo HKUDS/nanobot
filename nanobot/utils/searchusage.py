@@ -77,7 +77,7 @@ async def fetch_search_usage(
     Returns:
         SearchUsageInfo with populated fields where available.
     """
-    p = (provider or "duckduckgo").strip().lower()
+    p = (provider or "brave").strip().lower()
 
     if p == "tavily":
         return await _fetch_tavily_usage(api_key)

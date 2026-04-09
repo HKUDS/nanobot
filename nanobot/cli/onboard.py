@@ -306,7 +306,7 @@ def _show_main_menu_header() -> None:
     from rich.align import Align
 
     console.print(
-        Align.center(f"{__logo__} [bold cyan]nanobot[{__version__}][/bold cyan]")
+        Align.center(f"{__logo__} [bold cyan]HiperOne[{__version__}][/bold cyan]")
     )
     console.print()
 

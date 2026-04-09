@@ -25,7 +25,8 @@ The skill format and metadata structure follow OpenClaw's conventions to maintai
 |-------|-------------|
 | `github` | Interact with GitHub using the `gh` CLI |
 | `weather` | Get weather info using wttr.in and Open-Meteo |
-| `summarize` | Summarize URLs, files, and YouTube videos |
-| `tmux` | Remote-control tmux sessions |
-| `clawhub` | Search and install skills from ClawHub registry |
-| `skill-creator` | Create new skills |
+| `memory` | Enhanced memory system |
+| `self-improving-agent` | Continuous learning from errors and corrections |
+| `feishu-*` | Feishu integrations (docs, bitable, messages, etc.) |
+| `content-extractor` | Multi-platform content extraction |
+| `pdf` | PDF processing toolkit |
