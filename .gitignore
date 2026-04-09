@@ -39,6 +39,7 @@ tmp*.png
 tmp*.jpg
 tmp*.jpeg
 tmp*.gif
+llm_logs/
 
-# local docs/plans
-docs/superpowers/
+# graphify tool output
+graphify-out/
