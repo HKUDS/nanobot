@@ -1,4 +1,6 @@
 import asyncio
+import zipfile
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
@@ -221,3 +223,78 @@ async def test_download_dingtalk_file(tmp_path, monkeypatch) -> None:
     assert "messageFiles/download" in channel._http.calls[0]["url"]
     assert channel._http.calls[0]["json"]["downloadCode"] == "code123"
     assert channel._http.calls[1]["method"] == "GET"
+
+
+def test_normalize_upload_payload_zips_html_attachment() -> None:
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+
+    data, filename, content_type = channel._normalize_upload_payload(
+        "report.html",
+        b"<html><body>Hello</body></html>",
+        "text/html",
+    )
+
+    assert filename == "report.zip"
+    assert content_type == "application/zip"
+
+    archive = zipfile.ZipFile(BytesIO(data))
+    assert archive.namelist() == ["report.html"]
+    assert archive.read("report.html") == b"<html><body>Hello</body></html>"
+
+
+@pytest.mark.asyncio
+async def test_send_media_ref_zips_html_before_upload(tmp_path, monkeypatch) -> None:
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+
+    html_path = tmp_path / "report.html"
+    html_path.write_text("<html><body>Hello</body></html>", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    async def fake_upload_media(*, token, data, media_type, filename, content_type):
+        captured.update(
+            {
+                "token": token,
+                "data": data,
+                "media_type": media_type,
+                "filename": filename,
+                "content_type": content_type,
+            }
+        )
+        return "media-123"
+
+    async def fake_send_batch_message(token, chat_id, msg_key, msg_param):
+        captured.update(
+            {
+                "sent_token": token,
+                "chat_id": chat_id,
+                "msg_key": msg_key,
+                "msg_param": msg_param,
+            }
+        )
+        return True
+
+    monkeypatch.setattr(channel, "_upload_media", fake_upload_media)
+    monkeypatch.setattr(channel, "_send_batch_message", fake_send_batch_message)
+
+    ok = await channel._send_media_ref("token-123", "user-1", str(html_path))
+
+    assert ok is True
+    assert captured["media_type"] == "file"
+    assert captured["filename"] == "report.zip"
+    assert captured["content_type"] == "application/zip"
+    assert captured["msg_key"] == "sampleFile"
+    assert captured["msg_param"] == {
+        "mediaId": "media-123",
+        "fileName": "report.zip",
+        "fileType": "zip",
+    }
+
+    archive = zipfile.ZipFile(BytesIO(captured["data"]))
+    assert archive.namelist() == ["report.html"]

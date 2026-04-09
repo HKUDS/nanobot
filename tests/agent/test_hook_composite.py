@@ -232,6 +232,35 @@ async def test_composite_empty_hooks_no_ops():
     assert hook.finalize_content(ctx, "test") == "test"
 
 
+@pytest.mark.asyncio
+async def test_composite_supports_legacy_hook_init_without_super():
+    calls: list[str] = []
+
+    class LegacyHook(AgentHook):
+        def __init__(self, label: str) -> None:
+            self.label = label
+
+        async def before_iteration(self, context: AgentHookContext) -> None:
+            calls.append(self.label)
+
+    hook = CompositeHook([LegacyHook("legacy")])
+    await hook.before_iteration(_ctx())
+    assert calls == ["legacy"]
+
+
+@pytest.mark.asyncio
+async def test_composite_can_wrap_another_composite():
+    calls: list[str] = []
+
+    class Inner(AgentHook):
+        async def before_iteration(self, context: AgentHookContext) -> None:
+            calls.append("inner")
+
+    hook = CompositeHook([CompositeHook([Inner()])])
+    await hook.before_iteration(_ctx())
+    assert calls == ["inner"]
+
+
 # ---------------------------------------------------------------------------
 # Integration: AgentLoop with extra hooks
 # ---------------------------------------------------------------------------
