@@ -147,6 +147,7 @@ class AgentLoop:
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
+        per_user_memory: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 
@@ -178,6 +179,8 @@ class AgentLoop:
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
+        self._per_user_memory = per_user_memory
+        self._context_cache: dict[str, ContextBuilder] = {}
 
         self.context = ContextBuilder(workspace, timezone=timezone)
         self.sessions = session_manager or SessionManager(workspace)
@@ -207,6 +210,9 @@ class AgentLoop:
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
         )
+        def _store_factory(user_id: str) -> "MemoryStore":
+            return self._get_context(user_id).memory
+
         self.consolidator = Consolidator(
             store=self.context.memory,
             provider=provider,
@@ -216,6 +222,7 @@ class AgentLoop:
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
+            store_factory=_store_factory if per_user_memory else None,
         )
         self.dream = Dream(
             store=self.context.memory,
@@ -274,6 +281,21 @@ class AgentLoop:
                 self._mcp_stack = None
         finally:
             self._mcp_connecting = False
+
+    def _get_context(self, user_id: str | None = None) -> "ContextBuilder":
+        """Return the ContextBuilder for the given user.
+
+        When per_user_memory is enabled, each user gets an isolated ContextBuilder
+        (and therefore an isolated MemoryStore) keyed by user_id.
+        Falls back to the shared self.context when disabled or user_id is None.
+        """
+        if not self._per_user_memory or not user_id:
+            return self.context
+        if user_id not in self._context_cache:
+            self._context_cache[user_id] = ContextBuilder(
+                self.workspace, timezone=self.context.timezone, user_id=user_id
+            )
+        return self._context_cache[user_id]
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
@@ -500,7 +522,7 @@ class AgentLoop:
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
-            messages = self.context.build_messages(
+            messages = self._get_context(chat_id).build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
@@ -538,7 +560,7 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=0)
-        initial_messages = self.context.build_messages(
+        initial_messages = self._get_context(msg.chat_id).build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,

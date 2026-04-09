@@ -38,10 +38,25 @@ class MemoryStore:
         r"^\[\d{4}-\d{2}-\d{2}[^\]]*\]\s+[A-Z][A-Z0-9_]*(?:\s+\[tools:\s*[^\]]+\])?:"
     )
 
-    def __init__(self, workspace: Path, max_history_entries: int = _DEFAULT_MAX_HISTORY):
+    def __init__(
+        self,
+        workspace: Path,
+        max_history_entries: int = _DEFAULT_MAX_HISTORY,
+        user_id: str | None = None,
+    ):
         self.workspace = workspace
         self.max_history_entries = max_history_entries
-        self.memory_dir = ensure_dir(workspace / "memory")
+        self.user_id = user_id
+
+        # Per-user memory lives under workspace/users/{user_id}/memory/.
+        # Falls back to workspace/memory/ for single-user setups or when
+        # user_id is not provided (backwards compatible).
+        if user_id:
+            safe_id = "".join(c if c.isalnum() or c in "-_." else "_" for c in user_id)
+            self.memory_dir = ensure_dir(workspace / "users" / safe_id / "memory")
+        else:
+            self.memory_dir = ensure_dir(workspace / "memory")
+
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "history.jsonl"
         self.legacy_history_file = self.memory_dir / "HISTORY.md"
@@ -360,8 +375,10 @@ class Consolidator:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         max_completion_tokens: int = 4096,
+        store_factory: Callable[[str], MemoryStore] | None = None,
     ):
         self.store = store
+        self._store_factory = store_factory
         self.provider = provider
         self.model = model
         self.sessions = sessions
@@ -376,6 +393,18 @@ class Consolidator:
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
+
+    def _get_store(self, session_key: str) -> MemoryStore:
+        """Return the MemoryStore for the given session.
+
+        When a store_factory is provided (per-user memory mode), the user_id
+        is extracted from the session key (format: 'channel:chat_id') and
+        used to get the per-user store. Falls back to the shared store.
+        """
+        if self._store_factory and session_key:
+            chat_id = session_key.split(":", 1)[-1] if ":" in session_key else session_key
+            return self._store_factory(chat_id)
+        return self.store
 
     def pick_consolidation_boundary(
         self,
@@ -416,13 +445,14 @@ class Consolidator:
             self._get_tool_definitions(),
         )
 
-    async def archive(self, messages: list[dict]) -> bool:
+    async def archive(self, messages: list[dict], session_key: str = "") -> bool:
         """Summarize messages via LLM and append to history.jsonl.
 
         Returns True on success (or degraded success), False if nothing to do.
         """
         if not messages:
             return False
+        store = self._get_store(session_key)
         try:
             formatted = MemoryStore._format_messages(messages)
             response = await self.provider.chat_with_retry(
@@ -441,11 +471,11 @@ class Consolidator:
                 tool_choice=None,
             )
             summary = response.content or "[no summary]"
-            self.store.append_history(summary)
+            store.append_history(summary)
             return True
         except Exception:
             logger.warning("Consolidation LLM call failed, raw-dumping to history")
-            self.store.raw_archive(messages)
+            store.raw_archive(messages)
             return True
 
     async def maybe_consolidate_by_tokens(self, session: Session) -> None:
@@ -501,7 +531,7 @@ class Consolidator:
                     source,
                     len(chunk),
                 )
-                if not await self.archive(chunk):
+                if not await self.archive(chunk, session_key=session.key):
                     return
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
