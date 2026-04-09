@@ -63,8 +63,8 @@ class Nanobot:
             )
 
         provider = _make_provider(config)
-        bus = MessageBus()
         defaults = config.agents.defaults
+        bus = MessageBus(inbound_queue_dedup=defaults.inbound_queue_dedup)
 
         loop = AgentLoop(
             bus=bus,
