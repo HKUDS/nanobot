@@ -10,7 +10,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
-from nanobot.utils.helpers import ensure_dir, find_legal_message_start, safe_filename
+from nanobot.utils.helpers import ensure_dir, find_legal_message_start, parse_session_key, safe_filename
 
 
 @dataclass
@@ -22,7 +22,8 @@ class Session:
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
     metadata: dict[str, Any] = field(default_factory=dict)
-    last_consolidated: int = 0  # Number of messages already consolidated to files
+    last_consolidated: int = 0
+    channel: str = ""  # Number of messages already consolidated to files
 
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
@@ -116,7 +117,7 @@ class SessionManager:
         safe_key = safe_filename(key.replace(":", "_"))
         return self.legacy_sessions_dir / f"{safe_key}.jsonl"
 
-    def get_or_create(self, key: str) -> Session:
+    def get_or_create(self, key: str, channel: str = "") -> Session:
         """
         Get an existing session or create a new one.
 
@@ -131,7 +132,7 @@ class SessionManager:
 
         session = self._load(key)
         if session is None:
-            session = Session(key=key)
+            session = Session(key=key, channel=channel)
 
         self._cache[key] = session
         return session
@@ -151,6 +152,7 @@ class SessionManager:
         if not path.exists():
             return None
 
+        channel = parse_session_key(key)[0]
         try:
             messages = []
             metadata = {}
@@ -177,7 +179,8 @@ class SessionManager:
                 messages=messages,
                 created_at=created_at or datetime.now(),
                 metadata=metadata,
-                last_consolidated=last_consolidated
+                last_consolidated=last_consolidated,
+                channel=channel
             )
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)

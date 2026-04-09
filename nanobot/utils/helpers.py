@@ -79,6 +79,8 @@ _TOOL_RESULT_PREVIEW_CHARS = 1200
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
+_ISOLATION_DIR_RE = re.compile(r"^[a-zA-Z]+_\d+$")
+
 
 def safe_filename(name: str) -> str:
     """Replace unsafe path characters with underscores."""
@@ -476,3 +478,56 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         logger.warning("Failed to initialize git store for {}", workspace)
 
     return added
+
+
+def parse_session_key(session_key: str) -> tuple[str, str]:
+    """Parse a session_key into (channel, chat_id) by splitting on ':'.
+
+    The session_key format is ``channel:chat_id``.  If no ':' is present the
+    entire string is treated as the chat_id and channel defaults to an empty
+    string.
+    """
+    if ":" in session_key:
+        channel, chat_id = session_key.split(":", maxsplit=1)
+        return channel, chat_id
+    return "", session_key
+
+def match_memory_slot_name(name: str) -> bool:
+    """Safely convert a session key to a memory slot name.
+    The memory slot name is used as a directory name and must be safe to use as
+    a directory name on all platforms.
+    """
+    match = _ISOLATION_DIR_RE.match(name)
+    if not match:
+        return False
+    return True
+
+def trans_slot_entry_to_session_key(entry_name: str) -> str:
+    """Translate a slot entry name to a session key.
+
+    Expects ``entry_name`` in the format ``<channel>_<chat_id>`` (e.g.
+    ``test_123123``) and converts it to ``<channel>:<chat_id>`` (e.g.
+    ``test:123123``).
+
+    Raises:
+        ValueError: If *entry_name* does not match the expected
+            ``<non-empty>_<non-empty>`` pattern.
+    """
+    match = _ISOLATION_DIR_RE.match(entry_name)
+    if not match:
+        raise ValueError(
+            f"Invalid slot entry name '{entry_name}': "
+            "expected format '<channel>_<chat_id>' (e.g. 'test_123123')"
+        )
+    channel, chat_id = entry_name.split("_")
+    return f"{channel}:{chat_id}"
+
+
+def trans_session_key_to_slot_entry(session_key: str) -> str:
+    """Translate a session key to a slot entry name.
+    Expects ``session_key`` in the format ``<channel>:<chat_id>`` (e.g.
+    ``test:123123``) and converts it to ``<channel>_<chat_id>`` (e.g.
+    ``test_123123``).
+    """
+    return session_key.replace(":", "_")
+    
