@@ -347,6 +347,7 @@ class Consolidator:
     """Lightweight consolidation: summarizes evicted messages into history.jsonl."""
 
     _MAX_CONSOLIDATION_ROUNDS = 5
+    _MAX_CHUNK_MESSAGES = 60  # hard cap per consolidation round
 
     _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
 
@@ -461,16 +462,22 @@ class Consolidator:
         async with lock:
             budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
             target = budget // 2
-            estimated, source = self.estimate_session_prompt_tokens(session)
+            try:
+                estimated, source = self.estimate_session_prompt_tokens(session)
+            except Exception:
+                logger.exception("Token estimation failed for {}", session.key)
+                estimated, source = 0, "error"
             if estimated <= 0:
                 return
             if estimated < budget:
+                unconsolidated_count = len(session.messages) - session.last_consolidated
                 logger.debug(
-                    "Token consolidation idle {}: {}/{} via {}",
+                    "Token consolidation idle {}: {}/{} via {}, msgs={}",
                     session.key,
                     estimated,
                     self.context_window_tokens,
                     source,
+                    unconsolidated_count,
                 )
                 return
 
@@ -492,6 +499,10 @@ class Consolidator:
                 if not chunk:
                     return
 
+                if len(chunk) > self._MAX_CHUNK_MESSAGES:
+                    chunk = chunk[:self._MAX_CHUNK_MESSAGES]
+                    end_idx = session.last_consolidated + len(chunk)
+
                 logger.info(
                     "Token consolidation round {} for {}: {}/{} via {}, chunk={} msgs",
                     round_num,
@@ -506,7 +517,11 @@ class Consolidator:
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
 
-                estimated, source = self.estimate_session_prompt_tokens(session)
+                try:
+                    estimated, source = self.estimate_session_prompt_tokens(session)
+                except Exception:
+                    logger.exception("Token estimation failed for {}", session.key)
+                    estimated, source = 0, "error"
                 if estimated <= 0:
                     return
 
