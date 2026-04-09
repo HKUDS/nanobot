@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
+from nanobot.config.schema import IsolationConfig
 from nanobot.utils.prompt_templates import render_template
-from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, strip_think
+from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, safe_filename, strip_think
 
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.registry import ToolRegistry
@@ -22,6 +23,11 @@ from nanobot.utils.gitstore import GitStore
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session, SessionManager
+
+
+# ---------------------------------------------------------------------------
+# IsolationSlot — per-channel isolation container
+# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +44,7 @@ class MemoryStore:
         r"^\[\d{4}-\d{2}-\d{2}[^\]]*\]\s+[A-Z][A-Z0-9_]*(?:\s+\[tools:\s*[^\]]+\])?:"
     )
 
-    def __init__(self, workspace: Path, max_history_entries: int = _DEFAULT_MAX_HISTORY):
+    def __init__(self, workspace: Path, isolation_config: IsolationConfig | None = None, max_history_entries: int = _DEFAULT_MAX_HISTORY):
         self.workspace = workspace
         self.max_history_entries = max_history_entries
         self.memory_dir = ensure_dir(workspace / "memory")
@@ -52,6 +58,12 @@ class MemoryStore:
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md",
         ])
+        self.isolation_config = isolation_config
+        """ Isolation config for memory files. Build slots for each directory. 
+            Beware: each slots manage multi session key (defined by channel/chat_id).
+        """
+        self._isolation_slots: dict[str, MemoryStore] = {}
+        self._scan_isolation_slots()
         self._maybe_migrate_legacy_history()
 
     @property
@@ -187,18 +199,67 @@ class MemoryStore:
             candidate = self.memory_dir / f"HISTORY.md.bak.{suffix}"
             suffix += 1
         return candidate
+    
+    _ISOLATION_DIR_RE = re.compile(r"^[a-zA-Z]+_\d+$")
+
+    def _scan_isolation_slots(self) -> None:
+        """Scan workspace subdirectories and initialize MemoryStore for each existing session slot.
+
+        Only picks up directories whose names match the isolation naming
+        convention (e.g. ``dingtalk_231234``, ``telegram_98765``) and skips
+        the ``memory`` directory which belongs to the parent store itself.
+        """
+        if not self.workspace.is_dir():
+            return
+        for entry in self.workspace.iterdir():
+            if not entry.is_dir():
+                continue
+            if entry.name == "memory":
+                continue
+            if not self._ISOLATION_DIR_RE.match(entry.name):
+                continue
+            session_key = entry.name
+            self._isolation_slots[session_key] = MemoryStore(workspace=entry)
+
+    def _is_isolated(self, channel: str) -> bool:
+        if not self.isolation_config:
+            return False
+        if not self.isolation_config.enbaled:
+            return False
+        if not channel:
+            return False
+        return channel in self.isolation_config.channels
+    
+
+    def get_isolation_slots(self) -> list[MemoryStore]:
+        return list(self._isolation_slots.values())
+    
+
+    def get_isolation_slot(self, session_key: str) -> MemoryStore:
+        memory_store = self._isolation_slots.get(session_key)
+        if not memory_store:
+            dir_name = safe_filename(session_key.replace(":", "_"))
+            workspace = self.workspace / dir_name
+            memory_store = MemoryStore(workspace=workspace)
+            self._isolation_slots[session_key] = memory_store
+            memory_store.git.init()
+        return memory_store
 
     # -- MEMORY.md (long-term facts) -----------------------------------------
 
-    def read_memory(self) -> str:
+    def read_memory(self, channel: str = None, session_key: str = None) -> str:
+        if self._is_isolated(channel):
+            return self.read_file(self.get_isolation_slot(session_key).memory_file)
         return self.read_file(self.memory_file)
-
+    
     def write_memory(self, content: str) -> None:
         self.memory_file.write_text(content, encoding="utf-8")
 
     # -- SOUL.md -------------------------------------------------------------
 
-    def read_soul(self) -> str:
+    def read_soul(self, channel: str = None, session_key: str = None) -> str:
+        if self._is_isolated(channel):
+            return self.read_file(self.get_isolation_slot(session_key).soul_file)
         return self.read_file(self.soul_file)
 
     def write_soul(self, content: str) -> None:
@@ -206,7 +267,9 @@ class MemoryStore:
 
     # -- USER.md -------------------------------------------------------------
 
-    def read_user(self) -> str:
+    def read_user(self, channel: str = None, session_key: str = None) -> str:
+        if self._is_isolated(channel):
+            return self.read_file(self.get_isolation_slot(session_key).user_file)
         return self.read_file(self.user_file)
 
     def write_user(self, content: str) -> None:
@@ -214,20 +277,23 @@ class MemoryStore:
 
     # -- context injection (used by context.py) ------------------------------
 
-    def get_memory_context(self) -> str:
-        long_term = self.read_memory()
+    def get_memory_context(self, channel: str = None, session_key: str = None) -> str:
+        long_term = self.read_memory(channel=channel, session_key=session_key)
         return f"## Long-term Memory\n{long_term}" if long_term else ""
 
     # -- history.jsonl — append-only, JSONL format ---------------------------
 
-    def append_history(self, entry: str) -> int:
+    def append_history(self, entry: str, session_key: str = None, channel: str = None) -> int:
         """Append *entry* to history.jsonl and return its auto-incrementing cursor."""
-        cursor = self._next_cursor()
+        store = self
+        if self._is_isolated(channel):
+            store = self.get_isolation_slot(session_key=session_key)
+        cursor = store._next_cursor()
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
         record = {"cursor": cursor, "timestamp": ts, "content": strip_think(entry.rstrip()) or entry.rstrip()}
-        with open(self.history_file, "a", encoding="utf-8") as f:
+        with open(store.history_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        self._cursor_file.write_text(str(cursor), encoding="utf-8")
+        store._cursor_file.write_text(str(cursor), encoding="utf-8")
         return cursor
 
     def _next_cursor(self) -> int:
@@ -243,9 +309,12 @@ class MemoryStore:
             return last["cursor"] + 1
         return 1
 
-    def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
+    def read_unprocessed_history(self, since_cursor: int, session_key: str = None, channel: str = None) -> list[dict[str, Any]]:
         """Return history entries with cursor > *since_cursor*."""
-        return [e for e in self._read_entries() if e["cursor"] > since_cursor]
+        store = self
+        if self._is_isolated(channel):
+            store = self.get_isolation_slot(session_key=session_key)
+        return [e for e in store._read_entries() if e["cursor"] > since_cursor]
 
     def compact_history(self) -> None:
         """Drop oldest entries if the file exceeds *max_history_entries*."""
@@ -301,8 +370,11 @@ class MemoryStore:
 
     # -- dream cursor --------------------------------------------------------
 
-    def get_last_dream_cursor(self) -> int:
-        if self._dream_cursor_file.exists():
+    def get_last_dream_cursor(self, session_key: str = None, channel: str = None) -> int:
+        store = self
+        if self._is_isolated(channel):
+            store = self.get_isolation_slot(session_key=session_key)
+        if store._dream_cursor_file.exists():
             try:
                 return int(self._dream_cursor_file.read_text(encoding="utf-8").strip())
             except (ValueError, OSError):
@@ -326,11 +398,13 @@ class MemoryStore:
             )
         return "\n".join(lines)
 
-    def raw_archive(self, messages: list[dict]) -> None:
+    def raw_archive(self, messages: list[dict], session_key: str = None, channel: str = None) -> None:
         """Fallback: dump raw messages to history.jsonl without LLM summarization."""
         self.append_history(
             f"[RAW] {len(messages)} messages\n"
-            f"{self._format_messages(messages)}"
+            f"{self._format_messages(messages)}",
+            session_key=session_key,
+            channel=channel
         )
         logger.warning(
             "Memory consolidation degraded: raw-archived {} messages", len(messages)
@@ -408,6 +482,7 @@ class Consolidator:
             current_message="[token-probe]",
             channel=channel,
             chat_id=chat_id,
+            session_key=session.key,
         )
         return estimate_prompt_tokens_chain(
             self.provider,
@@ -416,7 +491,7 @@ class Consolidator:
             self._get_tool_definitions(),
         )
 
-    async def archive(self, messages: list[dict]) -> bool:
+    async def archive(self, messages: list[dict], session_key: str | None = None, channel : str | None = None) -> bool:
         """Summarize messages via LLM and append to history.jsonl.
 
         Returns True on success (or degraded success), False if nothing to do.
@@ -441,11 +516,11 @@ class Consolidator:
                 tool_choice=None,
             )
             summary = response.content or "[no summary]"
-            self.store.append_history(summary)
+            self.store.append_history(summary, session_key=session_key, channel=channel)
             return True
         except Exception:
             logger.warning("Consolidation LLM call failed, raw-dumping to history")
-            self.store.raw_archive(messages)
+            self.store.raw_archive(messages, session_key=session_key, channel=channel)
             return True
 
     async def maybe_consolidate_by_tokens(self, session: Session) -> None:
@@ -501,7 +576,7 @@ class Consolidator:
                     source,
                     len(chunk),
                 )
-                if not await self.archive(chunk):
+                if not await self.archive(chunk, session_key=session.key, channel=session.channel):
                     return
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
@@ -558,8 +633,19 @@ class Dream:
 
     async def run(self) -> bool:
         """Process unprocessed history entries. Returns True if work was done."""
-        last_cursor = self.store.get_last_dream_cursor()
-        entries = self.store.read_unprocessed_history(since_cursor=last_cursor)
+        result = await self.run_memory()
+
+        """Process unprocessed memory slot history entries. Returns True if work was done."""
+        await self.run_memory_slots()
+
+        return result
+
+    async def run_memory(self, store: MemoryStore | None = None) -> bool:
+        """Process unprocessed history entries. Returns True if work was done."""
+        store = store or self.store
+        logger.info("Dream: processing unprocessed history entries. dreaming dir={}", store.workspace)
+        last_cursor = store.get_last_dream_cursor()
+        entries = store.read_unprocessed_history(since_cursor=last_cursor)
         if not entries:
             return False
 
@@ -576,9 +662,9 @@ class Dream:
 
         # Current file contents
         current_date = datetime.now().strftime("%Y-%m-%d")
-        current_memory = self.store.read_memory() or "(empty)"
-        current_soul = self.store.read_soul() or "(empty)"
-        current_user = self.store.read_user() or "(empty)"
+        current_memory = store.read_memory() or "(empty)"
+        current_soul = store.read_soul() or "(empty)"
+        current_user = store.read_user() or "(empty)"
         file_context = (
             f"## Current Date\n{current_date}\n\n"
             f"## Current MEMORY.md ({len(current_memory)} chars)\n{current_memory}\n\n"
@@ -605,7 +691,7 @@ class Dream:
                 tool_choice=None,
             )
             analysis = phase1_response.content or ""
-            logger.debug("Dream Phase 1 analysis ({} chars): {}", len(analysis), analysis[:500])
+            logger.debug("Dream Phase 1 analysis ({} chars): {} in workspace:{}", len(analysis), analysis[:500], store.workspace)
         except Exception:
             logger.exception("Dream Phase 1 failed")
             return False
@@ -632,11 +718,11 @@ class Dream:
                 fail_on_tool_error=False,
             ))
             logger.debug(
-                "Dream Phase 2 complete: stop_reason={}, tool_events={}",
-                result.stop_reason, len(result.tool_events),
+                "Dream Phase 2 complete: stop_reason={}, tool_events={} in workspace:{}",
+                result.stop_reason, len(result.tool_events), store.workspace
             )
             for ev in (result.tool_events or []):
-                logger.info("Dream tool_event: name={}, status={}, detail={}", ev.get("name"), ev.get("status"), ev.get("detail", "")[:200])
+                logger.info("Dream tool_event: name={}, status={}, detail={} in workspace:{}", ev.get("name"), ev.get("status"), ev.get("detail", "")[:200], store.workspace)
         except Exception:
             logger.exception("Dream Phase 2 failed")
             result = None
@@ -650,8 +736,8 @@ class Dream:
 
         # Advance cursor — always, to avoid re-processing Phase 1
         new_cursor = batch[-1]["cursor"]
-        self.store.set_last_dream_cursor(new_cursor)
-        self.store.compact_history()
+        store.set_last_dream_cursor(new_cursor)
+        store.compact_history()
 
         if result and result.stop_reason == "completed":
             logger.info(
@@ -666,10 +752,19 @@ class Dream:
             )
 
         # Git auto-commit (only when there are actual changes)
-        if changelog and self.store.git.is_initialized():
+        if changelog and store.git.is_initialized():
             ts = batch[-1]["timestamp"]
             sha = self.store.git.auto_commit(f"dream: {ts}, {len(changelog)} change(s)")
             if sha:
                 logger.info("Dream commit: {}", sha)
-
+        
         return True
+    
+    async def run_memory_slots(self) -> bool:
+        """Process unprocessed memory slot history entries. Returns True if work was done."""
+        memory_slots = self.store.get_isolation_slots()
+        if not memory_slots:
+            return False
+        
+        for slot in memory_slots:
+            await self.run_memory(slot)

@@ -6,6 +6,7 @@ import platform
 from pathlib import Path
 from typing import Any
 
+from nanobot.config.schema import IsolationConfig
 from nanobot.utils.helpers import current_time_str
 
 from nanobot.agent.memory import MemoryStore
@@ -21,16 +22,17 @@ class ContextBuilder:
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     _MAX_RECENT_HISTORY = 50
 
-    def __init__(self, workspace: Path, timezone: str | None = None):
+    def __init__(self, workspace: Path, timezone: str | None = None, isolation_config : IsolationConfig | None = None):
         self.workspace = workspace
         self.timezone = timezone
-        self.memory = MemoryStore(workspace)
+        self.memory = MemoryStore(workspace, isolation_config=isolation_config)
         self.skills = SkillsLoader(workspace)
 
     def build_system_prompt(
         self,
         skill_names: list[str] | None = None,
         channel: str | None = None,
+        session_key: str | None = None
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity(channel=channel)]
@@ -39,7 +41,7 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
 
-        memory = self.memory.get_memory_context()
+        memory = self.memory.get_memory_context(channel=channel, session_key=session_key)
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
@@ -53,7 +55,8 @@ class ContextBuilder:
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
-        entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
+        entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor(channel=channel, session_key=session_key),
+                                                       channel=channel, session_key=session_key)
         if entries:
             capped = entries[-self._MAX_RECENT_HISTORY:]
             parts.append("# Recent History\n\n" + "\n".join(
@@ -120,6 +123,7 @@ class ContextBuilder:
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        session_key: str | None = None,
         current_role: str = "user",
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
@@ -133,7 +137,7 @@ class ContextBuilder:
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel, session_key=session_key)},
             *history,
         ]
         if messages[-1].get("role") == current_role:

@@ -29,7 +29,7 @@ from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults
+from nanobot.config.schema import AgentDefaults, DreamConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import image_placeholder_text, truncate_text
@@ -180,6 +180,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
+        dream_config: DreamConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 
@@ -212,7 +213,8 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone)
+        isolation_config = dream_config.isolation if dream_config else None
+        self.context = ContextBuilder(workspace, timezone=timezone, isolation_config=isolation_config)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
@@ -516,12 +518,14 @@ class AgentLoop:
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
+        final_session_key = session_key or msg.session_key
+        logger.info("process_message start {}:{}: {}", msg.channel, final_session_key, msg.session_key)
         if msg.channel == "system":
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
                                 else ("cli", msg.chat_id))
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
-            session = self.sessions.get_or_create(key)
+            session = self.sessions.get_or_create(key, channel=msg.channel)
             if self._restore_runtime_checkpoint(session):
                 self.sessions.save(session)
             await self.consolidator.maybe_consolidate_by_tokens(session)
@@ -530,7 +534,7 @@ class AgentLoop:
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
             messages = self.context.build_messages(
                 history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                current_message=msg.content, channel=channel, chat_id=chat_id, session_key=final_session_key,
                 current_role=current_role,
             )
             final_content, _, all_msgs = await self._run_agent_loop(
@@ -547,8 +551,8 @@ class AgentLoop:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        key = session_key or msg.session_key
-        session = self.sessions.get_or_create(key)
+        key = final_session_key
+        session = self.sessions.get_or_create(key, channel=msg.channel)
         if self._restore_runtime_checkpoint(session):
             self.sessions.save(session)
 
@@ -570,7 +574,7 @@ class AgentLoop:
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
+            channel=msg.channel, chat_id=msg.chat_id, session_key=final_session_key,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:

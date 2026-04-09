@@ -31,6 +31,11 @@ class ChannelsConfig(Base):
     transcription_provider: str = "groq"  # Voice transcription backend: "groq" or "openai"
 
 
+class IsolationConfig(Base):
+    """Isolation configuration for per-chat_id long-term memory separation."""
+    enbaled: bool = False
+    channels: list[str] = Field(default_factory=list)  # Channels that isolate memory by chat_id
+
 class DreamConfig(Base):
     """Dream memory consolidation configuration."""
 
@@ -44,6 +49,7 @@ class DreamConfig(Base):
     )  # Optional Dream-specific model override
     max_batch_size: int = Field(default=20, ge=1)  # Max history entries per run
     max_iterations: int = Field(default=10, ge=1)  # Max tool calls per Phase 2
+    isolation: IsolationConfig = Field(default_factory=IsolationConfig)  # Per-chat_id memory isolation
 
     def build_schedule(self, timezone: str) -> CronSchedule:
         """Build the runtime schedule, preferring the legacy cron override if present."""

@@ -80,6 +80,7 @@ _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
 
+
 def safe_filename(name: str) -> str:
     """Replace unsafe path characters with underscores."""
     return _UNSAFE_CHARS.sub("_", name).strip()
@@ -476,3 +477,16 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         logger.warning("Failed to initialize git store for {}", workspace)
 
     return added
+
+
+def parse_session_key(session_key: str) -> tuple[str, str]:
+    """Parse a session_key into (channel, chat_id) by splitting on ':'.
+
+    The session_key format is ``channel:chat_id``.  If no ':' is present the
+    entire string is treated as the chat_id and channel defaults to an empty
+    string.
+    """
+    if ":" in session_key:
+        channel, chat_id = session_key.split(":", maxsplit=1)
+        return channel, chat_id
+    return "", session_key

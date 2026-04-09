@@ -3,16 +3,28 @@
 from datetime import datetime
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from nanobot.agent.memory import MemoryStore
 
 
+def _make_isolation_config(enabled=True, channels=None):
+    """Build a lightweight stand-in for IsolationConfig."""
+    return SimpleNamespace(enbaled=enabled, channels=channels or [])
+
+
 @pytest.fixture
 def store(tmp_path):
     return MemoryStore(tmp_path)
 
+
+@pytest.fixture
+def isolated_store(tmp_path):
+    """MemoryStore with isolation enabled for the 'dingtalk' channel."""
+    config = _make_isolation_config(enabled=True, channels=["dingtalk"])
+    return MemoryStore(tmp_path, isolation_config=config)
 
 class TestMemoryStoreBasicIO:
     def test_read_memory_returns_empty_when_missing(self, store):
@@ -265,3 +277,167 @@ class TestLegacyHistoryMigration:
         assert entries[0]["timestamp"] == "2026-04-01 10:00"
         assert "Broken" in entries[0]["content"]
         assert "migration." in entries[0]["content"]
+
+
+class TestIsolationSlotReadWrite:
+    """Tests for _isolation_slots — per-channel isolated read/write operations."""
+
+    def test_read_memory_without_isolation_returns_root(self, store):
+        store.write_memory("root memory")
+        assert store.read_memory(channel="dingtalk", session_key="dingtalk_123") == "root memory"
+
+    def test_read_memory_with_isolation_returns_slot_content(self, isolated_store):
+        isolated_store.write_memory("root memory")
+        slot = isolated_store.get_isolation_slot("dingtalk_123")
+        slot.write_memory("slot memory")
+        result = isolated_store.read_memory(channel="dingtalk", session_key="dingtalk_123")
+        assert result == "slot memory"
+
+    def test_read_memory_isolated_returns_empty_when_slot_has_no_file(self, isolated_store):
+        isolated_store.write_memory("root memory")
+        result = isolated_store.read_memory(channel="dingtalk", session_key="dingtalk_999")
+        assert result == ""
+
+    def test_read_soul_without_isolation_returns_root(self, store):
+        store.write_soul("root soul")
+        assert store.read_soul(channel="dingtalk", session_key="dingtalk_123") == "root soul"
+
+    def test_read_soul_with_isolation_returns_slot_content(self, isolated_store):
+        isolated_store.write_soul("root soul")
+        slot = isolated_store.get_isolation_slot("dingtalk_123")
+        slot.write_soul("slot soul")
+        result = isolated_store.read_soul(channel="dingtalk", session_key="dingtalk_123")
+        assert result == "slot soul"
+
+    def test_read_user_without_isolation_returns_root(self, store):
+        store.write_user("root user")
+        assert store.read_user(channel="dingtalk", session_key="dingtalk_123") == "root user"
+
+    def test_read_user_with_isolation_returns_slot_content(self, isolated_store):
+        isolated_store.write_user("root user")
+        slot = isolated_store.get_isolation_slot("dingtalk_123")
+        slot.write_user("slot user")
+        result = isolated_store.read_user(channel="dingtalk", session_key="dingtalk_123")
+        assert result == "slot user"
+
+    def test_get_memory_context_with_isolation(self, isolated_store):
+        slot = isolated_store.get_isolation_slot("dingtalk_123")
+        slot.write_memory("isolated fact")
+        ctx = isolated_store.get_memory_context(channel="dingtalk", session_key="dingtalk_123")
+        assert "Long-term Memory" in ctx
+        assert "isolated fact" in ctx
+
+    def test_get_memory_context_isolated_returns_empty_when_slot_empty(self, isolated_store):
+        isolated_store.write_memory("root fact")
+        ctx = isolated_store.get_memory_context(channel="dingtalk", session_key="dingtalk_new")
+        assert ctx == ""
+
+    def test_append_history_with_isolation(self, isolated_store):
+        cursor = isolated_store.append_history("event A", channel="dingtalk", session_key="dingtalk_123")
+        assert cursor == 1
+        root_entries = isolated_store.read_unprocessed_history(since_cursor=0)
+        assert len(root_entries) == 0
+        slot_entries = isolated_store.read_unprocessed_history(
+            since_cursor=0, channel="dingtalk", session_key="dingtalk_123",
+        )
+        assert len(slot_entries) == 1
+        assert slot_entries[0]["content"] == "event A"
+
+    def test_append_history_without_isolation_goes_to_root(self, store):
+        cursor = store.append_history("root event", channel="dingtalk", session_key="dingtalk_123")
+        assert cursor == 1
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 1
+        assert entries[0]["content"] == "root event"
+
+    def test_read_unprocessed_history_with_isolation(self, isolated_store):
+        isolated_store.append_history("e1", channel="dingtalk", session_key="dingtalk_123")
+        isolated_store.append_history("e2", channel="dingtalk", session_key="dingtalk_123")
+        isolated_store.append_history("e3", channel="dingtalk", session_key="dingtalk_123")
+        entries = isolated_store.read_unprocessed_history(
+            since_cursor=1, channel="dingtalk", session_key="dingtalk_123",
+        )
+        assert len(entries) == 2
+        assert entries[0]["cursor"] == 2
+
+    def test_get_last_dream_cursor_with_isolation(self, isolated_store):
+        cursor = isolated_store.get_last_dream_cursor(channel="dingtalk", session_key="dingtalk_123")
+        assert cursor == 0
+
+    def test_non_isolated_channel_falls_back_to_root(self, isolated_store):
+        """A channel not listed in isolation_config.channels reads from root."""
+        isolated_store.write_memory("root memory")
+        result = isolated_store.read_memory(channel="telegram", session_key="telegram_456")
+        assert result == "root memory"
+
+    def test_disabled_isolation_config_falls_back_to_root(self, tmp_path):
+        config = _make_isolation_config(enabled=False, channels=["dingtalk"])
+        store = MemoryStore(tmp_path, isolation_config=config)
+        store.write_memory("root memory")
+        result = store.read_memory(channel="dingtalk", session_key="dingtalk_123")
+        assert result == "root memory"
+
+    def test_none_channel_falls_back_to_root(self, isolated_store):
+        isolated_store.write_memory("root memory")
+        result = isolated_store.read_memory(channel=None, session_key="dingtalk_123")
+        assert result == "root memory"
+
+
+class TestIsolationSlotManagement:
+    """Tests for slot creation, retrieval, and scanning."""
+
+    def test_get_isolation_slot_creates_new_slot(self, isolated_store):
+        slot = isolated_store.get_isolation_slot("dingtalk_123")
+        assert isinstance(slot, MemoryStore)
+        assert slot.workspace.name == "dingtalk_123"
+
+    def test_get_isolation_slot_returns_same_instance(self, isolated_store):
+        slot_a = isolated_store.get_isolation_slot("dingtalk_123")
+        slot_b = isolated_store.get_isolation_slot("dingtalk_123")
+        assert slot_a is slot_b
+
+    def test_get_isolation_slots_returns_all(self, isolated_store):
+        isolated_store.get_isolation_slot("dingtalk_111")
+        isolated_store.get_isolation_slot("dingtalk_222")
+        slots = isolated_store.get_isolation_slots()
+        assert len(slots) == 2
+
+    def test_scan_isolation_slots_picks_up_existing_dirs(self, tmp_path):
+        slot_dir = tmp_path / "dingtalk_123"
+        slot_dir.mkdir()
+        (slot_dir / "memory").mkdir()
+        config = _make_isolation_config(enabled=True, channels=["dingtalk"])
+        store = MemoryStore(tmp_path, isolation_config=config)
+        assert "dingtalk_123" in store._isolation_slots
+
+    def test_scan_ignores_non_matching_dirs(self, tmp_path):
+        (tmp_path / "random_dir").mkdir()
+        (tmp_path / ".hidden").mkdir()
+        (tmp_path / "no-underscore").mkdir()
+        config = _make_isolation_config(enabled=True, channels=["dingtalk"])
+        store = MemoryStore(tmp_path, isolation_config=config)
+        assert len(store._isolation_slots) == 0
+
+    def test_scan_ignores_memory_dir(self, tmp_path):
+        (tmp_path / "memory").mkdir(exist_ok=True)
+        config = _make_isolation_config(enabled=True, channels=["dingtalk"])
+        store = MemoryStore(tmp_path, isolation_config=config)
+        assert "memory" not in store._isolation_slots
+
+    def test_multiple_channels_isolate_independently(self, tmp_path):
+        config = _make_isolation_config(enabled=True, channels=["dingtalk", "telegram"])
+        store = MemoryStore(tmp_path, isolation_config=config)
+        slot_dt = store.get_isolation_slot("dingtalk_100")
+        slot_tg = store.get_isolation_slot("telegram_200")
+        slot_dt.write_memory("dt memory")
+        slot_tg.write_memory("tg memory")
+        assert store.read_memory(channel="dingtalk", session_key="dingtalk_100") == "dt memory"
+        assert store.read_memory(channel="telegram", session_key="telegram_200") == "tg memory"
+
+    def test_isolated_history_cursors_are_independent(self, tmp_path):
+        config = _make_isolation_config(enabled=True, channels=["dingtalk", "telegram"])
+        store = MemoryStore(tmp_path, isolation_config=config)
+        cursor_dt = store.append_history("dt event", channel="dingtalk", session_key="dingtalk_100")
+        cursor_tg = store.append_history("tg event", channel="telegram", session_key="telegram_200")
+        assert cursor_dt == 1
+        assert cursor_tg == 1
