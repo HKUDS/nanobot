@@ -620,11 +620,19 @@ class TelegramChannel(BaseChannel):
                 logger.warning("Stream initial send failed: {}", e)
                 raise  # Let ChannelManager handle retry
         elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
+            # Rolling window: Always display only the most recent 4000 characters
+            if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
+                # Truncate from the beginning to retain only the latest content (rolling).
+                rolling_text = buf.text[-TELEGRAM_MAX_MESSAGE_LEN:]
+                logger.debug(f"[!] Rolling edit: keeping last {len(rolling_text)} chars (total {len(buf.text)})")
+            else:
+                rolling_text = buf.text
+
             try:
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
-                    text=buf.text,
+                    text=rolling_text,
                 )
                 buf.last_edit = now
             except Exception as e:
