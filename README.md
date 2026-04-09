@@ -88,13 +88,11 @@
 - **2026-02-05** ✨ Added Feishu channel, DeepSeek provider, and enhanced scheduled tasks support!
 - **2026-02-04** 🚀 Released **v0.1.3.post4** with multi-provider & Docker support! Check [here](https://github.com/HKUDS/nanobot/releases/tag/v0.1.3.post4) for details.
 - **2026-02-03** ⚡ Integrated vLLM for local LLM support and improved natural language task scheduling!
-- **2026-02-02** 🎉 nanobot officially launched! Welcome to try 🐈 nanobot!
+- **2026-02-02** 🎉 nanobot officially launched! Welcome to try 🐈 Nanobot!
 
 </details>
 
-> 🐈 nanobot is for educational, research, and technical exchange purposes only. It is unrelated to crypto and does not involve any official token or coin.
-
-## Key Features of nanobot:
+## Key Features of Nanobot:
 
 🪶 **Ultra-Lightweight**: A lightweight implementation built for stable, long-running AI agents.
 
@@ -325,7 +323,7 @@ Simply send this message to nanobot (replace `xxx@xxx` with your real email):
 Read https://raw.githubusercontent.com/HKUDS/MoChat/refs/heads/main/skills/nanobot/skill.md and register on MoChat. My Email account is xxx@xxx Bind me as your owner and DM me on MoChat.
 ```
 
-nanobot will automatically register, configure `~/.nanobot/config.json`, and connect to Mochat.
+Nanobot will automatically register, configure `~/.nanobot/config.json`, and connect to Mochat.
 
 **2. Restart gateway**
 
@@ -333,7 +331,7 @@ nanobot will automatically register, configure `~/.nanobot/config.json`, and con
 nanobot gateway
 ```
 
-That's it — nanobot handles the rest!
+That's it — Nanobot handles the rest!
 
 <br>
 
@@ -715,7 +713,7 @@ DM the bot directly or @mention it in a channel — it should respond!
 <details>
 <summary><b>Email</b></summary>
 
-Give nanobot its own email account. It polls **IMAP** for incoming mail and replies via **SMTP** — like a personal email assistant.
+Give Nanobot its own email account. It polls **IMAP** for incoming mail and replies via **SMTP** — like a personal email assistant.
 
 **1. Get credentials (Gmail example)**
 - Create a dedicated Gmail account for your bot (e.g. `my-nanobot@gmail.com`)
@@ -855,14 +853,14 @@ nanobot gateway
 
 ## 🌐 Agent Social Network
 
-🐈 nanobot is capable of linking to the agent social network (agent community). **Just send one message and your nanobot joins automatically!**
+🐈 Nanobot is capable of linking to the agent social network (agent community). **Just send one message and your Nanobot joins automatically!**
 
 | Platform | How to Join (send this message to your bot) |
 |----------|-------------|
 | [**Moltbook**](https://www.moltbook.com/) | `Read https://moltbook.com/skill.md and follow the instructions to join Moltbook` |
 | [**ClawdChat**](https://clawdchat.ai/) | `Read https://clawdchat.ai/skill.md and follow the instructions to join ClawdChat` |
 
-Simply send the command above to your nanobot (via CLI or any chat channel), and it will handle the rest.
+Simply send the command above to your Nanobot (via CLI or any chat channel), and it will handle the rest.
 
 ## ⚙️ Configuration
 
@@ -1194,7 +1192,7 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
 <details>
 <summary><b>Adding a New Provider (Developer Guide)</b></summary>
 
-nanobot uses a **Provider Registry** (`nanobot/providers/registry.py`) as the single source of truth.
+Nanobot uses a **Provider Registry** (`nanobot/providers/registry.py`) as the single source of truth.
 Adding a new provider only takes **2 steps** — no if-elif chains to touch.
 
 **Step 1.** Add a `ProviderSpec` entry to `PROVIDERS` in `nanobot/providers/registry.py`:
@@ -1408,7 +1406,7 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
 > [!TIP]
 > The config format is compatible with Claude Desktop / Cursor. You can copy MCP server configs directly from any MCP server's README.
 
-nanobot supports [MCP](https://modelcontextprotocol.io/) — connect external tool servers and use them as native agent tools.
+Nanobot supports [MCP](https://modelcontextprotocol.io/) — connect external tool servers and use them as native agent tools.
 
 Add MCP servers to your `config.json`:
 
@@ -1994,11 +1992,11 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 </div>
 
 <p align="center">
-  <em> Thanks for visiting ✨ nanobot!</em><br><br>
+  <em> Thanks for visiting ✨ Nanobot!</em><br><br>
   <img src="https://visitor-badge.laobi.icu/badge?page_id=HKUDS.nanobot&style=for-the-badge&color=00d4ff" alt="Views">
 </p>
 
 
 <p align="center">
-  <sub>nanobot is for educational, research, and technical exchange purposes only</sub>
+  <sub>Nanobot is for educational, research, and technical exchange purposes only</sub>
 </p>
