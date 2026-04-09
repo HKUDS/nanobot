@@ -46,6 +46,7 @@ class ExecTool(Tool):
         restrict_to_workspace: bool = False,
         sandbox: str = "",
         path_append: str = "",
+        allowed_env_keys: list[str] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -64,6 +65,7 @@ class ExecTool(Tool):
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self.allowed_env_keys = allowed_env_keys or []
 
     @property
     def name(self) -> str:
@@ -208,7 +210,7 @@ class ExecTool(Tool):
         """
         if _IS_WINDOWS:
             sr = os.environ.get("SYSTEMROOT", r"C:\Windows")
-            return {
+            env = {
                 "SYSTEMROOT": sr,
                 "COMSPEC": os.environ.get("COMSPEC", f"{sr}\\system32\\cmd.exe"),
                 "USERPROFILE": os.environ.get("USERPROFILE", ""),
@@ -225,12 +227,22 @@ class ExecTool(Tool):
                 "ProgramFiles(x86)": os.environ.get("ProgramFiles(x86)", ""),
                 "ProgramW6432": os.environ.get("ProgramW6432", ""),
             }
+            for key in self.allowed_env_keys:
+                val = os.environ.get(key)
+                if val is not None:
+                    env[key] = val
+            return env
         home = os.environ.get("HOME", "/tmp")
-        return {
+        env = {
             "HOME": home,
             "LANG": os.environ.get("LANG", "C.UTF-8"),
             "TERM": os.environ.get("TERM", "dumb"),
         }
+        for key in self.allowed_env_keys:
+            val = os.environ.get(key)
+            if val is not None:
+                env[key] = val
+        return env
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
