@@ -83,6 +83,21 @@ class _LoopHook(AgentHook):
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
         if self._on_stream_end:
             await self._on_stream_end(resuming=resuming)
+        if self._stream_buf:
+            from nanobot.utils.helpers import (
+                extract_think_blocks,
+                extract_thought_blocks,
+            )
+
+            thoughts = extract_thought_blocks(self._stream_buf) or extract_think_blocks(
+                self._stream_buf
+            )
+            if thoughts:
+                logger.debug(
+                    "Model thought blocks ({}): {}",
+                    len(thoughts),
+                    "...".join(t[:100] for t in thoughts),
+                )
         self._stream_buf = ""
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
@@ -678,6 +693,7 @@ class AgentLoop:
             message.get("tool_calls"),
             message.get("reasoning_content"),
             message.get("thinking_blocks"),
+            message.get("thought_content"),
         )
 
     def _restore_runtime_checkpoint(self, session: Session) -> bool:

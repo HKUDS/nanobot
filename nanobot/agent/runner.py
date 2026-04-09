@@ -131,6 +131,7 @@ class AgentRunner:
                     tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
                     reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
+                    thought_content=response.thought_content,
                 )
                 messages.append(assistant_message)
                 tools_used.extend(tc.name for tc in response.tool_calls)
@@ -245,6 +246,7 @@ class AgentRunner:
                         clean,
                         reasoning_content=response.reasoning_content,
                         thinking_blocks=response.thinking_blocks,
+                        thought_content=response.thought_content,
                     ))
                     messages.append(build_length_recovery_message())
                     await hook.after_iteration(context)
@@ -278,6 +280,7 @@ class AgentRunner:
                 clean,
                 reasoning_content=response.reasoning_content,
                 thinking_blocks=response.thinking_blocks,
+                thought_content=response.thought_content,
             ))
             await self._emit_checkpoint(
                 spec,

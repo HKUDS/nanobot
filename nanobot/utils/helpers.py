@@ -15,10 +15,33 @@ from loguru import logger
 
 
 def strip_think(text: str) -> str:
-    """Remove <think>…</think> blocks and any unclosed trailing <think> tag."""
+    """Remove <think>…</think> blocks, <thought>…</thought> blocks, and any unclosed trailing tags."""
     text = re.sub(r"<think>[\s\S]*?</think>", "", text)
     text = re.sub(r"<think>[\s\S]*$", "", text)
+    text = re.sub(r"<thought>[\s\S]*?</thought>", "", text)
+    text = re.sub(r"<thought>[\s\S]*$", "", text)
     return text.strip()
+
+
+def extract_thought_blocks(text: str) -> list[str]:
+    """Extract all <thought>…</thought> block contents from text (for debugging/logging)."""
+    blocks: list[str] = re.findall(r"<thought>([\s\S]*?)</thought>", text)
+    remaining = re.sub(r"<thought>[\s\S]*?</thought>", "", text)
+    unclosed = re.findall(r"<thought>([\s\S]*)$", remaining)
+    return blocks + [u for u in unclosed if u]
+
+
+def extract_think_blocks(text: str) -> list[str]:
+    """Extract all <think>…</think> block contents from text (for debugging/logging)."""
+    blocks: list[str] = re.findall(r"<think>([\s\S]*?)</think>", text)
+    remaining = re.sub(r"<think>[\s\S]*?</think>", "", text)
+    unclosed = re.findall(r"<think>([\s\S]*)$", remaining)
+    return blocks + [u for u in unclosed if u]
+
+
+def has_thought_content(text: str) -> bool:
+    """Check if text contains any <thought> or <think> blocks."""
+    return bool(re.search(r"<thought>|<think>", text))
 
 
 def detect_image_mime(data: bytes) -> str | None:
@@ -270,15 +293,18 @@ def build_assistant_message(
     tool_calls: list[dict[str, Any]] | None = None,
     reasoning_content: str | None = None,
     thinking_blocks: list[dict] | None = None,
+    thought_content: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build a provider-safe assistant message with optional reasoning fields."""
     msg: dict[str, Any] = {"role": "assistant", "content": content or ""}
     if tool_calls:
         msg["tool_calls"] = tool_calls
-    if reasoning_content is not None or thinking_blocks:
+    if reasoning_content is not None or thinking_blocks or thought_content:
         msg["reasoning_content"] = reasoning_content if reasoning_content is not None else ""
     if thinking_blocks:
         msg["thinking_blocks"] = thinking_blocks
+    if thought_content:
+        msg["thought_content"] = thought_content
     return msg
 
 

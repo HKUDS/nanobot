@@ -32,6 +32,7 @@ from nanobot.providers.openai_responses import (
     convert_tools,
     parse_response_output,
 )
+from nanobot.utils.helpers import extract_thought_blocks
 
 if TYPE_CHECKING:
     from nanobot.providers.registry import ProviderSpec
@@ -543,6 +544,7 @@ class OpenAICompatProvider(LLMProvider):
                         reasoning_content=reasoning_content,
                         finish_reason=str(response_map.get("finish_reason") or "stop"),
                         usage=self._extract_usage(response_map),
+                        thought_content=(extract_thought_blocks(content) or None) if content else None,
                     )
                 return LLMResponse(content="Error: API returned empty choices.", finish_reason="error")
 
@@ -594,6 +596,7 @@ class OpenAICompatProvider(LLMProvider):
                 finish_reason=finish_reason,
                 usage=self._extract_usage(response_map),
                 reasoning_content=reasoning_content if isinstance(reasoning_content, str) else None,
+                thought_content=(extract_thought_blocks(content) or None) if content else None,
             )
 
         if not response.choices:
@@ -641,6 +644,7 @@ class OpenAICompatProvider(LLMProvider):
             finish_reason=finish_reason or "stop",
             usage=self._extract_usage(response),
             reasoning_content=reasoning_content,
+            thought_content=(extract_thought_blocks(content) or None) if content else None,
         )
 
     @classmethod
@@ -728,8 +732,9 @@ class OpenAICompatProvider(LLMProvider):
             for tc in (delta.tool_calls or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
 
+        final_content = "".join(content_parts) or None
         return LLMResponse(
-            content="".join(content_parts) or None,
+            content=final_content,
             tool_calls=[
                 ToolCallRequest(
                     id=b["id"] or _short_tool_id(),
@@ -744,6 +749,7 @@ class OpenAICompatProvider(LLMProvider):
             finish_reason=finish_reason,
             usage=usage,
             reasoning_content="".join(reasoning_parts) or None,
+            thought_content=(extract_thought_blocks(final_content) or None) if final_content else None,
         )
 
     @classmethod
