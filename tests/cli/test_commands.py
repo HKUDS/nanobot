@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,6 +12,10 @@ from typer.testing import CliRunner
 from nanobot.bus.events import OutboundMessage
 from nanobot.cli.commands import _make_provider, app
 from nanobot.config.schema import Config
+from nanobot.factory.gateway import (
+    GatewayComponentClasses,
+    create_gateway_runtime as _orig_create_gateway_runtime,
+)
 from nanobot.cron.types import CronJob, CronPayload
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
@@ -754,6 +759,41 @@ def _patch_cli_command_runtime(
         monkeypatch.setattr("nanobot.session.manager.SessionManager", session_manager)
     if cron_service is not None:
         monkeypatch.setattr("nanobot.cron.service.CronService", cron_service)
+
+    # With factory-based gateway assembly, dataclass defaults are bound at import time;
+    # patching only the class in the source module does not override ``GatewayComponentClasses``
+    # default fields. Pass ``components`` explicitly into ``create_gateway_runtime`` here to
+    # match the previous behaviour of function-local imports inside ``commands.gateway``.
+    if any(x is not None for x in (message_bus, session_manager, cron_service)):
+        from nanobot.factory.gateway import (
+            GatewayComponentClasses,
+            create_gateway_runtime as _orig_create_gateway_runtime,
+        )
+
+        def _inject_gateway_components(**kwargs):
+            parts = {}
+            if message_bus is not None:
+                parts["message_bus_cls"] = message_bus
+            if session_manager is not None:
+                parts["session_manager_cls"] = session_manager
+            if cron_service is not None:
+                parts["cron_service_cls"] = cron_service
+            existing = kwargs.get("components")
+            if existing is None:
+                kwargs["components"] = GatewayComponentClasses(**parts)
+            else:
+                kwargs["components"] = replace(existing, **parts)
+            return _orig_create_gateway_runtime(**kwargs)
+
+        monkeypatch.setattr(
+            "nanobot.factory.gateway.create_gateway_runtime",
+            _inject_gateway_components,
+        )
+        monkeypatch.setattr(
+            "nanobot.factory.create_gateway_runtime",
+            _inject_gateway_components,
+        )
+
     if get_cron_dir is not None:
         monkeypatch.setattr("nanobot.config.paths.get_cron_dir", get_cron_dir)
 
@@ -886,8 +926,14 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: provider)
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
-    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
+
+    class _FakeBus:
+        def __new__(cls):
+            return bus
+
+    class _FakeSessionManager:
+        def __init__(self, _workspace) -> None:
+            pass
 
     class _FakeCron:
         def __init__(self, _store_path: Path) -> None:
@@ -931,9 +977,24 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
         seen["model"] = model
         return True
 
-    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
+    def _inject_gateway_components(**kwargs):
+        kwargs["components"] = GatewayComponentClasses(
+            message_bus_cls=_FakeBus,
+            session_manager_cls=_FakeSessionManager,
+            cron_service_cls=_FakeCron,
+            agent_loop_cls=_FakeAgentLoop,
+            channel_manager_cls=_StopAfterCronSetup,
+        )
+        return _orig_create_gateway_runtime(**kwargs)
+
+    monkeypatch.setattr(
+        "nanobot.factory.gateway.create_gateway_runtime",
+        _inject_gateway_components,
+    )
+    monkeypatch.setattr(
+        "nanobot.factory.create_gateway_runtime",
+        _inject_gateway_components,
+    )
     monkeypatch.setattr(
         "nanobot.utils.evaluator.evaluate_response",
         _capture_evaluate_response,
