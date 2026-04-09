@@ -1,6 +1,6 @@
 /**
  * WebSocket server for Python-Node.js bridge communication.
- * Security: binds to 127.0.0.1 only; optional BRIDGE_TOKEN auth.
+ * Security: binds to 127.0.0.1 only; requires BRIDGE_TOKEN auth; rejects browser Origin headers.
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
@@ -12,6 +12,17 @@ interface SendCommand {
   text: string;
 }
 
+interface SendMediaCommand {
+  type: 'send_media';
+  to: string;
+  filePath: string;
+  mimetype: string;
+  caption?: string;
+  fileName?: string;
+}
+
+type BridgeCommand = SendCommand | SendMediaCommand;
+
 interface BridgeMessage {
   type: 'message' | 'status' | 'qr' | 'error';
   [key: string]: unknown;
@@ -22,13 +33,29 @@ export class BridgeServer {
   private wa: WhatsAppClient | null = null;
   private clients: Set<WebSocket> = new Set();
 
-  constructor(private port: number, private authDir: string, private token?: string) {}
+  constructor(private port: number, private authDir: string, private token: string) {}
 
   async start(): Promise<void> {
+    if (!this.token.trim()) {
+      throw new Error('BRIDGE_TOKEN is required');
+    }
+
     // Bind to localhost only — never expose to external network
-    this.wss = new WebSocketServer({ host: '127.0.0.1', port: this.port });
+    this.wss = new WebSocketServer({
+      host: '127.0.0.1',
+      port: this.port,
+      verifyClient: (info, done) => {
+        const origin = info.origin || info.req.headers.origin;
+        if (origin) {
+          console.warn(`Rejected WebSocket connection with Origin header: ${origin}`);
+          done(false, 403, 'Browser-originated WebSocket connections are not allowed');
+          return;
+        }
+        done(true);
+      },
+    });
     console.log(`🌉 Bridge server listening on ws://127.0.0.1:${this.port}`);
-    if (this.token) console.log('🔒 Token authentication enabled');
+    console.log('🔒 Token authentication enabled');
 
     // Initialize WhatsApp client
     this.wa = new WhatsAppClient({
@@ -40,27 +67,22 @@ export class BridgeServer {
 
     // Handle WebSocket connections
     this.wss.on('connection', (ws) => {
-      if (this.token) {
-        // Require auth handshake as first message
-        const timeout = setTimeout(() => ws.close(4001, 'Auth timeout'), 5000);
-        ws.once('message', (data) => {
-          clearTimeout(timeout);
-          try {
-            const msg = JSON.parse(data.toString());
-            if (msg.type === 'auth' && msg.token === this.token) {
-              console.log('🔗 Python client authenticated');
-              this.setupClient(ws);
-            } else {
-              ws.close(4003, 'Invalid token');
-            }
-          } catch {
-            ws.close(4003, 'Invalid auth message');
+      // Require auth handshake as first message
+      const timeout = setTimeout(() => ws.close(4001, 'Auth timeout'), 5000);
+      ws.once('message', (data) => {
+        clearTimeout(timeout);
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'auth' && msg.token === this.token) {
+            console.log('🔗 Python client authenticated');
+            this.setupClient(ws);
+          } else {
+            ws.close(4003, 'Invalid token');
           }
-        });
-      } else {
-        console.log('🔗 Python client connected');
-        this.setupClient(ws);
-      }
+        } catch {
+          ws.close(4003, 'Invalid auth message');
+        }
+      });
     });
 
     // Connect to WhatsApp
@@ -72,7 +94,7 @@ export class BridgeServer {
 
     ws.on('message', async (data) => {
       try {
-        const cmd = JSON.parse(data.toString()) as SendCommand;
+        const cmd = JSON.parse(data.toString()) as BridgeCommand;
         await this.handleCommand(cmd);
         ws.send(JSON.stringify({ type: 'sent', to: cmd.to }));
       } catch (error) {
@@ -92,9 +114,13 @@ export class BridgeServer {
     });
   }
 
-  private async handleCommand(cmd: SendCommand): Promise<void> {
-    if (cmd.type === 'send' && this.wa) {
+  private async handleCommand(cmd: BridgeCommand): Promise<void> {
+    if (!this.wa) return;
+
+    if (cmd.type === 'send') {
       await this.wa.sendMessage(cmd.to, cmd.text);
+    } else if (cmd.type === 'send_media') {
+      await this.wa.sendMedia(cmd.to, cmd.filePath, cmd.mimetype, cmd.caption, cmd.fileName);
     }
   }
 
