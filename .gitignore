@@ -20,4 +20,16 @@ __pycache__/
 poetry.lock
 .pytest_cache/
 botpy.log
+tests/
+.vscode/
+.VSCodeCounter/
+
+config.json
+his_log.json
+summary.md
+MEMORY-2026-03-26.md
+
+
+
+
 

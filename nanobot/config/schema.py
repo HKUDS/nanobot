@@ -231,6 +231,20 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    model_routing_enabled: bool = False  # Enable per-message model routing by rules
+    fallback_model: str | None = None  # Optional model used when routing is enabled and no rule matches
+    model_routes: list["ModelRoute"] = Field(default_factory=list)  # Ordered, first-match-wins routes
+
+
+class ModelRoute(Base):
+    """Per-message model routing rule."""
+
+    id: str = ""  # Optional rule identifier for logs/debugging
+    enabled: bool = True
+    model: str = ""  # Target model when the rule matches
+    keywords: list[str] = Field(default_factory=list)  # Case-insensitive substring matches by default
+    regex: str = ""  # Optional regex pattern (Python syntax)
+    case_sensitive: bool = False  # Applies to both keyword and regex matching
 
 
 class AgentsConfig(Base):

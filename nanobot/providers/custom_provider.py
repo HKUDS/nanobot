@@ -26,19 +26,33 @@ class CustomProvider(LLMProvider):
     async def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
                    model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
                    reasoning_effort: str | None = None) -> LLMResponse:
+        # max_tokens は既存モデルとの互換用。新しい一部モデルでは max_completion_tokens が必要になる。
+        max_tokens = max(1, max_tokens)
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
             "messages": self._sanitize_empty_content(messages),
-            "max_tokens": max(1, max_tokens),
+            "max_tokens": max_tokens,
             "temperature": temperature,
         }
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
         if tools:
             kwargs.update(tools=tools, tool_choice="auto")
+
         try:
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:
+            message = str(e)
+            # 一部の OpenAI/Azure モデルは max_tokens を受け付けず、
+            # 代わりに max_completion_tokens を要求するため、エラーメッセージを検出して再試行する。
+            if "max_completion_tokens" in message:
+                retry_kwargs = dict(kwargs)
+                retry_kwargs.pop("max_tokens", None)
+                retry_kwargs["max_completion_tokens"] = max_tokens
+                try:
+                    return self._parse(await self._client.chat.completions.create(**retry_kwargs))
+                except Exception as e2:
+                    return LLMResponse(content=f"Error: {e2}", finish_reason="error")
             return LLMResponse(content=f"Error: {e}", finish_reason="error")
 
     def _parse(self, response: Any) -> LLMResponse:

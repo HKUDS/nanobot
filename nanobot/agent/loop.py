@@ -52,6 +52,9 @@ class AgentLoop:
         provider: LLMProvider,
         workspace: Path,
         model: str | None = None,
+        model_routing_enabled: bool = False,
+        model_routes: list[dict[str, Any]] | None = None,
+        fallback_model: str | None = None,
         max_iterations: int = 40,
         temperature: float = 0.1,
         max_tokens: int = 4096,
@@ -72,6 +75,9 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self.model_routing_enabled = model_routing_enabled
+        self.model_routes = model_routes or []
+        self.fallback_model = fallback_model
         self.max_iterations = max_iterations
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -177,9 +183,68 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    def _select_model_for_message(self, msg_content: str) -> str:
+        """Select a model for the current message using optional routing rules."""
+        if not self.model_routing_enabled:
+            return self.model
+
+        text = msg_content or ""
+        for idx, route in enumerate(self.model_routes):
+            if not isinstance(route, dict):
+                continue
+            if not route.get("enabled", True):
+                continue
+
+            route_id = route.get("id") or f"route[{idx}]"
+            target_model = str(route.get("model") or "").strip()
+            if not target_model:
+                logger.warning("Model route {} skipped: empty target model", route_id)
+                continue
+
+            case_sensitive = bool(route.get("case_sensitive", False))
+            keywords = route.get("keywords") or []
+            pattern = str(route.get("regex") or "").strip()
+
+            source = text if case_sensitive else text.lower()
+            keyword_match = False
+            if isinstance(keywords, list):
+                for kw in keywords:
+                    if not isinstance(kw, str) or not kw:
+                        continue
+                    needle = kw if case_sensitive else kw.lower()
+                    if needle in source:
+                        keyword_match = True
+                        break
+
+            regex_match = False
+            if pattern:
+                flags = 0 if case_sensitive else re.IGNORECASE
+                try:
+                    regex_match = bool(re.search(pattern, text, flags))
+                except re.error as exc:
+                    logger.warning(
+                        "Model route {} skipped: invalid regex '{}' ({})",
+                        route_id,
+                        pattern,
+                        exc,
+                    )
+                    continue
+
+            if keyword_match or regex_match:
+                logger.debug("Model route matched {} -> {}", route_id, target_model)
+                return target_model
+
+        fallback = (self.fallback_model or "").strip()
+        if fallback:
+            logger.debug("Model routing fallback selected -> {}", fallback)
+            return fallback
+
+        return self.model
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
+        model: str,
         on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
@@ -194,7 +259,7 @@ class AgentLoop:
             response = await self.provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
-                model=self.model,
+                model=model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
@@ -347,7 +412,9 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            chosen_model = self._select_model_for_message(msg.content)
+            logger.debug("Using model '{}' for system message", chosen_model)
+            final_content, _, all_msgs = await self._run_agent_loop(messages, model=chosen_model)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -370,7 +437,15 @@ class AgentLoop:
                     if snapshot:
                         temp = Session(key=session.key)
                         temp.messages = list(snapshot)
-                        if not await self._consolidate_memory(temp, archive_all=True):
+                        consolidation_model = self._select_model_for_message(msg.content)
+                        logger.debug(
+                            "Using model '{}' for /new memory consolidation in {}",
+                            consolidation_model,
+                            msg.session_key,
+                        )
+                        if not await self._consolidate_memory(
+                            temp, archive_all=True, model=consolidation_model
+                        ):
                             return OutboundMessage(
                                 channel=msg.channel, chat_id=msg.chat_id,
                                 content="Memory archival failed, session not cleared. Please try again.",
@@ -401,7 +476,8 @@ class AgentLoop:
             async def _consolidate_and_unlock():
                 try:
                     async with lock:
-                        await self._consolidate_memory(session)
+                        consolidation_model = self._select_model_for_message(msg.content)
+                        await self._consolidate_memory(session, model=consolidation_model)
                 finally:
                     self._consolidating.discard(session.key)
                     _task = asyncio.current_task()
@@ -432,8 +508,10 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
+        chosen_model = self._select_model_for_message(msg.content)
+        logger.debug("Using model '{}' for message in {}", chosen_model, msg.session_key)
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages, model=chosen_model, on_progress=on_progress or _bus_progress,
         )
 
         if final_content is None:
@@ -487,10 +565,15 @@ class AgentLoop:
             session.messages.append(entry)
         session.updated_at = datetime.now()
 
-    async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
+    async def _consolidate_memory(
+        self,
+        session,
+        archive_all: bool = False,
+        model: str | None = None,
+    ) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
         return await MemoryStore(self.workspace).consolidate(
-            session, self.provider, self.model,
+            session, self.provider, model or self.model,
             archive_all=archive_all, memory_window=self.memory_window,
         )
 
