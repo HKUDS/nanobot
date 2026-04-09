@@ -1,6 +1,7 @@
 import asyncio
 import re
 from datetime import datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 
@@ -1136,3 +1137,381 @@ async def test_tick_mixed_pre_check_only_runs_tasks_with_work(tmp_path) -> None:
     assert len(execute_calls) == 1
     assert "Gmail scan" in execute_calls[0]
     assert "Check escalations" not in execute_calls[0]
+
+
+# ---------------------------------------------------------------------------
+# _advance_schedules — deterministic post-execution schedule advancement
+# ---------------------------------------------------------------------------
+
+def _fixed_now(dt: datetime):
+    """Return a patch context that fixes HeartbeatService._now()."""
+    return patch.object(HeartbeatService, "_now", return_value=dt)
+
+
+@pytest.fixture
+def advance_service(tmp_path):
+    """Factory fixture for _advance_schedules tests."""
+    def _make(heartbeat_content: str) -> HeartbeatService:
+        (tmp_path / "HEARTBEAT.md").write_text(heartbeat_content, encoding="utf-8")
+        return HeartbeatService(
+            workspace=tmp_path, provider=DummyProvider([]), model="test",
+            last_run_tracking=True, timezone="America/New_York",
+        )
+    return _make
+
+
+def test_advance_schedules_daily_task(advance_service) -> None:
+    """A daily recurring task's Schedule is advanced past now after execution."""
+    now = datetime(2026, 3, 12, 10, 30)
+    heartbeat = _make_heartbeat(
+        "\n### Gmail scan\nType: system\nSchedule: 2026-03-12 07:00\nRecur: every 1 day\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Gmail scan", task_type="system", schedule="2026-03-12 07:00")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert "Schedule: 2026-03-13 07:00" in updated
+    assert "Last-run: 2026-03-12 10:30" in updated
+
+
+def test_advance_schedules_hourly_task(advance_service) -> None:
+    """An hourly recurring task advances Schedule by 1 hour past now."""
+    now = datetime(2026, 3, 12, 10, 30)
+    heartbeat = _make_heartbeat(
+        "\n### Gmail scan\nType: system\nSchedule: 2026-03-12 09:00\nRecur: every 1 hour\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Gmail scan", task_type="system", schedule="2026-03-12 09:00")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert "Schedule: 2026-03-12 11:00" in updated
+
+
+def test_advance_schedules_skips_past_now(advance_service) -> None:
+    """When schedule is far in the past, it jumps forward past now."""
+    now = datetime(2026, 3, 12, 10, 30)
+    heartbeat = _make_heartbeat(
+        "\n### Balance check\nType: system\nSchedule: 2026-03-10 09:00\nRecur: every 1 day\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Balance check", task_type="system", schedule="2026-03-10 09:00")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert "Schedule: 2026-03-13 09:00" in updated
+
+
+def test_advance_schedules_skips_non_recurring(advance_service) -> None:
+    """Tasks without Recur field are not modified."""
+    now = datetime(2026, 3, 12, 10, 30)
+    past = "2026-03-12 09:00"
+    heartbeat = _make_heartbeat(
+        f"\n### One-time reminder\nSchedule: {past}\nRecipients: abc:whatsapp\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="One-time reminder", task_type="reminder", schedule=past)]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert f"Schedule: {past}" in updated
+    assert "Last-run:" not in updated
+
+
+def test_advance_schedules_skips_announcements(advance_service) -> None:
+    """Announcements (no schedule) are skipped without error."""
+    now = datetime(2026, 3, 12, 10, 30)
+    heartbeat = _make_heartbeat(announcements_section="\n### Deploy done\n")
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Deploy done", task_type="announcement", schedule=None)]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert updated == heartbeat
+
+
+def test_advance_schedules_updates_existing_last_run(advance_service) -> None:
+    """If Last-run already exists, it is updated rather than duplicated."""
+    now = datetime(2026, 3, 12, 10, 30)
+    heartbeat = _make_heartbeat(
+        "\n### Gmail scan\nType: system\nSchedule: 2026-03-12 09:00\nLast-run: 2026-03-11 09:00\nRecur: every 1 hour\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Gmail scan", task_type="system", schedule="2026-03-12 09:00")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert updated.count("Last-run:") == 1
+    assert "Last-run: 2026-03-12 10:30" in updated
+
+
+def test_advance_schedules_multiple_tasks(advance_service) -> None:
+    """Multiple due tasks are all advanced in a single call."""
+    now = datetime(2026, 3, 12, 10, 30)
+    heartbeat = _make_heartbeat(
+        "\n### Gmail scan\nType: system\nSchedule: 2026-03-12 09:00\nRecur: every 1 hour\n\n"
+        "### Balance check\nType: system\nSchedule: 2026-03-12 07:00\nRecur: every 1 day\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [
+        DueTask(name="Gmail scan", task_type="system", schedule="2026-03-12 09:00"),
+        DueTask(name="Balance check", task_type="system", schedule="2026-03-12 07:00"),
+    ]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert "Schedule: 2026-03-12 11:00" in updated
+    assert "Schedule: 2026-03-13 07:00" in updated
+
+
+def test_advance_schedules_date_only(advance_service) -> None:
+    """Date-only schedule (no time) stays date-only after advancement."""
+    now = datetime(2026, 3, 12, 10, 30)
+    heartbeat = _make_heartbeat(
+        "\n### Weekly review\nSchedule: 2026-03-12\nRecur: every 7 days\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Weekly review", task_type="reminder", schedule="2026-03-12")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert "Schedule: 2026-03-19" in updated
+
+
+def test_advance_schedules_advances_past_until(advance_service) -> None:
+    """Schedule is advanced even past Until — _compute_due_tasks handles expiry."""
+    now = datetime(2026, 3, 15, 10, 30)
+    heartbeat = _make_heartbeat(
+        "\n### Temp reminder\nSchedule: 2026-03-14 09:00\nRecur: every 1 day\nUntil: 2026-03-14\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Temp reminder", task_type="reminder", schedule="2026-03-14 09:00")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    # Schedule IS advanced — _compute_due_tasks won't fire it again (past Until)
+    assert "Schedule: 2026-03-16 09:00" in updated
+
+
+@pytest.mark.asyncio
+async def test_tick_advances_schedules_after_execution(tmp_path, monkeypatch) -> None:
+    """Full _tick integration: schedules are advanced after on_execute completes."""
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    heartbeat = _make_heartbeat(
+        f"\n### Gmail scan\nType: system\nSchedule: {past}\nRecur: every 1 hour\n"
+    )
+    (tmp_path / "HEARTBEAT.md").write_text(heartbeat, encoding="utf-8")
+
+    async def mock_execute(summary: str, model: str | None) -> str:
+        return "done"
+
+    async def mock_eval(*a, **kw):
+        return False
+
+    monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", mock_eval)
+
+    service = HeartbeatService(
+        workspace=tmp_path, provider=DummyProvider([]), model="test",
+        on_execute=mock_execute, last_run_tracking=True,
+    )
+
+    await service._tick()
+
+    updated = (tmp_path / "HEARTBEAT.md").read_text()
+    assert f"Schedule: {past}" not in updated
+    assert "Last-run:" in updated
+
+
+def test_advance_schedules_minute_recurrence(advance_service) -> None:
+    """Minute-based recurrence advances correctly."""
+    now = datetime(2026, 3, 12, 10, 35)
+    heartbeat = _make_heartbeat(
+        "\n### Frequent check\nType: system\nSchedule: 2026-03-12 10:00\nRecur: every 30 minutes\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Frequent check", task_type="system", schedule="2026-03-12 10:00")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert "Schedule: 2026-03-12 11:00" in updated
+
+
+def test_advance_schedules_extra_whitespace(advance_service) -> None:
+    """Schedule with extra whitespace after colon is still replaced correctly."""
+    now = datetime(2026, 3, 12, 10, 30)
+    heartbeat = _make_heartbeat(
+        "\n### Gmail scan\nType: system\nSchedule:  2026-03-12 09:00\nRecur: every 1 hour\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Gmail scan", task_type="system", schedule="2026-03-12 09:00")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert "2026-03-12 11:00" in updated
+    assert "2026-03-12 09:00" not in updated
+
+
+def test_advance_schedules_schedule_at_eof(advance_service) -> None:
+    """Last-run is inserted even when Schedule is the last line with no trailing newline."""
+    now = datetime(2026, 3, 12, 10, 30)
+    content = "# Heartbeat Tasks\n## Announcements\n## User Tasks\n### Task EOF\nType: system\nSchedule: 2026-03-12 09:00\nRecur: every 1 hour"
+    service = advance_service(content)
+    tasks = [DueTask(name="Task EOF", task_type="system", schedule="2026-03-12 09:00")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert "2026-03-12 11:00" in updated
+    assert "Last-run: 2026-03-12 10:30" in updated
+
+
+def test_advance_schedules_weekly_recurrence(advance_service) -> None:
+    """Weekly recurrence advances by 7 days."""
+    now = datetime(2026, 3, 12, 10, 30)
+    heartbeat = _make_heartbeat(
+        "\n### Weekly standup\nSchedule: 2026-03-12\nRecur: every 1 week\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Weekly standup", task_type="reminder", schedule="2026-03-12")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert "Schedule: 2026-03-19" in updated
+
+
+def test_advance_schedules_biweekly_recurrence(advance_service) -> None:
+    """Bi-weekly recurrence advances by 14 days."""
+    now = datetime(2026, 3, 12, 10, 30)
+    heartbeat = _make_heartbeat(
+        "\n### Biweekly review\nSchedule: 2026-03-12\nRecur: every 2 weeks\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Biweekly review", task_type="reminder", schedule="2026-03-12")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert "Schedule: 2026-03-26" in updated
+
+
+def test_advance_schedules_zero_recurrence_defaults_to_one(advance_service) -> None:
+    """Recur: every 0 days defaults to 1 day to prevent infinite loops."""
+    now = datetime(2026, 3, 12, 10, 30)
+    heartbeat = _make_heartbeat(
+        "\n### Bad task\nSchedule: 2026-03-12 09:00\nRecur: every 0 days\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Bad task", task_type="system", schedule="2026-03-12 09:00")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    # 0 days treated as 1 day
+    assert "Schedule: 2026-03-13 09:00" in updated
+
+
+def test_advance_schedules_block_stops_at_section_boundary(advance_service) -> None:
+    """Block regex stops at ## section headers, not just ### task headers."""
+    now = datetime(2026, 3, 12, 10, 30)
+    heartbeat = _make_heartbeat(
+        "\n### Last task\nType: system\nSchedule: 2026-03-12 09:00\nRecur: every 1 hour\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Last task", task_type="system", schedule="2026-03-12 09:00")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    assert "Schedule: 2026-03-12 11:00" in updated
+    # Verify ## Completed section is untouched
+    assert "## Completed" in updated
+
+
+def test_advance_schedules_skips_already_advanced(advance_service) -> None:
+    """If the LLM already ticked the schedule forward, don't double-advance."""
+    now = datetime(2026, 3, 12, 10, 30)
+    # Schedule is already in the future (LLM called --tick during execution)
+    heartbeat = _make_heartbeat(
+        "\n### Gmail scan\nType: system\nSchedule: 2026-03-12 11:00\nRecur: every 1 hour\n"
+    )
+    service = advance_service(heartbeat)
+    tasks = [DueTask(name="Gmail scan", task_type="system", schedule="2026-03-12 09:00")]
+
+    with _fixed_now(now):
+        service._advance_schedules(tasks)
+
+    updated = service.heartbeat_file.read_text()
+    # Should stay at 11:00, NOT advance to 12:00
+    assert "Schedule: 2026-03-12 11:00" in updated
+
+
+@pytest.mark.asyncio
+async def test_tick_advances_per_group_on_failure(tmp_path, monkeypatch) -> None:
+    """If one task group fails, the other group's schedule is still advanced."""
+    past = (datetime.now() - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+    heartbeat = _make_heartbeat(
+        f"\n### Gmail scan\nType: system\nSchedule: {past}\nModel: flash\nRecur: every 1 hour\n\n"
+        f"### Balance check\nType: system\nSchedule: {past}\nModel: pro\nRecur: every 1 day\n"
+    )
+    (tmp_path / "HEARTBEAT.md").write_text(heartbeat, encoding="utf-8")
+
+    call_count = 0
+
+    async def mock_execute(summary: str, model: str | None) -> str:
+        nonlocal call_count
+        call_count += 1
+        if "Balance check" in summary:
+            raise RuntimeError("API error")
+        return "done"
+
+    async def mock_eval(*a, **kw):
+        return False
+
+    monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", mock_eval)
+
+    service = HeartbeatService(
+        workspace=tmp_path, provider=DummyProvider([]), model="test",
+        on_execute=mock_execute, last_run_tracking=True,
+    )
+
+    await service._tick()
+
+    updated = (tmp_path / "HEARTBEAT.md").read_text()
+    # Both tasks should be advanced — even Balance check (failed) gets advanced
+    # to prevent retry spam on persistent errors
+    gmail_block = updated.split("### Gmail scan")[1].split("###")[0]
+    assert f"Schedule: {past}" not in gmail_block
+    assert "Last-run:" in gmail_block
+    balance_block = updated.split("### Balance check")[1].split("##")[0]
+    assert f"Schedule: {past}" not in balance_block
+    assert "Last-run:" in balance_block
+    assert call_count == 2
