@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 import importlib.util
+import json
 import os
 import re
 from collections import OrderedDict
@@ -51,6 +52,184 @@ def _guess_wecom_media_type(filename: str) -> str:
     if ext in _AUDIO_EXTS:
         return "voice"
     return "file"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Multi-level Memory Manager for WeCom
+# ═══════════════════════════════════════════════════════════════════════════
+# Directory layout under workspace:
+#   memory/MEMORY.md              ← shared public memory (skills, methods, knowledge)
+#   wecom_users/
+#     _config.json                ← admin binding, user registry
+#     <userid>/
+#       MEMORY.md                 ← private memory (preferences, habits, personal)
+#       HISTORY.md                ← private history summary
+#
+# Design goal: prevent cross-user information leakage in group chats.
+# Each user's private memory is isolated by userid directory; the context
+# patch only injects the *current sender's* private memory into the prompt,
+# never another user's data.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _now_str() -> str:
+    from datetime import datetime
+    return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+class WecomMemoryManager:
+    """Manages per-user private memory + shared public memory for WeCom users.
+
+    In group chats multiple users share the same chat_id session, so it is
+    critical that each user's private MEMORY.md is stored under their own
+    userid directory and only injected for the user who sent the current
+    message — never leaked to other participants.
+    """
+
+    def __init__(self, workspace: Path):
+        self.workspace = workspace
+        self.users_dir = workspace / "wecom_users"
+        self.users_dir.mkdir(parents=True, exist_ok=True)
+        self._config_path = self.users_dir / "_config.json"
+        self._config = self._load_config()
+
+    # ── Config persistence ──────────────────────────────────────────────
+
+    def _load_config(self) -> dict:
+        if self._config_path.exists():
+            try:
+                return json.loads(self._config_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return {"admin_ids": [], "users": {}}
+
+    def _save_config(self) -> None:
+        self._config_path.write_text(
+            json.dumps(self._config, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    # ── Admin management ────────────────────────────────────────────────
+
+    def is_admin(self, userid: str) -> bool:
+        return userid in self._config.get("admin_ids", [])
+
+    def add_admin(self, userid: str) -> None:
+        admins = self._config.setdefault("admin_ids", [])
+        if userid not in admins:
+            admins.append(userid)
+            self._save_config()
+
+    # ── User directory ──────────────────────────────────────────────────
+
+    def _user_dir(self, userid: str) -> Path:
+        d = self.users_dir / userid
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def ensure_user_registered(self, userid: str, name: str = "") -> None:
+        users = self._config.setdefault("users", {})
+        if userid not in users:
+            users[userid] = {"name": name, "first_seen": _now_str()}
+            self._save_config()
+        elif name and not users[userid].get("name"):
+            users[userid]["name"] = name
+            self._save_config()
+
+    def get_user_display(self, userid: str) -> str:
+        info = self._config.get("users", {}).get(userid, {})
+        name = info.get("name", "")
+        return f"{name} ({userid})" if name else userid
+
+    # ── Per-user private memory ─────────────────────────────────────────
+
+    def read_user_memory(self, userid: str) -> str:
+        p = self._user_dir(userid) / "MEMORY.md"
+        return p.read_text(encoding="utf-8") if p.exists() else ""
+
+    def write_user_memory(self, userid: str, content: str) -> None:
+        p = self._user_dir(userid) / "MEMORY.md"
+        p.write_text(content, encoding="utf-8")
+
+    # ── Shared public memory ────────────────────────────────────────────
+
+    def read_public_memory(self) -> str:
+        p = self.workspace / "memory" / "MEMORY.md"
+        return p.read_text(encoding="utf-8") if p.exists() else ""
+
+
+# Global instance — initialized lazily by WecomChannel
+_memory_mgr: WecomMemoryManager | None = None
+
+
+def get_memory_manager(workspace: Path) -> WecomMemoryManager:
+    global _memory_mgr
+    if _memory_mgr is None or _memory_mgr.workspace != workspace:
+        _memory_mgr = WecomMemoryManager(workspace)
+    return _memory_mgr
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Monkey-patch: inject per-user memory into system prompt
+# ═══════════════════════════════════════════════════════════════════════════
+# Only the *current sender's* private memory is injected, preventing any
+# cross-user data leakage in group chats where multiple users share a session.
+
+_context_patch_applied = False
+# Maps "wecom:<chat_id>" → sender_id of the most recent message in that chat
+_latest_sender: dict[str, str] = {}
+
+
+def _apply_context_patch() -> None:
+    """Patch ContextBuilder.build_system_prompt to append per-user WeCom memory."""
+    global _context_patch_applied
+    if _context_patch_applied:
+        return
+    _context_patch_applied = True
+
+    from nanobot.agent.context import ContextBuilder
+    _orig_build = ContextBuilder.build_system_prompt
+
+    def _patched_build_system_prompt(self, skill_names=None):
+        base = _orig_build(self, skill_names)
+
+        active_senders = set(_latest_sender.values())
+        if not active_senders:
+            return base
+
+        mgr = get_memory_manager(self.workspace)
+
+        # Build per-user memory sections — only inject memory for users who
+        # have private MEMORY.md; never mix memories between users.
+        user_memory_parts = []
+        for sid in active_senders:
+            priv = mgr.read_user_memory(sid)
+            if priv:
+                display = mgr.get_user_display(sid)
+                role = "管理员" if mgr.is_admin(sid) else "用户"
+                user_memory_parts.append(
+                    f"### {display} ({role}) 的私有记忆\n{priv}"
+                )
+
+        instruction = (
+            "\n\n---\n\n"
+            "# WeCom 多级记忆系统\n\n"
+            "你有两层记忆可用：\n"
+            "1. **公共记忆** (`memory/MEMORY.md`): 存放技能、方法、知识等所有人可见的信息\n"
+            "2. **私有记忆** (`wecom_users/<userid>/MEMORY.md`): 存放个人偏好、习惯、隐私信息\n\n"
+            "当用户要求记住某些内容时，请判断分类：\n"
+            "- 个人偏好/习惯/隐私 → 用 write_file 写入 `wecom_users/<userid>/MEMORY.md`\n"
+            "- 技能/方法/通用知识 → 用 edit_file 编辑 `memory/MEMORY.md`\n"
+            "- **严禁**将某用户的私有记忆泄露给其他用户（群聊中尤其注意）\n"
+            "- 查看某人私有记忆需要管理员权限或本人请求\n"
+        )
+        if user_memory_parts:
+            instruction += "\n" + "\n\n".join(user_memory_parts)
+
+        return base + instruction
+
+    ContextBuilder.build_system_prompt = _patched_build_system_prompt
+    logger.info("ContextBuilder patched: per-user WeCom memory enabled")
+
 
 class WecomConfig(Base):
     """WeCom (Enterprise WeChat) AI Bot channel configuration."""
@@ -111,6 +290,9 @@ class WecomChannel(BaseChannel):
             return
 
         from wecom_aibot_sdk import WSClient, generate_req_id
+
+        # Apply context patch for per-user memory isolation
+        _apply_context_patch()
 
         self._running = True
         self._loop = asyncio.get_running_loop()
@@ -245,11 +427,24 @@ class WecomChannel(BaseChannel):
             # Extract sender info from "from" field (SDK format)
             from_info = body.get("from", {})
             sender_id = from_info.get("userid", "unknown") if isinstance(from_info, dict) else "unknown"
+            sender_name = from_info.get("name", "") if isinstance(from_info, dict) else ""
 
             # For single chat, chatid is the sender's userid
             # For group chat, chatid is provided in body
             chat_type = body.get("chattype", "single")
             chat_id = body.get("chatid", sender_id)
+
+            # Register user in memory manager and track latest sender per chat.
+            # This enables the context patch to inject only the current sender's
+            # private memory — preventing cross-user leakage in group chats.
+            try:
+                from nanobot.config.loader import load_config
+                workspace = load_config().workspace_path
+                mgr = get_memory_manager(workspace)
+                mgr.ensure_user_registered(sender_id, sender_name)
+                _latest_sender[f"wecom:{chat_id}"] = sender_id
+            except Exception as exc:
+                logger.warning("Failed to register user in memory manager: {}", exc)
 
             content_parts = []
             media_paths: list[str] = []
