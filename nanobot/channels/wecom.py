@@ -35,6 +35,23 @@ def _sanitize_filename(name: str) -> str:
     name = _SAFE_NAME_RE.sub("_", name).strip("._ ")
     return name
 
+
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+_VIDEO_EXTS = {".mp4", ".avi", ".mov"}
+_AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg"}
+
+
+def _guess_wecom_media_type(filename: str) -> str:
+    """Classify file extension as WeCom media_type string."""
+    ext = Path(filename).suffix.lower()
+    if ext in _IMAGE_EXTS:
+        return "image"
+    if ext in _VIDEO_EXTS:
+        return "video"
+    if ext in _AUDIO_EXTS:
+        return "voice"
+    return "file"
+
 class WecomConfig(Base):
     """WeCom (Enterprise WeChat) AI Bot channel configuration."""
 
@@ -342,13 +359,21 @@ class WecomChannel(BaseChannel):
                 logger.warning("Failed to download media from WeCom")
                 return None
 
+            if len(data) > WECOM_UPLOAD_MAX_BYTES:
+                logger.warning(
+                    "WeCom inbound media too large: {} bytes (max {})",
+                    len(data),
+                    WECOM_UPLOAD_MAX_BYTES,
+                )
+                return None
+
             media_dir = get_media_dir("wecom")
             if not filename:
                 filename = fname or f"{media_type}_{hash(file_url) % 100000}"
             filename = _sanitize_filename(filename)
 
             file_path = media_dir / filename
-            file_path.write_bytes(data)
+            await asyncio.to_thread(file_path.write_bytes, data)
             logger.debug("Downloaded {} to {}", media_type, file_path)
             return str(file_path)
 
@@ -374,16 +399,7 @@ class WecomChannel(BaseChannel):
 
         try:
             fname = os.path.basename(file_path)
-            ext = os.path.splitext(fname)[1].lower()
-
-            if ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"):
-                media_type = "image"
-            elif ext in (".mp4", ".avi", ".mov"):
-                media_type = "video"
-            elif ext in (".amr", ".mp3", ".wav", ".ogg"):
-                media_type = "voice"
-            else:
-                media_type = "file"
+            media_type = _guess_wecom_media_type(fname)
 
             # Read file size and data in a thread to avoid blocking the event loop
             def _read_file():
@@ -400,9 +416,10 @@ class WecomChannel(BaseChannel):
             md5_hash = hashlib.md5(data).hexdigest()
 
             CHUNK_SIZE = 512 * 1024  # 512 KB raw (before base64)
-            chunk_list = [data[i : i + CHUNK_SIZE] for i in range(0, file_size, CHUNK_SIZE)]
+            mv = memoryview(data)
+            chunk_list = [bytes(mv[i : i + CHUNK_SIZE]) for i in range(0, file_size, CHUNK_SIZE)]
             n_chunks = len(chunk_list)
-            del data  # free raw bytes early
+            del mv, data
 
             # Step 1: init
             req_id = _gen_req_id("upload_init")
