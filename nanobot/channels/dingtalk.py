@@ -597,6 +597,18 @@ class DingTalkChannel(BaseChannel):
                 logger.error("DingTalk file download failed: status={}", file_resp.status_code)
                 return None
 
+            # Fix missing extension using Content-Type header
+            content_type = (file_resp.headers.get("content-type") or "").split(";")[0].strip()
+            if not Path(filename).suffix and content_type:
+                ext = mimetypes.guess_extension(content_type)
+                if ext:
+                    filename = f"{filename}{ext}"
+
+            # Prepend millisecond timestamp so files are never overwritten
+            stem = Path(filename).stem or "file"
+            suffix = Path(filename).suffix
+            filename = f"{stem}_{int(time.time() * 1000)}{suffix}"
+
             # Save to media directory (accessible under workspace)
             download_dir = get_media_dir("dingtalk") / sender_id
             download_dir.mkdir(parents=True, exist_ok=True)
