@@ -77,6 +77,7 @@ class AutoCompact:
             session = self.sessions.get_or_create(key)
         entry = self._summaries.pop(key, None)
         if entry:
+            session.metadata.pop("_last_summary", None)
             return session, self._format_summary(entry[0], entry[1])
         if not session.messages and "_last_summary" in session.metadata:
             meta = session.metadata.pop("_last_summary")
