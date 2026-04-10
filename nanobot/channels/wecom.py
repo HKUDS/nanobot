@@ -278,6 +278,9 @@ class WecomChannel(BaseChannel):
         self._generate_req_id = None
         # Store frame headers for each chat to enable replies
         self._chat_frames: dict[str, Any] = {}
+        # Streaming reply state: chat_id → (stream_id, accumulated_buffer)
+        self._active_streams: dict[str, str] = {}
+        self._stream_buffers: dict[str, str] = {}
 
     async def start(self) -> None:
         """Start the WeCom bot with WebSocket long connection."""
@@ -515,6 +518,16 @@ class WecomChannel(BaseChannel):
             if not content:
                 return
 
+            # Prepend sender identity so the agent always knows who is speaking.
+            # This is especially important in group chats where multiple users
+            # share the same session — without this the model cannot tell apart
+            # who sent each message or apply the correct per-user memory.
+            if sender_id and sender_id != "unknown":
+                if sender_name:
+                    content = f"[sender: {sender_id} ({sender_name})]\n{content}"
+                else:
+                    content = f"[sender: {sender_id}]\n{content}"
+
             # Store frame for this chat to enable replies
             self._chat_frames[chat_id] = frame
 
@@ -709,21 +722,28 @@ class WecomChannel(BaseChannel):
 
             if frame:
                 if is_progress:
-                    # Progress messages (thinking text): send as plain reply, no streaming
-                    await self._client.reply(frame, {
-                        "msgtype": "text",
-                        "text": {"content": content},
-                    })
-                    logger.debug("WeCom progress sent to {}", msg.chat_id)
+                    # Progress (tool hints / thinking): accumulate into buffer and
+                    # send each chunk via reply_stream(finish=False) so the user
+                    # sees live updates while the agent is still working.
+                    if msg.chat_id not in self._active_streams:
+                        self._active_streams[msg.chat_id] = self._generate_req_id("stream")
+                        self._stream_buffers[msg.chat_id] = ""
+                    self._stream_buffers[msg.chat_id] += content + "\n"
+                    try:
+                        await self._client.reply_stream(
+                            frame,
+                            self._active_streams[msg.chat_id],
+                            self._stream_buffers[msg.chat_id],
+                            finish=False,
+                        )
+                    except Exception as e:
+                        logger.warning("WeCom stream progress error: {}", e)
+                    logger.debug("WeCom stream progress sent to {}", msg.chat_id)
                 else:
-                    # Final response: use streaming reply for better UX
-                    stream_id = self._generate_req_id("stream")
-                    await self._client.reply_stream(
-                        frame,
-                        stream_id,
-                        content,
-                        finish=True,
-                    )
+                    # Final response: close any open stream or open a new one.
+                    stream_id = self._active_streams.pop(msg.chat_id, None) or self._generate_req_id("stream")
+                    self._stream_buffers.pop(msg.chat_id, None)
+                    await self._client.reply_stream(frame, stream_id, content, finish=True)
                     logger.debug("WeCom message sent to {}", msg.chat_id)
             else:
                 # No frame (e.g. cron push): proactive send only supports markdown
