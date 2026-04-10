@@ -400,6 +400,22 @@ class Consolidator:
 
         return last_boundary
 
+    def _cap_consolidation_boundary(
+        self,
+        session: Session,
+        end_idx: int,
+    ) -> int | None:
+        """Clamp the chunk size without breaking the user-turn boundary."""
+        start = session.last_consolidated
+        if end_idx - start <= self._MAX_CHUNK_MESSAGES:
+            return end_idx
+
+        capped_end = start + self._MAX_CHUNK_MESSAGES
+        for idx in range(capped_end, start, -1):
+            if session.messages[idx].get("role") == "user":
+                return idx
+        return None
+
     def estimate_session_prompt_tokens(self, session: Session) -> tuple[int, str]:
         """Estimate current prompt size for the normal session history view."""
         history = session.get_history(max_messages=0)
@@ -495,13 +511,18 @@ class Consolidator:
                     return
 
                 end_idx = boundary[0]
+                end_idx = self._cap_consolidation_boundary(session, end_idx)
+                if end_idx is None:
+                    logger.debug(
+                        "Token consolidation: no capped boundary for {} (round {})",
+                        session.key,
+                        round_num,
+                    )
+                    return
+
                 chunk = session.messages[session.last_consolidated:end_idx]
                 if not chunk:
                     return
-
-                if len(chunk) > self._MAX_CHUNK_MESSAGES:
-                    chunk = chunk[:self._MAX_CHUNK_MESSAGES]
-                    end_idx = session.last_consolidated + len(chunk)
 
                 logger.info(
                     "Token consolidation round {} for {}: {}/{} via {}, chunk={} msgs",
