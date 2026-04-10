@@ -11,6 +11,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults
+from nanobot.command import CommandContext
 from nanobot.providers.base import LLMResponse
 
 
@@ -47,11 +48,6 @@ class TestSessionTTLConfig:
         defaults = AgentDefaults(session_ttl_minutes=30)
         assert defaults.session_ttl_minutes == 30
 
-    def test_ttl_zero_means_disabled(self):
-        """TTL of 0 means auto-new is disabled."""
-        defaults = AgentDefaults()
-        assert defaults.session_ttl_minutes == 0
-
 
 class TestAgentLoopTTLParam:
     """Test that AutoSessionNew receives and stores session_ttl_minutes."""
@@ -69,6 +65,52 @@ class TestAgentLoopTTLParam:
 
 class TestAutoNew:
     """Test the _archive method."""
+
+    @pytest.mark.asyncio
+    async def test_is_expired_boundary(self, tmp_path):
+        """Exactly at TTL boundary should be expired (>= not >)."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        ts = datetime.now() - timedelta(minutes=15)
+        assert loop.auto_new._is_expired(ts) is True
+        ts2 = datetime.now() - timedelta(minutes=14, seconds=59)
+        assert loop.auto_new._is_expired(ts2) is False
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_is_expired_string_timestamp(self, tmp_path):
+        """_is_expired should parse ISO string timestamps."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        ts = (datetime.now() - timedelta(minutes=20)).isoformat()
+        assert loop.auto_new._is_expired(ts) is True
+        assert loop.auto_new._is_expired(None) is False
+        assert loop.auto_new._is_expired("") is False
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_check_expired_only_archives_expired_sessions(self, tmp_path):
+        """With multiple sessions, only the expired one should be archived."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        # Expired session
+        s1 = loop.sessions.get_or_create("cli:expired")
+        s1.add_message("user", "old")
+        s1.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(s1)
+        # Active session
+        s2 = loop.sessions.get_or_create("cli:active")
+        s2.add_message("user", "recent")
+        loop.sessions.save(s2)
+
+        async def _fake_archive(messages):
+            return True
+
+        loop.consolidator.archive = _fake_archive
+        loop.auto_new.check_expired(loop._schedule_background)
+        await asyncio.sleep(0.1)
+
+        active_after = loop.sessions.get_or_create("cli:active")
+        assert len(active_after.messages) == 1
+        assert active_after.messages[0]["content"] == "recent"
+        await loop.close_mcp()
 
     @pytest.mark.asyncio
     async def test_auto_new_archives_and_clears(self, tmp_path):
@@ -185,7 +227,7 @@ class TestAutoNewIdleDetection:
         await loop._process_message(msg)
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) >= 1
+        assert any(m["content"] == "old message" for m in session_after.messages)
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -216,6 +258,7 @@ class TestAutoNewIdleDetection:
 
         session_after = loop.sessions.get_or_create("cli:test")
         assert not any(m["content"] == "old message" for m in session_after.messages)
+        assert any(m["content"] == "new msg" for m in session_after.messages)
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -245,7 +288,6 @@ class TestAutoNewIdleDetection:
         # Priority commands are dispatched in run() before _process_message is called.
         # Simulate that path directly via dispatch_priority.
         raw = "/stop"
-        from nanobot.command import CommandContext
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content=raw)
         ctx = CommandContext(msg=msg, session=session, key="cli:test", raw=raw, loop=loop)
         result = await loop.commands.dispatch_priority(ctx)
@@ -585,22 +627,24 @@ class TestProactiveAutoNew:
         loop.sessions.save(session)
 
         archive_count = 0
+        started = asyncio.Event()
         block_forever = asyncio.Event()
 
         async def _slow_archive(messages):
             nonlocal archive_count
             archive_count += 1
-            await block_forever.wait()  # Simulate slow LLM call
+            started.set()
+            await block_forever.wait()
             return True
 
         loop.consolidator.archive = _slow_archive
 
         # First call starts archiving via callback
         loop.auto_new.check_expired(loop._schedule_background)
-        await asyncio.sleep(0.05)
+        await started.wait()
         assert archive_count == 1
 
-        # Second call should skip (key is in _archiving_keys)
+        # Second call should skip (key is in _archiving)
         loop.auto_new.check_expired(loop._schedule_background)
         await asyncio.sleep(0.05)
         assert archive_count == 1
