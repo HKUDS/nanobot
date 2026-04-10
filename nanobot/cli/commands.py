@@ -707,6 +707,17 @@ def gateway(
             f"Scheduled instruction: {job.payload.message}"
         )
 
+        # Resolve agent profile for this cron job
+        cron_model = None
+        saved_prefix = agent.system_prompt_prefix
+        if job.payload.agent:
+            profile = config.agents.profiles.get(job.payload.agent) or config.agents.profiles.get("default")
+            if profile:
+                if profile.system_prompt:
+                    agent.system_prompt_prefix = profile.system_prompt
+                if profile.model:
+                    cron_model = profile.model
+
         cron_tool = agent.tools.get("cron")
         cron_token = None
         if isinstance(cron_tool, CronTool):
@@ -717,10 +728,12 @@ def gateway(
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                model=cron_model,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
                 cron_tool.reset_cron_context(cron_token)
+            agent.system_prompt_prefix = saved_prefix
 
         response = resp.content if resp else ""
 
@@ -870,6 +883,7 @@ def agent(
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
     markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
     logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    agent_profile: str | None = typer.Option(None, "--agent", "-a", help="Named agent profile"),
 ):
     """Interact with the agent directly."""
     from loguru import logger
@@ -882,6 +896,30 @@ def agent(
     sync_workspace_templates(config.workspace_path)
 
     bus = MessageBus()
+
+    # Resolve agent profile overrides
+    profile_model = config.agents.defaults.model
+    profile_provider = config.agents.defaults.provider
+    system_prompt = None
+
+    if agent_profile:
+        profile = config.agents.profiles.get(agent_profile) or config.agents.profiles.get("default")
+        if profile:
+            if profile.system_prompt:
+                system_prompt = profile.system_prompt
+            if profile.model:
+                profile_model = profile.model
+            if profile.provider:
+                profile_provider = profile.provider
+            if profile.temperature is not None:
+                config.agents.defaults.temperature = profile.temperature
+        elif agent_profile != "default":
+            console.print(f"[yellow]Warning: agent profile '{agent_profile}' not found, using defaults[/yellow]")
+
+    # Override provider if profile specifies one
+    if agent_profile and profile_provider != config.agents.defaults.provider:
+        config.agents.defaults.provider = profile_provider
+
     provider = _make_provider(config)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
@@ -901,7 +939,7 @@ def agent(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
+        model=profile_model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
         web_config=config.tools.web,
@@ -914,6 +952,7 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        system_prompt_prefix=system_prompt,
         unified_session=config.agents.defaults.unified_session,
     )
     restart_notice = consume_restart_notice_from_env()

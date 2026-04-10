@@ -145,6 +145,7 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        system_prompt_prefix: str | None = None,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
     ):
@@ -156,6 +157,7 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self.system_prompt_prefix = system_prompt_prefix
         self.max_iterations = (
             max_iterations if max_iterations is not None else defaults.max_tool_iterations
         )
@@ -505,6 +507,7 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
+                system_prompt_prefix=self.system_prompt_prefix,
             )
             final_content, _, all_msgs, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
@@ -544,6 +547,7 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            system_prompt_prefix=self.system_prompt_prefix,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -739,13 +743,20 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        model: str | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        return await self._process_message(
-            msg, session_key=session_key, on_progress=on_progress,
-            on_stream=on_stream, on_stream_end=on_stream_end,
-        )
+        saved_model = self.model
+        if model:
+            self.model = model
+        try:
+            msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+            return await self._process_message(
+                msg, session_key=session_key, on_progress=on_progress,
+                on_stream=on_stream, on_stream_end=on_stream_end,
+            )
+        finally:
+            self.model = saved_model

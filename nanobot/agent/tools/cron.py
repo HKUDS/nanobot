@@ -104,13 +104,14 @@ class CronTool(Tool):
         tz: str | None = None,
         at: str | None = None,
         job_id: str | None = None,
+        agent: str | None = None,
         deliver: bool = True,
         **kwargs: Any,
     ) -> str:
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(name, message, every_seconds, cron_expr, tz, at, deliver)
+            return self._add_job(name, message, every_seconds, cron_expr, tz, at, agent=agent, deliver=deliver)
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -125,6 +126,7 @@ class CronTool(Tool):
         cron_expr: str | None,
         tz: str | None,
         at: str | None,
+        agent: str | None = None,
         deliver: bool = True,
     ) -> str:
         if not message:
@@ -171,6 +173,7 @@ class CronTool(Tool):
             channel=self._channel,
             to=self._chat_id,
             delete_after_run=delete_after,
+            agent=agent,
         )
         return f"Created job '{job.name}' (id: {job.id})"
 
@@ -221,7 +224,8 @@ class CronTool(Tool):
         lines = []
         for j in jobs:
             timing = self._format_timing(j.schedule)
-            parts = [f"- {j.name} (id: {j.id}, {timing})"]
+            agent_info = f", agent: {j.payload.agent}" if j.payload.agent else ""
+            parts = [f"- {j.name} (id: {j.id}, {timing}{agent_info})"]
             if j.payload.kind == "system_event":
                 parts.append(f"  Purpose: {self._system_job_purpose(j)}")
                 parts.append("  Protected: visible for inspection, but cannot be removed.")

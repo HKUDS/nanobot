@@ -31,9 +31,13 @@ class ContextBuilder:
         self,
         skill_names: list[str] | None = None,
         channel: str | None = None,
+        system_prompt_prefix: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity(channel=channel)]
+
+        if system_prompt_prefix:
+            parts.append(f"# Agent Profile\n\n{system_prompt_prefix}")
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -121,6 +125,7 @@ class ContextBuilder:
         channel: str | None = None,
         chat_id: str | None = None,
         current_role: str = "user",
+        system_prompt_prefix: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone)
@@ -132,8 +137,9 @@ class ContextBuilder:
             merged = f"{runtime_ctx}\n\n{user_content}"
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
+
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel, system_prompt_prefix=system_prompt_prefix)},
             *history,
         ]
         if messages[-1].get("role") == current_role:
