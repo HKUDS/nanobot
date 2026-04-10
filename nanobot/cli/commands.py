@@ -638,6 +638,7 @@ def gateway(
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
+    from loguru import logger
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
 
@@ -836,10 +837,8 @@ def gateway(
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
-                agent.run(),
-                channels.start_all(),
-            )
+            tasks = [agent.run(), channels.start_all()]
+            await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         except Exception:
@@ -851,6 +850,7 @@ def gateway(
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
+            event_svc.stop()
             agent.stop()
             await channels.stop_all()
 
