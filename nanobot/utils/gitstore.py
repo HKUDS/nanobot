@@ -51,9 +51,21 @@ class GitStore:
 
             porcelain.init(str(self._workspace))
 
-            # Write .gitignore
+            # Write .gitignore (merge if already exists, write fresh if not)
             gitignore = self._workspace / ".gitignore"
-            gitignore.write_text(self._build_gitignore(), encoding="utf-8")
+            new_content = self._build_gitignore()
+            if not gitignore.exists():
+                gitignore.write_text(new_content, encoding="utf-8")
+            else:
+                existing = gitignore.read_text(encoding="utf-8")
+                existing_lines = set(existing.splitlines())
+                extra = [
+                    line for line in new_content.splitlines()
+                    if line not in existing_lines
+                ]
+                if extra:
+                    append_block = "\n" + "\n".join(extra) + "\n"
+                    gitignore.write_text(existing.rstrip("\n") + "\n" + append_block, encoding="utf-8")
 
             # Ensure tracked files exist (touch them if missing) so the initial
             # commit has something to track.
@@ -150,6 +162,11 @@ class GitStore:
         for f in self._tracked_files:
             lines.append(f"!{f}")
         lines.append("!.gitignore")
+        # Runtime-only files that should never be tracked
+        lines.append("memory/.cursor")
+        lines.append("memory/.dream_cursor")
+        lines.append("memory/HISTORY.md.bak")
+        lines.append("memory/history.jsonl")
         return "\n".join(lines) + "\n"
 
     # -- query -----------------------------------------------------------------
