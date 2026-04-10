@@ -87,6 +87,28 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Return exactly: OK" in user_content
 
 
+def test_runtime_context_includes_group_metadata(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="We are calling it",
+        channel="whatsapp",
+        chat_id="120@g.us",
+        sender_id="19145550100",
+        metadata={
+            "is_group": True,
+            "was_mentioned": False,
+        },
+    )
+
+    user_content = messages[-1]["content"]
+    assert "Channel: whatsapp" in user_content
+    assert "Conversation Type: group chat" in user_content
+    assert "Was Mentioned: False" in user_content
+
+
 def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None:
     """Entries in history.jsonl not yet consumed by Dream appear with timestamps."""
     workspace = _make_workspace(tmp_path)

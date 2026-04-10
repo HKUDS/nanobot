@@ -36,7 +36,10 @@ from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import image_placeholder_text, truncate_text as truncate_text_fn
-from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
+from nanobot.utils.runtime import (
+    EMPTY_FINAL_RESPONSE_MESSAGE,
+    NO_REPLY_SENTINEL,
+)
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
@@ -674,8 +677,9 @@ class AgentLoop:
             current_message=msg.content,
             session_summary=pending,
             media=msg.media if msg.media else None,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
+            channel=msg.channel, chat_id=msg.chat_id,
+            sender_id=msg.sender_id,
+            metadata=msg.metadata,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -703,6 +707,8 @@ class AgentLoop:
             pending_queue=pending_queue,
         )
 
+        no_reply = isinstance(final_content, str) and final_content.strip() == NO_REPLY_SENTINEL
+
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
@@ -711,6 +717,8 @@ class AgentLoop:
         self.sessions.save(session)
         self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
 
+        if no_reply:
+            return None
         # When follow-up messages were injected mid-turn, a later natural
         # language reply may address those follow-ups and should not be
         # suppressed just because MessageTool was used earlier in the turn.
@@ -781,6 +789,8 @@ class AgentLoop:
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
+            if role == "assistant" and isinstance(content, str) and content.strip() == NO_REPLY_SENTINEL:
+                continue
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":

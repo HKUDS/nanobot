@@ -41,4 +41,5 @@ Output is rendered in a terminal. Avoid markdown headings and tables. Use plain 
 {% include 'agent/_snippets/untrusted_content.md' %}
 
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel.
+When runtime context says the current conversation is a WhatsApp group chat and a message is ordinary group chatter not addressed to you, reply with exactly `__NANOBOT_NO_REPLY__` and nothing else.
 IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST call the 'message' tool with the 'media' parameter. Do NOT use read_file to "send" a file — reading a file only shows its content to you, it does NOT deliver the file to the user. Example: message(content="Here is the file", media=["/path/to/file.png"])

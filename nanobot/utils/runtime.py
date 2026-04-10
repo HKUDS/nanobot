@@ -15,6 +15,8 @@ EMPTY_FINAL_RESPONSE_MESSAGE = (
     "Please try again or narrow the task."
 )
 
+NO_REPLY_SENTINEL = "__NANOBOT_NO_REPLY__"
+
 FINALIZATION_RETRY_PROMPT = (
     "Please provide your response to the user based on the conversation above."
 )

@@ -1,6 +1,15 @@
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import ExecToolConfig, WebToolsConfig
+from nanobot.providers.base import LLMResponse
 from nanobot.session.manager import Session
+from nanobot.utils.runtime import NO_REPLY_SENTINEL
 
 
 def _mk_loop() -> AgentLoop:
@@ -60,6 +69,51 @@ def test_save_turn_keeps_image_placeholder_without_meta() -> None:
         skip=0,
     )
     assert session.messages[0]["content"] == [{"type": "text", "text": "[image]"}]
+
+
+def test_save_turn_skips_no_reply_sentinel() -> None:
+    loop = _mk_loop()
+    session = Session(key="whatsapp:120@g.us")
+
+    loop._save_turn(
+        session,
+        [{"role": "assistant", "content": NO_REPLY_SENTINEL}],
+        skip=0,
+    )
+
+    assert session.messages == []
+
+
+@pytest.mark.asyncio
+async def test_process_message_suppresses_no_reply_sentinel(tmp_path) -> None:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.generation.max_tokens = 1024
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content=NO_REPLY_SENTINEL, tool_calls=[]))
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        exec_config=ExecToolConfig(enable=False),
+        web_config=WebToolsConfig(enable=False),
+    )
+
+    msg = InboundMessage(
+        channel="whatsapp",
+        sender_id="19145550100",
+        chat_id="120@g.us",
+        content="We are calling it",
+        metadata={"is_group": True, "was_mentioned": False},
+    )
+
+    response = await loop._process_message(msg)
+
+    assert response is None
+    session = loop.sessions.get_or_create("whatsapp:120@g.us")
+    assert len(session.messages) == 1
+    assert session.messages[0]["role"] == "user"
+    assert session.messages[0]["content"] == "We are calling it"
+    await loop.close_mcp()
 
 
 def test_save_turn_keeps_tool_results_under_16k() -> None:
