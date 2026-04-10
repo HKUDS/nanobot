@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import re
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,58 @@ def _guess_wecom_media_type(filename: str) -> str:
     if ext in _AUDIO_EXTS:
         return "voice"
     return "file"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NewSessionTool — lets the model rotate to a fresh session file
+# ═══════════════════════════════════════════════════════════════════════════
+# Session rotation avoids unbounded context growth: instead of clearing
+# history (which loses context), each /new creates a new timestamped session
+# file. Historical sessions remain on disk and can be queried on demand.
+
+def _make_new_session_tool(channel: "WecomChannel"):
+    """Create a new_session tool bound to the given WecomChannel instance."""
+    from nanobot.agent.tools.base import Tool, tool_parameters
+    from nanobot.agent.tools.schema import tool_parameters_schema
+
+    @tool_parameters(tool_parameters_schema(required=[]))
+    class NewSessionTool(Tool):
+        """Rotate the current WeCom chat to a new timestamped session file."""
+
+        def __init__(self):
+            self._current_chat_id: str | None = None
+            self._current_channel: str | None = None
+
+        @property
+        def name(self) -> str:
+            return "new_session"
+
+        @property
+        def description(self) -> str:
+            return (
+                "Start a completely fresh conversation session — clears all previous context. "
+                "Call this when the user wants to begin a new topic, clear history, "
+                "or says things like '新对话', '重新开始', '清空上下文', 'new chat', '/new'."
+            )
+
+        def set_context(self, ctx_channel: str, chat_id: str, *args, **kwargs) -> None:
+            self._current_channel = ctx_channel
+            self._current_chat_id = chat_id
+
+        async def execute(self, **_kwargs) -> str:
+            # Prefer set_context value; fall back to the most-recently-active chat
+            cid = self._current_chat_id
+            if not cid:
+                cid = next(iter(channel._chat_frames), None)
+            if not cid:
+                return "new_session is only available in WeCom conversations."
+            ts = str(int(time.time()))
+            new_key = f"wecom:{cid}:{ts}"
+            channel._chat_session_keys[cid] = new_key
+            logger.info("WeCom session rotated via tool for {}: {}", cid, new_key)
+            return "✅ 已开启新对话，之前的历史记录不会注入到本次会话。"
+
+    return NewSessionTool()
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Multi-level Memory Manager for WeCom
@@ -220,7 +273,18 @@ def _apply_context_patch() -> None:
             "- 个人偏好/习惯/隐私 → 用 write_file 写入 `wecom_users/<userid>/MEMORY.md`\n"
             "- 技能/方法/通用知识 → 用 edit_file 编辑 `memory/MEMORY.md`\n"
             "- **严禁**将某用户的私有记忆泄露给其他用户（群聊中尤其注意）\n"
-            "- 查看某人私有记忆需要管理员权限或本人请求\n"
+            "- 查看某人私有记忆需要管理员权限或本人请求\n\n"
+            "## 历史会话查阅\n"
+            "每个企业微信用户/群聊的历史对话保存在 `sessions/wecom_<chatid>_<timestamp>.jsonl` 文件中。\n"
+            "**不要主动加载历史 jsonl**；只在用户明确要求查看历史记录、回顾之前对话、"
+            "或需要特定上下文时，才用 `read_file` 按需读取对应文件。\n"
+            "这样可避免将无关的历史上下文注入当前会话，防止超长上下文污染模型判断。\n\n"
+            "## 新建对话（重要）\n"
+            "用户发送以下任意内容时，**必须立即调用 `new_session` 工具**，不得只用文字回复：\n"
+            "- '新对话'、'开启新对话'、'新建对话'、'重新开始'、'清空上下文'、'忘记之前'\n"
+            "- 'new chat'、'new session'、'/new'、'clear'、'reset'\n"
+            "- 或任何明确表达「开始全新会话、清空历史」的意图\n"
+            "调用 `new_session` 后，再用文字告知用户新对话已开启。\n"
         )
         if user_memory_parts:
             instruction += "\n" + "\n\n".join(user_memory_parts)
@@ -281,6 +345,10 @@ class WecomChannel(BaseChannel):
         # Streaming reply state: chat_id → (stream_id, accumulated_buffer)
         self._active_streams: dict[str, str] = {}
         self._stream_buffers: dict[str, str] = {}
+        # Per-chat session key: chat_id → "wecom:<chat_id>:<ts>"
+        # Rotation via new_session tool creates a new timestamped key without
+        # deleting the old session file — history is preserved and queryable.
+        self._chat_session_keys: dict[str, str] = {}
 
     async def start(self) -> None:
         """Start the WeCom bot with WebSocket long connection."""
@@ -296,6 +364,9 @@ class WecomChannel(BaseChannel):
 
         # Apply context patch for per-user memory isolation
         _apply_context_patch()
+
+        # Register new_session tool so the model can rotate sessions
+        self._register_new_session_tool()
 
         self._running = True
         self._loop = asyncio.get_running_loop()
@@ -331,6 +402,24 @@ class WecomChannel(BaseChannel):
         # Keep running until stopped
         while self._running:
             await asyncio.sleep(1)
+
+    def _register_new_session_tool(self) -> None:
+        """Register new_session tool into all live AgentLoop instances."""
+        try:
+            from nanobot.agent.loop import AgentLoop
+            import gc
+            registered = 0
+            for obj in gc.get_objects():
+                if isinstance(obj, AgentLoop):
+                    tool = _make_new_session_tool(self)
+                    obj.tools.register(tool)
+                    registered += 1
+            if registered:
+                logger.info("WeCom new_session tool registered ({} loops)", registered)
+            else:
+                logger.warning("WeCom new_session tool: no AgentLoop found at start time")
+        except Exception as e:
+            logger.warning("Could not register new_session tool: {}", e)
 
     async def stop(self) -> None:
         """Stop the WeCom bot."""
@@ -531,16 +620,31 @@ class WecomChannel(BaseChannel):
             # Store frame for this chat to enable replies
             self._chat_frames[chat_id] = frame
 
+            # ── Per-chat session key management ──────────────────────────
+            # Each chat gets a unique timestamped key: "wecom:<chat_id>:<ts>".
+            # On first message a key is created; the new_session tool rotates
+            # it to a fresh key so old history is never auto-loaded — avoiding
+            # unbounded context growth and stale-context pollution.
+            if chat_id not in self._chat_session_keys:
+                ts = str(int(time.time()))
+                self._chat_session_keys[chat_id] = f"wecom:{chat_id}:{ts}"
+                logger.info("WeCom initial session for {}: {}", chat_id, self._chat_session_keys[chat_id])
+
+            session_key = self._chat_session_keys[chat_id]
+
             # Forward to message bus
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
                 content=content,
                 media=media_paths or None,
+                session_key=session_key,
                 metadata={
                     "message_id": msg_id,
                     "msg_type": msg_type,
                     "chat_type": chat_type,
+                    "sender_id": sender_id,
+                    "sender_name": sender_name,
                 }
             )
 
