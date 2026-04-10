@@ -225,6 +225,25 @@ class AgentLoop:
         self._register_default_tools()
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+        self._load_custom_commands()
+
+    def _load_custom_commands(self) -> None:
+        """Load custom command handlers from workspace/commands/*.py files."""
+        commands_dir = self.workspace / "commands"
+        if not commands_dir.exists():
+            return
+        import importlib.util
+        for cmd_file in sorted(commands_dir.glob("*.py")):
+            if cmd_file.stem.startswith("_"):
+                continue
+            try:
+                spec = importlib.util.spec_from_file_location(cmd_file.stem, cmd_file)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                if hasattr(mod, "register"):
+                    mod.register(self.commands)
+            except Exception:
+                pass  # Skip broken command files silently
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
