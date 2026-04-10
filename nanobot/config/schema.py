@@ -234,6 +234,9 @@ class AgentDefaults(Base):
     model_routing_enabled: bool = False  # Enable per-message model routing by rules
     fallback_model: str | None = None  # Optional model used when routing is enabled and no rule matches
     model_routes: list["ModelRoute"] = Field(default_factory=list)  # Ordered, first-match-wins routes
+    log_llm_requests: bool = False  # Log full messages + tools sent to the LLM on each chat() call
+    log_llm_max_chars: int | None = None  # If set, truncate serialized request log to this many characters
+    log_llm_requests_path: str | None = None  # Relative to workspace, or absolute; None -> logs/llm_requests.log
 
 
 class ModelRoute(Base):
