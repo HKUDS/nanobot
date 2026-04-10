@@ -78,9 +78,13 @@ class Nanobot:
             provider_retry_mode=defaults.provider_retry_mode,
             web_config=config.tools.web,
             exec_config=config.tools.exec,
+            input_limits=config.tools.input_limits,
             restrict_to_workspace=config.tools.restrict_to_workspace,
             mcp_servers=config.tools.mcp_servers,
             timezone=defaults.timezone,
+            supports_vision=defaults.supports_vision(defaults.model),
+            supports_audio=defaults.supports_audio(defaults.model),
+            supports_video=defaults.supports_video(defaults.model),
         )
         return cls(loop)
 

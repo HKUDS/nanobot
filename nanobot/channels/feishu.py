@@ -169,19 +169,22 @@ def _extract_element_content(element: dict) -> list[str]:
     return parts
 
 
-def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
-    """Extract text and image keys from Feishu post (rich text) message.
+def _extract_post_content(content_json: dict) -> tuple[str, list[str], list[dict]]:
+    """Extract text and media info from Feishu post (rich text) message.
 
     Handles three payload shapes:
     - Direct:    {"title": "...", "content": [[...]]}
     - Localized: {"zh_cn": {"title": "...", "content": [...]}}
     - Wrapped:   {"post": {"zh_cn": {"title": "...", "content": [...]}}}
+
+    Returns (text, image_keys, media_items) where media_items is a list of
+    {"tag": "media", "file_key": "..."} dicts for video/file attachments.
     """
 
-    def _parse_block(block: dict) -> tuple[str | None, list[str]]:
+    def _parse_block(block: dict) -> tuple[str | None, list[str], list[dict]]:
         if not isinstance(block, dict) or not isinstance(block.get("content"), list):
-            return None, []
-        texts, images = [], []
+            return None, [], []
+        texts, images, medias = [], [], []
         if title := block.get("title"):
             texts.append(title)
         for row in block["content"]:
@@ -201,43 +204,36 @@ def _extract_post_content(content_json: dict) -> tuple[str, list[str]]:
                     texts.append(f"\n```{lang}\n{code_text}\n```\n")
                 elif tag == "img" and (key := el.get("image_key")):
                     images.append(key)
-        return (" ".join(texts).strip() or None), images
+                elif tag == "media" and el.get("file_key"):
+                    medias.append({"tag": "media", "file_key": el["file_key"]})
+        return (" ".join(texts).strip() or None), images, medias
 
     # Unwrap optional {"post": ...} envelope
     root = content_json
     if isinstance(root, dict) and isinstance(root.get("post"), dict):
         root = root["post"]
     if not isinstance(root, dict):
-        return "", []
+        return "", [], []
 
     # Direct format
     if "content" in root:
-        text, imgs = _parse_block(root)
-        if text or imgs:
-            return text or "", imgs
+        text, imgs, medias = _parse_block(root)
+        if text or imgs or medias:
+            return text or "", imgs, medias
 
     # Localized: prefer known locales, then fall back to any dict child
     for key in ("zh_cn", "en_us", "ja_jp"):
         if key in root:
-            text, imgs = _parse_block(root[key])
-            if text or imgs:
-                return text or "", imgs
+            text, imgs, medias = _parse_block(root[key])
+            if text or imgs or medias:
+                return text or "", imgs, medias
     for val in root.values():
         if isinstance(val, dict):
-            text, imgs = _parse_block(val)
-            if text or imgs:
-                return text or "", imgs
+            text, imgs, medias = _parse_block(val)
+            if text or imgs or medias:
+                return text or "", imgs, medias
 
-    return "", []
-
-
-def _extract_post_text(content_json: dict) -> str:
-    """Extract plain text from Feishu post (rich text) message content.
-
-    Legacy wrapper for _extract_post_content, returns only text.
-    """
-    text, _ = _extract_post_content(content_json)
-    return text
+    return "", [], []
 
 
 class FeishuConfig(Base):
@@ -1042,7 +1038,7 @@ class FeishuChannel(BaseChannel):
             file_path = media_dir / filename
             file_path.write_bytes(data)
             logger.debug("Downloaded {} to {}", msg_type, file_path)
-            return str(file_path), f"[{msg_type}: {filename}]"
+            return str(file_path), f"[{msg_type}: {file_path}]"
 
         return None, f"[{msg_type}: download failed]"
 
@@ -1082,7 +1078,7 @@ class FeishuChannel(BaseChannel):
             if msg_type == "text":
                 text = content_json.get("text", "").strip()
             elif msg_type == "post":
-                text, _ = _extract_post_content(content_json)
+                text, _, _ = _extract_post_content(content_json)
                 text = text.strip()
             else:
                 text = ""
@@ -1557,13 +1553,21 @@ class FeishuChannel(BaseChannel):
                     content_parts.append(text)
 
             elif msg_type == "post":
-                text, image_keys = _extract_post_content(content_json)
+                text, image_keys, media_items = _extract_post_content(content_json)
                 if text:
                     content_parts.append(text)
                 # Download images embedded in post
                 for img_key in image_keys:
                     file_path, content_text = await self._download_and_save_media(
                         "image", {"image_key": img_key}, message_id
+                    )
+                    if file_path:
+                        media_paths.append(file_path)
+                    content_parts.append(content_text)
+                # Download media (video/file) embedded in post
+                for media_item in media_items:
+                    file_path, content_text = await self._download_and_save_media(
+                        "media", media_item, message_id
                     )
                     if file_path:
                         media_paths.append(file_path)

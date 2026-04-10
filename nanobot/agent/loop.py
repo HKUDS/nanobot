@@ -15,10 +15,10 @@ from loguru import logger
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -27,16 +27,21 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
+from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.helpers import image_placeholder_text, truncate_text
+from nanobot.utils.helpers import truncate_text
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
+    from nanobot.config.schema import (
+        ChannelsConfig,
+        ExecToolConfig,
+        InputLimitsConfig,
+        WebToolsConfig,
+    )
     from nanobot.cron.service import CronService
 
 
@@ -173,6 +178,7 @@ class AgentLoop:
         provider_retry_mode: str = "standard",
         web_config: WebToolsConfig | None = None,
         exec_config: ExecToolConfig | None = None,
+        input_limits: InputLimitsConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
@@ -180,8 +186,11 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         hooks: list[AgentHook] | None = None,
+        supports_vision: bool | None = None,
+        supports_audio: bool | None = None,
+        supports_video: bool | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, WebToolsConfig
+        from nanobot.config.schema import ExecToolConfig, InputLimitsConfig, WebToolsConfig
 
         defaults = AgentDefaults()
         self.bus = bus
@@ -206,13 +215,17 @@ class AgentLoop:
         self.provider_retry_mode = provider_retry_mode
         self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
+        self.input_limits = input_limits or InputLimitsConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone)
+        self.context = ContextBuilder(workspace, timezone=timezone, input_limits=self.input_limits)
+        self._supports_vision = supports_vision
+        self._supports_audio = supports_audio
+        self._supports_video = supports_video
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
@@ -532,6 +545,9 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
+                supports_vision=self._supports_vision,
+                supports_audio=self._supports_audio,
+                supports_video=self._supports_video,
             )
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
@@ -571,6 +587,9 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            supports_vision=self._supports_vision,
+            supports_audio=self._supports_audio,
+            supports_video=self._supports_video,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -613,6 +632,8 @@ class AgentLoop:
             metadata=meta,
         )
 
+    _MEDIA_PLACEHOLDER_TYPES = LLMProvider._STRIP_MEDIA_TYPES
+
     def _sanitize_persisted_blocks(
         self,
         content: list[dict[str, Any]],
@@ -635,12 +656,21 @@ class AgentLoop:
             ):
                 continue
 
-            if (
-                block.get("type") == "image_url"
-                and block.get("image_url", {}).get("url", "").startswith("data:image/")
-            ):
-                path = (block.get("_meta") or {}).get("path", "")
-                filtered.append({"type": "text", "text": image_placeholder_text(path)})
+            btype = block.get("type")
+            if btype in self._MEDIA_PLACEHOLDER_TYPES:
+                # Strip blocks that contain volatile inline data.
+                # - image_url/video_url: strip when url starts with "data:" (base64 inline)
+                # - input_audio: always strip (data field is always base64 inline)
+                should_strip = False
+                if btype == "input_audio":
+                    should_strip = bool(block.get("input_audio", {}).get("data"))
+                else:
+                    raw_url = (block.get(btype, {}).get("url") or "")
+                    should_strip = raw_url.startswith("data:")
+                if should_strip:
+                    filtered.append(LLMProvider._media_placeholder(btype, block))
+                else:
+                    filtered.append(block)
                 continue
 
             if block.get("type") == "text" and isinstance(block.get("text"), str):

@@ -209,7 +209,7 @@ class AnthropicProvider(LLMProvider):
         return blocks or [{"type": "text", "text": ""}]
 
     def _convert_user_content(self, content: Any) -> Any:
-        """Convert user message content, translating image_url blocks."""
+        """Convert user message content, translating image_url and input_audio blocks."""
         if isinstance(content, str) or content is None:
             return content or "(empty)"
         if not isinstance(content, list):
@@ -224,6 +224,14 @@ class AnthropicProvider(LLMProvider):
                 converted = self._convert_image_block(item)
                 if converted:
                     result.append(converted)
+                continue
+            if item.get("type") == "input_audio":
+                # Anthropic doesn't support native audio → text placeholder
+                result.append(LLMProvider._media_placeholder("input_audio", item))
+                continue
+            if item.get("type") == "video_url":
+                # Anthropic doesn't support native video → text placeholder
+                result.append(LLMProvider._media_placeholder("video_url", item))
                 continue
             result.append(item)
         return result or "(empty)"

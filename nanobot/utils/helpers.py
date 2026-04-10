@@ -37,6 +37,79 @@ def detect_image_mime(data: bytes) -> str | None:
     return None
 
 
+# Audio formats supported by OpenAI input_audio block
+_AUDIO_MIME_COMPAT = {"audio/wav", "audio/mpeg", "audio/mp3", "audio/aac",
+                      "audio/ogg", "audio/flac", "audio/x-m4a", "audio/mp4"}
+
+# Map MIME types to the format token expected by OpenAI-compatible input_audio APIs.
+_AUDIO_FORMAT_MAP: dict[str, str] = {
+    "audio/wav": "wav",
+    "audio/x-wav": "wav",
+    "audio/mpeg": "mp3",
+    "audio/mp3": "mp3",
+    "audio/aac": "aac",
+    "audio/ogg": "ogg",
+    "audio/flac": "flac",
+    "audio/x-m4a": "m4a",
+    "audio/mp4": "m4a",
+}
+
+
+def detect_audio_mime(data: bytes, filename: str = "") -> str | None:
+    """Detect audio MIME type from magic bytes; fallback to filename guess."""
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "audio/wav"
+    if data[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2", b"\xff\xfa"):
+        return "audio/mpeg"
+    if data[:4] == b"fLaC":
+        return "audio/flac"
+    if data[:4] == b"OggS":
+        return "audio/ogg"
+    if len(data) > 8 and data[4:8] == b"ftyp":
+        # Only claim audio for M4A-specific brands; avoid matching MP4 video.
+        brand = data[8:12]
+        if brand in (b"M4A ", b"M4AB", b"M4AC"):
+            return "audio/x-m4a"
+    if filename:
+        import mimetypes as _mt
+        guessed = _mt.guess_type(filename)[0]
+        if guessed and guessed.startswith("audio/"):
+            return guessed
+    return None
+
+
+def audio_mime_compat(mime: str | None) -> bool:
+    """Check if the audio MIME is compatible with OpenAI input_audio block."""
+    if not mime:
+        return False
+    return mime in _AUDIO_MIME_COMPAT
+
+
+def audio_format_for_api(mime: str) -> str:
+    """Convert an audio MIME type to the format token expected by the API.
+
+    Falls back to the subtype portion of the MIME (e.g. "x-m4a" from
+    "audio/x-m4a") when no explicit mapping exists.
+    """
+    if not mime:
+        return "wav"
+    return _AUDIO_FORMAT_MAP.get(mime, mime.split("/")[-1])
+
+
+# Video formats commonly supported by LLM APIs (data URI inline)
+_VIDEO_MIME_COMPAT = {
+    "video/mp4", "video/quicktime", "video/x-m4v",
+    "video/webm", "video/x-matroska",
+}
+
+
+def video_mime_compat(mime: str | None) -> bool:
+    """Check if the video MIME is in the commonly-supported set."""
+    if not mime:
+        return False
+    return mime in _VIDEO_MIME_COMPAT
+
+
 def build_image_content_blocks(raw: bytes, mime: str, path: str, label: str) -> list[dict[str, Any]]:
     """Build native image blocks plus a short text label."""
     b64 = base64.b64encode(raw).decode()
@@ -402,7 +475,7 @@ def build_status_content(
     search_usage_text: str | None = None,
 ) -> str:
     """Build a human-readable runtime status snapshot.
-    
+
     Args:
         search_usage_text: Optional pre-formatted web search usage string
                            (produced by SearchUsageInfo.format()). When provided
@@ -434,7 +507,7 @@ def build_status_content(
     ]
     if search_usage_text:
         lines.append(search_usage_text)
-    return "\n".join(lines)    
+    return "\n".join(lines)
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:

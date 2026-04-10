@@ -74,9 +74,43 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 200
     max_tool_result_chars: int = 16_000
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
+    # Deprecated compatibility field: accepted from old configs but ignored at runtime.
+    memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    vision_models: list[str] = Field(default_factory=list)  # Models that support image input
+    audio_models: list[str] = Field(default_factory=list)  # Models that support native audio input
+    video_models: list[str] = Field(default_factory=list)  # Models that support native video input
     dream: DreamConfig = Field(default_factory=DreamConfig)
+
+    @staticmethod
+    def _bare_model(model: str) -> str:
+        """Strip provider prefix, e.g. 'openai/gpt-4o' -> 'gpt-4o'."""
+        return model.split("/", 1)[-1].lower() if "/" in model else model.lower()
+
+    def _supports_capability(self, model: str, patterns: list[str]) -> bool | None:
+        """Check if model matches any pattern. Returns None if patterns is empty."""
+        if not patterns:
+            return None
+        bare = self._bare_model(model)
+        return any(p.lower() in bare for p in patterns)
+
+    def supports_vision(self, model: str) -> bool | None:
+        """Check if model supports vision. None if unconfigured."""
+        return self._supports_capability(model, self.vision_models)
+
+    def supports_audio(self, model: str) -> bool | None:
+        """Check if model supports native audio. None if unconfigured."""
+        return self._supports_capability(model, self.audio_models)
+
+    def supports_video(self, model: str) -> bool | None:
+        """Check if model supports native video. None if unconfigured."""
+        return self._supports_capability(model, self.video_models)
+
+    @property
+    def should_warn_deprecated_memory_window(self) -> bool:
+        """Return True when old memoryWindow is present without contextWindowTokens."""
+        return self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
 
 
 class AgentsConfig(Base):
@@ -107,7 +141,6 @@ class ProvidersConfig(Base):
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
-    ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -177,6 +210,18 @@ class ExecToolConfig(Base):
     path_append: str = ""
     sandbox: str = ""  # sandbox backend: "" (none) or "bwrap"
 
+
+class InputLimitsConfig(Base):
+    """Limits for user-provided multimodal inputs."""
+
+    max_input_images: int = 3
+    max_input_image_bytes: int = 10 * 1024 * 1024   # 10 MB
+    max_input_audios: int = 1
+    max_input_audio_bytes: int = 10 * 1024 * 1024   # 10 MB
+    max_input_videos: int = 1
+    max_input_video_bytes: int = 20 * 1024 * 1024   # 20 MB
+
+
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -194,6 +239,7 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    input_limits: InputLimitsConfig = Field(default_factory=InputLimitsConfig)
     restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)

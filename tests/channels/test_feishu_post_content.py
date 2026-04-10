@@ -27,10 +27,11 @@ def test_extract_post_content_supports_post_wrapper_shape() -> None:
         }
     }
 
-    text, image_keys = _extract_post_content(payload)
+    text, image_keys, media_items = _extract_post_content(payload)
 
     assert text == "日报 完成"
     assert image_keys == ["img_1"]
+    assert media_items == []
 
 
 def test_extract_post_content_keeps_direct_shape_behavior() -> None:
@@ -45,10 +46,38 @@ def test_extract_post_content_keeps_direct_shape_behavior() -> None:
         ],
     }
 
-    text, image_keys = _extract_post_content(payload)
+    text, image_keys, media_items = _extract_post_content(payload)
 
     assert text == "Daily report"
     assert image_keys == ["img_a", "img_b"]
+    assert media_items == []
+
+
+def test_extract_post_content_extracts_media_tags() -> None:
+    payload = {
+        "title": "",
+        "content": [
+            [{"tag": "img", "image_key": "img_1", "width": 345, "height": 34}],
+            [{"tag": "media", "file_key": "file_v3_0010j_abc", "image_key": "img_v3_0210j_xyz"}],
+        ],
+    }
+
+    text, image_keys, media_items = _extract_post_content(payload)
+
+    assert image_keys == ["img_1"]
+    assert media_items == [{"tag": "media", "file_key": "file_v3_0010j_abc"}]
+
+
+def test_extract_post_content_ignores_media_without_file_key() -> None:
+    payload = {
+        "content": [
+            [{"tag": "media"}],
+        ],
+    }
+
+    text, image_keys, media_items = _extract_post_content(payload)
+
+    assert media_items == []
 
 
 def test_register_optional_event_keeps_builder_when_method_missing() -> None:

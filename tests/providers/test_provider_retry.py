@@ -196,7 +196,7 @@ async def test_image_fallback_returns_error_on_second_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_image_fallback_without_meta_uses_default_placeholder() -> None:
-    """When _meta is absent, fallback placeholder is '[image omitted]'."""
+    """When _meta is absent, fallback placeholder is '[image]'."""
     provider = ScriptedProvider([
         LLMResponse(content="error", finish_reason="error"),
         LLMResponse(content="ok"),
@@ -210,7 +210,7 @@ async def test_image_fallback_without_meta_uses_default_placeholder() -> None:
     for msg in msgs_on_retry:
         content = msg.get("content")
         if isinstance(content, list):
-            assert any("[image omitted]" in (b.get("text") or "") for b in content)
+            assert any("[image]" in (b.get("text") or "") for b in content)
 
 
 @pytest.mark.asyncio
