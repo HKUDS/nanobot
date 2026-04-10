@@ -172,6 +172,15 @@ async def test_grep_files_with_matches_supports_head_limit_and_offset(tmp_path: 
         (tmp_path / "src" / name).write_text("needle\n", encoding="utf-8")
 
     tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
+
+    # Get the full (unpaginated) list to determine the expected ordering.
+    full_result = await tool.execute(
+        pattern="needle",
+        path="src",
+        head_limit=0,
+    )
+    all_files = full_result.splitlines()
+
     result = await tool.execute(
         pattern="needle",
         path="src",
@@ -179,8 +188,9 @@ async def test_grep_files_with_matches_supports_head_limit_and_offset(tmp_path: 
         offset=1,
     )
 
-    lines = result.splitlines()
-    assert lines[0] == "src/b.py"
+    lines = [l for l in result.splitlines() if l and not l.startswith("(pagination")]
+    assert len(lines) == 1
+    assert lines[0] == all_files[1]
     assert "pagination: limit=1, offset=1" in result
 
 
