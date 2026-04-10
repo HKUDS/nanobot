@@ -324,6 +324,8 @@ def build_help_text() -> str:
         "/dream — Manually trigger Dream consolidation",
         "/dream-log — Show what the last Dream changed",
         "/dream-restore — Revert memory to a previous state",
+        "/providers — List configured providers",
+        "/switch <name> — Switch to a provider",
         "/help — Show available commands",
     ]
     return "\n".join(lines)

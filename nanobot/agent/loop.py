@@ -33,7 +33,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.helpers import image_placeholder_text, truncate_text as truncate_text_fn
+from nanobot.utils.helpers import image_placeholder_text, truncate_text
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
@@ -225,6 +225,25 @@ class AgentLoop:
         self._register_default_tools()
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+        self._load_custom_commands()
+
+    def _load_custom_commands(self) -> None:
+        """Load custom command handlers from workspace/commands/*.py files."""
+        commands_dir = self.workspace / "commands"
+        if not commands_dir.exists():
+            return
+        import importlib.util
+        for cmd_file in sorted(commands_dir.glob("*.py")):
+            if cmd_file.stem.startswith("_"):
+                continue
+            try:
+                spec = importlib.util.spec_from_file_location(cmd_file.stem, cmd_file)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                if hasattr(mod, "register"):
+                    mod.register(self.commands)
+            except Exception:
+                pass  # Skip broken command files silently
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -590,7 +609,7 @@ class AgentLoop:
         self,
         content: list[dict[str, Any]],
         *,
-        should_truncate_text: bool = False,
+        truncate_text: bool = False,
         drop_runtime: bool = False,
     ) -> list[dict[str, Any]]:
         """Strip volatile multimodal payloads before writing session history."""
@@ -618,8 +637,8 @@ class AgentLoop:
 
             if block.get("type") == "text" and isinstance(block.get("text"), str):
                 text = block["text"]
-                if should_truncate_text and len(text) > self.max_tool_result_chars:
-                    text = truncate_text_fn(text, self.max_tool_result_chars)
+                if truncate_text and len(text) > self.max_tool_result_chars:
+                    text = truncate_text(text, self.max_tool_result_chars)
                 filtered.append({**block, "text": text})
                 continue
 
@@ -637,9 +656,9 @@ class AgentLoop:
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":
                 if isinstance(content, str) and len(content) > self.max_tool_result_chars:
-                    entry["content"] = truncate_text_fn(content, self.max_tool_result_chars)
+                    entry["content"] = truncate_text(content, self.max_tool_result_chars)
                 elif isinstance(content, list):
-                    filtered = self._sanitize_persisted_blocks(content, should_truncate_text=True)
+                    filtered = self._sanitize_persisted_blocks(content, truncate_text=True)
                     if not filtered:
                         continue
                     entry["content"] = filtered

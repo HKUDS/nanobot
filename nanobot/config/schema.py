@@ -97,6 +97,8 @@ class ProviderConfig(Base):
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
+    model_config = ConfigDict(extra="allow")  # Allow custom provider names (e.g. myapi1, myapi2)
+
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -228,6 +230,10 @@ class Config(BaseSettings):
             if spec:
                 p = getattr(self.providers, spec.name, None)
                 return (p, spec.name) if p else (None, None)
+            # Fallback: try custom provider name not in registry
+            custom_p = getattr(self.providers, forced, None)
+            if custom_p and (custom_p.api_key or custom_p.api_base):
+                return custom_p, forced
             return None, None
 
         model_lower = (model or self.agents.defaults.model).lower()
@@ -245,6 +251,12 @@ class Config(BaseSettings):
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or p.api_key:
                     return p, spec.name
+
+        # Fallback: try custom provider name not in registry
+        if model_prefix:
+            custom_p = getattr(self.providers, model_prefix, None)
+            if custom_p and (custom_p.api_key or custom_p.api_base):
+                return custom_p, model_prefix
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
@@ -310,5 +322,31 @@ class Config(BaseSettings):
             if spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:
                 return spec.default_api_base
         return None
+
+    def get_custom_providers(self) -> list[tuple[str, "ProviderConfig"]]:
+        """List all configured providers (registry + custom) that have api_key or api_base.
+
+        Returns list of (provider_name, config) tuples, with the current active one first.
+        """
+        from nanobot.providers.registry import PROVIDERS
+
+        # Collect all provider names from registry
+        registry_names = {spec.name for spec in PROVIDERS}
+
+        # Gather all configured providers by scanning model_dump keys
+        result: list[tuple[str, ProviderConfig]] = []
+        current_provider = self.agents.defaults.provider
+        all_configured = set(self.providers.model_dump().keys())
+
+        for name in sorted(all_configured):
+            if name.startswith("_"):
+                continue
+            p = getattr(self.providers, name, None)
+            if p and hasattr(p, "api_key") and (getattr(p, "api_key", None) or getattr(p, "api_base", None)):
+                result.append((name, p))
+
+        # Sort: current provider first
+        result.sort(key=lambda x: (0 if x[0] == current_provider else 1, x[0]))
+        return result
 
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
