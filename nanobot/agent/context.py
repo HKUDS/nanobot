@@ -6,8 +6,6 @@ import platform
 from pathlib import Path
 from typing import Any
 
-from nanobot.utils.helpers import current_time_str
-
 from nanobot.agent.memory import MemoryStore
 from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.skills import SkillsLoader
@@ -40,14 +38,18 @@ class ContextBuilder:
             parts.append(bootstrap)
 
         memory = self.memory.get_memory_context()
-        if memory:
-            parts.append(f"# Memory\n\n{memory}")
-
         always_skills = self.skills.get_always_skills()
+        always_content = ""
         if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
+            always_content = self.skills.load_skills_for_context(always_skills) or ""
+        if memory or always_content:
+            parts.append(
+                render_template(
+                    "agent/memory_and_always_skills.md",
+                    memory=memory,
+                    always_content=always_content,
+                ),
+            )
 
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
@@ -81,10 +83,16 @@ class ContextBuilder:
         channel: str | None, chat_id: str | None, timezone: str | None = None,
     ) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
-        lines = [f"Current Time: {current_time_str(timezone)}"]
-        if channel and chat_id:
-            lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
-        return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
+        from nanobot.utils.helpers import current_time_str
+
+        return render_template(
+            "agent/runtime_context.md",
+            strip=True,
+            runtime_tag=ContextBuilder._RUNTIME_CONTEXT_TAG,
+            current_time=current_time_str(timezone),
+            channel=channel,
+            chat_id=chat_id,
+        )
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -102,15 +110,17 @@ class ContextBuilder:
 
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
-        parts = []
-
+        bootstrap_files: list[dict[str, str]] = []
         for filename in self.BOOTSTRAP_FILES:
             file_path = self.workspace / filename
             if file_path.exists():
-                content = file_path.read_text(encoding="utf-8")
-                parts.append(f"## {filename}\n\n{content}")
-
-        return "\n\n".join(parts) if parts else ""
+                bootstrap_files.append({
+                    "filename": filename,
+                    "content": file_path.read_text(encoding="utf-8"),
+                })
+        if not bootstrap_files:
+            return ""
+        return render_template("agent/bootstrap_workspace.md", bootstrap_files=bootstrap_files)
 
     def build_messages(
         self,

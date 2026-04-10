@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
 
+from nanobot.utils.helpers import current_time_str
+from nanobot.utils.prompt_templates import render_template
+
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
@@ -89,16 +92,21 @@ class HeartbeatService:
 
         Returns (action, tasks) where action is 'skip' or 'run'.
         """
-        from nanobot.utils.helpers import current_time_str
-
         response = await self.provider.chat_with_retry(
             messages=[
-                {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
-                {"role": "user", "content": (
-                    f"Current Time: {current_time_str(self.timezone)}\n\n"
-                    "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
-                    f"{content}"
-                )},
+                {
+                    "role": "system",
+                    "content": render_template("agent/heartbeat_decide.md", part="system", strip=True),
+                },
+                {
+                    "role": "user",
+                    "content": render_template(
+                        "agent/heartbeat_decide.md",
+                        part="user",
+                        current_time=current_time_str(self.timezone),
+                        heartbeat_content=content,
+                    ),
+                },
             ],
             tools=_HEARTBEAT_TOOL,
             model=self.model,

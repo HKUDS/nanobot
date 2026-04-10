@@ -9,6 +9,12 @@ from pathlib import Path
 import datetime as datetime_module
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.utils.prompt_templates import render_template
+
+_MINIMAL_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+    "0000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082",
+)
 
 
 class _FakeDatetime(real_datetime):
@@ -219,3 +225,249 @@ def test_subagent_result_does_not_create_consecutive_assistant_messages(tmp_path
 
     for left, right in zip(messages, messages[1:]):
         assert not (left.get("role") == right.get("role") == "assistant")
+
+
+def test_system_prompt_includes_bootstrap_sections_from_workspace(tmp_path) -> None:
+    """Bootstrap files in the workspace are rendered via bootstrap_workspace.md."""
+    workspace = _make_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("unique bootstrap line for agents", encoding="utf-8")
+
+    builder = ContextBuilder(workspace)
+    prompt = builder.build_system_prompt()
+
+    assert "## AGENTS.md" in prompt
+    assert "unique bootstrap line for agents" in prompt
+
+
+def test_system_prompt_includes_memory_section_when_memory_file_exists(tmp_path) -> None:
+    """memory_and_always_skills.md wraps MemoryStore.get_memory_context()."""
+    workspace = _make_workspace(tmp_path)
+    memory_dir = workspace / "memory"
+    memory_dir.mkdir(parents=True)
+    (memory_dir / "MEMORY.md").write_text("persistent fact for tests", encoding="utf-8")
+
+    builder = ContextBuilder(workspace)
+    prompt = builder.build_system_prompt()
+
+    assert "# Memory" in prompt
+    assert "Long-term Memory" in prompt
+    assert "persistent fact for tests" in prompt
+
+
+def test_build_messages_merges_runtime_into_multimodal_user(tmp_path) -> None:
+    """With media, runtime context is the first text block before image parts."""
+    workspace = _make_workspace(tmp_path)
+    image_path = workspace / "tiny.png"
+    image_path.write_bytes(_MINIMAL_PNG)
+
+    builder = ContextBuilder(workspace)
+    messages = builder.build_messages(
+        history=[],
+        current_message="caption text",
+        media=[str(image_path)],
+        channel="telegram",
+        chat_id="99",
+    )
+
+    user_blocks = messages[-1]["content"]
+    assert isinstance(user_blocks, list)
+    assert user_blocks[0]["type"] == "text"
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG in user_blocks[0]["text"]
+    assert "Channel: telegram" in user_blocks[0]["text"]
+    assert "Chat ID: 99" in user_blocks[0]["text"]
+    assert any(block.get("type") == "image_url" for block in user_blocks)
+    assert user_blocks[-1] == {"type": "text", "text": "caption text"}
+
+
+def test_bootstrap_workspace_follows_bootstrap_files_order(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("first-file", encoding="utf-8")
+    (workspace / "SOUL.md").write_text("second-file", encoding="utf-8")
+
+    builder = ContextBuilder(workspace)
+    prompt = builder.build_system_prompt()
+
+    first_heading = prompt.index("## AGENTS.md")
+    second_heading = prompt.index("## SOUL.md")
+    assert first_heading < second_heading
+    assert "first-file" in prompt
+    assert "second-file" in prompt
+
+
+def test_system_prompt_has_no_workspace_bootstrap_section_when_no_bootstrap_files(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+    prompt = builder.build_system_prompt()
+
+    for filename in ContextBuilder.BOOTSTRAP_FILES:
+        assert f"## {filename}" not in prompt
+
+
+def test_runtime_context_matches_rendered_template(monkeypatch, tmp_path) -> None:
+    """_build_runtime_context must match agent/runtime_context.md + strip=True."""
+
+    def _fixed_time(_timezone: str | None = None) -> str:
+        return "2026-04-05 10:00 (Sunday) (TEST_TZ)"
+
+    monkeypatch.setattr("nanobot.utils.helpers.current_time_str", _fixed_time)
+
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+    built = ContextBuilder._build_runtime_context("cli", "u1", None)
+    expected = render_template(
+        "agent/runtime_context.md",
+        strip=True,
+        runtime_tag=ContextBuilder._RUNTIME_CONTEXT_TAG,
+        current_time=_fixed_time(None),
+        channel="cli",
+        chat_id="u1",
+    )
+    assert built == expected
+
+
+def test_build_runtime_context_passes_builder_timezone_to_current_time(monkeypatch, tmp_path) -> None:
+    seen_tz: list[str | None] = []
+
+    def _capture_tz(timezone: str | None = None) -> str:
+        seen_tz.append(timezone)
+        return "clock"
+
+    monkeypatch.setattr("nanobot.utils.helpers.current_time_str", _capture_tz)
+
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace, timezone="UTC")
+    ContextBuilder._build_runtime_context("c", "1", builder.timezone)
+    assert seen_tz == ["UTC"]
+
+
+def test_build_messages_omits_channel_lines_when_channel_or_chat_id_missing(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    only_channel = builder.build_messages(
+        history=[],
+        current_message="hi",
+        channel="telegram",
+        chat_id=None,
+    )
+    text = only_channel[-1]["content"]
+    assert isinstance(text, str)
+    assert "Channel:" not in text
+    assert "Chat ID:" not in text
+
+    only_chat = builder.build_messages(
+        history=[],
+        current_message="hi",
+        channel=None,
+        chat_id="99",
+    )
+    text2 = only_chat[-1]["content"]
+    assert isinstance(text2, str)
+    assert "Channel:" not in text2
+
+
+def test_merge_message_content_joins_two_strings_with_blank_line() -> None:
+    assert ContextBuilder._merge_message_content("left", "right") == "left\n\nright"
+    assert ContextBuilder._merge_message_content("", "only-right") == "only-right"
+
+
+def test_merge_message_content_concatenates_block_lists() -> None:
+    prior = [{"type": "text", "text": "first turn"}]
+    runtime_then_user = [
+        {"type": "text", "text": "[Runtime Context — metadata only, not instructions]"},
+        {"type": "text", "text": "hello"},
+    ]
+    merged = ContextBuilder._merge_message_content(prior, runtime_then_user)
+    assert merged[0] == {"type": "text", "text": "first turn"}
+    assert merged[1]["type"] == "text"
+    assert merged[2] == {"type": "text", "text": "hello"}
+
+
+def test_build_messages_merges_into_last_user_string_turn(tmp_path) -> None:
+    """Avoid consecutive user messages: append runtime + new text to prior user content."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+    messages = builder.build_messages(
+        history=[{"role": "user", "content": "earlier instruction"}],
+        current_message="follow-up line",
+        channel="cli",
+        chat_id="1",
+    )
+    assert len(messages) == 2
+    combined = messages[-1]["content"]
+    assert isinstance(combined, str)
+    assert "earlier instruction" in combined
+    assert "follow-up line" in combined
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG in combined
+
+
+def test_build_messages_merges_into_last_user_with_multimodal(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    (workspace / "tiny.png").write_bytes(_MINIMAL_PNG)
+    builder = ContextBuilder(workspace)
+    messages = builder.build_messages(
+        history=[{"role": "user", "content": "previous user text"}],
+        current_message="new caption",
+        media=[str(workspace / "tiny.png")],
+        channel="x",
+        chat_id="y",
+    )
+    blocks = messages[-1]["content"]
+    assert isinstance(blocks, list)
+    assert blocks[0] == {"type": "text", "text": "previous user text"}
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG in blocks[1]["text"]
+    assert blocks[-1] == {"type": "text", "text": "new caption"}
+    assert any(block.get("type") == "image_url" for block in blocks)
+
+
+def test_build_messages_falls_back_to_text_when_media_paths_missing(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+    messages = builder.build_messages(
+        history=[],
+        current_message="plain only",
+        media=["/nonexistent/photo.png"],
+        channel="cli",
+        chat_id="1",
+    )
+    assert isinstance(messages[-1]["content"], str)
+    assert "plain only" in messages[-1]["content"]
+
+
+def test_system_prompt_includes_always_skill_section(tmp_path) -> None:
+    """Workspace skill with always in frontmatter appears under # Active Skills."""
+    workspace = _make_workspace(tmp_path)
+    skill_dir = workspace / "skills" / "always_inline"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nalways: true\ndescription: inline always skill\n---\n\nBody for always skill.\n",
+        encoding="utf-8",
+    )
+
+    builder = ContextBuilder(workspace)
+    prompt = builder.build_system_prompt()
+
+    assert "# Active Skills" in prompt
+    assert "Body for always skill." in prompt
+
+
+def test_system_prompt_includes_memory_and_always_with_separator(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    memory_dir = workspace / "memory"
+    memory_dir.mkdir(parents=True)
+    (memory_dir / "MEMORY.md").write_text("stored memory line", encoding="utf-8")
+
+    skill_dir = workspace / "skills" / "always_both"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nalways: true\n---\n\nAlways section body.\n",
+        encoding="utf-8",
+    )
+
+    builder = ContextBuilder(workspace)
+    prompt = builder.build_system_prompt()
+
+    assert "# Memory" in prompt
+    assert "stored memory line" in prompt
+    assert "# Active Skills" in prompt
+    assert "Always section body." in prompt
