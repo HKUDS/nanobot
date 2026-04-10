@@ -74,7 +74,7 @@ class ContextBuilder:
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
         if session_summary:
-            lines += ["", f"[Resumed Session] Previous conversation summary:", session_summary]
+            lines += ["", "[Resumed Session]", session_summary]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines) + "\n" + ContextBuilder._RUNTIME_CONTEXT_END
 
     @staticmethod

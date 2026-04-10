@@ -47,11 +47,15 @@ class AutoSessionNew:
                 self.sessions.save(session)
                 return
             n = len(msgs)
+            idle_min = int((datetime.now() - session.updated_at).total_seconds() / 60)
             await self.consolidator.archive(msgs)
             entry = self.consolidator.store._read_last_entry()
             summary = (entry or {}).get("content", "")
             if summary and summary != "(nothing)":
-                self._summaries[key] = summary
+                self._summaries[key] = (
+                    f"User was away for {idle_min} minutes.\n"
+                    f"Previous conversation summary: {summary}"
+                )
             session.clear()
             self.sessions.save(session)
             logger.info("Auto-new: archived {} ({} messages, summary={})", key, n, bool(summary))

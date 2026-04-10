@@ -114,7 +114,7 @@ class TestAutoNew:
 
         await loop.auto_new._archive("cli:test")
 
-        assert loop.auto_new._summaries.get("cli:test") == "User said hello."
+        assert "User said hello." in loop.auto_new._summaries.get("cli:test", "")
         session_after = loop.sessions.get_or_create("cli:test")
         assert len(session_after.messages) == 0
         await loop.close_mcp()
@@ -554,7 +554,7 @@ class TestProactiveAutoNew:
         session_after = loop.sessions.get_or_create("cli:test")
         assert len(session_after.messages) == 0
         assert len(archived_messages) == 2
-        assert loop.auto_new._summaries.get("cli:test") == "User chatted about old things."
+        assert "User chatted about old things." in loop.auto_new._summaries.get("cli:test", "")
         await loop.close_mcp()
 
     @pytest.mark.asyncio
