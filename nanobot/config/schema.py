@@ -76,6 +76,7 @@ class AgentDefaults(Base):
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    session_ttl_minutes: int = Field(default=0, ge=0)  # Auto /new after idle (0 = disabled)
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
 
