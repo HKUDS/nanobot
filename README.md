@@ -202,14 +202,14 @@ nanobot --version
 **Using WhatsApp?** Rebuild the local bridge after upgrading:
 
 ```bash
-rm -rf ~/.nanobot/bridge
+rm -rf ~/.hiperone/bridge
 nanobot channels login whatsapp
 ```
 
 ## 🚀 Quick Start
 
 > [!TIP]
-> Set your API key in `~/.nanobot/config.json`.
+> Set your API key in `~/.hiperone/config.json`.
 > Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global)
 >
 > For other LLM providers, please see the [Providers](#providers) section.
@@ -224,7 +224,7 @@ nanobot onboard
 
 Use `nanobot onboard --wizard` if you want the interactive setup wizard.
 
-**2. Configure** (`~/.nanobot/config.json`)
+**2. Configure** (`~/.hiperone/config.json`)
 
 Configure these **two parts** in your config (other options have defaults).
 
@@ -325,7 +325,7 @@ Simply send this message to nanobot (replace `xxx@xxx` with your real email):
 Read https://raw.githubusercontent.com/HKUDS/MoChat/refs/heads/main/skills/nanobot/skill.md and register on MoChat. My Email account is xxx@xxx Bind me as your owner and DM me on MoChat.
 ```
 
-nanobot will automatically register, configure `~/.nanobot/config.json`, and connect to Mochat.
+nanobot will automatically register, configure `~/.hiperone/config.json`, and connect to Mochat.
 
 **2. Restart gateway**
 
@@ -340,7 +340,7 @@ That's it — nanobot handles the rest!
 <details>
 <summary>Manual configuration (advanced)</summary>
 
-If you prefer to configure manually, add the following to `~/.nanobot/config.json`:
+If you prefer to configure manually, add the following to `~/.hiperone/config.json`:
 
 > Keep `claw_token` private. It should only be sent in `X-Claw-Token` header to your Mochat API endpoint.
 
@@ -526,7 +526,7 @@ nanobot gateway
 
 > WhatsApp bridge updates are not applied automatically for existing installations.
 > After upgrading nanobot, rebuild the local bridge with:
-> `rm -rf ~/.nanobot/bridge && nanobot channels login whatsapp`
+> `rm -rf ~/.hiperone/bridge && nanobot channels login whatsapp`
 
 </details>
 
@@ -872,7 +872,7 @@ Simply send the command above to your nanobot (via CLI or any chat channel), and
 
 ## ⚙️ Configuration
 
-Config file: `~/.nanobot/config.json`
+Config file: `~/.hiperone/config.json`
 
 > [!NOTE]
 > If your config file is older than the current schema, you can refresh it without overwriting your existing values:
@@ -965,7 +965,7 @@ No `providers.openaiCodex` block is needed in `config.json`; `nanobot provider l
 nanobot provider login openai-codex
 ```
 
-**2. Set model** (merge into `~/.nanobot/config.json`):
+**2. Set model** (merge into `~/.hiperone/config.json`):
 ```json
 {
   "agents": {
@@ -981,10 +981,10 @@ nanobot provider login openai-codex
 nanobot agent -m "Hello!"
 
 # Target a specific workspace/config locally
-nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello!"
+nanobot agent -c ~/.hiperone-telegram/config.json -m "Hello!"
 
 # One-off workspace override on top of that config
-nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -m "Hello!"
+nanobot agent -c ~/.hiperone-telegram/config.json -w /tmp/nanobot-telegram-test -m "Hello!"
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
@@ -1003,7 +1003,7 @@ No `providers.githubCopilot` block is needed in `config.json`; `nanobot provider
 nanobot provider login github-copilot
 ```
 
-**2. Set model** (merge into `~/.nanobot/config.json`):
+**2. Set model** (merge into `~/.hiperone/config.json`):
 ```json
 {
   "agents": {
@@ -1019,10 +1019,10 @@ nanobot provider login github-copilot
 nanobot agent -m "Hello!"
 
 # Target a specific workspace/config locally
-nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello!"
+nanobot agent -c ~/.hiperone-telegram/config.json -m "Hello!"
 
 # One-off workspace override on top of that config
-nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -m "Hello!"
+nanobot agent -c ~/.hiperone-telegram/config.json -w /tmp/nanobot-telegram-test -m "Hello!"
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
@@ -1064,7 +1064,7 @@ Run a local model with Ollama, then add to config:
 ollama run llama3.2
 ```
 
-**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
+**2. Add to config** (partial — merge into `~/.hiperone/config.json`):
 ```json
 {
   "providers": {
@@ -1138,7 +1138,7 @@ docker run -d \
   --target_device GPU
 ```
 
-**3. Add to config** (partial — merge into `~/.nanobot/config.json`):
+**3. Add to config** (partial — merge into `~/.hiperone/config.json`):
 
 ```json
 {
@@ -1170,7 +1170,7 @@ Run your own model with vLLM or any OpenAI-compatible server, then add to config
 vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
 ```
 
-**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
+**2. Add to config** (partial — merge into `~/.hiperone/config.json`):
 
 *Provider (key can be any non-empty string for local):*
 ```json
@@ -1242,7 +1242,7 @@ That's it! Environment variables, model routing, config matching, and `nanobot s
 
 ### Channel Settings
 
-Global settings that apply to all channels. Configure under the `channels` section in `~/.nanobot/config.json`:
+Global settings that apply to all channels. Configure under the `channels` section in `~/.hiperone/config.json`:
 
 ```json
 {
@@ -1291,9 +1291,9 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 > { "tools": { "web": { "proxy": "http://127.0.0.1:7890" } } }
 > ```
 
-nanobot supports multiple web search providers. Configure in `~/.nanobot/config.json` under `tools.web.search`.
+nanobot supports multiple web search providers. Configure in `~/.hiperone/config.json` under `tools.web.search`.
 
-By default, web tools are enabled and web search uses `duckduckgo`, so search works out of the box without an API key.
+By default, web tools are enabled and web search uses `brave`. If no Brave API key is configured, nanobot falls back to `duckduckgo`, so search still works out of the box.
 
 If you want to disable all built-in web tools entirely, set `tools.web.enable` to `false`. This removes both `web_search` and `web_fetch` from the tool list sent to the LLM.
 
@@ -1313,7 +1313,8 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
 | `tavily` | `apiKey` | `TAVILY_API_KEY` | No |
 | `jina` | `apiKey` | `JINA_API_KEY` | Free tier (10M tokens) |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
-| `duckduckgo` (default) | — | — | Yes |
+| `brave` (default) | `apiKey` | `BRAVE_API_KEY` | No |
+| `duckduckgo` | — | — | Yes |
 
 **Disable all built-in web tools:**
 ```json
@@ -1404,7 +1405,7 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `searxng`, `duckduckgo` |
+| `provider` | string | `"brave"` | Search backend: `brave`, `tavily`, `jina`, `searxng`, `duckduckgo` |
 | `apiKey` | string | `""` | API key for Brave or Tavily |
 | `baseUrl` | string | `""` | Base URL for SearXNG |
 | `maxResults` | integer | `5` | Results per search (1–10) |
@@ -1563,26 +1564,26 @@ If you want each instance to have its own dedicated workspace from the start, pa
 
 ```bash
 # Create separate instance configs and workspaces
-nanobot onboard --config ~/.nanobot-telegram/config.json --workspace ~/.nanobot-telegram/workspace
-nanobot onboard --config ~/.nanobot-discord/config.json --workspace ~/.nanobot-discord/workspace
-nanobot onboard --config ~/.nanobot-feishu/config.json --workspace ~/.nanobot-feishu/workspace
+nanobot onboard --config ~/.hiperone-telegram/config.json --workspace ~/.hiperone-telegram/workspace
+nanobot onboard --config ~/.hiperone-discord/config.json --workspace ~/.hiperone-discord/workspace
+nanobot onboard --config ~/.hiperone-feishu/config.json --workspace ~/.hiperone-feishu/workspace
 ```
 
 **Configure each instance:**
 
-Edit `~/.nanobot-telegram/config.json`, `~/.nanobot-discord/config.json`, etc. with different channel settings. The workspace you passed during `onboard` is saved into each config as that instance's default workspace.
+Edit `~/.hiperone-telegram/config.json`, `~/.hiperone-discord/config.json`, etc. with different channel settings. The workspace you passed during `onboard` is saved into each config as that instance's default workspace.
 
 **Run instances:**
 
 ```bash
 # Instance A - Telegram bot
-nanobot gateway --config ~/.nanobot-telegram/config.json
+nanobot gateway --config ~/.hiperone-telegram/config.json
 
 # Instance B - Discord bot  
-nanobot gateway --config ~/.nanobot-discord/config.json
+nanobot gateway --config ~/.hiperone-discord/config.json
 
 # Instance C - Feishu bot with custom port
-nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
+nanobot gateway --config ~/.hiperone-feishu/config.json --port 18792
 ```
 
 ### Path Resolution
@@ -1592,21 +1593,21 @@ When using `--config`, nanobot derives its runtime data directory from the confi
 To open a CLI session against one of these instances locally:
 
 ```bash
-nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello from Telegram instance"
-nanobot agent -c ~/.nanobot-discord/config.json -m "Hello from Discord instance"
+nanobot agent -c ~/.hiperone-telegram/config.json -m "Hello from Telegram instance"
+nanobot agent -c ~/.hiperone-discord/config.json -m "Hello from Discord instance"
 
 # Optional one-off workspace override
-nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
+nanobot agent -c ~/.hiperone-telegram/config.json -w /tmp/nanobot-telegram-test
 ```
 
 > `nanobot agent` starts a local CLI agent using the selected workspace/config. It does not attach to or proxy through an already running `nanobot gateway` process.
 
 | Component | Resolved From | Example |
 |-----------|---------------|---------|
-| **Config** | `--config` path | `~/.nanobot-A/config.json` |
-| **Workspace** | `--workspace` or config | `~/.nanobot-A/workspace/` |
-| **Cron Jobs** | config directory | `~/.nanobot-A/cron/` |
-| **Media / runtime state** | config directory | `~/.nanobot-A/media/` |
+| **Config** | `--config` path | `~/.hiperone-A/config.json` |
+| **Workspace** | `--workspace` or config | `~/.hiperone-A/workspace/` |
+| **Cron Jobs** | config directory | `~/.hiperone-A/cron/` |
+| **Media / runtime state** | config directory | `~/.hiperone-A/media/` |
 
 ### How It Works
 
@@ -1626,7 +1627,7 @@ Example config:
 {
   "agents": {
     "defaults": {
-      "workspace": "~/.nanobot-telegram/workspace",
+      "workspace": "~/.hiperone-telegram/workspace",
       "model": "anthropic/claude-sonnet-4-6"
     }
   },
@@ -1645,14 +1646,14 @@ Example config:
 Start separate instances:
 
 ```bash
-nanobot gateway --config ~/.nanobot-telegram/config.json
-nanobot gateway --config ~/.nanobot-discord/config.json
+nanobot gateway --config ~/.hiperone-telegram/config.json
+nanobot gateway --config ~/.hiperone-discord/config.json
 ```
 
 Override workspace for one-off runs when needed:
 
 ```bash
-nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobot-telegram-test
+nanobot gateway --config ~/.hiperone-telegram/config.json --workspace /tmp/nanobot-telegram-test
 ```
 
 ### Common Use Cases
@@ -1685,7 +1686,7 @@ If you want the full design, see [docs/MEMORY.md](docs/MEMORY.md).
 
 | Command | Description |
 |---------|-------------|
-| `nanobot onboard` | Initialize config & workspace at `~/.nanobot/` |
+| `nanobot onboard` | Initialize config & workspace at `~/.hiperone/` |
 | `nanobot onboard --wizard` | Launch the interactive onboarding wizard |
 | `nanobot onboard -c <config> -w <workspace>` | Initialize or refresh a specific instance config and workspace |
 | `nanobot agent -m "..."` | Chat with the agent |
@@ -1723,9 +1724,9 @@ These commands work inside chat channels and interactive agent sessions:
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>
 
-The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). If the file has tasks, the agent executes them and delivers results to your most recently active chat channel.
+The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspace (`~/.hiperone/workspace/HEARTBEAT.md`). If the file has tasks, the agent executes them and delivers results to your most recently active chat channel.
 
-**Setup:** edit `~/.nanobot/workspace/HEARTBEAT.md` (created automatically by `nanobot onboard`):
+**Setup:** edit `~/.hiperone/workspace/HEARTBEAT.md` (created automatically by `nanobot onboard`):
 
 ```markdown
 ## Periodic Tasks
@@ -1847,14 +1848,14 @@ print(resp.choices[0].message.content)
 ## 🐳 Docker
 
 > [!TIP]
-> The `-v ~/.nanobot:/home/nanobot/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
-> The container runs as user `nanobot` (UID 1000). If you get **Permission denied**, fix ownership on the host first: `sudo chown -R 1000:1000 ~/.nanobot`, or pass `--user $(id -u):$(id -g)` to match your host UID. Podman users can use `--userns=keep-id` instead.
+> The `-v ~/.hiperone:/root/.hiperone` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
+> The container runs as `root` and uses `/root/.hiperone` as its runtime home.
 
 ### Docker Compose
 
 ```bash
 docker compose run --rm nanobot-cli onboard   # first-time setup
-vim ~/.nanobot/config.json                     # add API keys
+vim ~/.hiperone/config.json                     # add API keys
 docker compose up -d nanobot-gateway           # start gateway
 ```
 
@@ -1871,17 +1872,17 @@ docker compose down                                      # stop
 docker build -t nanobot .
 
 # Initialize config (first time only)
-docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
+docker run -v ~/.hiperone:/root/.hiperone --rm nanobot onboard
 
 # Edit config on host to add API keys
-vim ~/.nanobot/config.json
+vim ~/.hiperone/config.json
 
 # Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat)
-docker run -v ~/.nanobot:/home/nanobot/.nanobot -p 18790:18790 nanobot gateway
+docker run -v ~/.hiperone:/root/.hiperone -p 18790:18790 nanobot gateway
 
 # Or run a single command
-docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot agent -m "Hello!"
-docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot status
+docker run -v ~/.hiperone:/root/.hiperone --rm nanobot agent -m "Hello!"
+docker run -v ~/.hiperone:/root/.hiperone --rm nanobot status
 ```
 
 ## 🐧 Linux Service

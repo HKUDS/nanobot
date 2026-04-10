@@ -36,27 +36,27 @@ def get_logs_dir() -> Path:
 
 def get_workspace_path(workspace: str | None = None) -> Path:
     """Resolve and ensure the agent workspace path."""
-    path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
+    path = Path(workspace).expanduser() if workspace else Path.home() / ".hiperone" / "workspace"
     return ensure_dir(path)
 
 
 def is_default_workspace(workspace: str | Path | None) -> bool:
-    """Return whether a workspace resolves to nanobot's default workspace path."""
-    current = Path(workspace).expanduser() if workspace is not None else Path.home() / ".nanobot" / "workspace"
-    default = Path.home() / ".nanobot" / "workspace"
+    """Return whether a workspace resolves to the default workspace path."""
+    current = Path(workspace).expanduser() if workspace is not None else Path.home() / ".hiperone" / "workspace"
+    default = Path.home() / ".hiperone" / "workspace"
     return current.resolve(strict=False) == default.resolve(strict=False)
 
 
 def get_cli_history_path() -> Path:
     """Return the shared CLI history file path."""
-    return Path.home() / ".nanobot" / "history" / "cli_history"
+    return Path.home() / ".hiperone" / "history" / "cli_history"
 
 
 def get_bridge_install_dir() -> Path:
     """Return the shared WhatsApp bridge installation directory."""
-    return Path.home() / ".nanobot" / "bridge"
+    return Path.home() / ".hiperone" / "bridge"
 
 
 def get_legacy_sessions_dir() -> Path:
     """Return the legacy global session directory used for migration fallback."""
-    return Path.home() / ".nanobot" / "sessions"
+    return Path.home() / ".hiperone" / "sessions"

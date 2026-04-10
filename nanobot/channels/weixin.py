@@ -121,7 +121,7 @@ class WeixinConfig(Base):
     cdn_base_url: str = "https://novac2c.cdn.weixin.qq.com/c2c"
     route_tag: str | int | None = None
     token: str = ""  # Manually set token, or obtained via QR login
-    state_dir: str = ""  # Default: ~/.nanobot/weixin/
+    state_dir: str = ""  # Default: ~/.hiperone/weixin/
     poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S  # seconds for long-poll
 
 

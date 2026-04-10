@@ -26,7 +26,7 @@ Create a `Nanobot` from a config file.
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
-| `config_path` | `str \| Path \| None` | `None` | Path to `config.json`. Defaults to `~/.nanobot/config.json`. |
+| `config_path` | `str \| Path \| None` | `None` | Path to `config.json`. Defaults to `~/.hiperone/config.json`. |
 | `workspace` | `str \| Path \| None` | `None` | Override workspace directory from config. |
 
 Raises `FileNotFoundError` if an explicit path doesn't exist.

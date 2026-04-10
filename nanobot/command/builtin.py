@@ -68,7 +68,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         web_cfg = getattr(loop, "web_config", None)
         search_cfg = getattr(web_cfg, "search", None) if web_cfg else None
         if search_cfg is not None:
-            provider = getattr(search_cfg, "provider", "duckduckgo")
+            provider = getattr(search_cfg, "provider", "brave")
             api_key = getattr(search_cfg, "api_key", "") or None
             usage = await fetch_search_usage(provider=provider, api_key=api_key)
             search_usage_text = usage.format()
@@ -316,7 +316,7 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
     lines = [
-        "🐈 nanobot commands:",
+        "commands:",
         "/new — Start a new conversation",
         "/stop — Stop the current task",
         "/restart — Restart the bot",
