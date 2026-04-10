@@ -887,3 +887,35 @@ class TestSummaryPersistence:
         assert summary2 is None
         assert "_last_summary" not in reloaded.metadata
         await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_metadata_cleanup_on_inmemory_path(self, tmp_path):
+        """In-memory _summaries path should also clean up _last_summary from metadata."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        session.add_message("user", "hello")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        async def _fake_archive(messages):
+            return True
+
+        loop.consolidator.archive = _fake_archive
+        loop.consolidator.get_last_history_entry = lambda: {
+            "cursor": 1, "timestamp": "2026-01-01 00:00", "content": "Summary.",
+        }
+
+        await loop.auto_compact._archive("cli:test")
+
+        # Both _summaries and metadata have the summary
+        assert "cli:test" in loop.auto_compact._summaries
+        loop.sessions.invalidate("cli:test")
+        reloaded = loop.sessions.get_or_create("cli:test")
+        assert "_last_summary" in reloaded.metadata
+
+        # In-memory path is taken (no restart)
+        _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
+        assert summary is not None
+        # Metadata should also be cleaned up
+        assert "_last_summary" not in reloaded.metadata
+        await loop.close_mcp()
