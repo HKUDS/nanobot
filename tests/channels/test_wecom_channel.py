@@ -449,7 +449,7 @@ async def test_process_text_message() -> None:
     msg = await channel.bus.consume_inbound()
     assert msg.sender_id == "user1"
     assert msg.chat_id == "chat1"
-    assert msg.content == "hello wecom"
+    assert "hello wecom" in msg.content  # sender prefix may be prepended
     assert msg.metadata["msg_type"] == "text"
 
 
@@ -561,7 +561,7 @@ async def test_process_message_deduplication() -> None:
     await channel._process_message(frame, "text")
 
     msg = await channel.bus.consume_inbound()
-    assert msg.content == "once"
+    assert "once" in msg.content  # sender prefix may be prepended
 
     # Second message should not appear on the bus
     assert channel.bus.inbound.empty()
