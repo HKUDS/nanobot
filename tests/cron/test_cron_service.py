@@ -422,7 +422,8 @@ def test_update_job_validates_schedule(tmp_path) -> None:
         )
 
 
-def test_update_job_preserves_run_history(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_update_job_preserves_run_history(tmp_path) -> None:
     import asyncio
     store_path = tmp_path / "cron" / "jobs.json"
     service = CronService(store_path, on_job=lambda _: asyncio.sleep(0))
@@ -431,7 +432,7 @@ def test_update_job_preserves_run_history(tmp_path) -> None:
         schedule=CronSchedule(kind="every", every_ms=60_000),
         message="hello",
     )
-    asyncio.get_event_loop().run_until_complete(service.run_job(job.id))
+    await service.run_job(job.id)
 
     result = service.update_job(job.id, name="renamed")
     assert isinstance(result, CronJob)
@@ -454,3 +455,27 @@ def test_update_job_offline_writes_action(tmp_path) -> None:
     last = json.loads(lines[-1])
     assert last["action"] == "update"
     assert last["params"]["name"] == "updated-offline"
+
+
+def test_update_job_sentinel_channel_and_to(tmp_path) -> None:
+    """Passing None clears channel/to; omitting leaves them unchanged."""
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    job = service.add_job(
+        name="sentinel",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        channel="telegram",
+        to="user123",
+    )
+    assert job.payload.channel == "telegram"
+    assert job.payload.to == "user123"
+
+    result = service.update_job(job.id, name="renamed")
+    assert isinstance(result, CronJob)
+    assert result.payload.channel == "telegram"
+    assert result.payload.to == "user123"
+
+    result = service.update_job(job.id, channel=None, to=None)
+    assert isinstance(result, CronJob)
+    assert result.payload.channel is None
+    assert result.payload.to is None
