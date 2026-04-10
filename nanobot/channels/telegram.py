@@ -189,6 +189,7 @@ class TelegramConfig(Base):
     react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
     group_allow_from: list[str] = Field(default_factory=list)
+    log_all_messages: bool = False
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
@@ -931,6 +932,16 @@ class TelegramChannel(BaseChannel):
         self._chat_ids[sender_id] = chat_id
 
         if not await self._is_group_message_for_bot(message):
+            if self.config.log_all_messages:
+                silent_metadata = {**metadata, "_store_only": True}
+                await self._handle_message(
+                    sender_id=sender_id,
+                    chat_id=str_chat_id,
+                    content=content,
+                    media=media_paths,
+                    metadata=silent_metadata,
+                    session_key=session_key,
+                )
             return
 
         # Build content from text and/or media
