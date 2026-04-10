@@ -77,6 +77,7 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high / adaptive - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
+    per_user_memory: bool = False  # Isolate memory per user (workspace/users/{user_id}/memory/)
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
 

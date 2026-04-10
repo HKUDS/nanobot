@@ -21,10 +21,11 @@ class ContextBuilder:
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     _MAX_RECENT_HISTORY = 50
 
-    def __init__(self, workspace: Path, timezone: str | None = None):
+    def __init__(self, workspace: Path, timezone: str | None = None, user_id: str | None = None):
         self.workspace = workspace
         self.timezone = timezone
-        self.memory = MemoryStore(workspace)
+        self.user_id = user_id
+        self.memory = MemoryStore(workspace, user_id=user_id)
         self.skills = SkillsLoader(workspace)
 
     def build_system_prompt(
@@ -68,9 +69,17 @@ class ContextBuilder:
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
 
+        # Memory path: per-user when user_id is set, shared otherwise
+        if self.user_id:
+            safe_id = "".join(c if c.isalnum() or c in "-_." else "_" for c in self.user_id)
+            memory_path = f"{workspace_path}/users/{safe_id}/memory"
+        else:
+            memory_path = f"{workspace_path}/memory"
+
         return render_template(
             "agent/identity.md",
             workspace_path=workspace_path,
+            memory_path=memory_path,
             runtime=runtime,
             platform_policy=render_template("agent/platform_policy.md", system=system),
             channel=channel or "",
