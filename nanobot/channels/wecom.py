@@ -5,7 +5,9 @@ import base64
 import hashlib
 import importlib.util
 import os
+import re
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -18,6 +20,20 @@ from nanobot.config.schema import Base
 from pydantic import Field
 
 WECOM_AVAILABLE = importlib.util.find_spec("wecom_aibot_sdk") is not None
+
+# Upload safety limits (matching QQ channel defaults)
+WECOM_UPLOAD_MAX_BYTES = 1024 * 1024 * 200  # 200MB
+
+# Replace unsafe characters with "_", keep Chinese and common safe punctuation.
+_SAFE_NAME_RE = re.compile(r"[^\w.\-()\[\]（）【】\u4e00-\u9fff]+", re.UNICODE)
+
+
+def _sanitize_filename(name: str) -> str:
+    """Sanitize filename to avoid traversal and problematic chars."""
+    name = (name or "").strip()
+    name = Path(name).name
+    name = _SAFE_NAME_RE.sub("_", name).strip("._ ")
+    return name
 
 class WecomConfig(Base):
     """WeCom (Enterprise WeChat) AI Bot channel configuration."""
@@ -260,7 +276,8 @@ class WecomChannel(BaseChannel):
                 if file_url and aes_key:
                     file_path = await self._download_and_save_media(file_url, aes_key, "file", file_name)
                     if file_path:
-                        content_parts.append(f"[file: {file_name}]\n[File: source: {file_path}]")
+                        content_parts.append(f"[file: {file_name}]")
+                        media_paths.append(file_path)
                     else:
                         content_parts.append(f"[file: {file_name}: download failed]")
                 else:
@@ -328,7 +345,7 @@ class WecomChannel(BaseChannel):
             media_dir = get_media_dir("wecom")
             if not filename:
                 filename = fname or f"{media_type}_{hash(file_url) % 100000}"
-            filename = os.path.basename(filename)
+            filename = _sanitize_filename(filename)
 
             file_path = media_dir / filename
             file_path.write_bytes(data)
@@ -368,13 +385,24 @@ class WecomChannel(BaseChannel):
             else:
                 media_type = "file"
 
-            data = open(file_path, "rb").read()  # noqa: SIM115
-            file_size = len(data)
-            md5_hash = hashlib.md5(data).hexdigest()  # noqa: S324
+            # Read file size and data in a thread to avoid blocking the event loop
+            def _read_file():
+                file_size = os.path.getsize(file_path)
+                if file_size > WECOM_UPLOAD_MAX_BYTES:
+                    raise ValueError(
+                        f"File too large: {file_size} bytes (max {WECOM_UPLOAD_MAX_BYTES})"
+                    )
+                with open(file_path, "rb") as f:
+                    return file_size, f.read()
+
+            file_size, data = await asyncio.to_thread(_read_file)
+            # MD5 is used for file integrity only, not cryptographic security
+            md5_hash = hashlib.md5(data).hexdigest()
 
             CHUNK_SIZE = 512 * 1024  # 512 KB raw (before base64)
             chunk_list = [data[i : i + CHUNK_SIZE] for i in range(0, file_size, CHUNK_SIZE)]
             n_chunks = len(chunk_list)
+            del data  # free raw bytes early
 
             # Step 1: init
             req_id = _gen_req_id("upload_init")
@@ -419,9 +447,13 @@ class WecomChannel(BaseChannel):
                 logger.warning("WeCom upload finish: no media_id in response body={}", resp.body)
                 return None, None
 
-            logger.debug("WeCom uploaded {} ({}) → media_id={}", fname, media_type, media_id[:16] + "...")
+            suffix = "..." if len(media_id) > 16 else ""
+            logger.debug("WeCom uploaded {} ({}) → media_id={}", fname, media_type, media_id[:16] + suffix)
             return media_id, media_type
 
+        except ValueError as e:
+            logger.warning("WeCom upload skipped for {}: {}", file_path, e)
+            return None, None
         except Exception as e:
             logger.error("WeCom _upload_media_ws error for {}: {}", file_path, e)
             return None, None
@@ -489,6 +521,5 @@ class WecomChannel(BaseChannel):
                 })
                 logger.info("WeCom proactive send to {}", msg.chat_id)
 
-        except Exception as e:
-            logger.error("Error sending WeCom message: {}", e)
-            raise
+        except Exception:
+            logger.exception("Error sending WeCom message to chat_id={}", msg.chat_id)
