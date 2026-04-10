@@ -252,7 +252,9 @@ class MemoryStore:
             return self.read_file(self.get_isolation_slot(session_key).memory_file)
         return self.read_file(self.memory_file)
     
-    def write_memory(self, content: str) -> None:
+    def write_memory(self, content: str, channel: str = None, session_key: str = None) -> None:
+        if self._is_isolated(channel):
+            self.get_isolation_slot(session_key).memory_file.write_text(content, encoding="utf-8")
         self.memory_file.write_text(content, encoding="utf-8")
 
     # -- SOUL.md -------------------------------------------------------------
@@ -262,7 +264,9 @@ class MemoryStore:
             return self.read_file(self.get_isolation_slot(session_key).soul_file)
         return self.read_file(self.soul_file)
 
-    def write_soul(self, content: str) -> None:
+    def write_soul(self, content: str, channel: str = None, session_key: str = None) -> None:
+        if self._is_isolated(channel):
+            self.get_isolation_slot(session_key).soul_file.write_text(content, encoding="utf-8")
         self.soul_file.write_text(content, encoding="utf-8")
 
     # -- USER.md -------------------------------------------------------------
@@ -272,7 +276,9 @@ class MemoryStore:
             return self.read_file(self.get_isolation_slot(session_key).user_file)
         return self.read_file(self.user_file)
 
-    def write_user(self, content: str) -> None:
+    def write_user(self, content: str, channel: str = None, session_key: str = None) -> None:
+        if self._is_isolated(channel):
+            self.get_isolation_slot(session_key).user_file.write_text(content, encoding="utf-8")
         self.user_file.write_text(content, encoding="utf-8")
 
     # -- context injection (used by context.py) ------------------------------
