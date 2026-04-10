@@ -290,7 +290,7 @@ class MemoryStore:
                 if not lines:
                     return None
                 return json.loads(lines[-1])
-        except (FileNotFoundError, json.JSONDecodeError):
+        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
             return None
 
     def _write_entries(self, entries: list[dict[str, Any]]) -> None:
