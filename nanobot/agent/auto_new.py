@@ -53,7 +53,7 @@ class AutoSessionNew:
             summary = (entry or {}).get("content", "")
             if summary and summary != "(nothing)":
                 self._summaries[key] = (
-                    f"User was away for {idle_min} minutes.\n"
+                    f"Inactive for {idle_min} minutes.\n"
                     f"Previous conversation summary: {summary}"
                 )
             session.clear()
