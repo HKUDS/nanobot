@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
-from nanobot.agent.auto_new import AutoSessionNew
+from nanobot.agent.auto_compact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
@@ -252,7 +252,7 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
         )
-        self.auto_new = AutoSessionNew(
+        self.auto_compact = AutoCompact(
             sessions=self.sessions,
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
@@ -410,7 +410,7 @@ class AgentLoop:
             try:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
             except asyncio.TimeoutError:
-                self.auto_new.check_expired(self._schedule_background)
+                self.auto_compact.check_expired(self._schedule_background)
                 continue
             except asyncio.CancelledError:
                 # Preserve real task cancellation so shutdown can complete cleanly.
@@ -533,7 +533,7 @@ class AgentLoop:
             if self._restore_runtime_checkpoint(session):
                 self.sessions.save(session)
 
-            session, pending = self.auto_new.prepare_session(session, key)
+            session, pending = self.auto_compact.prepare_session(session, key)
 
             await self.consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
@@ -565,7 +565,7 @@ class AgentLoop:
         if self._restore_runtime_checkpoint(session):
             self.sessions.save(session)
 
-        session, pending = self.auto_new.prepare_session(session, key)
+        session, pending = self.auto_compact.prepare_session(session, key)
 
         # Slash commands
         raw = msg.content.strip()

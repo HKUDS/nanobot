@@ -1,4 +1,4 @@
-"""Tests for auto session new (idle TTL) feature."""
+"""Tests for auto compact (idle TTL) feature."""
 
 import asyncio
 from datetime import datetime, timedelta
@@ -50,20 +50,20 @@ class TestSessionTTLConfig:
 
 
 class TestAgentLoopTTLParam:
-    """Test that AutoSessionNew receives and stores session_ttl_minutes."""
+    """Test that AutoCompact receives and stores session_ttl_minutes."""
 
     def test_loop_stores_ttl(self, tmp_path):
-        """AutoSessionNew should store the TTL value."""
+        """AutoCompact should store the TTL value."""
         loop = _make_loop(tmp_path, session_ttl_minutes=25)
-        assert loop.auto_new._ttl == 25
+        assert loop.auto_compact._ttl == 25
 
     def test_loop_default_ttl_zero(self, tmp_path):
-        """AutoSessionNew default TTL should be 0 (disabled)."""
+        """AutoCompact default TTL should be 0 (disabled)."""
         loop = _make_loop(tmp_path, session_ttl_minutes=0)
-        assert loop.auto_new._ttl == 0
+        assert loop.auto_compact._ttl == 0
 
 
-class TestAutoNew:
+class TestAutoCompact:
     """Test the _archive method."""
 
     @pytest.mark.asyncio
@@ -71,9 +71,9 @@ class TestAutoNew:
         """Exactly at TTL boundary should be expired (>= not >)."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         ts = datetime.now() - timedelta(minutes=15)
-        assert loop.auto_new._is_expired(ts) is True
+        assert loop.auto_compact._is_expired(ts) is True
         ts2 = datetime.now() - timedelta(minutes=14, seconds=59)
-        assert loop.auto_new._is_expired(ts2) is False
+        assert loop.auto_compact._is_expired(ts2) is False
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -81,9 +81,9 @@ class TestAutoNew:
         """_is_expired should parse ISO string timestamps."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         ts = (datetime.now() - timedelta(minutes=20)).isoformat()
-        assert loop.auto_new._is_expired(ts) is True
-        assert loop.auto_new._is_expired(None) is False
-        assert loop.auto_new._is_expired("") is False
+        assert loop.auto_compact._is_expired(ts) is True
+        assert loop.auto_compact._is_expired(None) is False
+        assert loop.auto_compact._is_expired("") is False
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -104,7 +104,7 @@ class TestAutoNew:
             return True
 
         loop.consolidator.archive = _fake_archive
-        loop.auto_new.check_expired(loop._schedule_background)
+        loop.auto_compact.check_expired(loop._schedule_background)
         await asyncio.sleep(0.1)
 
         active_after = loop.sessions.get_or_create("cli:active")
@@ -113,7 +113,7 @@ class TestAutoNew:
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_auto_new_archives_and_clears(self, tmp_path):
+    async def test_auto_compact_archives_and_clears(self, tmp_path):
         """_archive should archive un-consolidated messages and clear session."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -130,7 +130,7 @@ class TestAutoNew:
 
         loop.consolidator.archive = _fake_archive
 
-        await loop.auto_new._archive("cli:test")
+        await loop.auto_compact._archive("cli:test")
 
         assert len(archived_messages) == 8
         session_after = loop.sessions.get_or_create("cli:test")
@@ -138,7 +138,7 @@ class TestAutoNew:
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_auto_new_stores_summary(self, tmp_path):
+    async def test_auto_compact_stores_summary(self, tmp_path):
         """_archive should store the summary in _summaries."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -154,9 +154,9 @@ class TestAutoNew:
             "cursor": 1, "timestamp": "2026-01-01 00:00", "content": "User said hello.",
         }
 
-        await loop.auto_new._archive("cli:test")
+        await loop.auto_compact._archive("cli:test")
 
-        entry = loop.auto_new._summaries.get("cli:test")
+        entry = loop.auto_compact._summaries.get("cli:test")
         assert entry is not None
         assert entry[0] == "User said hello."
         session_after = loop.sessions.get_or_create("cli:test")
@@ -164,7 +164,7 @@ class TestAutoNew:
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_auto_new_empty_session(self, tmp_path):
+    async def test_auto_compact_empty_session(self, tmp_path):
         """_archive on empty session should not archive."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -178,7 +178,7 @@ class TestAutoNew:
 
         loop.consolidator.archive = _fake_archive
 
-        await loop.auto_new._archive("cli:test")
+        await loop.auto_compact._archive("cli:test")
 
         assert not archive_called
         session_after = loop.sessions.get_or_create("cli:test")
@@ -186,7 +186,7 @@ class TestAutoNew:
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_auto_new_respects_last_consolidated(self, tmp_path):
+    async def test_auto_compact_respects_last_consolidated(self, tmp_path):
         """_archive should only archive un-consolidated messages."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -205,17 +205,17 @@ class TestAutoNew:
 
         loop.consolidator.archive = _fake_archive
 
-        await loop.auto_new._archive("cli:test")
+        await loop.auto_compact._archive("cli:test")
 
         assert archived_count == 2
         await loop.close_mcp()
 
 
-class TestAutoNewIdleDetection:
+class TestAutoCompactIdleDetection:
     """Test idle detection triggers auto-new in _process_message."""
 
     @pytest.mark.asyncio
-    async def test_no_auto_new_when_ttl_disabled(self, tmp_path):
+    async def test_no_auto_compact_when_ttl_disabled(self, tmp_path):
         """No auto-new should happen when TTL is 0 (disabled)."""
         loop = _make_loop(tmp_path, session_ttl_minutes=0)
         session = loop.sessions.get_or_create("cli:test")
@@ -231,7 +231,7 @@ class TestAutoNewIdleDetection:
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_auto_new_triggers_on_idle(self, tmp_path):
+    async def test_auto_compact_triggers_on_idle(self, tmp_path):
         """Proactive auto-new archives expired session; _process_message reloads it."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -251,7 +251,7 @@ class TestAutoNewIdleDetection:
         }
 
         # Simulate proactive archive completing before message arrives
-        await loop.auto_new._archive("cli:test")
+        await loop.auto_compact._archive("cli:test")
 
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="new msg")
         await loop._process_message(msg)
@@ -262,7 +262,7 @@ class TestAutoNewIdleDetection:
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_no_auto_new_when_active(self, tmp_path):
+    async def test_no_auto_compact_when_active(self, tmp_path):
         """No auto-new should happen when session is recently active."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -277,7 +277,7 @@ class TestAutoNewIdleDetection:
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_auto_new_does_not_affect_priority_commands(self, tmp_path):
+    async def test_auto_compact_does_not_affect_priority_commands(self, tmp_path):
         """Priority commands (/stop, /restart) bypass _process_message entirely via run()."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -300,7 +300,7 @@ class TestAutoNewIdleDetection:
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_auto_new_with_slash_new(self, tmp_path):
+    async def test_auto_compact_with_slash_new(self, tmp_path):
         """Auto-new fires before /new dispatches; session is cleared twice but idempotent."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -327,11 +327,11 @@ class TestAutoNewIdleDetection:
         await loop.close_mcp()
 
 
-class TestAutoNewSystemMessages:
+class TestAutoCompactSystemMessages:
     """Test that auto-new also works for system messages."""
 
     @pytest.mark.asyncio
-    async def test_auto_new_triggers_for_system_messages(self, tmp_path):
+    async def test_auto_compact_triggers_for_system_messages(self, tmp_path):
         """Proactive auto-new archives expired session; system messages reload it."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -348,7 +348,7 @@ class TestAutoNewSystemMessages:
         }
 
         # Simulate proactive archive completing before system message arrives
-        await loop.auto_new._archive("cli:test")
+        await loop.auto_compact._archive("cli:test")
 
         msg = InboundMessage(
             channel="system", sender_id="subagent", chat_id="cli:test",
@@ -364,11 +364,11 @@ class TestAutoNewSystemMessages:
         await loop.close_mcp()
 
 
-class TestAutoNewEdgeCases:
+class TestAutoCompactEdgeCases:
     """Edge cases for auto session new."""
 
     @pytest.mark.asyncio
-    async def test_auto_new_with_nothing_summary(self, tmp_path):
+    async def test_auto_compact_with_nothing_summary(self, tmp_path):
         """Auto-new should not inject when archive produces '(nothing)'."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -381,17 +381,17 @@ class TestAutoNewEdgeCases:
             return_value=LLMResponse(content="(nothing)", tool_calls=[])
         )
 
-        await loop.auto_new._archive("cli:test")
+        await loop.auto_compact._archive("cli:test")
 
         session_after = loop.sessions.get_or_create("cli:test")
         assert len(session_after.messages) == 0
         # "(nothing)" summary should not be stored
-        assert "cli:test" not in loop.auto_new._summaries
+        assert "cli:test" not in loop.auto_compact._summaries
 
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_auto_new_archive_failure_still_clears(self, tmp_path):
+    async def test_auto_compact_archive_failure_still_clears(self, tmp_path):
         """Auto-new should clear session even if LLM archive fails (raw_archive fallback)."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -402,7 +402,7 @@ class TestAutoNewEdgeCases:
         loop.provider.chat_with_retry = AsyncMock(side_effect=Exception("API down"))
 
         # Should not raise
-        await loop.auto_new._archive("cli:test")
+        await loop.auto_compact._archive("cli:test")
 
         session_after = loop.sessions.get_or_create("cli:test")
         # Session should be cleared (archive falls back to raw dump)
@@ -411,7 +411,7 @@ class TestAutoNewEdgeCases:
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_auto_new_preserves_runtime_checkpoint_before_check(self, tmp_path):
+    async def test_auto_compact_preserves_runtime_checkpoint_before_check(self, tmp_path):
         """Runtime checkpoint is restored; proactive archive handles the expired session."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
@@ -436,7 +436,7 @@ class TestAutoNewEdgeCases:
         }
 
         # Simulate proactive archive completing before message arrives
-        await loop.auto_new._archive("cli:test")
+        await loop.auto_compact._archive("cli:test")
 
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="continue")
         await loop._process_message(msg)
@@ -447,7 +447,7 @@ class TestAutoNewEdgeCases:
         await loop.close_mcp()
 
 
-class TestAutoNewIntegration:
+class TestAutoCompactIntegration:
     """End-to-end test of auto session new feature."""
 
     @pytest.mark.asyncio
@@ -501,7 +501,7 @@ class TestAutoNewIntegration:
         )
 
         # Pending summary should be consumed (one-shot)
-        assert "cli:test" not in loop.auto_new._summaries
+        assert "cli:test" not in loop.auto_compact._summaries
 
         # The new message should be processed (response exists)
         assert response is not None
@@ -526,7 +526,7 @@ class TestAutoNewIntegration:
         }
 
         # Simulate proactive archive completing before message arrives
-        await loop.auto_new._archive("cli:test")
+        await loop.auto_compact._archive("cli:test")
 
         msg = InboundMessage(
             channel="cli", sender_id="user", chat_id="test",
@@ -548,13 +548,13 @@ class TestAutoNewIntegration:
         await loop.close_mcp()
 
 
-class TestProactiveAutoNew:
+class TestProactiveAutoCompact:
     """Test proactive auto-new on idle ticks (TimeoutError path in run loop)."""
 
     @staticmethod
     async def _run_check_expired(loop):
         """Helper: run check_expired via callback and wait for background tasks."""
-        loop.auto_new.check_expired(loop._schedule_background)
+        loop.auto_compact.check_expired(loop._schedule_background)
         await asyncio.sleep(0.1)
 
     @pytest.mark.asyncio
@@ -598,7 +598,7 @@ class TestProactiveAutoNew:
         session_after = loop.sessions.get_or_create("cli:test")
         assert len(session_after.messages) == 0
         assert len(archived_messages) == 2
-        entry = loop.auto_new._summaries.get("cli:test")
+        entry = loop.auto_compact._summaries.get("cli:test")
         assert entry is not None
         assert entry[0] == "User chatted about old things."
         await loop.close_mcp()
@@ -640,12 +640,12 @@ class TestProactiveAutoNew:
         loop.consolidator.archive = _slow_archive
 
         # First call starts archiving via callback
-        loop.auto_new.check_expired(loop._schedule_background)
+        loop.auto_compact.check_expired(loop._schedule_background)
         await started.wait()
         assert archive_count == 1
 
         # Second call should skip (key is in _archiving)
-        loop.auto_new.check_expired(loop._schedule_background)
+        loop.auto_compact.check_expired(loop._schedule_background)
         await asyncio.sleep(0.05)
         assert archive_count == 1
 
@@ -672,7 +672,7 @@ class TestProactiveAutoNew:
         await self._run_check_expired(loop)
 
         # Key should be removed from _archiving (finally block)
-        assert "cli:test" not in loop.auto_new._archiving
+        assert "cli:test" not in loop.auto_compact._archiving
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -722,7 +722,7 @@ class TestProactiveAutoNew:
         # First tick: archives the session
         await self._run_check_expired(loop)
         assert archive_count == 1
-        assert "cli:test" in loop.auto_new._archived
+        assert "cli:test" in loop.auto_compact._archived
 
         # Second tick: should NOT re-schedule (already archived)
         await self._run_check_expired(loop)
@@ -749,7 +749,7 @@ class TestProactiveAutoNew:
         # First tick: skips (no messages)
         await self._run_check_expired(loop)
         assert archive_count == 0
-        assert "cli:test" in loop.auto_new._archived
+        assert "cli:test" in loop.auto_compact._archived
 
         # Second tick: should NOT re-schedule
         await self._run_check_expired(loop)
@@ -774,14 +774,14 @@ class TestProactiveAutoNew:
         }
 
         # Archive completes
-        await loop.auto_new._archive("cli:test")
-        assert "cli:test" in loop.auto_new._archived
+        await loop.auto_compact._archive("cli:test")
+        assert "cli:test" in loop.auto_compact._archived
 
         # User sends a new message — prepare_session clears _archived
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="new msg")
         await loop._process_message(msg)
 
-        assert "cli:test" not in loop.auto_new._archived
+        assert "cli:test" not in loop.auto_compact._archived
         await loop.close_mcp()
 
 
@@ -806,7 +806,7 @@ class TestSummaryPersistence:
             "cursor": 1, "timestamp": "2026-01-01 00:00", "content": "User said hello.",
         }
 
-        await loop.auto_new._archive("cli:test")
+        await loop.auto_compact._archive("cli:test")
 
         # Summary should be persisted in session metadata
         session_after = loop.sessions.get_or_create("cli:test")
@@ -836,16 +836,16 @@ class TestSummaryPersistence:
         }
 
         # Archive
-        await loop.auto_new._archive("cli:test")
+        await loop.auto_compact._archive("cli:test")
 
         # Simulate restart: clear in-memory state
-        loop.auto_new._summaries.clear()
-        loop.auto_new._archived.clear()
+        loop.auto_compact._summaries.clear()
+        loop.auto_compact._archived.clear()
         loop.sessions.invalidate("cli:test")
 
         # prepare_session should recover summary from metadata
         reloaded = loop.sessions.get_or_create("cli:test")
-        _, summary = loop.auto_new.prepare_session(reloaded, "cli:test")
+        _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
 
         assert summary is not None
         assert "User said hello." in summary
@@ -871,19 +871,19 @@ class TestSummaryPersistence:
             "cursor": 1, "timestamp": "2026-01-01 00:00", "content": "Summary.",
         }
 
-        await loop.auto_new._archive("cli:test")
+        await loop.auto_compact._archive("cli:test")
 
         # Clear in-memory to force metadata path
-        loop.auto_new._summaries.clear()
+        loop.auto_compact._summaries.clear()
         loop.sessions.invalidate("cli:test")
         reloaded = loop.sessions.get_or_create("cli:test")
 
         # First call: consumes from metadata
-        _, summary = loop.auto_new.prepare_session(reloaded, "cli:test")
+        _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
         assert summary is not None
 
         # Second call: no summary (already consumed)
-        _, summary2 = loop.auto_new.prepare_session(reloaded, "cli:test")
+        _, summary2 = loop.auto_compact.prepare_session(reloaded, "cli:test")
         assert summary2 is None
         assert "_last_summary" not in reloaded.metadata
         await loop.close_mcp()

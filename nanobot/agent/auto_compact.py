@@ -1,4 +1,4 @@
-"""Auto session new: proactive archival of idle sessions."""
+"""Auto compact: proactive compression of idle sessions to reduce token cost and latency."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from nanobot.session.manager import Session, SessionManager
 
 
-class AutoSessionNew:
+class AutoCompact:
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
                  session_ttl_minutes: int = 0):
         self.sessions = sessions
@@ -39,7 +39,7 @@ class AutoSessionNew:
             key = info.get("key", "")
             if key and key not in self._archiving and key not in self._archived and self._is_expired(info.get("updated_at")):
                 self._archiving.add(key)
-                logger.debug("Auto-new: scheduling archival for {} (idle > {} min)", key, self._ttl)
+                logger.debug("Auto-compact: scheduling archival for {} (idle > {} min)", key, self._ttl)
                 schedule_background(self._archive(key))
 
     async def _archive(self, key: str) -> None:
@@ -48,7 +48,7 @@ class AutoSessionNew:
             session = self.sessions.get_or_create(key)
             msgs = session.messages[session.last_consolidated:]
             if not msgs:
-                logger.debug("Auto-new: skipping {}, no un-consolidated messages", key)
+                logger.debug("Auto-compact: skipping {}, no un-consolidated messages", key)
                 self._archived.add(key)
                 session.updated_at = datetime.now()
                 self.sessions.save(session)
@@ -64,16 +64,16 @@ class AutoSessionNew:
             session.clear()
             self._archived.add(key)
             self.sessions.save(session)
-            logger.info("Auto-new: archived {} ({} messages, summary={})", key, n, bool(summary))
+            logger.info("Auto-compact: archived {} ({} messages, summary={})", key, n, bool(summary))
         except Exception:
-            logger.exception("Auto-new: failed for {}", key)
+            logger.exception("Auto-compact: failed for {}", key)
         finally:
             self._archiving.discard(key)
 
     def prepare_session(self, session: Session, key: str) -> tuple[Session, str | None]:
         self._archived.discard(key)
         if key in self._archiving or self._is_expired(session.updated_at):
-            logger.info("Auto-new: reloading session {} (archiving={})", key, key in self._archiving)
+            logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
             session = self.sessions.get_or_create(key)
         entry = self._summaries.pop(key, None)
         if entry:
