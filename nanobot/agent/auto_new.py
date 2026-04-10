@@ -43,6 +43,8 @@ class AutoSessionNew:
             msgs = session.messages[session.last_consolidated:]
             if not msgs:
                 logger.debug("Auto-new: skipping {}, no un-consolidated messages", key)
+                session.updated_at = datetime.now()
+                self.sessions.save(session)
                 return
             n = len(msgs)
             await self.consolidator.archive(msgs)
