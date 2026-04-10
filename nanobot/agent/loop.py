@@ -671,9 +671,16 @@ class AgentLoop:
             elif isinstance(mt, MessageTool) and mt._sent_in_turn:
                 if on_message:
                     # Streaming: message content already delivered via on_message
-                    # callbacks. The final text from the LLM (directives, etc.) is
-                    # intentionally suppressed — the message tool is the response.
-                    resolved_content = ""
+                    # callbacks. The main text is intentionally suppressed, but
+                    # we preserve any <follow_ups> block from the model's final
+                    # output so the coordinator can extract suggestions.
+                    suppressed = getattr(self, "_last_final_content", "") or ""
+                    follow_match = re.search(
+                        r"<follow[-_]ups>\s*.*?\s*</follow[-_]ups>",
+                        suppressed,
+                        re.DOTALL | re.IGNORECASE,
+                    )
+                    resolved_content = follow_match.group(0) if follow_match else ""
                 else:
                     # Non-streaming: message content was published to the bus but
                     # the HTTP caller never sees it. Return the captured tool

@@ -165,39 +165,30 @@ You are communicating with an expert-level user:
         """Build guidance for personality learning."""
         return """## Personality Learning
 
-You should actively learn about the user throughout conversations:
+You should actively learn about the user throughout conversations. Use the dedicated memory tools — do NOT use `edit_file` or `write_file` on SOUL.md, USER.md, or MEMORY.md.
 
-**When to update USER.md:**
+**When to call `update_user_profile`:**
 - User shares personal information, preferences, or habits
 - You learn about their work context, projects, or tools they use
 - User mentions topics of interest or hobbies
 - User provides feedback about communication style or response preferences
 - You discover their preferred technical level or communication style
 
-**When to update SOUL.md:**
+**When to call `update_bot_identity`:**
+- User gives you a name or asks you to change it
 - You notice communication patterns that work well with this user
 - User provides feedback about your behavior or personality
 - You identify approaches that resonate with this specific user
-- You learn mistakes to avoid or adjustments to make
+
+**When to call `save_memory`:**
+- You learn important facts, preferences, or context worth remembering
+- User mentions something they want you to keep track of
 
 **How to update:**
-1. Use `read_file` to check current content of USER.md or SOUL.md
-2. Use `edit_file` to update relevant sections
-3. Be thoughtful - only update when you learn something meaningful
-4. Keep updates concise and relevant
-5. Don't update during every conversation - only when there's genuinely new information
-
-**USER.md sections to update:**
-- Basic Information (name, timezone, language)
-- Preferences (Communication Style, Response Length, Technical Level)
-- Work Context (role, projects, tools)
-- Topics of Interest
-- Special Instructions
-
-**SOUL.md updates:**
-- Add new sections as needed to track what works with this user
-- Document communication patterns and preferences
-- Note feedback and adjustments"""
+1. Call the appropriate memory tool immediately when you learn something meaningful
+2. Keep updates concise and relevant
+3. Don't update during every conversation — only when there's genuinely new information
+4. Never mention saving, tools, or file names to the user"""
     
     @staticmethod
     def _build_runtime_context(
