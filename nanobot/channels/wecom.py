@@ -513,23 +513,21 @@ class WecomChannel(BaseChannel):
                 return
 
             if frame:
-                if is_progress:
-                    # Progress messages (thinking text): send as plain reply, no streaming
-                    await self._client.reply(frame, {
-                        "msgtype": "text",
-                        "text": {"content": content},
-                    })
-                    logger.debug("WeCom progress sent to {}", msg.chat_id)
-                else:
-                    # Final response: use streaming reply for better UX
-                    stream_id = self._generate_req_id("stream")
-                    await self._client.reply_stream(
-                        frame,
-                        stream_id,
-                        content,
-                        finish=True,
-                    )
-                    logger.debug("WeCom message sent to {}", msg.chat_id)
+                # Both progress and final messages must use reply_stream (cmd="aibot_respond_msg").
+                # The plain reply() uses cmd="reply" which does not support "text" msgtype
+                # and causes errcode=40008 from WeCom API.
+                stream_id = self._generate_req_id("stream")
+                await self._client.reply_stream(
+                    frame,
+                    stream_id,
+                    content,
+                    finish=not is_progress,
+                )
+                logger.debug(
+                    "WeCom {} sent to {}",
+                    "progress" if is_progress else "message",
+                    msg.chat_id,
+                )
             else:
                 # No frame (e.g. cron push): proactive send only supports markdown
                 await self._client.send_message(msg.chat_id, {

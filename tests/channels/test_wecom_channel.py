@@ -317,20 +317,21 @@ async def test_send_text_with_frame() -> None:
 
 @pytest.mark.asyncio
 async def test_send_progress_with_frame() -> None:
-    """When metadata has _progress, send uses reply (not reply_stream)."""
+    """When metadata has _progress, send uses reply_stream with finish=False."""
     channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["*"]), MessageBus())
     client = _FakeWeComClient()
     channel._client = client
+    channel._generate_req_id = lambda x: f"req_{x}"
     channel._chat_frames["chat1"] = _FakeFrame()
 
     await channel.send(
         OutboundMessage(channel="wecom", chat_id="chat1", content="thinking...", metadata={"_progress": True})
     )
 
-    client.reply.assert_called_once()
-    client.reply_stream.assert_not_called()
-    call_args = client.reply.call_args
-    assert call_args[0][1]["text"]["content"] == "thinking..."
+    client.reply_stream.assert_called_once()
+    call_args = client.reply_stream.call_args
+    assert call_args[0][2] == "thinking..."  # content arg
+    assert call_args[1]["finish"] is False
 
 
 @pytest.mark.asyncio
