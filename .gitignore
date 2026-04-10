@@ -1,25 +1,86 @@
+# Project-specific
 .worktrees/
 .assets
 .docs
 .env
+.web
+
+# Python bytecode & caches
 *.pyc
-dist/
-build/
-*.egg-info/
-*.egg
-*.pycs
 *.pyo
 *.pyd
 *.pyw
 *.pyz
-*.pywz
-*.pyzz
+__pycache__/
+*.egg-info/
+*.egg
 .venv/
 venv/
-__pycache__/
-poetry.lock
 .pytest_cache/
-botpy.log
-nano.*.save
-.DS_Store
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.dmypy.json
+dmypy.json
+.tox/
+.nox/
+.hypothesis/
+
+# Build & packaging
+dist/
+build/
+*.manifest
+*.spec
+pip-wheel-metadata/
+share/python-wheels/
+
+# Test & coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+
+# Lock files (project policy)
+poetry.lock
 uv.lock
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+.directory
+
+# Editors & IDEs (local workspace / user settings)
+.vscode/
+.cursor/
+.idea/
+.fleet/
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+nano.*.save
+
+# Environment & secrets (keep examples tracked if needed)
+.env.*
+!.env.example
+
+# Logs & temp
+*.log
+logs/
+tmp/
+temp/
+*.tmp
