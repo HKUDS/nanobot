@@ -1503,6 +1503,32 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
 
 
+### Auto Compact
+
+When a user is idle for longer than a configured TTL, nanobot **proactively** compresses the session context into a summary. This reduces token cost and first-token latency when the user returns — instead of re-processing a long stale context with an expired KV cache, the model receives a compact summary and fresh input.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "sessionTtlMinutes": 15
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.sessionTtlMinutes` | `0` (disabled) | Minutes of idle time before auto-compaction. Set to `0` to disable. Recommended: `15` — matches typical LLM KV cache expiration, so compacted sessions won't waste cache on cold entries. |
+
+How it works:
+1. **Idle detection**: On each idle tick (~1 s), checks all sessions for expiration.
+2. **Background compaction**: Expired sessions are summarized via LLM, then cleared.
+3. **Summary injection**: When the user returns, the summary is injected as runtime context (one-shot, not persisted).
+
+> [!TIP]
+> The summary survives bot restarts — it's stored in session metadata and recovered on the next message.
+
 ### Timezone
 
 Time is context. Context should be precise.

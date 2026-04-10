@@ -374,6 +374,10 @@ class Consolidator:
             weakref.WeakValueDictionary()
         )
 
+    def get_last_history_entry(self) -> dict[str, Any] | None:
+        """Return the most recent entry from history.jsonl."""
+        return self.store._read_last_entry()
+
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
