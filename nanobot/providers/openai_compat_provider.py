@@ -243,6 +243,10 @@ class OpenAICompatProvider(LLMProvider):
                     tc_clean["id"] = map_id(tc_clean.get("id"))
                     normalized.append(tc_clean)
                 clean["tool_calls"] = normalized
+                if clean.get("role") == "assistant":
+                    # Some OpenAI-compatible gateways reject assistant messages
+                    # that mix non-empty content with tool_calls.
+                    clean["content"] = None
             if "tool_call_id" in clean and clean["tool_call_id"]:
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
         return self._enforce_role_alternation(sanitized)

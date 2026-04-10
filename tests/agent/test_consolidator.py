@@ -76,3 +76,52 @@ class TestConsolidatorTokenBudget:
         consolidator.archive = AsyncMock(return_value=True)
         await consolidator.maybe_consolidate_by_tokens(session)
         consolidator.archive.assert_not_called()
+
+    async def test_chunk_cap_preserves_user_turn_boundary(self, consolidator):
+        """Chunk cap should rewind to the last user boundary within the cap."""
+        consolidator._SAFETY_BUFFER = 0
+        session = MagicMock()
+        session.last_consolidated = 0
+        session.key = "test:key"
+        session.messages = [
+            {
+                "role": "user" if i in {0, 50, 61} else "assistant",
+                "content": f"m{i}",
+            }
+            for i in range(70)
+        ]
+        consolidator.estimate_session_prompt_tokens = MagicMock(
+            side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
+        )
+        consolidator.pick_consolidation_boundary = MagicMock(return_value=(61, 999))
+        consolidator.archive = AsyncMock(return_value=True)
+
+        await consolidator.maybe_consolidate_by_tokens(session)
+
+        archived_chunk = consolidator.archive.await_args.args[0]
+        assert len(archived_chunk) == 50
+        assert archived_chunk[0]["content"] == "m0"
+        assert archived_chunk[-1]["content"] == "m49"
+        assert session.last_consolidated == 50
+
+    async def test_chunk_cap_skips_when_no_user_boundary_within_cap(self, consolidator):
+        """If the cap would cut mid-turn, consolidation should skip that round."""
+        consolidator._SAFETY_BUFFER = 0
+        session = MagicMock()
+        session.last_consolidated = 0
+        session.key = "test:key"
+        session.messages = [
+            {
+                "role": "user" if i in {0, 61} else "assistant",
+                "content": f"m{i}",
+            }
+            for i in range(70)
+        ]
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(1200, "tiktoken"))
+        consolidator.pick_consolidation_boundary = MagicMock(return_value=(61, 999))
+        consolidator.archive = AsyncMock(return_value=True)
+
+        await consolidator.maybe_consolidate_by_tokens(session)
+
+        consolidator.archive.assert_not_awaited()
+        assert session.last_consolidated == 0
