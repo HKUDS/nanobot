@@ -460,6 +460,59 @@ class CronService:
                 return job
         return None
 
+    def update_job(
+        self,
+        job_id: str,
+        *,
+        name: str | None = None,
+        schedule: CronSchedule | None = None,
+        message: str | None = None,
+        deliver: bool | None = None,
+        channel: str | None = ...,
+        to: str | None = ...,
+        delete_after_run: bool | None = None,
+    ) -> CronJob | Literal["not_found", "protected"]:
+        """Update mutable fields of an existing job. System jobs cannot be updated.
+
+        For ``channel`` and ``to``, pass an explicit value (including ``None``)
+        to update; omit (sentinel ``...``) to leave unchanged.
+        """
+        store = self._load_store()
+        job = next((j for j in store.jobs if j.id == job_id), None)
+        if job is None:
+            return "not_found"
+        if job.payload.kind == "system_event":
+            return "protected"
+
+        if schedule is not None:
+            _validate_schedule_for_add(schedule)
+            job.schedule = schedule
+        if name is not None:
+            job.name = name
+        if message is not None:
+            job.payload.message = message
+        if deliver is not None:
+            job.payload.deliver = deliver
+        if channel is not ...:
+            job.payload.channel = channel
+        if to is not ...:
+            job.payload.to = to
+        if delete_after_run is not None:
+            job.delete_after_run = delete_after_run
+
+        job.updated_at_ms = _now_ms()
+        if job.enabled:
+            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+
+        if self._running:
+            self._save_store()
+            self._arm_timer()
+        else:
+            self._append_action("update", asdict(job))
+
+        logger.info("Cron: updated job '{}' ({})", job.name, job.id)
+        return job
+
     async def run_job(self, job_id: str, force: bool = False) -> bool:
         """Manually run a job without disturbing the service's running state."""
         was_running = self._running
