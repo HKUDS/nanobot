@@ -238,6 +238,7 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
         self._pending_summaries: dict[str, str] = {}  # session_key → summary (one-shot)
+        self._archiving_keys: set[str] = set()  # sessions currently being archived
         self._session_locks: dict[str, asyncio.Lock] = {}
         # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
@@ -407,6 +408,7 @@ class AgentLoop:
             try:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
             except asyncio.TimeoutError:
+                await self._check_expired_sessions()
                 continue
             except asyncio.CancelledError:
                 # Preserve real task cancellation so shutdown can complete cleanly.
@@ -510,14 +512,35 @@ class AgentLoop:
         self._running = False
         logger.info("Agent loop stopping")
 
-    def _should_auto_new(self, session: Session) -> bool:
-        """Check whether a session has been idle longer than the TTL."""
-        if self._session_ttl_minutes <= 0:
+    def _is_session_expired(self, updated_at: datetime | str | None) -> bool:
+        """Check whether an updated_at timestamp is beyond the TTL."""
+        if self._session_ttl_minutes <= 0 or not updated_at:
             return False
-        if not session.updated_at:
-            return False
-        elapsed_s = (datetime.now() - session.updated_at).total_seconds()
+        if isinstance(updated_at, str):
+            updated_at = datetime.fromisoformat(updated_at)
+        elapsed_s = (datetime.now() - updated_at).total_seconds()
         return elapsed_s >= self._session_ttl_minutes * 60
+
+    async def _check_expired_sessions(self) -> None:
+        """Proactively archive sessions that have been idle beyond TTL."""
+        for info in self.sessions.list_sessions():
+            key = info.get("key", "")
+            if not key or key in self._archiving_keys:
+                continue
+            if self._is_session_expired(info.get("updated_at")):
+                self._archiving_keys.add(key)
+                self._schedule_background(self._proactive_archive(key))
+
+    async def _proactive_archive(self, session_key: str) -> None:
+        """Archive an expired session in the background, store summary for next message."""
+        try:
+            summary = await self._auto_new(session_key)
+            if summary:
+                self._pending_summaries[session_key] = summary
+        except Exception:
+            logger.exception("Proactive auto-new failed for {}", session_key)
+        finally:
+            self._archiving_keys.discard(session_key)
 
     async def _auto_new(self, session_key: str) -> str | None:
         """Archive un-consolidated messages and clear session.
@@ -567,11 +590,8 @@ class AgentLoop:
             if self._restore_runtime_checkpoint(session):
                 self.sessions.save(session)
 
-            # Auto session new for system messages
-            if self._should_auto_new(session):
-                summary = await self._auto_new(key)
-                if summary:
-                    self._pending_summaries[key] = summary
+            # Reload session (proactive auto-new may have cleared it)
+            if key in self._archiving_keys or self._is_session_expired(session.updated_at):
                 session = self.sessions.get_or_create(key)
 
             await self.consolidator.maybe_consolidate_by_tokens(session)
@@ -607,11 +627,8 @@ class AgentLoop:
         if self._restore_runtime_checkpoint(session):
             self.sessions.save(session)
 
-        # --- Auto session new: reset stale sessions ---
-        if self._should_auto_new(session):
-            summary = await self._auto_new(key)
-            if summary:
-                self._pending_summaries[key] = summary
+        # Reload session (proactive auto-new may have cleared it)
+        if key in self._archiving_keys or self._is_session_expired(session.updated_at):
             session = self.sessions.get_or_create(key)
 
         # Slash commands

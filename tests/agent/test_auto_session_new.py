@@ -189,17 +189,28 @@ class TestAutoNewIdleDetection:
 
     @pytest.mark.asyncio
     async def test_auto_new_triggers_on_idle(self, tmp_path):
-        """Auto-new should trigger when idle exceeds TTL."""
+        """Proactive auto-new archives expired session; _process_message reloads it."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         session.add_message("user", "old message")
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
+        archived_messages = []
+
         async def _fake_archive(messages):
+            archived_messages.extend(messages)
             return True
 
         loop.consolidator.archive = _fake_archive
+        loop.consolidator.store.read_unprocessed_history = lambda since_cursor=0: [
+            {"cursor": 1, "timestamp": "2026-01-01 00:00", "content": "Summary."},
+        ]
+
+        # Simulate proactive archive completing before message arrives
+        summary = await loop._auto_new("cli:test")
+        if summary:
+            loop._pending_summaries["cli:test"] = summary
 
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="new msg")
         await loop._process_message(msg)
@@ -280,7 +291,7 @@ class TestAutoNewSystemMessages:
 
     @pytest.mark.asyncio
     async def test_auto_new_triggers_for_system_messages(self, tmp_path):
-        """Auto-new should also apply to system-originated messages."""
+        """Proactive auto-new archives expired session; system messages reload it."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         session.add_message("user", "old message from subagent context")
@@ -291,6 +302,14 @@ class TestAutoNewSystemMessages:
             return True
 
         loop.consolidator.archive = _fake_archive
+        loop.consolidator.store.read_unprocessed_history = lambda since_cursor=0: [
+            {"cursor": 1, "timestamp": "2026-01-01 00:00", "content": "Summary."},
+        ]
+
+        # Simulate proactive archive completing before system message arrives
+        summary = await loop._auto_new("cli:test")
+        if summary:
+            loop._pending_summaries["cli:test"] = summary
 
         msg = InboundMessage(
             channel="system", sender_id="subagent", chat_id="cli:test",
@@ -354,7 +373,7 @@ class TestAutoNewEdgeCases:
 
     @pytest.mark.asyncio
     async def test_auto_new_preserves_runtime_checkpoint_before_check(self, tmp_path):
-        """Runtime checkpoint should be restored before idle check runs."""
+        """Runtime checkpoint is restored; proactive archive handles the expired session."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         session.metadata[AgentLoop._RUNTIME_CHECKPOINT_KEY] = {
@@ -362,23 +381,31 @@ class TestAutoNewEdgeCases:
             "completed_tool_results": [],
             "pending_tool_calls": [],
         }
+        session.add_message("user", "previous message")
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        archive_called = False
+        archived_messages = []
 
         async def _fake_archive(messages):
-            nonlocal archive_called
-            archive_called = True
+            archived_messages.extend(messages)
             return True
 
         loop.consolidator.archive = _fake_archive
+        loop.consolidator.store.read_unprocessed_history = lambda since_cursor=0: [
+            {"cursor": 1, "timestamp": "2026-01-01 00:00", "content": "Summary."},
+        ]
+
+        # Simulate proactive archive completing before message arrives
+        summary = await loop._auto_new("cli:test")
+        if summary:
+            loop._pending_summaries["cli:test"] = summary
 
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="continue")
         await loop._process_message(msg)
 
-        # The interrupted response should have been archived (checkpoint restored first)
-        assert archive_called
+        # The checkpoint-restored message should have been archived by proactive path
+        assert len(archived_messages) >= 1
 
         await loop.close_mcp()
 
@@ -457,6 +484,14 @@ class TestAutoNewIntegration:
             return True
 
         loop.consolidator.archive = _fake_archive
+        loop.consolidator.store.read_unprocessed_history = lambda since_cursor=0: [
+            {"cursor": 1, "timestamp": "2026-01-01 00:00", "content": "Summary."},
+        ]
+
+        # Simulate proactive archive completing before message arrives
+        summary = await loop._auto_new("cli:test")
+        if summary:
+            loop._pending_summaries["cli:test"] = summary
 
         msg = InboundMessage(
             channel="cli", sender_id="user", chat_id="test",
@@ -475,4 +510,149 @@ class TestAutoNewIntegration:
         # No runtime context markers in persisted message
         assert "[Runtime Context" not in persisted
         assert "[/Runtime Context]" not in persisted
+        await loop.close_mcp()
+
+
+class TestProactiveAutoNew:
+    """Test proactive auto-new on idle ticks (TimeoutError path in run loop)."""
+
+    @pytest.mark.asyncio
+    async def test_no_check_when_ttl_disabled(self, tmp_path):
+        """_check_expired_sessions should be a no-op when TTL is 0."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=0)
+        session = loop.sessions.get_or_create("cli:test")
+        session.add_message("user", "old message")
+        session.updated_at = datetime.now() - timedelta(minutes=30)
+        loop.sessions.save(session)
+
+        await loop._check_expired_sessions()
+
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert len(session_after.messages) == 1
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_proactive_archive_on_idle_tick(self, tmp_path):
+        """Expired session should be archived during idle tick."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        session.add_message("user", "old message")
+        session.add_message("assistant", "old response")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        archived_messages = []
+
+        async def _fake_archive(messages):
+            archived_messages.extend(messages)
+            return True
+
+        loop.consolidator.archive = _fake_archive
+        loop.consolidator.store.read_unprocessed_history = lambda since_cursor=0: [
+            {"cursor": 1, "timestamp": "2026-01-01 00:00", "content": "User chatted about old things."},
+        ]
+
+        await loop._check_expired_sessions()
+        # Background task needs a tick to complete
+        await asyncio.sleep(0.1)
+
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert len(session_after.messages) == 0
+        assert len(archived_messages) == 2
+        assert loop._pending_summaries.get("cli:test") == "User chatted about old things."
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_no_proactive_archive_when_active(self, tmp_path):
+        """Recently active session should NOT be archived on idle tick."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        session.add_message("user", "recent message")
+        loop.sessions.save(session)
+
+        await loop._check_expired_sessions()
+        await asyncio.sleep(0.1)
+
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert len(session_after.messages) == 1
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_archive(self, tmp_path):
+        """Should not archive the same session twice if already in progress."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        session.add_message("user", "old message")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        archive_count = 0
+        block_forever = asyncio.Event()
+
+        async def _slow_archive(messages):
+            nonlocal archive_count
+            archive_count += 1
+            await block_forever.wait()  # Simulate slow LLM call
+            return True
+
+        loop.consolidator.archive = _slow_archive
+
+        # First call starts archiving
+        await loop._check_expired_sessions()
+        await asyncio.sleep(0.05)
+        assert archive_count == 1
+
+        # Second call should skip (key is in _archiving_keys)
+        await loop._check_expired_sessions()
+        await asyncio.sleep(0.05)
+        assert archive_count == 1
+
+        # Clean up
+        block_forever.set()
+        await asyncio.sleep(0.1)
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_proactive_archive_error_does_not_block(self, tmp_path):
+        """Proactive archive failure should be caught and not block future ticks."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        session.add_message("user", "old message")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        async def _failing_archive(messages):
+            raise RuntimeError("LLM down")
+
+        loop.consolidator.archive = _failing_archive
+
+        # Should not raise
+        await loop._check_expired_sessions()
+        await asyncio.sleep(0.1)
+
+        # Key should be removed from _archiving_keys (finally block)
+        assert "cli:test" not in loop._archiving_keys
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_proactive_archive_skips_empty_sessions(self, tmp_path):
+        """Proactive archive should not call LLM for sessions with no un-consolidated messages."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        archive_called = False
+
+        async def _fake_archive(messages):
+            nonlocal archive_called
+            archive_called = True
+            return True
+
+        loop.consolidator.archive = _fake_archive
+
+        await loop._check_expired_sessions()
+        await asyncio.sleep(0.1)
+
+        assert not archive_called
         await loop.close_mcp()
