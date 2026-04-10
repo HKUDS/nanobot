@@ -66,6 +66,7 @@ class Nanobot:
         bus = MessageBus()
         defaults = config.agents.defaults
         _resolved = config.resolve_preset()
+        pf = _make_provider_factory(config) if defaults.fallback_models else None
 
         loop = AgentLoop(
             bus=bus,
@@ -77,6 +78,8 @@ class Nanobot:
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
             provider_retry_mode=defaults.provider_retry_mode,
+            fallback_models=defaults.fallback_models,
+            provider_factory=pf,
             web_config=config.tools.web,
             exec_config=config.tools.exec,
             restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -121,13 +124,21 @@ class Nanobot:
         return RunResult(content=content, tools_used=[], messages=[])
 
 
-def _make_provider(config: Any) -> Any:
-    """Create the LLM provider from config (extracted from CLI)."""
+def _make_provider_for_model(
+    config: Any,
+    model: str,
+    *,
+    preset: Any | None = None,
+) -> Any:
+    """Create an LLM provider instance for a specific model string.
+
+    When *preset* is given, its generation settings (temperature, max_tokens,
+    reasoning_effort) override the active preset defaults.
+    """
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.registry import find_by_name
 
-    resolved = config.resolve_preset()
-    model = resolved.model
+    gen_src = preset or config.resolve_preset()
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
     spec = find_by_name(provider_name) if provider_name else None
@@ -177,8 +188,34 @@ def _make_provider(config: Any) -> Any:
         )
 
     provider.generation = GenerationSettings(
-        temperature=resolved.temperature,
-        max_tokens=resolved.max_tokens,
-        reasoning_effort=resolved.reasoning_effort,
+        temperature=gen_src.temperature,
+        max_tokens=gen_src.max_tokens,
+        reasoning_effort=gen_src.reasoning_effort,
     )
     return provider
+
+
+def _make_provider(config: Any) -> Any:
+    """Create the LLM provider for the primary model from config."""
+    return _make_provider_for_model(config, config.resolve_preset().model)
+
+
+def _make_provider_factory(config: Any):
+    """Build a cached factory that creates providers for arbitrary model strings.
+
+    If a model string matches a preset name in ``config.model_presets``, the
+    preset's full config (model, temperature, max_tokens, …) is used.
+    """
+    cache: dict[str, Any] = {}
+    presets = getattr(config, "model_presets", {}) or {}
+
+    def factory(model_or_preset: str):
+        preset = presets.get(model_or_preset)
+        actual_model = preset.model if preset else model_or_preset
+        provider_name = config.get_provider_name(actual_model)
+        key = provider_name or actual_model
+        if key not in cache:
+            cache[key] = _make_provider_for_model(config, actual_model, preset=preset)
+        return cache[key]
+
+    return factory
