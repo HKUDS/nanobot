@@ -1239,6 +1239,169 @@ async def test_backfill_noop_when_complete():
     assert result is messages  # same object — no copy
 
 
+@pytest.mark.asyncio
+async def test_backfill_repairs_model_context_without_shifting_save_turn_boundary(tmp_path):
+    """Historical backfill should not duplicate old tail messages on persist."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.runner import _BACKFILL_CONTENT
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    response = LLMResponse(content="new answer", tool_calls=[], usage={})
+    provider.chat_with_retry = AsyncMock(return_value=response)
+    provider.chat_stream_with_retry = AsyncMock(return_value=response)
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("cli:test")
+    session.messages = [
+        {"role": "user", "content": "old user", "timestamp": "2026-01-01T00:00:00"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_missing",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+            "timestamp": "2026-01-01T00:00:01",
+        },
+        {"role": "assistant", "content": "old tail", "timestamp": "2026-01-01T00:00:02"},
+    ]
+    loop.sessions.save(session)
+
+    result = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="test", content="new prompt")
+    )
+
+    assert result is not None
+    assert result.content == "new answer"
+
+    request_messages = provider.chat_with_retry.await_args.kwargs["messages"]
+    synthetic = [
+        message
+        for message in request_messages
+        if message.get("role") == "tool" and message.get("tool_call_id") == "call_missing"
+    ]
+    assert len(synthetic) == 1
+    assert synthetic[0]["content"] == _BACKFILL_CONTENT
+
+    session_after = loop.sessions.get_or_create("cli:test")
+    assert [
+        {
+            key: value
+            for key, value in message.items()
+            if key in {"role", "content", "tool_call_id", "name", "tool_calls"}
+        }
+        for message in session_after.messages
+    ] == [
+        {"role": "user", "content": "old user"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_missing",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "assistant", "content": "old tail"},
+        {"role": "user", "content": "new prompt"},
+        {"role": "assistant", "content": "new answer"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runner_backfill_only_mutates_model_context_not_returned_messages():
+    """Runner should repair orphaned tool calls for the model without rewriting result.messages."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _BACKFILL_CONTENT
+
+    provider = MagicMock()
+    captured_messages: list[dict] = []
+
+    async def chat_with_retry(*, messages, **kwargs):
+        captured_messages[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    initial_messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "old user"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_missing",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "assistant", "content": "old tail"},
+        {"role": "user", "content": "new prompt"},
+    ]
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=initial_messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    synthetic = [
+        message
+        for message in captured_messages
+        if message.get("role") == "tool" and message.get("tool_call_id") == "call_missing"
+    ]
+    assert len(synthetic) == 1
+    assert synthetic[0]["content"] == _BACKFILL_CONTENT
+
+    assert [
+        {
+            key: value
+            for key, value in message.items()
+            if key in {"role", "content", "tool_call_id", "name", "tool_calls"}
+        }
+        for message in result.messages
+    ] == [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "old user"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_missing",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "assistant", "content": "old tail"},
+        {"role": "user", "content": "new prompt"},
+        {"role": "assistant", "content": "done"},
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Microcompact (stale tool result compaction)
 # ---------------------------------------------------------------------------
