@@ -41,6 +41,27 @@ if TYPE_CHECKING:
     from nanobot.cron.service import CronService
 
 
+# Models known to support native vision (image input).
+# When the active model matches any of these prefixes/patterns, images are
+# sent inline as base64 and the vision_model preprocessor is skipped.
+_VISION_CAPABLE_PATTERNS = (
+    "claude",       # all Anthropic models (claude-3, claude-opus-4, ...)
+    "gpt-4",        # GPT-4V, GPT-4o, ...
+    "gpt-4o",
+    "gemini",       # Google Gemini
+    "llava",        # open-source multimodal
+    "pixtral",      # Mistral vision
+    "qwen-vl",      # Qwen Vision Language
+    "vision",       # any model with "vision" in name
+    "minicpm-v",
+)
+
+
+def _model_supports_vision(model: str) -> bool:
+    """Return True if the model is known to accept inline image content."""
+    m = model.lower()
+    return any(p in m for p in _VISION_CAPABLE_PATTERNS)
+
 UNIFIED_SESSION_KEY = "unified:default"
 
 class _LoopHook(AgentHook):
@@ -132,6 +153,7 @@ class AgentLoop:
         provider: LLMProvider,
         workspace: Path,
         model: str | None = None,
+        vision_model: str | None = None,
         max_iterations: int | None = None,
         context_window_tokens: int | None = None,
         context_block_limit: int | None = None,
@@ -145,6 +167,7 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        system_prompt_prefix: str | None = None,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
     ):
@@ -156,6 +179,8 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self.vision_model = vision_model or ""
+        self.system_prompt_prefix = system_prompt_prefix
         self.max_iterations = (
             max_iterations if max_iterations is not None else defaults.max_tool_iterations
         )
@@ -505,6 +530,7 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
+                system_prompt_prefix=self.system_prompt_prefix,
             )
             final_content, _, all_msgs, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
@@ -534,17 +560,85 @@ class AgentLoop:
         await self.consolidator.maybe_consolidate_by_tokens(session)
 
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        # Propagate shared session key to CronTool so new cron jobs inherit it
+        from nanobot.agent.tools.cron import CronTool
+        cron_tool = self.tools.get("cron")
+        if isinstance(cron_tool, CronTool):
+            cron_tool.set_session_key(session_key or msg.session_key_override)
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=0)
+
+        # -- Vision handling -----------------------------------------------
+        # Two paths depending on whether the main model supports native vision:
+        #
+        # A) Main model IS vision-capable (Claude, GPT-4V, Gemini, ...):
+        #    -> Images are passed inline as base64 directly to the main model.
+        #    -> vision_model is NOT called (it's a fallback, not a preprocessor).
+        #    -> Cache is still checked: a previously transcribed image is returned
+        #      as text so we never re-encode an image that was already described.
+        #
+        # B) Main model is NOT vision-capable (text-only LLM):
+        #    -> vision_model (if set) is called as a dedicated preprocessor.
+        #    -> Descriptions are stored in MediaCache (SHA-256 keyed JSON).
+        #    -> Raw files are deleted; main model receives text descriptions only.
+        #
+        main_has_vision = _model_supports_vision(self.model)
+        if msg.media and not main_has_vision and self.vision_model:
+            # Path B: preprocess images with the dedicated vision model
+            uncached = []
+            for path in msg.media:
+                fhash = self.context.media_cache.hash_file(path)
+                if fhash and not self.context.media_cache.get(fhash):
+                    uncached.append(path)
+
+            if uncached:
+                vision_msgs = self.context.build_vision_messages(
+                    history=history,
+                    current_message=msg.content,
+                    media=uncached,
+                    context_window=6,
+                )
+                try:
+                    vision_resp = await self.provider.chat(
+                        messages=vision_msgs,
+                        tools=[],
+                        model=self.vision_model,
+                        temperature=0.1,
+                        max_tokens=2048,
+                    )
+                    description = vision_resp.content or ""
+                    for path in uncached:
+                        fhash = self.context.media_cache.hash_file(path)
+                        if fhash:
+                            self.context.media_cache.put(fhash, description, path)
+                    logger.info(
+                        "Vision fallback: transcribed {} image(s) via {} (main model '{}' has no vision)",
+                        len(uncached), self.vision_model, self.model,
+                    )
+                except Exception as e:
+                    logger.warning("Vision fallback failed ({}), images will be dropped for text-only model", e)
+        elif msg.media and main_has_vision:
+            logger.debug("Main model '{}' supports vision -- passing images inline", self.model)
+
+        # Build messages BEFORE deleting files so _build_user_content can hash
+        # them and find their cached descriptions.  Files are deleted afterwards.
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            system_prompt_prefix=self.system_prompt_prefix,
         )
+
+        # Delete raw media files -- descriptions are now embedded in initial_messages
+        for media_path in (msg.media or []):
+            try:
+                Path(media_path).unlink(missing_ok=True)
+            except OSError:
+                pass
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
@@ -741,11 +835,18 @@ class AgentLoop:
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        model: str | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
-        return await self._process_message(
-            msg, session_key=session_key, on_progress=on_progress,
-            on_stream=on_stream, on_stream_end=on_stream_end,
-        )
+        saved_model = self.model
+        if model:
+            self.model = model
+        try:
+            msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+            return await self._process_message(
+                msg, session_key=session_key, on_progress=on_progress,
+                on_stream=on_stream, on_stream_end=on_stream_end,
+            )
+        finally:
+            self.model = saved_model

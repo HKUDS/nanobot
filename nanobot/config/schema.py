@@ -15,6 +15,14 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+
+
+class SessionConfig(Base):
+    """Named session definition."""
+
+    default: bool = False  # If true, this session is used by all channels/cron without explicit sessionKey
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -76,14 +84,26 @@ class AgentDefaults(Base):
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
     reasoning_effort: str | None = None  # low / medium / high / adaptive - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    vision_model: str = ""  # Optional vision-capable model used when images are attached
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
     dream: DreamConfig = Field(default_factory=DreamConfig)
+
+
+class AgentProfile(Base):
+    """Named agent profile with optional overrides."""
+
+    system_prompt: str = ""  # Custom system prompt prefix
+    model: str | None = None  # Override default model
+    provider: str | None = None  # Explicit provider name; None = auto-detect
+    temperature: float | None = None
+    max_tokens: int | None = None
 
 
 class AgentsConfig(Base):
     """Agent configuration."""
 
     defaults: AgentDefaults = Field(default_factory=AgentDefaults)
+    profiles: dict[str, AgentProfile] = Field(default_factory=dict)
 
 
 class ProviderConfig(Base):
@@ -204,12 +224,21 @@ class ToolsConfig(Base):
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
+    sessions: dict[str, SessionConfig] = Field(default_factory=dict)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+
+    @property
+    def default_session_key(self) -> str | None:
+        """Return the name of the default session, if one is configured."""
+        for name, sess in self.sessions.items():
+            if sess.default:
+                return name
+        return None
 
     @property
     def workspace_path(self) -> Path:
