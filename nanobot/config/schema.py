@@ -3,9 +3,11 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
+
+from nanobot.cron.types import CronSchedule
 
 
 class Base(BaseModel):
@@ -13,18 +15,48 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
-
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
     Built-in and plugin channel configs are stored as extra fields (dicts).
     Each channel parses its own config in __init__.
+    Per-channel "streaming": true enables streaming output (requires send_delta impl).
     """
 
     model_config = ConfigDict(extra="allow")
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
+    transcription_provider: str = "groq"  # Voice transcription backend: "groq" or "openai"
+
+
+class DreamConfig(Base):
+    """Dream memory consolidation configuration."""
+
+    _HOUR_MS = 3_600_000
+
+    interval_h: int = Field(default=2, ge=1)  # Every 2 hours by default
+    cron: str | None = Field(default=None, exclude=True)  # Legacy compatibility override
+    model_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("modelOverride", "model", "model_override"),
+    )  # Optional Dream-specific model override
+    max_batch_size: int = Field(default=20, ge=1)  # Max history entries per run
+    max_iterations: int = Field(default=10, ge=1)  # Max tool calls per Phase 2
+
+    def build_schedule(self, timezone: str) -> CronSchedule:
+        """Build the runtime schedule, preferring the legacy cron override if present."""
+        if self.cron:
+            return CronSchedule(kind="cron", expr=self.cron, tz=timezone)
+        return CronSchedule(kind="every", every_ms=self.interval_h * self._HOUR_MS)
+
+    def describe_schedule(self) -> str:
+        """Return a human-readable summary for logs and startup output."""
+        if self.cron:
+            return f"cron {self.cron} (legacy)"
+        hours = self.interval_h
+        return f"every {hours}h"
 
 
 class AgentDefaults(Base):
@@ -37,16 +69,15 @@ class AgentDefaults(Base):
     )
     max_tokens: int = 8192
     context_window_tokens: int = 65_536
+    context_block_limit: int | None = None
     temperature: float = 0.1
-    max_tool_iterations: int = 40
-    # Deprecated compatibility field: accepted from old configs but ignored at runtime.
-    memory_window: int | None = Field(default=None, exclude=True)
-    reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
-
-    @property
-    def should_warn_deprecated_memory_window(self) -> bool:
-        """Return True when old memoryWindow is present without contextWindowTokens."""
-        return self.memory_window is not None and "context_window_tokens" not in self.model_fields_set
+    max_tool_iterations: int = 200
+    max_tool_result_chars: int = 16_000
+    provider_retry_mode: Literal["standard", "persistent"] = "standard"
+    reasoning_effort: str | None = None  # low / medium / high / adaptive - enables LLM thinking mode
+    timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    unified_session: bool = False  # Share one session across all channels (single-user multi-device)
+    dream: DreamConfig = Field(default_factory=DreamConfig)
 
 
 class AgentsConfig(Base):
@@ -77,17 +108,22 @@ class ProvidersConfig(Base):
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
+    ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
     gemini: ProviderConfig = Field(default_factory=ProviderConfig)
     moonshot: ProviderConfig = Field(default_factory=ProviderConfig)
     minimax: ProviderConfig = Field(default_factory=ProviderConfig)
+    mistral: ProviderConfig = Field(default_factory=ProviderConfig)
+    stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰)
+    xiaomi_mimo: ProviderConfig = Field(default_factory=ProviderConfig)  # Xiaomi MIMO (小米)
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
     volcengine_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine Coding Plan
     byteplus: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus (VolcEngine international)
     byteplus_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # BytePlus Coding Plan
-    openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
-    github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+    openai_codex: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # OpenAI Codex (OAuth)
+    github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
+    qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Qianfan (百度千帆)
 
 
 class HeartbeatConfig(Base):
@@ -95,6 +131,15 @@ class HeartbeatConfig(Base):
 
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
+    keep_recent_messages: int = 8
+
+
+class ApiConfig(Base):
+    """OpenAI-compatible API server configuration."""
+
+    host: str = "127.0.0.1"  # Safer default: local-only bind.
+    port: int = 8900
+    timeout: float = 120.0  # Per-request timeout in seconds.
 
 
 class GatewayConfig(Base):
@@ -108,15 +153,17 @@ class GatewayConfig(Base):
 class WebSearchConfig(Base):
     """Web search tool configuration."""
 
-    provider: str = "brave"  # brave, tavily, duckduckgo, searxng, jina
+    provider: str = "duckduckgo"  # brave, tavily, duckduckgo, searxng, jina
     api_key: str = ""
     base_url: str = ""  # SearXNG base URL
     max_results: int = 5
+    timeout: int = 30  # Wall-clock timeout (seconds) for search operations
 
 
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
+    enable: bool = True
     proxy: str | None = (
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )
@@ -126,9 +173,11 @@ class WebToolsConfig(Base):
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
+    enable: bool = True
     timeout: int = 60
     path_append: str = ""
-
+    sandbox: str = ""  # sandbox backend: "" (none) or "bwrap"
+    allowed_env_keys: list[str] = Field(default_factory=list)  # Env var names to pass through to subprocess (e.g. ["GOPATH", "JAVA_HOME"])
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
@@ -147,8 +196,9 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
-    restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
+    restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
+    ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 
 class Config(BaseSettings):
@@ -157,6 +207,7 @@ class Config(BaseSettings):
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
 
@@ -169,12 +220,15 @@ class Config(BaseSettings):
         self, model: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
-        from nanobot.providers.registry import PROVIDERS
+        from nanobot.providers.registry import PROVIDERS, find_by_name
 
         forced = self.agents.defaults.provider
         if forced != "auto":
-            p = getattr(self.providers, forced, None)
-            return (p, forced) if p else (None, None)
+            spec = find_by_name(forced)
+            if spec:
+                p = getattr(self.providers, spec.name, None)
+                return (p, spec.name) if p else (None, None)
+            return None, None
 
         model_lower = (model or self.agents.defaults.model).lower()
         model_normalized = model_lower.replace("-", "_")
@@ -250,8 +304,7 @@ class Config(BaseSettings):
         if p and p.api_base:
             return p.api_base
         # Only gateways get a default api_base here. Standard providers
-        # (like Moonshot) set their base URL via env vars in _setup_env
-        # to avoid polluting the global litellm.api_base.
+        # resolve their base URL from the registry in the provider constructor.
         if name:
             spec = find_by_name(name)
             if spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:

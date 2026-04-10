@@ -10,20 +10,12 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
-from nanobot.utils.helpers import ensure_dir, safe_filename
+from nanobot.utils.helpers import ensure_dir, find_legal_message_start, safe_filename
 
 
 @dataclass
 class Session:
-    """
-    A conversation session.
-
-    Stores messages in JSONL format for easy reading and persistence.
-
-    Important: Messages are append-only for LLM cache efficiency.
-    The consolidation process writes summaries to MEMORY.md/HISTORY.md
-    but does NOT modify the messages list or get_history() output.
-    """
+    """A conversation session."""
 
     key: str  # channel:chat_id
     messages: list[dict[str, Any]] = field(default_factory=list)
@@ -44,22 +36,27 @@ class Session:
         self.updated_at = datetime.now()
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a user turn."""
+        """Return unconsolidated messages for LLM input, aligned to a legal tool-call boundary."""
         unconsolidated = self.messages[self.last_consolidated:]
         sliced = unconsolidated[-max_messages:]
 
-        # Drop leading non-user messages to avoid orphaned tool_result blocks
-        for i, m in enumerate(sliced):
-            if m.get("role") == "user":
+        # Avoid starting mid-turn when possible.
+        for i, message in enumerate(sliced):
+            if message.get("role") == "user":
                 sliced = sliced[i:]
                 break
 
+        # Drop orphan tool results at the front.
+        start = find_legal_message_start(sliced)
+        if start:
+            sliced = sliced[start:]
+
         out: list[dict[str, Any]] = []
-        for m in sliced:
-            entry: dict[str, Any] = {"role": m["role"], "content": m.get("content", "")}
-            for k in ("tool_calls", "tool_call_id", "name"):
-                if k in m:
-                    entry[k] = m[k]
+        for message in sliced:
+            entry: dict[str, Any] = {"role": message["role"], "content": message.get("content", "")}
+            for key in ("tool_calls", "tool_call_id", "name", "reasoning_content"):
+                if key in message:
+                    entry[key] = message[key]
             out.append(entry)
         return out
 
@@ -67,6 +64,32 @@ class Session:
         """Clear all messages and reset session to initial state."""
         self.messages = []
         self.last_consolidated = 0
+        self.updated_at = datetime.now()
+
+    def retain_recent_legal_suffix(self, max_messages: int) -> None:
+        """Keep a legal recent suffix, mirroring get_history boundary rules."""
+        if max_messages <= 0:
+            self.clear()
+            return
+        if len(self.messages) <= max_messages:
+            return
+
+        start_idx = max(0, len(self.messages) - max_messages)
+
+        # If the cutoff lands mid-turn, extend backward to the nearest user turn.
+        while start_idx > 0 and self.messages[start_idx].get("role") != "user":
+            start_idx -= 1
+
+        retained = self.messages[start_idx:]
+
+        # Mirror get_history(): avoid persisting orphan tool results at the front.
+        start = find_legal_message_start(retained)
+        if start:
+            retained = retained[start:]
+
+        dropped = len(self.messages) - len(retained)
+        self.messages = retained
+        self.last_consolidated = max(0, self.last_consolidated - dropped)
         self.updated_at = datetime.now()
 
 

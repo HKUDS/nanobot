@@ -5,6 +5,8 @@ import json
 import mimetypes
 import os
 import time
+import zipfile
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -62,6 +64,49 @@ class NanobotDingTalkHandler(CallbackHandler):
                 content = chatbot_msg.extensions["content"]["recognition"].strip()
             if not content:
                 content = message.data.get("text", {}).get("content", "").strip()
+
+            # Handle file/image messages
+            file_paths = []
+            if chatbot_msg.message_type == "picture" and chatbot_msg.image_content:
+                download_code = chatbot_msg.image_content.download_code
+                if download_code:
+                    sender_uid = chatbot_msg.sender_staff_id or chatbot_msg.sender_id or "unknown"
+                    fp = await self.channel._download_dingtalk_file(download_code, "image.jpg", sender_uid)
+                    if fp:
+                        file_paths.append(fp)
+                        content = content or "[Image]"
+
+            elif chatbot_msg.message_type == "file":
+                download_code = message.data.get("content", {}).get("downloadCode") or message.data.get("downloadCode")
+                fname = message.data.get("content", {}).get("fileName") or message.data.get("fileName") or "file"
+                if download_code:
+                    sender_uid = chatbot_msg.sender_staff_id or chatbot_msg.sender_id or "unknown"
+                    fp = await self.channel._download_dingtalk_file(download_code, fname, sender_uid)
+                    if fp:
+                        file_paths.append(fp)
+                        content = content or "[File]"
+
+            elif chatbot_msg.message_type == "richText" and chatbot_msg.rich_text_content:
+                rich_list = chatbot_msg.rich_text_content.rich_text_list or []
+                for item in rich_list:
+                    if not isinstance(item, dict):
+                        continue
+                    if item.get("type") == "text":
+                        t = item.get("text", "").strip()
+                        if t:
+                            content = (content + " " + t).strip() if content else t
+                    elif item.get("downloadCode"):
+                        dc = item["downloadCode"]
+                        fname = item.get("fileName") or "file"
+                        sender_uid = chatbot_msg.sender_staff_id or chatbot_msg.sender_id or "unknown"
+                        fp = await self.channel._download_dingtalk_file(dc, fname, sender_uid)
+                        if fp:
+                            file_paths.append(fp)
+                            content = content or "[File]"
+
+            if file_paths:
+                file_list = "\n".join("- " + p for p in file_paths)
+                content = content + "\n\nReceived files:\n" + file_list
 
             if not content:
                 logger.warning(
@@ -128,6 +173,7 @@ class DingTalkChannel(BaseChannel):
     _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
     _AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg", ".m4a", ".aac"}
     _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+    _ZIP_BEFORE_UPLOAD_EXTS = {".htm", ".html"}
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -243,6 +289,31 @@ class DingTalkChannel(BaseChannel):
     def _guess_filename(self, media_ref: str, upload_type: str) -> str:
         name = os.path.basename(urlparse(media_ref).path)
         return name or {"image": "image.jpg", "voice": "audio.amr", "video": "video.mp4"}.get(upload_type, "file.bin")
+
+    @staticmethod
+    def _zip_bytes(filename: str, data: bytes) -> tuple[bytes, str, str]:
+        stem = Path(filename).stem or "attachment"
+        safe_name = filename or "attachment.bin"
+        zip_name = f"{stem}.zip"
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(safe_name, data)
+        return buffer.getvalue(), zip_name, "application/zip"
+
+    def _normalize_upload_payload(
+        self,
+        filename: str,
+        data: bytes,
+        content_type: str | None,
+    ) -> tuple[bytes, str, str | None]:
+        ext = Path(filename).suffix.lower()
+        if ext in self._ZIP_BEFORE_UPLOAD_EXTS or content_type == "text/html":
+            logger.info(
+                "DingTalk does not accept raw HTML attachments, zipping {} before upload",
+                filename,
+            )
+            return self._zip_bytes(filename, data)
+        return data, filename, content_type
 
     async def _read_media_bytes(
         self,
@@ -401,6 +472,7 @@ class DingTalkChannel(BaseChannel):
             return False
 
         filename = filename or self._guess_filename(media_ref, upload_type)
+        data, filename, content_type = self._normalize_upload_payload(filename, data, content_type)
         file_type = Path(filename).suffix.lower().lstrip(".")
         if not file_type:
             guessed = mimetypes.guess_extension(content_type or "")
@@ -488,3 +560,50 @@ class DingTalkChannel(BaseChannel):
             )
         except Exception as e:
             logger.error("Error publishing DingTalk message: {}", e)
+
+    async def _download_dingtalk_file(
+        self,
+        download_code: str,
+        filename: str,
+        sender_id: str,
+    ) -> str | None:
+        """Download a DingTalk file to the media directory, return local path."""
+        from nanobot.config.paths import get_media_dir
+
+        try:
+            token = await self._get_access_token()
+            if not token or not self._http:
+                logger.error("DingTalk file download: no token or http client")
+                return None
+
+            # Step 1: Exchange downloadCode for a temporary download URL
+            api_url = "https://api.dingtalk.com/v1.0/robot/messageFiles/download"
+            headers = {"x-acs-dingtalk-access-token": token, "Content-Type": "application/json"}
+            payload = {"downloadCode": download_code, "robotCode": self.config.client_id}
+            resp = await self._http.post(api_url, json=payload, headers=headers)
+            if resp.status_code != 200:
+                logger.error("DingTalk get download URL failed: status={}, body={}", resp.status_code, resp.text)
+                return None
+
+            result = resp.json()
+            download_url = result.get("downloadUrl")
+            if not download_url:
+                logger.error("DingTalk download URL not found in response: {}", result)
+                return None
+
+            # Step 2: Download the file content
+            file_resp = await self._http.get(download_url, follow_redirects=True)
+            if file_resp.status_code != 200:
+                logger.error("DingTalk file download failed: status={}", file_resp.status_code)
+                return None
+
+            # Save to media directory (accessible under workspace)
+            download_dir = get_media_dir("dingtalk") / sender_id
+            download_dir.mkdir(parents=True, exist_ok=True)
+            file_path = download_dir / filename
+            await asyncio.to_thread(file_path.write_bytes, file_resp.content)
+            logger.info("DingTalk file saved: {}", file_path)
+            return str(file_path)
+        except Exception as e:
+            logger.error("DingTalk file download error: {}", e)
+            return None
