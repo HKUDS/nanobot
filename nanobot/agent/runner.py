@@ -13,7 +13,7 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.providers.base import LLMProvider, ToolCallRequest
+from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.helpers import (
     build_assistant_message,
     estimate_message_tokens,
@@ -70,6 +70,7 @@ class AgentRunSpec:
     context_window_tokens: int | None = None
     context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
+    fallback_models: list[str] = field(default_factory=list)
     progress_callback: Any | None = None
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
@@ -89,11 +90,21 @@ class AgentRunResult:
     had_injections: bool = False
 
 
+ProviderFactory = Any  # Callable[[str], LLMProvider] — avoids circular import
+
+
 class AgentRunner:
     """Run a tool-capable LLM loop without product-layer concerns."""
 
-    def __init__(self, provider: LLMProvider):
+    def __init__(
+        self,
+        provider: LLMProvider,
+        *,
+        provider_factory: ProviderFactory | None = None,
+    ):
         self.provider = provider
+        self._provider_factory = provider_factory
+        self._fallback_providers: dict[str, LLMProvider] = {}
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -507,21 +518,57 @@ class AgentRunner:
         messages: list[dict[str, Any]],
         hook: AgentHook,
         context: AgentHookContext,
-    ):
+    ) -> LLMResponse:
         kwargs = self._build_request_kwargs(
             spec,
             messages,
             tools=spec.tools.get_definitions(),
         )
+        response = await self._call_provider(self.provider, kwargs, hook, context)
+
+        if response.finish_reason == "error" and spec.fallback_models:
+            for fb_model in spec.fallback_models:
+                logger.warning(
+                    "Primary model {} failed, trying fallback: {}",
+                    spec.model,
+                    fb_model,
+                )
+                fb_provider = self._resolve_fallback_provider(fb_model)
+                fb_kwargs = dict(kwargs, model=fb_model)
+                response = await self._call_provider(
+                    fb_provider, fb_kwargs, hook, context,
+                )
+                if response.finish_reason != "error":
+                    break
+
+        return response
+
+    async def _call_provider(
+        self,
+        provider: LLMProvider,
+        kwargs: dict[str, Any],
+        hook: AgentHook,
+        context: AgentHookContext,
+    ) -> LLMResponse:
         if hook.wants_streaming():
             async def _stream(delta: str) -> None:
                 await hook.on_stream(context, delta)
 
-            return await self.provider.chat_stream_with_retry(
+            return await provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream,
             )
-        return await self.provider.chat_with_retry(**kwargs)
+        return await provider.chat_with_retry(**kwargs)
+
+    def _resolve_fallback_provider(self, model: str) -> LLMProvider:
+        """Return (or lazily create) the provider for a fallback model."""
+        if model in self._fallback_providers:
+            return self._fallback_providers[model]
+        if self._provider_factory:
+            provider = self._provider_factory(model)
+            self._fallback_providers[model] = provider
+            return provider
+        return self.provider
 
     async def _request_finalization_retry(
         self,

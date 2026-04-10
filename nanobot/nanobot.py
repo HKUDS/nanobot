@@ -65,6 +65,7 @@ class Nanobot:
         provider = _make_provider(config)
         bus = MessageBus()
         defaults = config.agents.defaults
+        pf = _make_provider_factory(config) if defaults.fallback_models else None
 
         loop = AgentLoop(
             bus=bus,
@@ -76,6 +77,8 @@ class Nanobot:
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
             provider_retry_mode=defaults.provider_retry_mode,
+            fallback_models=defaults.fallback_models,
+            provider_factory=pf,
             web_config=config.tools.web,
             exec_config=config.tools.exec,
             restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -116,12 +119,11 @@ class Nanobot:
         return RunResult(content=content, tools_used=[], messages=[])
 
 
-def _make_provider(config: Any) -> Any:
-    """Create the LLM provider from config (extracted from CLI)."""
+def _make_provider_for_model(config: Any, model: str) -> Any:
+    """Create an LLM provider instance for a specific model string."""
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.registry import find_by_name
 
-    model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
     spec = find_by_name(provider_name) if provider_name else None
@@ -177,3 +179,22 @@ def _make_provider(config: Any) -> Any:
         reasoning_effort=defaults.reasoning_effort,
     )
     return provider
+
+
+def _make_provider(config: Any) -> Any:
+    """Create the LLM provider for the primary model from config."""
+    return _make_provider_for_model(config, config.agents.defaults.model)
+
+
+def _make_provider_factory(config: Any):
+    """Build a cached factory that creates providers for arbitrary model strings."""
+    cache: dict[str, Any] = {}
+
+    def factory(model: str):
+        provider_name = config.get_provider_name(model)
+        key = provider_name or model
+        if key not in cache:
+            cache[key] = _make_provider_for_model(config, model)
+        return cache[key]
+
+    return factory
