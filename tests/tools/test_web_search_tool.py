@@ -1,5 +1,7 @@
 """Tests for multi-provider web search."""
 
+import asyncio
+
 import httpx
 import pytest
 
@@ -160,3 +162,70 @@ async def test_searxng_invalid_url():
     tool = _tool(provider="searxng", base_url="not-a-url")
     result = await tool.execute(query="test")
     assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_jina_422_falls_back_to_duckduckgo(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    async def mock_get(self, url, **kw):
+        assert "s.jina.ai" in str(url)
+        raise httpx.HTTPStatusError(
+            "422 Unprocessable Entity",
+            request=httpx.Request("GET", str(url)),
+            response=httpx.Response(422, request=httpx.Request("GET", str(url))),
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+
+    tool = _tool(provider="jina", api_key="jina-key")
+    result = await tool.execute(query="test")
+    assert "DuckDuckGo fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_jina_search_uses_path_encoded_query(monkeypatch):
+    calls = {}
+
+    async def mock_get(self, url, **kw):
+        calls["url"] = str(url)
+        calls["params"] = kw.get("params")
+        return _response(json={
+            "data": [{"title": "Jina Result", "url": "https://jina.ai", "content": "AI search"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    tool = _tool(provider="jina", api_key="jina-key")
+    await tool.execute(query="hello world")
+    assert calls["url"].rstrip("/") == "https://s.jina.ai/hello%20world"
+    assert calls["params"] in (None, {})
+
+
+@pytest.mark.asyncio
+async def test_duckduckgo_timeout_returns_error(monkeypatch):
+    """asyncio.wait_for guard should fire when DDG search hangs."""
+    import threading
+    gate = threading.Event()
+
+    class HangingDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            gate.wait(timeout=10)
+            return []
+
+    monkeypatch.setattr("ddgs.DDGS", HangingDDGS)
+    tool = _tool(provider="duckduckgo")
+    tool.config.timeout = 0.2
+    result = await tool.execute(query="test")
+    gate.set()
+    assert "Error" in result
+
+

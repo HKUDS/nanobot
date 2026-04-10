@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.security.network import contains_internal_url, validate_url_target
+from nanobot.security.network import configure_ssrf_whitelist, contains_internal_url, validate_url_target
 
 
 def _fake_resolve(host: str, results: list[str]):
@@ -99,3 +99,47 @@ def test_allows_normal_curl():
 
 def test_no_urls_returns_false():
     assert not contains_internal_url("echo hello && ls -la")
+
+
+# ---------------------------------------------------------------------------
+# SSRF whitelist — allow specific CIDR ranges (#2669)
+# ---------------------------------------------------------------------------
+
+def test_blocks_cgnat_by_default():
+    """100.64.0.0/10 (CGNAT / Tailscale) is blocked by default."""
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
+        ok, _ = validate_url_target("http://ts.local/api")
+        assert not ok
+
+
+def test_whitelist_allows_cgnat():
+    """Whitelisting 100.64.0.0/10 lets Tailscale addresses through."""
+    configure_ssrf_whitelist(["100.64.0.0/10"])
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
+            ok, err = validate_url_target("http://ts.local/api")
+            assert ok, f"Whitelisted CGNAT should be allowed, got: {err}"
+    finally:
+        configure_ssrf_whitelist([])
+
+
+def test_whitelist_does_not_affect_other_blocked():
+    """Whitelisting CGNAT must not unblock other private ranges."""
+    configure_ssrf_whitelist(["100.64.0.0/10"])
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("evil.com", ["10.0.0.1"])):
+            ok, _ = validate_url_target("http://evil.com/secret")
+            assert not ok
+    finally:
+        configure_ssrf_whitelist([])
+
+
+def test_whitelist_invalid_cidr_ignored():
+    """Invalid CIDR entries are silently skipped."""
+    configure_ssrf_whitelist(["not-a-cidr", "100.64.0.0/10"])
+    try:
+        with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve("ts.local", ["100.100.1.1"])):
+            ok, _ = validate_url_target("http://ts.local/api")
+            assert ok
+    finally:
+        configure_ssrf_whitelist([])

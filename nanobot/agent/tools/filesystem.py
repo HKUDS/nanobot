@@ -5,8 +5,10 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
+from nanobot.config.paths import get_media_dir
 
 
 def _resolve_path(
@@ -21,7 +23,8 @@ def _resolve_path(
         p = workspace / p
     resolved = p.resolve()
     if allowed_dir:
-        all_dirs = [allowed_dir] + (extra_allowed_dirs or [])
+        media_path = get_media_dir().resolve()
+        all_dirs = [allowed_dir] + [media_path] + (extra_allowed_dirs or []) 
         if not any(_is_under(resolved, d) for d in all_dirs):
             raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
     return resolved
@@ -56,6 +59,23 @@ class _FsTool(Tool):
 # read_file
 # ---------------------------------------------------------------------------
 
+
+@tool_parameters(
+    tool_parameters_schema(
+        path=StringSchema("The file path to read"),
+        offset=IntegerSchema(
+            1,
+            description="Line number to start reading from (1-indexed, default 1)",
+            minimum=1,
+        ),
+        limit=IntegerSchema(
+            2000,
+            description="Maximum number of lines to read (default 2000)",
+            minimum=1,
+        ),
+        required=["path"],
+    )
+)
 class ReadFileTool(_FsTool):
     """Read file contents with optional line-based pagination."""
 
@@ -69,29 +89,15 @@ class ReadFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Read the contents of a file. Returns numbered lines. "
-            "Use offset and limit to paginate through large files."
+            "Read a text file. Output format: LINE_NUM|CONTENT. "
+            "Use offset and limit for large files. "
+            "Cannot read binary files or images. "
+            "Reads exceeding ~128K chars are truncated."
         )
 
     @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "The file path to read"},
-                "offset": {
-                    "type": "integer",
-                    "description": "Line number to start reading from (1-indexed, default 1)",
-                    "minimum": 1,
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of lines to read (default 2000)",
-                    "minimum": 1,
-                },
-            },
-            "required": ["path"],
-        }
+    def read_only(self) -> bool:
+        return True
 
     async def execute(self, path: str | None = None, offset: int = 1, limit: int | None = None, **kwargs: Any) -> Any:
         try:
@@ -154,6 +160,14 @@ class ReadFileTool(_FsTool):
 # write_file
 # ---------------------------------------------------------------------------
 
+
+@tool_parameters(
+    tool_parameters_schema(
+        path=StringSchema("The file path to write to"),
+        content=StringSchema("The content to write"),
+        required=["path", "content"],
+    )
+)
 class WriteFileTool(_FsTool):
     """Write content to a file."""
 
@@ -163,18 +177,11 @@ class WriteFileTool(_FsTool):
 
     @property
     def description(self) -> str:
-        return "Write content to a file at the given path. Creates parent directories if needed."
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "The file path to write to"},
-                "content": {"type": "string", "description": "The content to write"},
-            },
-            "required": ["path", "content"],
-        }
+        return (
+            "Write content to a file. Overwrites if the file already exists; "
+            "creates parent directories as needed. "
+            "For partial edits, prefer edit_file instead."
+        )
 
     async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
         try:
@@ -185,7 +192,7 @@ class WriteFileTool(_FsTool):
             fp = self._resolve(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
-            return f"Successfully wrote {len(content)} bytes to {fp}"
+            return f"Successfully wrote {len(content)} characters to {fp}"
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
@@ -222,6 +229,15 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
     return None, 0
 
 
+@tool_parameters(
+    tool_parameters_schema(
+        path=StringSchema("The file path to edit"),
+        old_text=StringSchema("The text to find and replace"),
+        new_text=StringSchema("The text to replace with"),
+        replace_all=BooleanSchema(description="Replace all occurrences (default false)"),
+        required=["path", "old_text", "new_text"],
+    )
+)
 class EditFileTool(_FsTool):
     """Edit a file by replacing text with fallback matching."""
 
@@ -233,25 +249,10 @@ class EditFileTool(_FsTool):
     def description(self) -> str:
         return (
             "Edit a file by replacing old_text with new_text. "
-            "Supports minor whitespace/line-ending differences. "
-            "Set replace_all=true to replace every occurrence."
+            "Tolerates minor whitespace/indentation differences. "
+            "If old_text matches multiple times, you must provide more context "
+            "or set replace_all=true. Shows a diff of the closest match on failure."
         )
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "The file path to edit"},
-                "old_text": {"type": "string", "description": "The text to find and replace"},
-                "new_text": {"type": "string", "description": "The text to replace with"},
-                "replace_all": {
-                    "type": "boolean",
-                    "description": "Replace all occurrences (default false)",
-                },
-            },
-            "required": ["path", "old_text", "new_text"],
-        }
 
     async def execute(
         self, path: str | None = None, old_text: str | None = None,
@@ -322,6 +323,18 @@ class EditFileTool(_FsTool):
 # list_dir
 # ---------------------------------------------------------------------------
 
+@tool_parameters(
+    tool_parameters_schema(
+        path=StringSchema("The directory path to list"),
+        recursive=BooleanSchema(description="Recursively list all files (default false)"),
+        max_entries=IntegerSchema(
+            200,
+            description="Maximum entries to return (default 200)",
+            minimum=1,
+        ),
+        required=["path"],
+    )
+)
 class ListDirTool(_FsTool):
     """List directory contents with optional recursion."""
 
@@ -345,23 +358,8 @@ class ListDirTool(_FsTool):
         )
 
     @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string", "description": "The directory path to list"},
-                "recursive": {
-                    "type": "boolean",
-                    "description": "Recursively list all files (default false)",
-                },
-                "max_entries": {
-                    "type": "integer",
-                    "description": "Maximum entries to return (default 200)",
-                    "minimum": 1,
-                },
-            },
-            "required": ["path"],
-        }
+    def read_only(self) -> bool:
+        return True
 
     async def execute(
         self, path: str | None = None, recursive: bool = False,

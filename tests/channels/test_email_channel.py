@@ -1,5 +1,6 @@
 from email.message import EmailMessage
 from datetime import date
+from pathlib import Path
 import imaplib
 
 import pytest
@@ -10,8 +11,8 @@ from nanobot.channels.email import EmailChannel
 from nanobot.channels.email import EmailConfig
 
 
-def _make_config() -> EmailConfig:
-    return EmailConfig(
+def _make_config(**overrides) -> EmailConfig:
+    defaults = dict(
         enabled=True,
         consent_granted=True,
         imap_host="imap.example.com",
@@ -23,19 +24,27 @@ def _make_config() -> EmailConfig:
         smtp_username="bot@example.com",
         smtp_password="secret",
         mark_seen=True,
+        # Disable auth verification by default so existing tests are unaffected
+        verify_dkim=False,
+        verify_spf=False,
     )
+    defaults.update(overrides)
+    return EmailConfig(**defaults)
 
 
 def _make_raw_email(
     from_addr: str = "alice@example.com",
     subject: str = "Hello",
     body: str = "This is the body.",
+    auth_results: str | None = None,
 ) -> bytes:
     msg = EmailMessage()
     msg["From"] = from_addr
     msg["To"] = "bot@example.com"
     msg["Subject"] = subject
     msg["Message-ID"] = "<m1@example.com>"
+    if auth_results:
+        msg["Authentication-Results"] = auth_results
     msg.set_content(body)
     return msg.as_bytes()
 
@@ -481,3 +490,385 @@ def test_fetch_messages_between_dates_uses_imap_since_before_without_mark_seen(m
     assert fake.search_args is not None
     assert fake.search_args[1:] == ("SINCE", "06-Feb-2026", "BEFORE", "07-Feb-2026")
     assert fake.store_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Security: Anti-spoofing tests for Authentication-Results verification
+# ---------------------------------------------------------------------------
+
+def _make_fake_imap(raw: bytes):
+    """Return a FakeIMAP class pre-loaded with the given raw email."""
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.store_calls: list[tuple[bytes, str, str]] = []
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b"1"]
+
+        def fetch(self, _imap_id: bytes, _parts: str):
+            return "OK", [(b"1 (UID 500 BODY[] {200})", raw), b")"]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    return FakeIMAP()
+
+
+def test_spoofed_email_rejected_when_verify_enabled(monkeypatch) -> None:
+    """An email without Authentication-Results should be rejected when verify_dkim=True."""
+    raw = _make_raw_email(subject="Spoofed", body="Malicious payload")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=True, verify_spf=True)
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 0, "Spoofed email without auth headers should be rejected"
+
+
+def test_email_with_valid_auth_results_accepted(monkeypatch) -> None:
+    """An email with spf=pass and dkim=pass should be accepted."""
+    raw = _make_raw_email(
+        subject="Legit",
+        body="Hello from verified sender",
+        auth_results="mx.example.com; spf=pass smtp.mailfrom=alice@example.com; dkim=pass header.d=example.com",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=True, verify_spf=True)
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["sender"] == "alice@example.com"
+    assert items[0]["subject"] == "Legit"
+
+
+def test_email_with_partial_auth_rejected(monkeypatch) -> None:
+    """An email with only spf=pass but no dkim=pass should be rejected when verify_dkim=True."""
+    raw = _make_raw_email(
+        subject="Partial",
+        body="Only SPF passes",
+        auth_results="mx.example.com; spf=pass smtp.mailfrom=alice@example.com; dkim=fail",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=True, verify_spf=True)
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 0, "Email with dkim=fail should be rejected"
+
+
+def test_backward_compat_verify_disabled(monkeypatch) -> None:
+    """When verify_dkim=False and verify_spf=False, emails without auth headers are accepted."""
+    raw = _make_raw_email(subject="NoAuth", body="No auth headers present")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=False, verify_spf=False)
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1, "With verification disabled, emails should be accepted as before"
+
+
+def test_email_content_tagged_with_email_context(monkeypatch) -> None:
+    """Email content should be prefixed with [EMAIL-CONTEXT] for LLM isolation."""
+    raw = _make_raw_email(subject="Tagged", body="Check the tag")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=False, verify_spf=False)
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["content"].startswith("[EMAIL-CONTEXT]"), (
+        "Email content must be tagged with [EMAIL-CONTEXT]"
+    )
+
+
+def test_check_authentication_results_method() -> None:
+    """Unit test for the _check_authentication_results static method."""
+    from email.parser import BytesParser
+    from email import policy
+
+    # No Authentication-Results header
+    msg_no_auth = EmailMessage()
+    msg_no_auth["From"] = "alice@example.com"
+    msg_no_auth.set_content("test")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_no_auth.as_bytes())
+    spf, dkim = EmailChannel._check_authentication_results(parsed)
+    assert spf is False
+    assert dkim is False
+
+    # Both pass
+    msg_both = EmailMessage()
+    msg_both["From"] = "alice@example.com"
+    msg_both["Authentication-Results"] = (
+        "mx.google.com; spf=pass smtp.mailfrom=example.com; dkim=pass header.d=example.com"
+    )
+    msg_both.set_content("test")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_both.as_bytes())
+    spf, dkim = EmailChannel._check_authentication_results(parsed)
+    assert spf is True
+    assert dkim is True
+
+    # SPF pass, DKIM fail
+    msg_spf_only = EmailMessage()
+    msg_spf_only["From"] = "alice@example.com"
+    msg_spf_only["Authentication-Results"] = (
+        "mx.google.com; spf=pass smtp.mailfrom=example.com; dkim=fail"
+    )
+    msg_spf_only.set_content("test")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_spf_only.as_bytes())
+    spf, dkim = EmailChannel._check_authentication_results(parsed)
+    assert spf is True
+    assert dkim is False
+
+    # DKIM pass, SPF fail
+    msg_dkim_only = EmailMessage()
+    msg_dkim_only["From"] = "alice@example.com"
+    msg_dkim_only["Authentication-Results"] = (
+        "mx.google.com; spf=fail smtp.mailfrom=example.com; dkim=pass header.d=example.com"
+    )
+    msg_dkim_only.set_content("test")
+    parsed = BytesParser(policy=policy.default).parsebytes(msg_dkim_only.as_bytes())
+    spf, dkim = EmailChannel._check_authentication_results(parsed)
+    assert spf is False
+    assert dkim is True
+
+
+# ---------------------------------------------------------------------------
+# Attachment extraction tests
+# ---------------------------------------------------------------------------
+
+
+def _make_raw_email_with_attachment(
+    from_addr: str = "alice@example.com",
+    subject: str = "With attachment",
+    body: str = "See attached.",
+    attachment_name: str = "doc.pdf",
+    attachment_content: bytes = b"%PDF-1.4 fake pdf content",
+    attachment_mime: str = "application/pdf",
+    auth_results: str | None = None,
+) -> bytes:
+    msg = EmailMessage()
+    msg["From"] = from_addr
+    msg["To"] = "bot@example.com"
+    msg["Subject"] = subject
+    msg["Message-ID"] = "<m1@example.com>"
+    if auth_results:
+        msg["Authentication-Results"] = auth_results
+    msg.set_content(body)
+    maintype, subtype = attachment_mime.split("/", 1)
+    msg.add_attachment(
+        attachment_content,
+        maintype=maintype,
+        subtype=subtype,
+        filename=attachment_name,
+    )
+    return msg.as_bytes()
+
+
+def test_extract_attachments_saves_pdf(tmp_path, monkeypatch) -> None:
+    """PDF attachment is saved to media dir and path returned in media list."""
+    monkeypatch.setattr("nanobot.channels.email.get_media_dir", lambda ch: tmp_path)
+
+    raw = _make_raw_email_with_attachment()
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(allowed_attachment_types=["application/pdf"], verify_dkim=False, verify_spf=False)
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert len(items[0]["media"]) == 1
+    saved_path = Path(items[0]["media"][0])
+    assert saved_path.exists()
+    assert saved_path.read_bytes() == b"%PDF-1.4 fake pdf content"
+    assert "500_doc.pdf" in saved_path.name
+    assert "[attachment:" in items[0]["content"]
+
+
+def test_extract_attachments_disabled_by_default(monkeypatch) -> None:
+    """With no allowed_attachment_types (default), no attachments are extracted."""
+    raw = _make_raw_email_with_attachment()
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(verify_dkim=False, verify_spf=False)
+    assert cfg.allowed_attachment_types == []
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["media"] == []
+    assert "[attachment:" not in items[0]["content"]
+
+
+def test_extract_attachments_mime_type_filter(tmp_path, monkeypatch) -> None:
+    """Non-allowed MIME types are skipped."""
+    monkeypatch.setattr("nanobot.channels.email.get_media_dir", lambda ch: tmp_path)
+
+    raw = _make_raw_email_with_attachment(
+        attachment_name="image.png",
+        attachment_content=b"\x89PNG fake",
+        attachment_mime="image/png",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allowed_attachment_types=["application/pdf"],
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["media"] == []
+
+
+def test_extract_attachments_empty_allowed_types_rejects_all(tmp_path, monkeypatch) -> None:
+    """Empty allowed_attachment_types means no types are accepted."""
+    monkeypatch.setattr("nanobot.channels.email.get_media_dir", lambda ch: tmp_path)
+
+    raw = _make_raw_email_with_attachment(
+        attachment_name="image.png",
+        attachment_content=b"\x89PNG fake",
+        attachment_mime="image/png",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allowed_attachment_types=[],
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["media"] == []
+
+
+def test_extract_attachments_wildcard_pattern(tmp_path, monkeypatch) -> None:
+    """Glob patterns like 'image/*' match attachment MIME types."""
+    monkeypatch.setattr("nanobot.channels.email.get_media_dir", lambda ch: tmp_path)
+
+    raw = _make_raw_email_with_attachment(
+        attachment_name="photo.jpg",
+        attachment_content=b"\xff\xd8\xff fake jpeg",
+        attachment_mime="image/jpeg",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allowed_attachment_types=["image/*"],
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert len(items[0]["media"]) == 1
+
+
+def test_extract_attachments_size_limit(tmp_path, monkeypatch) -> None:
+    """Attachments exceeding max_attachment_size are skipped."""
+    monkeypatch.setattr("nanobot.channels.email.get_media_dir", lambda ch: tmp_path)
+
+    raw = _make_raw_email_with_attachment(
+        attachment_content=b"x" * 1000,
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allowed_attachment_types=["*"],
+        max_attachment_size=500,
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert items[0]["media"] == []
+
+
+def test_extract_attachments_max_count(tmp_path, monkeypatch) -> None:
+    """Only max_attachments_per_email are saved."""
+    monkeypatch.setattr("nanobot.channels.email.get_media_dir", lambda ch: tmp_path)
+
+    # Build email with 3 attachments
+    msg = EmailMessage()
+    msg["From"] = "alice@example.com"
+    msg["To"] = "bot@example.com"
+    msg["Subject"] = "Many attachments"
+    msg["Message-ID"] = "<m1@example.com>"
+    msg.set_content("See attached.")
+    for i in range(3):
+        msg.add_attachment(
+            f"content {i}".encode(),
+            maintype="application",
+            subtype="pdf",
+            filename=f"doc{i}.pdf",
+        )
+    raw = msg.as_bytes()
+
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(
+        allowed_attachment_types=["*"],
+        max_attachments_per_email=2,
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert len(items[0]["media"]) == 2
+
+
+def test_extract_attachments_sanitizes_filename(tmp_path, monkeypatch) -> None:
+    """Path traversal in filenames is neutralized."""
+    monkeypatch.setattr("nanobot.channels.email.get_media_dir", lambda ch: tmp_path)
+
+    raw = _make_raw_email_with_attachment(
+        attachment_name="../../../etc/passwd",
+    )
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    cfg = _make_config(allowed_attachment_types=["*"], verify_dkim=False, verify_spf=False)
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert len(items[0]["media"]) == 1
+    saved_path = Path(items[0]["media"][0])
+    # File must be inside the media dir, not escaped via path traversal
+    assert saved_path.parent == tmp_path

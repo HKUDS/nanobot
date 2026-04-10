@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -36,14 +37,23 @@ class TestRestartCommand:
     async def test_restart_sends_message_and_calls_execv(self):
         from nanobot.command.builtin import cmd_restart
         from nanobot.command.router import CommandContext
+        from nanobot.utils.restart import (
+            RESTART_NOTIFY_CHANNEL_ENV,
+            RESTART_NOTIFY_CHAT_ID_ENV,
+            RESTART_STARTED_AT_ENV,
+        )
 
         loop, bus = _make_loop()
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
-        with patch("nanobot.command.builtin.os.execv") as mock_execv:
+        with patch.dict(os.environ, {}, clear=False), \
+             patch("nanobot.command.builtin.os.execv") as mock_execv:
             out = await cmd_restart(ctx)
             assert "Restarting" in out.content
+            assert os.environ.get(RESTART_NOTIFY_CHANNEL_ENV) == "cli"
+            assert os.environ.get(RESTART_NOTIFY_CHAT_ID_ENV) == "direct"
+            assert os.environ.get(RESTART_STARTED_AT_ENV)
 
             await asyncio.sleep(1.5)
             mock_execv.assert_called_once()
@@ -127,7 +137,7 @@ class TestRestartCommand:
         loop.sessions.get_or_create.return_value = session
         loop._start_time = time.time() - 125
         loop._last_usage = {"prompt_tokens": 0, "completion_tokens": 0}
-        loop.memory_consolidator.estimate_session_prompt_tokens = MagicMock(
+        loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(20500, "tiktoken")
         )
 
@@ -138,7 +148,7 @@ class TestRestartCommand:
         assert response is not None
         assert "Model: test-model" in response.content
         assert "Tokens: 0 in / 0 out" in response.content
-        assert "Context: 20k/64k (31%)" in response.content
+        assert "Context: 20k/65k (31%)" in response.content
         assert "Session: 3 messages" in response.content
         assert "Uptime: 2m 5s" in response.content
         assert response.metadata == {"render_as": "text"}
@@ -152,10 +162,12 @@ class TestRestartCommand:
         ])
 
         await loop._run_agent_loop([])
-        assert loop._last_usage == {"prompt_tokens": 9, "completion_tokens": 4}
+        assert loop._last_usage["prompt_tokens"] == 9
+        assert loop._last_usage["completion_tokens"] == 4
 
         await loop._run_agent_loop([])
-        assert loop._last_usage == {"prompt_tokens": 0, "completion_tokens": 0}
+        assert loop._last_usage["prompt_tokens"] == 0
+        assert loop._last_usage["completion_tokens"] == 0
 
     @pytest.mark.asyncio
     async def test_status_falls_back_to_last_usage_when_context_estimate_missing(self):
@@ -164,7 +176,7 @@ class TestRestartCommand:
         session.get_history.return_value = [{"role": "user"}]
         loop.sessions.get_or_create.return_value = session
         loop._last_usage = {"prompt_tokens": 1200, "completion_tokens": 34}
-        loop.memory_consolidator.estimate_session_prompt_tokens = MagicMock(
+        loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(0, "none")
         )
 
@@ -174,7 +186,7 @@ class TestRestartCommand:
 
         assert response is not None
         assert "Tokens: 1200 in / 34 out" in response.content
-        assert "Context: 1k/64k (1%)" in response.content
+        assert "Context: 1k/65k (1%)" in response.content
 
     @pytest.mark.asyncio
     async def test_process_direct_preserves_render_metadata(self):
