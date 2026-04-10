@@ -242,6 +242,8 @@ class AgentLoop:
                 restrict_to_workspace=self.restrict_to_workspace,
                 sandbox=self.exec_config.sandbox,
                 path_append=self.exec_config.path_append,
+                deny_patterns=self.exec_config.deny_patterns,
+                allow_patterns=self.exec_config.allow_patterns,
                 allowed_env_keys=self.exec_config.allowed_env_keys,
             ))
         if self.web_config.enable:

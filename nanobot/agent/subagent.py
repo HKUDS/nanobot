@@ -127,6 +127,8 @@ class SubagentManager:
                     restrict_to_workspace=self.restrict_to_workspace,
                     sandbox=self.exec_config.sandbox,
                     path_append=self.exec_config.path_append,
+                    deny_patterns=self.exec_config.deny_patterns,
+                    allow_patterns=self.exec_config.allow_patterns,
                 ))
             if self.web_config.enable:
                 tools.register(WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy))
