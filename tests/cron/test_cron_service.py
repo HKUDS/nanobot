@@ -327,3 +327,130 @@ async def test_external_update_preserves_run_history_records(tmp_path):
 
     fresh._running = True
     fresh._save_store()
+
+
+# ── update_job tests ──
+
+
+def test_update_job_changes_name(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    job = service.add_job(
+        name="old name",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+    )
+    result = service.update_job(job.id, name="new name")
+    assert isinstance(result, CronJob)
+    assert result.name == "new name"
+    assert result.payload.message == "hello"
+
+
+def test_update_job_changes_schedule(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    job = service.add_job(
+        name="sched",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+    )
+    old_next = job.state.next_run_at_ms
+
+    new_sched = CronSchedule(kind="every", every_ms=120_000)
+    result = service.update_job(job.id, schedule=new_sched)
+    assert isinstance(result, CronJob)
+    assert result.schedule.every_ms == 120_000
+    assert result.state.next_run_at_ms != old_next
+
+
+def test_update_job_changes_message(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    job = service.add_job(
+        name="msg",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="old message",
+    )
+    result = service.update_job(job.id, message="new message")
+    assert isinstance(result, CronJob)
+    assert result.payload.message == "new message"
+
+
+def test_update_job_changes_cron_expression(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    job = service.add_job(
+        name="cron-job",
+        schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"),
+        message="hello",
+    )
+    result = service.update_job(
+        job.id,
+        schedule=CronSchedule(kind="cron", expr="0 18 * * *", tz="UTC"),
+    )
+    assert isinstance(result, CronJob)
+    assert result.schedule.expr == "0 18 * * *"
+    assert result.state.next_run_at_ms is not None
+
+
+def test_update_job_not_found(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    result = service.update_job("nonexistent", name="x")
+    assert result == "not_found"
+
+
+def test_update_job_rejects_system_job(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    service.register_system_job(CronJob(
+        id="dream",
+        name="dream",
+        schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
+        payload=CronPayload(kind="system_event"),
+    ))
+    result = service.update_job("dream", name="hacked")
+    assert result == "protected"
+    assert service.get_job("dream").name == "dream"
+
+
+def test_update_job_validates_schedule(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    job = service.add_job(
+        name="validate",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+    )
+    with pytest.raises(ValueError, match="unknown timezone"):
+        service.update_job(
+            job.id,
+            schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="Bad/Zone"),
+        )
+
+
+def test_update_job_preserves_run_history(tmp_path) -> None:
+    import asyncio
+    store_path = tmp_path / "cron" / "jobs.json"
+    service = CronService(store_path, on_job=lambda _: asyncio.sleep(0))
+    job = service.add_job(
+        name="hist",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+    )
+    asyncio.get_event_loop().run_until_complete(service.run_job(job.id))
+
+    result = service.update_job(job.id, name="renamed")
+    assert isinstance(result, CronJob)
+    assert len(result.state.run_history) == 1
+    assert result.state.run_history[0].status == "ok"
+
+
+def test_update_job_offline_writes_action(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    job = service.add_job(
+        name="offline",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+    )
+    service.update_job(job.id, name="updated-offline")
+
+    action_path = tmp_path / "cron" / "action.jsonl"
+    assert action_path.exists()
+    lines = [l for l in action_path.read_text().strip().split("\n") if l]
+    last = json.loads(lines[-1])
+    assert last["action"] == "update"
+    assert last["params"]["name"] == "updated-offline"
