@@ -152,6 +152,11 @@ class Tool(ABC):
         ...
 
     @property
+    def requires_confirmation(self) -> bool:
+        """Whether this tool requires user confirmation before execution."""
+        return False
+
+    @property
     def read_only(self) -> bool:
         """Whether this tool is side-effect free and safe to parallelize."""
         return False

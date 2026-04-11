@@ -269,6 +269,10 @@ class WriteFileTool(_FsTool):
     """Write content to a file."""
 
     @property
+    def requires_confirmation(self) -> bool:
+        return True
+
+    @property
     def name(self) -> str:
         return "write_file"
 
@@ -580,6 +584,10 @@ class EditFileTool(_FsTool):
 
     _MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024  # 1 GiB
     _MARKDOWN_EXTS = frozenset({".md", ".mdx", ".markdown"})
+
+    @property
+    def requires_confirmation(self) -> bool:
+        return True
 
     @property
     def name(self) -> str:

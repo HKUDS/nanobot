@@ -64,9 +64,9 @@ class TestMessageToolSuppressLogic:
         calls = iter([
             LLMResponse(content="", tool_calls=[interim]),
             LLMResponse(content="", tool_calls=[final]),
-            LLMResponse(content="", tool_calls=[]),  # empty text reply — suppressed
+            LLMResponse(content=".", tool_calls=[]),  # near-empty reply — suppressed by message-tool logic
         ])
-        loop.provider.chat = AsyncMock(side_effect=lambda *a, **kw: next(calls))
+        loop.provider.chat_with_retry = AsyncMock(side_effect=lambda *a, **kw: next(calls))
         loop.tools.get_definitions = MagicMock(return_value=[])
 
         sent: list[OutboundMessage] = []

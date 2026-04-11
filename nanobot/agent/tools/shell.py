@@ -85,6 +85,10 @@ class ExecTool(Tool):
         )
 
     @property
+    def requires_confirmation(self) -> bool:
+        return True
+
+    @property
     def exclusive(self) -> bool:
         return True
 
