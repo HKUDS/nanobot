@@ -101,3 +101,7 @@ temp/
 *.tmp
 exp/
 .playwright-mcp/
+
+# Project specific
+.skill_id
+.sisyphus
