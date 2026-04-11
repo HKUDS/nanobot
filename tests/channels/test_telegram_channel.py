@@ -388,6 +388,84 @@ async def test_send_delta_stream_end_treats_not_modified_as_success() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_delta_stream_end_does_not_fallback_on_network_timeout() -> None:
+    """TimedOut during HTML edit should propagate, never fall back to plain text."""
+    from telegram.error import TimedOut
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    # _call_with_retry retries TimedOut up to 3 times, so the mock will be called
+    # multiple times – but all calls must be with parse_mode="HTML" (no plain fallback).
+    channel._app.bot.edit_message_text = AsyncMock(side_effect=TimedOut("network timeout"))
+    channel._stream_bufs["123"] = _StreamBuf(text="hello", message_id=7, last_edit=0.0)
+
+    with pytest.raises(TimedOut, match="network timeout"):
+        await channel.send_delta("123", "", {"_stream_end": True})
+
+    # Every call to edit_message_text must have used parse_mode="HTML" —
+    # no plain-text fallback call should have been made.
+    for call in channel._app.bot.edit_message_text.call_args_list:
+        assert call.kwargs.get("parse_mode") == "HTML"
+    # Buffer should still be present (not cleaned up on error)
+    assert "123" in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_does_not_fallback_on_network_error() -> None:
+    """NetworkError during HTML edit should propagate, never fall back to plain text."""
+    from telegram.error import NetworkError
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock(side_effect=NetworkError("connection reset"))
+    channel._stream_bufs["123"] = _StreamBuf(text="hello", message_id=7, last_edit=0.0)
+
+    with pytest.raises(NetworkError, match="connection reset"):
+        await channel.send_delta("123", "", {"_stream_end": True})
+
+    # Every call to edit_message_text must have used parse_mode="HTML" —
+    # no plain-text fallback call should have been made.
+    for call in channel._app.bot.edit_message_text.call_args_list:
+        assert call.kwargs.get("parse_mode") == "HTML"
+    # Buffer should still be present (not cleaned up on error)
+    assert "123" in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_falls_back_on_bad_request() -> None:
+    """BadRequest (HTML parse error) should still trigger plain-text fallback."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    # First call (HTML) raises BadRequest, second call (plain) succeeds
+    channel._app.bot.edit_message_text = AsyncMock(
+        side_effect=[BadRequest("Can't parse entities"), None]
+    )
+    channel._stream_bufs["123"] = _StreamBuf(text="hello <bad>", message_id=7, last_edit=0.0)
+
+    await channel.send_delta("123", "", {"_stream_end": True})
+
+    # edit_message_text should have been called twice: once for HTML, once for plain fallback
+    assert channel._app.bot.edit_message_text.call_count == 2
+    # Second call should not use parse_mode="HTML"
+    second_call_kwargs = channel._app.bot.edit_message_text.call_args_list[1].kwargs
+    assert "parse_mode" not in second_call_kwargs or second_call_kwargs.get("parse_mode") is None
+    # Buffer should be cleaned up on success
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
 async def test_send_delta_stream_end_splits_oversized_reply() -> None:
     """Final streamed reply exceeding Telegram limit is split into chunks."""
     from nanobot.channels.telegram import TELEGRAM_MAX_MESSAGE_LEN

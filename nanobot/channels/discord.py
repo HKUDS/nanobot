@@ -366,6 +366,7 @@ class DiscordChannel(BaseChannel):
             await client.send_outbound(msg)
         except Exception as e:
             logger.error("Error sending Discord message: {}", e)
+            raise
         finally:
             if not is_progress:
                 await self._stop_typing(msg.chat_id)
