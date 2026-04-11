@@ -56,7 +56,8 @@ def _validate_url(url: str) -> tuple[bool, str]:
 def _validate_url_safe(url: str) -> tuple[bool, str]:
     """Validate URL with SSRF protection: scheme, domain, and resolved IP check."""
     from nanobot.security.network import validate_url_target
-    return validate_url_target(url)
+    ok, err, _ips = validate_url_target(url)
+    return ok, err
 
 
 def _format_results(query: str, items: list[dict[str, Any]], n: int) -> str:
