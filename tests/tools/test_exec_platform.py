@@ -5,11 +5,17 @@ strategy, and sandbox behaviour per platform — without actually running
 platform-specific binaries (all subprocess calls are mocked).
 """
 
+import sys
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from nanobot.agent.tools.shell import ExecTool
+
+_WINDOWS_ENV_KEYS = {
+    "APPDATA", "LOCALAPPDATA", "ProgramData",
+    "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -21,7 +27,10 @@ class TestBuildEnvUnix:
     def test_expected_keys(self):
         with patch("nanobot.agent.tools.shell._IS_WINDOWS", False):
             env = ExecTool()._build_env()
-        assert set(env) == {"HOME", "LANG", "TERM"}
+        expected = {"HOME", "LANG", "TERM"}
+        assert expected <= set(env)
+        if sys.platform != "win32":
+            assert set(env) == expected
 
     def test_home_from_environ(self, monkeypatch):
         monkeypatch.setenv("HOME", "/Users/dev")
@@ -45,6 +54,7 @@ class TestBuildEnvWindows:
     _EXPECTED_KEYS = {
         "SYSTEMROOT", "COMSPEC", "USERPROFILE", "HOMEDRIVE",
         "HOMEPATH", "TEMP", "TMP", "PATHEXT", "PATH",
+        *_WINDOWS_ENV_KEYS,
     }
 
     def test_expected_keys(self):

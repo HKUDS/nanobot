@@ -31,6 +31,7 @@ from nanobot.utils.runtime import (
 )
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
+_PERSISTED_MODEL_ERROR_PLACEHOLDER = "[Assistant reply unavailable due to model error.]"
 _MAX_EMPTY_RETRIES = 2
 _MAX_LENGTH_RECOVERIES = 3
 _SNIP_SAFETY_BUFFER = 1024
@@ -101,10 +102,15 @@ class AgentRunner:
 
         for iteration in range(spec.max_iterations):
             try:
-                messages = self._backfill_missing_tool_results(messages)
-                messages = self._microcompact(messages)
-                messages = self._apply_tool_result_budget(spec, messages)
-                messages_for_model = self._snip_history(spec, messages)
+                # Keep the persisted conversation untouched. Context governance
+                # may repair or compact historical messages for the model, but
+                # those synthetic edits must not shift the append boundary used
+                # later when the caller saves only the new turn.
+                messages_for_model = self._drop_orphan_tool_results(messages)
+                messages_for_model = self._backfill_missing_tool_results(messages_for_model)
+                messages_for_model = self._microcompact(messages_for_model)
+                messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
+                messages_for_model = self._snip_history(spec, messages_for_model)
             except Exception as exc:
                 logger.warning(
                     "Context governance failed on turn {} for {}: {}; using raw messages",
@@ -257,7 +263,7 @@ class AgentRunner:
                 final_content = clean or spec.error_message or _DEFAULT_ERROR_MESSAGE
                 stop_reason = "error"
                 error = final_content
-                self._append_final_message(messages, final_content)
+                self._append_model_error_placeholder(messages)
                 context.final_content = final_content
                 context.error = error
                 context.stop_reason = stop_reason
@@ -521,6 +527,12 @@ class AgentRunner:
             return
         messages.append(build_assistant_message(content))
 
+    @staticmethod
+    def _append_model_error_placeholder(messages: list[dict[str, Any]]) -> None:
+        if messages and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
+            return
+        messages.append(build_assistant_message(_PERSISTED_MODEL_ERROR_PLACEHOLDER))
+
     def _normalize_tool_result(
         self,
         spec: AgentRunSpec,
@@ -548,6 +560,32 @@ class AgentRunner:
         if isinstance(content, str) and len(content) > spec.max_tool_result_chars:
             return truncate_text(content, spec.max_tool_result_chars)
         return content
+
+    @staticmethod
+    def _drop_orphan_tool_results(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Drop tool results that have no matching assistant tool_call earlier in the history."""
+        declared: set[str] = set()
+        updated: list[dict[str, Any]] | None = None
+        for idx, msg in enumerate(messages):
+            role = msg.get("role")
+            if role == "assistant":
+                for tc in msg.get("tool_calls") or []:
+                    if isinstance(tc, dict) and tc.get("id"):
+                        declared.add(str(tc["id"]))
+            if role == "tool":
+                tid = msg.get("tool_call_id")
+                if tid and str(tid) not in declared:
+                    if updated is None:
+                        updated = [dict(m) for m in messages[:idx]]
+                    continue
+            if updated is not None:
+                updated.append(dict(msg))
+
+        if updated is None:
+            return messages
+        return updated
 
     @staticmethod
     def _backfill_missing_tool_results(

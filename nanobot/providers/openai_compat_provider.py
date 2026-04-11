@@ -26,6 +26,12 @@ else:
     from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.openai_responses import (
+    consume_sdk_stream,
+    convert_messages,
+    convert_tools,
+    parse_response_output,
+)
 
 if TYPE_CHECKING:
     from nanobot.providers.registry import ProviderSpec
@@ -113,6 +119,14 @@ def _uses_openrouter_attribution(spec: "ProviderSpec | None", api_base: str | No
     return bool(api_base and "openrouter" in api_base.lower())
 
 
+def _is_direct_openai_base(api_base: str | None) -> bool:
+    """Return True for direct OpenAI endpoints, not generic OpenAI-compatible gateways."""
+    if not api_base:
+        return True
+    normalized = api_base.strip().lower().rstrip("/")
+    return "api.openai.com" in normalized and "openrouter" not in normalized
+
+
 class OpenAICompatProvider(LLMProvider):
     """Unified provider for all OpenAI-compatible APIs.
 
@@ -137,6 +151,7 @@ class OpenAICompatProvider(LLMProvider):
             self._setup_env(api_key, api_base)
 
         effective_base = api_base or (spec.default_api_base if spec else None) or None
+        self._effective_base = effective_base
         default_headers = {"x-session-affinity": uuid.uuid4().hex}
         if _uses_openrouter_attribution(spec, effective_base):
             default_headers.update(_DEFAULT_OPENROUTER_HEADERS)
@@ -228,9 +243,13 @@ class OpenAICompatProvider(LLMProvider):
                     tc_clean["id"] = map_id(tc_clean.get("id"))
                     normalized.append(tc_clean)
                 clean["tool_calls"] = normalized
+                if clean.get("role") == "assistant":
+                    # Some OpenAI-compatible gateways reject assistant messages
+                    # that mix non-empty content with tool_calls.
+                    clean["content"] = None
             if "tool_call_id" in clean and clean["tool_call_id"]:
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
-        return sanitized
+        return self._enforce_role_alternation(sanitized)
 
     # ------------------------------------------------------------------
     # Build kwargs
@@ -320,6 +339,88 @@ class OpenAICompatProvider(LLMProvider):
             kwargs["tool_choice"] = tool_choice or "auto"
 
         return kwargs
+
+    def _should_use_responses_api(
+        self,
+        model: str | None,
+        reasoning_effort: str | None,
+    ) -> bool:
+        """Use Responses API only for direct OpenAI requests that benefit from it."""
+        if self._spec and self._spec.name != "openai":
+            return False
+        if not _is_direct_openai_base(self._effective_base):
+            return False
+
+        model_name = (model or self.default_model).lower()
+        if reasoning_effort and reasoning_effort.lower() != "none":
+            return True
+        return any(token in model_name for token in ("gpt-5", "o1", "o3", "o4"))
+
+    @staticmethod
+    def _should_fallback_from_responses_error(e: Exception) -> bool:
+        """Fallback only for likely Responses API compatibility errors."""
+        response = getattr(e, "response", None)
+        status_code = getattr(e, "status_code", None)
+        if status_code is None and response is not None:
+            status_code = getattr(response, "status_code", None)
+        if status_code not in {400, 404, 422}:
+            return False
+
+        body = (
+            getattr(e, "body", None)
+            or getattr(e, "doc", None)
+            or getattr(response, "text", None)
+        )
+        body_text = str(body).lower() if body is not None else ""
+        compatibility_markers = (
+            "responses",
+            "response api",
+            "max_output_tokens",
+            "instructions",
+            "previous_response",
+            "unsupported",
+            "not supported",
+            "unknown parameter",
+            "unrecognized request argument",
+        )
+        return any(marker in body_text for marker in compatibility_markers)
+
+    def _build_responses_body(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        model: str | None,
+        max_tokens: int,
+        temperature: float,
+        reasoning_effort: str | None,
+        tool_choice: str | dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Build a Responses API body for direct OpenAI requests."""
+        model_name = model or self.default_model
+        sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
+        instructions, input_items = convert_messages(sanitized_messages)
+
+        body: dict[str, Any] = {
+            "model": model_name,
+            "instructions": instructions or None,
+            "input": input_items,
+            "max_output_tokens": max(1, max_tokens),
+            "store": False,
+            "stream": False,
+        }
+
+        if self._supports_temperature(model_name, reasoning_effort):
+            body["temperature"] = temperature
+
+        if reasoning_effort and reasoning_effort.lower() != "none":
+            body["reasoning"] = {"effort": reasoning_effort}
+            body["include"] = ["reasoning.encrypted_content"]
+
+        if tools:
+            body["tools"] = convert_tools(tools)
+            body["tool_choice"] = tool_choice or "auto"
+
+        return body
 
     # ------------------------------------------------------------------
     # Response parsing
@@ -731,11 +832,22 @@ class OpenAICompatProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
-        kwargs = self._build_kwargs(
-            messages, tools, model, max_tokens, temperature,
-            reasoning_effort, tool_choice,
-        )
         try:
+            if self._should_use_responses_api(model, reasoning_effort):
+                try:
+                    body = self._build_responses_body(
+                        messages, tools, model, max_tokens, temperature,
+                        reasoning_effort, tool_choice,
+                    )
+                    return parse_response_output(await self._client.responses.create(**body))
+                except Exception as responses_error:
+                    if not self._should_fallback_from_responses_error(responses_error):
+                        raise
+
+            kwargs = self._build_kwargs(
+                messages, tools, model, max_tokens, temperature,
+                reasoning_effort, tool_choice,
+            )
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:
             return self._handle_error(e)
@@ -751,14 +863,49 @@ class OpenAICompatProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        kwargs = self._build_kwargs(
-            messages, tools, model, max_tokens, temperature,
-            reasoning_effort, tool_choice,
-        )
-        kwargs["stream"] = True
-        kwargs["stream_options"] = {"include_usage": True}
         idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
+            if self._should_use_responses_api(model, reasoning_effort):
+                try:
+                    body = self._build_responses_body(
+                        messages, tools, model, max_tokens, temperature,
+                        reasoning_effort, tool_choice,
+                    )
+                    body["stream"] = True
+                    stream = await self._client.responses.create(**body)
+
+                    async def _timed_stream():
+                        stream_iter = stream.__aiter__()
+                        while True:
+                            try:
+                                yield await asyncio.wait_for(
+                                    stream_iter.__anext__(),
+                                    timeout=idle_timeout_s,
+                                )
+                            except StopAsyncIteration:
+                                break
+
+                    content, tool_calls, finish_reason, usage, reasoning_content = await consume_sdk_stream(
+                        _timed_stream(),
+                        on_content_delta,
+                    )
+                    return LLMResponse(
+                        content=content or None,
+                        tool_calls=tool_calls,
+                        finish_reason=finish_reason,
+                        usage=usage,
+                        reasoning_content=reasoning_content,
+                    )
+                except Exception as responses_error:
+                    if not self._should_fallback_from_responses_error(responses_error):
+                        raise
+
+            kwargs = self._build_kwargs(
+                messages, tools, model, max_tokens, temperature,
+                reasoning_effort, tool_choice,
+            )
+            kwargs["stream"] = True
+            kwargs["stream_options"] = {"include_usage": True}
             stream = await self._client.chat.completions.create(**kwargs)
             chunks: list[Any] = []
             stream_iter = stream.__aiter__()

@@ -798,7 +798,7 @@ async def test_loop_max_iterations_message_stays_stable(tmp_path):
     loop.tools.execute = AsyncMock(return_value="ok")
     loop.max_iterations = 2
 
-    final_content, _, _ = await loop._run_agent_loop([])
+    final_content, _, _, _ = await loop._run_agent_loop([])
 
     assert final_content == (
         "I reached the maximum number of tool call iterations (2) "
@@ -825,7 +825,7 @@ async def test_loop_stream_filter_handles_think_only_prefix_without_crashing(tmp
     async def on_stream_end(*, resuming: bool = False) -> None:
         endings.append(resuming)
 
-    final_content, _, _ = await loop._run_agent_loop(
+    final_content, _, _, _ = await loop._run_agent_loop(
         [],
         on_stream=on_stream,
         on_stream_end=on_stream_end,
@@ -849,10 +849,128 @@ async def test_loop_retries_think_only_final_response(tmp_path):
 
     loop.provider.chat_with_retry = chat_with_retry
 
-    final_content, _, _ = await loop._run_agent_loop([])
+    final_content, _, _, _ = await loop._run_agent_loop([])
 
     assert final_content == "Recovered answer"
     assert call_count["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_llm_error_not_appended_to_session_messages():
+    """When LLM returns finish_reason='error', the error content must NOT be
+    appended to the messages list (prevents polluting session history)."""
+    from nanobot.agent.runner import (
+        AgentRunSpec,
+        AgentRunner,
+        _PERSISTED_MODEL_ERROR_PLACEHOLDER,
+    )
+
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage={},
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.stop_reason == "error"
+    assert result.final_content == "429 rate limit exceeded"
+    assistant_msgs = [m for m in result.messages if m.get("role") == "assistant"]
+    assert all("429" not in (m.get("content") or "") for m in assistant_msgs), \
+        "Error content should not appear in session messages"
+    assert assistant_msgs[-1]["content"] == _PERSISTED_MODEL_ERROR_PLACEHOLDER
+
+
+@pytest.mark.asyncio
+async def test_streamed_flag_not_set_on_llm_error(tmp_path):
+    """When LLM errors during a streaming-capable channel interaction,
+    _streamed must NOT be set so ChannelManager delivers the error."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    error_resp = LLMResponse(
+        content="503 service unavailable", finish_reason="error", tool_calls=[], usage={},
+    )
+    loop.provider.chat_with_retry = AsyncMock(return_value=error_resp)
+    loop.provider.chat_stream_with_retry = AsyncMock(return_value=error_resp)
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    msg = InboundMessage(
+        channel="feishu", sender_id="u1", chat_id="c1", content="hi",
+    )
+    result = await loop._process_message(
+        msg,
+        on_stream=AsyncMock(),
+        on_stream_end=AsyncMock(),
+    )
+
+    assert result is not None
+    assert "503" in result.content
+    assert not result.metadata.get("_streamed"), \
+        "_streamed must not be set when stop_reason is error"
+
+
+@pytest.mark.asyncio
+async def test_next_turn_after_llm_error_keeps_turn_boundary(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.runner import _PERSISTED_MODEL_ERROR_PLACEHOLDER
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage={}),
+        LLMResponse(content="Recovered answer", tool_calls=[], usage={}),
+    ])
+
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    first = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="test", content="first question")
+    )
+    assert first is not None
+    assert first.content == "429 rate limit exceeded"
+
+    session = loop.sessions.get_or_create("cli:test")
+    assert [
+        {key: value for key, value in message.items() if key in {"role", "content"}}
+        for message in session.messages
+    ] == [
+        {"role": "user", "content": "first question"},
+        {"role": "assistant", "content": _PERSISTED_MODEL_ERROR_PLACEHOLDER},
+    ]
+
+    second = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="test", content="second question")
+    )
+    assert second is not None
+    assert second.content == "Recovered answer"
+
+    request_messages = provider.chat_with_retry.await_args_list[1].kwargs["messages"]
+    non_system = [message for message in request_messages if message.get("role") != "system"]
+    assert non_system[0] == {"role": "user", "content": "first question"}
+    assert non_system[1] == {
+        "role": "assistant",
+        "content": _PERSISTED_MODEL_ERROR_PLACEHOLDER,
+    }
+    assert non_system[2]["role"] == "user"
+    assert "second question" in non_system[2]["content"]
 
 
 @pytest.mark.asyncio
@@ -1155,6 +1273,41 @@ async def test_backfill_missing_tool_results_inserts_error():
     assert backfilled[0]["name"] == "read_file"
 
 
+def test_drop_orphan_tool_results_removes_unmatched_tool_messages():
+    from nanobot.agent.runner import AgentRunner
+
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "old user"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_ok", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_ok", "name": "read_file", "content": "ok"},
+        {"role": "tool", "tool_call_id": "call_orphan", "name": "exec", "content": "stale"},
+        {"role": "assistant", "content": "after tool"},
+    ]
+
+    cleaned = AgentRunner._drop_orphan_tool_results(messages)
+
+    assert cleaned == [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "old user"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_ok", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_ok", "name": "read_file", "content": "ok"},
+        {"role": "assistant", "content": "after tool"},
+    ]
+
+
 @pytest.mark.asyncio
 async def test_backfill_noop_when_complete():
     """Complete message chains should not be modified."""
@@ -1174,6 +1327,208 @@ async def test_backfill_noop_when_complete():
     ]
     result = AgentRunner._backfill_missing_tool_results(messages)
     assert result is messages  # same object — no copy
+
+
+@pytest.mark.asyncio
+async def test_runner_drops_orphan_tool_results_before_model_request():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    captured_messages: list[dict] = []
+
+    async def chat_with_retry(*, messages, **kwargs):
+        captured_messages[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "old user"},
+            {"role": "tool", "tool_call_id": "call_orphan", "name": "exec", "content": "stale"},
+            {"role": "assistant", "content": "after orphan"},
+            {"role": "user", "content": "new prompt"},
+        ],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert all(
+        message.get("tool_call_id") != "call_orphan"
+        for message in captured_messages
+        if message.get("role") == "tool"
+    )
+    assert result.messages[2]["tool_call_id"] == "call_orphan"
+    assert result.final_content == "done"
+
+
+@pytest.mark.asyncio
+async def test_backfill_repairs_model_context_without_shifting_save_turn_boundary(tmp_path):
+    """Historical backfill should not duplicate old tail messages on persist."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.runner import _BACKFILL_CONTENT
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    response = LLMResponse(content="new answer", tool_calls=[], usage={})
+    provider.chat_with_retry = AsyncMock(return_value=response)
+    provider.chat_stream_with_retry = AsyncMock(return_value=response)
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+    )
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("cli:test")
+    session.messages = [
+        {"role": "user", "content": "old user", "timestamp": "2026-01-01T00:00:00"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_missing",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+            "timestamp": "2026-01-01T00:00:01",
+        },
+        {"role": "assistant", "content": "old tail", "timestamp": "2026-01-01T00:00:02"},
+    ]
+    loop.sessions.save(session)
+
+    result = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="test", content="new prompt")
+    )
+
+    assert result is not None
+    assert result.content == "new answer"
+
+    request_messages = provider.chat_with_retry.await_args.kwargs["messages"]
+    synthetic = [
+        message
+        for message in request_messages
+        if message.get("role") == "tool" and message.get("tool_call_id") == "call_missing"
+    ]
+    assert len(synthetic) == 1
+    assert synthetic[0]["content"] == _BACKFILL_CONTENT
+
+    session_after = loop.sessions.get_or_create("cli:test")
+    assert [
+        {
+            key: value
+            for key, value in message.items()
+            if key in {"role", "content", "tool_call_id", "name", "tool_calls"}
+        }
+        for message in session_after.messages
+    ] == [
+        {"role": "user", "content": "old user"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_missing",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "assistant", "content": "old tail"},
+        {"role": "user", "content": "new prompt"},
+        {"role": "assistant", "content": "new answer"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runner_backfill_only_mutates_model_context_not_returned_messages():
+    """Runner should repair orphaned tool calls for the model without rewriting result.messages."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _BACKFILL_CONTENT
+
+    provider = MagicMock()
+    captured_messages: list[dict] = []
+
+    async def chat_with_retry(*, messages, **kwargs):
+        captured_messages[:] = messages
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    initial_messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "old user"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_missing",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "assistant", "content": "old tail"},
+        {"role": "user", "content": "new prompt"},
+    ]
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=initial_messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    synthetic = [
+        message
+        for message in captured_messages
+        if message.get("role") == "tool" and message.get("tool_call_id") == "call_missing"
+    ]
+    assert len(synthetic) == 1
+    assert synthetic[0]["content"] == _BACKFILL_CONTENT
+
+    assert [
+        {
+            key: value
+            for key, value in message.items()
+            if key in {"role", "content", "tool_call_id", "name", "tool_calls"}
+        }
+        for message in result.messages
+    ] == [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "old user"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_missing",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "assistant", "content": "old tail"},
+        {"role": "user", "content": "new prompt"},
+        {"role": "assistant", "content": "done"},
+    ]
 
 
 # ---------------------------------------------------------------------------
