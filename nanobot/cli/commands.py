@@ -590,6 +590,18 @@ def gateway(
                     status=500,
                 )
 
+        async def handle_consolidate_session(request):
+            """Consolidate memory for a session and clear it."""
+            body = await request.json()
+            session_key = body.get("session_key")
+            if not session_key:
+                return web.json_response(
+                    {"success": False, "error": "session_key is required"},
+                    status=400,
+                )
+            success = await agent.consolidate_and_reset_session(session_key)
+            return web.json_response({"success": success})
+
         async def handle_identity(request):
             """Return the bot's display name extracted from SOUL.md."""
             soul_path = config.workspace_path / "SOUL.md"
@@ -613,6 +625,7 @@ def gateway(
         web_app.router.add_post("/agent/run", handle_agent_run)
         web_app.router.add_post("/agent/run/stream", handle_agent_run_stream)
         web_app.router.add_post("/agent/execute-tool", handle_execute_tool)
+        web_app.router.add_post("/agent/consolidate-session", handle_consolidate_session)
         web_app.router.add_post("/agent/sync-scopes", handle_sync_scopes)
         runner = web.AppRunner(web_app)
         await runner.setup()

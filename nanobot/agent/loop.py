@@ -624,6 +624,33 @@ class AgentLoop:
             archive_all=archive_all, memory_window=self.memory_window,
         )
 
+    async def consolidate_and_reset_session(self, session_key: str) -> bool:
+        """Consolidate memory for the given session, then clear it.
+
+        Returns True on success, False if consolidation failed.
+        """
+        session = self.sessions.get_or_create(session_key)
+        unconsolidated = session.messages[session.last_consolidated:]
+        if unconsolidated:
+            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
+            self._consolidating.add(session.key)
+            try:
+                async with lock:
+                    temp = Session(key=session.key)
+                    temp.messages = list(unconsolidated)
+                    if not await self._consolidate_memory(temp, archive_all=True):
+                        return False
+            except Exception:
+                logger.exception("Consolidation failed for {}", session.key)
+                return False
+            finally:
+                self._consolidating.discard(session.key)
+
+        session.clear()
+        self.sessions.save(session)
+        self.sessions.invalidate(session.key)
+        return True
+
     async def process_direct(
         self,
         content: str,
