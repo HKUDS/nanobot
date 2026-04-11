@@ -46,5 +46,11 @@ ENV HOME=/home/nanobot
 # Gateway default port
 EXPOSE 18790
 
+ENV NANOBOT_TELEGRAM_HEALTH_PATH=/tmp/nanobot-telegram-health.json \
+    NANOBOT_TELEGRAM_HEALTH_MAX_AGE_S=120
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=1 \
+    CMD ["python", "-m", "nanobot.telegram_healthcheck"]
+
 ENTRYPOINT ["entrypoint.sh"]
 CMD ["status"]
