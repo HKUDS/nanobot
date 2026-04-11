@@ -392,7 +392,11 @@ class LLMProvider(ABC):
             else:
                 merged.append(dict(msg))
 
-        while merged and merged[-1].get("role") == "assistant":
+        while (
+            merged
+            and merged[-1].get("role") == "assistant"
+            and not merged[-1].get("tool_calls")
+        ):
             merged.pop()
 
         return merged

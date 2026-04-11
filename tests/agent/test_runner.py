@@ -856,7 +856,7 @@ async def test_loop_stream_filter_holds_partial_angle_bracket_until_reasoning_ta
     async def on_stream(delta: str) -> None:
         deltas.append(delta)
 
-    final_content, _, _ = await loop._run_agent_loop([], on_stream=on_stream)
+    final_content, _, _, _ = await loop._run_agent_loop([], on_stream=on_stream)
 
     assert final_content == "Dạ thưa anh"
     assert deltas == ["Dạ thưa anh"]
@@ -877,7 +877,7 @@ async def test_loop_stream_filter_drops_orphan_thought_closer_before_text(tmp_pa
     async def on_stream(delta: str) -> None:
         deltas.append(delta)
 
-    final_content, _, _ = await loop._run_agent_loop([], on_stream=on_stream)
+    final_content, _, _, _ = await loop._run_agent_loop([], on_stream=on_stream)
 
     assert final_content == "Dạ thưa Master, em đã..."
     assert deltas == ["Dạ thưa Master, em đã..."]
@@ -902,7 +902,7 @@ async def test_loop_stream_filter_drops_orphan_thought_closer_after_text(tmp_pat
     async def on_stream(delta: str) -> None:
         deltas.append(delta)
 
-    final_content, _, _ = await loop._run_agent_loop([], on_stream=on_stream)
+    final_content, _, _, _ = await loop._run_agent_loop([], on_stream=on_stream)
 
     assert final_content == "Dạ thưa Master, em đã sửa xong rồi ạ!"
     assert deltas == ["Dạ thưa Master, em đã sửa xong rồi ạ!"]
