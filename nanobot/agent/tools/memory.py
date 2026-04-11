@@ -20,6 +20,7 @@ class UpdateBotIdentityTool(Tool):
 
     def __init__(self, workspace: Path | None = None):
         self._workspace = workspace
+        self._on_stream_event: Any | None = None
 
     @property
     def name(self) -> str:
@@ -87,6 +88,11 @@ class UpdateBotIdentityTool(Tool):
             soul_path.write_text(content, encoding="utf-8")
 
             asyncio.create_task(self._notify_coordinator(bot_name))
+
+            if self._on_stream_event and bot_name:
+                asyncio.create_task(self._on_stream_event(
+                    {"type": "bot_name_updated", "display_name": bot_name}
+                ))
 
             changes = [f"name → {bot_name}"]
             if personality_traits:

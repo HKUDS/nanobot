@@ -1004,6 +1004,13 @@ class AgentLoop:
 
             mt.set_send_callback(_stream_callback)
 
+        from nanobot.agent.tools.memory import UpdateBotIdentityTool
+        identity_tool = self.tools.get("update_bot_identity")
+        old_stream_event = None
+        if isinstance(identity_tool, UpdateBotIdentityTool):
+            old_stream_event = identity_tool._on_stream_event
+            identity_tool._on_stream_event = on_stream_event
+
         try:
             msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
             response = await self._process_message(
@@ -1037,3 +1044,5 @@ class AgentLoop:
         finally:
             if original_cb is not None and isinstance(mt, MessageTool):
                 mt.set_send_callback(original_cb)
+            if isinstance(identity_tool, UpdateBotIdentityTool):
+                identity_tool._on_stream_event = old_stream_event
