@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nanobot</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="header">
+      <div class="header-left">
+        <h1 id="header-title">Nanobot</h1>
+      </div>
+      <div class="header-right">
+        <span id="status" class="status disconnected">disconnected</span>
+        <div id="chat-switcher">
+          <button id="btn-chats" title="Switch conversation">Chats ▾</button>
+          <div id="chat-menu" class="chat-menu hidden">
+            <div id="chat-list"></div>
+            <div class="chat-menu-divider"></div>
+            <button id="btn-new" class="chat-menu-item new-chat">＋ New Chat</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main id="messages"></main>
+
+    <footer id="input-area">
+      <form id="chat-form">
+        <textarea id="input" placeholder="Type a message..." rows="1" autofocus></textarea>
+        <button type="submit" id="btn-send" disabled>Send</button>
+      </form>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
