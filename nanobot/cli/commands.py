@@ -1335,19 +1335,18 @@ def status():
 
         # Show custom providers not in the registry
         custom_list = config.get_custom_providers()
-        if custom_list:
-            registry_names = {spec.name for spec in PROVIDERS}
-            for name, cp in custom_list:
-                if name in registry_names:
-                    continue
-                pk, pb, ph = _pv_cli(cp)
-                label = name.replace("_", " ").title()
-                if pb:
-                    console.print(f"{label}: [green]✓ {pb}[/green]")
-                elif pk:
-                    console.print(f"{label}: [green]✓[/green]")
-                else:
-                    console.print(f"{label}: [dim]not set[/dim]")
+        registry_names = {spec.name for spec in PROVIDERS}
+        for name, cp in custom_list:
+            if name in registry_names:
+                continue
+            pk, pb, ph = _pv_cli(cp)
+            label = name.replace("_", " ").title()
+            if pb:
+                console.print(f"[CUSTOM] {label}: [green]✓ {pb}[/green]")
+            elif pk:
+                console.print(f"[CUSTOM] {label}: [green]✓[/green]")
+            else:
+                console.print(f"[CUSTOM] {label}: [dim]not set[/dim]")
 
 
 # ============================================================================
