@@ -398,63 +398,67 @@ class AgentLoop:
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
-        if self._unified_session and not msg.session_key_override:
-            msg = dataclasses.replace(msg, session_key_override=UNIFIED_SESSION_KEY)
-        lock = self._session_locks.setdefault(msg.session_key, asyncio.Lock())
-        gate = self._concurrency_gate or nullcontext()
-        async with lock, gate:
-            try:
-                on_stream = on_stream_end = None
-                if msg.metadata.get("_wants_stream"):
-                    # Split one answer into distinct stream segments.
-                    stream_base_id = f"{msg.session_key}:{time.time_ns()}"
-                    stream_segment = 0
+        dedup_release_msg = msg
+        try:
+            if self._unified_session and not msg.session_key_override:
+                msg = dataclasses.replace(msg, session_key_override=UNIFIED_SESSION_KEY)
+            lock = self._session_locks.setdefault(msg.session_key, asyncio.Lock())
+            gate = self._concurrency_gate or nullcontext()
+            async with lock, gate:
+                try:
+                    on_stream = on_stream_end = None
+                    if msg.metadata.get("_wants_stream"):
+                        # Split one answer into distinct stream segments.
+                        stream_base_id = f"{msg.session_key}:{time.time_ns()}"
+                        stream_segment = 0
 
-                    def _current_stream_id() -> str:
-                        return f"{stream_base_id}:{stream_segment}"
+                        def _current_stream_id() -> str:
+                            return f"{stream_base_id}:{stream_segment}"
 
-                    async def on_stream(delta: str) -> None:
-                        meta = dict(msg.metadata or {})
-                        meta["_stream_delta"] = True
-                        meta["_stream_id"] = _current_stream_id()
+                        async def on_stream(delta: str) -> None:
+                            meta = dict(msg.metadata or {})
+                            meta["_stream_delta"] = True
+                            meta["_stream_id"] = _current_stream_id()
+                            await self.bus.publish_outbound(OutboundMessage(
+                                channel=msg.channel, chat_id=msg.chat_id,
+                                content=delta,
+                                metadata=meta,
+                            ))
+
+                        async def on_stream_end(*, resuming: bool = False) -> None:
+                            nonlocal stream_segment
+                            meta = dict(msg.metadata or {})
+                            meta["_stream_end"] = True
+                            meta["_resuming"] = resuming
+                            meta["_stream_id"] = _current_stream_id()
+                            await self.bus.publish_outbound(OutboundMessage(
+                                channel=msg.channel, chat_id=msg.chat_id,
+                                content="",
+                                metadata=meta,
+                            ))
+                            stream_segment += 1
+
+                    response = await self._process_message(
+                        msg, on_stream=on_stream, on_stream_end=on_stream_end,
+                    )
+                    if response is not None:
+                        await self.bus.publish_outbound(response)
+                    elif msg.channel == "cli":
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
-                            content=delta,
-                            metadata=meta,
+                            content="", metadata=msg.metadata or {},
                         ))
-
-                    async def on_stream_end(*, resuming: bool = False) -> None:
-                        nonlocal stream_segment
-                        meta = dict(msg.metadata or {})
-                        meta["_stream_end"] = True
-                        meta["_resuming"] = resuming
-                        meta["_stream_id"] = _current_stream_id()
-                        await self.bus.publish_outbound(OutboundMessage(
-                            channel=msg.channel, chat_id=msg.chat_id,
-                            content="",
-                            metadata=meta,
-                        ))
-                        stream_segment += 1
-
-                response = await self._process_message(
-                    msg, on_stream=on_stream, on_stream_end=on_stream_end,
-                )
-                if response is not None:
-                    await self.bus.publish_outbound(response)
-                elif msg.channel == "cli":
+                except asyncio.CancelledError:
+                    logger.info("Task cancelled for session {}", msg.session_key)
+                    raise
+                except Exception:
+                    logger.exception("Error processing message for session {}", msg.session_key)
                     await self.bus.publish_outbound(OutboundMessage(
                         channel=msg.channel, chat_id=msg.chat_id,
-                        content="", metadata=msg.metadata or {},
+                        content="Sorry, I encountered an error.",
                     ))
-            except asyncio.CancelledError:
-                logger.info("Task cancelled for session {}", msg.session_key)
-                raise
-            except Exception:
-                logger.exception("Error processing message for session {}", msg.session_key)
-                await self.bus.publish_outbound(OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content="Sorry, I encountered an error.",
-                ))
+        finally:
+            self.bus.release_inbound_dedup(dedup_release_msg)
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
