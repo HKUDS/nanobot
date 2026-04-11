@@ -17,7 +17,7 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunSpec, AgentRunner
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
@@ -370,16 +370,30 @@ class AgentLoop:
                 return
             self._set_runtime_checkpoint(session, payload)
 
-        async def _drain_pending() -> list[InboundMessage]:
+        async def _drain_pending(*, limit: int = _MAX_INJECTIONS_PER_TURN) -> list[dict[str, Any]]:
             """Non-blocking drain of follow-up messages from the pending queue."""
             if pending_queue is None:
                 return []
-            items: list[InboundMessage] = []
-            while True:
+            items: list[dict[str, Any]] = []
+            while len(items) < limit:
                 try:
-                    items.append(pending_queue.get_nowait())
+                    pending_msg = pending_queue.get_nowait()
                 except asyncio.QueueEmpty:
                     break
+                user_content = self.context._build_user_content(
+                    pending_msg.content,
+                    pending_msg.media if pending_msg.media else None,
+                )
+                runtime_ctx = self.context._build_runtime_context(
+                    pending_msg.channel,
+                    pending_msg.chat_id,
+                    self.context.timezone,
+                )
+                if isinstance(user_content, str):
+                    merged: str | list[dict[str, Any]] = f"{runtime_ctx}\n\n{user_content}"
+                else:
+                    merged = [{"type": "text", "text": runtime_ctx}] + user_content
+                items.append({"role": "user", "content": merged})
             return items
 
         result = await self.runner.run(AgentRunSpec(
@@ -451,7 +465,7 @@ class AgentLoop:
                     self._pending_queues[effective_key].put_nowait(pending_msg)
                 except asyncio.QueueFull:
                     logger.warning(
-                        "Pending queue full for session {}, dropping follow-up",
+                        "Pending queue full for session {}, falling back to queued task",
                         effective_key,
                     )
                 else:
@@ -459,7 +473,7 @@ class AgentLoop:
                         "Routed follow-up message to pending queue for session {}",
                         effective_key,
                     )
-                continue
+                    continue
             # Compute the effective session key before dispatching
             # This ensures /stop command can find tasks correctly when unified session is enabled
             task = asyncio.create_task(self._dispatch(msg))
@@ -697,12 +711,14 @@ class AgentLoop:
         self.sessions.save(session)
         self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
 
-        # When follow-up messages were injected mid-turn, the LLM's final
-        # response addresses those follow-ups.  Always send the response in
-        # this case, even if MessageTool was used earlier in the turn — the
-        # follow-up response is new content the user hasn't seen.
-        if not had_injections:
-            if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
+        # When follow-up messages were injected mid-turn, a later natural
+        # language reply may address those follow-ups and should not be
+        # suppressed just because MessageTool was used earlier in the turn.
+        # However, if the turn falls back to the empty-final-response
+        # placeholder, suppress it when the real user-visible output already
+        # came from MessageTool.
+        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
+            if not had_injections or stop_reason == "empty_final_response":
                 return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+import inspect
 from pathlib import Path
 from typing import Any
 
@@ -94,37 +95,89 @@ class AgentRunner:
     def __init__(self, provider: LLMProvider):
         self.provider = provider
 
-    async def _drain_injections(self, spec: AgentRunSpec) -> list[str]:
+    @staticmethod
+    def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
+        if isinstance(left, str) and isinstance(right, str):
+            return f"{left}\n\n{right}" if left else right
+
+        def _to_blocks(value: Any) -> list[dict[str, Any]]:
+            if isinstance(value, list):
+                return [
+                    item if isinstance(item, dict) else {"type": "text", "text": str(item)}
+                    for item in value
+                ]
+            if value is None:
+                return []
+            return [{"type": "text", "text": str(value)}]
+
+        return _to_blocks(left) + _to_blocks(right)
+
+    @classmethod
+    def _append_injected_messages(
+        cls,
+        messages: list[dict[str, Any]],
+        injections: list[dict[str, Any]],
+    ) -> None:
+        """Append injected user messages while preserving role alternation."""
+        for injection in injections:
+            if (
+                messages
+                and injection.get("role") == "user"
+                and messages[-1].get("role") == "user"
+            ):
+                merged = dict(messages[-1])
+                merged["content"] = cls._merge_message_content(
+                    merged.get("content"),
+                    injection.get("content"),
+                )
+                messages[-1] = merged
+                continue
+            messages.append(injection)
+
+    async def _drain_injections(self, spec: AgentRunSpec) -> list[dict[str, Any]]:
         """Drain pending user messages via the injection callback.
 
-        Returns all drained message contents (capped by
+        Returns normalized user messages (capped by
         ``_MAX_INJECTIONS_PER_TURN``), or an empty list when there is
-        nothing to inject.  Messages beyond the cap are logged so they
+        nothing to inject. Messages beyond the cap are logged so they
         are not silently lost.
         """
         if spec.injection_callback is None:
             return []
         try:
-            items = await spec.injection_callback()
+            signature = inspect.signature(spec.injection_callback)
+            accepts_limit = (
+                "limit" in signature.parameters
+                or any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in signature.parameters.values()
+                )
+            )
+            if accepts_limit:
+                items = await spec.injection_callback(limit=_MAX_INJECTIONS_PER_TURN)
+            else:
+                items = await spec.injection_callback()
         except Exception:
             logger.exception("injection_callback failed")
             return []
         if not items:
             return []
-        # items are InboundMessage objects from _drain_pending
-        texts: list[str] = []
+        injected_messages: list[dict[str, Any]] = []
         for item in items:
+            if isinstance(item, dict) and item.get("role") == "user" and "content" in item:
+                injected_messages.append(item)
+                continue
             text = getattr(item, "content", str(item))
             if text.strip():
-                texts.append(text)
-        if len(texts) > _MAX_INJECTIONS_PER_TURN:
-            dropped = len(texts) - _MAX_INJECTIONS_PER_TURN
+                injected_messages.append({"role": "user", "content": text})
+        if len(injected_messages) > _MAX_INJECTIONS_PER_TURN:
+            dropped = len(injected_messages) - _MAX_INJECTIONS_PER_TURN
             logger.warning(
-                "Injection batch has {} messages, capping to {} ({} dropped)",
-                len(texts), _MAX_INJECTIONS_PER_TURN, dropped,
+                "Injection callback returned {} messages, capping to {} ({} dropped)",
+                len(injected_messages), _MAX_INJECTIONS_PER_TURN, dropped,
             )
-            texts = texts[-_MAX_INJECTIONS_PER_TURN:]
-        return texts
+            injected_messages = injected_messages[:_MAX_INJECTIONS_PER_TURN]
+        return injected_messages
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
         hook = spec.hook or AgentHook()
@@ -247,8 +300,7 @@ class AgentRunner:
                     if injections:
                         had_injections = True
                         injection_cycles += 1
-                        for text in injections:
-                            messages.append({"role": "user", "content": text})
+                        self._append_injected_messages(messages, injections)
                         logger.info(
                             "Injected {} follow-up message(s) after tool execution ({}/{})",
                             len(injections), injection_cycles, _MAX_INJECTION_CYCLES,
@@ -340,8 +392,7 @@ class AgentRunner:
                                 "pending_tool_calls": [],
                             },
                         )
-                    for text in injections:
-                        messages.append({"role": "user", "content": text})
+                    self._append_injected_messages(messages, injections)
                     logger.info(
                         "Injected {} follow-up message(s) after final response ({}/{})",
                         len(injections), injection_cycles, _MAX_INJECTION_CYCLES,
