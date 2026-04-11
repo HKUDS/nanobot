@@ -403,6 +403,17 @@ def _onboard_plugins(config_path: Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def _pv_cli(p):
+    """Safely extract provider fields (handles ProviderConfig and dict)."""
+    if isinstance(p, dict):
+        return (
+            p.get("apiKey") or p.get("api_key") or "",
+            p.get("apiBase") or p.get("api_base") or "",
+            p.get("extraHeaders") or p.get("extra_headers"),
+        )
+    return (getattr(p, "api_key", None) or ""), (getattr(p, "api_base", None) or ""), getattr(p, "extra_headers", None)
+
+
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config.
 
@@ -414,18 +425,19 @@ def _make_provider(config: Config):
     model = config.agents.defaults.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
+    pk, pb, ph = _pv_cli(p)
     spec = find_by_name(provider_name) if provider_name else None
     backend = spec.backend if spec else "openai_compat"
 
     # --- validation ---
     if backend == "azure_openai":
-        if not p or not p.api_key or not p.api_base:
+        if not pk or not pb:
             console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
             console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
             console.print("Use the model field to specify the deployment name.")
             raise typer.Exit(1)
     elif backend == "openai_compat" and not model.startswith("bedrock/"):
-        needs_key = not (p and p.api_key)
+        needs_key = not pk
         exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
         if needs_key and not exempt:
             console.print("[red]Error: No API key configured.[/red]")
@@ -441,8 +453,8 @@ def _make_provider(config: Config):
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
         provider = AzureOpenAIProvider(
-            api_key=p.api_key,
-            api_base=p.api_base,
+            api_key=pk,
+            api_base=pb,
             default_model=model,
         )
     elif backend == "github_copilot":
@@ -452,19 +464,19 @@ def _make_provider(config: Config):
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
         provider = AnthropicProvider(
-            api_key=p.api_key if p else None,
+            api_key=pk,
             api_base=config.get_api_base(model),
             default_model=model,
-            extra_headers=p.extra_headers if p else None,
+            extra_headers=ph,
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
         provider = OpenAICompatProvider(
-            api_key=p.api_key if p else None,
+            api_key=pk,
             api_base=config.get_api_base(model),
             default_model=model,
-            extra_headers=p.extra_headers if p else None,
+            extra_headers=ph,
             spec=spec,
         )
 
@@ -592,6 +604,7 @@ def serve(
         timezone=runtime_config.agents.defaults.timezone,
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
     )
+    agent_loop.config = runtime_config  # Attach config for command handlers
 
     model_name = runtime_config.agents.defaults.model
     console.print(f"{__logo__} Starting OpenAI-compatible API server")
@@ -684,6 +697,7 @@ def gateway(
         timezone=config.agents.defaults.timezone,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
     )
+    agent_loop.config = config  # Attach config for command handlers
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
@@ -916,6 +930,7 @@ def agent(
         timezone=config.agents.defaults.timezone,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
     )
+    agent_loop.config = config  # Attach config for command handlers
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
         _print_agent_response(
@@ -1308,13 +1323,31 @@ def status():
                 console.print(f"{spec.label}: [green]✓ (OAuth)[/green]")
             elif spec.is_local:
                 # Local deployments show api_base instead of api_key
-                if p.api_base:
-                    console.print(f"{spec.label}: [green]✓ {p.api_base}[/green]")
+                pk, pb, ph = _pv_cli(p) if p else ("", "", None)
+                if pb:
+                    console.print(f"{spec.label}: [green]✓ {pb}[/green]")
                 else:
                     console.print(f"{spec.label}: [dim]not set[/dim]")
             else:
-                has_key = bool(p.api_key)
+                pk, pb, ph = _pv_cli(p) if p else ("", "", None)
+                has_key = bool(pk)
                 console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+
+        # Show custom providers not in the registry
+        custom_list = config.get_custom_providers()
+        if custom_list:
+            registry_names = {spec.name for spec in PROVIDERS}
+            for name, cp in custom_list:
+                if name in registry_names:
+                    continue
+                pk, pb, ph = _pv_cli(cp)
+                label = name.replace("_", " ").title()
+                if pb:
+                    console.print(f"{label}: [green]✓ {pb}[/green]")
+                elif pk:
+                    console.print(f"{label}: [green]✓[/green]")
+                else:
+                    console.print(f"{label}: [dim]not set[/dim]")
 
 
 # ============================================================================

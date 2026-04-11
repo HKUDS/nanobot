@@ -74,7 +74,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 200
     max_tool_result_chars: int = 16_000
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
-    reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
+    reasoning_effort: str | None = None  # low / medium / high / adaptive - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     session_ttl_minutes: int = Field(default=0, ge=0)  # Auto /new after idle (0 = disabled)
     dream: DreamConfig = Field(default_factory=DreamConfig)
@@ -96,6 +96,8 @@ class ProviderConfig(Base):
 
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
+
+    model_config = ConfigDict(extra="allow")  # Allow custom provider names (e.g. myapi1, myapi2)
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
@@ -177,6 +179,7 @@ class ExecToolConfig(Base):
     timeout: int = 60
     path_append: str = ""
     sandbox: str = ""  # sandbox backend: "" (none) or "bwrap"
+    allowed_env_keys: list[str] = Field(default_factory=list)  # Env var names to pass through to subprocess (e.g. ["GOPATH", "JAVA_HOME"])
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
@@ -215,6 +218,13 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
 
+    @staticmethod
+    def _pv(p):
+        """Safely extract api_key and api_base (handles ProviderConfig and dict)."""
+        if isinstance(p, dict):
+            return (p.get("apiKey") or p.get("api_key", "") or ""), (p.get("apiBase") or p.get("api_base", "") or "")
+        return (getattr(p, "api_key", None) or ""), (getattr(p, "api_base", None) or "")
+
     def _match_provider(
         self, model: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
@@ -227,6 +237,11 @@ class Config(BaseSettings):
             if spec:
                 p = getattr(self.providers, spec.name, None)
                 return (p, spec.name) if p else (None, None)
+            # Fallback: try custom provider name not in registry
+            custom_p = getattr(self.providers, forced, None)
+            ck, cb = self._pv(custom_p)
+            if custom_p and (ck or cb):
+                return custom_p, forced
             return None, None
 
         model_lower = (model or self.agents.defaults.model).lower()
@@ -238,76 +253,101 @@ class Config(BaseSettings):
             kw = kw.lower()
             return kw in model_lower or kw.replace("-", "_") in model_normalized
 
-        # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and model_prefix and normalized_prefix == spec.name:
-                if spec.is_oauth or spec.is_local or p.api_key:
+                pk, pb = self._pv(p)
+                if spec.is_oauth or spec.is_local or pk:
                     return p, spec.name
+
+        # Fallback: try custom provider name not in registry
+        if model_prefix:
+            custom_p = getattr(self.providers, model_prefix, None)
+            ck, cb = self._pv(custom_p)
+            if custom_p and (ck or cb):
+                return custom_p, model_prefix
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
-                if spec.is_oauth or spec.is_local or p.api_key:
+                pk, pb = self._pv(p)
+                if spec.is_oauth or spec.is_local or pk:
                     return p, spec.name
 
-        # Fallback: configured local providers can route models without
-        # provider-specific keywords (for example plain "llama3.2" on Ollama).
-        # Prefer providers whose detect_by_base_keyword matches the configured api_base
-        # (e.g. Ollama's "11434" in "http://localhost:11434") over plain registry order.
-        local_fallback: tuple[ProviderConfig, str] | None = None
+        # Local fallback
+        local_fallback = None
         for spec in PROVIDERS:
             if not spec.is_local:
                 continue
             p = getattr(self.providers, spec.name, None)
-            if not (p and p.api_base):
+            if not p:
                 continue
-            if spec.detect_by_base_keyword and spec.detect_by_base_keyword in p.api_base:
+            pk, pb = self._pv(p)
+            if not pb:
+                continue
+            if spec.detect_by_base_keyword and spec.detect_by_base_keyword in pb:
                 return p, spec.name
             if local_fallback is None:
                 local_fallback = (p, spec.name)
         if local_fallback:
             return local_fallback
 
-        # Fallback: gateways first, then others (follows registry order)
-        # OAuth providers are NOT valid fallbacks — they require explicit model selection
+        # Fallback: gateways first, then others
         for spec in PROVIDERS:
             if spec.is_oauth:
                 continue
             p = getattr(self.providers, spec.name, None)
-            if p and p.api_key:
+            pk, pb = self._pv(p)
+            if p and pk:
                 return p, spec.name
         return None, None
 
-    def get_provider(self, model: str | None = None) -> ProviderConfig | None:
-        """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
+    def get_provider(self, model: str | None = None) -> "ProviderConfig | None":
+        """Get matched provider config."""
         p, _ = self._match_provider(model)
         return p
 
     def get_provider_name(self, model: str | None = None) -> str | None:
-        """Get the registry name of the matched provider (e.g. "deepseek", "openrouter")."""
+        """Get the registry name of the matched provider."""
         _, name = self._match_provider(model)
         return name
 
     def get_api_key(self, model: str | None = None) -> str | None:
-        """Get API key for the given model. Falls back to first available key."""
+        """Get API key for the given model."""
         p = self.get_provider(model)
         return p.api_key if p else None
 
     def get_api_base(self, model: str | None = None) -> str | None:
-        """Get API base URL for the given model. Applies default URLs for gateway/local providers."""
+        """Get API base URL for the given model."""
         from nanobot.providers.registry import find_by_name
-
         p, name = self._match_provider(model)
-        if p and p.api_base:
-            return p.api_base
-        # Only gateways get a default api_base here. Standard providers
-        # resolve their base URL from the registry in the provider constructor.
+        pk, pb = self._pv(p) if p else ("", "")
+        if pb:
+            return pb
         if name:
             spec = find_by_name(name)
             if spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:
                 return spec.default_api_base
         return None
+
+    def get_custom_providers(self) -> list[tuple[str, "ProviderConfig"]]:
+        """List all configured providers that have api_key or api_base."""
+        from nanobot.providers.registry import PROVIDERS
+        result = []
+        current_provider = self.agents.defaults.provider
+        all_configured = set(self.providers.model_dump().keys())
+        for name in sorted(all_configured):
+            if name.startswith("_"):
+                continue
+            p = getattr(self.providers, name, None)
+            if p is None:
+                continue
+            pk, pb = self._pv(p)
+            if pk or pb:
+                result.append((name, p))
+        result.sort(key=lambda x: (0 if x[0] == current_provider else 1, x[0]))
+        return result
+
 
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
