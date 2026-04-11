@@ -55,6 +55,23 @@ class TestSessionTTLConfig:
         defaults = AgentDefaults(session_ttl_minutes=30)
         assert defaults.session_ttl_minutes == 30
 
+    def test_user_friendly_alias_is_supported(self):
+        """Config should accept idleCompactAfterMinutes as the preferred JSON key."""
+        defaults = AgentDefaults.model_validate({"idleCompactAfterMinutes": 30})
+        assert defaults.session_ttl_minutes == 30
+
+    def test_legacy_alias_is_still_supported(self):
+        """Config should still accept the old sessionTtlMinutes key for compatibility."""
+        defaults = AgentDefaults.model_validate({"sessionTtlMinutes": 30})
+        assert defaults.session_ttl_minutes == 30
+
+    def test_serializes_with_user_friendly_alias(self):
+        """Config dumps should use idleCompactAfterMinutes for JSON output."""
+        defaults = AgentDefaults(session_ttl_minutes=30)
+        data = defaults.model_dump(mode="json", by_alias=True)
+        assert data["idleCompactAfterMinutes"] == 30
+        assert "sessionTtlMinutes" not in data
+
 
 class TestAgentLoopTTLParam:
     """Test that AutoCompact receives and stores session_ttl_minutes."""

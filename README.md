@@ -1505,13 +1505,13 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 ### Auto Compact
 
-When a user is idle for longer than a configured TTL, nanobot **proactively** compresses the older part of the session context into a summary while keeping a recent legal suffix of live messages. This reduces token cost and first-token latency when the user returns — instead of re-processing a long stale context with an expired KV cache, the model receives a compact summary, the most recent live context, and fresh input.
+When a user is idle for longer than a configured threshold, nanobot **proactively** compresses the older part of the session context into a summary while keeping a recent legal suffix of live messages. This reduces token cost and first-token latency when the user returns — instead of re-processing a long stale context with an expired KV cache, the model receives a compact summary, the most recent live context, and fresh input.
 
 ```json
 {
   "agents": {
     "defaults": {
-      "sessionTtlMinutes": 15
+      "idleCompactAfterMinutes": 15
     }
   }
 }
@@ -1519,15 +1519,18 @@ When a user is idle for longer than a configured TTL, nanobot **proactively** co
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `agents.defaults.sessionTtlMinutes` | `0` (disabled) | Minutes of idle time before auto-compaction. Set to `0` to disable. Recommended: `15` — matches typical LLM KV cache expiration, so compacted sessions won't waste cache on cold entries. |
+| `agents.defaults.idleCompactAfterMinutes` | `0` (disabled) | Minutes of idle time before auto-compaction starts. Set to `0` to disable. Recommended: `15` — close to a typical LLM KV cache expiry window, so stale sessions get compacted before the user returns. |
+
+`sessionTtlMinutes` remains accepted as a legacy alias for backward compatibility, but `idleCompactAfterMinutes` is the preferred config key going forward.
 
 How it works:
 1. **Idle detection**: On each idle tick (~1 s), checks all sessions for expiration.
-2. **Background compaction**: Expired sessions summarize the older live prefix via LLM and keep the most recent legal suffix (currently 8 messages).
+2. **Background compaction**: Idle sessions summarize the older live prefix via LLM and keep the most recent legal suffix (currently 8 messages).
 3. **Summary injection**: When the user returns, the summary is injected as runtime context (one-shot, not persisted) alongside the retained recent suffix.
+4. **Restart-safe resume**: The summary is also mirrored into session metadata so it can still be recovered after a process restart.
 
 > [!TIP]
-> The summary survives bot restarts — it's stored in session metadata and recovered on the next message.
+> Think of auto compact as "summarize older context, keep the freshest live turns." It is not a hard session reset.
 
 ### Timezone
 
