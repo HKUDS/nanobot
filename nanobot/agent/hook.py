@@ -70,7 +70,9 @@ class CompositeHook(AgentHook):
     async def _for_each_hook_safe(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         for h in self._hooks:
             try:
-                await getattr(h, method_name)(*args, **kwargs)
+                method = getattr(h, method_name, None)
+                if method is not None and callable(method):
+                    await method(*args, **kwargs)
             except Exception:
                 logger.exception("AgentHook.{} error in {}", method_name, type(h).__name__)
 

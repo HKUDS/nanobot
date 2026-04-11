@@ -19,6 +19,7 @@ class ContextBuilder:
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
+    _MAX_RECENT_HISTORY = 50
 
     def __init__(self, workspace: Path, timezone: str | None = None):
         self.workspace = workspace
@@ -26,9 +27,13 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        channel: str | None = None,
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
-        parts = [self._get_identity()]
+        parts = [self._get_identity(channel=channel)]
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -48,9 +53,16 @@ class ContextBuilder:
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
+        entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
+        if entries:
+            capped = entries[-self._MAX_RECENT_HISTORY:]
+            parts.append("# Recent History\n\n" + "\n".join(
+                f"- [{e['timestamp']}] {e['content']}" for e in capped
+            ))
+
         return "\n\n---\n\n".join(parts)
 
-    def _get_identity(self) -> str:
+    def _get_identity(self, channel: str | None = None) -> str:
         """Get the core identity section."""
         workspace_path = str(self.workspace.expanduser().resolve())
         system = platform.system()
@@ -61,6 +73,7 @@ class ContextBuilder:
             workspace_path=workspace_path,
             runtime=runtime,
             platform_policy=render_template("agent/platform_policy.md", system=system),
+            channel=channel or "",
         )
 
     @staticmethod
@@ -120,7 +133,7 @@ class ContextBuilder:
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel)},
             *history,
         ]
         if messages[-1].get("role") == current_role:
@@ -131,31 +144,56 @@ class ContextBuilder:
         messages.append({"role": current_role, "content": merged})
         return messages
 
-    def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
-        """Build user message content with optional base64-encoded images."""
+    def _build_user_content(
+        self, text: str, media: list[str] | None
+    ) -> str | list[dict[str, Any]]:
+        """Build user message content with optional media.
+
+        Images are converted to base64 vision blocks.
+        Documents (PDF, Word, Excel, PPT) have their text extracted and appended.
+        """
         if not media:
             return text
 
-        images = []
+        images: list[dict[str, Any]] = []
+        doc_texts: list[str] = []
+
         for path in media:
             p = Path(path)
             if not p.is_file():
                 continue
             raw = p.read_bytes()
-            # Detect real MIME type from magic bytes; fallback to filename guess
             mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
-            if not mime or not mime.startswith("image/"):
-                continue
-            b64 = base64.b64encode(raw).decode()
-            images.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{b64}"},
-                "_meta": {"path": str(p)},
-            })
 
-        if not images:
+            if mime and mime.startswith("image/"):
+                b64 = base64.b64encode(raw).decode()
+                images.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime};base64,{b64}"},
+                    "_meta": {"path": str(p)},
+                })
+            else:
+                # Try document text extraction
+                from nanobot.utils.document import extract_text
+                extracted = extract_text(p)
+                if extracted and not extracted.startswith("Error"):
+                    doc_texts.append(f"[File: {p.name}]\n{extracted}")
+
+        # Build final content
+        parts: list[dict[str, Any]] = []
+        parts.extend(images)
+
+        combined_text = text
+        if doc_texts:
+            combined_text = text + "\n\n" + "\n\n".join(doc_texts)
+
+        if images:
+            parts.append({"type": "text", "text": combined_text})
+            return parts
+        elif doc_texts:
+            return combined_text
+        else:
             return text
-        return images + [{"type": "text", "text": text}]
 
     def add_tool_result(
         self, messages: list[dict[str, Any]],

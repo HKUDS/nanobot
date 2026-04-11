@@ -65,8 +65,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     search_usage_text: str | None = None
     try:
         from nanobot.utils.searchusage import fetch_search_usage
-        web_cfg = getattr(getattr(loop, "config", None), "tools", None)
-        web_cfg = getattr(web_cfg, "web", None) if web_cfg else None
+        web_cfg = getattr(loop, "web_config", None)
         search_cfg = getattr(web_cfg, "search", None) if web_cfg else None
         if search_cfg is not None:
             provider = getattr(search_cfg, "provider", "duckduckgo")

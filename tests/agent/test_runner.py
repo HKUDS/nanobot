@@ -458,6 +458,7 @@ async def test_runner_uses_raw_messages_when_context_governance_fails():
 
 @pytest.mark.asyncio
 async def test_runner_retries_empty_final_response_with_summary_prompt():
+    """Empty responses get 2 silent retries before finalization kicks in."""
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
 
     provider = MagicMock()
@@ -465,11 +466,11 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
 
     async def chat_with_retry(*, messages, tools=None, **kwargs):
         calls.append({"messages": messages, "tools": tools})
-        if len(calls) == 1:
+        if len(calls) <= 2:
             return LLMResponse(
                 content=None,
                 tool_calls=[],
-                usage={"prompt_tokens": 10, "completion_tokens": 1},
+                usage={"prompt_tokens": 5, "completion_tokens": 1},
             )
         return LLMResponse(
             content="final answer",
@@ -486,20 +487,23 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
         initial_messages=[{"role": "user", "content": "do task"}],
         tools=tools,
         model="test-model",
-        max_iterations=1,
+        max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == "final answer"
-    assert len(calls) == 2
-    assert calls[1]["tools"] is None
-    assert "Do not call any more tools" in calls[1]["messages"][-1]["content"]
+    # 2 silent retries (iterations 0,1) + finalization on iteration 1
+    assert len(calls) == 3
+    assert calls[0]["tools"] is not None
+    assert calls[1]["tools"] is not None
+    assert calls[2]["tools"] is None
     assert result.usage["prompt_tokens"] == 13
-    assert result.usage["completion_tokens"] == 8
+    assert result.usage["completion_tokens"] == 9
 
 
 @pytest.mark.asyncio
 async def test_runner_uses_specific_message_after_empty_finalization_retry():
+    """After silent retries + finalization all return empty, stop_reason is empty_final_response."""
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
     from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
@@ -517,12 +521,72 @@ async def test_runner_uses_specific_message_after_empty_finalization_retry():
         initial_messages=[{"role": "user", "content": "do task"}],
         tools=tools,
         model="test-model",
-        max_iterations=1,
+        max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
     assert result.final_content == EMPTY_FINAL_RESPONSE_MESSAGE
     assert result.stop_reason == "empty_final_response"
+
+
+@pytest.mark.asyncio
+async def test_runner_empty_response_does_not_break_tool_chain():
+    """An empty intermediate response must not kill an ongoing tool chain.
+
+    Sequence: tool_call → empty → tool_call → final text.
+    The runner should recover via silent retry and complete normally.
+    """
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    call_count = 0
+
+    async def chat_with_retry(*, messages, tools=None, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return LLMResponse(
+                content=None,
+                tool_calls=[ToolCallRequest(id="tc1", name="read_file", arguments={"path": "a.txt"})],
+                usage={"prompt_tokens": 10, "completion_tokens": 5},
+            )
+        if call_count == 2:
+            return LLMResponse(content=None, tool_calls=[], usage={"prompt_tokens": 10, "completion_tokens": 1})
+        if call_count == 3:
+            return LLMResponse(
+                content=None,
+                tool_calls=[ToolCallRequest(id="tc2", name="read_file", arguments={"path": "b.txt"})],
+                usage={"prompt_tokens": 10, "completion_tokens": 5},
+            )
+        return LLMResponse(
+            content="Here are the results.",
+            tool_calls=[],
+            usage={"prompt_tokens": 10, "completion_tokens": 10},
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    provider.chat_stream_with_retry = chat_with_retry
+
+    async def fake_tool(name, args, **kw):
+        return "file content"
+
+    tool_registry = MagicMock()
+    tool_registry.get_definitions.return_value = [{"type": "function", "function": {"name": "read_file"}}]
+    tool_registry.execute = AsyncMock(side_effect=fake_tool)
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "read both files"}],
+        tools=tool_registry,
+        model="test-model",
+        max_iterations=10,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "Here are the results."
+    assert result.stop_reason == "completed"
+    assert call_count == 4
+    assert "read_file" in result.tools_used
 
 
 def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch):
@@ -935,3 +999,256 @@ async def test_runner_passes_cached_tokens_to_hook_context():
 
     assert len(captured_usage) == 1
     assert captured_usage[0]["cached_tokens"] == 150
+
+
+# ---------------------------------------------------------------------------
+# Length recovery (auto-continue on finish_reason == "length")
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_length_recovery_continues_from_truncated_output():
+    """When finish_reason is 'length', runner should insert a continuation
+    prompt and retry, stitching partial outputs into the final result."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] <= 2:
+            return LLMResponse(
+                content=f"part{call_count['n']} ",
+                finish_reason="length",
+                usage={},
+            )
+        return LLMResponse(content="final", finish_reason="stop", usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "write a long essay"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=10,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.stop_reason == "completed"
+    assert result.final_content == "final"
+    assert call_count["n"] == 3
+    roles = [m["role"] for m in result.messages if m["role"] == "user"]
+    assert len(roles) >= 3  # original + 2 recovery prompts
+
+
+@pytest.mark.asyncio
+async def test_length_recovery_streaming_calls_on_stream_end_with_resuming():
+    """During length recovery with streaming, on_stream_end should be called
+    with resuming=True so the hook knows the conversation is continuing."""
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+    stream_end_calls: list[bool] = []
+
+    class StreamHook(AgentHook):
+        def wants_streaming(self) -> bool:
+            return True
+
+        async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+            pass
+
+        async def on_stream_end(self, context: AgentHookContext, resuming: bool = False) -> None:
+            stream_end_calls.append(resuming)
+
+    async def chat_stream_with_retry(*, messages, on_content_delta=None, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(content="partial ", finish_reason="length", usage={})
+        return LLMResponse(content="done", finish_reason="stop", usage={})
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner(provider)
+    await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "go"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=10,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=StreamHook(),
+    ))
+
+    assert len(stream_end_calls) == 2
+    assert stream_end_calls[0] is True   # length recovery: resuming
+    assert stream_end_calls[1] is False  # final response: done
+
+
+@pytest.mark.asyncio
+async def test_length_recovery_gives_up_after_max_retries():
+    """After _MAX_LENGTH_RECOVERIES attempts the runner should stop retrying."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _MAX_LENGTH_RECOVERIES
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        return LLMResponse(
+            content=f"chunk{call_count['n']}",
+            finish_reason="length",
+            usage={},
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "go"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=20,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert call_count["n"] == _MAX_LENGTH_RECOVERIES + 1
+    assert result.final_content is not None
+
+
+# ---------------------------------------------------------------------------
+# Backfill missing tool_results
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_backfill_missing_tool_results_inserts_error():
+    """Orphaned tool_use (no matching tool_result) should get a synthetic error."""
+    from nanobot.agent.runner import AgentRunner, _BACKFILL_CONTENT
+
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_a", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
+                {"id": "call_b", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_a", "name": "exec", "content": "ok"},
+    ]
+    result = AgentRunner._backfill_missing_tool_results(messages)
+    tool_msgs = [m for m in result if m.get("role") == "tool"]
+    assert len(tool_msgs) == 2
+    backfilled = [m for m in tool_msgs if m.get("tool_call_id") == "call_b"]
+    assert len(backfilled) == 1
+    assert backfilled[0]["content"] == _BACKFILL_CONTENT
+    assert backfilled[0]["name"] == "read_file"
+
+
+@pytest.mark.asyncio
+async def test_backfill_noop_when_complete():
+    """Complete message chains should not be modified."""
+    from nanobot.agent.runner import AgentRunner
+
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": "call_x", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_x", "name": "exec", "content": "done"},
+        {"role": "assistant", "content": "all good"},
+    ]
+    result = AgentRunner._backfill_missing_tool_results(messages)
+    assert result is messages  # same object — no copy
+
+
+# ---------------------------------------------------------------------------
+# Microcompact (stale tool result compaction)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_microcompact_replaces_old_tool_results():
+    """Tool results beyond _MICROCOMPACT_KEEP_RECENT should be summarized."""
+    from nanobot.agent.runner import AgentRunner, _MICROCOMPACT_KEEP_RECENT
+
+    total = _MICROCOMPACT_KEEP_RECENT + 5
+    long_content = "x" * 600
+    messages: list[dict] = [{"role": "system", "content": "sys"}]
+    for i in range(total):
+        messages.append({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}],
+        })
+        messages.append({
+            "role": "tool", "tool_call_id": f"c{i}", "name": "read_file",
+            "content": long_content,
+        })
+
+    result = AgentRunner._microcompact(messages)
+    tool_msgs = [m for m in result if m.get("role") == "tool"]
+    stale_count = total - _MICROCOMPACT_KEEP_RECENT
+    compacted = [m for m in tool_msgs if "omitted from context" in str(m.get("content", ""))]
+    preserved = [m for m in tool_msgs if m.get("content") == long_content]
+    assert len(compacted) == stale_count
+    assert len(preserved) == _MICROCOMPACT_KEEP_RECENT
+
+
+@pytest.mark.asyncio
+async def test_microcompact_preserves_short_results():
+    """Short tool results (< _MICROCOMPACT_MIN_CHARS) should not be replaced."""
+    from nanobot.agent.runner import AgentRunner, _MICROCOMPACT_KEEP_RECENT
+
+    total = _MICROCOMPACT_KEEP_RECENT + 5
+    messages: list[dict] = []
+    for i in range(total):
+        messages.append({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": "exec", "arguments": "{}"}}],
+        })
+        messages.append({
+            "role": "tool", "tool_call_id": f"c{i}", "name": "exec",
+            "content": "short",
+        })
+
+    result = AgentRunner._microcompact(messages)
+    assert result is messages  # no copy needed — all stale results are short
+
+
+@pytest.mark.asyncio
+async def test_microcompact_skips_non_compactable_tools():
+    """Non-compactable tools (e.g. 'message') should never be replaced."""
+    from nanobot.agent.runner import AgentRunner, _MICROCOMPACT_KEEP_RECENT
+
+    total = _MICROCOMPACT_KEEP_RECENT + 5
+    long_content = "y" * 1000
+    messages: list[dict] = []
+    for i in range(total):
+        messages.append({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": "message", "arguments": "{}"}}],
+        })
+        messages.append({
+            "role": "tool", "tool_call_id": f"c{i}", "name": "message",
+            "content": long_content,
+        })
+
+    result = AgentRunner._microcompact(messages)
+    assert result is messages  # no compactable tools found

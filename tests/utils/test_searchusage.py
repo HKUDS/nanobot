@@ -79,11 +79,18 @@ class TestSearchUsageInfoFormat:
 class TestParseTavilyUsage:
     def test_full_response(self):
         data = {
-            "used": 142,
-            "limit": 1000,
-            "remaining": 858,
-            "reset_date": "2026-05-01",
-            "breakdown": {"search": 120, "extract": 15, "crawl": 7},
+            "account": {
+                "current_plan": "Researcher",
+                "plan_usage": 142,
+                "plan_limit": 1000,
+                "search_usage": 120,
+                "extract_usage": 15,
+                "crawl_usage": 7,
+                "map_usage": 0,
+                "research_usage": 0,
+                "paygo_usage": 0,
+                "paygo_limit": None,
+            },
         }
         info = _parse_tavily_usage(data)
         assert info.provider == "tavily"
@@ -91,25 +98,19 @@ class TestParseTavilyUsage:
         assert info.used == 142
         assert info.limit == 1000
         assert info.remaining == 858
-        assert info.reset_date == "2026-05-01"
         assert info.search_used == 120
         assert info.extract_used == 15
         assert info.crawl_used == 7
 
-    def test_remaining_computed_when_missing(self):
-        data = {"used": 300, "limit": 1000}
+    def test_remaining_computed(self):
+        data = {"account": {"plan_usage": 300, "plan_limit": 1000}}
         info = _parse_tavily_usage(data)
         assert info.remaining == 700
 
     def test_remaining_not_negative(self):
-        data = {"used": 1100, "limit": 1000}
+        data = {"account": {"plan_usage": 1100, "plan_limit": 1000}}
         info = _parse_tavily_usage(data)
         assert info.remaining == 0
-
-    def test_camel_case_reset_date(self):
-        data = {"used": 10, "limit": 100, "resetDate": "2026-06-01"}
-        info = _parse_tavily_usage(data)
-        assert info.reset_date == "2026-06-01"
 
     def test_empty_response(self):
         info = _parse_tavily_usage({})
@@ -118,8 +119,8 @@ class TestParseTavilyUsage:
         assert info.used is None
         assert info.limit is None
 
-    def test_no_breakdown_key(self):
-        data = {"used": 5, "limit": 50}
+    def test_no_breakdown_fields(self):
+        data = {"account": {"plan_usage": 5, "plan_limit": 50}}
         info = _parse_tavily_usage(data)
         assert info.search_used is None
         assert info.extract_used is None
@@ -175,11 +176,14 @@ class TestFetchSearchUsageRouting:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "used": 142,
-            "limit": 1000,
-            "remaining": 858,
-            "reset_date": "2026-05-01",
-            "breakdown": {"search": 120, "extract": 15, "crawl": 7},
+            "account": {
+                "current_plan": "Researcher",
+                "plan_usage": 142,
+                "plan_limit": 1000,
+                "search_usage": 120,
+                "extract_usage": 15,
+                "crawl_usage": 7,
+            },
         }
         mock_response.raise_for_status = MagicMock()
 
@@ -197,7 +201,6 @@ class TestFetchSearchUsageRouting:
         assert info.used == 142
         assert info.limit == 1000
         assert info.remaining == 858
-        assert info.reset_date == "2026-05-01"
         assert info.search_used == 120
 
     @pytest.mark.asyncio

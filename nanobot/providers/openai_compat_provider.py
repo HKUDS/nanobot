@@ -455,7 +455,12 @@ class OpenAICompatProvider(LLMProvider):
             finish_reason = str(choice0.get("finish_reason") or "stop")
 
             raw_tool_calls: list[Any] = []
+            # StepFun Plan: fallback to reasoning field when content is empty
+            if not content and msg0.get("reasoning"):
+                content = self._extract_text_content(msg0.get("reasoning"))
             reasoning_content = msg0.get("reasoning_content")
+            if not reasoning_content and msg0.get("reasoning"):
+                reasoning_content = self._extract_text_content(msg0.get("reasoning"))
             for ch in choices:
                 ch_map = self._maybe_mapping(ch) or {}
                 m = self._maybe_mapping(ch_map.get("message")) or {}
@@ -475,7 +480,10 @@ class OpenAICompatProvider(LLMProvider):
                 fn = self._maybe_mapping(tc_map.get("function")) or {}
                 args = fn.get("arguments", {})
                 if isinstance(args, str):
-                    args = json_repair.loads(args)
+                    try:
+                        args = json_repair.loads(args)
+                    except (ValueError, TypeError, Exception):
+                        args = {}
                 ec, prov, fn_prov = _extract_tc_extras(tc)
                 parsed_tool_calls.append(ToolCallRequest(
                     id=_short_tool_id(),
@@ -511,12 +519,17 @@ class OpenAICompatProvider(LLMProvider):
                     finish_reason = ch.finish_reason
             if not content and m.content:
                 content = m.content
+            if not content and getattr(m, "reasoning", None):
+                content = m.reasoning
 
         tool_calls = []
         for tc in raw_tool_calls:
             args = tc.function.arguments
             if isinstance(args, str):
-                args = json_repair.loads(args)
+                try:
+                    args = json_repair.loads(args)
+                except (ValueError, TypeError, Exception):
+                    args = {}
             ec, prov, fn_prov = _extract_tc_extras(tc)
             tool_calls.append(ToolCallRequest(
                 id=_short_tool_id(),
@@ -527,12 +540,16 @@ class OpenAICompatProvider(LLMProvider):
                 function_provider_specific_fields=fn_prov,
             ))
 
+        reasoning_content = getattr(msg, "reasoning_content", None) or None
+        if not reasoning_content and getattr(msg, "reasoning", None):
+            reasoning_content = msg.reasoning
+
         return LLMResponse(
             content=content,
             tool_calls=tool_calls,
             finish_reason=finish_reason or "stop",
             usage=self._extract_usage(response),
-            reasoning_content=getattr(msg, "reasoning_content", None) or None,
+            reasoning_content=reasoning_content,
         )
 
     @classmethod
@@ -593,6 +610,8 @@ class OpenAICompatProvider(LLMProvider):
                 if text:
                     content_parts.append(text)
                 text = cls._extract_text_content(delta.get("reasoning_content"))
+                if not text:
+                    text = cls._extract_text_content(delta.get("reasoning"))
                 if text:
                     reasoning_parts.append(text)
                 for idx, tc in enumerate(delta.get("tool_calls") or []):
@@ -611,6 +630,8 @@ class OpenAICompatProvider(LLMProvider):
                 content_parts.append(delta.content)
             if delta:
                 reasoning = getattr(delta, "reasoning_content", None)
+                if not reasoning:
+                    reasoning = getattr(delta, "reasoning", None)
                 if reasoning:
                     reasoning_parts.append(reasoning)
             for tc in (delta.tool_calls or []) if delta else []:
@@ -634,16 +655,73 @@ class OpenAICompatProvider(LLMProvider):
             reasoning_content="".join(reasoning_parts) or None,
         )
 
+    @classmethod
+    def _extract_error_metadata(cls, e: Exception) -> dict[str, Any]:
+        response = getattr(e, "response", None)
+        headers = getattr(response, "headers", None)
+        payload = (
+            getattr(e, "body", None)
+            or getattr(e, "doc", None)
+            or getattr(response, "text", None)
+        )
+        if payload is None and response is not None:
+            response_json = getattr(response, "json", None)
+            if callable(response_json):
+                try:
+                    payload = response_json()
+                except Exception:
+                    payload = None
+        error_type, error_code = LLMProvider._extract_error_type_code(payload)
+
+        status_code = getattr(e, "status_code", None)
+        if status_code is None and response is not None:
+            status_code = getattr(response, "status_code", None)
+
+        should_retry: bool | None = None
+        if headers is not None:
+            raw = headers.get("x-should-retry")
+            if isinstance(raw, str):
+                lowered = raw.strip().lower()
+                if lowered == "true":
+                    should_retry = True
+                elif lowered == "false":
+                    should_retry = False
+
+        error_kind: str | None = None
+        error_name = e.__class__.__name__.lower()
+        if "timeout" in error_name:
+            error_kind = "timeout"
+        elif "connection" in error_name:
+            error_kind = "connection"
+
+        return {
+            "error_status_code": int(status_code) if status_code is not None else None,
+            "error_kind": error_kind,
+            "error_type": error_type,
+            "error_code": error_code,
+            "error_retry_after_s": cls._extract_retry_after_from_headers(headers),
+            "error_should_retry": should_retry,
+        }
+
     @staticmethod
     def _handle_error(e: Exception) -> LLMResponse:
+        body = (
+            getattr(e, "doc", None)
+            or getattr(e, "body", None)
+            or getattr(getattr(e, "response", None), "text", None)
+        )
+        body_text = body if isinstance(body, str) else str(body) if body is not None else ""
+        msg = f"Error: {body_text.strip()[:500]}" if body_text.strip() else f"Error calling LLM: {e}"
         response = getattr(e, "response", None)
-        body = getattr(e, "doc", None) or getattr(response, "text", None)
-        body_text = str(body).strip() if body is not None else ""
-        msg = f"Error: {body_text[:500]}" if body_text else f"Error calling LLM: {e}"
         retry_after = LLMProvider._extract_retry_after_from_headers(getattr(response, "headers", None))
         if retry_after is None:
             retry_after = LLMProvider._extract_retry_after(msg)
-        return LLMResponse(content=msg, finish_reason="error", retry_after=retry_after)
+        return LLMResponse(
+            content=msg,
+            finish_reason="error",
+            retry_after=retry_after,
+            **OpenAICompatProvider._extract_error_metadata(e),
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -711,6 +789,7 @@ class OpenAICompatProvider(LLMProvider):
                     f"{idle_timeout_s} seconds"
                 ),
                 finish_reason="error",
+                error_kind="timeout",
             )
         except Exception as e:
             return self._handle_error(e)

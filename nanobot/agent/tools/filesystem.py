@@ -32,7 +32,8 @@ def _resolve_path(
 
 def _is_under(path: Path, directory: Path) -> bool:
     try:
-        path.relative_to(directory.resolve())
+        # Resolve symlinks to prevent symlink-based path escape
+        path.resolve().relative_to(directory.resolve())
         return True
     except ValueError:
         return False
@@ -89,8 +90,10 @@ class ReadFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Read the contents of a file. Returns numbered lines. "
-            "Use offset and limit to paginate through large files."
+            "Read a text file. Output format: LINE_NUM|CONTENT. "
+            "Use offset and limit for large files. "
+            "Cannot read binary files or images. "
+            "Reads exceeding ~128K chars are truncated."
         )
 
     @property
@@ -175,7 +178,11 @@ class WriteFileTool(_FsTool):
 
     @property
     def description(self) -> str:
-        return "Write content to a file at the given path. Creates parent directories if needed."
+        return (
+            "Write content to a file. Overwrites if the file already exists; "
+            "creates parent directories as needed. "
+            "For partial edits, prefer edit_file instead."
+        )
 
     async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
         try:
@@ -186,7 +193,7 @@ class WriteFileTool(_FsTool):
             fp = self._resolve(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
-            return f"Successfully wrote {len(content)} bytes to {fp}"
+            return f"Successfully wrote {len(content)} characters to {fp}"
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
@@ -243,8 +250,9 @@ class EditFileTool(_FsTool):
     def description(self) -> str:
         return (
             "Edit a file by replacing old_text with new_text. "
-            "Supports minor whitespace/line-ending differences. "
-            "Set replace_all=true to replace every occurrence."
+            "Tolerates minor whitespace/indentation differences. "
+            "If old_text matches multiple times, you must provide more context "
+            "or set replace_all=true. Shows a diff of the closest match on failure."
         )
 
     async def execute(
