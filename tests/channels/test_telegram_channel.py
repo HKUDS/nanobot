@@ -1159,3 +1159,159 @@ async def test_on_message_location_with_text() -> None:
     assert len(handled) == 1
     assert "meet me here" in handled[0]["content"]
     assert "[location: 51.5074, -0.1278]" in handled[0]["content"]
+
+
+# ---------------------------------------------------------------------------
+# Tests for retry amplification fix (issue #3050)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_send_text_does_not_fallback_on_network_timeout() -> None:
+    """TimedOut should propagate immediately, NOT trigger plain-text fallback.
+
+    Before the fix, _send_text caught ALL exceptions (including TimedOut)
+    and retried as plain text, doubling connection demand during pool
+    exhaustion — see issue #3050.
+    """
+    from telegram.error import TimedOut
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    call_count = 0
+
+    async def always_timeout(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        raise TimedOut()
+
+    channel._app.bot.send_message = always_timeout
+
+    import nanobot.channels.telegram as tg_mod
+    orig_delay = tg_mod._SEND_RETRY_BASE_DELAY
+    tg_mod._SEND_RETRY_BASE_DELAY = 0.01
+    try:
+        with pytest.raises(TimedOut):
+            await channel._send_text(123, "hello", None, {})
+    finally:
+        tg_mod._SEND_RETRY_BASE_DELAY = orig_delay
+
+    # With the fix: only _call_with_retry's 3 HTML attempts (no plain fallback).
+    # Before the fix: 3 HTML + 3 plain = 6 attempts.
+    assert call_count == 3, (
+        f"Expected 3 calls (HTML retries only), got {call_count} "
+        "(plain-text fallback should not trigger on TimedOut)"
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_text_does_not_fallback_on_network_error() -> None:
+    """NetworkError should propagate immediately, NOT trigger plain-text fallback."""
+    from telegram.error import NetworkError
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    call_count = 0
+
+    async def always_network_error(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        raise NetworkError("Connection reset")
+
+    channel._app.bot.send_message = always_network_error
+
+    import nanobot.channels.telegram as tg_mod
+    orig_delay = tg_mod._SEND_RETRY_BASE_DELAY
+    tg_mod._SEND_RETRY_BASE_DELAY = 0.01
+    try:
+        with pytest.raises(NetworkError):
+            await channel._send_text(123, "hello", None, {})
+    finally:
+        tg_mod._SEND_RETRY_BASE_DELAY = orig_delay
+
+    # _call_with_retry does NOT retry NetworkError (only TimedOut/RetryAfter),
+    # so it raises after 1 attempt. The fix prevents plain-text fallback.
+    # Before the fix: 1 HTML + 1 plain = 2. After the fix: 1 HTML only.
+    assert call_count == 1, (
+        f"Expected 1 call (HTML only, no plain fallback), got {call_count}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_text_falls_back_on_bad_request() -> None:
+    """BadRequest (HTML parse error) should still trigger plain-text fallback."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    original_send = channel._app.bot.send_message
+    html_call_count = 0
+
+    async def html_fails(**kwargs):
+        nonlocal html_call_count
+        if kwargs.get("parse_mode") == "HTML":
+            html_call_count += 1
+            raise BadRequest("Can't parse entities")
+        return await original_send(**kwargs)
+
+    channel._app.bot.send_message = html_fails
+
+    import nanobot.channels.telegram as tg_mod
+    orig_delay = tg_mod._SEND_RETRY_BASE_DELAY
+    tg_mod._SEND_RETRY_BASE_DELAY = 0.01
+    try:
+        await channel._send_text(123, "hello **world**", None, {})
+    finally:
+        tg_mod._SEND_RETRY_BASE_DELAY = orig_delay
+
+    # HTML attempt failed with BadRequest → fallback to plain text succeeds.
+    assert html_call_count == 1, f"Expected 1 HTML attempt, got {html_call_count}"
+    assert len(channel._app.bot.sent_messages) == 1
+    # Plain text send should NOT have parse_mode
+    assert channel._app.bot.sent_messages[0].get("parse_mode") is None
+
+
+@pytest.mark.asyncio
+async def test_send_text_bad_request_plain_fallback_exhausted() -> None:
+    """When both HTML and plain-text fallback fail with BadRequest, the error propagates."""
+    from telegram.error import BadRequest
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    call_count = 0
+
+    async def always_bad_request(**kwargs):
+        nonlocal call_count
+        call_count += 1
+        raise BadRequest("Bad request")
+
+    channel._app.bot.send_message = always_bad_request
+
+    import nanobot.channels.telegram as tg_mod
+    orig_delay = tg_mod._SEND_RETRY_BASE_DELAY
+    tg_mod._SEND_RETRY_BASE_DELAY = 0.01
+    try:
+        with pytest.raises(BadRequest):
+            await channel._send_text(123, "hello", None, {})
+    finally:
+        tg_mod._SEND_RETRY_BASE_DELAY = orig_delay
+
+    # _call_with_retry does NOT retry BadRequest (only TimedOut/RetryAfter),
+    # so HTML fails after 1 attempt → fallback to plain also fails after 1 attempt.
+    # Before the fix: 2 total. After the fix: still 2 (BadRequest SHOULD fallback).
+    assert call_count == 2, f"Expected 2 calls (1 HTML + 1 plain), got {call_count}"

@@ -520,7 +520,10 @@ class TelegramChannel(BaseChannel):
                 reply_parameters=reply_params,
                 **(thread_kwargs or {}),
             )
-        except Exception as e:
+        except BadRequest as e:
+            # Only fall back to plain text on actual HTML parse/format errors.
+            # Network errors (TimedOut, NetworkError) should propagate immediately
+            # to avoid doubling connection demand during pool exhaustion.
             logger.warning("HTML parse failed, falling back to plain text: {}", e)
             try:
                 await self._call_with_retry(
