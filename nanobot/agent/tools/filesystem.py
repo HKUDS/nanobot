@@ -2,11 +2,13 @@
 
 import difflib
 import mimetypes
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
+from nanobot.agent.tools import file_state
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 from nanobot.config.paths import get_media_dir
 
@@ -60,6 +62,36 @@ class _FsTool(Tool):
 # ---------------------------------------------------------------------------
 
 
+_BLOCKED_DEVICE_PATHS = frozenset({
+    "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
+    "/dev/stdin", "/dev/stdout", "/dev/stderr",
+    "/dev/tty", "/dev/console",
+    "/dev/fd/0", "/dev/fd/1", "/dev/fd/2",
+})
+
+
+def _is_blocked_device(path: str | Path) -> bool:
+    """Check if path is a blocked device that could hang or produce infinite output."""
+    import re
+    raw = str(path)
+    if raw in _BLOCKED_DEVICE_PATHS:
+        return True
+    if re.match(r"/proc/\d+/fd/[012]$", raw) or re.match(r"/proc/self/fd/[012]$", raw):
+        return True
+    return False
+
+
+def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
+    """Parse a page range like '2-5' into 0-based (start, end) inclusive."""
+    parts = pages.strip().split("-")
+    if len(parts) == 1:
+        p = int(parts[0])
+        return max(0, p - 1), min(p - 1, total - 1)
+    start = int(parts[0])
+    end = int(parts[1])
+    return max(0, start - 1), min(end - 1, total - 1)
+
+
 @tool_parameters(
     tool_parameters_schema(
         path=StringSchema("The file path to read"),
@@ -73,6 +105,7 @@ class _FsTool(Tool):
             description="Maximum number of lines to read (default 2000)",
             minimum=1,
         ),
+        pages=StringSchema("Page range for PDF files, e.g. '1-5' (default: all, max 20 pages)"),
         required=["path"],
     )
 )
@@ -81,6 +114,7 @@ class ReadFileTool(_FsTool):
 
     _MAX_CHARS = 128_000
     _DEFAULT_LIMIT = 2000
+    _MAX_PDF_PAGES = 20
 
     @property
     def name(self) -> str:
@@ -89,9 +123,10 @@ class ReadFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Read a text file. Output format: LINE_NUM|CONTENT. "
+            "Read a file (text or image). Text output format: LINE_NUM|CONTENT. "
+            "Images return visual content for analysis. "
             "Use offset and limit for large files. "
-            "Cannot read binary files or images. "
+            "Cannot read non-image binary files. "
             "Reads exceeding ~128K chars are truncated."
         )
 
@@ -99,15 +134,26 @@ class ReadFileTool(_FsTool):
     def read_only(self) -> bool:
         return True
 
-    async def execute(self, path: str | None = None, offset: int = 1, limit: int | None = None, **kwargs: Any) -> Any:
+    async def execute(self, path: str | None = None, offset: int = 1, limit: int | None = None, pages: str | None = None, **kwargs: Any) -> Any:
         try:
             if not path:
                 return "Error reading file: Unknown path"
+
+            # Device path blacklist
+            if _is_blocked_device(path):
+                return f"Error: Reading {path} is blocked (device path that could hang or produce infinite output)."
+
             fp = self._resolve(path)
+            if _is_blocked_device(fp):
+                return f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output)."
             if not fp.exists():
                 return f"Error: File not found: {path}"
             if not fp.is_file():
                 return f"Error: Not a file: {path}"
+
+            # PDF support
+            if fp.suffix.lower() == ".pdf":
+                return self._read_pdf(fp, pages)
 
             raw = fp.read_bytes()
             if not raw:
@@ -116,6 +162,10 @@ class ReadFileTool(_FsTool):
             mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
             if mime and mime.startswith("image/"):
                 return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
+
+            # Read dedup: same path + offset + limit + unchanged mtime → stub
+            if file_state.is_unchanged(fp, offset=offset, limit=limit):
+                return f"[File unchanged since last read: {path}]"
 
             try:
                 text_content = raw.decode("utf-8")
@@ -149,11 +199,58 @@ class ReadFileTool(_FsTool):
                 result += f"\n\n(Showing lines {offset}-{end} of {total}. Use offset={end + 1} to continue.)"
             else:
                 result += f"\n\n(End of file — {total} lines total)"
+            file_state.record_read(fp, offset=offset, limit=limit)
             return result
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
             return f"Error reading file: {e}"
+
+    def _read_pdf(self, fp: Path, pages: str | None) -> str:
+        try:
+            import fitz  # pymupdf
+        except ImportError:
+            return "Error: PDF reading requires pymupdf. Install with: pip install pymupdf"
+
+        try:
+            doc = fitz.open(str(fp))
+        except Exception as e:
+            return f"Error reading PDF: {e}"
+
+        total_pages = len(doc)
+        if pages:
+            try:
+                start, end = _parse_page_range(pages, total_pages)
+            except (ValueError, IndexError):
+                doc.close()
+                return f"Error: Invalid page range '{pages}'. Use format like '1-5'."
+            if start > end or start >= total_pages:
+                doc.close()
+                return f"Error: Page range '{pages}' is out of bounds (document has {total_pages} pages)."
+        else:
+            start = 0
+            end = min(total_pages - 1, self._MAX_PDF_PAGES - 1)
+
+        if end - start + 1 > self._MAX_PDF_PAGES:
+            end = start + self._MAX_PDF_PAGES - 1
+
+        parts: list[str] = []
+        for i in range(start, end + 1):
+            page = doc[i]
+            text = page.get_text().strip()
+            if text:
+                parts.append(f"--- Page {i + 1} ---\n{text}")
+        doc.close()
+
+        if not parts:
+            return f"(PDF has no extractable text: {fp})"
+
+        result = "\n\n".join(parts)
+        if end < total_pages - 1:
+            result += f"\n\n(Showing pages {start + 1}-{end + 1} of {total_pages}. Use pages='{end + 2}-{min(end + 1 + self._MAX_PDF_PAGES, total_pages)}' to continue.)"
+        if len(result) > self._MAX_CHARS:
+            result = result[:self._MAX_CHARS] + "\n\n(PDF text truncated at ~128K chars)"
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +289,7 @@ class WriteFileTool(_FsTool):
             fp = self._resolve(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
             fp.write_text(content, encoding="utf-8")
+            file_state.record_write(fp)
             return f"Successfully wrote {len(content)} characters to {fp}"
         except PermissionError as e:
             return f"Error: {e}"
@@ -203,30 +301,269 @@ class WriteFileTool(_FsTool):
 # edit_file
 # ---------------------------------------------------------------------------
 
+_QUOTE_TABLE = str.maketrans({
+    "\u2018": "'", "\u2019": "'",  # curly single → straight
+    "\u201c": '"', "\u201d": '"',  # curly double → straight
+    "'": "'", '"': '"',            # identity (kept for completeness)
+})
+
+
+def _normalize_quotes(s: str) -> str:
+    return s.translate(_QUOTE_TABLE)
+
+
+def _curly_double_quotes(text: str) -> str:
+    parts: list[str] = []
+    opening = True
+    for ch in text:
+        if ch == '"':
+            parts.append("\u201c" if opening else "\u201d")
+            opening = not opening
+        else:
+            parts.append(ch)
+    return "".join(parts)
+
+
+def _curly_single_quotes(text: str) -> str:
+    parts: list[str] = []
+    opening = True
+    for i, ch in enumerate(text):
+        if ch != "'":
+            parts.append(ch)
+            continue
+        prev_ch = text[i - 1] if i > 0 else ""
+        next_ch = text[i + 1] if i + 1 < len(text) else ""
+        if prev_ch.isalnum() and next_ch.isalnum():
+            parts.append("\u2019")
+            continue
+        parts.append("\u2018" if opening else "\u2019")
+        opening = not opening
+    return "".join(parts)
+
+
+def _preserve_quote_style(old_text: str, actual_text: str, new_text: str) -> str:
+    """Preserve curly quote style when a quote-normalized fallback matched."""
+    if _normalize_quotes(old_text.strip()) != _normalize_quotes(actual_text.strip()) or old_text == actual_text:
+        return new_text
+
+    styled = new_text
+    if any(ch in actual_text for ch in ("\u201c", "\u201d")) and '"' in styled:
+        styled = _curly_double_quotes(styled)
+    if any(ch in actual_text for ch in ("\u2018", "\u2019")) and "'" in styled:
+        styled = _curly_single_quotes(styled)
+    return styled
+
+
+def _leading_ws(line: str) -> str:
+    return line[: len(line) - len(line.lstrip(" \t"))]
+
+
+def _reindent_like_match(old_text: str, actual_text: str, new_text: str) -> str:
+    """Preserve the outer indentation from the actual matched block."""
+    old_lines = old_text.split("\n")
+    actual_lines = actual_text.split("\n")
+    if len(old_lines) != len(actual_lines):
+        return new_text
+
+    comparable = [
+        (old_line, actual_line)
+        for old_line, actual_line in zip(old_lines, actual_lines)
+        if old_line.strip() and actual_line.strip()
+    ]
+    if not comparable or any(
+        _normalize_quotes(old_line.strip()) != _normalize_quotes(actual_line.strip())
+        for old_line, actual_line in comparable
+    ):
+        return new_text
+
+    old_ws = _leading_ws(comparable[0][0])
+    actual_ws = _leading_ws(comparable[0][1])
+    if actual_ws == old_ws:
+        return new_text
+
+    if old_ws:
+        if not actual_ws.startswith(old_ws):
+            return new_text
+        delta = actual_ws[len(old_ws):]
+    else:
+        delta = actual_ws
+
+    if not delta:
+        return new_text
+
+    return "\n".join((delta + line) if line else line for line in new_text.split("\n"))
+
+
+@dataclass(slots=True)
+class _MatchSpan:
+    start: int
+    end: int
+    text: str
+    line: int
+
+
+def _find_exact_matches(content: str, old_text: str) -> list[_MatchSpan]:
+    matches: list[_MatchSpan] = []
+    start = 0
+    while True:
+        idx = content.find(old_text, start)
+        if idx == -1:
+            break
+        matches.append(
+            _MatchSpan(
+                start=idx,
+                end=idx + len(old_text),
+                text=content[idx : idx + len(old_text)],
+                line=content.count("\n", 0, idx) + 1,
+            )
+        )
+        start = idx + max(1, len(old_text))
+    return matches
+
+
+def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = False) -> list[_MatchSpan]:
+    old_lines = old_text.splitlines()
+    if not old_lines:
+        return []
+
+    content_lines = content.splitlines()
+    content_lines_keepends = content.splitlines(keepends=True)
+    if len(content_lines) < len(old_lines):
+        return []
+
+    offsets: list[int] = []
+    pos = 0
+    for line in content_lines_keepends:
+        offsets.append(pos)
+        pos += len(line)
+    offsets.append(pos)
+
+    if normalize_quotes:
+        stripped_old = [_normalize_quotes(line.strip()) for line in old_lines]
+    else:
+        stripped_old = [line.strip() for line in old_lines]
+
+    matches: list[_MatchSpan] = []
+    window_size = len(stripped_old)
+    for i in range(len(content_lines) - window_size + 1):
+        window = content_lines[i : i + window_size]
+        if normalize_quotes:
+            comparable = [_normalize_quotes(line.strip()) for line in window]
+        else:
+            comparable = [line.strip() for line in window]
+        if comparable != stripped_old:
+            continue
+
+        start = offsets[i]
+        end = offsets[i + window_size]
+        if content_lines_keepends[i + window_size - 1].endswith("\n"):
+            end -= 1
+        matches.append(
+            _MatchSpan(
+                start=start,
+                end=end,
+                text=content[start:end],
+                line=i + 1,
+            )
+        )
+    return matches
+
+
+def _find_quote_matches(content: str, old_text: str) -> list[_MatchSpan]:
+    norm_content = _normalize_quotes(content)
+    norm_old = _normalize_quotes(old_text)
+    matches: list[_MatchSpan] = []
+    start = 0
+    while True:
+        idx = norm_content.find(norm_old, start)
+        if idx == -1:
+            break
+        matches.append(
+            _MatchSpan(
+                start=idx,
+                end=idx + len(old_text),
+                text=content[idx : idx + len(old_text)],
+                line=content.count("\n", 0, idx) + 1,
+            )
+        )
+        start = idx + max(1, len(norm_old))
+    return matches
+
+
+def _find_matches(content: str, old_text: str) -> list[_MatchSpan]:
+    """Locate all matches using progressively looser strategies."""
+    for matcher in (
+        lambda: _find_exact_matches(content, old_text),
+        lambda: _find_trim_matches(content, old_text),
+        lambda: _find_trim_matches(content, old_text, normalize_quotes=True),
+        lambda: _find_quote_matches(content, old_text),
+    ):
+        matches = matcher()
+        if matches:
+            return matches
+    return []
+
+
+def _find_match_line_numbers(content: str, old_text: str) -> list[int]:
+    """Return 1-based starting line numbers for the current matching strategies."""
+    return [match.line for match in _find_matches(content, old_text)]
+
+
+def _collapse_internal_whitespace(text: str) -> str:
+    return "\n".join(" ".join(line.split()) for line in text.splitlines())
+
+
+def _diagnose_near_match(old_text: str, actual_text: str) -> list[str]:
+    """Return actionable hints describing why text was close but not exact."""
+    hints: list[str] = []
+
+    if old_text.lower() == actual_text.lower() and old_text != actual_text:
+        hints.append("letter case differs")
+    if _collapse_internal_whitespace(old_text) == _collapse_internal_whitespace(actual_text) and old_text != actual_text:
+        hints.append("whitespace differs")
+    if old_text.rstrip("\n") == actual_text.rstrip("\n") and old_text != actual_text:
+        hints.append("trailing newline differs")
+    if _normalize_quotes(old_text) == _normalize_quotes(actual_text) and old_text != actual_text:
+        hints.append("quote style differs")
+
+    return hints
+
+
+def _best_window(old_text: str, content: str) -> tuple[float, int, list[str], list[str]]:
+    """Find the closest line-window match and return ratio/start/snippet/hints."""
+    lines = content.splitlines(keepends=True)
+    old_lines = old_text.splitlines(keepends=True)
+    window = max(1, len(old_lines))
+
+    best_ratio, best_start = -1.0, 0
+    best_window_lines: list[str] = []
+
+    for i in range(max(1, len(lines) - window + 1)):
+        current = lines[i : i + window]
+        ratio = difflib.SequenceMatcher(None, old_lines, current).ratio()
+        if ratio > best_ratio:
+            best_ratio, best_start = ratio, i
+            best_window_lines = current
+
+    actual_text = "".join(best_window_lines).replace("\r\n", "\n").rstrip("\n")
+    hints = _diagnose_near_match(old_text.replace("\r\n", "\n").rstrip("\n"), actual_text)
+    return best_ratio, best_start, best_window_lines, hints
+
+
 def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
-    """Locate old_text in content: exact first, then line-trimmed sliding window.
+    """Locate old_text in content with a multi-level fallback chain:
+
+    1. Exact substring match
+    2. Line-trimmed sliding window (handles indentation differences)
+    3. Smart quote normalization (curly ↔ straight quotes)
 
     Both inputs should use LF line endings (caller normalises CRLF).
     Returns (matched_fragment, count) or (None, 0).
     """
-    if old_text in content:
-        return old_text, content.count(old_text)
-
-    old_lines = old_text.splitlines()
-    if not old_lines:
+    matches = _find_matches(content, old_text)
+    if not matches:
         return None, 0
-    stripped_old = [l.strip() for l in old_lines]
-    content_lines = content.splitlines()
-
-    candidates = []
-    for i in range(len(content_lines) - len(stripped_old) + 1):
-        window = content_lines[i : i + len(stripped_old)]
-        if [l.strip() for l in window] == stripped_old:
-            candidates.append("\n".join(window))
-
-    if candidates:
-        return candidates[0], len(candidates)
-    return None, 0
+    return matches[0].text, len(matches)
 
 
 @tool_parameters(
@@ -241,6 +578,9 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
 class EditFileTool(_FsTool):
     """Edit a file by replacing text with fallback matching."""
 
+    _MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024  # 1 GiB
+    _MARKDOWN_EXTS = frozenset({".md", ".mdx", ".markdown"})
+
     @property
     def name(self) -> str:
         return "edit_file"
@@ -249,10 +589,15 @@ class EditFileTool(_FsTool):
     def description(self) -> str:
         return (
             "Edit a file by replacing old_text with new_text. "
-            "Tolerates minor whitespace/indentation differences. "
+            "Tolerates minor whitespace/indentation differences and curly/straight quote mismatches. "
             "If old_text matches multiple times, you must provide more context "
             "or set replace_all=true. Shows a diff of the closest match on failure."
         )
+
+    @staticmethod
+    def _strip_trailing_ws(text: str) -> str:
+        """Strip trailing whitespace from each line."""
+        return "\n".join(line.rstrip() for line in text.split("\n"))
 
     async def execute(
         self, path: str | None = None, old_text: str | None = None,
@@ -267,55 +612,133 @@ class EditFileTool(_FsTool):
             if new_text is None:
                 raise ValueError("Unknown new_text")
 
+            # .ipynb detection
+            if path.endswith(".ipynb"):
+                return "Error: This is a Jupyter notebook. Use the notebook_edit tool instead of edit_file."
+
             fp = self._resolve(path)
+
+            # Create-file semantics: old_text='' + file doesn't exist → create
             if not fp.exists():
-                return f"Error: File not found: {path}"
+                if old_text == "":
+                    fp.parent.mkdir(parents=True, exist_ok=True)
+                    fp.write_text(new_text, encoding="utf-8")
+                    file_state.record_write(fp)
+                    return f"Successfully created {fp}"
+                return self._file_not_found_msg(path, fp)
+
+            # File size protection
+            try:
+                fsize = fp.stat().st_size
+            except OSError:
+                fsize = 0
+            if fsize > self._MAX_EDIT_FILE_SIZE:
+                return f"Error: File too large to edit ({fsize / (1024**3):.1f} GiB). Maximum is 1 GiB."
+
+            # Create-file: old_text='' but file exists and not empty → reject
+            if old_text == "":
+                raw = fp.read_bytes()
+                content = raw.decode("utf-8")
+                if content.strip():
+                    return f"Error: Cannot create file — {path} already exists and is not empty."
+                fp.write_text(new_text, encoding="utf-8")
+                file_state.record_write(fp)
+                return f"Successfully edited {fp}"
+
+            # Read-before-edit check
+            warning = file_state.check_read(fp)
 
             raw = fp.read_bytes()
             uses_crlf = b"\r\n" in raw
             content = raw.decode("utf-8").replace("\r\n", "\n")
-            match, count = _find_match(content, old_text.replace("\r\n", "\n"))
+            norm_old = old_text.replace("\r\n", "\n")
+            matches = _find_matches(content, norm_old)
 
-            if match is None:
+            if not matches:
                 return self._not_found_msg(old_text, content, path)
+            count = len(matches)
             if count > 1 and not replace_all:
+                line_numbers = [match.line for match in matches]
+                preview = ", ".join(f"line {n}" for n in line_numbers[:3])
+                if len(line_numbers) > 3:
+                    preview += ", ..."
+                location_hint = f" at {preview}" if preview else ""
                 return (
-                    f"Warning: old_text appears {count} times. "
+                    f"Warning: old_text appears {count} times{location_hint}. "
                     "Provide more context to make it unique, or set replace_all=true."
                 )
 
             norm_new = new_text.replace("\r\n", "\n")
-            new_content = content.replace(match, norm_new) if replace_all else content.replace(match, norm_new, 1)
+
+            # Trailing whitespace stripping (skip markdown to preserve double-space line breaks)
+            if fp.suffix.lower() not in self._MARKDOWN_EXTS:
+                norm_new = self._strip_trailing_ws(norm_new)
+
+            selected = matches if replace_all else matches[:1]
+            new_content = content
+            for match in reversed(selected):
+                replacement = _preserve_quote_style(norm_old, match.text, norm_new)
+                replacement = _reindent_like_match(norm_old, match.text, replacement)
+
+                # Delete-line cleanup: when deleting text (new_text=''), consume trailing
+                # newline to avoid leaving a blank line
+                end = match.end
+                if replacement == "" and not match.text.endswith("\n") and content[end:end + 1] == "\n":
+                    end += 1
+
+                new_content = new_content[: match.start] + replacement + new_content[end:]
             if uses_crlf:
                 new_content = new_content.replace("\n", "\r\n")
 
             fp.write_bytes(new_content.encode("utf-8"))
-            return f"Successfully edited {fp}"
+            file_state.record_write(fp)
+            msg = f"Successfully edited {fp}"
+            if warning:
+                msg = f"{warning}\n{msg}"
+            return msg
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
             return f"Error editing file: {e}"
 
+    def _file_not_found_msg(self, path: str, fp: Path) -> str:
+        """Build an error message with 'Did you mean ...?' suggestions."""
+        parent = fp.parent
+        suggestions: list[str] = []
+        if parent.is_dir():
+            siblings = [f.name for f in parent.iterdir() if f.is_file()]
+            close = difflib.get_close_matches(fp.name, siblings, n=3, cutoff=0.6)
+            suggestions = [str(parent / c) for c in close]
+        parts = [f"Error: File not found: {path}"]
+        if suggestions:
+            parts.append("Did you mean: " + ", ".join(suggestions) + "?")
+        return "\n".join(parts)
+
     @staticmethod
     def _not_found_msg(old_text: str, content: str, path: str) -> str:
-        lines = content.splitlines(keepends=True)
-        old_lines = old_text.splitlines(keepends=True)
-        window = len(old_lines)
-
-        best_ratio, best_start = 0.0, 0
-        for i in range(max(1, len(lines) - window + 1)):
-            ratio = difflib.SequenceMatcher(None, old_lines, lines[i : i + window]).ratio()
-            if ratio > best_ratio:
-                best_ratio, best_start = ratio, i
-
+        best_ratio, best_start, best_window_lines, hints = _best_window(old_text, content)
         if best_ratio > 0.5:
             diff = "\n".join(difflib.unified_diff(
-                old_lines, lines[best_start : best_start + window],
+                old_text.splitlines(keepends=True),
+                best_window_lines,
                 fromfile="old_text (provided)",
                 tofile=f"{path} (actual, line {best_start + 1})",
                 lineterm="",
             ))
-            return f"Error: old_text not found in {path}.\nBest match ({best_ratio:.0%} similar) at line {best_start + 1}:\n{diff}"
+            hint_text = ""
+            if hints:
+                hint_text = "\nPossible cause: " + ", ".join(hints) + "."
+            return (
+                f"Error: old_text not found in {path}."
+                f"{hint_text}\nBest match ({best_ratio:.0%} similar) at line {best_start + 1}:\n{diff}"
+            )
+
+        if hints:
+            return (
+                f"Error: old_text not found in {path}. "
+                f"Possible cause: {', '.join(hints)}. "
+                "Copy the exact text from read_file and try again."
+            )
         return f"Error: old_text not found in {path}. No similar text found. Verify the file content."
 
 

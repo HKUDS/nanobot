@@ -34,3 +34,32 @@ class TestStripThinkTag:
 
     def test_empty_string(self):
         assert strip_think("") == ""
+
+
+class TestStripThinkFalsePositive:
+    """Ensure mid-content <think>/<thought> tags are NOT stripped (#3004)."""
+
+    def test_backtick_think_tag_preserved(self):
+        text = "*Think Stripping:* A new utility to strip `<think>` tags from output."
+        assert strip_think(text) == text
+
+    def test_prose_think_tag_preserved(self):
+        text = "The model emits <think> at the start of its response."
+        assert strip_think(text) == text
+
+    def test_code_block_think_tag_preserved(self):
+        text = "Example:\n```\ntext = re.sub(r\"<think>[\\s\\S]*\", \"\", text)\n```\nDone."
+        assert strip_think(text) == text
+
+    def test_backtick_thought_tag_preserved(self):
+        text = "Gemma 4 uses `<thought>` blocks for reasoning."
+        assert strip_think(text) == text
+
+    def test_prefix_unclosed_think_still_stripped(self):
+        assert strip_think("<think>reasoning without closing") == ""
+
+    def test_prefix_unclosed_think_with_whitespace(self):
+        assert strip_think("  <think>reasoning...") == ""
+
+    def test_prefix_unclosed_thought_still_stripped(self):
+        assert strip_think("<thought>reasoning without closing") == ""

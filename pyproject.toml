@@ -76,12 +76,16 @@ discord = [
 langsmith = [
     "langsmith>=0.1.0",
 ]
+pdf = [
+    "pymupdf>=1.25.0",
+]
 dev = [
     "pytest>=9.0.0,<10.0.0",
     "pytest-asyncio>=1.3.0,<2.0.0",
     "aiohttp>=3.9.0,<4.0.0",
     "pytest-cov>=6.0.0,<7.0.0",
     "ruff>=0.1.0",
+    "pymupdf>=1.25.0",
 ]
 
 [project.scripts]
