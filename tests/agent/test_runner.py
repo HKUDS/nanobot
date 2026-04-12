@@ -1014,10 +1014,23 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="working",
-        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
-    ))
+    # Use different arguments on each call so the stagnation guard does not
+    # fire.  This tests the max_iterations path for a model that makes
+    # progress (different args each time) but never produces a final answer.
+    _call_n = {"n": 0}
+
+    async def _chat(*, messages, **kwargs):
+        _call_n["n"] += 1
+        return LLMResponse(
+            content="working",
+            tool_calls=[ToolCallRequest(
+                id=f"call_{_call_n['n']}",
+                name="list_dir",
+                arguments={"path": f"./dir_{_call_n['n']}"},
+            )],
+        )
+
+    provider.chat_with_retry = _chat
     mgr = SubagentManager(
         provider=provider,
         workspace=tmp_path,
@@ -2410,3 +2423,151 @@ async def test_dispatch_republishes_leftover_queue_messages(tmp_path):
     contents = [m.content for m in msgs]
     assert "leftover-1" in contents
     assert "leftover-2" in contents
+
+
+def test_tool_call_signature_deterministic():
+    """tool_call_signature produces the same key for the same name+args."""
+    from nanobot.utils.runtime import tool_call_signature
+
+    sig_a = tool_call_signature("read_file", {"path": "/tmp/a.txt", "limit": 50})
+    sig_b = tool_call_signature("read_file", {"limit": 50, "path": "/tmp/a.txt"})
+    assert sig_a == sig_b, "Argument order should not affect the signature"
+
+    sig_c = tool_call_signature("read_file", {"path": "/tmp/b.txt", "limit": 50})
+    assert sig_a != sig_c, "Different arguments should produce different signatures"
+
+    sig_d = tool_call_signature("grep", {"path": "/tmp/a.txt", "limit": 50})
+    assert sig_a != sig_d, "Different tool names should produce different signatures"
+
+
+def test_repeated_tool_call_error_blocks_after_threshold():
+    """repeated_tool_call_error should return None for the first N calls
+    and an error string after that."""
+    from nanobot.utils.runtime import repeated_tool_call_error
+
+    counts: dict[str, int] = {}
+    args = {"path": "history.jsonl", "limit": 50, "offset": 1}
+
+    # First 3 calls should pass (default max_repeats=3)
+    for _ in range(3):
+        result = repeated_tool_call_error("read_file", args, counts)
+        assert result is None
+
+    # 4th call should be blocked
+    result = repeated_tool_call_error("read_file", args, counts)
+    assert result is not None
+    assert "read_file" in result
+    assert "identical arguments" in result
+
+
+def test_repeated_tool_call_error_different_args_not_blocked():
+    """Different arguments for the same tool should not trigger blocking."""
+    from nanobot.utils.runtime import repeated_tool_call_error
+
+    counts: dict[str, int] = {}
+
+    for i in range(10):
+        result = repeated_tool_call_error("read_file", {"path": f"file_{i}.txt"}, counts)
+        assert result is None, f"Call {i} with unique args should not be blocked"
+
+
+@pytest.mark.asyncio
+async def test_runner_blocks_repeated_identical_tool_calls():
+    """The runner should detect when the model calls the same tool with
+    identical arguments repeatedly and block the call with a helpful error,
+    preventing infinite loops like the one described in issue #3073."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        # First 5 iterations: model stubbornly calls read_file with same args
+        if call_count["n"] <= 5:
+            return LLMResponse(
+                content="let me check",
+                tool_calls=[ToolCallRequest(
+                    id=f"call_{call_count['n']}",
+                    name="read_file",
+                    arguments={"path": "~/.nanobot/workspace/memory/history.jsonl", "limit": 50, "offset": 1},
+                )],
+                usage={"prompt_tokens": 100, "completion_tokens": 50},
+            )
+        # After getting the stagnation error, model produces final response
+        return LLMResponse(content="Here is a summary of recent events.", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="line 1: something happened\nline 2: another thing")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "What happened recently?"},
+        ],
+        tools=tools,
+        model="test-model",
+        max_iterations=10,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    # The model should have been forced to produce a final response
+    assert result.final_content == "Here is a summary of recent events."
+    assert result.stop_reason == "completed"
+    # read_file should have been called but blocked after 3 repeats (default)
+    assert "read_file" in result.tools_used
+    # Check that at least one tool event records the stagnation block
+    stagnation_events = [
+        e for e in result.tool_events if "stagnation" in e.get("detail", "")
+    ]
+    assert len(stagnation_events) > 0
+
+
+@pytest.mark.asyncio
+async def test_runner_allows_same_tool_with_different_arguments():
+    """Calls to the same tool with *different* arguments should not be blocked."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] <= 4:
+            return LLMResponse(
+                content="reading",
+                tool_calls=[ToolCallRequest(
+                    id=f"call_{call_count['n']}",
+                    name="read_file",
+                    arguments={"path": f"file_{call_count['n']}.txt"},
+                )],
+                usage={"prompt_tokens": 100, "completion_tokens": 50},
+            )
+        return LLMResponse(content="done reading all files", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="file content")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "Read all files"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=10,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "done reading all files"
+    assert result.stop_reason == "completed"
+    # All 4 reads should have succeeded since arguments differ
+    assert result.tools_used.count("read_file") == 4
+    # No stagnation events
+    stagnation_events = [
+        e for e in result.tool_events if "stagnation" in e.get("detail", "")
+    ]
+    assert len(stagnation_events) == 0

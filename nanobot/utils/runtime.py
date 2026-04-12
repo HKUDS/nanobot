@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from loguru import logger
@@ -9,6 +10,7 @@ from loguru import logger
 from nanobot.utils.helpers import stringify_text_blocks
 
 _MAX_REPEAT_EXTERNAL_LOOKUPS = 2
+_MAX_REPEAT_TOOL_CALLS = 3
 
 EMPTY_FINAL_RESPONSE_MESSAGE = (
     "I completed the tool steps but couldn't produce a final answer. "
@@ -94,4 +96,59 @@ def repeated_external_lookup_error(
     return (
         "Error: repeated external lookup blocked. "
         "Use the results you already have to answer, or try a meaningfully different source."
+    )
+
+
+# ---------------------------------------------------------------------------
+# General tool-call stagnation detection
+# ---------------------------------------------------------------------------
+
+
+def tool_call_signature(tool_name: str, arguments: dict[str, Any]) -> str:
+    """Stable signature for a tool call (name + sorted arguments).
+
+    Returns a deterministic string key so the runner can detect when the
+    model is calling the same tool with the same arguments repeatedly —
+    a common symptom of the model getting stuck in a loop.
+    """
+    try:
+        args_key = json.dumps(arguments, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        args_key = str(arguments)
+    return f"{tool_name}:{args_key}"
+
+
+def repeated_tool_call_error(
+    tool_name: str,
+    arguments: dict[str, Any],
+    seen_counts: dict[str, int],
+    *,
+    max_repeats: int = _MAX_REPEAT_TOOL_CALLS,
+) -> str | None:
+    """Return an error string when the same tool+args combination repeats too many times.
+
+    This is a generalised version of :func:`repeated_external_lookup_error`
+    that covers **all** tools, not just web searches.  It catches the common
+    failure mode where the model enters an infinite loop calling the same
+    tool (e.g. ``read_file`` on ``history.jsonl``) without making progress.
+
+    The caller should maintain a ``seen_counts`` dict across the entire
+    ``AgentRunner.run()`` invocation and pass it on every tool execution.
+    """
+    sig = tool_call_signature(tool_name, arguments)
+    count = seen_counts.get(sig, 0) + 1
+    seen_counts[sig] = count
+    if count <= max_repeats:
+        return None
+    logger.warning(
+        "Blocking repeated tool call {} on attempt {} (max {})",
+        sig[:200],
+        count,
+        max_repeats,
+    )
+    return (
+        f"Error: you have already called {tool_name} with identical arguments "
+        f"{max_repeats} times. Summarize the information you already have "
+        "and provide your response to the user. Do not call this tool again "
+        "with the same arguments."
     )
