@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import (
@@ -16,10 +16,11 @@ from nanobot.agent.tools.schema import (
     tool_parameters_schema,
 )
 from nanobot.calendar.errors import CalendarError, CalendarErrorCode
-from nanobot.calendar.providers import (
-    LocalCalendarProvider,
-)
+from nanobot.calendar.providers import FeishuCalendarProvider, LocalCalendarProvider
 from nanobot.calendar.service import CalendarService
+
+if TYPE_CHECKING:
+    from nanobot.config.schema import ChannelsConfig
 
 
 def _json(data: Any) -> str:
@@ -48,7 +49,7 @@ def _error(code: str, message: str, details: dict[str, Any] | None = None) -> st
                 "find_free_slots",
             ],
         ),
-        provider=StringSchema("Provider name: local", nullable=True),
+        provider=StringSchema("Provider name: local | feishu", nullable=True),
         calendar_id=StringSchema("Calendar identifier", nullable=True),
         event_id=StringSchema("Event ID for update/delete", nullable=True),
         title=StringSchema("Event title", nullable=True),
@@ -69,9 +70,15 @@ def _error(code: str, message: str, details: dict[str, Any] | None = None) -> st
             nullable=True,
             additional_properties=True,
         ),
-        duration_minutes=IntegerSchema(description="Duration for find_free_slots", nullable=True, minimum=1),
-        step_minutes=IntegerSchema(description="Step size for find_free_slots", nullable=True, minimum=1),
-        limit=IntegerSchema(description="Max number of slots", nullable=True, minimum=1, maximum=20),
+        duration_minutes=IntegerSchema(
+            description="Duration for find_free_slots", nullable=True, minimum=1
+        ),
+        step_minutes=IntegerSchema(
+            description="Step size for find_free_slots", nullable=True, minimum=1
+        ),
+        limit=IntegerSchema(
+            description="Max number of slots", nullable=True, minimum=1, maximum=20
+        ),
         ignore_event_id=StringSchema("Event id to ignore during conflict checks", nullable=True),
         required=["action"],
     )
@@ -79,11 +86,55 @@ def _error(code: str, message: str, details: dict[str, Any] | None = None) -> st
 class CalendarTool(Tool):
     """Manage calendar events via unified provider APIs."""
 
-    def __init__(self, workspace: Path, default_timezone: str = "UTC"):
+    def __init__(
+        self,
+        workspace: Path,
+        default_timezone: str = "UTC",
+        feishu_app_id: str = "",
+        feishu_app_secret: str = "",
+        feishu_redirect_uri: str = "",
+        channels_config: ChannelsConfig | None = None,
+    ):
         self.default_timezone = default_timezone
+        self._feishu_app_id = feishu_app_id
+        self._feishu_app_secret = feishu_app_secret
+        self._feishu_redirect_uri = feishu_redirect_uri
+        self._channels_config = channels_config
         store_path = workspace / ".nanobot" / "calendar" / "events.json"
         self.service = CalendarService()
         self.service.register_provider(LocalCalendarProvider(store_path))
+        self._feishu_registered = False
+
+    def _ensure_feishu(self) -> None:
+        """Lazily register FeishuCalendarProvider on first use."""
+        if self._feishu_registered:
+            return
+        feishu_cfg: dict[str, Any] = (
+            (self._channels_config.model_extra or {}).get("feishu", {})
+            if self._channels_config
+            else {}
+        )
+        app_id = self._feishu_app_id or feishu_cfg.get("appId") or feishu_cfg.get("app_id") or None
+        app_secret = (
+            self._feishu_app_secret
+            or feishu_cfg.get("appSecret")
+            or feishu_cfg.get("app_secret")
+            or None
+        )
+        redirect_uri = (
+            self._feishu_redirect_uri
+            or feishu_cfg.get("redirectUri")
+            or feishu_cfg.get("redirect_uri")
+            or None
+        )
+        self.service.register_provider(
+            FeishuCalendarProvider(
+                app_id=app_id,
+                app_secret=app_secret,
+                redirect_uri=redirect_uri,
+            )
+        )
+        self._feishu_registered = True
 
     @property
     def name(self) -> str:
@@ -118,6 +169,7 @@ class CalendarTool(Tool):
         ignore_event_id: str | None = None,
         **kwargs: Any,
     ) -> str:
+        self._ensure_feishu()
         provider = provider or "local"
         timezone = timezone or self.default_timezone
 
@@ -131,7 +183,9 @@ class CalendarTool(Tool):
 
             if action == "create":
                 if not title:
-                    return _error(CalendarErrorCode.INVALID_ARGUMENT, "title is required for create")
+                    return _error(
+                        CalendarErrorCode.INVALID_ARGUMENT, "title is required for create"
+                    )
                 if not start_at or not end_at:
                     return _error(
                         CalendarErrorCode.INVALID_ARGUMENT,
@@ -163,9 +217,13 @@ class CalendarTool(Tool):
 
             if action == "update":
                 if not event_id:
-                    return _error(CalendarErrorCode.INVALID_ARGUMENT, "event_id is required for update")
+                    return _error(
+                        CalendarErrorCode.INVALID_ARGUMENT, "event_id is required for update"
+                    )
                 if not updates:
-                    return _error(CalendarErrorCode.INVALID_ARGUMENT, "updates is required for update")
+                    return _error(
+                        CalendarErrorCode.INVALID_ARGUMENT, "updates is required for update"
+                    )
                 normalized = dict(updates)
                 allowed_update_fields = {
                     "title",
@@ -204,7 +262,9 @@ class CalendarTool(Tool):
 
             if action == "delete":
                 if not event_id:
-                    return _error(CalendarErrorCode.INVALID_ARGUMENT, "event_id is required for delete")
+                    return _error(
+                        CalendarErrorCode.INVALID_ARGUMENT, "event_id is required for delete"
+                    )
                 ok = self.service.delete_event(
                     provider=provider,
                     calendar_id=calendar_id,

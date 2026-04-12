@@ -293,7 +293,13 @@ class AgentLoop:
             self.tools.register(WebFetchTool(proxy=self.web_config.proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
-        self.tools.register(CalendarTool(workspace=self.workspace, default_timezone=self.context.timezone or "UTC"))
+        self.tools.register(
+            CalendarTool(
+                workspace=self.workspace,
+                default_timezone=self.context.timezone or "UTC",
+                channels_config=self.channels_config,
+            )
+        )
         if self.cron_service:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")

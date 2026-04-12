@@ -5,6 +5,7 @@ import json
 import pytest
 
 from nanobot.agent.tools.calendar import CalendarTool
+from nanobot.calendar.providers import FeishuCalendarProvider
 
 
 @pytest.mark.asyncio
@@ -13,7 +14,8 @@ async def test_calendar_providers(tmp_path) -> None:
     result = await tool.execute(action="providers")
     data = json.loads(result)
     assert data["local"]["configured"] is True
-    assert list(data.keys()) == ["local"]
+    assert "feishu" in data
+    assert data["feishu"]["configured"] is False  # no credentials in test env
 
 
 @pytest.mark.asyncio
@@ -79,7 +81,7 @@ async def test_calendar_error_code_payload(tmp_path) -> None:
     tool = CalendarTool(workspace=tmp_path, default_timezone="Asia/Shanghai")
     result = await tool.execute(action="create")
     assert result.startswith("Error: ")
-    payload = json.loads(result[len("Error: "):])
+    payload = json.loads(result[len("Error: ") :])
     assert payload["error"]["code"] == "CAL_INVALID_ARGUMENT"
 
 
@@ -93,7 +95,7 @@ async def test_calendar_invalid_datetime_returns_invalid_argument(tmp_path) -> N
         end_at="2026-04-12T11:00:00+08:00",
     )
     assert result.startswith("Error: ")
-    payload = json.loads(result[len("Error: "):])
+    payload = json.loads(result[len("Error: ") :])
     assert payload["error"]["code"] == "CAL_INVALID_ARGUMENT"
 
 
@@ -116,7 +118,7 @@ async def test_calendar_update_unknown_field_returns_invalid_argument(tmp_path) 
         updates={"foo": "bar"},
     )
     assert result.startswith("Error: ")
-    payload = json.loads(result[len("Error: "):])
+    payload = json.loads(result[len("Error: ") :])
     assert payload["error"]["code"] == "CAL_INVALID_ARGUMENT"
     assert payload["error"]["details"]["unknown_fields"] == ["foo"]
 
@@ -134,3 +136,55 @@ def test_calendar_parameters_are_plain_json_schema(tmp_path) -> None:
     assert isinstance(params, dict)
     assert params["type"] == "object"
     assert params["properties"]["event_description"]["type"] == ["string", "null"]
+
+
+@pytest.mark.asyncio
+async def test_calendar_tool_passes_explicit_feishu_redirect_uri(tmp_path, monkeypatch) -> None:
+    captured: dict[str, str | None] = {}
+    original_ctor = FeishuCalendarProvider
+
+    class _FakeProvider:
+        name = "feishu"
+        reason = ""
+
+        def __init__(self, app_id=None, app_secret=None, redirect_uri=None, **kwargs):  # noqa: ANN001
+            captured["app_id"] = app_id
+            captured["app_secret"] = app_secret
+            captured["redirect_uri"] = redirect_uri
+
+        def configured(self) -> bool:
+            return False
+
+        def list_calendars(self):  # noqa: ANN201
+            return []
+
+        def list_events(self, **kwargs):  # noqa: ANN003, ANN201
+            return []
+
+        def get_event(self, **kwargs):  # noqa: ANN003, ANN201
+            return None
+
+        def create_event(self, **kwargs):  # noqa: ANN003, ANN201
+            return None
+
+        def update_event(self, **kwargs):  # noqa: ANN003, ANN201
+            return None
+
+        def delete_event(self, **kwargs):  # noqa: ANN003, ANN201
+            return False
+
+    monkeypatch.setattr("nanobot.agent.tools.calendar.FeishuCalendarProvider", _FakeProvider)
+    try:
+        tool = CalendarTool(
+            workspace=tmp_path,
+            default_timezone="Asia/Shanghai",
+            feishu_app_id="cli_a",
+            feishu_app_secret="sec_b",
+            feishu_redirect_uri="http://127.0.0.1:9000/callback",
+        )
+        await tool.execute(action="providers")
+        assert captured["app_id"] == "cli_a"
+        assert captured["app_secret"] == "sec_b"
+        assert captured["redirect_uri"] == "http://127.0.0.1:9000/callback"
+    finally:
+        monkeypatch.setattr("nanobot.agent.tools.calendar.FeishuCalendarProvider", original_ctor)

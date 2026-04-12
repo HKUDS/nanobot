@@ -34,3 +34,14 @@ This file documents non-obvious constraints and usage patterns.
 ## cron — Scheduled Reminders
 
 - Please refer to cron skill for usage.
+
+## calendar — Unified Calendar
+
+- Supported providers: `local`, `feishu`
+- `feishu` reads the user's personal Feishu calendar via OAuth 2.0 user access token:
+  - On first use it opens a browser for authorization and starts a local HTTP callback server
+  - OAuth tokens are stored under `feishu.token` in `~/.nanobot/auth.json` and refreshed automatically
+  - The auth file is shared across all calendar providers: `{"feishu": {"token": {...}}, ...}`
+  - Required OAuth scopes: `calendar:calendar:readonly`, `calendar:calendar.event:create`, `calendar:calendar.event:update`, `calendar:calendar.event:delete`
+  - App credentials come from the Feishu channel config (`appId` / `appSecret`) or env vars `NANOBOT_FEISHU_APP_ID` / `NANOBOT_FEISHU_APP_SECRET`
+  - Optional env vars: `NANOBOT_FEISHU_REDIRECT_URI` (default: `http://localhost:9527/callback`), `NANOBOT_FEISHU_CALENDAR_ID` (default: `primary`), `NANOBOT_FEISHU_DOMAIN` (`feishu` or `lark`)
