@@ -280,6 +280,9 @@ class QQChannel(BaseChannel):
                     msg_id=msg_id,
                     content=msg.content.strip(),
                 )
+        except (aiohttp.ClientError, OSError):
+            # Network / transport errors — propagate so ChannelManager can retry
+            raise
         except Exception:
             logger.exception("Error sending QQ message to chat_id={}", msg.chat_id)
 
