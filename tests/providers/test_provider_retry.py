@@ -166,6 +166,24 @@ async def test_non_transient_error_with_images_retries_without_images() -> None:
 
 
 @pytest.mark.asyncio
+async def test_successful_image_retry_mutates_original_messages_in_place() -> None:
+    """Successful no-image retry should update the caller's message history."""
+    provider = ScriptedProvider([
+        LLMResponse(content="model does not support images", finish_reason="error"),
+        LLMResponse(content="ok, no image"),
+    ])
+    messages = copy.deepcopy(_IMAGE_MSG)
+
+    response = await provider.chat_with_retry(messages=messages)
+
+    assert response.content == "ok, no image"
+    content = messages[0]["content"]
+    assert isinstance(content, list)
+    assert all(block.get("type") != "image_url" for block in content)
+    assert any("[image: /media/test.png]" in (block.get("text") or "") for block in content)
+
+
+@pytest.mark.asyncio
 async def test_non_transient_error_without_images_no_retry() -> None:
     """Non-transient errors without image content are returned immediately."""
     provider = ScriptedProvider([
