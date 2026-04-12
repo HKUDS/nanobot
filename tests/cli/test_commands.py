@@ -498,7 +498,7 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
         lambda path: seen.__setitem__("config_path", path),
     )
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path, **_kwargs: None)
     monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: object())
@@ -533,7 +533,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path, **_kwargs: None)
     monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
 
@@ -579,7 +579,7 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path, **_kwargs: None)
     monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
@@ -632,7 +632,7 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path, **_kwargs: None)
     monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
@@ -735,13 +735,13 @@ def _patch_cli_command_runtime(
 ) -> None:
     monkeypatch.setattr(
         "nanobot.config.loader.set_config_path",
-        set_config_path or (lambda _path: None),
+        set_config_path or (lambda _path, **_kwargs: None),
     )
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.config.loader.resolve_config_env_vars", lambda c: c)
     monkeypatch.setattr(
         "nanobot.cli.commands.sync_workspace_templates",
-        sync_templates or (lambda _path: None),
+        sync_templates or (lambda _path, **_kwargs: None),
     )
     monkeypatch.setattr(
         "nanobot.cli.commands._make_provider",
@@ -808,7 +808,7 @@ def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Pa
         monkeypatch,
         config,
         set_config_path=lambda path: seen.__setitem__("config_path", path),
-        sync_templates=lambda path: seen.__setitem__("workspace", path),
+        sync_templates=lambda path, **kwargs: seen.__setitem__("workspace", path),
         make_provider=_stop_gateway_provider,
     )
 
@@ -829,7 +829,7 @@ def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) 
     _patch_cli_command_runtime(
         monkeypatch,
         config,
-        sync_templates=lambda path: seen.__setitem__("workspace", path),
+        sync_templates=lambda path, **kwargs: seen.__setitem__("workspace", path),
         make_provider=_stop_gateway_provider,
     )
 
@@ -884,7 +884,7 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
 
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path, **_kwargs: None)
     monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: provider)
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
     monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
