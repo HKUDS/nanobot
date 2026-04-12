@@ -73,6 +73,7 @@ class AgentRunSpec:
     progress_callback: Any | None = None
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
+    confirmation_callback: Any | None = None
 
 
 @dataclass(slots=True)
@@ -622,6 +623,29 @@ class AgentRunner:
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
             return prep_error + _HINT, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
+
+        resolved_tool = tool if tool is not None else spec.tools.get(tool_call.name)
+        if (
+            spec.confirmation_callback is not None
+            and resolved_tool is not None
+            and getattr(resolved_tool, "requires_confirmation", False)
+        ):
+            pending = await spec.confirmation_callback(
+                tool_call.id, tool_call.name, params
+            )
+            if pending is not None:
+                event = {
+                    "name": tool_call.name,
+                    "status": "pending_confirmation",
+                    "detail": "Queued for user confirmation",
+                }
+                return (
+                    "[This action requires user confirmation before it can be executed. "
+                    "The user has been notified and will approve or reject it.]",
+                    event,
+                    None,
+                )
+
         try:
             if tool is not None:
                 result = await tool.execute(**params)

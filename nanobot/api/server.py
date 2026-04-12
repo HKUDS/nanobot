@@ -98,7 +98,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
     session_locks: dict[str, asyncio.Lock] = request.app["session_locks"]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
-    logger.info("API request session_key={} content={}", session_key, user_content[:80])
+    logger.info("API request session_key={} content_length={}", session_key, len(user_content))
 
     _FALLBACK = EMPTY_FINAL_RESPONSE_MESSAGE
 

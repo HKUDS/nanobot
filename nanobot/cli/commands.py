@@ -853,16 +853,23 @@ def gateway(
 
         from aiohttp import web
 
-        # Only require API key auth when one is configured
-        if api_key:
-            @web.middleware
-            async def auth_middleware(request, handler):
-                if request.headers.get("Authorization") != f"Bearer {api_key}":
-                    raise web.HTTPUnauthorized()
-                return await handler(request)
-            middlewares = [auth_middleware]
-        else:
-            middlewares = []
+        import hmac as _hmac
+
+        if not api_key:
+            logger.error(
+                "NANOBOT_API_KEY is required for gateway mode. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+            )
+            raise SystemExit(1)
+
+        @web.middleware
+        async def auth_middleware(request, handler):
+            provided = request.headers.get("Authorization", "")
+            expected = f"Bearer {api_key}"
+            if not _hmac.compare_digest(provided.encode(), expected.encode()):
+                raise web.HTTPUnauthorized()
+            return await handler(request)
+        middlewares = [auth_middleware]
 
         async def handle_agent_run(request):
             body = await request.json()
@@ -971,9 +978,25 @@ def gateway(
             await resp.write_eof()
             return resp
 
+        _EXECUTE_TOOL_BLOCKED = frozenset({
+            "exec", "write_file", "edit_file", "read_file", "list_dir",
+            "glob", "grep", "notebook_edit", "web_fetch", "web_search",
+            "message", "spawn", "cron", "save_memory",
+            "update_bot_identity", "update_user_profile",
+        })
+
         async def handle_execute_tool(request):
             body = await request.json()
             tool_name = body.get("tool_name")
+            if not tool_name:
+                return web.json_response(
+                    {"success": False, "error": "tool_name is required"}, status=400,
+                )
+            if tool_name in _EXECUTE_TOOL_BLOCKED or tool_name.startswith("mcp_"):
+                return web.json_response(
+                    {"success": False, "error": f"Tool '{tool_name}' cannot be invoked directly"},
+                    status=403,
+                )
             arguments = body.get("arguments", {})
             tool = agent.tools.get(tool_name)
             if not tool:

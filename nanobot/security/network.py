@@ -43,39 +43,42 @@ def _is_private(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return any(addr in net for net in _BLOCKED_NETWORKS)
 
 
-def validate_url_target(url: str) -> tuple[bool, str]:
+def validate_url_target(url: str) -> tuple[bool, str, list[str]]:
     """Validate a URL is safe to fetch: scheme, hostname, and resolved IPs.
 
-    Returns (ok, error_message).  When ok is True, error_message is empty.
+    Returns (ok, error_message, resolved_ips).  When ok is True, error_message
+    is empty and resolved_ips contains the validated addresses for DNS pinning.
     """
     try:
         p = urlparse(url)
     except Exception as e:
-        return False, str(e)
+        return False, str(e), []
 
     if p.scheme not in ("http", "https"):
-        return False, f"Only http/https allowed, got '{p.scheme or 'none'}'"
+        return False, f"Only http/https allowed, got '{p.scheme or 'none'}'", []
     if not p.netloc:
-        return False, "Missing domain"
+        return False, "Missing domain", []
 
     hostname = p.hostname
     if not hostname:
-        return False, "Missing hostname"
+        return False, "Missing hostname", []
 
     try:
         infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
     except socket.gaierror:
-        return False, f"Cannot resolve hostname: {hostname}"
+        return False, f"Cannot resolve hostname: {hostname}", []
 
+    resolved: list[str] = []
     for info in infos:
         try:
             addr = ipaddress.ip_address(info[4][0])
         except ValueError:
             continue
         if _is_private(addr):
-            return False, f"Blocked: {hostname} resolves to private/internal address {addr}"
+            return False, f"Blocked: {hostname} resolves to private/internal address {addr}", []
+        resolved.append(str(addr))
 
-    return True, ""
+    return True, "", resolved
 
 
 def validate_resolved_url(url: str) -> tuple[bool, str]:
@@ -83,22 +86,21 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
     try:
         p = urlparse(url)
     except Exception:
-        return True, ""
+        return False, "Failed to parse redirect URL"
 
     hostname = p.hostname
     if not hostname:
-        return True, ""
+        return False, "Redirect target has no hostname"
 
     try:
         addr = ipaddress.ip_address(hostname)
         if _is_private(addr):
             return False, f"Redirect target is a private address: {addr}"
     except ValueError:
-        # hostname is a domain name, resolve it
         try:
             infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         except socket.gaierror:
-            return True, ""
+            return False, f"Cannot resolve redirect target: {hostname}"
         for info in infos:
             try:
                 addr = ipaddress.ip_address(info[4][0])
@@ -114,7 +116,7 @@ def contains_internal_url(command: str) -> bool:
     """Return True if the command string contains a URL targeting an internal/private address."""
     for m in _URL_RE.finditer(command):
         url = m.group(0)
-        ok, _ = validate_url_target(url)
+        ok, _, _ips = validate_url_target(url)
         if not ok:
             return True
     return False

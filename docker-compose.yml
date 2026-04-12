@@ -6,11 +6,13 @@ x-common-config: &common-config
     - ~/.nanobot:/home/nanobot/.nanobot
   cap_drop:
     - ALL
-  cap_add:
-    - SYS_ADMIN
-  security_opt:
-    - apparmor=unconfined
-    - seccomp=unconfined
+  # SYS_ADMIN + seccomp/apparmor unconfined only needed if exec sandbox=bwrap.
+  # Uncomment below lines if you enable tools.exec with sandbox: "bwrap":
+  #   cap_add:
+  #     - SYS_ADMIN
+  #   security_opt:
+  #     - apparmor=unconfined
+  #     - seccomp=unconfined
 
 services:
   nanobot-gateway:
@@ -19,7 +21,7 @@ services:
     command: ["gateway"]
     restart: unless-stopped
     ports:
-      - 18790:18790
+      - "127.0.0.1:18790:18790"
     deploy:
       resources:
         limits:

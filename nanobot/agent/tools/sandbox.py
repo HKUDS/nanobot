@@ -30,11 +30,11 @@ def _bwrap(command: str, workspace: str, cwd: str) -> str:
     optional  = ["/bin", "/lib", "/lib64", "/etc/alternatives",
                  "/etc/ssl/certs", "/etc/resolv.conf", "/etc/ld.so.cache"]
 
-    args = ["bwrap", "--new-session", "--die-with-parent"]
+    args = ["bwrap", "--new-session", "--die-with-parent", "--unshare-net"]
     for p in required: args += ["--ro-bind",     p, p]
     for p in optional: args += ["--ro-bind-try", p, p]
     args += [
-        "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+        "--proc", "/proc", "--dev", "/dev/null", "--tmpfs", "/tmp",
         "--tmpfs", str(ws.parent),        # mask config dir
         "--dir", str(ws),                 # recreate workspace mount point
         "--bind", str(ws), str(ws),

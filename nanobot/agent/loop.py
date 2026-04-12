@@ -452,6 +452,21 @@ class AgentLoop:
                 items.append({"role": "user", "content": merged})
             return items
 
+        async def _on_confirmation_needed(
+            tool_call_id: str, tool_name: str, arguments: dict,
+        ) -> PendingAction | None:
+            if not self._confirmation_supported:
+                return None
+            import uuid as _uuid
+            pa = PendingAction(
+                action_id=str(_uuid.uuid4()),
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                arguments=arguments,
+            )
+            self._pending_actions.append(pa)
+            return pa
+
         result = await self.runner.run(AgentRunSpec(
             initial_messages=initial_messages,
             tools=self.tools,
@@ -469,6 +484,7 @@ class AgentLoop:
             progress_callback=on_progress,
             checkpoint_callback=_checkpoint,
             injection_callback=_drain_pending,
+            confirmation_callback=_on_confirmation_needed,
         ))
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":

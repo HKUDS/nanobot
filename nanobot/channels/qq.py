@@ -394,7 +394,7 @@ class QQChannel(BaseChannel):
                 return None, None
 
         # Remote URL
-        ok, err = validate_url_target(media_ref)
+        ok, err, _ips = validate_url_target(media_ref)
         if not ok:
             logger.warning("QQ outbound media URL validation failed url={} err={}", media_ref, err)
             return None, None
