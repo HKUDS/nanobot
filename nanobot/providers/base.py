@@ -419,6 +419,26 @@ class LLMProvider(ABC):
                 result.append(msg)
         return result if found else None
 
+    @staticmethod
+    def _strip_image_content_inplace(messages: list[dict[str, Any]]) -> bool:
+        """Replace image_url blocks with text placeholder *in-place*.
+
+        Mutates the content lists of the original message dicts so that
+        callers holding references to those dicts also see the stripped
+        version.
+        """
+        found = False
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                for i, b in enumerate(content):
+                    if isinstance(b, dict) and b.get("type") == "image_url":
+                        path = (b.get("_meta") or {}).get("path", "")
+                        placeholder = image_placeholder_text(path, empty="[image omitted]")
+                        content[i] = {"type": "text", "text": placeholder}
+                        found = True
+        return found
+
     async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
         """Call chat() and convert unexpected exceptions to error responses."""
         try:
@@ -670,7 +690,12 @@ class LLMProvider(ABC):
                     )
                     retry_kw = dict(kw)
                     retry_kw["messages"] = stripped
-                    return await call(**retry_kw)
+                    result = await call(**retry_kw)
+                    # Permanently strip images from the original messages so
+                    # subsequent iterations do not repeat the error-retry cycle.
+                    if result.finish_reason != "error":
+                        self._strip_image_content_inplace(original_messages)
+                    return result
                 return response
 
             if persistent and identical_error_count >= self._PERSISTENT_IDENTICAL_ERROR_LIMIT:

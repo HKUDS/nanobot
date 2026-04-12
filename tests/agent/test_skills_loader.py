@@ -250,3 +250,63 @@ def test_list_skills_openclaw_metadata_parsed_for_requirements(
     assert entries == [
         {"name": "openclaw_skill", "path": str(skill_path), "source": "workspace"},
     ]
+
+
+def test_disabled_skills_excluded_from_list(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    _write_skill(ws_skills, "alpha", body="# Alpha")
+    beta_path = _write_skill(ws_skills, "beta", body="# Beta")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin, disabled_skills={"alpha"})
+    entries = loader.list_skills(filter_unavailable=False)
+    assert len(entries) == 1
+    assert entries[0]["name"] == "beta"
+    assert entries[0]["path"] == str(beta_path)
+
+
+def test_disabled_skills_empty_set_no_effect(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    _write_skill(ws_skills, "alpha", body="# Alpha")
+    _write_skill(ws_skills, "beta", body="# Beta")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin, disabled_skills=set())
+    entries = loader.list_skills(filter_unavailable=False)
+    assert len(entries) == 2
+
+
+def test_disabled_skills_excluded_from_build_skills_summary(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    _write_skill(ws_skills, "alpha", body="# Alpha")
+    _write_skill(ws_skills, "beta", body="# Beta")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin, disabled_skills={"alpha"})
+    summary = loader.build_skills_summary()
+    assert "alpha" not in summary
+    assert "beta" in summary
+
+
+def test_disabled_skills_excluded_from_get_always_skills(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    _write_skill(ws_skills, "alpha", metadata_json={"always": True}, body="# Alpha")
+    _write_skill(ws_skills, "beta", metadata_json={"always": True}, body="# Beta")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin, disabled_skills={"alpha"})
+    always = loader.get_always_skills()
+    assert "alpha" not in always
+    assert "beta" in always
