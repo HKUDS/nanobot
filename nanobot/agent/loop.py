@@ -693,6 +693,23 @@ class AgentLoop:
                 )
             )
 
+        # Persist the triggering user message immediately, before running the
+        # agent loop. If the process is killed mid-turn (OOM, SIGKILL, self-
+        # restart, etc.), the existing runtime_checkpoint preserves the
+        # in-flight assistant/tool state but NOT the user message itself, so
+        # the user's prompt is silently lost on recovery. Saving it up front
+        # makes recovery possible from the session log alone.
+        user_persisted_early = False
+        if isinstance(msg.content, str) and msg.content.strip():
+            from datetime import datetime as _dt
+            session.messages.append({
+                "role": "user",
+                "content": msg.content,
+                "timestamp": _dt.now().isoformat(),
+            })
+            self.sessions.save(session)
+            user_persisted_early = True
+
         final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
@@ -708,7 +725,9 @@ class AgentLoop:
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        # Skip the already-persisted user message when saving the turn
+        save_skip = 1 + len(history) + (1 if user_persisted_early else 0)
+        self._save_turn(session, all_msgs, save_skip)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
         self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
