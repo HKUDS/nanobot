@@ -79,6 +79,13 @@ else
     echo -e "  sudo fallocate -l 2G /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
 fi
 
+# Fix ownership: the container runs as uid 1000 (nanobot), so all files
+# in the config dir must be writable by that uid. On Raspberry Pi OS the
+# default "pi" user is also uid 1000, but files created by earlier runs
+# (or the onboard container running as root) may be owned by root.
+echo -e "${YELLOW}Ensuring correct file ownership in $CONFIG_DIR...${NC}"
+sudo chown -R $(id -u):$(id -g) "$CONFIG_DIR"
+
 # ------------------------------------------------------------------------------
 # STEP 1: Docker Installation
 # ------------------------------------------------------------------------------
@@ -106,6 +113,13 @@ if ! command -v docker &> /dev/null; then
 else
     echo -e "${GREEN}Docker is already installed.${NC}"
 fi
+
+# Fix ownership: the container runs as uid 1000 (nanobot), so all files
+# in the config dir must be writable by that uid. On Raspberry Pi OS the
+# default "pi" user is also uid 1000, but files created by earlier runs
+# (or the onboard container running as root) may be owned by root.
+echo -e "${YELLOW}Ensuring correct file ownership in $CONFIG_DIR...${NC}"
+sudo chown -R $(id -u):$(id -g) "$CONFIG_DIR"
 
 # ------------------------------------------------------------------------------
 # STEP 2: Build Docker Image
@@ -139,6 +153,13 @@ if [ ! -f "$CONFIG_DIR/config.json" ]; then
 else
     echo -e "${GREEN}Configuration found at $CONFIG_DIR${NC}"
 fi
+
+# Fix ownership: the container runs as uid 1000 (nanobot), so all files
+# in the config dir must be writable by that uid. On Raspberry Pi OS the
+# default "pi" user is also uid 1000, but files created by earlier runs
+# (or the onboard container running as root) may be owned by root.
+echo -e "${YELLOW}Ensuring correct file ownership in $CONFIG_DIR...${NC}"
+sudo chown -R $(id -u):$(id -g) "$CONFIG_DIR"
 
 # ------------------------------------------------------------------------------
 # STEP 4: Cleanup Old Containers
@@ -189,3 +210,10 @@ else
     docker logs nanobot
     exit 1
 fi
+
+# Fix ownership: the container runs as uid 1000 (nanobot), so all files
+# in the config dir must be writable by that uid. On Raspberry Pi OS the
+# default "pi" user is also uid 1000, but files created by earlier runs
+# (or the onboard container running as root) may be owned by root.
+echo -e "${YELLOW}Ensuring correct file ownership in $CONFIG_DIR...${NC}"
+sudo chown -R $(id -u):$(id -g) "$CONFIG_DIR"
