@@ -16,8 +16,12 @@ EMPTY_FINAL_RESPONSE_MESSAGE = (
 )
 
 FINALIZATION_RETRY_PROMPT = (
-    "You have already finished the tool work. Do not call any more tools. "
-    "Using only the conversation and tool results above, provide the final answer for the user now."
+    "Please provide your response to the user based on the conversation above."
+)
+
+LENGTH_RECOVERY_PROMPT = (
+    "Output limit reached. Continue exactly where you left off "
+    "— no recap, no apology. Break remaining work into smaller steps if needed."
 )
 
 
@@ -49,6 +53,11 @@ def is_blank_text(content: str | None) -> bool:
 def build_finalization_retry_message() -> dict[str, str]:
     """A short no-tools-allowed prompt for final answer recovery."""
     return {"role": "user", "content": FINALIZATION_RETRY_PROMPT}
+
+
+def build_length_recovery_message() -> dict[str, str]:
+    """Prompt the model to continue after hitting output token limit."""
+    return {"role": "user", "content": LENGTH_RECOVERY_PROMPT}
 
 
 def external_lookup_signature(tool_name: str, arguments: dict[str, Any]) -> str | None:

@@ -54,7 +54,14 @@ class LLMResponse:
     retry_after: float | None = None  # Provider supplied retry wait in seconds.
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
     thinking_blocks: list[dict] | None = None  # Anthropic extended thinking
-    
+    # Structured error metadata used by retry policy when finish_reason == "error".
+    error_status_code: int | None = None
+    error_kind: str | None = None  # e.g. "timeout", "connection"
+    error_type: str | None = None  # Provider/type semantic, e.g. insufficient_quota.
+    error_code: str | None = None  # Provider/code semantic, e.g. rate_limit_exceeded.
+    error_retry_after_s: float | None = None
+    error_should_retry: bool | None = None
+
     @property
     def has_tool_calls(self) -> bool:
         """Check if response contains tool calls."""
@@ -90,6 +97,52 @@ class LLMProvider(ABC):
         "connection",
         "server error",
         "temporarily unavailable",
+    )
+    _RETRYABLE_STATUS_CODES = frozenset({408, 409, 429})
+    _TRANSIENT_ERROR_KINDS = frozenset({"timeout", "connection"})
+    _NON_RETRYABLE_429_ERROR_TOKENS = frozenset({
+        "insufficient_quota",
+        "quota_exceeded",
+        "quota_exhausted",
+        "billing_hard_limit_reached",
+        "insufficient_balance",
+        "credit_balance_too_low",
+        "billing_not_active",
+        "payment_required",
+    })
+    _RETRYABLE_429_ERROR_TOKENS = frozenset({
+        "rate_limit_exceeded",
+        "rate_limit_error",
+        "too_many_requests",
+        "request_limit_exceeded",
+        "requests_limit_exceeded",
+        "overloaded_error",
+    })
+    _NON_RETRYABLE_429_TEXT_MARKERS = (
+        "insufficient_quota",
+        "insufficient quota",
+        "quota exceeded",
+        "quota exhausted",
+        "billing hard limit",
+        "billing_hard_limit_reached",
+        "billing not active",
+        "insufficient balance",
+        "insufficient_balance",
+        "credit balance too low",
+        "payment required",
+        "out of credits",
+        "out of quota",
+        "exceeded your current quota",
+    )
+    _RETRYABLE_429_TEXT_MARKERS = (
+        "rate limit",
+        "rate_limit",
+        "too many requests",
+        "retry after",
+        "try again in",
+        "temporarily unavailable",
+        "overloaded",
+        "concurrency limit",
     )
 
     _SENTINEL = object()
@@ -149,6 +202,38 @@ class LLMProvider(ABC):
         return result
 
     @staticmethod
+    def _tool_name(tool: dict[str, Any]) -> str:
+        """Extract tool name from either OpenAI or Anthropic-style tool schemas."""
+        name = tool.get("name")
+        if isinstance(name, str):
+            return name
+        fn = tool.get("function")
+        if isinstance(fn, dict):
+            fname = fn.get("name")
+            if isinstance(fname, str):
+                return fname
+        return ""
+
+    @classmethod
+    def _tool_cache_marker_indices(cls, tools: list[dict[str, Any]]) -> list[int]:
+        """Return cache marker indices: builtin/MCP boundary and tail index."""
+        if not tools:
+            return []
+
+        tail_idx = len(tools) - 1
+        last_builtin_idx: int | None = None
+        for i in range(tail_idx, -1, -1):
+            if not cls._tool_name(tools[i]).startswith("mcp_"):
+                last_builtin_idx = i
+                break
+
+        ordered_unique: list[int] = []
+        for idx in (last_builtin_idx, tail_idx):
+            if idx is not None and idx not in ordered_unique:
+                ordered_unique.append(idx)
+        return ordered_unique
+
+    @staticmethod
     def _sanitize_request_messages(
         messages: list[dict[str, Any]],
         allowed_keys: frozenset[str],
@@ -175,7 +260,7 @@ class LLMProvider(ABC):
     ) -> LLMResponse:
         """
         Send a chat completion request.
-        
+
         Args:
             messages: List of message dicts with 'role' and 'content'.
             tools: Optional list of tool definitions.
@@ -183,7 +268,7 @@ class LLMProvider(ABC):
             max_tokens: Maximum tokens in response.
             temperature: Sampling temperature.
             tool_choice: Tool selection strategy ("auto", "required", or specific tool dict).
-        
+
         Returns:
             LLMResponse with content and/or tool calls.
         """
@@ -193,6 +278,124 @@ class LLMProvider(ABC):
     def _is_transient_error(cls, content: str | None) -> bool:
         err = (content or "").lower()
         return any(marker in err for marker in cls._TRANSIENT_ERROR_MARKERS)
+
+    @classmethod
+    def _is_transient_response(cls, response: LLMResponse) -> bool:
+        """Prefer structured error metadata, fallback to text markers for legacy providers."""
+        if response.error_should_retry is not None:
+            return bool(response.error_should_retry)
+
+        if response.error_status_code is not None:
+            status = int(response.error_status_code)
+            if status == 429:
+                return cls._is_retryable_429_response(response)
+            if status in cls._RETRYABLE_STATUS_CODES or status >= 500:
+                return True
+
+        kind = (response.error_kind or "").strip().lower()
+        if kind in cls._TRANSIENT_ERROR_KINDS:
+            return True
+
+        return cls._is_transient_error(response.content)
+
+    @staticmethod
+    def _normalize_error_token(value: Any) -> str | None:
+        if value is None:
+            return None
+        token = str(value).strip().lower()
+        return token or None
+
+    @classmethod
+    def _extract_error_type_code(cls, payload: Any) -> tuple[str | None, str | None]:
+        data: dict[str, Any] | None = None
+        if isinstance(payload, dict):
+            data = payload
+        elif isinstance(payload, str):
+            text = payload.strip()
+            if text:
+                try:
+                    parsed = json.loads(text)
+                except Exception:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    data = parsed
+        if not isinstance(data, dict):
+            return None, None
+
+        error_obj = data.get("error")
+        type_value = data.get("type")
+        code_value = data.get("code")
+        if isinstance(error_obj, dict):
+            type_value = error_obj.get("type") or type_value
+            code_value = error_obj.get("code") or code_value
+
+        return cls._normalize_error_token(type_value), cls._normalize_error_token(code_value)
+
+    @classmethod
+    def _is_retryable_429_response(cls, response: LLMResponse) -> bool:
+        type_token = cls._normalize_error_token(response.error_type)
+        code_token = cls._normalize_error_token(response.error_code)
+        semantic_tokens = {
+            token for token in (type_token, code_token)
+            if token is not None
+        }
+        if any(token in cls._NON_RETRYABLE_429_ERROR_TOKENS for token in semantic_tokens):
+            return False
+
+        content = (response.content or "").lower()
+        if any(marker in content for marker in cls._NON_RETRYABLE_429_TEXT_MARKERS):
+            return False
+
+        if any(token in cls._RETRYABLE_429_ERROR_TOKENS for token in semantic_tokens):
+            return True
+        if any(marker in content for marker in cls._RETRYABLE_429_TEXT_MARKERS):
+            return True
+        # Unknown 429 defaults to WAIT+retry.
+        return True
+
+    @staticmethod
+    def _enforce_role_alternation(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Merge consecutive same-role messages and drop trailing assistant messages.
+
+        Some providers (OpenAI-compat, Azure, vLLM, Ollama, etc.) reject requests
+        where the last message is 'assistant' (prefill not supported) or two
+        consecutive non-system messages share the same role.
+        """
+        if not messages:
+            return messages
+
+        merged: list[dict[str, Any]] = []
+        for msg in messages:
+            role = msg.get("role")
+            if (
+                merged
+                and role != "system"
+                and role not in ("tool",)
+                and merged[-1].get("role") == role
+                and role in ("user", "assistant")
+            ):
+                prev = merged[-1]
+                if role == "assistant":
+                    prev_has_tools = bool(prev.get("tool_calls"))
+                    curr_has_tools = bool(msg.get("tool_calls"))
+                    if curr_has_tools:
+                        merged[-1] = dict(msg)
+                        continue
+                    if prev_has_tools:
+                        continue
+                prev_content = prev.get("content") or ""
+                curr_content = msg.get("content") or ""
+                if isinstance(prev_content, str) and isinstance(curr_content, str):
+                    prev["content"] = (prev_content + "\n\n" + curr_content).strip()
+                else:
+                    merged[-1] = dict(msg)
+            else:
+                merged.append(dict(msg))
+
+        while merged and merged[-1].get("role") == "assistant":
+            merged.pop()
+
+        return merged
 
     @staticmethod
     def _strip_image_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
@@ -365,14 +568,28 @@ class LLMProvider(ABC):
     def _extract_retry_after_from_headers(cls, headers: Any) -> float | None:
         if not headers:
             return None
-        retry_after: Any = None
-        if hasattr(headers, "get"):
-            retry_after = headers.get("retry-after") or headers.get("Retry-After")
-        if retry_after is None and isinstance(headers, dict):
-            for key, value in headers.items():
-                if isinstance(key, str) and key.lower() == "retry-after":
-                    retry_after = value
-                    break
+
+        def _header_value(name: str) -> Any:
+            if hasattr(headers, "get"):
+                value = headers.get(name) or headers.get(name.title())
+                if value is not None:
+                    return value
+            if isinstance(headers, dict):
+                for key, value in headers.items():
+                    if isinstance(key, str) and key.lower() == name.lower():
+                        return value
+            return None
+
+        try:
+            retry_ms = _header_value("retry-after-ms")
+            if retry_ms is not None:
+                value = float(retry_ms) / 1000.0
+                if value > 0:
+                    return value
+        except (TypeError, ValueError):
+            pass
+
+        retry_after = _header_value("retry-after")
         if retry_after is None:
             return None
         retry_after_text = str(retry_after).strip()
@@ -388,6 +605,14 @@ class LLMProvider(ABC):
             retry_at = retry_at.replace(tzinfo=timezone.utc)
         remaining = (retry_at - datetime.now(retry_at.tzinfo)).total_seconds()
         return max(0.1, remaining)
+
+    @classmethod
+    def _extract_retry_after_from_response(cls, response: LLMResponse) -> float | None:
+        if response.error_retry_after_s is not None and response.error_retry_after_s > 0:
+            return response.error_retry_after_s
+        if response.retry_after is not None and response.retry_after > 0:
+            return response.retry_after
+        return cls._extract_retry_after(response.content)
 
     async def _sleep_with_heartbeat(
         self,
@@ -437,7 +662,7 @@ class LLMProvider(ABC):
                 last_error_key = error_key
                 identical_error_count = 1 if error_key else 0
 
-            if not self._is_transient_error(response.content):
+            if not self._is_transient_response(response):
                 stripped = self._strip_image_content(original_messages)
                 if stripped is not None and stripped != kw["messages"]:
                     logger.warning(
@@ -460,7 +685,7 @@ class LLMProvider(ABC):
                 break
 
             base_delay = delays[min(attempt - 1, len(delays) - 1)]
-            delay = response.retry_after or self._extract_retry_after(response.content) or base_delay
+            delay = self._extract_retry_after_from_response(response) or base_delay
             if persistent:
                 delay = min(delay, self._PERSISTENT_MAX_DELAY)
 

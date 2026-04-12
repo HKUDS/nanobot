@@ -57,9 +57,7 @@ def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
 
     if "properties" in normalized and isinstance(normalized["properties"], dict):
         normalized["properties"] = {
-            name: _normalize_schema_for_openai(prop)
-            if isinstance(prop, dict)
-            else prop
+            name: _normalize_schema_for_openai(prop) if isinstance(prop, dict) else prop
             for name, prop in normalized["properties"].items()
         }
 
@@ -135,36 +133,214 @@ class MCPToolWrapper(Tool):
         return "\n".join(parts) or "(no output)"
 
 
+class MCPResourceWrapper(Tool):
+    """Wraps an MCP resource URI as a read-only nanobot Tool."""
+
+    def __init__(self, session, server_name: str, resource_def, resource_timeout: int = 30):
+        self._session = session
+        self._uri = resource_def.uri
+        self._name = f"mcp_{server_name}_resource_{resource_def.name}"
+        desc = resource_def.description or resource_def.name
+        self._description = f"[MCP Resource] {desc}\nURI: {self._uri}"
+        self._parameters: dict[str, Any] = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        }
+        self._resource_timeout = resource_timeout
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def description(self) -> str:
+        return self._description
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return self._parameters
+
+    @property
+    def read_only(self) -> bool:
+        return True
+
+    async def execute(self, **kwargs: Any) -> str:
+        from mcp import types
+
+        try:
+            result = await asyncio.wait_for(
+                self._session.read_resource(self._uri),
+                timeout=self._resource_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "MCP resource '{}' timed out after {}s", self._name, self._resource_timeout
+            )
+            return f"(MCP resource read timed out after {self._resource_timeout}s)"
+        except asyncio.CancelledError:
+            task = asyncio.current_task()
+            if task is not None and task.cancelling() > 0:
+                raise
+            logger.warning("MCP resource '{}' was cancelled by server/SDK", self._name)
+            return "(MCP resource read was cancelled)"
+        except Exception as exc:
+            logger.exception(
+                "MCP resource '{}' failed: {}: {}",
+                self._name,
+                type(exc).__name__,
+                exc,
+            )
+            return f"(MCP resource read failed: {type(exc).__name__})"
+
+        parts: list[str] = []
+        for block in result.contents:
+            if isinstance(block, types.TextResourceContents):
+                parts.append(block.text)
+            elif isinstance(block, types.BlobResourceContents):
+                parts.append(f"[Binary resource: {len(block.blob)} bytes]")
+            else:
+                parts.append(str(block))
+        return "\n".join(parts) or "(no output)"
+
+
+class MCPPromptWrapper(Tool):
+    """Wraps an MCP prompt as a read-only nanobot Tool."""
+
+    def __init__(self, session, server_name: str, prompt_def, prompt_timeout: int = 30):
+        self._session = session
+        self._prompt_name = prompt_def.name
+        self._name = f"mcp_{server_name}_prompt_{prompt_def.name}"
+        desc = prompt_def.description or prompt_def.name
+        self._description = (
+            f"[MCP Prompt] {desc}\n"
+            "Returns a filled prompt template that can be used as a workflow guide."
+        )
+        self._prompt_timeout = prompt_timeout
+
+        # Build parameters from prompt arguments
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+        for arg in prompt_def.arguments or []:
+            prop: dict[str, Any] = {"type": "string"}
+            if getattr(arg, "description", None):
+                prop["description"] = arg.description
+            properties[arg.name] = prop
+            if arg.required:
+                required.append(arg.name)
+        self._parameters: dict[str, Any] = {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        }
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def description(self) -> str:
+        return self._description
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return self._parameters
+
+    @property
+    def read_only(self) -> bool:
+        return True
+
+    async def execute(self, **kwargs: Any) -> str:
+        from mcp import types
+        from mcp.shared.exceptions import McpError
+
+        try:
+            result = await asyncio.wait_for(
+                self._session.get_prompt(self._prompt_name, arguments=kwargs),
+                timeout=self._prompt_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("MCP prompt '{}' timed out after {}s", self._name, self._prompt_timeout)
+            return f"(MCP prompt call timed out after {self._prompt_timeout}s)"
+        except asyncio.CancelledError:
+            task = asyncio.current_task()
+            if task is not None and task.cancelling() > 0:
+                raise
+            logger.warning("MCP prompt '{}' was cancelled by server/SDK", self._name)
+            return "(MCP prompt call was cancelled)"
+        except McpError as exc:
+            logger.error(
+                "MCP prompt '{}' failed: code={} message={}",
+                self._name,
+                exc.error.code,
+                exc.error.message,
+            )
+            return f"(MCP prompt call failed: {exc.error.message} [code {exc.error.code}])"
+        except Exception as exc:
+            logger.exception(
+                "MCP prompt '{}' failed: {}: {}",
+                self._name,
+                type(exc).__name__,
+                exc,
+            )
+            return f"(MCP prompt call failed: {type(exc).__name__})"
+
+        parts: list[str] = []
+        for message in result.messages:
+            content = message.content
+            # content is a single ContentBlock (not a list) in MCP SDK >= 1.x
+            if isinstance(content, types.TextContent):
+                parts.append(content.text)
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, types.TextContent):
+                        parts.append(block.text)
+                    else:
+                        parts.append(str(block))
+            else:
+                parts.append(str(content))
+        return "\n".join(parts) or "(no output)"
+
+
 async def connect_mcp_servers(
-    mcp_servers: dict, registry: ToolRegistry, stack: AsyncExitStack
-) -> None:
-    """Connect to configured MCP servers and register their tools."""
+    mcp_servers: dict, registry: ToolRegistry
+) -> dict[str, AsyncExitStack]:
+    """Connect to configured MCP servers and register their tools, resources, prompts.
+
+    Returns a dict mapping server name -> its dedicated AsyncExitStack.
+    Each server gets its own stack and runs in its own task to prevent
+    cancel scope conflicts when multiple MCP servers are configured.
+    """
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.sse import sse_client
     from mcp.client.stdio import stdio_client
     from mcp.client.streamable_http import streamable_http_client
 
-    for name, cfg in mcp_servers.items():
+    async def connect_single_server(name: str, cfg) -> tuple[str, AsyncExitStack | None]:
+        server_stack = AsyncExitStack()
+        await server_stack.__aenter__()
+
         try:
             transport_type = cfg.type
             if not transport_type:
                 if cfg.command:
                     transport_type = "stdio"
                 elif cfg.url:
-                    # Convention: URLs ending with /sse use SSE transport; others use streamableHttp
                     transport_type = (
                         "sse" if cfg.url.rstrip("/").endswith("/sse") else "streamableHttp"
                     )
                 else:
                     logger.warning("MCP server '{}': no command or url configured, skipping", name)
-                    continue
+                    await server_stack.aclose()
+                    return name, None
 
             if transport_type == "stdio":
                 params = StdioServerParameters(
                     command=cfg.command, args=cfg.args, env=cfg.env or None
                 )
-                read, write = await stack.enter_async_context(stdio_client(params))
+                read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
+
                 def httpx_client_factory(
                     headers: dict[str, str] | None = None,
                     timeout: httpx.Timeout | None = None,
@@ -182,27 +358,26 @@ async def connect_mcp_servers(
                         auth=auth,
                     )
 
-                read, write = await stack.enter_async_context(
+                read, write = await server_stack.enter_async_context(
                     sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
                 )
             elif transport_type == "streamableHttp":
-                # Always provide an explicit httpx client so MCP HTTP transport does not
-                # inherit httpx's default 5s timeout and preempt the higher-level tool timeout.
-                http_client = await stack.enter_async_context(
+                http_client = await server_stack.enter_async_context(
                     httpx.AsyncClient(
                         headers=cfg.headers or None,
                         follow_redirects=True,
                         timeout=None,
                     )
                 )
-                read, write, _ = await stack.enter_async_context(
+                read, write, _ = await server_stack.enter_async_context(
                     streamable_http_client(cfg.url, http_client=http_client)
                 )
             else:
                 logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
-                continue
+                await server_stack.aclose()
+                return name, None
 
-            session = await stack.enter_async_context(ClientSession(read, write))
+            session = await server_stack.enter_async_context(ClientSession(read, write))
             await session.initialize()
 
             tools = await session.list_tools()
@@ -247,6 +422,60 @@ async def connect_mcp_servers(
                         ", ".join(available_wrapped_names) or "(none)",
                     )
 
-            logger.info("MCP server '{}': connected, {} tools registered", name, registered_count)
+            try:
+                resources_result = await session.list_resources()
+                for resource in resources_result.resources:
+                    wrapper = MCPResourceWrapper(
+                        session, name, resource, resource_timeout=cfg.tool_timeout
+                    )
+                    registry.register(wrapper)
+                    registered_count += 1
+                    logger.debug(
+                        "MCP: registered resource '{}' from server '{}'", wrapper.name, name
+                    )
+            except Exception as e:
+                logger.debug("MCP server '{}': resources not supported or failed: {}", name, e)
+
+            try:
+                prompts_result = await session.list_prompts()
+                for prompt in prompts_result.prompts:
+                    wrapper = MCPPromptWrapper(
+                        session, name, prompt, prompt_timeout=cfg.tool_timeout
+                    )
+                    registry.register(wrapper)
+                    registered_count += 1
+                    logger.debug("MCP: registered prompt '{}' from server '{}'", wrapper.name, name)
+            except Exception as e:
+                logger.debug("MCP server '{}': prompts not supported or failed: {}", name, e)
+
+            logger.info(
+                "MCP server '{}': connected, {} capabilities registered", name, registered_count
+            )
+            return name, server_stack
+
         except Exception as e:
             logger.error("MCP server '{}': failed to connect: {}", name, e)
+            try:
+                await server_stack.aclose()
+            except Exception:
+                pass
+            return name, None
+
+    server_stacks: dict[str, AsyncExitStack] = {}
+
+    tasks: list[asyncio.Task] = []
+    for name, cfg in mcp_servers.items():
+        task = asyncio.create_task(connect_single_server(name, cfg))
+        tasks.append(task)
+
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, result in enumerate(results):
+        name = list(mcp_servers.keys())[i]
+        if isinstance(result, BaseException):
+            if not isinstance(result, asyncio.CancelledError):
+                logger.error("MCP server '{}' connection task failed: {}", name, result)
+        elif result is not None and result[1] is not None:
+            server_stacks[result[0]] = result[1]
+
+    return server_stacks

@@ -8,12 +8,13 @@ import json
 import os
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import httpx
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.utils.helpers import build_image_content_blocks
 
 if TYPE_CHECKING:
@@ -72,19 +73,22 @@ def _format_results(query: str, items: list[dict[str, Any]], n: int) -> str:
     return "\n".join(lines)
 
 
+@tool_parameters(
+    tool_parameters_schema(
+        query=StringSchema("Search query"),
+        count=IntegerSchema(1, description="Results (1-10)", minimum=1, maximum=10),
+        required=["query"],
+    )
+)
 class WebSearchTool(Tool):
     """Search the web using configured provider."""
 
     name = "web_search"
-    description = "Search the web. Returns titles, URLs, and snippets."
-    parameters = {
-        "type": "object",
-        "properties": {
-            "query": {"type": "string", "description": "Search query"},
-            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10},
-        },
-        "required": ["query"],
-    }
+    description = (
+        "Search the web. Returns titles, URLs, and snippets. "
+        "count defaults to 5 (max 10). "
+        "Use web_fetch to read a specific page in full."
+    )
 
     def __init__(self, config: WebSearchConfig | None = None, proxy: str | None = None):
         from nanobot.config.schema import WebSearchConfig
@@ -110,6 +114,8 @@ class WebSearchTool(Tool):
             return await self._search_jina(query, n)
         elif provider == "brave":
             return await self._search_brave(query, n)
+        elif provider == "kagi":
+            return await self._search_kagi(query, n)
         else:
             return f"Error: unknown search provider '{provider}'"
 
@@ -182,10 +188,10 @@ class WebSearchTool(Tool):
             return await self._search_duckduckgo(query, n)
         try:
             headers = {"Accept": "application/json", "Authorization": f"Bearer {api_key}"}
+            encoded_query = quote(query, safe="")
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.get(
-                    f"https://s.jina.ai/",
-                    params={"q": query},
+                    f"https://s.jina.ai/{encoded_query}",
                     headers=headers,
                     timeout=15.0,
                 )
@@ -194,6 +200,30 @@ class WebSearchTool(Tool):
             items = [
                 {"title": d.get("title", ""), "url": d.get("url", ""), "content": d.get("content", "")[:500]}
                 for d in data
+            ]
+            return _format_results(query, items, n)
+        except Exception as e:
+            logger.warning("Jina search failed ({}), falling back to DuckDuckGo", e)
+            return await self._search_duckduckgo(query, n)
+
+    async def _search_kagi(self, query: str, n: int) -> str:
+        api_key = self.config.api_key or os.environ.get("KAGI_API_KEY", "")
+        if not api_key:
+            logger.warning("KAGI_API_KEY not set, falling back to DuckDuckGo")
+            return await self._search_duckduckgo(query, n)
+        try:
+            async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r = await client.get(
+                    "https://kagi.com/api/v0/search",
+                    params={"q": query, "limit": n},
+                    headers={"Authorization": f"Bot {api_key}"},
+                    timeout=10.0,
+                )
+                r.raise_for_status()
+            # t=0 items are search results; other values are related searches, etc.
+            items = [
+                {"title": d.get("title", ""), "url": d.get("url", ""), "content": d.get("snippet", "")}
+                for d in r.json().get("data", []) if d.get("t") == 0
             ]
             return _format_results(query, items, n)
         except Exception as e:
@@ -206,7 +236,10 @@ class WebSearchTool(Tool):
             from ddgs import DDGS
 
             ddgs = DDGS(timeout=10)
-            raw = await asyncio.to_thread(ddgs.text, query, max_results=n)
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(ddgs.text, query, max_results=n),
+                timeout=self.config.timeout,
+            )
             if not raw:
                 return f"No results for: {query}"
             items = [
@@ -219,20 +252,27 @@ class WebSearchTool(Tool):
             return f"Error: DuckDuckGo search failed ({e})"
 
 
+@tool_parameters(
+    tool_parameters_schema(
+        url=StringSchema("URL to fetch"),
+        extractMode={
+            "type": "string",
+            "enum": ["markdown", "text"],
+            "default": "markdown",
+        },
+        maxChars=IntegerSchema(0, minimum=100),
+        required=["url"],
+    )
+)
 class WebFetchTool(Tool):
     """Fetch and extract content from a URL."""
 
     name = "web_fetch"
-    description = "Fetch URL and extract readable content (HTML → markdown/text)."
-    parameters = {
-        "type": "object",
-        "properties": {
-            "url": {"type": "string", "description": "URL to fetch"},
-            "extractMode": {"type": "string", "enum": ["markdown", "text"], "default": "markdown"},
-            "maxChars": {"type": "integer", "minimum": 100},
-        },
-        "required": ["url"],
-    }
+    description = (
+        "Fetch a URL and extract readable content (HTML → markdown/text). "
+        "Output is capped at maxChars (default 50 000). "
+        "Works for most web pages and docs; may fail on login-walled or JS-heavy sites."
+    )
 
     def __init__(self, max_chars: int = 50000, proxy: str | None = None):
         self.max_chars = max_chars

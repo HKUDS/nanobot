@@ -1,12 +1,11 @@
 """CLI commands for nanobot."""
 
 import asyncio
-from contextlib import contextmanager, nullcontext
-
 import os
 import select
 import signal
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +21,7 @@ if sys.platform == "win32":
             pass
 
 import typer
+from loguru import logger
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.formatted_text import ANSI, HTML
@@ -33,6 +33,19 @@ from rich.table import Table
 from rich.text import Text
 
 from nanobot import __logo__, __version__
+
+
+class SafeFileHistory(FileHistory):
+    """FileHistory subclass that sanitizes surrogate characters on write.
+
+    On Windows, special Unicode input (emoji, mixed-script) can produce
+    surrogate characters that crash prompt_toolkit's file write.
+    See issue #2846.
+    """
+
+    def store_string(self, string: str) -> None:
+        safe = string.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
+        super().store_string(safe)
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
@@ -72,6 +85,7 @@ def _flush_pending_tty_input() -> None:
 
     try:
         import termios
+
         termios.tcflush(fd, termios.TCIFLUSH)
         return
     except Exception:
@@ -94,6 +108,7 @@ def _restore_terminal() -> None:
         return
     try:
         import termios
+
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
     except Exception:
         pass
@@ -106,6 +121,7 @@ def _init_prompt_session() -> None:
     # Save terminal state so we can restore it on exit
     try:
         import termios
+
         _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
     except Exception:
         pass
@@ -116,9 +132,9 @@ def _init_prompt_session() -> None:
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
     _PROMPT_SESSION = PromptSession(
-        history=FileHistory(str(history_file)),
+        history=SafeFileHistory(str(history_file)),
         enable_open_in_editor=False,
-        multiline=False,   # Enter submits (single line mode)
+        multiline=False,  # Enter submits (single line mode)
     )
 
 
@@ -230,7 +246,6 @@ async def _read_interactive_input_async() -> str:
         raise KeyboardInterrupt from exc
 
 
-
 def version_callback(value: bool):
     if value:
         console.print(f"{__logo__} nanobot v{__version__}")
@@ -280,8 +295,12 @@ def onboard(
             config = _apply_workspace_override(load_config(config_path))
         else:
             console.print(f"[yellow]Config already exists at {config_path}[/yellow]")
-            console.print("  [bold]y[/bold] = overwrite with defaults (existing values will be lost)")
-            console.print("  [bold]N[/bold] = refresh config, keeping existing values and adding new fields")
+            console.print(
+                "  [bold]y[/bold] = overwrite with defaults (existing values will be lost)"
+            )
+            console.print(
+                "  [bold]N[/bold] = refresh config, keeping existing values and adding new fields"
+            )
             if typer.confirm("Overwrite?"):
                 config = _apply_workspace_override(Config())
                 save_config(config, config_path)
@@ -289,7 +308,9 @@ def onboard(
             else:
                 config = _apply_workspace_override(load_config(config_path))
                 save_config(config, config_path)
-                console.print(f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)")
+                console.print(
+                    f"[green]✓[/green] Config refreshed at {config_path} (existing values preserved)"
+                )
     else:
         config = _apply_workspace_override(Config())
         # In wizard mode, don't save yet - the wizard will handle saving if should_save=True
@@ -339,7 +360,9 @@ def onboard(
         console.print(f"  1. Add your API key to [cyan]{config_path}[/cyan]")
         console.print("     Get one at: https://openrouter.ai/keys")
         console.print(f"  2. Chat: [cyan]{agent_cmd}[/cyan]")
-    console.print("\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]")
+    console.print(
+        "\n[dim]Want Telegram/WhatsApp? See: https://github.com/HKUDS/nanobot#-chat-apps[/dim]"
+    )
 
 
 def _merge_missing_defaults(existing: Any, defaults: Any) -> Any:
@@ -412,9 +435,11 @@ def _make_provider(config: Config):
     # --- instantiation by backend ---
     if backend == "openai_codex":
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+
         provider = OpenAICodexProvider(default_model=model)
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
+
         provider = AzureOpenAIProvider(
             api_key=p.api_key,
             api_base=p.api_base,
@@ -425,6 +450,7 @@ def _make_provider(config: Config):
         provider = GitHubCopilotProvider(default_model=model)
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
+
         provider = AnthropicProvider(
             api_key=p.api_key if p else None,
             api_base=config.get_api_base(model),
@@ -433,6 +459,7 @@ def _make_provider(config: Config):
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+
         provider = OpenAICompatProvider(
             api_key=p.api_key if p else None,
             api_base=config.get_api_base(model),
@@ -452,7 +479,7 @@ def _make_provider(config: Config):
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
-    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
 
     config_path = None
     if config:
@@ -463,7 +490,11 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
         set_config_path(config_path)
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
-    loaded = load_config(config_path)
+    try:
+        loaded = resolve_config_env_vars(load_config(config_path))
+    except ValueError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1)
     _warn_deprecated_config_keys(config_path)
     if workspace:
         loaded.agents.defaults.workspace = workspace
@@ -473,6 +504,7 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
 def _warn_deprecated_config_keys(config_path: Path | None) -> None:
     """Hint users to remove obsolete keys from their config file."""
     import json
+
     from nanobot.config.loader import get_config_path
 
     path = config_path or get_config_path()
@@ -496,6 +528,7 @@ def _migrate_cron_store(config: "Config") -> None:
     if legacy_path.is_file() and not new_path.exists():
         new_path.parent.mkdir(parents=True, exist_ok=True)
         import shutil
+
         shutil.move(str(legacy_path), str(new_path))
 
 
@@ -557,6 +590,9 @@ def serve(
         mcp_servers=runtime_config.tools.mcp_servers,
         channels_config=runtime_config.channels,
         timezone=runtime_config.agents.defaults.timezone,
+        unified_session=runtime_config.agents.defaults.unified_session,
+        disabled_skills=runtime_config.agents.defaults.disabled_skills,
+        session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -609,6 +645,7 @@ def gateway(
 
     if verbose:
         import logging
+
         logging.basicConfig(level=logging.DEBUG)
 
     config = _load_runtime_config(config, workspace)
@@ -647,11 +684,23 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        unified_session=config.agents.defaults.unified_session,
+        disabled_skills=config.agents.defaults.disabled_skills,
+        session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
     )
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
+        # Dream is an internal job — run directly, not through the agent loop.
+        if job.name == "dream":
+            try:
+                await agent.dream.run()
+                logger.info("Dream cron job completed")
+            except Exception:
+                logger.exception("Dream cron job failed")
+            return None
+
         from nanobot.agent.tools.cron import CronTool
         from nanobot.agent.tools.message import MessageTool
         from nanobot.utils.evaluator import evaluate_response
@@ -685,7 +734,7 @@ def gateway(
 
         if job.payload.deliver and job.payload.to and response:
             should_notify = await evaluate_response(
-                response, job.payload.message, provider, agent.model,
+                response, reminder_note, provider, agent.model,
             )
             if should_notify:
                 from nanobot.bus.events import OutboundMessage
@@ -695,6 +744,7 @@ def gateway(
                     content=response,
                 ))
         return response
+
     cron.on_job = on_cron_job
 
     # Create channel manager
@@ -771,6 +821,21 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
+    # Register Dream system job (always-on, idempotent on restart)
+    dream_cfg = config.agents.defaults.dream
+    if dream_cfg.model_override:
+        agent.dream.model = dream_cfg.model_override
+    agent.dream.max_batch_size = dream_cfg.max_batch_size
+    agent.dream.max_iterations = dream_cfg.max_iterations
+    from nanobot.cron.types import CronJob, CronPayload
+    cron.register_system_job(CronJob(
+        id="dream",
+        name="dream",
+        schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
+        payload=CronPayload(kind="system_event"),
+    ))
+    console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
+
     async def run():
         try:
             await cron.start()
@@ -783,6 +848,7 @@ def gateway(
             console.print("\nShutting down...")
         except Exception:
             import traceback
+
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
@@ -793,8 +859,6 @@ def gateway(
             await channels.stop_all()
 
     asyncio.run(run())
-
-
 
 
 # ============================================================================
@@ -854,6 +918,9 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        unified_session=config.agents.defaults.unified_session,
+        disabled_skills=config.agents.defaults.disabled_skills,
+        session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
@@ -979,6 +1046,9 @@ def agent(
                 while True:
                     try:
                         _flush_pending_tty_input()
+                        # Stop spinner before user input to avoid prompt_toolkit conflicts
+                        if renderer:
+                            renderer.stop_for_input()
                         user_input = await _read_interactive_input_async()
                         command = user_input.strip()
                         if not command:
@@ -1055,7 +1125,7 @@ def channels_status(
 
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
-    table.add_column("Enabled", style="green")
+    table.add_column("Enabled")
 
     for name, cls in sorted(discover_all().items()):
         section = getattr(config.channels, name, None)
@@ -1190,7 +1260,7 @@ def plugins_list():
     table = Table(title="Channel Plugins")
     table.add_column("Name", style="cyan")
     table.add_column("Source", style="magenta")
-    table.add_column("Enabled", style="green")
+    table.add_column("Enabled")
 
     for name in sorted(all_channels):
         cls = all_channels[name]
@@ -1268,6 +1338,7 @@ def _register_login(name: str):
     def decorator(fn):
         _LOGIN_HANDLERS[name] = fn
         return fn
+
     return decorator
 
 
@@ -1298,6 +1369,7 @@ def provider_login(
 def _login_openai_codex() -> None:
     try:
         from oauth_cli_kit import get_token, login_oauth_interactive
+
         token = None
         try:
             token = get_token()

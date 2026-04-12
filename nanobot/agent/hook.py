@@ -29,6 +29,9 @@ class AgentHookContext:
 class AgentHook:
     """Minimal lifecycle surface for shared runner customization."""
 
+    def __init__(self, reraise: bool = False) -> None:
+        self._reraise = reraise
+
     def wants_streaming(self) -> bool:
         return False
 
@@ -62,45 +65,37 @@ class CompositeHook(AgentHook):
     __slots__ = ("_hooks",)
 
     def __init__(self, hooks: list[AgentHook]) -> None:
+        super().__init__()
         self._hooks = list(hooks)
 
     def wants_streaming(self) -> bool:
         return any(h.wants_streaming() for h in self._hooks)
 
-    async def before_iteration(self, context: AgentHookContext) -> None:
+    async def _for_each_hook_safe(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         for h in self._hooks:
+            if getattr(h, "_reraise", False):
+                await getattr(h, method_name)(*args, **kwargs)
+                continue
+
             try:
-                await h.before_iteration(context)
+                await getattr(h, method_name)(*args, **kwargs)
             except Exception:
-                logger.exception("AgentHook.before_iteration error in {}", type(h).__name__)
+                logger.exception("AgentHook.{} error in {}", method_name, type(h).__name__)
+
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        await self._for_each_hook_safe("before_iteration", context)
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
-        for h in self._hooks:
-            try:
-                await h.on_stream(context, delta)
-            except Exception:
-                logger.exception("AgentHook.on_stream error in {}", type(h).__name__)
+        await self._for_each_hook_safe("on_stream", context, delta)
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
-        for h in self._hooks:
-            try:
-                await h.on_stream_end(context, resuming=resuming)
-            except Exception:
-                logger.exception("AgentHook.on_stream_end error in {}", type(h).__name__)
+        await self._for_each_hook_safe("on_stream_end", context, resuming=resuming)
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
-        for h in self._hooks:
-            try:
-                await h.before_execute_tools(context)
-            except Exception:
-                logger.exception("AgentHook.before_execute_tools error in {}", type(h).__name__)
+        await self._for_each_hook_safe("before_execute_tools", context)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
-        for h in self._hooks:
-            try:
-                await h.after_iteration(context)
-            except Exception:
-                logger.exception("AgentHook.after_iteration error in {}", type(h).__name__)
+        await self._for_each_hook_safe("after_iteration", context)
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         for h in self._hooks:

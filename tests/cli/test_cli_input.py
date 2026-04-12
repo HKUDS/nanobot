@@ -145,3 +145,29 @@ def test_response_renderable_without_metadata_keeps_markdown_path():
     renderable = commands._response_renderable(help_text, render_markdown=True)
 
     assert renderable.__class__.__name__ == "Markdown"
+
+
+def test_stream_renderer_stop_for_input_stops_spinner():
+    """stop_for_input should stop the active spinner to avoid prompt_toolkit conflicts."""
+    spinner = MagicMock()
+    mock_console = MagicMock()
+    mock_console.status.return_value = spinner
+
+    # Create renderer with mocked console
+    with patch.object(stream_mod, "_make_console", return_value=mock_console):
+        renderer = stream_mod.StreamRenderer(show_spinner=True)
+        
+        # Verify spinner started
+        spinner.start.assert_called_once()
+        
+        # Stop for input
+        renderer.stop_for_input()
+        
+        # Verify spinner stopped
+        spinner.stop.assert_called_once()
+
+
+def test_make_console_uses_force_terminal():
+    """Console should be created with force_terminal=True for proper ANSI handling."""
+    console = stream_mod._make_console()
+    assert console._force_terminal is True

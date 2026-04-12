@@ -5,11 +5,17 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
 discord = pytest.importorskip("discord")
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.discord import DiscordBotClient, DiscordChannel, DiscordConfig
+from nanobot.channels.discord import (
+    MAX_MESSAGE_LEN,
+    DiscordBotClient,
+    DiscordChannel,
+    DiscordConfig,
+)
 from nanobot.command.builtin import build_help_text
 
 
@@ -18,9 +24,11 @@ class _FakeDiscordClient:
     instances: list["_FakeDiscordClient"] = []
     start_error: Exception | None = None
 
-    def __init__(self, owner, *, intents) -> None:
+    def __init__(self, owner, *, intents, proxy=None, proxy_auth=None) -> None:
         self.owner = owner
         self.intents = intents
+        self.proxy = proxy
+        self.proxy_auth = proxy_auth
         self.closed = False
         self.ready = True
         self.channels: dict[int, object] = {}
@@ -53,7 +61,9 @@ class _FakeDiscordClient:
 
 class _FakeAttachment:
     # Attachment double that can simulate successful or failing save() calls.
-    def __init__(self, attachment_id: int, filename: str, *, size: int = 1, fail: bool = False) -> None:
+    def __init__(
+        self, attachment_id: int, filename: str, *, size: int = 1, fail: bool = False
+    ) -> None:
         self.id = attachment_id
         self.filename = filename
         self.size = size
@@ -71,11 +81,25 @@ class _FakePartialMessage:
         self.id = message_id
 
 
+class _FakeSentMessage:
+    # Sent-message double supporting edit() for streaming tests.
+    def __init__(self, channel, content: str) -> None:
+        self.channel = channel
+        self.content = content
+        self.edits: list[dict] = []
+
+    async def edit(self, **kwargs) -> None:
+        self.edits.append(dict(kwargs))
+        if "content" in kwargs:
+            self.content = kwargs["content"]
+
+
 class _FakeChannel:
     # Channel double that records outbound payloads and typing activity.
     def __init__(self, channel_id: int = 123) -> None:
         self.id = channel_id
         self.sent_payloads: list[dict] = []
+        self.sent_messages: list[_FakeSentMessage] = []
         self.trigger_typing_calls = 0
         self.typing_enter_hook = None
 
@@ -85,6 +109,9 @@ class _FakeChannel:
             payload["file_name"] = payload["file"].filename
             del payload["file"]
         self.sent_payloads.append(payload)
+        message = _FakeSentMessage(self, payload.get("content", ""))
+        self.sent_messages.append(message)
+        return message
 
     def get_partial_message(self, message_id: int) -> _FakePartialMessage:
         return _FakePartialMessage(message_id)
@@ -194,7 +221,7 @@ async def test_start_handles_client_construction_failure(monkeypatch) -> None:
         MessageBus(),
     )
 
-    def _boom(owner, *, intents):
+    def _boom(owner, *, intents, proxy=None, proxy_auth=None):
         raise RuntimeError("bad client")
 
     monkeypatch.setattr("nanobot.channels.discord.DiscordBotClient", _boom)
@@ -427,6 +454,60 @@ async def test_send_fetches_channel_when_not_cached() -> None:
     assert target.sent_payloads == [{"content": "hello"}]
 
 
+def test_supports_streaming_enabled_by_default() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+
+    assert channel.supports_streaming is True
+
+
+@pytest.mark.asyncio
+async def test_send_delta_streams_by_editing_message(monkeypatch) -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _FakeDiscordClient(owner, intents=None)
+    owner._client = client
+    owner._running = True
+    target = _FakeChannel(channel_id=123)
+    client.channels[123] = target
+
+    times = iter([1.0, 3.0, 5.0])
+    monkeypatch.setattr("nanobot.channels.discord.time.monotonic", lambda: next(times, 5.0))
+
+    await owner.send_delta("123", "hel", {"_stream_delta": True, "_stream_id": "s1"})
+    await owner.send_delta("123", "lo", {"_stream_delta": True, "_stream_id": "s1"})
+    await owner.send_delta("123", "", {"_stream_end": True, "_stream_id": "s1"})
+
+    assert target.sent_payloads[0] == {"content": "hel"}
+    assert target.sent_messages[0].edits == [{"content": "hello"}, {"content": "hello"}]
+    assert owner._stream_bufs == {}
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_splits_oversized_reply(monkeypatch) -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _FakeDiscordClient(owner, intents=None)
+    owner._client = client
+    owner._running = True
+    target = _FakeChannel(channel_id=123)
+    client.channels[123] = target
+
+    prefix = "a" * (MAX_MESSAGE_LEN - 100)
+    suffix = "b" * 150
+    full_text = prefix + suffix
+    chunks = DiscordBotClient._build_chunks(full_text, [], False)
+    assert len(chunks) == 2
+
+    times = iter([1.0, 3.0])
+    monkeypatch.setattr("nanobot.channels.discord.time.monotonic", lambda: next(times, 3.0))
+
+    await owner.send_delta("123", prefix, {"_stream_delta": True, "_stream_id": "s1"})
+    await owner.send_delta("123", suffix, {"_stream_delta": True, "_stream_id": "s1"})
+    await owner.send_delta("123", "", {"_stream_end": True, "_stream_id": "s1"})
+
+    assert target.sent_payloads == [{"content": prefix}, {"content": chunks[1]}]
+    assert target.sent_messages[0].edits == [{"content": chunks[0]}, {"content": chunks[0]}]
+    assert owner._stream_bufs == {}
+
+
 @pytest.mark.asyncio
 async def test_slash_new_forwards_when_user_is_allowlisted() -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["123"]), MessageBus())
@@ -443,9 +524,7 @@ async def test_slash_new_forwards_when_user_is_allowlisted() -> None:
     assert new_cmd is not None
     await new_cmd.callback(interaction)
 
-    assert interaction.response.messages == [
-        {"content": "Processing /new...", "ephemeral": True}
-    ]
+    assert interaction.response.messages == [{"content": "Processing /new...", "ephemeral": True}]
     assert len(handled) == 1
     assert handled[0]["content"] == "/new"
     assert handled[0]["sender_id"] == "123"
@@ -519,9 +598,7 @@ async def test_slash_help_returns_ephemeral_help_text() -> None:
     assert help_cmd is not None
     await help_cmd.callback(interaction)
 
-    assert interaction.response.messages == [
-        {"content": build_help_text(), "ephemeral": True}
-    ]
+    assert interaction.response.messages == [{"content": build_help_text(), "ephemeral": True}]
     assert handled == []
 
 
@@ -656,11 +733,13 @@ async def test_start_typing_uses_typing_context_when_trigger_typing_missing() ->
         def typing(self):
             async def _waiter():
                 await release.wait()
+
             # Hold the loop so task remains active until explicitly stopped.
             class _Ctx(_TypingCtx):
                 async def __aenter__(self):
                     await super().__aenter__()
                     await _waiter()
+
             return _Ctx()
 
     typing_channel = _NoTriggerChannel(channel_id=123)
@@ -674,3 +753,117 @@ async def test_start_typing_uses_typing_context_when_trigger_typing_missing() ->
     await asyncio.sleep(0)
 
     assert channel._typing_tasks == {}
+
+
+def test_config_accepts_proxy_fields() -> None:
+    config = DiscordConfig(
+        enabled=True,
+        token="token",
+        allow_from=["*"],
+        proxy="http://127.0.0.1:7890",
+        proxy_username="user",
+        proxy_password="pass",
+    )
+    assert config.proxy == "http://127.0.0.1:7890"
+    assert config.proxy_username == "user"
+    assert config.proxy_password == "pass"
+
+
+def test_config_proxy_defaults_to_none() -> None:
+    config = DiscordConfig(enabled=True, token="token", allow_from=["*"])
+    assert config.proxy is None
+    assert config.proxy_username is None
+    assert config.proxy_password is None
+
+
+@pytest.mark.asyncio
+async def test_start_passes_proxy_to_client(monkeypatch) -> None:
+    _FakeDiscordClient.instances.clear()
+    channel = DiscordChannel(
+        DiscordConfig(
+            enabled=True,
+            token="token",
+            allow_from=["*"],
+            proxy="http://127.0.0.1:7890",
+        ),
+        MessageBus(),
+    )
+    monkeypatch.setattr("nanobot.channels.discord.DiscordBotClient", _FakeDiscordClient)
+
+    await channel.start()
+
+    assert channel.is_running is False
+    assert len(_FakeDiscordClient.instances) == 1
+    assert _FakeDiscordClient.instances[0].proxy == "http://127.0.0.1:7890"
+    assert _FakeDiscordClient.instances[0].proxy_auth is None
+
+
+@pytest.mark.asyncio
+async def test_start_passes_proxy_auth_when_credentials_provided(monkeypatch) -> None:
+    aiohttp = pytest.importorskip("aiohttp")
+    _FakeDiscordClient.instances.clear()
+    channel = DiscordChannel(
+        DiscordConfig(
+            enabled=True,
+            token="token",
+            allow_from=["*"],
+            proxy="http://127.0.0.1:7890",
+            proxy_username="user",
+            proxy_password="pass",
+        ),
+        MessageBus(),
+    )
+    monkeypatch.setattr("nanobot.channels.discord.DiscordBotClient", _FakeDiscordClient)
+
+    await channel.start()
+
+    assert channel.is_running is False
+    assert len(_FakeDiscordClient.instances) == 1
+    assert _FakeDiscordClient.instances[0].proxy == "http://127.0.0.1:7890"
+    assert _FakeDiscordClient.instances[0].proxy_auth is not None
+    assert isinstance(_FakeDiscordClient.instances[0].proxy_auth, aiohttp.BasicAuth)
+    assert _FakeDiscordClient.instances[0].proxy_auth.login == "user"
+    assert _FakeDiscordClient.instances[0].proxy_auth.password == "pass"
+
+
+@pytest.mark.asyncio
+async def test_start_no_proxy_auth_when_only_username(monkeypatch) -> None:
+    _FakeDiscordClient.instances.clear()
+    channel = DiscordChannel(
+        DiscordConfig(
+            enabled=True,
+            token="token",
+            allow_from=["*"],
+            proxy="http://127.0.0.1:7890",
+            proxy_username="user",
+        ),
+        MessageBus(),
+    )
+    monkeypatch.setattr("nanobot.channels.discord.DiscordBotClient", _FakeDiscordClient)
+
+    await channel.start()
+
+    assert channel.is_running is False
+    assert _FakeDiscordClient.instances[0].proxy_auth is None
+
+
+@pytest.mark.asyncio
+async def test_start_no_proxy_auth_when_only_password(monkeypatch) -> None:
+    _FakeDiscordClient.instances.clear()
+    channel = DiscordChannel(
+        DiscordConfig(
+            enabled=True,
+            token="token",
+            allow_from=["*"],
+            proxy="http://127.0.0.1:7890",
+            proxy_password="pass",
+        ),
+        MessageBus(),
+    )
+    monkeypatch.setattr("nanobot.channels.discord.DiscordBotClient", _FakeDiscordClient)
+
+    await channel.start()
+
+    assert channel.is_running is False
+    assert _FakeDiscordClient.instances[0].proxy == "http://127.0.0.1:7890"
+    assert _FakeDiscordClient.instances[0].proxy_auth is None
