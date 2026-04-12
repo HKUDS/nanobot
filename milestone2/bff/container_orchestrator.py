@@ -113,6 +113,109 @@ class ContainerOrchestrator:
     def _get_volume_name(self, conversation_id: str) -> str:
         return f"{self.volume_prefix}{conversation_id}"
 
+    async def extract_workspace_files(
+        self,
+        conversation_id: str,
+        target_host_dir: str,
+        file_patterns: list = None
+    ) -> list:
+        """
+        将容器工作空间中的匹配文件复制到宿主机目录。
+        返回复制的文件路径列表。
+        """
+        import tempfile
+        import shutil
+
+        if file_patterns is None:
+            file_patterns = ["*.md", "*.txt", "*.py", "solution*"]
+
+        container_name = self._get_container_name(conversation_id)
+        volume_name = self._get_volume_name(conversation_id)
+        os.makedirs(target_host_dir, exist_ok=True)
+
+        print(f"[Orchestrator] 从容器 {container_name} 提取文件到 {target_host_dir}")
+        print(f"[Orchestrator] 容器 workspace 路径: /app/workspace")
+
+        try:
+            container = self.docker_client.containers.get(container_name)
+        except docker.errors.NotFound:
+            print(f"[Orchestrator] 容器 {container_name} 不存在")
+            return []
+
+        # 先列出容器内 /app/workspace 的内容
+        try:
+            list_result = container.exec_run(["ls", "-laR", "/app/workspace"])
+            print(f"[Orchestrator] 容器 {container_name} 的 /app/workspace 内容:")
+            print(f"[Orchestrator] {list_result.output.decode('utf-8')[:2000]}")
+        except Exception as e:
+            print(f"[Orchestrator] 列出容器目录失败: {e}")
+
+        or_conditions = " -o ".join([f"-name '{p}'" for p in file_patterns])
+        command = f"find /app/workspace -type f \\( {or_conditions} \\) 2>/dev/null || true"
+        print(f"[Orchestrator] find 命令: {command}")
+
+        try:
+            result = container.exec_run(["sh", "-c", command])
+            files_str = result.output.decode('utf-8').strip()
+
+            print(f"[Orchestrator] find 命令输出: '{files_str}'")
+
+            if not files_str:
+                print(f"[Orchestrator] 容器 {container_name} 中没有找到匹配的文件")
+                return []
+
+            files_list = files_str.split('\n')
+            copied_files = []
+
+            print(f"[Orchestrator] 找到 {len(files_list)} 个文件")
+
+            for file_path in files_list:
+                file_path = file_path.strip()
+                if not file_path:
+                    continue
+
+                file_name = os.path.basename(file_path)
+                target_path = os.path.join(target_host_dir, file_name)
+
+                print(f"[Orchestrator] 尝试复制: {file_path} -> {target_path}")
+
+                try:
+                    bits, stat = container.get_archive(file_path)
+
+                    # get_archive 返回的是 tar 流，需要解压
+                    import tarfile
+                    import io
+
+                    tar_stream = io.BytesIO()
+                    for chunk in bits:
+                        tar_stream.write(chunk)
+                    tar_stream.seek(0)
+
+                    with tarfile.open(fileobj=tar_stream, mode='r') as tar:
+                        for member in tar.getmembers():
+                            if member.isfile():
+                                file_data = tar.extractfile(member)
+                                if file_data:
+                                    content = file_data.read()
+                                    # 使用成员名作为目标文件名
+                                    final_target = os.path.join(target_host_dir, os.path.basename(member.name))
+                                    with open(final_target, 'wb') as f:
+                                        f.write(content)
+                                    copied_files.append(final_target)
+                                    print(f"[Orchestrator] 解压并复制成功: {member.name} -> {final_target}")
+                except Exception as e:
+                    print(f"[Orchestrator] 复制/解压文件失败 {file_path}: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            return copied_files
+
+        except Exception as e:
+            print(f"[Orchestrator] 提取文件失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
     async def create_container(
         self,
         conversation_id: str,
@@ -256,7 +359,7 @@ class ContainerOrchestrator:
             
             # 2. 获取并过滤环境变量
             parent_env_list = parent_container.attrs.get("Config", {}).get("Env", [])
-            allowed_prefixes = ['TASK', 'MODEL', 'API_KEY', 'HTTP_PROXY', 'HTTPS_PROXY']
+            allowed_prefixes = ['TASK', 'MODEL', 'API_KEY', 'HTTP_PROXY', 'HTTPS_PROXY', 'CONVERSATION_ID']
             child_env = [e for e in parent_env_list if any(e.startswith(p) for p in allowed_prefixes)]
             
             print(f"[Orchestrator] Filtered environment variables: {len(child_env)} items")
@@ -270,6 +373,8 @@ class ContainerOrchestrator:
             await self._copy_workspace_via_docker_api(parent_conversation_id, child_conversation_id)
             
             # 5. 创建子容器（数据已准备就绪）
+            child_env = [e for e in child_env if not e.startswith('CONVERSATION_ID=')]
+            child_env.append(f"CONVERSATION_ID={child_conversation_id}")
             child_container = self.docker_client.containers.run(
                 image="nanobot-agent:latest",
                 name=f"nanobot_conv_{child_conversation_id}",

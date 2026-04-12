@@ -1,0 +1,30 @@
+{
+  "name": "date-arrange-frontend",
+  "version": "1.0.0",
+  "description": "Date Arrange 前端界面 - 日程规划与任务管理",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "serve": "vite preview --port 3001"
+  },
+  "dependencies": {
+    "vue": "^3.3.4",
+    "vue-router": "^4.2.4",
+    "pinia": "^2.1.6",
+    "axios": "^1.4.0",
+    "element-plus": "^2.3.8",
+    "@element-plus/icons-vue": "^2.1.0",
+    "dayjs": "^1.11.9",
+    "marked": "^5.0.2",
+    "highlight.js": "^11.8.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.2.3",
+    "vite": "^4.4.5",
+    "unplugin-vue-components": "^0.25.1",
+    "unplugin-auto-import": "^0.16.6",
+    "@types/marked": "^5.0.2"
+  }
+}

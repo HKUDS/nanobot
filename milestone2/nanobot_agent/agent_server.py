@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
+import aiohttp
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
@@ -143,6 +144,165 @@ def load_trajectory() -> list:
     return records
 
 
+async def check_notifications():
+    """检查新通知"""
+    bff_url = os.environ.get("BFF_URL", "http://host.docker.internal:8000")
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+        try:
+            async with session.get(f"{bff_url}/notifications/{CONVERSATION_ID}") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("notifications", [])
+                else:
+                    print(f"[Notifications] Failed to get notifications: {resp.status}")
+        except Exception as e:
+            print(f"[Notifications] Error checking notifications: {e}")
+    return []
+
+
+async def process_bounty_task(bounty_id: str, notification_id: str = None):
+    """处理悬赏任务"""
+    bff_url = os.environ.get("BFF_URL", "http://host.docker.internal:8000")
+
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as http_session:
+        try:
+            if notification_id:
+                async with http_session.post(f"{bff_url}/notifications/{notification_id}/process") as update_resp:
+                    if update_resp.status == 200:
+                        print(f"[Bounty] 通知状态已更新为 processing: notification_id={notification_id}")
+                    else:
+                        print(f"[Bounty] 更新通知状态失败: {update_resp.status}")
+                        return
+
+            async with http_session.get(f"{bff_url}/bounties/{bounty_id}") as resp:
+                if resp.status == 200:
+                    bounty = await resp.json()
+                    print(f"[Bounty] Processing task: {bounty.get('title')}")
+
+                    global agent_loop
+                    if agent_loop is None:
+                        print(f"[Bounty] AgentLoop 未初始化，跳过自动处理")
+                        solution_content = f"自动接受任务：{bounty.get('title', '未知任务')} - AgentLoop未初始化，仅标记参与"
+                    else:
+                        from nanobot.bus.events import InboundMessage
+
+                        task_content = f"请处理以下悬赏任务：\n"
+                        task_content += f"标题：{bounty.get('title')}\n"
+                        task_content += f"描述：{bounty.get('description')}\n"
+                        task_content += f"奖励：{bounty.get('reward_pool')} Token\n"
+                        task_content += f"Docker 奖励：{bounty.get('docker_reward')}\n"
+                        task_content += f"截止时间：{bounty.get('deadline')}\n"
+                        task_content += "请生成解决方案并提交。"
+
+                        inbound_msg = InboundMessage(
+                            channel="container",
+                            chat_id=CONVERSATION_ID,
+                            sender_id="system",
+                            content=task_content,
+                            metadata={"bounty_id": bounty_id}
+                        )
+
+                        # 获取处理前的消息数
+                        session_key = f"container:{CONVERSATION_ID}"
+                        conv_session = agent_loop.sessions.get_or_create(session_key)
+                        messages_before = len(list(conv_session.messages)) if hasattr(conv_session, 'messages') else 0
+
+                        response = await agent_loop._process_message(inbound_msg)
+                        print(f"[Bounty] Task processed: {bounty_id}")
+
+                        # 从 conv_session 消息历史中获取最后一条 assistant 的回复作为 solution
+                        solution_content = ""
+                        conv_session = agent_loop.sessions.get_or_create(session_key)
+                        if hasattr(conv_session, 'messages'):
+                            messages = list(conv_session.messages)
+                            print(f"[Bounty] 会话消息总数: {len(messages)}")
+                            assistant_roles = {'assistant', 'model', 'ai', 'bot'}
+
+                            for msg in reversed(messages):
+                                role = msg.get('role', '').lower()
+                                content = msg.get('content', '')
+                                print(f"[Bounty]   检查消息: role={role}, 长度={len(content)}")
+
+                                if role in assistant_roles and content and content.strip():
+                                    solution_content = content.strip()
+                                    print(f"[Bounty] 成功提取 solution，长度: {len(solution_content)}")
+                                    break
+
+                        if not solution_content:
+                            # 尝试从 response 对象提取
+                            if hasattr(response, 'content') and response.content:
+                                solution_content = response.content.strip()
+                                print(f"[Bounty] 从 response.content 提取 solution，长度: {len(solution_content)}")
+                            elif hasattr(response, 'text') and response.text:
+                                solution_content = response.text.strip()
+                                print(f"[Bounty] 从 response.text 提取 solution，长度: {len(solution_content)}")
+
+                        if not solution_content:
+                            solution_content = f"自动接受任务：{bounty.get('title', '未知任务')}"
+                            print(f"[Bounty] 使用占位文本，长度: {len(solution_content)}")
+
+                    async with http_session.post(f"{bff_url}/bounties/{bounty_id}/submit", json={
+                        "agent_id": CONVERSATION_ID,
+                        "content": solution_content,
+                        "skill_code": "",
+                        "cost_tokens": 0
+                    }) as submit_resp:
+                        if submit_resp.status == 200:
+                            print(f"[Bounty] Solution submitted successfully: {bounty_id}")
+                            if notification_id:
+                                async with http_session.post(f"{bff_url}/notifications/{notification_id}/complete") as complete_resp:
+                                    if complete_resp.status == 200:
+                                        print(f"[Bounty] 通知状态已更新为 completed: notification_id={notification_id}")
+                                    else:
+                                        print(f"[Bounty] 更新通知状态为 completed 失败: {complete_resp.status}")
+                        else:
+                            error_text = await submit_resp.text()
+                            print(f"[Bounty] Failed to submit solution: {submit_resp.status}, details: {error_text}")
+                else:
+                    print(f"[Bounty] Failed to get task details: {resp.status}")
+        except Exception as e:
+            print(f"[Bounty] Error processing task: {e}")
+
+
+async def check_and_process_tasks():
+    """检查并处理新任务"""
+    notifications = await check_notifications()
+    for notification in notifications:
+        if notification.get("type") == "bounty" and notification.get("status") == "pending":
+            bounty_id = notification.get("bounty_id")
+            notification_id = notification.get("id")
+            if bounty_id and notification_id:
+                await process_bounty_task(bounty_id, notification_id)
+
+
+async def task_checker():
+    """后台任务检查器"""
+    while True:
+        await check_and_process_tasks()
+        await asyncio.sleep(5)
+
+
+async def fix_consolidator(loop_instance):
+    """修复 nanobot 内部 Consolidator 的 None 值问题"""
+    try:
+        if hasattr(loop_instance, 'memory') and loop_instance.memory:
+            if hasattr(loop_instance.memory, 'consolidator') and loop_instance.memory.consolidator:
+                consolidator = loop_instance.memory.consolidator
+                print(f"[AgentLoop] consolidator found, context_window_tokens={getattr(consolidator, 'context_window_tokens', 'N/A')}")
+                if hasattr(consolidator, 'context_window_tokens') and consolidator.context_window_tokens is None:
+                    consolidator.context_window_tokens = 128000
+                    print("[AgentLoop] 已修复 consolidator.context_window_tokens 默认值为 128000")
+    except Exception as e:
+        print(f"[AgentLoop] 修复 consolidator 时出错: {e}")
+
+
+async def delayed_fix_consolidator(loop_instance):
+    """延迟修复 consolidator（处理异步创建的情况）"""
+    await asyncio.sleep(5)
+    print(f"[AgentLoop] 执行延迟修复检查...")
+    await fix_consolidator(loop_instance)
+
+
 async def initialize_agent():
     """初始化 AgentLoop 实例"""
     global agent_loop
@@ -166,6 +326,16 @@ async def initialize_agent():
         # 设置 DeepSeek 的 base URL（通过环境变量）
         os.environ['OPENAI_BASE_URL'] = 'https://api.deepseek.com/v1'
 
+        # Monkey patch Consolidator 修复 context_window_tokens None 问题
+        from nanobot.agent.memory import Consolidator
+        _original_maybe = Consolidator.maybe_consolidate_by_tokens
+        async def _patched_maybe(self, *args, **kwargs):
+            if hasattr(self, 'context_window_tokens') and self.context_window_tokens is None:
+                self.context_window_tokens = 128000
+            return await _original_maybe(self, *args, **kwargs)
+        Consolidator.maybe_consolidate_by_tokens = _patched_maybe
+        print("[AgentLoop] 已 Monkey Patch Consolidator.maybe_consolidate_by_tokens")
+
         from nanobot.agent.loop import AgentLoop
         from nanobot.bus.queue import MessageBus
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
@@ -173,6 +343,13 @@ async def initialize_agent():
 
         api_key = os.environ.get("API_KEY", "")
         model = os.environ.get("MODEL", "deepseek-chat")
+
+        # 检查 API_KEY 是否有效
+        if not api_key:
+            print(f"[AgentLoop] 警告: API_KEY 为空，LLM 调用将失败！")
+            print(f"[AgentLoop] 请确保容器环境变量中设置了有效的 API_KEY")
+        else:
+            print(f"[AgentLoop] API_KEY 已设置，长度: {len(api_key)}")
 
         # 创建基础组件
         bus = MessageBus()
@@ -184,10 +361,13 @@ async def initialize_agent():
             provider=provider,
             workspace=WORKSPACE_DIR,
             model=model,
-            max_iterations=10,
+            max_iterations=50,
         )
 
-
+        # 立即尝试修复 consolidator
+        await fix_consolidator(agent_loop)
+        # 同时创建延迟修复任务（以防 consolidator 异步创建）
+        asyncio.create_task(delayed_fix_consolidator(agent_loop))
 
         print(f"[AgentLoop] 初始化成功 for conversation={CONVERSATION_ID}, model={model}")
         print(f"[AgentLoop] Workspace: {WORKSPACE_DIR.absolute()}")
@@ -200,9 +380,18 @@ async def initialize_agent():
         agent_loop = None
 
 
+async def delayed_task_checker():
+    """延迟启动的后台任务检查器"""
+    await asyncio.sleep(3)
+    asyncio.create_task(task_checker())
+    print(f"[Agent] 延迟后台任务检查器已启动")
+
+
 @app.on_event("startup")
 async def startup():
     await initialize_agent()
+    asyncio.create_task(delayed_task_checker())
+    print(f"[Agent] 应用已启动，CONVERSATION_ID={CONVERSATION_ID}")
 
 
 @app.get("/health")
@@ -212,6 +401,724 @@ async def health():
         "conversation_id": CONVERSATION_ID,
         "task": TASK,
     }
+
+
+class EvaluateRequest(BaseModel):
+    bounty_description: str
+    submission_content: str
+
+
+class EvaluateResponse(BaseModel):
+    score: float
+    reason: str
+
+
+@app.post("/evaluate", response_model=EvaluateResponse)
+async def evaluate(req: EvaluateRequest):
+    """使用 LLM 评估悬赏任务提交的质量"""
+    global agent_loop
+
+    if agent_loop is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+
+    prompt = f"""你是一个任务评审专家。请根据以下悬赏要求和提交内容进行评分（0-100分），并给出简短理由。
+
+悬赏描述：{req.bounty_description}
+提交内容：{req.submission_content}
+
+评分标准：
+- 完整性（40%）：是否完全满足任务要求
+- 准确性（30%）：内容是否正确、无错误
+- 可执行性（30%）：是否可以直接使用或执行
+
+请严格按以下 JSON 格式输出，不要包含任何其他内容：
+{{"score": 85, "reason": "内容完整准确，可直接执行"}}
+"""
+
+    try:
+        from nanobot.bus.events import InboundMessage
+
+        inbound_msg = InboundMessage(
+            channel="container",
+            chat_id=CONVERSATION_ID,
+            sender_id="system",
+            content=f"请作为评分专家，评价以下任务提交的质量。\n\n{prompt}",
+            metadata={"type": "evaluation"}
+        )
+
+        response = await agent_loop._process_message(inbound_msg)
+
+        # 从响应中提取 JSON
+        content = ""
+        if response:
+            content = response.content if hasattr(response, 'content') else str(response)
+
+        # 解析 JSON
+        import json
+        json_str = content.strip()
+        if not json_str:
+            raise ValueError("Empty response from LLM")
+
+        # 尝试提取 ```json ... ``` 代码块
+        if json_str.startswith("```"):
+            parts = json_str.split("```")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("json"):
+                    part = part[4:].strip()
+                if part.startswith("{") and part.endswith("}"):
+                    json_str = part
+                    break
+
+        # 提取 JSON（使用 brace-counting 算法支持嵌套）
+        start = json_str.find('{')
+        if start != -1:
+            brace_count = 0
+            end_pos = -1
+            for i in range(start, len(json_str)):
+                if json_str[i] == '{':
+                    brace_count += 1
+                elif json_str[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_pos = i + 1
+                        break
+            if end_pos > 0:
+                json_str = json_str[start:end_pos]
+
+        result = json.loads(json_str)
+        score = float(result.get("score", 50))
+        reason = str(result.get("reason", ""))
+
+        return EvaluateResponse(score=score, reason=reason)
+
+    except Exception as e:
+        print(f"[Evaluate] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        # 降级为规则评分
+        content = req.submission_content
+        length = len(content)
+        if length < 50:
+            return EvaluateResponse(score=30.0, reason="内容过短")
+        elif length < 200:
+            return EvaluateResponse(score=50.0, reason="内容较短")
+        elif length < 500:
+            return EvaluateResponse(score=70.0, reason="内容适中")
+        else:
+            return EvaluateResponse(score=80.0, reason="内容丰富")
+
+
+class BatchEvaluateRequest(BaseModel):
+    bounty_id: str
+    bounty_title: str
+    bounty_description: str
+    review_base_path: str
+    submissions: list
+
+
+class BatchEvaluateResponse(BaseModel):
+    results: list
+
+
+@app.post("/evaluate_batch", response_model=BatchEvaluateResponse)
+async def evaluate_batch(req: BatchEvaluateRequest):
+    """批量评审，读取文件进行评分，并为高分提交生成Skill总结"""
+    global agent_loop
+
+    if agent_loop is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+
+    # Skill总结阈值配置（宁缺毋滥策略）
+    SKILL_SUMMARY_THRESHOLD = 80.0  # 分数高于80分时才进行Skill总结，否则总结最高分
+    
+    print(f"[EvaluateBatch] 开始批量评审 {len(req.submissions)} 个提交")
+    print(f"[EvaluateBatch] 评审路径: {req.review_base_path}")
+    print(f"[EvaluateBatch] Skill总结策略: 80分以上总结80分的，否则总结最高分")
+
+    # 添加调试：检查评审目录结构
+    import os
+    from pathlib import Path
+    review_path = Path(req.review_base_path)
+
+    print(f"[EvaluateBatch] 检查评审目录: {review_path}")
+    print(f"[EvaluateBatch]   - 路径存在: {review_path.exists()}")
+    if review_path.exists():
+        print(f"[EvaluateBatch]   - 目录内容: {list(review_path.iterdir())}")
+        for d in review_path.iterdir():
+            if d.is_dir():
+                print(f"[EvaluateBatch]   - Agent {d.name}: {list(d.glob('*'))}")
+    else:
+        # 尝试列出 /tmp 下有什么
+        tmp_dir = Path("/tmp")
+        print(f"[EvaluateBatch]   - /tmp 目录内容: {list(tmp_dir.glob('*'))}")
+
+    results = []
+    submission_contents = {}  # 存储提交ID对应的内容，用于Skill总结
+    
+    for sub in req.submissions:
+        try:
+            agent_id = sub.get("agent_id", "")
+            submission_id = sub.get("submission_id", "")
+            content_fallback = sub.get("content", "")
+
+            file_contents = []
+
+            # 尝试从文件读取
+            if req.review_base_path:
+                agent_dir = Path(req.review_base_path) / agent_id
+                print(f"[EvaluateBatch] 尝试读取: {agent_dir}")
+
+                if agent_dir.exists():
+                    files_in_dir = list(agent_dir.glob("*"))
+                    print(f"[EvaluateBatch]   找到 {len(files_in_dir)} 个文件: {[f.name for f in files_in_dir]}")
+                    for f in files_in_dir:
+                        if f.is_file():
+                            try:
+                                content = f.read_text()
+                                print(f"[EvaluateBatch]   - {f.name}: {len(content)} 字符")
+                                file_contents.append(content)
+                            except Exception as e:
+                                print(f"[EvaluateBatch]   - 读取 {f.name} 失败: {e}")
+                else:
+                    print(f"[EvaluateBatch]   目录不存在!")
+
+            combined_content = "\n\n".join(file_contents) if file_contents else content_fallback
+            print(f"[EvaluateBatch] 最终用于评分的内容长度: {len(combined_content)}")
+
+            if not combined_content:
+                combined_content = "无提交内容"
+
+            # 存储内容用于可能的Skill总结
+            submission_contents[submission_id] = combined_content
+
+            # 调用单个评分
+            score, reason = await evaluate_single(
+                req.bounty_description,
+                combined_content
+            )
+
+            result = {
+                "submission_id": submission_id,
+                "agent_id": agent_id,
+                "score": score,
+                "reason": reason
+            }
+            results.append(result)
+            print(f"[EvaluateBatch] 评审完成: {submission_id}, score={score}")
+
+        except Exception as e:
+            print(f"[EvaluateBatch] 评审失败 {sub.get('submission_id')}: {e}")
+            result = {
+                "submission_id": sub.get("submission_id", ""),
+                "agent_id": sub.get("agent_id", ""),
+                "score": 50.0,
+                "reason": f"评审出错: {str(e)[:50]}"
+            }
+            results.append(result)
+
+    print(f"[EvaluateBatch] 批量评分完成: {len(results)} 个结果")
+    
+    # 步骤2：为高分提交生成Skill总结
+    print(f"[EvaluateBatch] 开始Skill总结分析...")
+    
+    # 找出所有高于Skill总结阈值的提交
+    high_score_submissions = [r for r in results if r["score"] > SKILL_SUMMARY_THRESHOLD]
+    
+    # 找出最高分的提交（用于没有高于阈值的情况）
+    highest_score_submission = None
+    if results:
+        highest_score_submission = max(results, key=lambda x: x["score"])
+    
+    print(f"[EvaluateBatch] 80分以上提交数量: {len(high_score_submissions)}")
+    print(f"[EvaluateBatch] 最高分提交: {highest_score_submission['submission_id'] if highest_score_submission else '无'}，分数: {highest_score_submission['score'] if highest_score_submission else 0}")
+    
+    # 确定需要进行Skill总结的提交
+    submissions_to_summarize = []
+    if high_score_submissions:
+        # 有80分以上的提交：总结所有80分以上的
+        submissions_to_summarize = high_score_submissions
+        print(f"[EvaluateBatch] 有{len(high_score_submissions)}个80分以上提交，将总结所有80分以上的")
+    elif highest_score_submission and highest_score_submission["score"] > 0:
+        # 没有80分以上的提交，总结最高分的提交
+        submissions_to_summarize = [highest_score_submission]
+        print(f"[EvaluateBatch] 无80分以上提交，将总结最高分提交（分数: {highest_score_submission['score']})")
+    else:
+        print(f"[EvaluateBatch] 没有符合条件的提交进行Skill总结")
+    
+    # 为选定的提交生成Skill总结
+    for submission_result in submissions_to_summarize:
+        submission_id = submission_result["submission_id"]
+        score = submission_result["score"]
+        
+        if submission_id in submission_contents:
+            content = submission_contents[submission_id]
+            print(f"[EvaluateBatch] 开始为提交 {submission_id} (分数: {score}) 生成Skill总结...")
+            
+            try:
+                skill_summary = await _generate_skill_summary(
+                    req.bounty_description,
+                    content
+                )
+                
+                # 将Skill总结添加到结果中
+                submission_result["skill_summary"] = skill_summary
+                print(f"[EvaluateBatch] ✅ 提交 {submission_id} 的Skill总结成功，技能名称: {skill_summary.get('name', 'unknown')}")
+                
+            except Exception as e:
+                print(f"[EvaluateBatch] ❌ 提交 {submission_id} 的Skill总结失败: {e}")
+                # 添加空的Skill总结表示失败
+                submission_result["skill_summary"] = {
+                    "name": "skill-error",
+                    "description": "Skill总结失败",
+                    "error": str(e)
+                }
+        else:
+            print(f"[EvaluateBatch] ⚠️ 提交 {submission_id} 的内容不存在，跳过Skill总结")
+            submission_result["skill_summary"] = {
+                "name": "skill-missing-content",
+                "description": "无法生成Skill总结，内容缺失"
+            }
+    
+    print(f"[EvaluateBatch] 批量评审完成，共 {len(results)} 个结果，为 {len(submissions_to_summarize)} 个提交生成Skill总结")
+    
+    # 步骤3：生成综合所有提交的总结类Skill
+    print(f"[EvaluateBatch] 开始生成综合所有提交的总结类Skill...")
+    
+    if submission_contents and len(submission_contents) > 0:
+        try:
+            # 收集所有提交内容
+            all_contents = list(submission_contents.values())
+            
+            # 生成综合Skill总结
+            aggregated_skill = await _generate_aggregated_skill_summary(
+                req.bounty_description,
+                all_contents
+            )
+            
+            # 将综合Skill作为特殊结果添加到results中
+            aggregated_result = {
+                "submission_id": "aggregated-summary",
+                "agent_id": "system",
+                "score": 0.0,  # 综合Skill没有评分
+                "reason": "综合所有提交生成的总结类Skill",
+                "skill_summary": aggregated_skill
+            }
+            results.append(aggregated_result)
+            
+            print(f"[EvaluateBatch] ✅ 综合Skill总结成功，名称: {aggregated_skill.get('name', 'unknown')}")
+        except Exception as e:
+            print(f"[EvaluateBatch] ❌ 综合Skill总结失败: {e}")
+            # 添加失败标记
+            aggregated_result = {
+                "submission_id": "aggregated-summary-error",
+                "agent_id": "system",
+                "score": 0.0,
+                "reason": f"综合Skill生成失败: {str(e)[:100]}",
+                "skill_summary": {
+                    "name": "aggregated-skill-error",
+                    "description": "综合Skill生成失败",
+                    "error": str(e)
+                }
+            }
+            results.append(aggregated_result)
+    else:
+        print(f"[EvaluateBatch] ⚠️ 没有可用的提交内容，跳过综合Skill生成")
+    
+    print(f"[EvaluateBatch] 全部完成，总计 {len(results)} 个结果（包括综合Skill）")
+    return BatchEvaluateResponse(results=results)
+
+
+async def _generate_skill_summary(bounty_description: str, submission_content: str) -> dict:
+    """
+    生成Skill总结的辅助函数（复用summarize_skill端点的逻辑）
+    """
+    from nanobot.bus.events import InboundMessage
+
+    prompt = f"""你是一个 Skill 总结专家。请根据以下悬赏任务和提交内容，总结出一个高质量、可复用的 Agent Skill。
+
+悬赏任务描述: {bounty_description}
+
+提交内容: {submission_content[:8000]}
+
+请严格按照以下 JSON 格式输出，**不要输出任何其他内容**：
+
+```json
+{{
+    "name": "技能名称（只用小写字母和连字符）",
+    "description": "一句话描述这个技能是什么、何时使用",
+    "usage": "具体的使用步骤",
+    "instructions": "核心执行指令",
+    "examples": "使用示例",
+    "code_template": "代码模板或空字符串"
+}}
+```
+
+要求：
+1. **name**: 必须是小写字母+连字符，如 "data-analysis-skill"
+2. **description**: 一句话，不超过50字
+3. **instructions**: 要输出真正可复用的方法论，不是简单重复提交内容
+4. **只输出上面的JSON代码块，不要有任何前缀、后缀或解释**"""
+
+    inbound_msg = InboundMessage(
+        channel="container",
+        chat_id=CONVERSATION_ID,
+        sender_id="system",
+        content=f"请作为 Skill 总结专家，根据以下内容生成标准化的 Agent Skill。\n\n{prompt}",
+        metadata={"type": "skill_summary"}
+    )
+
+    response = await agent_loop._process_message(inbound_msg)
+
+    # 从响应中提取 JSON
+    content = ""
+    if response:
+        content = response.content if hasattr(response, 'content') else str(response)
+
+    # 解析 JSON（复用现有的解析逻辑）
+    import json
+    import re
+    
+    json_str = content.strip()
+    if json_str.startswith("```"):
+        parts = json_str.split("```")
+        for part in parts:
+            part = part.strip()
+            if part.startswith("{") and part.endswith("}"):
+                json_str = part
+                break
+
+    # 提取 JSON（使用 brace-counting 算法支持嵌套）
+    start = json_str.find('{')
+    if start != -1:
+        brace_count = 0
+        end_pos = -1
+        for i in range(start, len(json_str)):
+            if json_str[i] == '{':
+                brace_count += 1
+            elif json_str[i] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    end_pos = i + 1
+                    break
+        if end_pos > 0:
+            json_str = json_str[start:end_pos]
+
+    try:
+        skill_data = json.loads(json_str)
+        print(f"[_generate_skill_summary] Skill 总结成功，名称: {skill_data.get('name', 'unknown')}")
+        return skill_data
+    except json.JSONDecodeError as e:
+        print(f"[_generate_skill_summary] JSON 解析失败: {e}, 原始内容: {content[:200]}")
+        # 返回降级版本
+        return {
+            "name": "skill-fallback",
+            "description": f"基于悬赏生成的技能: {bounty_description[:100] if bounty_description else '未命名'}",
+            "usage": "请参考提交内容中的具体实现",
+            "instructions": f"这是一个基于以下内容生成的技能:\n\n{submission_content[:1000]}",
+            "examples": "暂无示例",
+            "code_template": "",
+            "quality_assessment": {
+                "task_completion": "无法评估",
+                "tool_usage": "无法评估",
+                "reasoning_planning": "无法评估",
+                "reusability": "无法评估",
+                "completeness": "基础版本",
+                "accuracy": "无法评估",
+                "clarity": "基础版本",
+                "executability": "基础版本"
+            },
+            "improvement_suggestions": ["需要更详细的总结"]
+        }
+
+
+async def _generate_aggregated_skill_summary(bounty_description: str, all_submissions_content: list) -> dict:
+    """
+    生成综合所有提交的总结类Skill
+    all_submissions_content: 所有提交内容的列表
+    """
+    from nanobot.bus.events import InboundMessage
+
+    combined_content = "\n".join([f"提交 #{i+1}:\n{content[:4000]}\n" for i, content in enumerate(all_submissions_content)])
+
+    prompt = f"""你是一个 Skill 总结专家。请综合分析以下多个提交，提炼出一个通用的 Agent Skill。
+
+悬赏任务: {bounty_description}
+
+提交内容:
+{combined_content}
+
+请严格按照以下 JSON 格式输出，**只输出 JSON，不要有任何其他内容**：
+
+```json
+{{
+    "name": "综合技能名称（小写连字符）",
+    "description": "一句话描述",
+    "usage": "使用步骤",
+    "instructions": "核心方法论（从所有提交中提炼的通用模式）",
+    "examples": "示例",
+    "code_template": ""
+}}
+```
+
+要求：
+1. **instructions**: 必须是从所有提交中提炼出的**通用方法论**，不是简单复述
+2. 识别并归纳所有提交的**共同最佳实践**
+3. **只输出 JSON 代码块**"""
+
+    inbound_msg = InboundMessage(
+        channel="container",
+        chat_id=CONVERSATION_ID,
+        sender_id="system",
+        content=f"请综合分析所有提交内容，生成标准化的综合性 Agent Skill。\n\n{prompt}",
+        metadata={"type": "aggregated_skill_summary"}
+    )
+
+    response = await agent_loop._process_message(inbound_msg)
+
+    # 从响应中提取 JSON
+    content = ""
+    if response:
+        content = response.content if hasattr(response, 'content') else str(response)
+
+    # 复用现有的 JSON 解析逻辑
+    try:
+        # 先尝试使用现有的 extract_and_repair_json 函数
+        skill_data = extract_and_repair_json(content)
+        if skill_data:
+            print(f"[_generate_aggregated_skill_summary] 综合 Skill 总结成功，名称: {skill_data.get('name', 'unknown')}")
+            return skill_data
+        
+        # 如果 extract_and_repair_json 失败，使用正则提取
+        import re
+        import json
+        
+        json_str = content.strip()
+        if json_str.startswith("```"):
+            parts = json_str.split("```")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("{") and part.endswith("}"):
+                    json_str = part
+                    break
+
+        # 使用与 extract_and_repair_json 相同的 brace-counting 算法
+        start = json_str.find('{')
+        if start != -1:
+            brace_count = 0
+            end_pos = -1
+            for i in range(start, len(json_str)):
+                if json_str[i] == '{':
+                    brace_count += 1
+                elif json_str[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_pos = i + 1
+                        break
+            if end_pos > 0:
+                json_str = json_str[start:end_pos]
+        
+        skill_data = json.loads(json_str)
+        print(f"[_generate_aggregated_skill_summary] 综合 Skill 总结成功，名称: {skill_data.get('name', 'unknown')}")
+        return skill_data
+    except Exception as e:
+        print(f"[_generate_aggregated_skill_summary] 综合 Skill 总结失败: {e}, 原始内容: {content[:200]}")
+        # 返回降级版本
+        return {
+            "name": "aggregated-skill-fallback",
+            "description": f"基于所有提交的综合技能: {bounty_description[:100] if bounty_description else '未命名'}",
+            "usage": "请参考所有提交中的最佳实践",
+            "instructions": f"这是一个综合了所有提交精华的技能:\n\n{combined_content[:1500]}",
+            "examples": "暂无示例",
+            "code_template": "",
+            "quality_assessment": {
+                "overall_quality": "基础综合版本",
+                "best_practices": "需要进一步分析",
+                "common_patterns": "需要进一步分析",
+                "innovation_highlights": "需要进一步分析"
+            },
+            "improvement_suggestions": ["需要更详细的综合分析"],
+            "submissions_analysis": "综合分析失败，请检查提交内容"
+        }
+
+
+def extract_and_repair_json(text: str):
+    """
+    本地解析 JSON，包括提取 Markdown 代码块、完整 JSON 对象、正则提取字段。
+    返回解析后的 dict，若失败则返回 None。
+    """
+    import re
+    import json
+    
+    if not text:
+        return None
+    
+    # 1. 直接解析
+    try:
+        return json.loads(text.strip())
+    except json.JSONDecodeError:
+        pass
+    
+    # 2. 提取 Markdown 代码块中的 JSON
+    code_block_pattern = r'```(?:json)?\s*(\{.*?\})\s*```'
+    match = re.search(code_block_pattern, text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+    
+    # 3. 提取首个完整 JSON 对象
+    start = text.find('{')
+    if start != -1:
+        brace_count = 0
+        for i in range(start, len(text)):
+            if text[i] == '{':
+                brace_count += 1
+            elif text[i] == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    try:
+                        return json.loads(text[start:i+1])
+                    except json.JSONDecodeError:
+                        break
+    
+    # 4. 正则提取 score 和 reason
+    score_match = re.search(r'(?:score|评分|分数)[\s:：]*(\d+(?:\.\d+)?)', text, re.IGNORECASE)
+    reason_match = re.search(r'(?:reason|理由|原因)[\s:：]*(.+?)(?:\n|$)', text, re.IGNORECASE)
+    if score_match:
+        score = float(score_match.group(1))
+        reason = reason_match.group(1).strip() if reason_match else "评分完成"
+        return {"score": score, "reason": reason}
+    
+    return None
+
+
+async def _convert_to_json_via_llm(raw_text: str):
+    """
+    调用 LLM 将纯文本转换为 JSON 格式。
+    """
+    global agent_loop
+    if agent_loop is None:
+        return None
+    
+    prompt = f"""请将以下评分内容转换为严格的 JSON 格式，只输出 JSON，不要包含其他文字。
+
+评分内容：
+{raw_text}
+
+要求输出格式：
+{{"score": 85, "reason": "内容完整准确，可直接执行"}}
+"""
+    try:
+        from nanobot.bus.events import InboundMessage
+        inbound_msg = InboundMessage(
+            channel="container",
+            chat_id=CONVERSATION_ID,
+            sender_id="system",
+            content=prompt,
+            metadata={"type": "json_repair"}
+        )
+        response = await agent_loop._process_message(inbound_msg)
+        raw_response = response.content if response else ""
+        print(f"[_convert_to_json_via_llm] LLM转换响应: {raw_response[:200] if raw_response else '(空)'}...")
+        return extract_and_repair_json(raw_response)
+    except Exception as e:
+        print(f"[_convert_to_json_via_llm] LLM转换失败: {e}")
+        return None
+
+
+async def evaluate_single(bounty_description: str, submission_content: str) -> tuple:
+    """单个评分逻辑 - 按优先级实现评分容错"""
+    prompt = f"""你是一个任务评审专家。请根据以下悬赏要求和提交内容进行评分（0-100分），并给出简短理由。
+
+悬赏描述：{bounty_description}
+提交内容：{submission_content}
+
+评分标准：
+- 完整性（40%）：是否完全满足任务要求
+- 准确性（30%）：内容是否正确、无错误
+- 可执行性（30%）：是否可以直接使用或执行
+
+请严格按以下 JSON 格式输出，不要包含任何其他内容：
+{{"score": 85, "reason": "内容完整准确，可直接执行"}}
+"""
+
+    try:
+        from nanobot.bus.events import InboundMessage
+        
+        # 检查 agent_loop 是否已初始化
+        global agent_loop
+        if agent_loop is None:
+            print("[Evaluate] AgentLoop 未初始化，使用规则评分")
+            return _rule_based_score(submission_content)
+
+        inbound_msg = InboundMessage(
+            channel="container",
+            chat_id=CONVERSATION_ID,
+            sender_id="system",
+            content=f"请作为评分专家，评价以下任务提交的质量。\n\n{prompt}",
+            metadata={"type": "evaluation"}
+        )
+
+        response = await agent_loop._process_message(inbound_msg)
+        raw_response = response.content if response else ""
+
+        print(f"[Evaluate] 原始响应长度: {len(raw_response)}, 内容前200字符: {raw_response[:200] if raw_response else '(空)'}")
+
+        # ---------- 按优先级解析 ----------
+        result = None
+        
+        # 层级1：直接解析
+        try:
+            result = json.loads(raw_response.strip())
+            print("[Evaluate] 层级1：直接JSON解析成功")
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"[Evaluate] 层级1失败: {e}")
+        
+        # 层级2：LLM二次转换（直接解析失败时立即调用）
+        if result is None:
+            print("[Evaluate] 层级1失败，层级2：调用LLM二次转换...")
+            result = await _convert_to_json_via_llm(raw_response)
+            if result:
+                print("[Evaluate] 层级2：LLM转换成功")
+        
+        # 层级3~5：本地解析降级
+        if result is None:
+            print("[Evaluate] 层级2失败，尝试本地解析降级...")
+            result = extract_and_repair_json(raw_response)
+            if result:
+                print("[Evaluate] 本地解析降级成功")
+        
+        # 最终降级：规则评分
+        if result:
+            score = float(result.get("score", 50))
+            reason = str(result.get("reason", ""))
+        else:
+            print("[Evaluate] 所有解析均失败，使用规则评分")
+            score, reason = _rule_based_score(submission_content)
+
+        print(f"[Evaluate] 最终评分: score={score}, reason={reason[:50]}")
+        return score, reason
+
+    except Exception as e:
+        print(f"[Evaluate] 异常: {e}")
+        import traceback
+        traceback.print_exc()
+        return _rule_based_score(submission_content)
+
+
+def _rule_based_score(submission_content: str) -> tuple:
+    """基于内容长度的规则评分"""
+    length = len(submission_content)
+    if length < 50:
+        return 30.0, "内容过短"
+    elif length < 200:
+        return 50.0, "内容较短"
+    elif length < 500:
+        return 70.0, "内容适中"
+    else:
+        return 80.0, "内容丰富"
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -485,6 +1392,165 @@ async def get_history():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading history: {str(e)}")
+
+
+class SummarizeSkillRequest(BaseModel):
+    bounty_description: str
+    submission_content: str
+
+
+class SummarizeSkillResponse(BaseModel):
+    skill_summary: dict
+
+
+@app.post("/summarize_skill", response_model=SummarizeSkillResponse)
+async def summarize_skill(req: SummarizeSkillRequest):
+    """使用 LLM 总结提交内容，生成标准化的 Skill 信息"""
+    global agent_loop
+
+    if agent_loop is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+
+    prompt = f"""你是一个 Skill 总结专家。请根据以下悬赏任务和提交内容，总结出一个高质量、可复用的 Agent Skill。
+
+悬赏任务描述: {req.bounty_description}
+
+提交内容: {req.submission_content}
+
+请将这个提交总结成一个标准化的 Agent Skill，需要包含以下部分：
+
+## Skill 质量标准（请基于这些标准评估和生成）：
+
+### 1. 核心能力维度
+- **任务完成率**: Skill 能否完整解决特定类型的问题
+- **工具调用能力**: 是否需要调用外部工具，调用是否准确
+- **推理规划能力**: 是否包含多步逻辑推理和规划
+- **可复用性**: Skill 能否在不同场景和上下文中复用
+
+### 2. 内容质量标准
+- **完整性**: 包含所有必要组件（名称、描述、用法、指令、示例）
+- **准确性**: 技术细节正确，无事实错误
+- **清晰度**: 表达清晰，易于理解
+- **可执行性**: 提供可直接执行的指导或代码
+
+### 3. 工程化标准
+- **模块化**: Skill 是否模块化，便于维护和扩展
+- **错误处理**: 是否包含错误处理和边界条件
+- **性能考虑**: 是否考虑执行效率和资源消耗
+- **安全性**: 是否包含安全注意事项
+
+## 请生成以下结构的 Skill 信息：
+
+1. **name**: 技能名称（使用小写字母和连字符，如 "data-analysis-pipeline"）
+2. **description**: 技能描述（1-2句话说明这个技能是什么，何时使用）
+3. **usage**: 使用方法（具体的使用场景和步骤）
+4. **instructions**: 核心指令（详细的执行步骤和操作指南）
+5. **examples**: 使用示例（输入输出示例，展示实际应用）
+6. **code_template**: 代码模板（可选的代码模板或示例代码）
+7. **quality_assessment**: 质量评估（基于上述标准对Skill进行自我评估）
+8. **improvement_suggestions**: 改进建议（如何进一步完善这个Skill）
+
+请以 JSON 格式输出，结构如下：
+{{
+    "name": "skill-name",
+    "description": "技能描述",
+    "usage": "使用步骤...",
+    "instructions": "详细指令...",
+    "examples": "示例说明...",
+    "code_template": "代码模板...",
+    "quality_assessment": {{
+        "task_completion": "评估说明...",
+        "tool_usage": "评估说明...",
+        "reasoning_planning": "评估说明...",
+        "reusability": "评估说明...",
+        "completeness": "评估说明...",
+        "accuracy": "评估说明...",
+        "clarity": "评估说明...",
+        "executability": "评估说明..."
+    }},
+    "improvement_suggestions": ["建议1", "建议2", "建议3"]
+}}
+
+只输出 JSON，不要包含其他内容。"""
+
+    try:
+        from nanobot.bus.events import InboundMessage
+
+        inbound_msg = InboundMessage(
+            channel="container",
+            chat_id=CONVERSATION_ID,
+            sender_id="system",
+            content=f"请作为 Skill 总结专家，根据以下内容生成标准化的 Agent Skill。\n\n{prompt}",
+            metadata={"type": "skill_summary"}
+        )
+
+        response = await agent_loop._process_message(inbound_msg)
+
+        # 从响应中提取 JSON
+        content = ""
+        if response:
+            content = response.content if hasattr(response, 'content') else str(response)
+
+        # 解析 JSON（复用现有的解析逻辑）
+        import json
+        import re
+        
+        json_str = content.strip()
+        if json_str.startswith("```"):
+            parts = json_str.split("```")
+            for part in parts:
+                part = part.strip()
+                if part.startswith("{") and part.endswith("}"):
+                    json_str = part
+                    break
+
+        # 提取 JSON
+        match = re.search(r'\{[^{}]*\}', json_str, re.DOTALL)
+        if match:
+            json_str = match.group()
+
+        try:
+            skill_data = json.loads(json_str)
+            print(f"[SummarizeSkill] Skill 总结成功，名称: {skill_data.get('name', 'unknown')}")
+            return SummarizeSkillResponse(skill_summary=skill_data)
+        except json.JSONDecodeError as e:
+            print(f"[SummarizeSkill] JSON 解析失败: {e}, 原始内容: {content[:200]}")
+            # 返回降级版本
+            return SummarizeSkillResponse(skill_summary={
+                "name": "skill-fallback",
+                "description": f"基于悬赏生成的技能: {req.bounty_description[:100] if req.bounty_description else '未命名'}",
+                "usage": "请参考提交内容中的具体实现",
+                "instructions": f"这是一个基于以下内容生成的技能:\n\n{req.submission_content[:1000]}",
+                "examples": "暂无示例",
+                "code_template": "",
+                "quality_assessment": {
+                    "task_completion": "无法评估",
+                    "tool_usage": "无法评估",
+                    "reasoning_planning": "无法评估",
+                    "reusability": "无法评估",
+                    "completeness": "基础版本",
+                    "accuracy": "无法评估",
+                    "clarity": "基础版本",
+                    "executability": "基础版本"
+                },
+                "improvement_suggestions": ["需要更详细的总结"]
+            })
+
+    except Exception as e:
+        print(f"[SummarizeSkill] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        # 返回降级版本
+        return SummarizeSkillResponse(skill_summary={
+            "name": "skill-error",
+            "description": "Skill 总结过程中发生错误",
+            "usage": "无法使用",
+            "instructions": "请联系管理员",
+            "examples": "无",
+            "code_template": "",
+            "quality_assessment": {},
+            "improvement_suggestions": ["修复系统错误"]
+        })
 
 
 @app.get("/memory")

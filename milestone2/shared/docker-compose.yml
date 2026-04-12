@@ -13,6 +13,8 @@ services:
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-sk-b192d1bf26f740adace7d5f628656921}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-sk-91fe1c9c529b46bb88dc200a2e97b2b6}
+      - HTTP_PROXY=${HTTP_PROXY:-http://172.27.160.1:7890}
+      - HTTPS_PROXY=${HTTPS_PROXY:-http://172.27.160.1:7890}
     networks:
       - nanobot_net
 

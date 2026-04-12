@@ -1,0 +1,17 @@
+# Date Arrange 依赖包
+
+# 核心依赖
+fastapi>=0.104.0
+pydantic>=2.0.0
+uvicorn>=0.24.0
+
+# 可选依赖（用于更高级的功能）
+# aiohttp>=3.8.0  # 异步HTTP客户端
+# httpx>=0.25.0   # 同步/异步HTTP客户端
+
+# 开发依赖
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+isort>=5.12.0
+mypy>=1.0.0

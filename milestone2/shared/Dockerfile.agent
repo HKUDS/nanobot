@@ -7,11 +7,17 @@ ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# 使用阿里云镜像源加速下载
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+
+# 先升级 pip、setuptools、wheel（解决构建依赖问题）
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 # 先复制requirements.txt（依赖不变时这层会被缓存）
 COPY shared/requirements.txt /app/requirements.txt
 
-# 安装依赖（依赖不变时这层会被缓存）
-RUN pip install --no-cache-dir -r requirements.txt
+# 安装依赖（增加超时时间）
+RUN pip install --no-cache-dir --default-timeout=100 -r requirements.txt
 
 # 最后复制代码（代码变化时只重新构建这一层）
 COPY nanobot_agent/agent_server.py /app/agent_server.py

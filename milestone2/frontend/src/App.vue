@@ -15,10 +15,10 @@
         <el-tag :type="healthOk ? 'success' : 'danger'" effect="dark" size="small" round>
           {{ healthOk ? '服务正常' : '服务异常' }}
         </el-tag>
-        <el-tag :type="activeCount >= 10 ? 'warning' : 'success'" effect="dark" size="small" round>
-          活跃：{{ activeCount }}/10
+        <el-tag :type="activeCount >= 50 ? 'warning' : 'success'" effect="dark" size="small" round>
+          活跃：{{ activeCount }}/50
         </el-tag>
-        <el-button type="primary" size="small" @click="handleCreateConv" :disabled="activeCount >= 10" class="!rounded-lg">
+        <el-button type="primary" size="small" @click="handleCreateConv" :disabled="activeCount >= 50" class="!rounded-lg">
           <el-icon class="mr-1"><Plus /></el-icon>
           新建对话
         </el-button>
@@ -51,6 +51,49 @@
         </div>
 
         <div class="flex-1 overflow-y-auto p-3 space-y-2">
+          <!-- 悬赏市场 -->
+          <BountyMarket v-if="currentConvId" :conversation-id="currentConvId" />
+
+          <!-- 对话列表头部：显示当前对话的Power信息 -->
+          <div v-if="currentConvId" class="mb-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-100">
+            <div class="flex items-center justify-between">
+              <div>
+                <div class="text-sm font-medium text-blue-800">当前对话状态</div>
+                <div class="text-xs text-blue-600 mt-1">ID: {{ currentConvId }}</div>
+              </div>
+              <div class="text-right">
+                <div class="text-lg font-bold text-blue-700">{{ currentPower }}<span class="text-xs font-normal">/100</span></div>
+                <div class="text-xs text-blue-600">Power值</div>
+              </div>
+            </div>
+            <div class="mt-2 flex items-center justify-between text-xs">
+              <span class="text-blue-600">标注次数: {{ totalAnnotations }}</span>
+              <span class="text-blue-600 cursor-pointer hover:text-blue-800" @click="toggleFileStatsPanel">文件监控: {{ fileStatsStatus }}</span>
+            </div>
+            <!-- Power进度条 -->
+            <div class="mt-2">
+              <el-progress
+                :percentage="Math.round(currentPower)"
+                :color="powerColor"
+                :show-text="false"
+                stroke-width="6"
+                class="power-progress"
+              />
+            </div>
+            <!-- 文件监控详情面板 -->
+            <div v-if="showFileStatsPanel" class="mt-2 p-2 bg-gray-50 rounded-lg text-xs">
+              <div class="font-medium text-gray-600 mb-1">文件详情：</div>
+              <div v-for="file in fileStatsDetails" :key="file.name" class="flex items-center gap-2 py-1">
+                <el-tag :type="file.exists ? 'success' : 'danger'" size="small" effect="plain">
+                  {{ file.status }}
+                </el-tag>
+                <span class="text-gray-700 font-mono">{{ file.name }}</span>
+                <span v-if="file.exists" class="text-gray-400">({{ file.size }}B, {{ file.lines }}行)</span>
+              </div>
+              <div v-if="fileStatsDetails.length === 0" class="text-gray-400">暂无数据</div>
+            </div>
+          </div>
+          
           <div v-if="!currentConvId" class="p-8 text-center text-gray-400">
             <el-icon size="48" class="mb-2"><Folder /></el-icon>
             <p class="text-sm">请选择或创建对话</p>
@@ -89,6 +132,21 @@
                 <div>
                   <div class="text-xs font-semibold text-gray-400 mb-1 flex items-center gap-1">
                     <el-icon><ChatDotSquare /></el-icon> Agent 回复
+                    <span class="flex-1"></span>
+                    <!-- 反馈按钮 -->
+                    <el-button
+                      :type="feedbackStatus[item.step] === 'good' ? 'primary' : 'default'"
+                      size="small"
+                      circle
+                      @click="submitFeedback(item.step, 'Good')"
+                      class="ml-2"
+                    >👍</el-button>
+                    <el-button
+                      :type="feedbackStatus[item.step] === 'bad' ? 'danger' : 'default'"
+                      size="small"
+                      circle
+                      @click="submitFeedback(item.step, 'Bad')"
+                    >👎</el-button>
                   </div>
                   <div class="bg-white p-3 rounded-xl border border-gray-200 text-sm text-gray-700 markdown-body" v-html="renderMarkdown(item.assistant || '...')">
                   </div>
@@ -308,7 +366,7 @@
           </el-tab-pane>
         </el-tabs>
       </div>
-      
+
       <template #footer>
         <el-button @click="showConflictDialog = false">取消合并</el-button>
         <el-button type="primary" @click="applyConflictResolutions" :loading="loading">
@@ -320,21 +378,23 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { 
-  Connection, User, Plus, Folder, Share, Switch, Delete, 
+import {
+  Connection, User, Plus, Folder, Share, Switch, Delete,
   ChatDotRound, ChatLineSquare, Document, CaretRight,
   ChatDotSquare, Promotion, Files, Star, Refresh
 } from '@element-plus/icons-vue'
 import { storeToRefs } from 'pinia'
 import { useConvStore } from './stores/conversation'
-import { 
-  healthCheck, listConversations, createConversation, sendMessage, 
-  getTrajectory, getHistory, forkConversation, mergeConversation, 
+import {
+  healthCheck, listConversations, createConversation, sendMessage,
+  getTrajectory, getHistory, forkConversation, mergeConversation,
   deleteConversation, getConversationsStatus
 } from './api/agentBff'
+import BountyMarket from './components/BountyMarket.vue'
 import * as d3 from 'd3'
+import dagre from 'dagre'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -371,6 +431,14 @@ const conflictResolutions = ref({})
 
 let currentZoom = null
 
+// Power机制相关响应式数据
+const currentPower = ref(50.0)
+const totalAnnotations = ref(0)
+const fileStatsStatus = ref('正常')
+const fileStatsDetails = ref([])
+const showFileStatsPanel = ref(false)
+const feedbackStatus = ref({})
+
 const currentBranchName = computed(() => {
   const conv = convList.value.find(c => c.conversation_id === currentConvId.value)
   return conv?.title || 'main'
@@ -379,6 +447,116 @@ const currentBranchName = computed(() => {
 const availableMergeTargets = computed(() => {
   return convList.value.filter(c => c.conversation_id !== currentConvId.value)
 })
+
+// 边权数据
+let edgeWeightsMap = new Map()
+
+// 获取边权数据
+async function fetchEdgeWeights() {
+  try {
+    const response = await fetch('http://localhost:8000/node-relations/all')
+    if (response.ok) {
+      const data = await response.json()
+      edgeWeightsMap.clear()
+      data.relations.forEach(r => {
+        edgeWeightsMap.set(`${r.source}-${r.target}`, r.weight)
+        edgeWeightsMap.set(`${r.target}-${r.source}`, r.weight)  // 双向关系
+      })
+      console.log('[EdgeWeights] 已加载边权数据:', edgeWeightsMap.size)
+    } else {
+      // 降级方案：使用默认边权
+      console.warn('[EdgeWeights] API 返回失败，使用默认边权')
+      edgeWeightsMap.clear()
+    }
+  } catch (error) {
+    console.error('获取边权数据失败:', error)
+    // 降级方案：使用默认边权
+    edgeWeightsMap.clear()
+  }
+}
+
+// 获取边权的函数
+function getEdgeWeight(sourceId, targetId) {
+  const key = `${sourceId}-${targetId}`
+  return edgeWeightsMap.get(key) || 1  // 默认值为 1
+}
+
+// Power相关计算属性
+const powerColor = computed(() => {
+  const power = currentPower.value
+  if (power >= 80) return '#10b981' // 绿色
+  if (power >= 60) return '#f59e0b' // 黄色
+  if (power >= 40) return '#f97316' // 橙色
+  return '#ef4444' // 红色
+})
+
+// 获取Power信息的函数
+async function fetchPowerInfo() {
+  if (!currentConvId.value) return
+  
+  try {
+    const response = await fetch(`http://localhost:8000/conversations/${currentConvId.value}/power`)
+    if (response.ok) {
+      const data = await response.json()
+      currentPower.value = data.power || 50.0
+      totalAnnotations.value = data.total_annotations || 0
+    }
+  } catch (error) {
+    console.error('获取Power信息失败:', error)
+  }
+}
+
+// 获取文件状态信息的函数
+async function fetchFileStats() {
+  if (!currentConvId.value) return
+
+  try {
+    const response = await fetch(`http://localhost:8000/conversations/${currentConvId.value}/files`)
+    if (response.ok) {
+      const data = await response.json()
+      const stats = data.file_stats || {}
+
+      // 构建文件详情列表
+      const files = [
+        { name: 'trajectory.jsonl', path: '/app/workspace/conv_xxx/trajectory.jsonl' },
+        { name: 'MEMORY.md', path: '/app/workspace/memory/MEMORY.md' },
+        { name: 'conversation_history.json', path: '/app/workspace/sessions/container_xxx.jsonl' }
+      ]
+
+      fileStatsDetails.value = files.map(f => {
+        const stat = stats[f.name] || { exists: false, size: 0, lines: 0 }
+        return {
+          name: f.name,
+          path: f.path.replace('xxx', currentConvId.value),
+          exists: stat.exists,
+          size: stat.size,
+          lines: stat.lines,
+          status: stat.exists ? '正常' : '缺失'
+        }
+      })
+
+      // 检查文件状态
+      const missingFiles = fileStatsDetails.value.filter(f => !f.exists)
+      if (missingFiles.length === 0) {
+        fileStatsStatus.value = '正常'
+      } else {
+        fileStatsStatus.value = `${missingFiles.length}个异常`
+      }
+    }
+  } catch (error) {
+    console.error('获取文件状态失败:', error)
+    fileStatsStatus.value = '获取失败'
+    fileStatsDetails.value = []
+  }
+}
+
+// 切换文件详情面板显示
+function toggleFileStatsPanel() {
+  showFileStatsPanel.value = !showFileStatsPanel.value
+  if (showFileStatsPanel.value) {
+    fetchFileStats()
+  }
+}
 
 // 将对象转换为 el-tree 的 data 格式（安全版本）
 function objectToTreeData(obj) {
@@ -424,10 +602,26 @@ function formatJSON(obj) {
   }
 }
 
+// 轮询定时器
+let pollingTimer = null
+
 onMounted(async () => {
   await checkHealth()
   await loadConversations()
   window.addEventListener('resize', handleResize)
+  // 启动轮询，每 5 秒刷新一次（包括边权数据）
+  pollingTimer = setInterval(async () => {
+    await loadConversations()
+    await fetchEdgeWeights()  // 同时刷新边权数据
+  }, 5000)
+})
+
+onUnmounted(() => {
+  // 清除轮询定时器
+  if (pollingTimer) {
+    clearInterval(pollingTimer)
+  }
+  window.removeEventListener('resize', handleResize)
 })
 
 function handleResize() {
@@ -455,7 +649,8 @@ async function loadConversations() {
         title: conv.title,
         model: conv.model,
         parent_id: conv.parent_id,
-        created_at: conv.created_at
+        created_at: conv.created_at,
+        balance: conv.balance || 0  // 保留余额字段
       }))
     const invalidCount = statusList.length - healthyConversations.length
     if (invalidCount > 0) {
@@ -466,6 +661,8 @@ async function loadConversations() {
     if (healthyConversations.length > 0 && !currentConvId.value) {
       handleSwitchConv(healthyConversations[0])
     }
+    // 获取边权数据
+    await fetchEdgeWeights()
     drawGraph()
   } catch (e) {
     console.error('加载对话失败:', e)
@@ -530,6 +727,11 @@ async function handleSwitchConv(conv) {
   expandedIdx.value = -1
   await loadTrajectory(conv.conversation_id)
   await loadHistory(conv.conversation_id)
+
+  // 获取Power信息、文件状态和反馈状态
+  await fetchPowerInfo()
+  await fetchFileStats()
+  await loadFeedbackStatus(conv.conversation_id)
 }
 
 async function loadTrajectoryWithRetry(convId, retries = 3, delay = 1000) {
@@ -563,7 +765,7 @@ async function loadHistoryWithRetry(convId, retries = 3, delay = 1000) {
       const formatted = []
       let currentUserMsg = null
       let turnIndex = 0
-      
+
       for (let i = 0; i < history.length; i++) {
         const msg = history[i]
         if (msg.role === 'user') {
@@ -574,6 +776,7 @@ async function loadHistoryWithRetry(convId, retries = 3, delay = 1000) {
         } else if (msg.role === 'assistant' && currentUserMsg) {
           const trajRecord = trajectory[turnIndex] || {}
           formatted.push({
+            step: turnIndex,
             user: currentUserMsg.content,
             assistant: msg.content || '...',
             s: trajRecord.s_t || {},
@@ -613,8 +816,20 @@ async function handleSend() {
   const content = msgContent.value
   msgContent.value = ''
   try {
-    const res = await sendMessage(currentConvId.value, { content })
-    const data = res.data
+      // 使用增强的Power集成版本发送消息（使用正确的baseURL）
+      const response = await fetch(`http://localhost:8000/conversations/${currentConvId.value}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
+      const data = await response.json()
     const chatItem = {
       user: content,
       assistant: data.content || '...',
@@ -625,11 +840,70 @@ async function handleSend() {
     }
     store.appendChat(chatItem)
     expandedIdx.value = chatList.value.length - 1
+    
+    // 发送消息后更新Power信息
+    await fetchPowerInfo()
+    await fetchFileStats()
+    
+    ElMessage.success('消息发送成功，Power已更新')
   } catch (e) {
     ElMessage.error('发送失败：' + (e.message || '未知错误'))
     msgContent.value = content
   } finally {
     loading.value = false
+  }
+}
+
+// 提交反馈函数
+async function submitFeedback(stepIndex, label) {
+  const convId = currentConvId.value
+  if (!convId) return
+
+  const current = feedbackStatus.value[stepIndex]
+  const expectedKey = label === 'Good' ? 'good' : 'bad'
+
+  if (current === expectedKey) {
+    ElMessage.info('已取消反馈')
+    delete feedbackStatus.value[stepIndex]
+    return
+  }
+
+  try {
+    const response = await fetch('http://localhost:8000/annotations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversation_id: convId,
+        step: stepIndex,
+        target_type: 'action',
+        label: label
+      })
+    })
+    if (!response.ok) throw new Error('提交失败')
+    const data = await response.json()
+    feedbackStatus.value[stepIndex] = label === 'Good' ? 'good' : 'bad'
+    ElMessage.success(`反馈已提交，Power ${data.power_delta > 0 ? '提升' : '下降'} ${Math.abs(data.power_delta)}`)
+    await fetchPowerInfo()
+  } catch (e) {
+    ElMessage.error('反馈提交失败：' + e.message)
+  }
+}
+
+// 加载已有反馈状态
+async function loadFeedbackStatus(convId) {
+  try {
+    const res = await fetch(`http://localhost:8000/conversations/${convId}/annotations`)
+    if (res.ok) {
+      const data = await res.json()
+      const newStatus = {}
+      data.annotations.forEach(ann => {
+        if (ann.label === 'Good') newStatus[ann.step] = 'good'
+        if (ann.label === 'Bad') newStatus[ann.step] = 'bad'
+      })
+      feedbackStatus.value = newStatus
+    }
+  } catch (e) {
+    console.error('加载反馈状态失败', e)
   }
 }
 
@@ -800,60 +1074,144 @@ function drawGraph() {
   currentZoom = zoom
   svg.call(zoom)
   const svgGroup = svg.append('g').attr('class', 'graph-group')
+  
+  // 构建节点映射
   const nodeMap = new Map()
   convList.value.forEach(conv => {
     nodeMap.set(conv.conversation_id, {
       id: conv.conversation_id,
       title: conv.title,
       parent_id: conv.parent_id || null,
-      children: []
+      balance: conv.balance || 0
     })
   })
-  nodeMap.forEach(node => {
+  
+  // 创建 dagre 图
+  const g = new dagre.graphlib.Graph()
+  g.setGraph({
+    rankdir: 'TB',  // 从上到下
+    nodesep: 50,
+    ranksep: 80,
+    marginx: 20,
+    marginy: 20
+  })
+  g.setDefaultEdgeLabel(() => ({}))
+  
+  // 添加节点
+  nodeMap.forEach((node, id) => {
+    // 计算节点宽度，基于标题长度
+    const titleLength = node.title.length
+    const nodeWidth = Math.max(120, titleLength * 8)
+    g.setNode(id, {
+      label: node.title,
+      width: nodeWidth,
+      height: 50
+    })
+  })
+  
+  // 添加边
+  nodeMap.forEach((node, id) => {
     if (node.parent_id && nodeMap.has(node.parent_id)) {
-      nodeMap.get(node.parent_id).children.push(node)
+      g.setEdge(node.parent_id, id)
     }
   })
-  const rootNodes = Array.from(nodeMap.values()).filter(n => !n.parent_id)
-  if (rootNodes.length === 0) return
-  const root = d3.hierarchy(rootNodes[0])
-  const treeLayout = d3.tree().size([width - 100, height - 100])
-  treeLayout(root)
+
+  // 运行布局
+  dagre.layout(g)
+
+  // 绘制边
   svgGroup.selectAll('.link')
-    .data(root.links())
+    .data(g.edges())
     .enter()
     .append('path')
     .attr('class', 'link')
-    .attr('d', d3.linkVertical()
-      .x(d => d.x)
-      .y(d => d.y)
-    )
+    .attr('d', d => {
+      const source = g.node(d.v)
+      const target = g.node(d.w)
+      return d3.linkVertical()
+        .x(d => d.x)
+        .y(d => d.y)({
+          source: { x: source.x, y: source.y + source.height / 2 },
+          target: { x: target.x, y: target.y - target.height / 2 }
+        })
+    })
     .attr('fill', 'none')
     .attr('stroke', '#999')
-    .attr('stroke-width', 2)
+    .attr('stroke-width', d => {
+      // 根据边权设置线宽
+      const weight = getEdgeWeight(d.v, d.w)
+      return Math.max(1, weight)
+    })
+  
+  // 添加边权标签
+  svgGroup.selectAll('.edge-label')
+    .data(g.edges())
+    .enter()
+    .append('text')
+    .attr('class', 'edge-label')
+    .attr('x', d => {
+      const source = g.node(d.v)
+      const target = g.node(d.w)
+      return (source.x + target.x) / 2
+    })
+    .attr('y', d => {
+      const source = g.node(d.v)
+      const target = g.node(d.w)
+      return (source.y + target.y) / 2 - 10
+    })
+    .text(d => {
+      const weight = getEdgeWeight(d.v, d.w)
+      return weight
+    })
+    .attr('font-size', '10px')
+    .attr('fill', '#666')
+  
+  // 绘制节点
   const nodeGroups = svgGroup.selectAll('.node')
-    .data(root.descendants())
+    .data(g.nodes())
     .enter()
     .append('g')
     .attr('class', 'node')
-    .attr('transform', d => `translate(${d.x}, ${d.y})`)
+    .attr('transform', d => {
+      const node = g.node(d)
+      return `translate(${node.x}, ${node.y})`
+    })
     .on('click', (event, d) => {
       event.stopPropagation()
-      const conv = convList.value.find(c => c.conversation_id === d.data.id)
+      const conv = convList.value.find(c => c.conversation_id === d)
       if (conv) handleSwitchConv(conv)
     })
     .style('cursor', 'pointer')
+  
   nodeGroups.append('circle')
     .attr('r', 8)
-    .attr('fill', d => d.data.id === currentConvId.value ? '#007acc' : '#4caf50')
+    .attr('fill', d => d === currentConvId.value ? '#007acc' : '#4caf50')
     .attr('stroke', '#fff')
     .attr('stroke-width', 2)
+  
   nodeGroups.append('text')
     .attr('x', 15)
     .attr('y', 5)
-    .text(d => d.data.title)
+    .text(d => g.node(d).label)
     .attr('font-size', '12px')
     .attr('fill', '#333')
+  
+  // 添加钱包余额显示
+  nodeGroups.append('text')
+    .attr('x', 15)
+    .attr('y', 20)
+    .text(d => {
+      const node = nodeMap.get(d)
+      return node ? `Token: ${node.balance || 0}` : 'Token: 0'
+    })
+    .attr('font-size', '10px')
+    .attr('fill', d => {
+      const node = nodeMap.get(d)
+      const balance = node ? (node.balance || 0) : 0
+      if (balance > 1000) return '#4caf50' // 绿色：余额充足
+      if (balance > 0) return '#ff9800' // 橙色：余额较少
+      return '#f44336' // 红色：无余额
+    })
 }
 </script>
 

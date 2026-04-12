@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # Date Arrange API 服务
+  date-arrange-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8081:8081"
+    environment:
+      - PYTHONPATH=/app
+      - ENVIRONMENT=production
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      - nanobot-agent
+    networks:
+      - date-arrange-network
+
+  # Nanobot Agent 服务
+  nanobot-agent:
+    build:
+      context: ../milestone2
+      dockerfile: shared/Dockerfile.agent
+    environment:
+      - PYTHONPATH=/app
+      - MODEL_PROVIDER=openai
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - ./data/workspace:/app/workspace
+      - ./logs:/app/logs
+    networks:
+      - date-arrange-network
+
+  # 前端服务
+  date-arrange-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3002:3002"
+    depends_on:
+      - date-arrange-api
+    networks:
+      - date-arrange-network
+
+  # Nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - date-arrange-api
+      - date-arrange-frontend
+    networks:
+      - date-arrange-network
+
+networks:
+  date-arrange-network:
+    driver: bridge
+
+volumes:
+  workspace-data:
+  logs:

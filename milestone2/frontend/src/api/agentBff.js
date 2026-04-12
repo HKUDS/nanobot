@@ -33,4 +33,54 @@ export const getConversationsStatus = () => request.get('/conversations/status')
 export const deleteConversation = (id) =>
   request.delete(`/conversations/${id}`)
 
+export const listBounties = () => request.get('/bounties')
+
+export const getSkill = (skillId) => request.get(`/public-skills/${skillId}`)
+
+export const createBounty = (data) => request.post('/bounties', data)
+
+export const submitSolution = (bountyId, data) =>
+  request.post(`/bounties/${bountyId}/submit`, data)
+
+export const getBountySubmissions = (bountyId) =>
+  request.get(`/bounties/${bountyId}/submissions`)
+
+export const evaluateBounty = (bountyId, data) =>
+  request.post(`/bounties/${bountyId}/evaluate`, data)
+
+export const curateSkill = (bountyId, data) =>
+  request.post(`/bounties/${bountyId}/curate-skill`, data)
+
+export const getWalletBalance = (convId) =>
+  request.get(`/wallet/${convId}/balance`)
+
+export const transferTokens = (params) =>
+  request.post('/wallet/transfer', params)
+
+export const searchKnowledge = (query, top_k = 5) =>
+  request.post('/public-space/search', { query, top_k })
+
+export const uploadKnowledge = (data) =>
+  request.post('/public-space/upload', data)
+
+export const matchReflex = (state, threshold = 0.85) =>
+  request.post('/reflex/match', { state, threshold })
+
+export const learnReflex = (data) =>
+  request.post('/reflex/learn', data)
+
+export const listReflexes = () => request.get('/reflex/list')
+
+export const addFriend = (agentA, agentB) =>
+  request.post('/social/friend', { agent_a: agentA, agent_b: agentB })
+
+export const getFriends = (agentId) =>
+  request.get(`/social/friends/${agentId}`)
+
+export const getFriendsWithTrust = (agentId) =>
+  request.get(`/social/friends/${agentId}/with-trust`)
+
+export const updateTrust = (agentA, agentB, delta) =>
+  request.post('/social/trust', { agent_a: agentA, agent_b: agentB, delta })
+
 export default request
