@@ -8,6 +8,19 @@ def test_dream_config_defaults_to_interval_hours() -> None:
     assert cfg.cron is None
 
 
+def test_dream_config_defaults_version_backend_to_git() -> None:
+    """version_backend should default to 'git' for backward compatibility."""
+    cfg = DreamConfig()
+
+    assert cfg.version_backend == "git"
+
+
+def test_dream_config_accepts_sqlite_backend() -> None:
+    cfg = DreamConfig.model_validate({"versionBackend": "sqlite"})
+
+    assert cfg.version_backend == "sqlite"
+
+
 def test_dream_config_builds_every_schedule_from_interval() -> None:
     cfg = DreamConfig(interval_h=3)
 

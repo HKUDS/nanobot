@@ -63,8 +63,14 @@ class MemoryStore:
         self._maybe_migrate_legacy_history()
 
     @property
-    def git(self) -> GitStore | SQLiteStore:
+    def version_store(self) -> GitStore | SQLiteStore:
         """Version store for dream history (GitStore or SQLiteStore)."""
+        return self._version_store
+
+    # Backward compatibility alias
+    @property
+    def git(self) -> GitStore | SQLiteStore:
+        """Deprecated: Use version_store instead. Kept for backward compatibility."""
         return self._version_store
 
     # -- generic helpers -----------------------------------------------------

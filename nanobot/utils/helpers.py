@@ -437,7 +437,7 @@ def build_status_content(
     return "\n".join(lines)    
 
 
-def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
+def sync_workspace_templates(workspace: Path, silent: bool = False, version_backend: str = "git") -> list[str]:
     """Sync bundled templates to workspace. Only creates missing files."""
     from importlib.resources import files as pkg_files
     try:
@@ -468,14 +468,17 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         for name in added:
             Console().print(f"  [dim]Created {name}[/dim]")
 
-    # Initialize git for memory version control
+    # Initialize version control backend for memory files
+    tracked_files = ["SOUL.md", "USER.md", "memory/MEMORY.md"]
     try:
-        from nanobot.utils.gitstore import GitStore
-        gs = GitStore(workspace, tracked_files=[
-            "SOUL.md", "USER.md", "memory/MEMORY.md",
-        ])
-        gs.init()
+        if version_backend == "git":
+            from nanobot.utils.gitstore import GitStore
+            store = GitStore(workspace, tracked_files=tracked_files)
+        else:
+            from nanobot.utils.sqlitestore import SQLiteStore
+            store = SQLiteStore(workspace, tracked_files=tracked_files)
+        store.init()
     except Exception:
-        logger.warning("Failed to initialize git store for {}", workspace)
+        logger.warning("Failed to initialize {} store for {}", version_backend, workspace)
 
     return added

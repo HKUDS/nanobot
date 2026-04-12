@@ -4,24 +4,11 @@ from __future__ import annotations
 
 import io
 import time
-from dataclasses import dataclass
 from pathlib import Path
 
 from loguru import logger
 
-
-@dataclass
-class CommitInfo:
-    sha: str  # Short SHA (8 chars)
-    message: str
-    timestamp: str  # Formatted datetime
-
-    def format(self, diff: str = "") -> str:
-        """Format this commit for display, optionally with a diff."""
-        header = f"## {self.message.splitlines()[0]}\n`{self.sha}` — {self.timestamp}\n"
-        if diff:
-            return f"{header}\n```diff\n{diff}\n```"
-        return f"{header}\n(no file changes)"
+from nanobot.utils.version_store import CommitInfo
 
 
 class GitStore:

@@ -7,25 +7,12 @@ import random
 import sqlite3
 import string
 import time
-from dataclasses import dataclass
 from difflib import unified_diff
 from pathlib import Path
 
 from loguru import logger
 
-
-@dataclass
-class CommitInfo:
-    sha: str  # 8-char ID
-    message: str
-    timestamp: str  # Formatted datetime
-
-    def format(self, diff: str = "") -> str:
-        """Format this commit for display, optionally with a diff."""
-        header = f"## {self.message.splitlines()[0]}\n`{self.sha}` — {self.timestamp}\n"
-        if diff:
-            return f"{header}\n```diff\n{diff}\n```"
-        return f"{header}\n(no file changes)"
+from nanobot.utils.version_store import CommitInfo
 
 
 class SQLiteStore:
@@ -255,3 +242,121 @@ class SQLiteStore:
         except Exception:
             logger.warning("SQLite revert failed for {}", commit)
             return None
+
+    # -- migration -------------------------------------------------------------
+
+    def migrate_from_git(self) -> int:
+        """Migrate dream history from GitStore to SQLiteStore.
+
+        Reads all commits from the existing git repository and replays them
+        into SQLite. Returns the number of commits migrated.
+
+        This is a one-time migration for users switching from git to sqlite backend.
+        """
+        from nanobot.utils.gitstore import GitStore
+
+        git_store = GitStore(self._workspace, tracked_files=self._tracked_files)
+        if not git_store.is_initialized():
+            logger.info("No git store found, skipping migration")
+            return 0
+
+        if self.is_initialized():
+            logger.warning("SQLite store already exists, skipping migration")
+            return 0
+
+        try:
+            # Read all commits from git (oldest first for correct ordering)
+            git_commits = git_store.log(max_entries=1000)
+            if not git_commits:
+                logger.info("No git commits to migrate")
+                return 0
+
+            # Reverse to get oldest first
+            git_commits = list(reversed(git_commits))
+
+            # Initialize SQLite store
+            self._ensure_table()
+
+            migrated = 0
+            for commit in git_commits:
+                # Get file snapshots at this commit using dulwich
+                snapshots = self._read_git_snapshots_at_commit(commit.sha)
+                if snapshots is None:
+                    logger.warning("Failed to read snapshots for git commit {}", commit.sha)
+                    continue
+
+                # Insert into SQLite
+                with self._get_conn() as conn:
+                    conn.execute(
+                        "INSERT INTO commits (sha, message, timestamp, snapshots) VALUES (?, ?, ?, ?)",
+                        (commit.sha, commit.message, commit.timestamp, json.dumps(snapshots, ensure_ascii=False)),
+                    )
+                migrated += 1
+
+            logger.info("Migrated {} commits from git to SQLite", migrated)
+            return migrated
+        except Exception:
+            logger.exception("Git to SQLite migration failed")
+            return 0
+
+    def _read_git_snapshots_at_commit(self, short_sha: str) -> dict[str, str] | None:
+        """Read file snapshots at a specific git commit."""
+        try:
+            from dulwich.repo import Repo
+
+            with Repo(str(self._workspace)) as repo:
+                # Resolve short SHA to full SHA
+                try:
+                    head = repo.refs[b"HEAD"]
+                except KeyError:
+                    return None
+
+                full_sha = None
+                sha = head
+                while sha:
+                    if sha.hex().startswith(short_sha):
+                        full_sha = sha
+                        break
+                    commit = repo[sha]
+                    if commit.type_name != b"commit":
+                        break
+                    sha = commit.parents[0] if commit.parents else None
+
+                if not full_sha:
+                    return None
+
+                # Read files from the commit's tree
+                commit_obj = repo[full_sha]
+                if commit_obj.type_name != b"commit":
+                    return None
+
+                tree = repo[commit_obj.tree]
+                snapshots: dict[str, str] = {}
+
+                for filepath in self._tracked_files:
+                    content = self._read_blob_from_tree(repo, tree, filepath)
+                    if content is not None:
+                        snapshots[filepath] = content
+
+                return snapshots
+        except Exception:
+            return None
+
+    @staticmethod
+    def _read_blob_from_tree(repo, tree, filepath: str) -> str | None:
+        """Read a blob's content from a tree object by walking path parts."""
+        parts = Path(filepath).parts
+        current = tree
+        for part in parts:
+            try:
+                entry = current[part.encode()]
+            except KeyError:
+                return None
+            obj = repo[entry[1]]
+            if obj.type_name == b"blob":
+                return obj.data.decode("utf-8", errors="replace")
+            if obj.type_name == b"tree":
+                current = obj
+            else:
+                return None
+        return None

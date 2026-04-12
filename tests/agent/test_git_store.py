@@ -3,7 +3,8 @@
 import pytest
 from pathlib import Path
 
-from nanobot.utils.gitstore import GitStore, CommitInfo
+from nanobot.utils.gitstore import GitStore
+from nanobot.utils.version_store import CommitInfo
 
 
 TRACKED = ["SOUL.md", "USER.md", "memory/MEMORY.md"]

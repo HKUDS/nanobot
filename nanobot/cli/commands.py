@@ -343,7 +343,7 @@ def onboard(
         workspace_path.mkdir(parents=True, exist_ok=True)
         console.print(f"[green]✓[/green] Created workspace at {workspace_path}")
 
-    sync_workspace_templates(workspace_path)
+    sync_workspace_templates(workspace_path, version_backend=config.agents.defaults.dream.version_backend)
 
     agent_cmd = 'nanobot agent -m "Hello!"'
     gateway_cmd = "nanobot gateway"
@@ -569,7 +569,7 @@ def serve(
     host = host if host is not None else api_cfg.host
     port = port if port is not None else api_cfg.port
     timeout = timeout if timeout is not None else api_cfg.timeout
-    sync_workspace_templates(runtime_config.workspace_path)
+    sync_workspace_templates(runtime_config.workspace_path, version_backend=runtime_config.agents.defaults.dream.version_backend)
     bus = MessageBus()
     provider = _make_provider(runtime_config)
     session_manager = SessionManager(runtime_config.workspace_path)
@@ -651,7 +651,7 @@ def gateway(
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
-    sync_workspace_templates(config.workspace_path)
+    sync_workspace_templates(config.workspace_path, version_backend=config.agents.defaults.dream.version_backend)
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
@@ -881,7 +881,7 @@ def agent(
     from nanobot.cron.service import CronService
 
     config = _load_runtime_config(config, workspace)
-    sync_workspace_templates(config.workspace_path)
+    sync_workspace_templates(config.workspace_path, version_backend=config.agents.defaults.dream.version_backend)
 
     bus = MessageBus()
     provider = _make_provider(config)
@@ -1402,6 +1402,50 @@ def _login_github_copilot() -> None:
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
         raise typer.Exit(1)
+
+
+@app.command()
+def migrate_dream(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+) -> None:
+    """Migrate dream history from git to SQLite backend.
+
+    This is a one-time migration for users switching from git to sqlite backend.
+    Reads all commits from the existing git repository and replays them into SQLite.
+    """
+    cfg = _load_runtime_config(config, workspace)
+    workspace_path = cfg.workspace_path
+
+    # Check if git store exists
+    git_dir = workspace_path / ".git"
+    if not git_dir.is_dir():
+        console.print("[yellow]No git store found in workspace. Nothing to migrate.[/yellow]")
+        raise typer.Exit(0)
+
+    # Check if SQLite store already exists
+    sqlite_db = workspace_path / "memory" / ".dream_history.db"
+    if sqlite_db.exists():
+        console.print("[yellow]SQLite store already exists. Migration already done or manually created.[/yellow]")
+        console.print("[dim]To re-migrate, first delete: {}[/dim]".format(sqlite_db))
+        raise typer.Exit(0)
+
+    console.print(f"{__logo__} Migrating dream history from git to SQLite...")
+    console.print(f"  [cyan]Workspace[/cyan]: {workspace_path}")
+
+    from nanobot.utils.sqlitestore import SQLiteStore
+
+    tracked_files = ["SOUL.md", "USER.md", "memory/MEMORY.md"]
+    sqlite_store = SQLiteStore(workspace_path, tracked_files=tracked_files)
+
+    migrated = sqlite_store.migrate_from_git()
+
+    if migrated > 0:
+        console.print(f"[green]✓[/green] Migrated {migrated} commits to SQLite")
+        console.print("\n[dim]You can now set version_backend: sqlite in your config.[/dim]")
+    else:
+        console.print("[yellow]No commits were migrated.[/yellow]")
+        console.print("[dim]Make sure the git repository contains dream commits.[/dim]")
 
 
 if __name__ == "__main__":

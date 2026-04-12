@@ -45,9 +45,9 @@ class DreamConfig(Base):
     max_batch_size: int = Field(default=20, ge=1)  # Max history entries per run
     max_iterations: int = Field(default=10, ge=1)  # Max tool calls per Phase 2
     version_backend: Literal["sqlite", "git"] = Field(
-        default="sqlite",
+        default="git",
         validation_alias=AliasChoices("versionBackend", "version_backend"),
-    )  # Version control backend: "sqlite" (default, no git conflicts) or "git" (legacy)
+    )  # Version control backend: "git" (default, legacy) or "sqlite" (no git conflicts)
 
     def build_schedule(self, timezone: str) -> CronSchedule:
         """Build the runtime schedule, preferring the legacy cron override if present."""
