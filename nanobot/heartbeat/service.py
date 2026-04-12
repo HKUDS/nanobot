@@ -194,7 +194,32 @@ class HeartbeatService:
             pre_check_match = re.search(r"^Pre-check:\s*(\S+)", block, re.MULTILINE)
             pre_check = pre_check_match.group(1).strip() if pre_check_match else None
 
-            if now >= schedule_dt:
+            # Determine effective due time considering Last-run + Recur
+            effective_due = schedule_dt
+            last_run_match = re.search(
+                r"Last-run:\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)", block
+            )
+            recur_match = _RECUR_PAT.search(block)
+            if last_run_match and recur_match:
+                try:
+                    lr_str = last_run_match.group(1).strip()
+                    if " " in lr_str:
+                        last_run_dt = datetime.strptime(lr_str, "%Y-%m-%d %H:%M")
+                    else:
+                        last_run_dt = datetime.strptime(lr_str, "%Y-%m-%d")
+                    amount = int(recur_match.group(1))
+                    unit = recur_match.group(2).lower()
+                    delta = {
+                        "minute": timedelta(minutes=amount),
+                        "hour": timedelta(hours=amount),
+                        "day": timedelta(days=amount),
+                        "week": timedelta(weeks=amount),
+                    }.get(unit, timedelta())
+                    effective_due = last_run_dt + delta
+                except (ValueError, KeyError):
+                    pass  # fall back to schedule_dt
+
+            if now >= effective_due:
                 due.append(DueTask(
                     name=task_name, task_type=task_type, schedule=schedule_str,
                     model=model, pre_check=pre_check,
@@ -263,15 +288,42 @@ class HeartbeatService:
                 except ValueError:
                     pass
 
+            # Determine effective due time considering Last-run + Recur
+            effective_due = schedule_dt
+            effective_due_str = schedule_str
+            last_run_match = re.search(
+                r"Last-run:\s*(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2})?)", block
+            )
+            recur_match = _RECUR_PAT.search(block)
+            if last_run_match and recur_match:
+                try:
+                    lr_str = last_run_match.group(1).strip()
+                    if " " in lr_str:
+                        last_run_dt = datetime.strptime(lr_str, "%Y-%m-%d %H:%M")
+                    else:
+                        last_run_dt = datetime.strptime(lr_str, "%Y-%m-%d")
+                    amount = int(recur_match.group(1))
+                    unit = recur_match.group(2).lower()
+                    delta = {
+                        "minute": timedelta(minutes=amount),
+                        "hour": timedelta(hours=amount),
+                        "day": timedelta(days=amount),
+                        "week": timedelta(weeks=amount),
+                    }.get(unit, timedelta())
+                    effective_due = last_run_dt + delta
+                    effective_due_str = effective_due.strftime("%Y-%m-%d %H:%M")
+                except (ValueError, KeyError):
+                    pass
+
             now_str = now.strftime("%Y-%m-%d %H:%M")
-            if now >= schedule_dt:
+            if now >= effective_due:
                 lines.append(
                     f"  - '{task_name}' IS DUE NOW "
-                    f"(scheduled {schedule_str}, now is {now_str})"
+                    f"(scheduled {effective_due_str}, now is {now_str})"
                 )
             else:
                 lines.append(
-                    f"  - '{task_name}' is NOT due until {schedule_str}"
+                    f"  - '{task_name}' is NOT due until {effective_due_str}"
                 )
 
         if not lines:
