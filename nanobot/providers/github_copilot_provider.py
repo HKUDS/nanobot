@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import webbrowser
 from collections.abc import Callable
@@ -26,6 +27,8 @@ EDITOR_VERSION = "vscode/1.99.0"
 EDITOR_PLUGIN_VERSION = "copilot-chat/0.26.0"
 _EXPIRY_SKEW_SECONDS = 60
 _LONG_LIVED_TOKEN_SECONDS = 315360000
+# Copilot API gateway rejects request bodies exceeding ~1 MB.
+_MAX_REQUEST_BODY_BYTES = 950_000
 
 
 def _storage() -> FileTokenStorage:
@@ -211,6 +214,52 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         self.api_key = token
         self._client.api_key = token
         return token
+
+    @staticmethod
+    def _trim_kwargs_body(
+        kwargs: dict[str, object],
+        max_body_bytes: int = _MAX_REQUEST_BODY_BYTES,
+    ) -> dict[str, object]:
+        """Drop oldest non-system messages from kwargs when body exceeds the size limit.
+
+        Called after _build_kwargs so all sanitization / cache-control fields
+        are already applied and the byte estimate is accurate.
+        """
+        body_bytes = len(json.dumps(kwargs, ensure_ascii=False, default=str).encode())
+        if body_bytes <= max_body_bytes:
+            return kwargs
+
+        messages: list[dict[str, object]] = list(kwargs.get("messages") or [])  # type: ignore[arg-type]
+
+        # Separate system messages (keep all) from conversation messages
+        system_msgs = [m for m in messages if m.get("role") == "system"]
+        conv_msgs = [m for m in messages if m.get("role") != "system"]
+
+        # Pre-compute per-message byte sizes for O(n) trimming
+        msg_sizes = [len(json.dumps(m, ensure_ascii=False, default=str).encode()) for m in conv_msgs]
+        conv_total = sum(msg_sizes)
+        non_conv_bytes = body_bytes - conv_total
+        target = max_body_bytes - non_conv_bytes
+
+        # Drop from the front until conversation fits within target
+        removed = 0
+        drop_count = 0
+        while drop_count < len(msg_sizes) and conv_total - removed > target:
+            removed += msg_sizes[drop_count]
+            drop_count += 1
+        conv_msgs = conv_msgs[drop_count:]
+
+        # Ensure we start on a user message to avoid orphan tool results
+        while conv_msgs and conv_msgs[0].get("role") not in ("user", "system"):
+            conv_msgs.pop(0)
+
+        kwargs = dict(kwargs)
+        kwargs["messages"] = system_msgs + conv_msgs
+        return kwargs
+
+    def _build_kwargs(self, *args: object, **kw: object) -> dict[str, object]:
+        kwargs = super()._build_kwargs(*args, **kw)  # type: ignore[arg-type]
+        return self._trim_kwargs_body(kwargs)
 
     async def chat(
         self,
