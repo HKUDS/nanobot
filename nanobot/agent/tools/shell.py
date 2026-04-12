@@ -101,6 +101,21 @@ class ExecTool(Tool):
         timeout: int | None = None, **kwargs: Any,
     ) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
+
+        # Prevent an LLM-supplied working_dir from escaping the configured
+        # workspace when restrict_to_workspace is enabled (#2826). Without
+        # this, a caller can pass working_dir="/etc" and then all absolute
+        # paths under /etc would pass the _guard_command check that anchors
+        # on cwd.
+        if self.restrict_to_workspace and self.working_dir:
+            try:
+                requested = Path(cwd).expanduser().resolve()
+                workspace_root = Path(self.working_dir).expanduser().resolve()
+            except Exception:
+                return "Error: working_dir could not be resolved"
+            if requested != workspace_root and workspace_root not in requested.parents:
+                return "Error: working_dir is outside the configured workspace"
+
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
