@@ -5,6 +5,8 @@ import json
 import mimetypes
 import os
 import time
+import zipfile
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -171,6 +173,7 @@ class DingTalkChannel(BaseChannel):
     _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
     _AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg", ".m4a", ".aac"}
     _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+    _ZIP_BEFORE_UPLOAD_EXTS = {".htm", ".html"}
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -286,6 +289,31 @@ class DingTalkChannel(BaseChannel):
     def _guess_filename(self, media_ref: str, upload_type: str) -> str:
         name = os.path.basename(urlparse(media_ref).path)
         return name or {"image": "image.jpg", "voice": "audio.amr", "video": "video.mp4"}.get(upload_type, "file.bin")
+
+    @staticmethod
+    def _zip_bytes(filename: str, data: bytes) -> tuple[bytes, str, str]:
+        stem = Path(filename).stem or "attachment"
+        safe_name = filename or "attachment.bin"
+        zip_name = f"{stem}.zip"
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(safe_name, data)
+        return buffer.getvalue(), zip_name, "application/zip"
+
+    def _normalize_upload_payload(
+        self,
+        filename: str,
+        data: bytes,
+        content_type: str | None,
+    ) -> tuple[bytes, str, str | None]:
+        ext = Path(filename).suffix.lower()
+        if ext in self._ZIP_BEFORE_UPLOAD_EXTS or content_type == "text/html":
+            logger.info(
+                "DingTalk does not accept raw HTML attachments, zipping {} before upload",
+                filename,
+            )
+            return self._zip_bytes(filename, data)
+        return data, filename, content_type
 
     async def _read_media_bytes(
         self,
@@ -444,6 +472,7 @@ class DingTalkChannel(BaseChannel):
             return False
 
         filename = filename or self._guess_filename(media_ref, upload_type)
+        data, filename, content_type = self._normalize_upload_payload(filename, data, content_type)
         file_type = Path(filename).suffix.lower().lstrip(".")
         if not file_type:
             guessed = mimetypes.guess_extension(content_type or "")

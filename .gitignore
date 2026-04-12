@@ -1,29 +1,91 @@
-
-# Bridge build artifacts
-*.egg
-*.egg-info/
-*.pyc
-*.pycs
-*.pyd
-*.pyo
-*.pyw
-*.pywz
-*.pyz
-*.pyzz
-.DS_Store
+# Project-specific
+.worktrees/
 .assets
 .docs
 .env
-.pytest_cache/
-.venv/
-.worktrees/
+.web
+
+# Python bytecode & caches
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
 __pycache__/
-botpy.log
-bridge/node_modules/
-bridge/package-lock.json
-build/
+*.egg-info/
+*.egg
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.dmypy.json
+dmypy.json
+.tox/
+.nox/
+.hypothesis/
+
+# Build & packaging
 dist/
-nano.*.save
+build/
+*.manifest
+*.spec
+pip-wheel-metadata/
+share/python-wheels/
+
+# Test & coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+
+# Lock files (project policy)
 poetry.lock
 uv.lock
-venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+.directory
+
+# Editors & IDEs (local workspace / user settings)
+.vscode/
+.cursor/
+.idea/
+.fleet/
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
+nano.*.save
+
+# Environment & secrets (keep examples tracked if needed)
+.env.*
+!.env.example
+
+# Logs & temp
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+
+# Bridge build artifacts (Homer fork)
+bridge/node_modules/
+bridge/package-lock.json
+botpy.log

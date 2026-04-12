@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from nanobot.utils.prompt_templates import render_template
+
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
@@ -37,24 +39,12 @@ _EVALUATE_TOOL = [
     }
 ]
 
-_SYSTEM_PROMPT = (
-    "You are a notification gate for a background agent. "
-    "You will be given the original task and the agent's response. "
-    "Call the evaluate_notification tool to decide whether the user "
-    "should be notified.\n\n"
-    "Notify when the response contains actionable information, errors, "
-    "completed deliverables, or anything the user explicitly asked to "
-    "be reminded about.\n\n"
-    "Suppress when the response is a routine status check with nothing "
-    "new, a confirmation that everything is normal, or essentially empty."
-)
-
-
 _SUPPRESS_ERRORS_ADDENDUM = (
     "\n\nIMPORTANT: Error messages, failure reports, and 'unable to' responses "
     "from the agent must ALWAYS be suppressed. These are operational issues "
     "logged elsewhere — never forward them to users."
 )
+
 
 
 async def evaluate_response(
@@ -73,16 +63,15 @@ async def evaluate_response(
     When ``suppress_errors`` is True, error/failure messages are always
     suppressed (logged only, never sent to users).
     """
-    prompt = _SYSTEM_PROMPT
-    if suppress_errors:
-        prompt += _SUPPRESS_ERRORS_ADDENDUM
     try:
         llm_response = await provider.chat_with_retry(
             messages=[
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": (
-                    f"## Original task\n{task_context}\n\n"
-                    f"## Agent response\n{response}"
+                {"role": "system", "content": render_template("agent/evaluator.md", part="system") + (_SUPPRESS_ERRORS_ADDENDUM if suppress_errors else "")},
+                {"role": "user", "content": render_template(
+                    "agent/evaluator.md",
+                    part="user",
+                    task_context=task_context,
+                    response=response,
                 )},
             ],
             tools=_EVALUATE_TOOL,

@@ -173,6 +173,27 @@ def test_empty_session_history():
     assert history == []
 
 
+def test_get_history_preserves_reasoning_content():
+    session = Session(key="test:reasoning")
+    session.messages.append({"role": "user", "content": "hi"})
+    session.messages.append({
+        "role": "assistant",
+        "content": "done",
+        "reasoning_content": "hidden chain of thought",
+    })
+
+    history = session.get_history(max_messages=500)
+
+    assert history == [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "done",
+            "reasoning_content": "hidden chain of thought",
+        },
+    ]
+
+
 # --- Window cuts mid-group: assistant present but some tool results orphaned ---
 
 def test_window_cuts_mid_tool_group():

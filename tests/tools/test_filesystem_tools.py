@@ -322,6 +322,22 @@ class TestWorkspaceRestriction:
         assert "Error" not in result
 
     @pytest.mark.asyncio
+    async def test_read_allowed_in_media_dir(self, tmp_path, monkeypatch):
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        media_dir = tmp_path / "media"
+        media_dir.mkdir()
+        media_file = media_dir / "photo.txt"
+        media_file.write_text("shared media", encoding="utf-8")
+
+        monkeypatch.setattr("nanobot.agent.tools.filesystem.get_media_dir", lambda: media_dir)
+
+        tool = ReadFileTool(workspace=workspace, allowed_dir=workspace)
+        result = await tool.execute(path=str(media_file))
+        assert "shared media" in result
+        assert "Error" not in result
+
+    @pytest.mark.asyncio
     async def test_extra_dirs_does_not_widen_write(self, tmp_path):
         from nanobot.agent.tools.filesystem import WriteFileTool
 

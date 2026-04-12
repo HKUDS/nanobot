@@ -10,20 +10,12 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
-from nanobot.utils.helpers import ensure_dir, safe_filename
+from nanobot.utils.helpers import ensure_dir, find_legal_message_start, safe_filename
 
 
 @dataclass
 class Session:
-    """
-    A conversation session.
-
-    Stores messages in JSONL format for easy reading and persistence.
-
-    Important: Messages are append-only for LLM cache efficiency.
-    The consolidation process writes summaries to MEMORY.md/HISTORY.md
-    but does NOT modify the messages list or get_history() output.
-    """
+    """A conversation session."""
 
     key: str  # channel:chat_id
     messages: list[dict[str, Any]] = field(default_factory=list)
@@ -43,50 +35,26 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
-    @staticmethod
-    def _find_legal_start(messages: list[dict[str, Any]]) -> int:
-        """Find first index where every tool result has a matching assistant tool_call."""
-        declared: set[str] = set()
-        start = 0
-        for i, msg in enumerate(messages):
-            role = msg.get("role")
-            if role == "assistant":
-                for tc in msg.get("tool_calls") or []:
-                    if isinstance(tc, dict) and tc.get("id"):
-                        declared.add(str(tc["id"]))
-            elif role == "tool":
-                tid = msg.get("tool_call_id")
-                if tid and str(tid) not in declared:
-                    start = i + 1
-                    declared.clear()
-                    for prev in messages[start:i + 1]:
-                        if prev.get("role") == "assistant":
-                            for tc in prev.get("tool_calls") or []:
-                                if isinstance(tc, dict) and tc.get("id"):
-                                    declared.add(str(tc["id"]))
-        return start
-
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input, aligned to a legal tool-call boundary."""
         unconsolidated = self.messages[self.last_consolidated:]
         sliced = unconsolidated[-max_messages:]
 
-        # Drop leading non-user messages to avoid starting mid-turn when possible.
+        # Avoid starting mid-turn when possible.
         for i, message in enumerate(sliced):
             if message.get("role") == "user":
                 sliced = sliced[i:]
                 break
 
-        # Some providers reject orphan tool results if the matching assistant
-        # tool_calls message fell outside the fixed-size history window.
-        start = self._find_legal_start(sliced)
+        # Drop orphan tool results at the front.
+        start = find_legal_message_start(sliced)
         if start:
             sliced = sliced[start:]
 
         out: list[dict[str, Any]] = []
         for message in sliced:
             entry: dict[str, Any] = {"role": message["role"], "content": message.get("content", "")}
-            for key in ("tool_calls", "tool_call_id", "name"):
+            for key in ("tool_calls", "tool_call_id", "name", "reasoning_content"):
                 if key in message:
                     entry[key] = message[key]
             out.append(entry)
@@ -115,7 +83,7 @@ class Session:
         retained = self.messages[start_idx:]
 
         # Mirror get_history(): avoid persisting orphan tool results at the front.
-        start = self._find_legal_start(retained)
+        start = find_legal_message_start(retained)
         if start:
             retained = retained[start:]
 
@@ -187,6 +155,7 @@ class SessionManager:
             messages = []
             metadata = {}
             created_at = None
+            updated_at = None
             last_consolidated = 0
 
             with open(path, encoding="utf-8") as f:
@@ -200,6 +169,7 @@ class SessionManager:
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
                         created_at = datetime.fromisoformat(data["created_at"]) if data.get("created_at") else None
+                        updated_at = datetime.fromisoformat(data["updated_at"]) if data.get("updated_at") else None
                         last_consolidated = data.get("last_consolidated", 0)
                     else:
                         messages.append(data)
@@ -208,6 +178,7 @@ class SessionManager:
                 key=key,
                 messages=messages,
                 created_at=created_at or datetime.now(),
+                updated_at=updated_at or datetime.now(),
                 metadata=metadata,
                 last_consolidated=last_consolidated
             )

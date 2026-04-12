@@ -1,29 +1,41 @@
 <div align="center">
   <img src="nanobot_logo.png" alt="nanobot" width="500">
-  <h1>nanobot: Ultra-Lightweight Personal AI Assistant</h1>
+  <h1>nanobot: Ultra-Lightweight Personal AI Agent</h1>
   <p>
     <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/pypi/v/nanobot-ai" alt="PyPI"></a>
     <a href="https://pepy.tech/project/nanobot-ai"><img src="https://static.pepy.tech/badge/nanobot-ai" alt="Downloads"></a>
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+    <a href="https://nanobot.wiki/docs/0.1.5/getting-started/nanobot-overview"><img src="https://img.shields.io/badge/Docs-nanobot.wiki-blue?style=flat&logo=readthedocs&logoColor=white" alt="Docs"></a>
     <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/Feishu-Group-E9DBFC?style=flat&logo=feishu&logoColor=white" alt="Feishu"></a>
     <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/WeChat-Group-C5EAB4?style=flat&logo=wechat&logoColor=white" alt="WeChat"></a>
     <a href="https://discord.gg/MnCvHqpUGB"><img src="https://img.shields.io/badge/Discord-Community-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
   </p>
 </div>
 
-🐈 **nanobot** is an **ultra-lightweight** personal AI assistant inspired by [OpenClaw](https://github.com/openclaw/openclaw).
+🐈 **nanobot** is an **ultra-lightweight** personal AI agent inspired by [OpenClaw](https://github.com/openclaw/openclaw).
 
-⚡️ Delivers core agent functionality with **99% fewer lines of code** than OpenClaw.
+⚡️ Delivers core agent functionality with **99% fewer lines of code**.
 
 📏 Real-time line count: run `bash core_agent_lines.sh` to verify anytime.
 
 ## 📢 News
 
-> [!IMPORTANT]
-> **Security note:** Due to `litellm` supply chain poisoning, **please check your Python environment ASAP** and refer to this [advisory](https://github.com/HKUDS/nanobot/discussions/2445) for details. We have fully removed the `litellm` since **v0.1.4.post6**.
-
+- **2026-04-05** 🚀 Released **v0.1.5** — sturdier long-running tasks, Dream two-stage memory, production-ready sandboxing and programming Agent SDK. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.5) for details.
+- **2026-04-04** 🚀 Jinja2 response templates, Dream memory hardened, smarter retry handling.
+- **2026-04-03** 🧠 Xiaomi MiMo provider, chain-of-thought reasoning visible, Telegram UX polish.
+- **2026-04-02** 🧱 Long-running tasks run more reliably — core runtime hardening.
+- **2026-04-01** 🔑 GitHub Copilot auth restored; stricter workspace paths; OpenRouter Claude caching fix.
+- **2026-03-31** 🛰️ WeChat multimodal alignment, Discord/Matrix polish, Python SDK facade, MCP and tool fixes.
+- **2026-03-30** 🧩 OpenAI-compatible API tightened; composable agent lifecycle hooks.
+- **2026-03-29** 💬 WeChat voice, typing, QR/media resilience; fixed-session OpenAI-compatible API.
+- **2026-03-28** 📚 Provider docs refresh; skill template wording fix.
 - **2026-03-27** 🚀 Released **v0.1.4.post6** — architecture decoupling, litellm removal, end-to-end streaming, WeChat channel, and a security fix. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post6) for details.
+
+
+<details>
+<summary>Earlier news</summary>
+
 - **2026-03-26** 🏗️ Agent runner extracted and lifecycle hooks unified; stream delta coalescing at boundaries.
 - **2026-03-25** 🌏 StepFun provider, configurable timezone, Gemini thought signatures.
 - **2026-03-24** 🔧 WeChat compatibility, Feishu CardKit streaming, test suite restructured.
@@ -34,10 +46,6 @@
 - **2026-03-19** 💬 Telegram gets more resilient under load; Feishu now renders code blocks properly.
 - **2026-03-18** 📷 Telegram can now send media via URL. Cron schedules show human-readable details.
 - **2026-03-17** ✨ Feishu formatting glow-up, Slack reacts when done, custom endpoints support extra headers, and image handling is more reliable.
-
-<details>
-<summary>Earlier news</summary>
-
 - **2026-03-16** 🚀 Released **v0.1.4.post5** — a refinement-focused release with stronger reliability and channel support, and a more dependable day-to-day experience. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.4.post5) for details.
 - **2026-03-15** 🧩 DingTalk rich media, smarter built-in skills, and cleaner model compatibility.
 - **2026-03-14** 💬 Channel plugins, Feishu replies, and steadier MCP, QQ, and media handling.
@@ -88,7 +96,7 @@
 
 ## Key Features of nanobot:
 
-🪶 **Ultra-Lightweight**: A super lightweight implementation of OpenClaw — 99% smaller, significantly faster.
+🪶 **Ultra-Lightweight**: A lightweight implementation built for stable, long-running AI agents.
 
 🔬 **Research-Ready**: Clean, readable code that's easy to understand, modify, and extend for research.
 
@@ -114,7 +122,11 @@
 - [Agent Social Network](#-agent-social-network)
 - [Configuration](#️-configuration)
 - [Multiple Instances](#-multiple-instances)
+- [Memory](#-memory)
 - [CLI Reference](#-cli-reference)
+- [In-Chat Commands](#-in-chat-commands)
+- [Python SDK](#-python-sdk)
+- [OpenAI-Compatible API](#-openai-compatible-api)
 - [Docker](#-docker)
 - [Linux Service](#-linux-service)
 - [Project Structure](#-project-structure)
@@ -133,7 +145,7 @@
   <tr>
     <td align="center"><p align="center"><img src="case/search.gif" width="180" height="400"></p></td>
     <td align="center"><p align="center"><img src="case/code.gif" width="180" height="400"></p></td>
-    <td align="center"><p align="center"><img src="case/scedule.gif" width="180" height="400"></p></td>
+    <td align="center"><p align="center"><img src="case/schedule.gif" width="180" height="400"></p></td>
     <td align="center"><p align="center"><img src="case/memory.gif" width="180" height="400"></p></td>
   </tr>
   <tr>
@@ -146,7 +158,12 @@
 
 ## 📦 Install
 
-**Install from source** (latest features, recommended for development)
+> [!IMPORTANT]
+> This README may describe features that are available first in the latest source code.
+> If you want the newest features and experiments, install from source.
+> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
+
+**Install from source** (latest features, experimental changes may land here first; recommended for development)
 
 ```bash
 git clone https://github.com/HKUDS/nanobot.git
@@ -154,13 +171,13 @@ cd nanobot
 pip install -e .
 ```
 
-**Install with [uv](https://github.com/astral-sh/uv)** (stable, fast)
+**Install with [uv](https://github.com/astral-sh/uv)** (stable release, fast)
 
 ```bash
 uv tool install nanobot-ai
 ```
 
-**Install from PyPI** (stable)
+**Install from PyPI** (stable release)
 
 ```bash
 pip install nanobot-ai
@@ -240,7 +257,7 @@ Configure these **two parts** in your config (other options have defaults).
 nanobot agent
 ```
 
-That's it! You have a working AI assistant in 2 minutes.
+That's it! You have a working AI agent in 2 minutes.
 
 ## 💬 Chat Apps
 
@@ -377,7 +394,8 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
       "allowFrom": ["YOUR_USER_ID"],
-      "groupPolicy": "mention"
+      "groupPolicy": "mention",
+      "streaming": true
     }
   }
 }
@@ -388,6 +406,7 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 > - `"open"` — Respond to all messages
 > DMs always respond when the sender is in `allowFrom`.
 > - If you set group policy to open create new threads as private threads and then @ the bot into it. Otherwise the thread itself and the channel in which you spawned it will spawn a bot session.
+> `streaming` defaults to `true`. Disable it only if you explicitly want non-streaming replies.
 
 **5. Invite the bot**
 - OAuth2 → URL Generator
@@ -421,9 +440,11 @@ pip install nanobot-ai[matrix]
 
 - You need:
   - `userId` (example: `@nanobot:matrix.org`)
-  - `accessToken`
-  - `deviceId` (recommended so sync tokens can be restored across restarts)
-- You can obtain these from your homeserver login API (`/_matrix/client/v3/login`) or from your client's advanced session settings.
+  - `password`
+
+(Note: `accessToken` and `deviceId` are still supported for legacy reasons, but
+for reliable encryption, password login is recommended instead. If the
+`password` is provided, `accessToken` and `deviceId` will be ignored.)
 
 **3. Configure**
 
@@ -434,8 +455,7 @@ pip install nanobot-ai[matrix]
       "enabled": true,
       "homeserver": "https://matrix.org",
       "userId": "@nanobot:matrix.org",
-      "accessToken": "syt_xxx",
-      "deviceId": "NANOBOT01",
+      "password": "mypasswordhere",
       "e2eeEnabled": true,
       "allowFrom": ["@your_user:matrix.org"],
       "groupPolicy": "open",
@@ -447,7 +467,7 @@ pip install nanobot-ai[matrix]
 }
 ```
 
-> Keep a persistent `matrix-store` and stable `deviceId` — encrypted session state is lost if these change across restarts.
+> Keep a persistent `matrix-store` — encrypted session state is lost if these change across restarts.
 
 | Option | Description |
 |--------|-------------|
@@ -540,7 +560,11 @@ Uses **WebSocket** long connection — no public IP required.
       "verificationToken": "",
       "allowFrom": ["ou_YOUR_OPEN_ID"],
       "groupPolicy": "mention",
-      "streaming": true
+      "reactEmoji": "OnIt",
+      "doneEmoji": "DONE",
+      "toolHintPrefix": "🔧",
+      "streaming": true,
+      "domain": "feishu"
     }
   }
 }
@@ -550,6 +574,10 @@ Uses **WebSocket** long connection — no public IP required.
 > `encryptKey` and `verificationToken` are optional for Long Connection mode.
 > `allowFrom`: Add your open_id (find it in nanobot logs when you message the bot). Use `["*"]` to allow all users.
 > `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all group messages). Private chats always respond.
+> `reactEmoji`: Emoji for "processing" status (default: `OnIt`). See [available emojis](https://open.larkoffice.com/document/server-docs/im-v1/message-reaction/emojis-introduce).
+> `doneEmoji`: Optional emoji for "completed" status (e.g., `DONE`, `OK`, `HEART`). When set, bot adds this reaction after removing `reactEmoji`.
+> `toolHintPrefix`: Prefix for inline tool hints in streaming cards (default: `🔧`).
+> `domain`: `"feishu"` (default) for China (open.feishu.cn), `"lark"` for international Lark (open.larksuite.com).
 
 **3. Run**
 
@@ -708,6 +736,9 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 > - `allowFrom`: Add your email address. Use `["*"]` to accept emails from anyone.
 > - `smtpUseTls` and `smtpUseSsl` default to `true` / `false` respectively, which is correct for Gmail (port 587 + STARTTLS). No need to set them explicitly.
 > - Set `"autoReplyEnabled": false` if you only want to read/analyze emails without sending automatic replies.
+> - `allowedAttachmentTypes`: Save inbound attachments matching these MIME types — `["*"]` for all, e.g. `["application/pdf", "image/*"]` (default `[]` = disabled).
+> - `maxAttachmentSize`: Max size per attachment in bytes (default `2000000` / 2MB).
+> - `maxAttachmentsPerEmail`: Max attachments to save per email (default `5`).
 
 ```json
 {
@@ -724,7 +755,8 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
       "smtpUsername": "my-nanobot@gmail.com",
       "smtpPassword": "your-app-password",
       "fromAddress": "my-nanobot@gmail.com",
-      "allowFrom": ["your-real-email@gmail.com"]
+      "allowFrom": ["your-real-email@gmail.com"],
+      "allowedAttachmentTypes": ["application/pdf", "image/*"]
     }
   }
 }
@@ -844,10 +876,50 @@ Simply send the command above to your nanobot (via CLI or any chat channel), and
 
 Config file: `~/.nanobot/config.json`
 
+> [!NOTE]
+> If your config file is older than the current schema, you can refresh it without overwriting your existing values:
+> run `nanobot onboard`, then answer `N` when asked whether to overwrite the config.
+> nanobot will merge in missing default fields and keep your current settings.
+
+### Environment Variables for Secrets
+
+Instead of storing secrets directly in `config.json`, you can use `${VAR_NAME}` references that are resolved from environment variables at startup:
+
+```json
+{
+  "channels": {
+    "telegram": { "token": "${TELEGRAM_TOKEN}" },
+    "email": {
+      "imapPassword": "${IMAP_PASSWORD}",
+      "smtpPassword": "${SMTP_PASSWORD}"
+    }
+  },
+  "providers": {
+    "groq": { "apiKey": "${GROQ_API_KEY}" }
+  }
+}
+```
+
+For **systemd** deployments, use `EnvironmentFile=` in the service unit to load variables from a file that only the deploying user can read:
+
+```ini
+# /etc/systemd/system/nanobot.service (excerpt)
+[Service]
+EnvironmentFile=/home/youruser/nanobot_secrets.env
+User=nanobot
+ExecStart=...
+```
+
+```bash
+# /home/youruser/nanobot_secrets.env (mode 600, owned by youruser)
+TELEGRAM_TOKEN=your-token-here
+IMAP_PASSWORD=your-password-here
+```
+
 ### Providers
 
 > [!TIP]
-> - **Groq** provides free voice transcription via Whisper. If configured, Telegram voice messages will be automatically transcribed.
+> - **Voice transcription**: Voice messages (Telegram, WhatsApp) are automatically transcribed using Whisper. By default Groq is used (free tier). Set `"transcriptionProvider": "openai"` under `channels` to use OpenAI Whisper instead — the API key is picked from the matching provider config.
 > - **MiniMax Coding Plan**: Exclusive discount links for the nanobot community: [Overseas](https://platform.minimax.io/subscribe/coding-plan?code=9txpdXw04g&source=link) · [Mainland China](https://platform.minimaxi.com/subscribe/token-plan?code=GILTJpMTqZ&source=link)
 > - **MiniMax (Mainland China)**: If your API key is from MiniMax's mainland China platform (minimaxi.com), set `"apiBase": "https://api.minimaxi.com/v1"` in your minimax provider config.
 > - **VolcEngine / BytePlus Coding Plan**: Use dedicated providers `volcengineCodingPlan` or `byteplusCodingPlan` instead of the pay-per-use `volcengine` / `byteplus` providers.
@@ -863,9 +935,9 @@ Config file: `~/.nanobot/config.json`
 | `byteplus` | LLM (VolcEngine international, pay-per-use) | [Coding Plan](https://www.byteplus.com/en/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [byteplus.com](https://www.byteplus.com) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `azure_openai` | LLM (Azure OpenAI) | [portal.azure.com](https://portal.azure.com) |
-| `openai` | LLM (GPT direct) | [platform.openai.com](https://platform.openai.com) |
+| `openai` | LLM + Voice transcription (Whisper) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
-| `groq` | LLM + **Voice transcription** (Whisper) | [console.groq.com](https://console.groq.com) |
+| `groq` | LLM + Voice transcription (Whisper, default) | [console.groq.com](https://console.groq.com) |
 | `minimax` | LLM (MiniMax direct) | [platform.minimaxi.com](https://platform.minimaxi.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
@@ -873,6 +945,7 @@ Config file: `~/.nanobot/config.json`
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
+| `mimo` | LLM (MiMo) | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
 | `ollama` | LLM (local, Ollama) | — |
 | `mistral` | LLM | [docs.mistral.ai](https://docs.mistral.ai/) |
 | `stepfun` | LLM (Step Fun/阶跃星辰) | [platform.stepfun.com](https://platform.stepfun.com) |
@@ -880,6 +953,8 @@ Config file: `~/.nanobot/config.json`
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
+| `qianfan` | LLM (Baidu Qianfan) | [cloud.baidu.com](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |
+
 
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>
@@ -1177,6 +1252,7 @@ Global settings that apply to all channels. Configure under the `channels` secti
     "sendProgress": true,
     "sendToolHints": false,
     "sendMaxRetries": 3,
+    "transcriptionProvider": "groq",
     "telegram": { ... }
   }
 }
@@ -1187,19 +1263,27 @@ Global settings that apply to all channels. Configure under the `channels` secti
 | `sendProgress` | `true` | Stream agent's text progress to the channel |
 | `sendToolHints` | `false` | Stream tool-call hints (e.g. `read_file("…")`) |
 | `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
+| `transcriptionProvider` | `"groq"` | Voice transcription backend: `"groq"` (free tier, default) or `"openai"`. API key is auto-resolved from the matching provider config. |
 
 #### Retry Behavior
 
-When a channel send operation raises an error, nanobot retries with exponential backoff:
+Retry is intentionally simple.
 
-- **Attempt 1**: Initial send
-- **Attempts 2-4**: Retry delays are 1s, 2s, 4s
-- **Attempts 5+**: Retry delay caps at 4s
-- **Transient failures** (network hiccups, temporary API limits): Retry usually succeeds
-- **Permanent failures** (invalid token, channel banned): All retries fail
+When a channel `send()` raises, nanobot retries at the channel-manager layer. By default, `channels.sendMaxRetries` is `3`, and that count includes the initial send.
+
+- **Attempt 1**: Send immediately
+- **Attempt 2**: Retry after `1s`
+- **Attempt 3**: Retry after `2s`
+- **Higher retry budgets**: Backoff continues as `1s`, `2s`, `4s`, then stays capped at `4s`
+- **Transient failures**: Network hiccups and temporary API limits often recover on the next attempt
+- **Permanent failures**: Invalid tokens, revoked access, or banned channels will exhaust the retry budget and fail cleanly
 
 > [!NOTE]
-> When a channel is completely unavailable, there's no way to notify the user since we cannot reach them through that channel. Monitor logs for "Failed to send to {channel} after N attempts" to detect persistent delivery failures.
+> This design is deliberate: channel implementations should raise on delivery failure, and the channel manager owns the shared retry policy.
+>
+> Some channels may still apply small API-specific retries internally. For example, Telegram separately retries timeout and flood-control errors before surfacing a final failure to the manager.
+>
+> If a channel is completely unreachable, nanobot cannot notify the user through that same channel. Watch logs for `Failed to send to {channel} after N attempts` to spot persistent delivery failures.
 
 ### Web Search
 
@@ -1211,17 +1295,41 @@ When a channel send operation raises an error, nanobot retries with exponential 
 
 nanobot supports multiple web search providers. Configure in `~/.nanobot/config.json` under `tools.web.search`.
 
+By default, web tools are enabled and web search uses `duckduckgo`, so search works out of the box without an API key.
+
+If you want to disable all built-in web tools entirely, set `tools.web.enable` to `false`. This removes both `web_search` and `web_fetch` from the tool list sent to the LLM.
+
+If you need to allow trusted private ranges such as Tailscale / CGNAT addresses, you can explicitly exempt them from SSRF blocking with `tools.ssrfWhitelist`:
+
+```json
+{
+  "tools": {
+    "ssrfWhitelist": ["100.64.0.0/10"]
+  }
+}
+```
+
 | Provider | Config fields | Env var fallback | Free |
 |----------|--------------|------------------|------|
-| `brave` (default) | `apiKey` | `BRAVE_API_KEY` | No |
+| `brave` | `apiKey` | `BRAVE_API_KEY` | No |
 | `tavily` | `apiKey` | `TAVILY_API_KEY` | No |
 | `jina` | `apiKey` | `JINA_API_KEY` | Free tier (10M tokens) |
+| `kagi` | `apiKey` | `KAGI_API_KEY` | No |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
-| `duckduckgo` | — | — | Yes |
+| `duckduckgo` (default) | — | — | Yes |
 
-When credentials are missing, nanobot automatically falls back to DuckDuckGo.
+**Disable all built-in web tools:**
+```json
+{
+  "tools": {
+    "web": {
+      "enable": false
+    }
+  }
+}
+```
 
-**Brave** (default):
+**Brave:**
 ```json
 {
   "tools": {
@@ -1263,6 +1371,20 @@ When credentials are missing, nanobot automatically falls back to DuckDuckGo.
 }
 ```
 
+**Kagi:**
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "kagi",
+        "apiKey": "your-kagi-api-key"
+      }
+    }
+  }
+}
+```
+
 **SearXNG** (self-hosted, no API key needed):
 ```json
 {
@@ -1292,7 +1414,14 @@ When credentials are missing, nanobot automatically falls back to DuckDuckGo.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | string | `"brave"` | Search backend: `brave`, `tavily`, `jina`, `searxng`, `duckduckgo` |
+| `enable` | boolean | `true` | Enable or disable all built-in web tools (`web_search` + `web_fetch`) |
+| `proxy` | string or null | `null` | Proxy for all web requests, for example `http://127.0.0.1:7890` |
+
+#### `tools.web.search`
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `provider` | string | `"duckduckgo"` | Search backend: `brave`, `tavily`, `jina`, `searxng`, `duckduckgo` |
 | `apiKey` | string | `""` | API key for Brave or Tavily |
 | `baseUrl` | string | `""` | Base URL for SearXNG |
 | `maxResults` | integer | `5` | Results per search (1–10) |
@@ -1377,16 +1506,48 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 ### Security
 
 > [!TIP]
-> For production deployments, set `"restrictToWorkspace": true` in your config to sandbox the agent.
+> For production deployments, set `"restrictToWorkspace": true` and `"tools.exec.sandbox": "bwrap"` in your config to sandbox the agent.
 > In `v0.1.4.post3` and earlier, an empty `allowFrom` allowed all senders. Since `v0.1.4.post4`, empty `allowFrom` denies all access by default. To allow all senders, set `"allowFrom": ["*"]`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `tools.restrictToWorkspace` | `false` | When `true`, restricts **all** agent tools (shell, file read/write/edit, list) to the workspace directory. Prevents path traversal and out-of-scope access. |
+| `tools.exec.sandbox` | `""` | Sandbox backend for shell commands. Set to `"bwrap"` to wrap exec calls in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox — the process can only see the workspace (read-write) and media directory (read-only); config files and API keys are hidden. Automatically enables `restrictToWorkspace` for file tools. **Linux only** — requires `bwrap` installed (`apt install bubblewrap`; pre-installed in the Docker image). Not available on macOS or Windows (bwrap depends on Linux kernel namespaces). |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
 
+**Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
+
+
+### Auto Compact
+
+When a user is idle for longer than a configured threshold, nanobot **proactively** compresses the older part of the session context into a summary while keeping a recent legal suffix of live messages. This reduces token cost and first-token latency when the user returns — instead of re-processing a long stale context with an expired KV cache, the model receives a compact summary, the most recent live context, and fresh input.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "idleCompactAfterMinutes": 15
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.idleCompactAfterMinutes` | `0` (disabled) | Minutes of idle time before auto-compaction starts. Set to `0` to disable. Recommended: `15` — close to a typical LLM KV cache expiry window, so stale sessions get compacted before the user returns. |
+
+`sessionTtlMinutes` remains accepted as a legacy alias for backward compatibility, but `idleCompactAfterMinutes` is the preferred config key going forward.
+
+How it works:
+1. **Idle detection**: On each idle tick (~1 s), checks all sessions for expiration.
+2. **Background compaction**: Idle sessions summarize the older live prefix via LLM and keep the most recent legal suffix (currently 8 messages).
+3. **Summary injection**: When the user returns, the summary is injected as runtime context (one-shot, not persisted) alongside the retained recent suffix.
+4. **Restart-safe resume**: The summary is also mirrored into session metadata so it can still be recovered after a process restart.
+
+> [!TIP]
+> Think of auto compact as "summarize older context, keep the freshest live turns." It is not a hard session reset.
 
 ### Timezone
 
@@ -1409,6 +1570,52 @@ This affects runtime time strings shown to the model, such as runtime context an
 Common examples: `UTC`, `America/New_York`, `America/Los_Angeles`, `Europe/London`, `Europe/Berlin`, `Asia/Tokyo`, `Asia/Shanghai`, `Asia/Singapore`, `Australia/Sydney`.
 
 > Need another timezone? Browse the full [IANA Time Zone Database](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
+
+### Unified Session
+
+By default, each channel × chat ID combination gets its own session. If you use nanobot across multiple channels (e.g. Telegram + Discord + CLI) and want them to share the same conversation, enable `unifiedSession`:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "unifiedSession": true
+    }
+  }
+}
+```
+
+When enabled, all incoming messages — regardless of which channel they arrive on — are routed into a single shared session. Switching from Telegram to Discord (or any other channel) continues the same conversation seamlessly.
+
+| Behavior | `false` (default) | `true` |
+|----------|-------------------|--------|
+| Session key | `channel:chat_id` | `unified:default` |
+| Cross-channel continuity | No | Yes |
+| `/new` clears | Current channel session | Shared session |
+| `/stop` finds tasks | By channel session | By shared session |
+| Existing `session_key_override` (e.g. Telegram thread) | Respected | Still respected — not overwritten |
+
+> This is designed for single-user, multi-device setups. It is **off by default** — existing users see zero behavior change.
+
+### Disabled Skills
+
+nanobot ships with built-in skills, and your workspace can also define custom skills under `skills/`. If you want to hide specific skills from the agent, set `agents.defaults.disabledSkills` to a list of skill directory names:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "disabledSkills": ["github", "weather"]
+    }
+  }
+}
+```
+
+Disabled skills are excluded from the main agent's skill summary, from always-on skill injection, and from subagent skill summaries. This is useful when some bundled skills are unnecessary for your deployment or should not be exposed to end users.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.disabledSkills` | `[]` | List of skill directory names to exclude from loading. Applies to both built-in skills and workspace skills. |
 
 ## 🧩 Multiple Instances
 
@@ -1528,6 +1735,19 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 - `--workspace` overrides the workspace defined in the config file
 - Cron jobs and runtime media/state are derived from the config directory
 
+## 🧠 Memory
+
+nanobot uses a layered memory system designed to stay light in the moment and durable over
+time.
+
+- `memory/history.jsonl` stores append-only summarized history
+- `SOUL.md`, `USER.md`, and `memory/MEMORY.md` store long-term knowledge managed by Dream
+- `Dream` can also promote repeated workflows into reusable workspace skills under `skills/`
+- `Dream` runs on a schedule and can also be triggered manually
+- memory changes can be inspected and restored with built-in commands
+
+If you want the full design, see [docs/MEMORY.md](docs/MEMORY.md).
+
 ## 💻 CLI Reference
 
 | Command | Description |
@@ -1541,6 +1761,7 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot agent` | Interactive chat mode |
 | `nanobot agent --no-markdown` | Show plain-text replies |
 | `nanobot agent --logs` | Show runtime logs during chat |
+| `nanobot serve` | Start the OpenAI-compatible API |
 | `nanobot gateway` | Start the gateway |
 | `nanobot status` | Show status |
 | `nanobot provider login openai-codex` | OAuth login for providers |
@@ -1548,6 +1769,23 @@ nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobo
 | `nanobot channels status` | Show channel status |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
+
+## 💬 In-Chat Commands
+
+These commands work inside chat channels and interactive agent sessions:
+
+| Command | Description |
+|---------|-------------|
+| `/new` | Start a new conversation |
+| `/stop` | Stop the current task |
+| `/restart` | Restart the bot |
+| `/status` | Show bot status |
+| `/dream` | Run Dream memory consolidation now |
+| `/dream-log` | Show the latest Dream memory change |
+| `/dream-log <sha>` | Show a specific Dream memory change |
+| `/dream-restore` | List recent Dream memory versions |
+| `/dream-restore <sha>` | Restore memory to the state before a specific change |
+| `/help` | Show available in-chat commands |
 
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>
@@ -1569,10 +1807,115 @@ The agent can also manage this file itself — ask it to "add a periodic task" a
 
 </details>
 
+## 🐍 Python SDK
+
+Use nanobot as a library — no CLI, no gateway, just Python:
+
+```python
+from nanobot import Nanobot
+
+bot = Nanobot.from_config()
+result = await bot.run("Summarize the README")
+print(result.content)
+```
+
+Each call carries a `session_key` for conversation isolation — different keys get independent history:
+
+```python
+await bot.run("hi", session_key="user-alice")
+await bot.run("hi", session_key="task-42")
+```
+
+Add lifecycle hooks to observe or customize the agent:
+
+```python
+from nanobot.agent import AgentHook, AgentHookContext
+
+class AuditHook(AgentHook):
+    async def before_execute_tools(self, ctx: AgentHookContext) -> None:
+        for tc in ctx.tool_calls:
+            print(f"[tool] {tc.name}")
+
+result = await bot.run("Hello", hooks=[AuditHook()])
+```
+
+See [docs/PYTHON_SDK.md](docs/PYTHON_SDK.md) for the full SDK reference.
+
+## 🔌 OpenAI-Compatible API
+
+nanobot can expose a minimal OpenAI-compatible endpoint for local integrations:
+
+```bash
+pip install "nanobot-ai[api]"
+nanobot serve
+```
+
+By default, the API binds to `127.0.0.1:8900`. You can change this in `config.json`.
+
+### Behavior
+
+- Session isolation: pass `"session_id"` in the request body to isolate conversations; omit for a shared default session (`api:default`)
+- Single-message input: each request must contain exactly one `user` message
+- Fixed model: omit `model`, or pass the same model shown by `/v1/models`
+- No streaming: `stream=true` is not supported
+
+### Endpoints
+
+- `GET /health`
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+
+### curl
+
+```bash
+curl http://127.0.0.1:8900/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": "hi"}],
+    "session_id": "my-session"
+  }'
+```
+
+### Python (`requests`)
+
+```python
+import requests
+
+resp = requests.post(
+    "http://127.0.0.1:8900/v1/chat/completions",
+    json={
+        "messages": [{"role": "user", "content": "hi"}],
+        "session_id": "my-session",  # optional: isolate conversation
+    },
+    timeout=120,
+)
+resp.raise_for_status()
+print(resp.json()["choices"][0]["message"]["content"])
+```
+
+### Python (`openai`)
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8900/v1",
+    api_key="dummy",
+)
+
+resp = client.chat.completions.create(
+    model="MiniMax-M2.7",
+    messages=[{"role": "user", "content": "hi"}],
+    extra_body={"session_id": "my-session"},  # optional: isolate conversation
+)
+print(resp.choices[0].message.content)
+```
+
 ## 🐳 Docker
 
 > [!TIP]
-> The `-v ~/.nanobot:/root/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
+> The `-v ~/.nanobot:/home/nanobot/.nanobot` flag mounts your local config directory into the container, so your config and workspace persist across container restarts.
+> The container runs as user `nanobot` (UID 1000). If you get **Permission denied**, fix ownership on the host first: `sudo chown -R 1000:1000 ~/.nanobot`, or pass `--user $(id -u):$(id -g)` to match your host UID. Podman users can use `--userns=keep-id` instead.
 
 ### Docker Compose
 
@@ -1595,17 +1938,17 @@ docker compose down                                      # stop
 docker build -t nanobot .
 
 # Initialize config (first time only)
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot onboard
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
 
 # Edit config on host to add API keys
 vim ~/.nanobot/config.json
 
 # Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat)
-docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
+docker run -v ~/.nanobot:/home/nanobot/.nanobot -p 18790:18790 nanobot gateway
 
 # Or run a single command
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot agent -m "Hello!"
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot status
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot agent -m "Hello!"
+docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot status
 ```
 
 ## 🐧 Linux Service

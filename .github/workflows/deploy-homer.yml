@@ -63,6 +63,21 @@ jobs:
               sudo -u homer HOME=/home/homer UV_NO_CONFIG=1 uv pip install -r /opt/homer/portal/backend/requirements.txt --python /opt/homer/.venv/bin/python -q
             fi
             echo "${{ github.sha }}" | cut -c1-8 > /opt/homer/context/.nanobot_workspace/NANOBOT_FORK_COMMIT
+
+            # Seed-only: copy SOUL.md, USER.md, memory/MEMORY.md only if they
+            # don't already exist on the VPS.  After first deploy, Dream owns
+            # these files and the deploy must not overwrite them.
+            WS=/opt/homer/context/.nanobot_workspace
+            for f in SOUL.md USER.md; do
+              SRC=$(find /opt/homer/.venv -path "*/nanobot/templates/$f" 2>/dev/null | head -1)
+              [ -n "$SRC" ] && [ ! -f "$WS/$f" ] && cp "$SRC" "$WS/$f" && chown homer:homer "$WS/$f" && echo "[deploy] Seeded $f"
+            done
+            mkdir -p "$WS/memory" && chown homer:homer "$WS/memory"
+            if [ ! -f "$WS/memory/MEMORY.md" ]; then
+              touch "$WS/memory/MEMORY.md" && chown homer:homer "$WS/memory/MEMORY.md"
+              echo "[deploy] Seeded memory/MEMORY.md"
+            fi
+
             if [[ "${{ steps.bridge.outputs.changed }}" == "true" ]]; then
               chown -R homer:homer /home/homer/.nanobot/bridge
               systemctl restart homer-bridge 2>/dev/null || true

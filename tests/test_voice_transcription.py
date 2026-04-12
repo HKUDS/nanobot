@@ -10,7 +10,7 @@ import pytest
 
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.whatsapp import WhatsAppChannel
-from nanobot.config.schema import WhatsAppConfig
+from nanobot.channels.whatsapp import WhatsAppConfig
 from nanobot.providers.transcription import (
     TranscriptionProvider,
     VoiceTranscriptionProvider,
@@ -21,10 +21,16 @@ from nanobot.providers.transcription import (
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_whatsapp_channel(
-    transcription_provider: TranscriptionProvider | None = None,
+    transcribe_return: str | None = None,
 ) -> tuple[WhatsAppChannel, list[dict]]:
     config = WhatsAppConfig(enabled=True, bridge_url="ws://localhost:3001", allow_from=["*"])
-    channel = WhatsAppChannel(config, MessageBus(), transcription_provider=transcription_provider)
+    channel = WhatsAppChannel(config, MessageBus())
+
+    # Mock transcribe_audio on the channel instance
+    if transcribe_return is not None:
+        channel.transcribe_audio = AsyncMock(return_value=transcribe_return)  # type: ignore[method-assign]
+    else:
+        channel.transcribe_audio = AsyncMock(return_value="")  # type: ignore[method-assign]
 
     published: list[dict] = []
 
@@ -42,25 +48,23 @@ def _make_whatsapp_channel(
     return channel, published
 
 
-def _audio_bridge_message(
-    audio_bytes: bytes = b"\x00" * 100,
-    mimetype: str = "audio/ogg; codecs=opus",
-    duration: float | None = 10.0,
+def _voice_bridge_message(
     sender: str = "123456789@s.whatsapp.net",
+    media_path: str = "/tmp/voice_001.ogg",
 ) -> str:
+    """Build a bridge message representing a voice message in the new format.
+
+    The bridge now sends content='[Voice Message]' and media=['/path/to/file'].
+    """
     return json.dumps({
         "type": "message",
         "id": "msg-001",
         "sender": sender,
         "pn": "",
-        "content": "",
+        "content": "[Voice Message]",
         "timestamp": 1700000000,
         "isGroup": False,
-        "audio": {
-            "data": base64.b64encode(audio_bytes).decode(),
-            "mimetype": mimetype,
-            **({"duration": duration} if duration is not None else {}),
-        },
+        "media": [media_path],
     })
 
 
@@ -199,30 +203,28 @@ class TestVoiceTranscriptionProvider:
 class TestWhatsAppVoiceTranscription:
     @pytest.mark.asyncio
     async def test_voice_message_replaced_with_transcript(self) -> None:
-        mock_provider = AsyncMock(spec=TranscriptionProvider)
-        mock_provider.transcribe = AsyncMock(return_value="Hi, this is a test.")
-        channel, published = _make_whatsapp_channel(transcription_provider=mock_provider)
+        channel, published = _make_whatsapp_channel(transcribe_return="Hi, this is a test.")
 
-        await channel._handle_bridge_message(_audio_bridge_message())
+        await channel._handle_bridge_message(_voice_bridge_message())
 
         assert len(published) == 1
-        assert published[0]["content"] == "Hi, this is a test."
-        mock_provider.transcribe.assert_called_once()
+        # The transcribed content plus media tag
+        assert "Hi, this is a test." in published[0]["content"]
+        channel.transcribe_audio.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_no_provider_returns_placeholder(self) -> None:
-        channel, published = _make_whatsapp_channel(transcription_provider=None)
+    async def test_no_transcription_returns_failure_placeholder(self) -> None:
+        # When transcribe_audio returns empty string, content becomes failure sentinel
+        channel, published = _make_whatsapp_channel(transcribe_return="")
 
-        await channel._handle_bridge_message(_audio_bridge_message())
+        await channel._handle_bridge_message(_voice_bridge_message())
 
         assert len(published) == 1
-        assert published[0]["content"] == "[Voice Message]"
+        assert "[Voice Message: Transcription failed]" in published[0]["content"]
 
     @pytest.mark.asyncio
     async def test_normal_text_not_transcribed(self) -> None:
-        mock_provider = AsyncMock(spec=TranscriptionProvider)
-        mock_provider.transcribe = AsyncMock(side_effect=AssertionError("should not be called"))
-        channel, published = _make_whatsapp_channel(transcription_provider=mock_provider)
+        channel, published = _make_whatsapp_channel(transcribe_return="should not appear")
 
         raw = json.dumps({
             "type": "message", "id": "msg-002", "sender": "123@s.whatsapp.net",
@@ -232,32 +234,28 @@ class TestWhatsAppVoiceTranscription:
         await channel._handle_bridge_message(raw)
 
         assert published[0]["content"] == "Hello there"
+        channel.transcribe_audio.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_invalid_base64_returns_failure_sentinel(self) -> None:
-        mock_provider = AsyncMock(spec=TranscriptionProvider)
-        channel, published = _make_whatsapp_channel(transcription_provider=mock_provider)
+    async def test_voice_no_media_returns_audio_not_available(self) -> None:
+        channel, published = _make_whatsapp_channel(transcribe_return="ok")
 
+        # Voice message with no media paths
         raw = json.dumps({
             "type": "message", "id": "msg-003", "sender": "123@s.whatsapp.net",
-            "pn": "", "content": "", "timestamp": 1700000002, "isGroup": False,
-            "audio": {"data": "!!!invalid!!!", "mimetype": "audio/ogg"},
+            "pn": "", "content": "[Voice Message]", "timestamp": 1700000002, "isGroup": False,
         })
 
         await channel._handle_bridge_message(raw)
 
-        assert published[0]["content"] == "[Voice message - transcription failed]"
+        assert "[Voice Message: Audio not available]" in published[0]["content"]
 
     @pytest.mark.asyncio
-    async def test_provider_receives_correct_args(self) -> None:
-        mock_provider = AsyncMock(spec=TranscriptionProvider)
-        mock_provider.transcribe = AsyncMock(return_value="ok")
-        channel, _ = _make_whatsapp_channel(transcription_provider=mock_provider)
+    async def test_transcribe_audio_receives_file_path(self) -> None:
+        channel, _ = _make_whatsapp_channel(transcribe_return="ok")
 
         await channel._handle_bridge_message(
-            _audio_bridge_message(mimetype="audio/mp4", duration=42.5)
+            _voice_bridge_message(media_path="/tmp/test_audio.ogg")
         )
 
-        call_kwargs = mock_provider.transcribe.call_args.kwargs
-        assert call_kwargs["mime_type"] == "audio/mp4"
-        assert call_kwargs["duration_seconds"] == 42.5
+        channel.transcribe_audio.assert_called_once_with("/tmp/test_audio.ogg")

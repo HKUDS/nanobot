@@ -5,6 +5,7 @@ import base64
 import json
 import mimetypes
 import os
+import secrets
 import shutil
 import subprocess
 from collections import OrderedDict
@@ -30,6 +31,80 @@ class WhatsAppConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention"] = "open"
     identity_resolution: bool = False  # Enable LID→name resolution via sender_map/lid_map
+
+
+def _bridge_token_path() -> Path:
+    from nanobot.config.paths import get_runtime_subdir
+
+    return get_runtime_subdir("whatsapp-auth") / "bridge-token"
+
+
+def _load_or_create_bridge_token(path: Path) -> str:
+    """Load a persisted bridge token or create one on first use."""
+    if path.exists():
+        token = path.read_text(encoding="utf-8").strip()
+        if token:
+            return token
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_urlsafe(32)
+    path.write_text(token, encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return token
+
+
+def _ensure_bridge_setup() -> Path:
+    """
+    Ensure the WhatsApp bridge is set up and built.
+
+    Returns the bridge directory. Raises RuntimeError if npm is not found
+    or bridge cannot be built.
+    """
+    from nanobot.config.paths import get_bridge_install_dir
+
+    user_bridge = get_bridge_install_dir()
+
+    if (user_bridge / "dist" / "index.js").exists():
+        return user_bridge
+
+    npm_path = shutil.which("npm")
+    if not npm_path:
+        raise RuntimeError("npm not found. Please install Node.js >= 18.")
+
+    # Find source bridge
+    current_file = Path(__file__)
+    pkg_bridge = current_file.parent.parent / "bridge"
+    src_bridge = current_file.parent.parent.parent / "bridge"
+
+    source = None
+    if (pkg_bridge / "package.json").exists():
+        source = pkg_bridge
+    elif (src_bridge / "package.json").exists():
+        source = src_bridge
+
+    if not source:
+        raise RuntimeError(
+            "WhatsApp bridge source not found. "
+            "Try reinstalling: pip install --force-reinstall nanobot"
+        )
+
+    logger.info("Setting up WhatsApp bridge...")
+    user_bridge.parent.mkdir(parents=True, exist_ok=True)
+    if user_bridge.exists():
+        shutil.rmtree(user_bridge)
+    shutil.copytree(source, user_bridge, ignore=shutil.ignore_patterns("node_modules", "dist"))
+
+    logger.info("  Installing dependencies...")
+    subprocess.run([npm_path, "install"], cwd=user_bridge, check=True, capture_output=True)
+
+    logger.info("  Building...")
+    subprocess.run([npm_path, "run", "build"], cwd=user_bridge, check=True, capture_output=True)
+
+    logger.info("Bridge ready")
+    return user_bridge
 
 
 class WhatsAppChannel(BaseChannel):
@@ -64,6 +139,19 @@ class WhatsAppChannel(BaseChannel):
         self._lid_map_loaded = False
         self._sender_map: dict[str, str] = {}  # in-memory cache of sender_map.json
         self._greeted_sessions: OrderedDict[str, None] = OrderedDict()  # tracks first-message injection
+        self._lid_to_phone: dict[str, str] = {}
+        self._bridge_token: str | None = None
+
+    def _effective_bridge_token(self) -> str:
+        """Resolve the bridge token, generating a local secret when needed."""
+        if self._bridge_token is not None:
+            return self._bridge_token
+        configured = self.config.bridge_token.strip()
+        if configured:
+            self._bridge_token = configured
+        else:
+            self._bridge_token = _load_or_create_bridge_token(_bridge_token_path())
+        return self._bridge_token
 
     async def login(self, force: bool = False) -> bool:
         """
@@ -73,8 +161,6 @@ class WhatsAppChannel(BaseChannel):
         authentication flow. The process blocks until the user scans the QR code
         or interrupts with Ctrl+C.
         """
-        from nanobot.config.paths import get_runtime_subdir
-
         try:
             bridge_dir = _ensure_bridge_setup()
         except RuntimeError as e:
@@ -82,9 +168,8 @@ class WhatsAppChannel(BaseChannel):
             return False
 
         env = {**os.environ}
-        if self.config.bridge_token:
-            env["BRIDGE_TOKEN"] = self.config.bridge_token
-        env["AUTH_DIR"] = str(get_runtime_subdir("whatsapp-auth"))
+        env["BRIDGE_TOKEN"] = self._effective_bridge_token()
+        env["AUTH_DIR"] = str(_bridge_token_path().parent)
 
         logger.info("Starting WhatsApp bridge for QR login...")
         try:
@@ -114,11 +199,9 @@ class WhatsAppChannel(BaseChannel):
             try:
                 async with websockets.connect(bridge_url) as ws:
                     self._ws = ws
-                    # Send auth token if configured
-                    if self.config.bridge_token:
-                        await ws.send(
-                            json.dumps({"type": "auth", "token": self.config.bridge_token})
-                        )
+                    await ws.send(
+                        json.dumps({"type": "auth", "token": self._effective_bridge_token()})
+                    )
                     self._connected = True
                     logger.info("Connected to WhatsApp bridge")
 
@@ -275,31 +358,51 @@ class WhatsAppChannel(BaseChannel):
                 if not was_mentioned:
                     return
 
-            # When identity_resolution is enabled, always use LID (sender) as
-            # canonical identifier. Otherwise, prefer pn for backward compat
-            # with existing allow_from lists that use phone numbers.
-            if self.config.identity_resolution:
-                sender_id = sender.split("@")[0] if "@" in sender else sender
-            else:
-                user_id = pn if pn else sender
-                sender_id = user_id.split("@")[0] if "@" in user_id else user_id
-            logger.info("Sender {} (pn={})", sender, pn or "none")
+            # Classify by JID suffix: @s.whatsapp.net = phone, @lid.whatsapp.net = LID
+            # The bridge's pn/sender fields don't consistently map to phone/LID across versions.
+            raw_a = pn or ""
+            raw_b = sender or ""
+            id_a = raw_a.split("@")[0] if "@" in raw_a else raw_a
+            id_b = raw_b.split("@")[0] if "@" in raw_b else raw_b
 
-            # Load identity maps on first message (if enabled)
+            phone_id = ""
+            lid_id = ""
+            for raw, extracted in [(raw_a, id_a), (raw_b, id_b)]:
+                if "@s.whatsapp.net" in raw:
+                    phone_id = extracted
+                elif "@lid.whatsapp.net" in raw:
+                    lid_id = extracted
+                elif extracted and not phone_id:
+                    phone_id = extracted  # best guess for bare values
+
+            if phone_id and lid_id:
+                self._lid_to_phone[lid_id] = phone_id
+            sender_id = phone_id or self._lid_to_phone.get(lid_id, "") or lid_id or id_a or id_b
+
+            logger.info("Sender phone={} lid={} → sender_id={}", phone_id or "(empty)", lid_id or "(empty)", sender_id)
+
+            # Load identity maps on first message (if identity_resolution enabled)
             if self.config.identity_resolution:
                 await self._ensure_maps_loaded()
-                # Learn LID↔phone from inbound messages (handles case where
-                # user messages bot before bot has ever messaged them)
+                # Learn LID↔phone from inbound messages
                 if pn and sender and pn != sender:
                     await self._save_lid_mapping(pn, sender)
 
-            # Handle voice/audio message transcription
-            audio_data = data.get("audio")
-            if audio_data:
-                content = await self._transcribe_audio(audio_data, sender_id)
-
             # Extract media paths (images/documents/videos downloaded by the bridge)
             media_paths = data.get("media") or []
+
+            # Handle voice transcription if it's a voice message
+            if content == "[Voice Message]":
+                if media_paths:
+                    logger.info("Transcribing voice message from {}...", sender_id)
+                    transcription = await self.transcribe_audio(media_paths[0])
+                    if transcription:
+                        content = transcription
+                        logger.info("Transcribed voice from {}: {}...", sender_id, transcription[:50])
+                    else:
+                        content = "[Voice Message: Transcription failed]"
+                else:
+                    content = "[Voice Message: Audio not available]"
 
             # Build content tags matching Telegram's pattern: [image: /path] or [file: /path]
             if media_paths:

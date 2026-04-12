@@ -500,16 +500,15 @@ class TestNewCommandArchival:
             model="test-model",
             context_window_tokens=1,
         )
-tests/agent/test_consolidate_offset.py
         loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="ok", tool_calls=[]))
         loop.tools.get_definitions = MagicMock(return_value=[])
         return loop
 
     @pytest.mark.asyncio
     async def test_new_clears_session_immediately_even_if_archive_fails(self, tmp_path: Path) -> None:
-        """/new clears session immediately; archive_messages retries until raw dump."""
+        """/new clears session immediately; archive is fire-and-forget."""
         from nanobot.bus.events import InboundMessage
-tests/agent/test_consolidate_offset.py
+
 
         loop = self._make_loop(tmp_path)
         session = loop.sessions.get_or_create("cli:test")
@@ -520,12 +519,12 @@ tests/agent/test_consolidate_offset.py
 
         call_count = 0
 
-        async def _failing_consolidate(_messages) -> bool:
+        async def _failing_summarize(_messages) -> bool:
             nonlocal call_count
             call_count += 1
             return False
 
-        loop.memory_consolidator.consolidate_messages = _failing_consolidate  # type: ignore[method-assign]
+        loop.consolidator.archive = _failing_summarize  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         response = await loop._process_message(new_msg)
@@ -537,12 +536,12 @@ tests/agent/test_consolidate_offset.py
         assert len(session_after.messages) == 0
 
         await loop.close_mcp()
-        assert call_count == 3  # retried up to raw-archive threshold
+        assert call_count == 1
 
     @pytest.mark.asyncio
     async def test_new_archives_only_unconsolidated_messages(self, tmp_path: Path) -> None:
         from nanobot.bus.events import InboundMessage
-tests/agent/test_consolidate_offset.py
+
 
         loop = self._make_loop(tmp_path)
         session = loop.sessions.get_or_create("cli:test")
@@ -554,12 +553,12 @@ tests/agent/test_consolidate_offset.py
 
         archived_count = -1
 
-        async def _fake_consolidate(messages) -> bool:
+        async def _fake_summarize(messages) -> bool:
             nonlocal archived_count
             archived_count = len(messages)
             return True
 
-        loop.memory_consolidator.consolidate_messages = _fake_consolidate  # type: ignore[method-assign]
+        loop.consolidator.archive = _fake_summarize  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         response = await loop._process_message(new_msg)
@@ -573,7 +572,7 @@ tests/agent/test_consolidate_offset.py
     @pytest.mark.asyncio
     async def test_new_clears_session_and_responds(self, tmp_path: Path) -> None:
         from nanobot.bus.events import InboundMessage
-tests/agent/test_consolidate_offset.py
+
 
         loop = self._make_loop(tmp_path)
         session = loop.sessions.get_or_create("cli:test")
@@ -582,10 +581,10 @@ tests/agent/test_consolidate_offset.py
             session.add_message("assistant", f"resp{i}")
         loop.sessions.save(session)
 
-        async def _ok_consolidate(_messages) -> bool:
+        async def _ok_summarize(_messages) -> bool:
             return True
 
-        loop.memory_consolidator.consolidate_messages = _ok_consolidate  # type: ignore[method-assign]
+        loop.consolidator.archive = _ok_summarize  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         response = await loop._process_message(new_msg)
@@ -608,12 +607,12 @@ tests/agent/test_consolidate_offset.py
 
         archived = asyncio.Event()
 
-        async def _slow_consolidate(_messages) -> bool:
+        async def _slow_summarize(_messages) -> bool:
             await asyncio.sleep(0.1)
             archived.set()
             return True
 
-        loop.memory_consolidator.consolidate_messages = _slow_consolidate  # type: ignore[method-assign]
+        loop.consolidator.archive = _slow_summarize  # type: ignore[method-assign]
 
         new_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         await loop._process_message(new_msg)
