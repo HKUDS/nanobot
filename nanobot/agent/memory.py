@@ -595,10 +595,11 @@ class Dream:
             extra_allowed_dirs=extra_read,
         ))
         tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace))
-        # write_file scoped to skills/ directory for skill creation
+        # write_file resolves relative paths from workspace root, but can only
+        # write under skills/ so the prompt can safely use skills/<name>/SKILL.md.
         skills_dir = workspace / "skills"
         skills_dir.mkdir(parents=True, exist_ok=True)
-        tools.register(WriteFileTool(workspace=skills_dir, allowed_dir=skills_dir))
+        tools.register(WriteFileTool(workspace=workspace, allowed_dir=skills_dir))
         return tools
 
     # -- skill listing --------------------------------------------------------
@@ -633,6 +634,8 @@ class Dream:
 
     async def run(self) -> bool:
         """Process unprocessed history entries. Returns True if work was done."""
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+
         last_cursor = self.store.get_last_dream_cursor()
         entries = self.store.read_unprocessed_history(since_cursor=last_cursor)
         if not entries:
@@ -697,10 +700,15 @@ class Dream:
         phase2_prompt = f"## Analysis Result\n{analysis}\n\n{file_context}{skills_section}"
 
         tools = self._tools
+        skill_creator_path = BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md"
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
-                "content": render_template("agent/dream_phase2.md", strip=True),
+                "content": render_template(
+                    "agent/dream_phase2.md",
+                    strip=True,
+                    skill_creator_path=str(skill_creator_path),
+                ),
             },
             {"role": "user", "content": phase2_prompt},
         ]

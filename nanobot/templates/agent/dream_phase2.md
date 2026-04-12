@@ -21,7 +21,7 @@ Do NOT guess paths.
 
 ## Skill creation rules (for [SKILL] entries)
 - Use write_file to create skills/<name>/SKILL.md
-- Before writing, read_file skills/skill-creator/SKILL.md for format reference (frontmatter structure, naming conventions, quality standards)
+- Before writing, read_file `{{ skill_creator_path }}` for format reference (frontmatter structure, naming conventions, quality standards)
 - **Dedup check**: read existing skills listed below to verify the new skill is not functionally redundant. Skip creation if an existing skill already covers the same workflow.
 - Include YAML frontmatter with name and description fields
 - Keep SKILL.md under 2000 words — concise and actionable

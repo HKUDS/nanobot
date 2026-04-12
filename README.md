@@ -1742,6 +1742,7 @@ time.
 
 - `memory/history.jsonl` stores append-only summarized history
 - `SOUL.md`, `USER.md`, and `memory/MEMORY.md` store long-term knowledge managed by Dream
+- `Dream` can also promote repeated workflows into reusable workspace skills under `skills/`
 - `Dream` runs on a schedule and can also be triggered manually
 - memory changes can be inspected and restored with built-in commands
 
