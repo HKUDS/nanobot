@@ -798,7 +798,13 @@ class OpenAICompatProvider(LLMProvider):
             "error_should_retry": should_retry,
         }
 
-    def _handle_error(self, e: Exception) -> LLMResponse:
+    @staticmethod
+    def _handle_error(
+        e: Exception,
+        *,
+        spec: ProviderSpec | None = None,
+        api_base: str | None = None,
+    ) -> LLMResponse:
         body = (
             getattr(e, "doc", None)
             or getattr(e, "body", None)
@@ -807,12 +813,11 @@ class OpenAICompatProvider(LLMProvider):
         body_text = body if isinstance(body, str) else str(body) if body is not None else ""
         msg = f"Error: {body_text.strip()[:500]}" if body_text.strip() else f"Error calling LLM: {e}"
 
-        spec = self._spec
         text = f"{body_text} {e}".lower()
         if spec and spec.is_local and ("502" in text or "connection" in text or "refused" in text):
             msg += (
                 "\nHint: this is a local model endpoint. Check that the local server is reachable at "
-                f"{self.api_base or spec.default_api_base}, and if you are using a proxy/tunnel, make sure it "
+                f"{api_base or spec.default_api_base}, and if you are using a proxy/tunnel, make sure it "
                 "can reach your local Ollama/vLLM service instead of routing localhost through the remote host."
             )
 
@@ -859,7 +864,7 @@ class OpenAICompatProvider(LLMProvider):
             )
             return self._parse(await self._client.chat.completions.create(**kwargs))
         except Exception as e:
-            return self._handle_error(e)
+            return self._handle_error(e, spec=self._spec, api_base=self.api_base)
 
     async def chat_stream(
         self,
@@ -942,7 +947,7 @@ class OpenAICompatProvider(LLMProvider):
                 error_kind="timeout",
             )
         except Exception as e:
-            return self._handle_error(e)
+            return self._handle_error(e, spec=self._spec, api_base=self.api_base)
 
     def get_default_model(self) -> str:
         return self.default_model

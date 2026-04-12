@@ -61,7 +61,11 @@ def test_local_provider_502_error_includes_reachability_hint() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(api_base="http://localhost:11434/v1", spec=spec)
 
-    result = provider._handle_error(Exception("Error code: 502"))
+    result = provider._handle_error(
+        Exception("Error code: 502"),
+        spec=spec,
+        api_base="http://localhost:11434/v1",
+    )
 
     assert result.finish_reason == "error"
     assert "local model endpoint" in result.content
