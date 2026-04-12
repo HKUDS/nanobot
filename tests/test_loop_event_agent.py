@@ -12,6 +12,7 @@ def _mk_loop(workspace: Path) -> AgentLoop:
     loop = AgentLoop.__new__(AgentLoop)
     loop.workspace = workspace
     loop._guest_agent_cache = {}
+    loop._guest_workspace = None
     return loop
 
 

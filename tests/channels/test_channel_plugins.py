@@ -799,6 +799,8 @@ async def test_stop_all_cancels_dispatcher_and_stops_channels():
 
     dispatch_task = asyncio.create_task(dummy_task())
     mgr._dispatch_task = dispatch_task
+    mgr._channel_workers = {}
+    mgr._channel_queues = {}
 
     await mgr.stop_all()
 
@@ -867,6 +869,8 @@ async def test_stop_all_handles_channel_exception():
     mgr.bus = MessageBus()
     mgr.channels = {"stopfailing": _StopFailingChannel(fake_config, mgr.bus)}
     mgr._dispatch_task = None
+    mgr._channel_workers = {}
+    mgr._channel_queues = {}
 
     # Should not raise even if channel.stop() raises
     await mgr.stop_all()

@@ -924,6 +924,7 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
         task_context: str,
         provider_arg: object,
         model: str,
+        suppress_errors: bool = False,
     ) -> bool:
         seen["response"] = response
         seen["task_context"] = task_context

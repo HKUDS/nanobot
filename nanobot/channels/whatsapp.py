@@ -1,7 +1,6 @@
 """WhatsApp channel implementation using Node.js bridge."""
 
 import asyncio
-import base64
 import json
 import mimetypes
 import os
@@ -623,49 +622,3 @@ class WhatsAppChannel(BaseChannel):
         except OSError as e:
             logger.warning("Failed to save LID mapping: {}", e)
 
-    async def _transcribe_audio(self, audio_data: dict, sender_id: str) -> str:
-        """Transcribe a voice/audio message using base channel transcription.
-
-        Audio bytes from the bridge are base64-encoded, decoded to a temp file,
-        then transcribed via self.transcribe_audio() (Groq via BaseChannel).
-        """
-        import tempfile
-
-        try:
-            audio_bytes = base64.b64decode(audio_data.get("data", ""))
-        except Exception as e:
-            logger.error("Failed to decode audio bytes from bridge for {}: {}", sender_id, e)
-            return "[Voice message - transcription failed]"
-
-        if not audio_bytes:
-            return "[Voice message - transcription failed]"
-
-        mimetype = audio_data.get("mimetype", "audio/ogg; codecs=opus")
-        ext = ".ogg" if "ogg" in mimetype else ".mp3"
-
-        logger.info(
-            "Transcribing voice message from {} ({} bytes, mimetype={})",
-            sender_id, len(audio_bytes), mimetype,
-        )
-
-        try:
-            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-            transcript = await self.transcribe_audio(tmp_path)
-        except Exception as e:
-            logger.error("Voice transcription failed for {}: {}", sender_id, e)
-            return "[Voice message - transcription failed]"
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-
-        if transcript:
-            logger.info("Transcribed voice message from {}: {}...", sender_id, transcript[:80])
-        else:
-            logger.warning("Empty transcript for voice message from {}", sender_id)
-            transcript = "[Voice message - transcription failed]"
-
-        return transcript
