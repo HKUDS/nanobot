@@ -798,8 +798,7 @@ class OpenAICompatProvider(LLMProvider):
             "error_should_retry": should_retry,
         }
 
-    @staticmethod
-    def _handle_error(e: Exception) -> LLMResponse:
+    def _handle_error(self, e: Exception) -> LLMResponse:
         body = (
             getattr(e, "doc", None)
             or getattr(e, "body", None)
@@ -807,6 +806,16 @@ class OpenAICompatProvider(LLMProvider):
         )
         body_text = body if isinstance(body, str) else str(body) if body is not None else ""
         msg = f"Error: {body_text.strip()[:500]}" if body_text.strip() else f"Error calling LLM: {e}"
+
+        spec = self._spec
+        text = f"{body_text} {e}".lower()
+        if spec and spec.is_local and ("502" in text or "connection" in text or "refused" in text):
+            msg += (
+                "\nHint: this is a local model endpoint. Check that the local server is reachable at "
+                f"{self.api_base or spec.default_api_base}, and if you are using a proxy/tunnel, make sure it "
+                "can reach your local Ollama/vLLM service instead of routing localhost through the remote host."
+            )
+
         response = getattr(e, "response", None)
         retry_after = LLMProvider._extract_retry_after_from_headers(getattr(response, "headers", None))
         if retry_after is None:
