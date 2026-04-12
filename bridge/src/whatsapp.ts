@@ -13,13 +13,12 @@ import makeWASocket, {
   extractMessageContent as baileysExtractMessageContent,
 } from '@whiskeysockets/baileys';
 import { readFileSync } from 'fs';
-import { extname, basename } from 'path';
 
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
 import { readFile, writeFile, mkdir } from 'fs/promises';
-import { join, basename } from 'path';
+import { join, basename, extname } from 'path';
 import { randomBytes } from 'crypto';
 
 const VERSION = '0.1.0';
