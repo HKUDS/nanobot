@@ -711,6 +711,9 @@ def gateway(
             f"Scheduled instruction: {job.payload.message}"
         )
 
+        async def _silent(*_args, **_kwargs) -> None:
+            pass
+
         cron_tool = agent.tools.get("cron")
         cron_token = None
         if isinstance(cron_tool, CronTool):
@@ -721,6 +724,7 @@ def gateway(
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                on_progress=_silent,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
