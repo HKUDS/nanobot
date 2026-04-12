@@ -284,7 +284,8 @@ class WhatsAppChannel(BaseChannel):
                 metadata={
                     "message_id": message_id,
                     "timestamp": data.get("timestamp"),
-                    "is_group": data.get("isGroup", False),
+                    "is_group": is_group,
+                    "was_mentioned": was_mentioned,
                 },
             )
 

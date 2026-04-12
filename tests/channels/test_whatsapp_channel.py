@@ -161,6 +161,8 @@ async def test_group_policy_mention_accepts_mentioned_group_message():
     kwargs = ch._handle_message.await_args.kwargs
     assert kwargs["chat_id"] == "12345@g.us"
     assert kwargs["sender_id"] == "user"
+    assert kwargs["metadata"]["is_group"] is True
+    assert kwargs["metadata"]["was_mentioned"] is True
 
 
 @pytest.mark.asyncio
