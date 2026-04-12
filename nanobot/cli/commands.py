@@ -417,11 +417,12 @@ def _make_provider(config: Config):
     spec = find_by_name(provider_name) if provider_name else None
     backend = spec.backend if spec else "openai_compat"
 
+    from nanobot.config.loader import get_config_path
     # --- validation ---
     if backend == "azure_openai":
         if not p or not p.api_key or not p.api_base:
             console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
-            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
+            console.print(f"Set them in {get_config_path()} under providers.azure_openai section")
             console.print("Use the model field to specify the deployment name.")
             raise typer.Exit(1)
     elif backend == "openai_compat" and not model.startswith("bedrock/"):
@@ -429,7 +430,7 @@ def _make_provider(config: Config):
         exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
         if needs_key and not exempt:
             console.print("[red]Error: No API key configured.[/red]")
-            console.print("Set one in ~/.nanobot/config.json under providers section")
+            console.print(f"Set one in {get_config_path()} under providers section")
             raise typer.Exit(1)
 
     # --- instantiation by backend ---

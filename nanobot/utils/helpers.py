@@ -3,6 +3,7 @@
 import base64
 import json
 import re
+import os
 import shutil
 import time
 import uuid
@@ -54,6 +55,27 @@ def ensure_dir(path: Path) -> Path:
     """Ensure directory exists, return it."""
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def get_home_path() -> Path:
+    """Home directory $NANOBOT_HOME or ~/.nanobot."""
+    home_dir = os.environ.get("NANOBOT_HOME")
+    print(f"NANOBOT_HOME: {home_dir}")
+    if home_dir:
+        return ensure_dir(Path(home_dir))
+    else:
+        return ensure_dir(Path.home() / ".nanobot")
+
+
+def get_data_path() -> Path:
+    """$NANOBOT_HOME or ~/.nanobot."""
+    return get_home_path()
+
+
+def get_workspace_path(workspace: str | None = None) -> Path:
+    """Resolve and ensure workspace path. Defaults to $NANOBOT_HOME/workspace or ~/.nanobot/workspace."""
+    path = Path(workspace).expanduser() if workspace else get_data_path() / "workspace"
+    return ensure_dir(path)
 
 
 def timestamp() -> str:
