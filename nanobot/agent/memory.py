@@ -215,6 +215,11 @@ class MemoryStore:
     def write_user(self, content: str) -> None:
         self.user_file.write_text(content, encoding="utf-8")
 
+    # -- TOOLS.md ------------------------------------------------------------
+
+    def read_tools(self) -> str:
+        return self.read_file(self.workspace / "TOOLS.md")
+
     # -- context injection (used by context.py) ------------------------------
 
     def get_memory_context(self) -> str:
@@ -683,6 +688,7 @@ class Dream:
     _MEMORY_FILE_MAX_CHARS = 32_000
     _SOUL_FILE_MAX_CHARS = 16_000
     _USER_FILE_MAX_CHARS = 16_000
+    _TOOLS_FILE_MAX_CHARS = 16_000
     _HISTORY_ENTRY_PREVIEW_MAX_CHARS = 4_000
 
     def __init__(
@@ -848,12 +854,16 @@ class Dream:
         current_user = truncate_text(
             self.store.read_user() or "(empty)", self._USER_FILE_MAX_CHARS,
         )
+        current_tools = truncate_text(
+            self.store.read_tools() or "(empty)", self._TOOLS_FILE_MAX_CHARS,
+        )
 
         file_context = (
             f"## Current Date\n{current_date}\n\n"
             f"## Current MEMORY.md ({len(current_memory)} chars)\n{current_memory}\n\n"
             f"## Current SOUL.md ({len(current_soul)} chars)\n{current_soul}\n\n"
-            f"## Current USER.md ({len(current_user)} chars)\n{current_user}"
+            f"## Current USER.md ({len(current_user)} chars)\n{current_user}\n\n"
+            f"## Current TOOLS.md ({len(current_tools)} chars)\n{current_tools}"
         )
 
         # Phase 1: Analyze (no skills list — dedup is Phase 2's job)
