@@ -142,12 +142,14 @@ class AgentRunner:
         injection_cycles: int,
         *,
         phase: str = "after error",
+        iteration: int | None = None,
     ) -> tuple[bool, int]:
         """Drain pending injections. Returns (should_continue, updated_cycles).
 
         If injections are found and we haven't exceeded _MAX_INJECTION_CYCLES,
-        append them to *messages* and return (True, cycles+1) so the caller
-        continues the iteration loop.  Otherwise return (False, cycles).
+        append them to *messages* (and emit a checkpoint if *assistant_message*
+        and *iteration* are both provided) and return (True, cycles+1) so the
+        caller continues the iteration loop.  Otherwise return (False, cycles).
         """
         if injection_cycles >= _MAX_INJECTION_CYCLES:
             return False, injection_cycles
@@ -157,6 +159,18 @@ class AgentRunner:
         injection_cycles += 1
         if assistant_message is not None:
             messages.append(assistant_message)
+            if iteration is not None:
+                await self._emit_checkpoint(
+                    spec,
+                    {
+                        "phase": "final_response",
+                        "iteration": iteration,
+                        "model": spec.model,
+                        "assistant_message": assistant_message,
+                        "completed_tool_results": [],
+                        "pending_tool_calls": [],
+                    },
+                )
         self._append_injected_messages(messages, injections)
         logger.info(
             "Injected {} follow-up message(s) {} ({}/{})",
@@ -339,16 +353,12 @@ class AgentRunner:
                 empty_content_retries = 0
                 length_recovery_count = 0
                 # Checkpoint 1: drain injections after tools, before next LLM call
-                if injection_cycles < _MAX_INJECTION_CYCLES:
-                    injections = await self._drain_injections(spec)
-                    if injections:
-                        had_injections = True
-                        injection_cycles += 1
-                        self._append_injected_messages(messages, injections)
-                        logger.info(
-                            "Injected {} follow-up message(s) after tool execution ({}/{})",
-                            len(injections), injection_cycles, _MAX_INJECTION_CYCLES,
-                        )
+                _drained, injection_cycles = await self._try_drain_injections(
+                    spec, messages, None, injection_cycles,
+                    phase="after tool execution",
+                )
+                if _drained:
+                    had_injections = True
                 await hook.after_iteration(context)
                 continue
 
@@ -419,23 +429,10 @@ class AgentRunner:
             should_continue, injection_cycles = await self._try_drain_injections(
                 spec, messages, assistant_message, injection_cycles,
                 phase="after final response",
+                iteration=iteration,
             )
             if should_continue:
                 had_injections = True
-                # Emit checkpoint for the assistant message that was appended
-                # by _try_drain_injections, then keep the stream alive.
-                if assistant_message is not None:
-                    await self._emit_checkpoint(
-                        spec,
-                        {
-                            "phase": "final_response",
-                            "iteration": iteration,
-                            "model": spec.model,
-                            "assistant_message": assistant_message,
-                            "completed_tool_results": [],
-                            "pending_tool_calls": [],
-                        },
-                    )
 
             if hook.wants_streaming():
                 await hook.on_stream_end(context, resuming=should_continue)

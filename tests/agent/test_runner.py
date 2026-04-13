@@ -18,6 +18,16 @@ from nanobot.providers.base import LLMResponse, ToolCallRequest
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 
+def _make_injection_callback(queue: asyncio.Queue):
+    """Return an async callback that drains *queue* into a list of dicts."""
+    async def inject_cb():
+        items = []
+        while not queue.empty():
+            items.append(await queue.get())
+        return items
+    return inject_cb
+
+
 def _make_loop(tmp_path):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
@@ -1888,12 +1898,7 @@ async def test_checkpoint1_injects_after_tool_execution():
     tools.execute = AsyncMock(return_value="file content")
 
     injection_queue = asyncio.Queue()
-
-    async def inject_cb():
-        items = []
-        while not injection_queue.empty():
-            items.append(await injection_queue.get())
-        return items
+    inject_cb = _make_injection_callback(injection_queue)
 
     # Put a follow-up message in the queue before the run starts
     await injection_queue.put(
@@ -1951,12 +1956,7 @@ async def test_checkpoint2_injects_after_final_response_with_resuming_stream():
     tools.get_definitions.return_value = []
 
     injection_queue = asyncio.Queue()
-
-    async def inject_cb():
-        items = []
-        while not injection_queue.empty():
-            items.append(await injection_queue.get())
-        return items
+    inject_cb = _make_injection_callback(injection_queue)
 
     # Inject a follow-up that arrives during the first response
     await injection_queue.put(
@@ -2005,12 +2005,7 @@ async def test_checkpoint2_preserves_final_response_in_history_before_followup()
     tools.get_definitions.return_value = []
 
     injection_queue = asyncio.Queue()
-
-    async def inject_cb():
-        items = []
-        while not injection_queue.empty():
-            items.append(await injection_queue.get())
-        return items
+    inject_cb = _make_injection_callback(injection_queue)
 
     await injection_queue.put(
         InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up question")
@@ -2438,12 +2433,7 @@ async def test_drain_injections_on_fatal_tool_error():
     tools.execute = AsyncMock(side_effect=RuntimeError("tool exploded"))
 
     injection_queue = asyncio.Queue()
-
-    async def inject_cb():
-        items = []
-        while not injection_queue.empty():
-            items.append(await injection_queue.get())
-        return items
+    inject_cb = _make_injection_callback(injection_queue)
 
     await injection_queue.put(
         InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after error")
@@ -2496,12 +2486,7 @@ async def test_drain_injections_on_llm_error():
     tools.get_definitions.return_value = []
 
     injection_queue = asyncio.Queue()
-
-    async def inject_cb():
-        items = []
-        while not injection_queue.empty():
-            items.append(await injection_queue.get())
-        return items
+    inject_cb = _make_injection_callback(injection_queue)
 
     await injection_queue.put(
         InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after LLM error")
@@ -2551,12 +2536,7 @@ async def test_drain_injections_on_empty_final_response():
     tools.get_definitions.return_value = []
 
     injection_queue = asyncio.Queue()
-
-    async def inject_cb():
-        items = []
-        while not injection_queue.empty():
-            items.append(await injection_queue.get())
-        return items
+    inject_cb = _make_injection_callback(injection_queue)
 
     await injection_queue.put(
         InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after empty")
@@ -2613,12 +2593,7 @@ async def test_drain_injections_on_max_iterations():
     tools.execute = AsyncMock(return_value="file content")
 
     injection_queue = asyncio.Queue()
-
-    async def inject_cb():
-        items = []
-        while not injection_queue.empty():
-            items.append(await injection_queue.get())
-        return items
+    inject_cb = _make_injection_callback(injection_queue)
 
     await injection_queue.put(
         InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after max iters")
@@ -2643,3 +2618,53 @@ async def test_drain_injections_on_max_iterations():
         if m.get("role") == "user" and m.get("content") == "follow-up after max iters"
     ]
     assert len(injected) == 1
+
+
+@pytest.mark.asyncio
+async def test_injection_cycle_cap_on_error_path():
+    """Injection cycles should be capped even when every iteration hits an LLM error."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _MAX_INJECTION_CYCLES
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        return LLMResponse(
+            content=None,
+            tool_calls=[],
+            finish_reason="error",
+            usage={},
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    drain_count = {"n": 0}
+
+    async def inject_cb():
+        drain_count["n"] += 1
+        if drain_count["n"] <= _MAX_INJECTION_CYCLES:
+            return [InboundMessage(channel="cli", sender_id="u", chat_id="c", content=f"msg-{drain_count['n']}")]
+        return []
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "previous"},
+            {"role": "user", "content": "trigger error"},
+        ],
+        tools=tools,
+        model="test-model",
+        max_iterations=20,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.had_injections is True
+    # Should cap: _MAX_INJECTION_CYCLES drained rounds + 1 final round that breaks
+    assert call_count["n"] == _MAX_INJECTION_CYCLES + 1
+    assert drain_count["n"] == _MAX_INJECTION_CYCLES
