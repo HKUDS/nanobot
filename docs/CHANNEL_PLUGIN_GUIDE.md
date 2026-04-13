@@ -155,7 +155,7 @@ nanobot plugins list      # verify "Webhook" shows as "plugin"
 nanobot onboard           # auto-adds default config for detected plugins
 ```
 
-Edit `~/.nanobot/config.json`:
+Edit `~/.hiperone/config.json`:
 
 ```json
 {
