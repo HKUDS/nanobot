@@ -434,7 +434,10 @@ class AgentLoop:
             try:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
             except asyncio.TimeoutError:
-                self.auto_compact.check_expired(self._schedule_background)
+                self.auto_compact.check_expired(
+                    self._schedule_background,
+                    active_session_keys=self._pending_queues.keys(),
+                )
                 continue
             except asyncio.CancelledError:
                 # Preserve real task cancellation so shutdown can complete cleanly.
