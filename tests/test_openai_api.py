@@ -12,8 +12,10 @@ import pytest_asyncio
 from nanobot.api.server import (
     API_CHAT_ID,
     API_SESSION_KEY,
+    _chat_completion_chunk,
     _chat_completion_response,
     _error_json,
+    _sse_frame,
     create_app,
     handle_chat_completions,
 )
@@ -101,15 +103,61 @@ async def test_no_user_message_returns_400(aiohttp_client, app) -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
-async def test_stream_true_returns_400(aiohttp_client, app) -> None:
+async def test_stream_true_returns_sse(aiohttp_client) -> None:
+    """stream=true should return a text/event-stream response with SSE chunks."""
+    deltas: list[str] = ["Hello", " world", "!"]
+
+    async def streaming_process(content, session_key="", channel="", chat_id="", on_stream=None):
+        if on_stream:
+            for d in deltas:
+                await on_stream(d)
+        return "Hello world!"
+
+    agent = MagicMock()
+    agent.process_direct = streaming_process
+    agent._connect_mcp = AsyncMock()
+    agent.close_mcp = AsyncMock()
+
+    app = create_app(agent, model_name="test-model")
     client = await aiohttp_client(app)
     resp = await client.post(
         "/v1/chat/completions",
         json={"messages": [{"role": "user", "content": "hello"}], "stream": True},
     )
-    assert resp.status == 400
-    body = await resp.json()
-    assert "stream" in body["error"]["message"].lower()
+    assert resp.status == 200
+    assert "text/event-stream" in resp.headers.get("Content-Type", "")
+
+    raw = await resp.read()
+    text = raw.decode("utf-8")
+    lines = [l for l in text.strip().split("\n") if l.startswith("data: ")]
+
+    # Parse SSE frames
+    chunks = []
+    for line in lines:
+        payload = line[len("data: "):]
+        if payload == "[DONE]":
+            chunks.append("[DONE]")
+        else:
+            chunks.append(json.loads(payload))
+
+    # First chunk: role
+    assert chunks[0]["object"] == "chat.completion.chunk"
+    assert chunks[0]["choices"][0]["delta"] == {"role": "assistant"}
+
+    # Content chunks
+    content_deltas = [
+        c["choices"][0]["delta"]["content"]
+        for c in chunks[1:]
+        if isinstance(c, dict) and "content" in c.get("choices", [{}])[0].get("delta", {})
+    ]
+    assert content_deltas == deltas
+
+    # Stop chunk (second to last)
+    stop_chunk = chunks[-2]
+    assert stop_chunk["choices"][0]["finish_reason"] == "stop"
+
+    # [DONE] sentinel (last)
+    assert chunks[-1] == "[DONE]"
 
 
 @pytest.mark.asyncio
@@ -125,7 +173,7 @@ async def test_model_mismatch_returns_400() -> None:
         "agent_loop": _make_mock_agent(),
         "model_name": "test-model",
         "request_timeout": 10.0,
-        "session_lock": asyncio.Lock(),
+        "session_locks": {},
     }
 
     resp = await handle_chat_completions(request)
@@ -149,7 +197,7 @@ async def test_single_user_message_required() -> None:
         "agent_loop": _make_mock_agent(),
         "model_name": "test-model",
         "request_timeout": 10.0,
-        "session_lock": asyncio.Lock(),
+        "session_locks": {},
     }
 
     resp = await handle_chat_completions(request)
@@ -170,7 +218,7 @@ async def test_single_user_message_must_have_user_role() -> None:
         "agent_loop": _make_mock_agent(),
         "model_name": "test-model",
         "request_timeout": 10.0,
-        "session_lock": asyncio.Lock(),
+        "session_locks": {},
     }
 
     resp = await handle_chat_completions(request)
@@ -371,3 +419,118 @@ async def test_empty_response_falls_back(aiohttp_client) -> None:
     body = await resp.json()
     assert body["choices"][0]["message"]["content"] == EMPTY_FINAL_RESPONSE_MESSAGE
     assert call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Streaming helper unit tests
+# ---------------------------------------------------------------------------
+
+def test_chat_completion_chunk_format() -> None:
+    chunk = _chat_completion_chunk(
+        delta={"content": "hi"},
+        model="test-model",
+        completion_id="chatcmpl-abc123",
+        finish_reason=None,
+    )
+    assert chunk["object"] == "chat.completion.chunk"
+    assert chunk["id"] == "chatcmpl-abc123"
+    assert chunk["model"] == "test-model"
+    assert chunk["choices"][0]["delta"] == {"content": "hi"}
+    assert chunk["choices"][0]["finish_reason"] is None
+
+
+def test_chat_completion_chunk_with_stop() -> None:
+    chunk = _chat_completion_chunk(
+        delta={},
+        model="m",
+        completion_id="chatcmpl-xyz",
+        finish_reason="stop",
+    )
+    assert chunk["choices"][0]["finish_reason"] == "stop"
+    assert chunk["choices"][0]["delta"] == {}
+
+
+def test_sse_frame_encoding() -> None:
+    frame = _sse_frame('{"key": "value"}')
+    assert frame == b'data: {"key": "value"}\n\n'
+
+
+def test_sse_frame_done_sentinel() -> None:
+    frame = _sse_frame("[DONE]")
+    assert frame == b"data: [DONE]\n\n"
+
+
+# ---------------------------------------------------------------------------
+# Streaming integration tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_stream_false_still_returns_json(aiohttp_client, mock_agent) -> None:
+    """Explicitly setting stream=false should return a normal JSON response."""
+    app = create_app(mock_agent, model_name="test-model")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hi"}], "stream": False},
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["object"] == "chat.completion"
+    assert body["choices"][0]["message"]["content"] == "mock response"
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_stream_with_custom_session_id(aiohttp_client) -> None:
+    """stream=true with session_id should use the custom session key."""
+    captured_keys: list[str] = []
+
+    async def track_session(content, session_key="", channel="", chat_id="", on_stream=None):
+        captured_keys.append(session_key)
+        if on_stream:
+            await on_stream("ok")
+        return "ok"
+
+    agent = MagicMock()
+    agent.process_direct = track_session
+    agent._connect_mcp = AsyncMock()
+    agent.close_mcp = AsyncMock()
+
+    app = create_app(agent, model_name="m")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "hello"}],
+            "stream": True,
+            "session_id": "my-session",
+        },
+    )
+    assert resp.status == 200
+    assert captured_keys == ["api:my-session"]
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_stream_empty_content_still_sends_done(aiohttp_client) -> None:
+    """Even if on_stream is never called, the SSE response should end with [DONE]."""
+    async def no_stream(content, session_key="", channel="", chat_id="", on_stream=None):
+        # on_stream is provided but never called
+        return ""
+
+    agent = MagicMock()
+    agent.process_direct = no_stream
+    agent._connect_mcp = AsyncMock()
+    agent.close_mcp = AsyncMock()
+
+    app = create_app(agent, model_name="m")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}], "stream": True},
+    )
+    assert resp.status == 200
+    raw = await resp.read()
+    text = raw.decode("utf-8")
+    assert "data: [DONE]" in text
