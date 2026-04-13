@@ -701,12 +701,7 @@ class AgentLoop:
         # makes recovery possible from the session log alone.
         user_persisted_early = False
         if isinstance(msg.content, str) and msg.content.strip():
-            from datetime import datetime as _dt
-            session.messages.append({
-                "role": "user",
-                "content": msg.content,
-                "timestamp": _dt.now().isoformat(),
-            })
+            session.add_message("user", msg.content)
             self.sessions.save(session)
             user_persisted_early = True
 

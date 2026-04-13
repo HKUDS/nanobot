@@ -1,5 +1,12 @@
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
+from nanobot.bus.events import InboundMessage
+from nanobot.bus.queue import MessageBus
 from nanobot.session.manager import Session
 
 
@@ -9,6 +16,12 @@ def _mk_loop() -> AgentLoop:
 
     loop.max_tool_result_chars = AgentDefaults().max_tool_result_chars
     return loop
+
+
+def _make_full_loop(tmp_path: Path) -> AgentLoop:
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    return AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
 
 
 def test_save_turn_skips_multimodal_user_when_only_runtime_context() -> None:
@@ -200,3 +213,52 @@ def test_restore_runtime_checkpoint_dedupes_overlapping_tail() -> None:
     assert session.messages[0]["role"] == "assistant"
     assert session.messages[1]["tool_call_id"] == "call_done"
     assert session.messages[2]["tool_call_id"] == "call_pending"
+
+
+@pytest.mark.asyncio
+async def test_process_message_persists_user_message_before_turn_completes(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
+
+    msg = InboundMessage(channel="feishu", sender_id="u1", chat_id="c1", content="persist me")
+    with pytest.raises(RuntimeError, match="boom"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate("feishu:c1")
+    persisted = loop.sessions.get_or_create("feishu:c1")
+    assert [m["role"] for m in persisted.messages] == ["user"]
+    assert persisted.messages[0]["content"] == "persist me"
+    assert persisted.updated_at >= persisted.created_at
+
+
+@pytest.mark.asyncio
+async def test_process_message_does_not_duplicate_early_persisted_user_message(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(return_value=(
+        "done",
+        None,
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "done"},
+        ],
+        "stop",
+        False,
+    ))  # type: ignore[method-assign]
+
+    result = await loop._process_message(
+        InboundMessage(channel="feishu", sender_id="u1", chat_id="c2", content="hello")
+    )
+
+    assert result is not None
+    assert result.content == "done"
+    session = loop.sessions.get_or_create("feishu:c2")
+    assert [
+        {k: v for k, v in m.items() if k in {"role", "content"}}
+        for m in session.messages
+    ] == [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "done"},
+    ]
