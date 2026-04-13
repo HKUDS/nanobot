@@ -2410,3 +2410,236 @@ async def test_dispatch_republishes_leftover_queue_messages(tmp_path):
     contents = [m.content for m in msgs]
     assert "leftover-1" in contents
     assert "leftover-2" in contents
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_on_fatal_tool_error():
+    """Pending injections should be drained even when a fatal tool error occurs."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content="",
+                tool_calls=[ToolCallRequest(id="c1", name="exec", arguments={"cmd": "bad"})],
+                usage={},
+            )
+        # Second call: respond normally to the injected follow-up
+        return LLMResponse(content="reply to follow-up", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(side_effect=RuntimeError("tool exploded"))
+
+    injection_queue = asyncio.Queue()
+
+    async def inject_cb():
+        items = []
+        while not injection_queue.empty():
+            items.append(await injection_queue.get())
+        return items
+
+    await injection_queue.put(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after error")
+    )
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        fail_on_tool_error=True,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.had_injections is True
+    assert result.final_content == "reply to follow-up"
+    # The injection should be in the messages history
+    injected = [
+        m for m in result.messages
+        if m.get("role") == "user" and m.get("content") == "follow-up after error"
+    ]
+    assert len(injected) == 1
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_on_llm_error():
+    """Pending injections should be drained when the LLM returns an error finish_reason."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content=None,
+                tool_calls=[],
+                finish_reason="error",
+                usage={},
+            )
+        # Second call: respond normally to the injected follow-up
+        return LLMResponse(content="recovered answer", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    injection_queue = asyncio.Queue()
+
+    async def inject_cb():
+        items = []
+        while not injection_queue.empty():
+            items.append(await injection_queue.get())
+        return items
+
+    await injection_queue.put(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after LLM error")
+    )
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "previous response"},
+            {"role": "user", "content": "trigger error"},
+        ],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.had_injections is True
+    assert result.final_content == "recovered answer"
+    injected = [
+        m for m in result.messages
+        if m.get("role") == "user" and "follow-up after LLM error" in str(m.get("content", ""))
+    ]
+    assert len(injected) == 1
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_on_empty_final_response():
+    """Pending injections should be drained when the runner exits due to empty response."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _MAX_EMPTY_RETRIES
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] <= _MAX_EMPTY_RETRIES + 1:
+            return LLMResponse(content="", tool_calls=[], usage={})
+        # After retries exhausted + injection drain, respond normally
+        return LLMResponse(content="answer after empty", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    injection_queue = asyncio.Queue()
+
+    async def inject_cb():
+        items = []
+        while not injection_queue.empty():
+            items.append(await injection_queue.get())
+        return items
+
+    await injection_queue.put(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after empty")
+    )
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[
+            {"role": "user", "content": "hello"},
+            {"role": "assistant", "content": "previous response"},
+            {"role": "user", "content": "trigger empty"},
+        ],
+        tools=tools,
+        model="test-model",
+        max_iterations=10,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.had_injections is True
+    assert result.final_content == "answer after empty"
+    injected = [
+        m for m in result.messages
+        if m.get("role") == "user" and "follow-up after empty" in str(m.get("content", ""))
+    ]
+    assert len(injected) == 1
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_on_max_iterations():
+    """Pending injections should be drained when the runner hits max_iterations.
+
+    Unlike other error paths, max_iterations cannot continue the loop, so
+    injections are appended to messages but not processed by the LLM.
+    The key point is they are consumed from the queue to prevent re-publish.
+    """
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        return LLMResponse(
+            content="",
+            tool_calls=[ToolCallRequest(id=f"c{call_count['n']}", name="read_file", arguments={"path": "x"})],
+            usage={},
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="file content")
+
+    injection_queue = asyncio.Queue()
+
+    async def inject_cb():
+        items = []
+        while not injection_queue.empty():
+            items.append(await injection_queue.get())
+        return items
+
+    await injection_queue.put(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after max iters")
+    )
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+    ))
+
+    assert result.stop_reason == "max_iterations"
+    # The injection was consumed from the queue (preventing re-publish)
+    assert injection_queue.empty()
+    # The injection message is appended to conversation history
+    injected = [
+        m for m in result.messages
+        if m.get("role") == "user" and m.get("content") == "follow-up after max iters"
+    ]
+    assert len(injected) == 1
