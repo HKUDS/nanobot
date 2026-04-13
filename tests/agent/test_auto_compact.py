@@ -560,9 +560,12 @@ class TestProactiveAutoCompact:
     """Test proactive auto-new on idle ticks (TimeoutError path in run loop)."""
 
     @staticmethod
-    async def _run_check_expired(loop):
+    async def _run_check_expired(loop, active_session_keys=()):
         """Helper: run check_expired via callback and wait for background tasks."""
-        loop.auto_compact.check_expired(loop._schedule_background)
+        loop.auto_compact.check_expired(
+            loop._schedule_background,
+            active_session_keys=active_session_keys,
+        )
         await asyncio.sleep(0.1)
 
     @pytest.mark.asyncio
@@ -699,6 +702,99 @@ class TestProactiveAutoCompact:
         await self._run_check_expired(loop)
 
         assert not archive_called
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_skip_expired_session_with_active_agent_task(self, tmp_path):
+        """Expired session with an active agent task should NOT be archived."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        _add_turns(session, 6, prefix="old")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        archive_count = 0
+
+        async def _fake_archive(messages):
+            nonlocal archive_count
+            archive_count += 1
+            return "Summary."
+
+        loop.consolidator.archive = _fake_archive
+
+        # Simulate an active agent task for this session
+        await self._run_check_expired(loop, active_session_keys={"cli:test"})
+        assert archive_count == 0
+
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert len(session_after.messages) == 12  # All messages preserved
+
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_archive_after_active_task_completes(self, tmp_path):
+        """Session should be archived on next tick after active task completes."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        _add_turns(session, 6, prefix="old")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        archive_count = 0
+
+        async def _fake_archive(messages):
+            nonlocal archive_count
+            archive_count += 1
+            return "Summary."
+
+        loop.consolidator.archive = _fake_archive
+
+        # First tick: active task, skip
+        await self._run_check_expired(loop, active_session_keys={"cli:test"})
+        assert archive_count == 0
+
+        # Second tick: task completed, should archive
+        await self._run_check_expired(loop)
+        assert archive_count == 1
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_partial_active_set_only_archives_inactive_expired(self, tmp_path):
+        """With multiple sessions, only the expired+inactive one should be archived."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        # Session A: expired, no active task -> should be archived
+        s1 = loop.sessions.get_or_create("cli:expired_idle")
+        _add_turns(s1, 6, prefix="old_a")
+        s1.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(s1)
+        # Session B: expired, has active task -> should be skipped
+        s2 = loop.sessions.get_or_create("cli:expired_active")
+        _add_turns(s2, 6, prefix="old_b")
+        s2.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(s2)
+        # Session C: recent, no active task -> should be skipped
+        s3 = loop.sessions.get_or_create("cli:recent")
+        s3.add_message("user", "recent")
+        loop.sessions.save(s3)
+
+        archive_count = 0
+
+        async def _fake_archive(messages):
+            nonlocal archive_count
+            archive_count += 1
+            return "Summary."
+
+        loop.consolidator.archive = _fake_archive
+
+        await self._run_check_expired(loop, active_session_keys={"cli:expired_active"})
+
+        assert archive_count == 1
+        s1_after = loop.sessions.get_or_create("cli:expired_idle")
+        assert len(s1_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        s2_after = loop.sessions.get_or_create("cli:expired_active")
+        assert len(s2_after.messages) == 12  # Preserved
+        s3_after = loop.sessions.get_or_create("cli:recent")
+        assert len(s3_after.messages) == 1  # Preserved
         await loop.close_mcp()
 
     @pytest.mark.asyncio
