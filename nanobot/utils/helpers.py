@@ -463,6 +463,64 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
     _write(None, workspace / "memory" / "history.jsonl")
     (workspace / "skills").mkdir(exist_ok=True)
 
+    # Initialize hooks directory and default hook script
+    hooks_dir = workspace / "hooks"
+    hooks_dir.mkdir(exist_ok=True)
+    default_hook = hooks_dir / "hook_after_dreaming.py"
+    if not default_hook.exists():
+        default_hook.write_text('''"""Hook script executed after Dream completion.
+
+This script is called automatically after each Dream processing cycle.
+Implement your custom logic in the functions below.
+"""
+
+
+def run(ctx: dict) -> None:
+    """Main entry point called after Dream completion.
+    
+    Args:
+        ctx: Dictionary containing:
+            - changelog: List of change descriptions
+            - cursor: Current dream cursor position
+            - batch: List of processed history entries
+            - result: AgentRunner result object
+    """
+    _validate_result(ctx)
+    _notify_user(ctx)
+    _save_to_external(ctx)
+
+
+def _validate_result(ctx: dict) -> None:
+    """Validate that result contains required memory keywords.
+    
+    TODO: Add your own validation logic here to check if the result
+    contains 'memory' and other required keywords from the original memory.
+    Example:
+        if "memory" not in str(ctx.get("result", "")):
+            raise ValueError("Result missing memory keyword")
+    """
+    pass
+
+
+def _notify_user(ctx: dict) -> None:
+    """Notify user about Dream completion.
+    
+    TODO: Implement your own notification logic here.
+    Example: Send email, Feishu/Lark message, or other notifications.
+    """
+    pass
+
+
+def _save_to_external(ctx: dict) -> None:
+    """Save memory changes to external storage.
+    
+    TODO: Implement your own logic to save to external documents.
+    Example: Save to Feishu/Lark docs, Tencent Docs, Notion, etc.
+    """
+    pass
+''', encoding="utf-8")
+        added.append("hooks/hook_after_dreaming.py")
+
     if added and not silent:
         from rich.console import Console
         for name in added:

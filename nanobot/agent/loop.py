@@ -234,10 +234,15 @@ class AgentLoop:
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
         )
+        dream_config = defaults.dream
         self.dream = Dream(
             store=self.context.memory,
             provider=provider,
             model=self.model,
+            max_batch_size=dream_config.max_batch_size,
+            max_iterations=dream_config.max_iterations,
+            max_tool_result_chars=defaults.max_tool_result_chars,
+            hook_script=dream_config.hook_script,
         )
         self._register_default_tools()
         self.commands = CommandRouter()
