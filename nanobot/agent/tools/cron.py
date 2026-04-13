@@ -320,7 +320,7 @@ class CronTool(Tool):
             job_id,
             name=name,
             schedule=schedule,
-            message=message,
+            message=message if message else None,
             deliver=deliver,
         )
 
