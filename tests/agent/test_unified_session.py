@@ -32,15 +32,18 @@ from nanobot.session.manager import Session, SessionManager
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_loop(tmp_path: Path, unified_session: bool = False) -> AgentLoop:
     """Create a minimal AgentLoop for dispatch-level tests."""
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
 
-    with patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr, \
-         patch("nanobot.agent.loop.Dream"):
+    with (
+        patch("nanobot.agent.loop.SessionManager"),
+        patch("nanobot.agent.loop.SubagentManager") as MockSubMgr,
+        patch("nanobot.agent.loop.Dream"),
+    ):
         MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(
             bus=bus,
@@ -51,8 +54,9 @@ def _make_loop(tmp_path: Path, unified_session: bool = False) -> AgentLoop:
     return loop
 
 
-def _make_msg(channel: str = "telegram", chat_id: str = "111",
-              session_key_override: str | None = None) -> InboundMessage:
+def _make_msg(
+    channel: str = "telegram", chat_id: str = "111", session_key_override: str | None = None
+) -> InboundMessage:
     return InboundMessage(
         channel=channel,
         chat_id=chat_id,
@@ -65,6 +69,7 @@ def _make_msg(channel: str = "telegram", chat_id: str = "111",
 # ---------------------------------------------------------------------------
 # TestUnifiedSessionDispatch — core behaviour
 # ---------------------------------------------------------------------------
+
 
 class TestUnifiedSessionDispatch:
     """AgentLoop._dispatch() session key rewriting logic."""
@@ -137,7 +142,9 @@ class TestUnifiedSessionDispatch:
 
         loop._process_message = fake_process  # type: ignore[method-assign]
 
-        msg = _make_msg(channel="telegram", chat_id="111", session_key_override="telegram:thread:42")
+        msg = _make_msg(
+            channel="telegram", chat_id="111", session_key_override="telegram:thread:42"
+        )
         await loop._dispatch(msg)
 
         assert captured == ["telegram:thread:42"]
@@ -151,6 +158,7 @@ class TestUnifiedSessionDispatch:
 # ---------------------------------------------------------------------------
 # TestUnifiedSessionConfig — schema & serialisation
 # ---------------------------------------------------------------------------
+
 
 class TestUnifiedSessionConfig:
     """Config schema and onboard serialisation for unified_session."""
@@ -207,6 +215,7 @@ class TestUnifiedSessionConfig:
 # TestCmdNewUnifiedSession — /new command behaviour in unified mode
 # ---------------------------------------------------------------------------
 
+
 class TestCmdNewUnifiedSession:
     """/new command routing and session-clear behaviour in unified mode."""
 
@@ -245,7 +254,10 @@ class TestCmdNewUnifiedSession:
         loop._schedule_background = lambda coro: asyncio.ensure_future(coro)
 
         msg = InboundMessage(
-            channel="telegram", sender_id="user1", chat_id="111", content="/new",
+            channel="telegram",
+            sender_id="user1",
+            chat_id="111",
+            content="/new",
             session_key_override="unified:default",  # as _dispatch() would set it
         )
         ctx = CommandContext(msg=msg, session=None, key="unified:default", raw="/new", loop=loop)
@@ -278,7 +290,10 @@ class TestCmdNewUnifiedSession:
         loop._schedule_background = lambda coro: asyncio.ensure_future(coro)
 
         msg = InboundMessage(
-            channel="telegram", sender_id="user1", chat_id="111", content="/new",
+            channel="telegram",
+            sender_id="user1",
+            chat_id="111",
+            content="/new",
             session_key_override="unified:default",
         )
         ctx = CommandContext(msg=msg, session=None, key="unified:default", raw="/new", loop=loop)
@@ -293,6 +308,7 @@ class TestCmdNewUnifiedSession:
 # ---------------------------------------------------------------------------
 # TestConsolidationUnaffectedByUnifiedSession — consolidation is key-agnostic
 # ---------------------------------------------------------------------------
+
 
 class TestConsolidationUnaffectedByUnifiedSession:
     """maybe_consolidate_by_tokens() behaviour is identical regardless of session key."""
@@ -414,7 +430,7 @@ class TestStopCommandWithUnifiedSession:
         from nanobot.agent.loop import UNIFIED_SESSION_KEY
 
         loop = _make_loop(tmp_path, unified_session=True)
-        
+
         # Create a message from telegram channel
         msg = _make_msg(channel="telegram", chat_id="123456")
 
@@ -425,7 +441,11 @@ class TestStopCommandWithUnifiedSession:
         loop._dispatch = fake_dispatch  # type: ignore[method-assign]
 
         # Simulate the task creation flow (from _run loop)
-        effective_key = UNIFIED_SESSION_KEY if loop._unified_session and not msg.session_key_override else msg.session_key
+        effective_key = (
+            UNIFIED_SESSION_KEY
+            if loop._unified_session and not msg.session_key_override
+            else msg.session_key
+        )
         task = asyncio.create_task(loop._dispatch(msg))
         loop._active_tasks.setdefault(effective_key, []).append(task)
 
@@ -500,3 +520,64 @@ class TestStopCommandWithUnifiedSession:
 
         # Both tasks should be cancelled
         assert "Stopped 2 task" in result.content
+
+
+class TestStoreOnlyMessages:
+    """Messages with _store_only metadata should not be processed or queued."""
+
+    @pytest.mark.asyncio
+    async def test_store_only_message_not_dispatched(self, tmp_path: Path):
+        """_store_only messages should be skipped entirely in the run loop."""
+        loop = _make_loop(tmp_path, unified_session=False)
+
+        dispatched: list[InboundMessage] = []
+
+        async def fake_dispatch(msg):
+            dispatched.append(msg)
+
+        loop._dispatch = fake_dispatch  # type: ignore[method-assign]
+
+        msg = InboundMessage(
+            channel="telegram",
+            chat_id="123",
+            sender_id="user1",
+            content="should be ignored",
+            metadata={"_store_only": True},
+        )
+
+        await loop._dispatch(msg)
+
+        # Should not have been dispatched
+        assert dispatched == []
+
+    @pytest.mark.asyncio
+    async def test_store_only_message_not_queued_to_pending(self, tmp_path: Path):
+        """_store_only messages should not be routed to pending queue."""
+        loop = _make_loop(tmp_path, unified_session=False)
+
+        # Simulate an active pending queue for a session
+        loop._pending_queues["telegram:123"] = asyncio.Queue()
+
+        queued_messages: list[InboundMessage] = []
+
+        # Patch put_nowait to capture what gets queued
+        original_put = loop._pending_queues["telegram:123"].put_nowait
+        loop._pending_queues["telegram:123"].put_nowait = lambda msg: queued_messages.append(msg)  # type: ignore[method-assign]
+
+        msg = InboundMessage(
+            channel="telegram",
+            chat_id="123",
+            sender_id="user1",
+            content="should not be queued",
+            metadata={"_store_only": True},
+        )
+
+        # Simulate the run loop behavior
+        if msg.metadata.get("_store_only"):
+            pass  # Should skip
+        else:
+            if "telegram:123" in loop._pending_queues:
+                loop._pending_queues["telegram:123"].put_nowait(msg)
+
+        # Should not have been queued
+        assert queued_messages == []

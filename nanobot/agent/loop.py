@@ -475,16 +475,21 @@ class AgentLoop:
                 continue
             except Exception as e:
                 logger.warning("Error consuming inbound message: {}, continuing...", e)
-                continue
+        continue
 
-            raw = msg.content.strip()
-            if self.commands.is_priority(raw):
-                ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, loop=self)
-                result = await self.commands.dispatch_priority(ctx)
-                if result:
-                    await self.bus.publish_outbound(result)
-                continue
-            effective_key = self._effective_session_key(msg)
+        raw = msg.content.strip()
+        if self.commands.is_priority(raw):
+            ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, loop=self)
+            result = await self.commands.dispatch_priority(ctx)
+            if result:
+                await self.bus.publish_outbound(result)
+            continue
+
+        # Skip _store_only messages - they're for logging only, not processing
+        if msg.metadata.get("_store_only"):
+            continue
+
+        effective_key = self._effective_session_key(msg)
             # If this session already has an active pending queue (i.e. a task
             # is processing this session), route the message there for mid-turn
             # injection instead of creating a competing task.
