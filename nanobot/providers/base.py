@@ -392,8 +392,22 @@ class LLMProvider(ABC):
             else:
                 merged.append(dict(msg))
 
+        last_popped = None
         while merged and merged[-1].get("role") == "assistant":
-            merged.pop()
+            last_popped = merged.pop()
+
+        # If removing trailing assistant messages left only system messages,
+        # the request would be invalid for most providers (e.g. Zhipu/GLM
+        # error 1214).  Recover by converting the last popped assistant
+        # message to a user message so the LLM can still see the content.
+        if (
+            merged
+            and last_popped is not None
+            and not any(m.get("role") in ("user", "tool") for m in merged)
+        ):
+            recovered = dict(last_popped)
+            recovered["role"] = "user"
+            merged.append(recovered)
 
         return merged
 
@@ -418,6 +432,26 @@ class LLMProvider(ABC):
             else:
                 result.append(msg)
         return result if found else None
+
+    @staticmethod
+    def _strip_image_content_inplace(messages: list[dict[str, Any]]) -> bool:
+        """Replace image_url blocks with text placeholder *in-place*.
+
+        Mutates the content lists of the original message dicts so that
+        callers holding references to those dicts also see the stripped
+        version.
+        """
+        found = False
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                for i, b in enumerate(content):
+                    if isinstance(b, dict) and b.get("type") == "image_url":
+                        path = (b.get("_meta") or {}).get("path", "")
+                        placeholder = image_placeholder_text(path, empty="[image omitted]")
+                        content[i] = {"type": "text", "text": placeholder}
+                        found = True
+        return found
 
     async def _safe_chat(self, **kwargs: Any) -> LLMResponse:
         """Call chat() and convert unexpected exceptions to error responses."""
@@ -670,7 +704,12 @@ class LLMProvider(ABC):
                     )
                     retry_kw = dict(kw)
                     retry_kw["messages"] = stripped
-                    return await call(**retry_kw)
+                    result = await call(**retry_kw)
+                    # Permanently strip images from the original messages so
+                    # subsequent iterations do not repeat the error-retry cycle.
+                    if result.finish_reason != "error":
+                        self._strip_image_content_inplace(original_messages)
+                    return result
                 return response
 
             if persistent and identical_error_count >= self._PERSISTENT_IDENTICAL_ERROR_LIMIT:

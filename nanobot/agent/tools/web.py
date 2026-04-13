@@ -114,6 +114,8 @@ class WebSearchTool(Tool):
             return await self._search_jina(query, n)
         elif provider == "brave":
             return await self._search_brave(query, n)
+        elif provider == "kagi":
+            return await self._search_kagi(query, n)
         else:
             return f"Error: unknown search provider '{provider}'"
 
@@ -203,6 +205,29 @@ class WebSearchTool(Tool):
         except Exception as e:
             logger.warning("Jina search failed ({}), falling back to DuckDuckGo", e)
             return await self._search_duckduckgo(query, n)
+
+    async def _search_kagi(self, query: str, n: int) -> str:
+        api_key = self.config.api_key or os.environ.get("KAGI_API_KEY", "")
+        if not api_key:
+            logger.warning("KAGI_API_KEY not set, falling back to DuckDuckGo")
+            return await self._search_duckduckgo(query, n)
+        try:
+            async with httpx.AsyncClient(proxy=self.proxy) as client:
+                r = await client.get(
+                    "https://kagi.com/api/v0/search",
+                    params={"q": query, "limit": n},
+                    headers={"Authorization": f"Bot {api_key}"},
+                    timeout=10.0,
+                )
+                r.raise_for_status()
+            # t=0 items are search results; other values are related searches, etc.
+            items = [
+                {"title": d.get("title", ""), "url": d.get("url", ""), "content": d.get("snippet", "")}
+                for d in r.json().get("data", []) if d.get("t") == 0
+            ]
+            return _format_results(query, items, n)
+        except Exception as e:
+            return f"Error: {e}"
 
     async def _search_duckduckgo(self, query: str, n: int) -> str:
         try:

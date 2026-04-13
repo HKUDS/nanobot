@@ -22,6 +22,8 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 
+from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
+
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 
 # Message type display mapping
@@ -255,6 +257,7 @@ class FeishuConfig(Base):
     group_policy: Literal["open", "mention"] = "mention"
     reply_to_message: bool = False  # If True, bot replies quote the user's original message
     streaming: bool = True
+    domain: Literal["feishu", "lark"] = "feishu"  # Set to "lark" for international Lark
 
 
 _STREAM_ELEMENT_ID = "streaming_md"
@@ -328,10 +331,12 @@ class FeishuChannel(BaseChannel):
         self._loop = asyncio.get_running_loop()
 
         # Create Lark client for sending messages
+        domain = LARK_DOMAIN if self.config.domain == "lark" else FEISHU_DOMAIN
         self._client = (
             lark.Client.builder()
             .app_id(self.config.app_id)
             .app_secret(self.config.app_secret)
+            .domain(domain)
             .log_level(lark.LogLevel.INFO)
             .build()
         )
@@ -359,6 +364,7 @@ class FeishuChannel(BaseChannel):
         self._ws_client = lark.ws.Client(
             self.config.app_id,
             self.config.app_secret,
+            domain=domain,
             event_handler=event_handler,
             log_level=lark.LogLevel.INFO,
         )
@@ -1014,14 +1020,29 @@ class FeishuChannel(BaseChannel):
 
         elif msg_type in ("audio", "file", "media"):
             file_key = content_json.get("file_key")
-            if file_key and message_id:
-                data, filename = await loop.run_in_executor(
-                    None, self._download_file_sync, message_id, file_key, msg_type
-                )
-                if not filename:
-                    filename = file_key[:16]
-                if msg_type == "audio" and not filename.endswith(".opus"):
-                    filename = f"{filename}.opus"
+            if not file_key:
+                logger.warning("Feishu {} message missing file_key: {}", msg_type, content_json)
+                return None, f"[{msg_type}: missing file_key]"
+            if not message_id:
+                logger.warning("Feishu {} message missing message_id", msg_type)
+                return None, f"[{msg_type}: missing message_id]"
+
+            data, filename = await loop.run_in_executor(
+                None, self._download_file_sync, message_id, file_key, msg_type
+            )
+
+            if not data:
+                logger.warning("Feishu {} download failed: file_key={}", msg_type, file_key)
+                return None, f"[{msg_type}: download failed]"
+
+            if not filename:
+                filename = file_key[:16]
+
+            # Feishu voice messages are opus in OGG container.
+            # Use .ogg extension for better Whisper compatibility.
+            if msg_type == "audio":
+                if not any(filename.endswith(ext) for ext in (".opus", ".ogg", ".oga")):
+                    filename = f"{filename}.ogg"
 
         if data and filename:
             file_path = media_dir / filename

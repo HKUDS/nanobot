@@ -337,6 +337,9 @@ class DingTalkChannel(BaseChannel):
                 content_type = (resp.headers.get("content-type") or "").split(";")[0].strip()
                 filename = self._guess_filename(media_ref, self._guess_upload_type(media_ref))
                 return resp.content, filename, content_type or None
+            except httpx.TransportError as e:
+                logger.error("DingTalk media download network error ref={} err={}", media_ref, e)
+                raise
             except Exception as e:
                 logger.error("DingTalk media download error ref={} err={}", media_ref, e)
                 return None, None, None
@@ -388,6 +391,9 @@ class DingTalkChannel(BaseChannel):
                 logger.error("DingTalk media upload missing media_id body={}", text[:500])
                 return None
             return str(media_id)
+        except httpx.TransportError as e:
+            logger.error("DingTalk media upload network error type={} err={}", media_type, e)
+            raise
         except Exception as e:
             logger.error("DingTalk media upload error type={} err={}", media_type, e)
             return None
@@ -437,6 +443,9 @@ class DingTalkChannel(BaseChannel):
                 return False
             logger.debug("DingTalk message sent to {} with msgKey={}", chat_id, msg_key)
             return True
+        except httpx.TransportError as e:
+            logger.error("DingTalk network error sending message msgKey={} err={}", msg_key, e)
+            raise
         except Exception as e:
             logger.error("Error sending DingTalk message msgKey={} err={}", msg_key, e)
             return False

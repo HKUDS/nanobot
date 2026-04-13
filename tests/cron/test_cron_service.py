@@ -329,6 +329,45 @@ async def test_external_update_preserves_run_history_records(tmp_path):
     fresh._save_store()
 
 
+# ── timer race regression tests ──
+
+
+@pytest.mark.asyncio
+async def test_timer_execution_is_not_rolled_back_by_list_jobs_reload(tmp_path):
+    """list_jobs() during _on_timer should not replace the active store and re-run the same due job."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    calls: list[str] = []
+
+    async def on_job(job):
+        calls.append(job.id)
+        # Simulate frontend polling list_jobs while the timer callback is mid-execution.
+        service.list_jobs(include_disabled=True)
+        await asyncio.sleep(0)
+
+    service = CronService(store_path, on_job=on_job)
+    service._running = True
+    service._load_store()
+    service._arm_timer = lambda: None
+
+    job = service.add_job(
+        name="race",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+    )
+    job.state.next_run_at_ms = max(1, int(time.time() * 1000) - 1_000)
+    service._save_store()
+
+    await service._on_timer()
+    await service._on_timer()
+
+    assert calls == [job.id]
+    loaded = service.get_job(job.id)
+    assert loaded is not None
+    assert loaded.state.last_run_at_ms is not None
+    assert loaded.state.next_run_at_ms is not None
+    assert loaded.state.next_run_at_ms > loaded.state.last_run_at_ms
+
+
 # ── update_job tests ──
 
 
@@ -479,3 +518,49 @@ def test_update_job_sentinel_channel_and_to(tmp_path) -> None:
     assert isinstance(result, CronJob)
     assert result.payload.channel is None
     assert result.payload.to is None
+
+
+@pytest.mark.asyncio
+async def test_list_jobs_during_on_job_does_not_cause_stale_reload(tmp_path) -> None:
+    """Regression: if the bot calls list_jobs (which reloads from disk) during
+    on_job execution, the in-memory next_run_at_ms update must not be lost.
+    Previously this caused an infinite re-trigger loop."""
+    store_path = tmp_path / "cron" / "jobs.json"
+    execution_count = 0
+
+    async def on_job_that_lists(job):
+        nonlocal execution_count
+        execution_count += 1
+        # Simulate the bot calling cron(action=list) mid-execution
+        service.list_jobs()
+
+    service = CronService(store_path, on_job=on_job_that_lists, max_sleep_ms=100)
+    await service.start()
+
+    # Add two jobs scheduled in the past so they're immediately due
+    now_ms = int(time.time() * 1000)
+    for name in ("job-a", "job-b"):
+        service.add_job(
+            name=name,
+            schedule=CronSchedule(kind="every", every_ms=3_600_000),
+            message="test",
+        )
+    # Force next_run to the past so _on_timer picks them up
+    for job in service._store.jobs:
+        job.state.next_run_at_ms = now_ms - 1000
+    service._save_store()
+    service._arm_timer()
+
+    # Let the timer fire once
+    await asyncio.sleep(0.3)
+    service.stop()
+
+    # Each job should have run exactly once, not looped
+    assert execution_count == 2
+
+    # Verify next_run_at_ms was persisted correctly (in the future)
+    raw = json.loads(store_path.read_text())
+    for j in raw["jobs"]:
+        next_run = j["state"]["nextRunAtMs"]
+        assert next_run is not None
+        assert next_run > now_ms, f"Job '{j['name']}' next_run should be in the future"

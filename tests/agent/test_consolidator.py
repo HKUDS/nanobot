@@ -46,7 +46,7 @@ class TestConsolidatorSummarize:
             {"role": "assistant", "content": "Done, fixed the race condition."},
         ]
         result = await consolidator.archive(messages)
-        assert result is True
+        assert result == "User fixed a bug in the auth module."
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
 
@@ -55,14 +55,14 @@ class TestConsolidatorSummarize:
         mock_provider.chat_with_retry.side_effect = Exception("API error")
         messages = [{"role": "user", "content": "hello"}]
         result = await consolidator.archive(messages)
-        assert result is True  # always succeeds
+        assert result is None  # no summary on raw dump fallback
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
         assert "[RAW]" in entries[0]["content"]
 
     async def test_summarize_skips_empty_messages(self, consolidator):
         result = await consolidator.archive([])
-        assert result is False
+        assert result is None
 
 
 class TestConsolidatorTokenBudget:
