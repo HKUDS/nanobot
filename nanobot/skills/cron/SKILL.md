@@ -35,9 +35,10 @@ Timezone-aware cron:
 cron(action="add", message="Morning standup", cron_expr="0 9 * * 1-5", tz="America/Vancouver")
 ```
 
-List/remove:
+List/update/remove:
 ```
 cron(action="list")
+cron(action="update", job_id="abc123", message="Updated message", every_seconds=1800)
 cron(action="remove", job_id="abc123")
 ```
 
