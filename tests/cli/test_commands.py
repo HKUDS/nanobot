@@ -977,6 +977,88 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
     )
 
 
+def test_gateway_cron_skips_duplicate_delivery_when_message_tool_sent_cross_channel(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    seen: dict[str, object] = {}
+
+    class _FakeCron:
+        def __init__(self, *args, **kwargs) -> None:
+            self.on_job = None
+            seen["cron"] = self
+
+        def status(self):
+            return {"jobs": 0}
+
+        async def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+    class _FakeAgentLoop:
+        def __init__(self, *args, **kwargs) -> None:
+            from nanobot.agent.tools.message import MessageTool
+            from nanobot.agent.tools.registry import ToolRegistry
+
+            self.model = "test-model"
+            self.tools = ToolRegistry()
+            self._message_tool = MessageTool(send_callback=AsyncMock())
+            self.tools.register(self._message_tool)
+
+        async def process_direct(self, *args, **kwargs):
+            self._message_tool.start_turn()
+            self._message_tool.set_context("telegram", "user-1")
+            await self._message_tool.execute(
+                "Forwarded update",
+                channel="discord",
+                chat_id="channel:123",
+            )
+            from nanobot.bus.events import OutboundMessage
+            return OutboundMessage(channel="telegram", chat_id="user-1", content="Message sent to discord:channel:123")
+
+    class _StopAfterCronSetup:
+        def __init__(self, *args, **kwargs) -> None:
+            raise _StopGatewayError("stop")
+
+    bus = AsyncMock()
+    provider = object()
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: bus,
+        make_provider=lambda _cfg: provider,
+        cron_service=_FakeCron,
+    )
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGatewayError)
+    cron = seen["cron"]
+    assert cron.on_job is not None
+
+    job = CronJob(
+        id="cron-2",
+        name="forward-update",
+        payload=CronPayload(
+            message="Send a message to Discord.",
+            deliver=True,
+            channel="telegram",
+            to="user-1",
+        ),
+    )
+
+    response = asyncio.run(cron.on_job(job))
+
+    assert response == "Message sent to discord:channel:123"
+    bus.publish_outbound.assert_not_awaited()
+
+
 def test_gateway_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch, tmp_path: Path
 ) -> None:

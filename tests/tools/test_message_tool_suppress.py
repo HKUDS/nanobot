@@ -155,15 +155,22 @@ class TestMessageToolSuppressLogic:
 
 class TestMessageToolTurnTracking:
 
-    def test_sent_in_turn_tracks_same_target(self) -> None:
-        tool = MessageTool()
+    @pytest.mark.asyncio
+    async def test_sent_in_turn_only_tracks_same_target(self) -> None:
+        sent: list[OutboundMessage] = []
+        tool = MessageTool(send_callback=AsyncMock(side_effect=lambda m: sent.append(m)))
         tool.set_context("feishu", "chat1")
+
+        await tool.execute("hello", channel="email", chat_id="user@example.com")
+
+        assert len(sent) == 1
         assert not tool._sent_in_turn
-        tool._sent_in_turn = True
-        assert tool._sent_in_turn
+        assert tool._any_sent_in_turn
 
     def test_start_turn_resets(self) -> None:
         tool = MessageTool()
         tool._sent_in_turn = True
+        tool._any_sent_in_turn = True
         tool.start_turn()
         assert not tool._sent_in_turn
+        assert not tool._any_sent_in_turn
