@@ -2610,12 +2610,76 @@ async def test_drain_injections_on_max_iterations():
     ))
 
     assert result.stop_reason == "max_iterations"
+    assert result.had_injections is True
     # The injection was consumed from the queue (preventing re-publish)
     assert injection_queue.empty()
     # The injection message is appended to conversation history
     injected = [
         m for m in result.messages
         if m.get("role") == "user" and m.get("content") == "follow-up after max iters"
+    ]
+    assert len(injected) == 1
+
+
+@pytest.mark.asyncio
+async def test_drain_injections_set_flag_when_followup_arrives_after_last_iteration():
+    """Late follow-ups drained in max_iterations should still flip had_injections."""
+    from nanobot.agent.hook import AgentHook
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.bus.events import InboundMessage
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        return LLMResponse(
+            content="",
+            tool_calls=[ToolCallRequest(id=f"c{call_count['n']}", name="read_file", arguments={"path": "x"})],
+            usage={},
+        )
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="file content")
+
+    injection_queue = asyncio.Queue()
+    inject_cb = _make_injection_callback(injection_queue)
+
+    class InjectOnLastAfterIterationHook(AgentHook):
+        def __init__(self) -> None:
+            self.after_iteration_calls = 0
+
+        async def after_iteration(self, context) -> None:
+            self.after_iteration_calls += 1
+            if self.after_iteration_calls == 2:
+                await injection_queue.put(
+                    InboundMessage(
+                        channel="cli",
+                        sender_id="u",
+                        chat_id="c",
+                        content="late follow-up after max iters",
+                    )
+                )
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        injection_callback=inject_cb,
+        hook=InjectOnLastAfterIterationHook(),
+    ))
+
+    assert result.stop_reason == "max_iterations"
+    assert result.had_injections is True
+    assert injection_queue.empty()
+    injected = [
+        m for m in result.messages
+        if m.get("role") == "user" and m.get("content") == "late follow-up after max iters"
     ]
     assert len(injected) == 1
 

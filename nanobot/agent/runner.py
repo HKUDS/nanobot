@@ -515,10 +515,12 @@ class AgentRunner:
             # independent inbound messages by _dispatch's finally block.
             # We ignore should_continue here because the for-loop has already
             # exhausted all iterations.
-            _, injection_cycles = await self._try_drain_injections(
+            drained_after_max_iterations, injection_cycles = await self._try_drain_injections(
                 spec, messages, None, injection_cycles,
                 phase="after max_iterations",
             )
+            if drained_after_max_iterations:
+                had_injections = True
 
         return AgentRunResult(
             final_content=final_content,
