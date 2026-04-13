@@ -17,9 +17,8 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
-from nanobot.agent.messages import AgentMessage
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunSpec, AgentRunner
-from nanobot.agent.steering import InterruptionChecker
+from nanobot.agent.steering import InterruptionChecker, SteeringHook
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
@@ -44,10 +43,6 @@ if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
     from nanobot.cron.service import CronService
 
-TransformContextHook = Callable[[list[AgentMessage]], list[AgentMessage]]
-ConvertToLlmHook = Callable[[list[AgentMessage]], list[dict[str, Any]]]
-
-
 UNIFIED_SESSION_KEY = "unified:default"
 
 
@@ -64,7 +59,6 @@ class _LoopHook(AgentHook):
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
-        interruption_checker: InterruptionChecker | None = None,
     ) -> None:
         super().__init__(reraise=True)
         self._loop = agent_loop
@@ -74,7 +68,6 @@ class _LoopHook(AgentHook):
         self._channel = channel
         self._chat_id = chat_id
         self._message_id = message_id
-        self._interruption_checker = interruption_checker
         self._stream_buf = ""
 
     def wants_streaming(self) -> bool:
@@ -95,19 +88,6 @@ class _LoopHook(AgentHook):
             await self._on_stream_end(resuming=resuming)
         self._stream_buf = ""
 
-    async def before_iteration(self, context: AgentHookContext) -> None:
-        if not self._interruption_checker:
-            return
-        pending = self._interruption_checker.drain_all()
-        if pending:
-            combined = "\n\n---\n\n".join(m.content for m in pending)
-            injection = (
-                "[The user just sent a new message while you were working. "
-                "Read it and decide: continue current work, switch to the "
-                "new request, or address both.]\n\n" + combined
-            )
-            context.messages.append({"role": "user", "content": injection})
-            logger.info("Steering: injected {} interruption(s) before LLM call", len(pending))
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if self._on_progress:
@@ -132,23 +112,6 @@ class _LoopHook(AgentHook):
             u.get("completion_tokens", 0),
             u.get("cached_tokens", 0),
         )
-        # Steering: inject interruptions after tool results
-        if self._interruption_checker and context.tool_calls:
-            pending = self._interruption_checker.drain_all()
-            if pending:
-                combined = "\n\n---\n\n".join(m.content for m in pending)
-                injection = (
-                    "[The user just sent a new message while you were working. "
-                    "Read it and decide: continue current work, switch to the "
-                    "new request, or address both.]\n\n" + combined
-                )
-                context.messages.append({"role": "user", "content": injection})
-                logger.info("Steering: injected {} interruption(s)", len(pending))
-                if self._on_progress:
-                    await self._on_progress(
-                        "New message merged into current conversation",
-                        tool_hint=True,
-                    )
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         return self._loop._strip_think(content)
@@ -191,10 +154,6 @@ class AgentLoop:
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
-        *,
-        enable_steering: bool = False,
-        transform_context: TransformContextHook | None = None,
-        convert_to_llm: ConvertToLlmHook | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 
@@ -226,11 +185,6 @@ class AgentLoop:
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
-
-        # Dual-layer architecture (opt-in)
-        self.enable_steering = enable_steering
-        self._transform_context = transform_context
-        self._convert_to_llm = convert_to_llm or AgentMessage.to_llm_list
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
@@ -392,7 +346,7 @@ class AgentLoop:
         chat_id: str = "direct",
         message_id: str | None = None,
         pending_queue: asyncio.Queue | None = None,
-        interruption_checker: InterruptionChecker | None = None,
+        extra_hooks: list[AgentHook] | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -400,9 +354,6 @@ class AgentLoop:
         *on_stream_end(resuming)*: called when a streaming session finishes.
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
-
-        *interruption_checker*: when steering is enabled, used to merge user
-        messages that arrive during tool execution.
 
         Returns (final_content, tools_used, messages, stop_reason, had_injections).
         """
@@ -414,10 +365,10 @@ class AgentLoop:
             channel=channel,
             chat_id=chat_id,
             message_id=message_id,
-            interruption_checker=interruption_checker,
         )
+        all_hooks = self._extra_hooks + (extra_hooks or [])
         hook: AgentHook = (
-            CompositeHook([loop_hook] + self._extra_hooks) if self._extra_hooks else loop_hook
+            CompositeHook([loop_hook] + all_hooks) if all_hooks else loop_hook
         )
 
         async def _checkpoint(payload: dict[str, Any]) -> None:
@@ -480,7 +431,7 @@ class AgentLoop:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
         self._running = True
         await self._connect_mcp()
-        logger.info("Agent loop started (steering={})", self.enable_steering)
+        logger.info("Agent loop started")
 
         while self._running:
             try:
@@ -530,12 +481,11 @@ class AgentLoop:
                     )
                     continue
 
-            if self.enable_steering:
-                active = [t for t in self._active_tasks.get(effective_key, []) if not t.done()]
-                if active and effective_key in self._interrupt_checkers:
-                    await self._interrupt_checkers[effective_key].signal(msg)
-                    logger.info("Steering: signaled interruption for {}", effective_key)
-                    continue
+            active = [t for t in self._active_tasks.get(effective_key, []) if not t.done()]
+            if active and effective_key in self._interrupt_checkers:
+                await self._interrupt_checkers[effective_key].signal(msg)
+                logger.info("Steering: signaled interruption for {}", effective_key)
+                continue
 
             task = asyncio.create_task(self._dispatch(msg))
             self._active_tasks.setdefault(effective_key, []).append(task)
@@ -548,10 +498,9 @@ class AgentLoop:
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
-        checker: InterruptionChecker | None = None
-        if self.enable_steering:
-            checker = InterruptionChecker()
-            self._interrupt_checkers[msg.session_key] = checker
+        checker = InterruptionChecker()
+        self._interrupt_checkers[msg.session_key] = checker
+        steering_hook = SteeringHook(checker)
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
@@ -601,7 +550,7 @@ class AgentLoop:
                     response = await self._process_message(
                         msg, on_stream=on_stream, on_stream_end=on_stream_end,
                         pending_queue=pending,
-                        interruption_checker=checker,
+                        extra_hooks=[steering_hook],
                     )
                     if response is not None:
                         await self.bus.publish_outbound(response)
@@ -671,7 +620,7 @@ class AgentLoop:
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         pending_queue: asyncio.Queue | None = None,
-        interruption_checker: InterruptionChecker | None = None,
+        extra_hooks: list[AgentHook] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -769,7 +718,7 @@ class AgentLoop:
             chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
             pending_queue=pending_queue,
-            interruption_checker=interruption_checker,
+            extra_hooks=extra_hooks,
         )
 
         if final_content is None or not final_content.strip():
