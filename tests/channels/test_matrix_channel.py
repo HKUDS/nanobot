@@ -1365,6 +1365,21 @@ def test_build_matrix_text_content_with_event_id() -> None:
     assert result["m.relates_to"]["event_id"] == event_id
 
 
+def test_build_matrix_text_content_with_markdown_and_event_id() -> None:
+    """Test text content with markdown that renders to HTML."""
+    text = "*Hello* **World**"
+    event_id = "$8E2XVyINbEhcuAxvxd1d9JhQosNPzkVoU8TrbCAvyHo"
+    result = _build_matrix_text_content(text, event_id=event_id)
+
+    assert "body" in result
+    assert result["m.new_content"]
+    assert result["m.new_content"]["body"] == text
+    assert "format" in result["m.new_content"]
+    assert result["m.new_content"]["format"] == MATRIX_HTML_FORMAT
+    assert "formatted_body" in result["m.new_content"]
+    assert result["m.new_content"]["formatted_body"] == '<p><em>Hello</em> <strong>World</strong></p>'
+
+
 def test_build_matrix_text_content_with_event_id_preserves_thread_relation() -> None:
     """Thread relations for edits should stay inside m.new_content."""
     relates_to = {
