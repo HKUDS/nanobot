@@ -161,6 +161,8 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
+        light_model: str | None = None,
+        routing_strategy: str = "none",
     ):
         from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
 
@@ -171,6 +173,8 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self.light_model = light_model
+        self.routing_strategy = routing_strategy
         self.max_iterations = (
             max_iterations if max_iterations is not None else defaults.max_tool_iterations
         )
@@ -412,11 +416,16 @@ class AgentLoop:
                     merged = [{"type": "text", "text": runtime_ctx}] + user_content
                 items.append({"role": "user", "content": merged})
             return items
+        
+        from nanobot.agent.model_router import pick_model
+        routed_model = pick_model(
+            initial_messages, self.model, self.light_model, self.routing_strategy,
+        )
 
         result = await self.runner.run(AgentRunSpec(
             initial_messages=initial_messages,
             tools=self.tools,
-            model=self.model,
+            model=routed_model,
             max_iterations=self.max_iterations,
             max_tool_result_chars=self.max_tool_result_chars,
             hook=hook,
