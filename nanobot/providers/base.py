@@ -392,8 +392,22 @@ class LLMProvider(ABC):
             else:
                 merged.append(dict(msg))
 
+        last_popped = None
         while merged and merged[-1].get("role") == "assistant":
-            merged.pop()
+            last_popped = merged.pop()
+
+        # If removing trailing assistant messages left only system messages,
+        # the request would be invalid for most providers (e.g. Zhipu/GLM
+        # error 1214).  Recover by converting the last popped assistant
+        # message to a user message so the LLM can still see the content.
+        if (
+            merged
+            and last_popped is not None
+            and not any(m.get("role") in ("user", "tool") for m in merged)
+        ):
+            recovered = dict(last_popped)
+            recovered["role"] = "user"
+            merged.append(recovered)
 
         return merged
 
