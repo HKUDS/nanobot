@@ -267,3 +267,43 @@ async def test_duckduckgo_timeout_returns_error(monkeypatch):
     assert "Error" in result
 
 
+@pytest.mark.asyncio
+async def test_tavily_custom_base_url(monkeypatch):
+    """Tavily search should POST to the custom base_url when provided."""
+    captured_url = []
+
+    async def mock_post(self, url, **kw):
+        captured_url.append(url)
+        assert kw["headers"]["Authorization"] == "Bearer tavily-key"
+        return _response(json={
+            "results": [{"title": "Custom Base", "url": "https://example.com", "content": "Test"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="tavily", api_key="tavily-key", base_url="https://custom.proxy.com")
+    result = await tool.execute(query="test")
+    assert "Custom Base" in result
+    assert len(captured_url) == 1
+    assert captured_url[0].startswith("https://custom.proxy.com/")
+    assert "/search" in captured_url[0]
+
+
+@pytest.mark.asyncio
+async def test_tavily_empty_base_url_falls_back(monkeypatch):
+    """Empty base_url should fall back to https://api.tavily.com."""
+    captured_url = []
+
+    async def mock_post(self, url, **kw):
+        captured_url.append(url)
+        assert kw["headers"]["Authorization"] == "Bearer tavily-key"
+        return _response(json={
+            "results": [{"title": "Default", "url": "https://example.com", "content": "Test"}]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    tool = _tool(provider="tavily", api_key="tavily-key", base_url="")
+    result = await tool.execute(query="test")
+    assert "Default" in result
+    assert len(captured_url) == 1
+    assert captured_url[0].startswith("https://api.tavily.com/")
+

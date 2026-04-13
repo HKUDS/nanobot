@@ -245,6 +245,59 @@ class TestFetchSearchUsageRouting:
         assert info.provider == "tavily"
         assert info.supported is True
 
+    @pytest.mark.asyncio
+    async def test_tavily_custom_base_url(self):
+        """Tavily usage fetch should use the custom base_url when provided."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "account": {"plan_usage": 10, "plan_limit": 100},
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        captured_url = []
+
+        async def mock_get(self, url, **kw):
+            captured_url.append(url)
+            return mock_response
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = mock_get
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await fetch_search_usage("tavily", api_key="test-key", base_url="https://custom.proxy.com")
+
+        assert len(captured_url) == 1
+        assert captured_url[0].startswith("https://custom.proxy.com/")
+        assert "/usage" in captured_url[0]
+
+    @pytest.mark.asyncio
+    async def test_tavily_empty_base_url_falls_back(self):
+        """Empty base_url should fall back to https://api.tavily.com."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"account": {"plan_usage": 5, "plan_limit": 50}}
+        mock_response.raise_for_status = MagicMock()
+
+        captured_url = []
+
+        async def mock_get(self, url, **kw):
+            captured_url.append(url)
+            return mock_response
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = mock_get
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            await fetch_search_usage("tavily", api_key="test-key", base_url="")
+
+        assert len(captured_url) == 1
+        assert captured_url[0].startswith("https://api.tavily.com/")
+
 
 # ---------------------------------------------------------------------------
 # build_status_content integration tests
