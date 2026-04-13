@@ -65,7 +65,7 @@ async def test_incremental_save_called_per_iteration(tmp_path) -> None:
     def on_saved(msgs):
         saved_snapshots.append(len(msgs))
 
-    content, tools_used, messages = await loop._run_agent_loop(
+    content, tools_used, messages, _, _ = await loop._run_agent_loop(
         [{"role": "user", "content": "hi"}],
         on_turn_saved=on_saved,
     )
@@ -81,7 +81,7 @@ async def test_incremental_save_not_called_for_direct_response(tmp_path) -> None
     loop = _make_loop(tmp_path, tool_iterations=0)
     saved: list[int] = []
 
-    content, _, _ = await loop._run_agent_loop(
+    content, _, _, _, _ = await loop._run_agent_loop(
         [{"role": "user", "content": "hi"}],
         on_turn_saved=lambda msgs: saved.append(len(msgs)),
     )
