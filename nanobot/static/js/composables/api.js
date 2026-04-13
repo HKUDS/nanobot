@@ -73,7 +73,7 @@ const ApiClient = {
 
     // SSE streaming helper
     async streamChat(message, sessionId, callbacks) {
-        const { onContent, onDone, onError, signal } = callbacks;
+        const { onContent, onThinking, onDone, onError, signal } = callbacks;
         const response = await fetch('/api/chat?stream=true', {
             method: 'POST',
             headers: this.getHeaders(),
@@ -106,13 +106,17 @@ const ApiClient = {
                         const event = JSON.parse(data);
                         if (event.type === 'content') {
                             onContent(event.content);
+                        } else if (event.type === 'thinking') {
+                            if (onThinking) {
+                                onThinking(event.content);
+                            }
                         } else if (event.type === 'error') {
                             throw new Error(event.error);
                         } else if (event.type === 'done') {
                             if (event.content && (event.content.startsWith('Error') || event.content.includes('Error calling LLM'))) {
                                 throw new Error(event.content);
                             }
-                            onDone(event.metadata || {});
+                            onDone(event.metadata || {}, event.thinking || null);
                         }
                     } catch (e) {
                         if (e.name !== 'SyntaxError') throw e;

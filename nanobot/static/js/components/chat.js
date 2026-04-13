@@ -40,8 +40,18 @@ const ChatComponent = {
                                                 {{ msg.role === 'user' ? 'You' : 'nanobot' }}
                                                 <small v-if="msg.model" class="text-muted ms-2">{{ msg.model }}</small>
                                             </div>
-                                            <div :class="['message-content', msg.role === 'user' ? 'bg-primary text-white' : msg.role === 'error' ? '' : 'bg-light', 'rounded', 'p-3', 'd-inline-block']"
-                                                 v-html="renderMessage(msg)"></div>
+                                            <div :class="['message-content', msg.role === 'user' ? 'bg-primary text-white' : msg.role === 'error' ? '' : 'bg-light', 'rounded', 'p-3', 'd-inline-block']">
+                                                <!-- Thinking block for assistant messages -->
+                                                <div v-if="msg.role === 'assistant' && msg.thinking" class="thinking-block">
+                                                    <div class="thinking-header" @click="toggleThinking(idx)">
+                                                        <i :class="['bi', msg.thinkingCollapsed ? 'bi-chevron-right' : 'bi-chevron-down']"></i>
+                                                        <span>Thinking</span>
+                                                    </div>
+                                                    <div v-show="!msg.thinkingCollapsed" class="thinking-content" v-html="renderThinking(msg.thinking)"></div>
+                                                </div>
+                                                <!-- Main content -->
+                                                <div v-html="renderMessage(msg)"></div>
+                                            </div>
                                             <div v-if="msg.role === 'assistant' && !msg.isStreaming" class="mt-2">
                                                 <button class="btn btn-sm btn-link" @click="copyMessage(idx)" title="Copy">
                                                     <i :class="['bi', msg.copied ? 'bi-check' : 'bi-clipboard']"></i>
@@ -105,6 +115,15 @@ const ChatComponent = {
                 return window.marked ? marked.parse(msg.content) : msg.content;
             }
         },
+        renderThinking(thinking) {
+            // Render thinking content as markdown
+            return window.marked ? marked.parse(thinking) : escapeHtml(thinking);
+        },
+        toggleThinking(idx) {
+            if (this.messages[idx]) {
+                this.messages[idx].thinkingCollapsed = !this.messages[idx].thinkingCollapsed;
+            }
+        },
         handleKeyPress(event) {
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
@@ -122,12 +141,14 @@ const ChatComponent = {
 
             // Add assistant placeholder
             const assistantIdx = this.messages.length;
-            this.messages.push({ role: 'assistant', content: '', isStreaming: true });
+            this.messages.push({ role: 'assistant', content: '', thinking: '', isStreaming: true, thinkingCollapsed: false });
 
             this.abortController = new AbortController();
 
             try {
                 let fullContent = '';
+                let fullThinking = '';
+                let hasThinking = false;
 
                 await api.streamChat(message, this.selectedSession, {
                     onContent: (chunk) => {
@@ -135,8 +156,18 @@ const ChatComponent = {
                         this.messages[assistantIdx].content = fullContent;
                         this.scrollToBottom();
                     },
-                    onDone: (metadata) => {
+                    onThinking: (chunk) => {
+                        fullThinking += chunk;
+                        hasThinking = true;
+                        this.messages[assistantIdx].thinking = fullThinking;
+                        this.scrollToBottom();
+                    },
+                    onDone: (metadata, thinking) => {
                         this.messages[assistantIdx].isStreaming = false;
+                        if (thinking) {
+                            this.messages[assistantIdx].thinking = thinking;
+                            hasThinking = true;
+                        }
                         if (metadata && metadata.model) {
                             this.messages[assistantIdx].model = metadata.model;
                         }

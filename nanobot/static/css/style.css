@@ -488,6 +488,56 @@ body {
     font-weight: 600;
 }
 
+/* Thinking Block Widget */
+.thinking-block {
+    margin-bottom: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background-color: rgba(13, 202, 240, 0.05);
+    overflow: hidden;
+}
+
+.thinking-header {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    background-color: rgba(13, 202, 240, 0.1);
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s ease;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--muted-text);
+}
+
+.thinking-header:hover {
+    background-color: rgba(13, 202, 240, 0.15);
+}
+
+.thinking-header i {
+    margin-right: 0.5rem;
+    font-size: 0.75rem;
+    transition: transform 0.2s ease;
+}
+
+.thinking-content {
+    padding: 0.75rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--muted-text);
+    border-top: 1px solid var(--border-color);
+    background-color: rgba(0, 0, 0, 0.02);
+}
+
+.thinking-content p:last-child {
+    margin-bottom: 0;
+}
+
+/* Assistant message content area */
+.assistant-message .message-content {
+    max-width: 80%;
+}
+
 /* Welcome Message */
 #welcomeMessage {
     transition: all 0.3s ease;
