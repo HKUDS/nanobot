@@ -131,6 +131,47 @@ class TestEnforceRoleAlternation:
         assert msgs[0] == original_first
         assert len(msgs) == 2
 
+    def test_trailing_assistant_recovered_as_user_when_only_system_remains(self):
+        """Subagent result injected as assistant message must not be silently dropped.
+
+        When build_messages(current_role="assistant") produces [system, assistant],
+        _enforce_role_alternation would drop the assistant, leaving only [system].
+        Most providers (e.g. Zhipu/GLM error 1214) reject such requests.
+        The trailing assistant should be recovered as a user message instead.
+        """
+        msgs = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "assistant", "content": "Subagent completed successfully."},
+        ]
+        result = LLMProvider._enforce_role_alternation(msgs)
+        assert len(result) == 2
+        assert result[0]["role"] == "system"
+        assert result[1]["role"] == "user"
+        assert "Subagent completed successfully." in result[1]["content"]
+
+    def test_trailing_assistant_not_recovered_when_user_message_present(self):
+        """Recovery should NOT happen when a user message already exists."""
+        msgs = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hi"},
+            {"role": "assistant", "content": "Hello!"},
+        ]
+        result = LLMProvider._enforce_role_alternation(msgs)
+        assert len(result) == 2
+        assert result[-1]["role"] == "user"
+
+    def test_trailing_assistant_recovered_with_tool_result_preceding(self):
+        """When only [system, tool, assistant] remains, recovery is not needed
+        because tool messages are valid non-system content."""
+        msgs = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "tool", "content": "result", "tool_call_id": "1"},
+            {"role": "assistant", "content": "Done."},
+        ]
+        result = LLMProvider._enforce_role_alternation(msgs)
+        assert len(result) == 2
+        assert result[-1]["role"] == "tool"
+
     def test_only_assistant_messages(self):
         msgs = [
             {"role": "assistant", "content": "A"},
