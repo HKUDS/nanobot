@@ -1858,6 +1858,19 @@ By default, the API binds to `127.0.0.1:8900`. You can change this in `config.js
 - Single-message input: each request must contain exactly one `user` message
 - Fixed model: omit `model`, or pass the same model shown by `/v1/models`
 - No streaming: `stream=true` is not supported
+- API requests run in the synthetic `api` channel, so the `message` tool does **not** automatically deliver to Telegram/Discord/etc. To proactively send to another chat, call `message` with an explicit `channel` and `chat_id` for an enabled channel.
+
+Example tool call for cross-channel delivery from an API session:
+
+```json
+{
+  "content": "Build finished successfully.",
+  "channel": "telegram",
+  "chat_id": "123456789"
+}
+```
+
+If `channel` points to a channel that is not enabled in your config, nanobot will queue the outbound event but no platform delivery will occur.
 
 ### Endpoints
 
