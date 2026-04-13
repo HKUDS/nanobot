@@ -86,13 +86,14 @@ class AutoCompact:
             session.last_consolidated = 0
             session.updated_at = datetime.now()
             self.sessions.save(session)
-            logger.info(
-                "Auto-compact: archived {} (archived={}, kept={}, summary={})",
-                key,
-                len(archive_msgs),
-                len(kept_msgs),
-                bool(summary),
-            )
+            if archive_msgs:
+                logger.info(
+                    "Auto-compact: archived {} (archived={}, kept={}, summary={})",
+                    key,
+                    len(archive_msgs),
+                    len(kept_msgs),
+                    bool(summary),
+                )
         except Exception:
             logger.exception("Auto-compact: failed for {}", key)
         finally:
