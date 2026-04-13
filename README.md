@@ -1053,6 +1053,30 @@ Connects directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, To
 ```
 
 > For local servers that don't require a key, set `apiKey` to any non-empty string (e.g. `"no-key"`).
+>
+> `custom` is the right choice for providers that expose an OpenAI-compatible **chat completions** API. It does **not** force third-party endpoints onto the OpenAI/Azure **Responses API**.
+>
+> If your proxy or gateway is specifically Responses-API-compatible, use the `azure_openai` provider shape instead and point `apiBase` at that endpoint:
+>
+> ```json
+> {
+>   "providers": {
+>     "azure_openai": {
+>       "apiKey": "your-api-key",
+>       "apiBase": "https://api.your-provider.com",
+>       "defaultModel": "your-model-name"
+>     }
+>   },
+>   "agents": {
+>     "defaults": {
+>       "provider": "azure_openai",
+>       "model": "your-model-name"
+>     }
+>   }
+> }
+> ```
+>
+> In short: **chat-completions-compatible endpoint → `custom`**; **Responses-compatible endpoint → `azure_openai`**.
 
 </details>
 
