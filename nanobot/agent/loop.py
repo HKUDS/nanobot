@@ -851,6 +851,7 @@ class AgentLoop:
 
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
+            stop_reason = STOP_EMPTY_FINAL
 
         self._save_turn(session, all_msgs, 1 + len(history), usage=self._last_usage)
         self._clear_runtime_checkpoint(session)
