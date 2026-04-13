@@ -70,7 +70,8 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         if search_cfg is not None:
             provider = getattr(search_cfg, "provider", "duckduckgo")
             api_key = getattr(search_cfg, "api_key", "") or None
-            usage = await fetch_search_usage(provider=provider, api_key=api_key)
+            base_url = getattr(search_cfg, "base_url", "") or None
+            usage = await fetch_search_usage(provider=provider, api_key=api_key, base_url=base_url)
             search_usage_text = usage.format()
     except Exception:
         pass  # Never let usage fetch break /status
