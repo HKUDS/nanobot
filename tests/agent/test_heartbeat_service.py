@@ -7,6 +7,7 @@ import pytest
 
 from nanobot.agent.runner import STOP_COMPLETED, STOP_EMPTY_FINAL, STOP_ERROR
 from nanobot.bus.events import OutboundMessage
+from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 from nanobot.heartbeat.service import (
     DueTask,
     HeartbeatService,
@@ -1547,6 +1548,11 @@ class TestFilterHeartbeatResponse:
 
     def test_empty_final_suppressed(self):
         resp = _make_resp("I completed the tool steps but couldn't produce a final answer.", stop_reason=STOP_EMPTY_FINAL)
+        assert filter_heartbeat_response(resp, "Gmail scan") == ""
+
+    def test_llm_echoed_empty_message_suppressed(self):
+        """LLM mimics EMPTY_FINAL_RESPONSE_MESSAGE from session history."""
+        resp = _make_resp(EMPTY_FINAL_RESPONSE_MESSAGE, stop_reason=STOP_COMPLETED)
         assert filter_heartbeat_response(resp, "Gmail scan") == ""
 
     def test_error_notifies_admin_by_default(self):

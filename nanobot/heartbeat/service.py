@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from nanobot.agent.runner import STOP_EMPTY_FINAL, STOP_ERROR
 from nanobot.bus.events import OutboundMessage
+from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -38,7 +39,7 @@ def filter_heartbeat_response(
     if not resp:
         return ""
 
-    if resp.stop_reason == STOP_EMPTY_FINAL:
+    if resp.stop_reason == STOP_EMPTY_FINAL or resp.content == EMPTY_FINAL_RESPONSE_MESSAGE:
         logger.info("Heartbeat: suppressed empty response for: {}", tasks[:120])
         return ""
 
