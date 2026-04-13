@@ -113,8 +113,8 @@ class CronTool(Tool):
         **kwargs: Any,
     ) -> str:
         if action == "add":
-            if self._cron_job_id.get() is not None:
-                return "Error: cannot schedule new jobs from within a cron job execution"
+            # if self._cron_job_id.get() is not None:
+            #     return "Error: cannot schedule new jobs from within a cron job execution"
             return self._add_job(name, message, every_seconds, cron_expr, tz, at, deliver)
         elif action == "list":
             return self._list_jobs()
