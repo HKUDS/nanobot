@@ -831,20 +831,23 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
-    # Register Dream system job (always-on, idempotent on restart)
+    # Register Dream system job
     dream_cfg = config.agents.defaults.dream
-    if dream_cfg.model_override:
-        agent.dream.model = dream_cfg.model_override
-    agent.dream.max_batch_size = dream_cfg.max_batch_size
-    agent.dream.max_iterations = dream_cfg.max_iterations
-    from nanobot.cron.types import CronJob, CronPayload
-    cron.register_system_job(CronJob(
-        id="dream",
-        name="dream",
-        schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
-        payload=CronPayload(kind="system_event"),
-    ))
-    console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
+    if dream_cfg.enabled:
+        if dream_cfg.model_override:
+            agent.dream.model = dream_cfg.model_override
+        agent.dream.max_batch_size = dream_cfg.max_batch_size
+        agent.dream.max_iterations = dream_cfg.max_iterations
+        from nanobot.cron.types import CronJob, CronPayload
+        cron.register_system_job(CronJob(
+            id="dream",
+            name="dream",
+            schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
+            payload=CronPayload(kind="system_event"),
+        ))
+        console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
+    else:
+        console.print("[yellow]⊘[/yellow] Dream: disabled")
 
     async def run():
         try:

@@ -45,6 +45,7 @@ class DreamConfig(Base):
 
     _HOUR_MS = 3_600_000
 
+    enabled: bool = True  # Set to false to disable Dream entirely
     interval_h: int = Field(default=2, ge=1)  # Every 2 hours by default
     cron: str | None = Field(default=None, exclude=True)  # Legacy compatibility override
     model_override: str | None = Field(
