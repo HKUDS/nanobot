@@ -61,7 +61,6 @@ class AutoCompact:
             key = info.get("key", "")
             if key and key not in self._archiving and self._is_expired(info.get("updated_at")):
                 self._archiving.add(key)
-                logger.debug("Auto-compact: scheduling archival for {} (idle > {} min)", key, self._ttl)
                 schedule_background(self._archive(key))
 
     async def _archive(self, key: str) -> None:
@@ -70,7 +69,6 @@ class AutoCompact:
             session = self.sessions.get_or_create(key)
             archive_msgs, kept_msgs = self._split_unconsolidated(session)
             if not archive_msgs and not kept_msgs:
-                logger.debug("Auto-compact: skipping {}, no un-consolidated messages", key)
                 session.updated_at = datetime.now()
                 self.sessions.save(session)
                 return
@@ -86,13 +84,14 @@ class AutoCompact:
             session.last_consolidated = 0
             session.updated_at = datetime.now()
             self.sessions.save(session)
-            logger.info(
-                "Auto-compact: archived {} (archived={}, kept={}, summary={})",
-                key,
-                len(archive_msgs),
-                len(kept_msgs),
-                bool(summary),
-            )
+            if archive_msgs:
+                logger.info(
+                    "Auto-compact: archived {} (archived={}, kept={}, summary={})",
+                    key,
+                    len(archive_msgs),
+                    len(kept_msgs),
+                    bool(summary),
+                )
         except Exception:
             logger.exception("Auto-compact: failed for {}", key)
         finally:
