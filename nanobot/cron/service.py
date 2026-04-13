@@ -348,12 +348,14 @@ class CronService:
         if job.schedule.kind == "at":
             if job.delete_after_run:
                 self._store.jobs = [j for j in self._store.jobs if j.id != job.id]
+                logger.info(f"Cron: deleted job id: {job.id}, name: {job.name}")
             else:
                 job.enabled = False
                 job.state.next_run_at_ms = None
         else:
             # Compute next run
             job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+        self._save_store()
 
     def _append_action(self, action: Literal["add", "del", "update"], params: dict):
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
