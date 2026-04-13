@@ -323,3 +323,27 @@ async def test_subagent_registers_grep_and_glob(tmp_path: Path) -> None:
 
     assert "grep" in captured["tool_names"]
     assert "glob" in captured["tool_names"]
+
+
+def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    skills_dir = tmp_path / "skills"
+    (skills_dir / "alpha").mkdir(parents=True)
+    (skills_dir / "alpha" / "SKILL.md").write_text("# Alpha\n\nhidden\n", encoding="utf-8")
+    (skills_dir / "beta").mkdir(parents=True)
+    (skills_dir / "beta" / "SKILL.md").write_text("# Beta\n\nshown\n", encoding="utf-8")
+
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=4096,
+        disabled_skills=["alpha"],
+    )
+
+    prompt = mgr._build_subagent_prompt()
+
+    assert "alpha" not in prompt
+    assert "beta" in prompt

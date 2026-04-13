@@ -22,6 +22,7 @@ from nanobot.utils.helpers import safe_filename, split_message
 
 DISCORD_AVAILABLE = importlib.util.find_spec("discord") is not None
 if TYPE_CHECKING:
+    import aiohttp
     import discord
     from discord import app_commands
     from discord.abc import Messageable
@@ -58,6 +59,9 @@ class DiscordConfig(Base):
     working_emoji: str = "🔧"
     working_emoji_delay: float = 2.0
     streaming: bool = True
+    proxy: str | None = None
+    proxy_username: str | None = None
+    proxy_password: str | None = None
 
 
 if DISCORD_AVAILABLE:
@@ -65,8 +69,15 @@ if DISCORD_AVAILABLE:
     class DiscordBotClient(discord.Client):
         """discord.py client that forwards events to the channel."""
 
-        def __init__(self, channel: DiscordChannel, *, intents: discord.Intents) -> None:
-            super().__init__(intents=intents)
+        def __init__(
+            self,
+            channel: DiscordChannel,
+            *,
+            intents: discord.Intents,
+            proxy: str | None = None,
+            proxy_auth: aiohttp.BasicAuth | None = None,
+        ) -> None:
+            super().__init__(intents=intents, proxy=proxy, proxy_auth=proxy_auth)
             self._channel = channel
             self.tree = app_commands.CommandTree(self)
             self._register_app_commands()
@@ -130,6 +141,7 @@ if DISCORD_AVAILABLE:
             )
 
             for name, description, command_text in commands:
+
                 @self.tree.command(name=name, description=description)
                 async def command_handler(
                     interaction: discord.Interaction,
@@ -186,7 +198,9 @@ if DISCORD_AVAILABLE:
                 else:
                     failed_media.append(Path(media_path).name)
 
-            for index, chunk in enumerate(self._build_chunks(msg.content or "", failed_media, sent_media)):
+            for index, chunk in enumerate(
+                self._build_chunks(msg.content or "", failed_media, sent_media)
+            ):
                 kwargs: dict[str, Any] = {"content": chunk}
                 if index == 0 and reference is not None and not sent_media:
                     kwargs["reference"] = reference
@@ -292,7 +306,29 @@ class DiscordChannel(BaseChannel):
         try:
             intents = discord.Intents.none()
             intents.value = self.config.intents
-            self._client = DiscordBotClient(self, intents=intents)
+
+            proxy_auth = None
+            has_user = bool(self.config.proxy_username)
+            has_pass = bool(self.config.proxy_password)
+            if has_user and has_pass:
+                import aiohttp
+
+                proxy_auth = aiohttp.BasicAuth(
+                    login=self.config.proxy_username,
+                    password=self.config.proxy_password,
+                )
+            elif has_user != has_pass:
+                logger.warning(
+                    "Discord proxy auth incomplete: both proxy_username and "
+                    "proxy_password must be set; ignoring partial credentials",
+                )
+
+            self._client = DiscordBotClient(
+                self,
+                intents=intents,
+                proxy=self.config.proxy,
+                proxy_auth=proxy_auth,
+            )
         except Exception as e:
             logger.error("Failed to initialize Discord client: {}", e)
             self._client = None
@@ -330,12 +366,15 @@ class DiscordChannel(BaseChannel):
             await client.send_outbound(msg)
         except Exception as e:
             logger.error("Error sending Discord message: {}", e)
+            raise
         finally:
             if not is_progress:
                 await self._stop_typing(msg.chat_id)
                 await self._clear_reactions(msg.chat_id)
 
-    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+    async def send_delta(
+        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+    ) -> None:
         """Progressive Discord delivery: send once, then edit until the stream ends."""
         client = self._client
         if client is None or not client.is_ready():
@@ -355,7 +394,9 @@ class DiscordChannel(BaseChannel):
             return
 
         buf = self._stream_bufs.get(chat_id)
-        if buf is None or (stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id):
+        if buf is None or (
+            stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id
+        ):
             buf = _StreamBuf(stream_id=stream_id)
             self._stream_bufs[chat_id] = buf
         elif buf.stream_id is None:
@@ -534,7 +575,11 @@ class DiscordChannel(BaseChannel):
     @staticmethod
     def _build_inbound_metadata(message: discord.Message) -> dict[str, str | None]:
         """Build metadata for inbound Discord messages."""
-        reply_to = str(message.reference.message_id) if message.reference and message.reference.message_id else None
+        reply_to = (
+            str(message.reference.message_id)
+            if message.reference and message.reference.message_id
+            else None
+        )
         return {
             "message_id": str(message.id),
             "guild_id": str(message.guild.id) if message.guild else None,
@@ -549,7 +594,9 @@ class DiscordChannel(BaseChannel):
         if self.config.group_policy == "mention":
             bot_user_id = self._bot_user_id
             if bot_user_id is None:
-                logger.debug("Discord message in {} ignored (bot identity unavailable)", message.channel.id)
+                logger.debug(
+                    "Discord message in {} ignored (bot identity unavailable)", message.channel.id
+                )
                 return False
 
             if any(str(user.id) == bot_user_id for user in message.mentions):
@@ -590,7 +637,6 @@ class DiscordChannel(BaseChannel):
             await task
         except asyncio.CancelledError:
             pass
-
 
     async def _clear_reactions(self, chat_id: str) -> None:
         """Remove all pending reactions after bot replies."""

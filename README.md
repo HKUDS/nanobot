@@ -603,7 +603,11 @@ Uses **WebSocket** long connection — no public IP required.
       "verificationToken": "",
       "allowFrom": ["ou_YOUR_OPEN_ID"],
       "groupPolicy": "mention",
-      "streaming": true
+      "reactEmoji": "OnIt",
+      "doneEmoji": "DONE",
+      "toolHintPrefix": "🔧",
+      "streaming": true,
+      "domain": "feishu"
     }
   }
 }
@@ -613,6 +617,10 @@ Uses **WebSocket** long connection — no public IP required.
 > `encryptKey` and `verificationToken` are optional for Long Connection mode.
 > `allowFrom`: Add your open_id (find it in nanobot logs when you message the bot). Use `["*"]` to allow all users.
 > `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all group messages). Private chats always respond.
+> `reactEmoji`: Emoji for "processing" status (default: `OnIt`). See [available emojis](https://open.larkoffice.com/document/server-docs/im-v1/message-reaction/emojis-introduce).
+> `doneEmoji`: Optional emoji for "completed" status (e.g., `DONE`, `OK`, `HEART`). When set, bot adds this reaction after removing `reactEmoji`.
+> `toolHintPrefix`: Prefix for inline tool hints in streaming cards (default: `🔧`).
+> `domain`: `"feishu"` (default) for China (open.feishu.cn), `"lark"` for international Lark (open.larksuite.com).
 
 **3. Run**
 
@@ -1088,6 +1096,30 @@ Connects directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, To
 ```
 
 > For local servers that don't require a key, set `apiKey` to any non-empty string (e.g. `"no-key"`).
+>
+> `custom` is the right choice for providers that expose an OpenAI-compatible **chat completions** API. It does **not** force third-party endpoints onto the OpenAI/Azure **Responses API**.
+>
+> If your proxy or gateway is specifically Responses-API-compatible, use the `azure_openai` provider shape instead and point `apiBase` at that endpoint:
+>
+> ```json
+> {
+>   "providers": {
+>     "azure_openai": {
+>       "apiKey": "your-api-key",
+>       "apiBase": "https://api.your-provider.com",
+>       "defaultModel": "your-model-name"
+>     }
+>   },
+>   "agents": {
+>     "defaults": {
+>       "provider": "azure_openai",
+>       "model": "your-model-name"
+>     }
+>   }
+> }
+> ```
+>
+> In short: **chat-completions-compatible endpoint → `custom`**; **Responses-compatible endpoint → `azure_openai`**.
 
 </details>
 
@@ -1349,6 +1381,7 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
 | `brave` | `apiKey` | `BRAVE_API_KEY` | No |
 | `tavily` | `apiKey` | `TAVILY_API_KEY` | No |
 | `jina` | `apiKey` | `JINA_API_KEY` | Free tier (10M tokens) |
+| `kagi` | `apiKey` | `KAGI_API_KEY` | No |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
 | `duckduckgo` (default) | — | — | Yes |
 
@@ -1399,6 +1432,20 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
       "search": {
         "provider": "jina",
         "apiKey": "jina_..."
+      }
+    }
+  }
+}
+```
+
+**Kagi:**
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "kagi",
+        "apiKey": "your-kagi-api-key"
       }
     }
   }
@@ -1540,6 +1587,35 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
 
 
+### Auto Compact
+
+When a user is idle for longer than a configured threshold, nanobot **proactively** compresses the older part of the session context into a summary while keeping a recent legal suffix of live messages. This reduces token cost and first-token latency when the user returns — instead of re-processing a long stale context with an expired KV cache, the model receives a compact summary, the most recent live context, and fresh input.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "idleCompactAfterMinutes": 15
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.idleCompactAfterMinutes` | `0` (disabled) | Minutes of idle time before auto-compaction starts. Set to `0` to disable. Recommended: `15` — close to a typical LLM KV cache expiry window, so stale sessions get compacted before the user returns. |
+
+`sessionTtlMinutes` remains accepted as a legacy alias for backward compatibility, but `idleCompactAfterMinutes` is the preferred config key going forward.
+
+How it works:
+1. **Idle detection**: On each idle tick (~1 s), checks all sessions for expiration.
+2. **Background compaction**: Idle sessions summarize the older live prefix via LLM and keep the most recent legal suffix (currently 8 messages).
+3. **Summary injection**: When the user returns, the summary is injected as runtime context (one-shot, not persisted) alongside the retained recent suffix.
+4. **Restart-safe resume**: The summary is also mirrored into session metadata so it can still be recovered after a process restart.
+
+> [!TIP]
+> Think of auto compact as "summarize older context, keep the freshest live turns." It is not a hard session reset.
+
 ### Timezone
 
 Time is context. Context should be precise.
@@ -1587,6 +1663,26 @@ When enabled, all incoming messages — regardless of which channel they arrive 
 | Existing `session_key_override` (e.g. Telegram thread) | Respected | Still respected — not overwritten |
 
 > This is designed for single-user, multi-device setups. It is **off by default** — existing users see zero behavior change.
+
+### Disabled Skills
+
+nanobot ships with built-in skills, and your workspace can also define custom skills under `skills/`. If you want to hide specific skills from the agent, set `agents.defaults.disabledSkills` to a list of skill directory names:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "disabledSkills": ["github", "weather"]
+    }
+  }
+}
+```
+
+Disabled skills are excluded from the main agent's skill summary, from always-on skill injection, and from subagent skill summaries. This is useful when some bundled skills are unnecessary for your deployment or should not be exposed to end users.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.disabledSkills` | `[]` | List of skill directory names to exclude from loading. Applies to both built-in skills and workspace skills. |
 
 ## 🧩 Multiple Instances
 
@@ -1713,6 +1809,7 @@ time.
 
 - `memory/history.jsonl` stores append-only summarized history
 - `SOUL.md`, `USER.md`, and `memory/MEMORY.md` store long-term knowledge managed by Dream
+- `Dream` can also promote repeated workflows into reusable workspace skills under `skills/`
 - `Dream` runs on a schedule and can also be triggered manually
 - memory changes can be inspected and restored with built-in commands
 
@@ -1831,6 +1928,19 @@ By default, the API binds to `127.0.0.1:8900`. You can change this in `config.js
 - Single-message input: each request must contain exactly one `user` message
 - Fixed model: omit `model`, or pass the same model shown by `/v1/models`
 - No streaming: `stream=true` is not supported
+- API requests run in the synthetic `api` channel, so the `message` tool does **not** automatically deliver to Telegram/Discord/etc. To proactively send to another chat, call `message` with an explicit `channel` and `chat_id` for an enabled channel.
+
+Example tool call for cross-channel delivery from an API session:
+
+```json
+{
+  "content": "Build finished successfully.",
+  "channel": "telegram",
+  "chat_id": "123456789"
+}
+```
+
+If `channel` points to a channel that is not enabled in your config, nanobot will queue the outbound event but no platform delivery will occur.
 
 ### Endpoints
 

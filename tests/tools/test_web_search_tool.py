@@ -121,6 +121,27 @@ async def test_jina_search(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_kagi_search(monkeypatch):
+    async def mock_get(self, url, **kw):
+        assert "kagi.com/api/v0/search" in url
+        assert kw["headers"]["Authorization"] == "Bot kagi-key"
+        assert kw["params"] == {"q": "test", "limit": 2}
+        return _response(json={
+            "data": [
+                {"t": 0, "title": "Kagi Result", "url": "https://kagi.com", "snippet": "Premium search"},
+                {"t": 1, "list": ["ignored related search"]},
+            ]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    tool = _tool(provider="kagi", api_key="kagi-key")
+    result = await tool.execute(query="test", count=2)
+    assert "Kagi Result" in result
+    assert "https://kagi.com" in result
+    assert "ignored related search" not in result
+
+
+@pytest.mark.asyncio
 async def test_unknown_provider():
     tool = _tool(provider="unknown")
     result = await tool.execute(query="test")
@@ -187,6 +208,23 @@ async def test_jina_422_falls_back_to_duckduckgo(monkeypatch):
     tool = _tool(provider="jina", api_key="jina-key")
     result = await tool.execute(query="test")
     assert "DuckDuckGo fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_kagi_fallback_to_duckduckgo_when_no_key(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.delenv("KAGI_API_KEY", raising=False)
+
+    tool = _tool(provider="kagi", api_key="")
+    result = await tool.execute(query="test")
+    assert "Fallback" in result
 
 
 @pytest.mark.asyncio

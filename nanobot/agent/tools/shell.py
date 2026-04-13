@@ -46,6 +46,7 @@ class ExecTool(Tool):
         restrict_to_workspace: bool = False,
         sandbox: str = "",
         path_append: str = "",
+        allowed_env_keys: list[str] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
@@ -60,10 +61,19 @@ class ExecTool(Tool):
             r">\s*/dev/sd",                  # write to disk
             r"\b(shutdown|reboot|poweroff)\b",  # system power
             r":\(\)\s*\{.*\};\s*:",          # fork bomb
+            # Block writes to nanobot internal state files (#2989).
+            # history.jsonl / .dream_cursor are managed by append_history();
+            # direct writes corrupt the cursor format and crash /dream.
+            r">>?\s*\S*(?:history\.jsonl|\.dream_cursor)",            # > / >> redirect
+            r"\btee\b[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",     # tee / tee -a
+            r"\b(?:cp|mv)\b(?:\s+[^\s|;&<>]+)+\s+\S*(?:history\.jsonl|\.dream_cursor)",  # cp/mv target
+            r"\bdd\b[^|;&<>]*\bof=\S*(?:history\.jsonl|\.dream_cursor)",  # dd of=
+            r"\bsed\s+-i[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",  # sed -i
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
+        self.allowed_env_keys = allowed_env_keys or []
 
     @property
     def name(self) -> str:
@@ -91,6 +101,21 @@ class ExecTool(Tool):
         timeout: int | None = None, **kwargs: Any,
     ) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
+
+        # Prevent an LLM-supplied working_dir from escaping the configured
+        # workspace when restrict_to_workspace is enabled (#2826). Without
+        # this, a caller can pass working_dir="/etc" and then all absolute
+        # paths under /etc would pass the _guard_command check that anchors
+        # on cwd.
+        if self.restrict_to_workspace and self.working_dir:
+            try:
+                requested = Path(cwd).expanduser().resolve()
+                workspace_root = Path(self.working_dir).expanduser().resolve()
+            except Exception:
+                return "Error: working_dir could not be resolved"
+            if requested != workspace_root and workspace_root not in requested.parents:
+                return "Error: working_dir is outside the configured workspace"
+
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
@@ -208,7 +233,7 @@ class ExecTool(Tool):
         """
         if _IS_WINDOWS:
             sr = os.environ.get("SYSTEMROOT", r"C:\Windows")
-            return {
+            env = {
                 "SYSTEMROOT": sr,
                 "COMSPEC": os.environ.get("COMSPEC", f"{sr}\\system32\\cmd.exe"),
                 "USERPROFILE": os.environ.get("USERPROFILE", ""),
@@ -225,12 +250,22 @@ class ExecTool(Tool):
                 "ProgramFiles(x86)": os.environ.get("ProgramFiles(x86)", ""),
                 "ProgramW6432": os.environ.get("ProgramW6432", ""),
             }
+            for key in self.allowed_env_keys:
+                val = os.environ.get(key)
+                if val is not None:
+                    env[key] = val
+            return env
         home = os.environ.get("HOME", "/tmp")
-        return {
+        env = {
             "HOME": home,
             "LANG": os.environ.get("LANG", "C.UTF-8"),
             "TERM": os.environ.get("TERM", "dumb"),
         }
+        for key in self.allowed_env_keys:
+            val = os.environ.get(key)
+            if val is not None:
+                env[key] = val
+        return env
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""

@@ -550,9 +550,38 @@ def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
         {"role": "user", "content": "thanks"},
     ])
 
+    assert sanitized[1]["content"] is None
     assert sanitized[1]["reasoning_content"] == "hidden"
     assert sanitized[1]["extra_content"] == {"debug": True}
     assert sanitized[1]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "sig"}}
+
+
+def test_openai_compat_keeps_tool_calls_after_consecutive_assistant_messages() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    sanitized = provider._sanitize_messages([
+        {"role": "user", "content": "不错"},
+        {"role": "assistant", "content": "对，破 4 万指日可待"},
+        {
+            "role": "assistant",
+            "content": "<think>我再查一下</think>",
+            "tool_calls": [
+                {
+                    "id": "call_function_akxp3wqzn7ph_1",
+                    "type": "function",
+                    "function": {"name": "exec", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_function_akxp3wqzn7ph_1", "name": "exec", "content": "ok"},
+        {"role": "user", "content": "多少star了呢"},
+    ])
+
+    assert sanitized[1]["role"] == "assistant"
+    assert sanitized[1]["content"] is None
+    assert sanitized[1]["tool_calls"][0]["id"] == "3ec83c30d"
+    assert sanitized[2]["tool_call_id"] == "3ec83c30d"
 
 
 @pytest.mark.asyncio
