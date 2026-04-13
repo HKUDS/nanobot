@@ -76,6 +76,14 @@ class AgentRunSpec:
     injection_callback: Any | None = None
 
 
+# Stop reason constants — used by AgentRunResult and heartbeat suppression.
+STOP_COMPLETED = "completed"
+STOP_ERROR = "error"
+STOP_EMPTY_FINAL = "empty_final_response"
+STOP_MAX_ITERATIONS = "max_iterations"
+STOP_TOOL_ERROR = "tool_error"
+
+
 @dataclass(slots=True)
 class AgentRunResult:
     """Outcome of a shared agent execution."""
@@ -84,7 +92,7 @@ class AgentRunResult:
     messages: list[dict[str, Any]]
     tools_used: list[str] = field(default_factory=list)
     usage: dict[str, int] = field(default_factory=dict)
-    stop_reason: str = "completed"
+    stop_reason: str = STOP_COMPLETED
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
@@ -187,7 +195,7 @@ class AgentRunner:
         tools_used: list[str] = []
         usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
         error: str | None = None
-        stop_reason = "completed"
+        stop_reason = STOP_COMPLETED
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
         empty_content_retries = 0
@@ -282,7 +290,7 @@ class AgentRunner:
                 if fatal_error is not None:
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     final_content = error
-                    stop_reason = "tool_error"
+                    stop_reason = STOP_TOOL_ERROR
                     self._append_final_message(messages, final_content)
                     context.final_content = final_content
                     context.error = error
@@ -415,7 +423,7 @@ class AgentRunner:
 
             if response.finish_reason == "error":
                 final_content = spec.error_message or clean or _DEFAULT_ERROR_MESSAGE
-                stop_reason = "error"
+                stop_reason = STOP_ERROR
                 error = final_content
                 self._append_model_error_placeholder(messages)
                 context.final_content = final_content
@@ -425,7 +433,7 @@ class AgentRunner:
                 break
             if is_blank_text(clean):
                 final_content = EMPTY_FINAL_RESPONSE_MESSAGE
-                stop_reason = "empty_final_response"
+                stop_reason = STOP_EMPTY_FINAL
                 error = final_content
                 self._append_final_message(messages, final_content)
                 context.final_content = final_content
@@ -456,7 +464,7 @@ class AgentRunner:
             await hook.after_iteration(context)
             break
         else:
-            stop_reason = "max_iterations"
+            stop_reason = STOP_MAX_ITERATIONS
             if spec.max_iterations_message:
                 final_content = spec.max_iterations_message.format(
                     max_iterations=spec.max_iterations,

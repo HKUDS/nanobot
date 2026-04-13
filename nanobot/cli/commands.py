@@ -640,7 +640,7 @@ def gateway(
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
-    from nanobot.heartbeat.service import HeartbeatService
+    from nanobot.heartbeat.service import HeartbeatService, filter_heartbeat_response
     from nanobot.session.manager import SessionManager
 
     if verbose:
@@ -795,7 +795,7 @@ def gateway(
         session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
         agent.sessions.save(session)
 
-        return resp.content if resp else ""
+        return filter_heartbeat_response(resp, tasks, suppress_errors=hb_cfg.suppress_errors)
 
     async def on_heartbeat_notify(response: str) -> None:
         """Deliver a heartbeat response to the user's channel."""

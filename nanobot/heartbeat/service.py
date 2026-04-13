@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine, Literal
 from loguru import logger
 from zoneinfo import ZoneInfo
 
+from nanobot.agent.runner import STOP_EMPTY_FINAL, STOP_ERROR
+from nanobot.bus.events import OutboundMessage
+
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
 
@@ -20,6 +23,33 @@ _SCHED_PAT = re.compile(r"Schedule:\s*(\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?)")
 _RECUR_PAT = re.compile(r"Recur:\s*every\s+(\d+)\s+(minute|hour|day|week)s?", re.IGNORECASE)
 _UNTIL_PAT = re.compile(r"Until:\s*(\d{4}-\d{2}-\d{2})")
 _LASTRUN_PAT = re.compile(r"Last-run:[^\n]*")
+
+def filter_heartbeat_response(
+    resp: OutboundMessage | None,
+    tasks: str,
+    suppress_errors: bool = False,
+) -> str:
+    """Extract deliverable content from a heartbeat execution result.
+
+    Returns the response content for normal completions, a short
+    diagnostic for API errors (unless suppress_errors is set), or
+    empty string when the response should be silenced.
+    """
+    if not resp:
+        return ""
+
+    if resp.stop_reason == STOP_EMPTY_FINAL:
+        logger.info("Heartbeat: suppressed empty response for: {}", tasks[:120])
+        return ""
+
+    if resp.stop_reason == STOP_ERROR:
+        logger.warning("Heartbeat: task error for: {}", tasks[:120])
+        if suppress_errors:
+            return ""
+        return f"⚠️ Heartbeat error running: {tasks}. Check logs for details."
+
+    return resp.content or ""
+
 
 _HEARTBEAT_TOOL = [
     {

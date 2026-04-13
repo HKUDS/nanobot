@@ -5,7 +5,14 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.heartbeat.service import DueTask, HeartbeatService, MODEL_PRESETS
+from nanobot.agent.runner import STOP_COMPLETED, STOP_EMPTY_FINAL, STOP_ERROR
+from nanobot.bus.events import OutboundMessage
+from nanobot.heartbeat.service import (
+    DueTask,
+    HeartbeatService,
+    MODEL_PRESETS,
+    filter_heartbeat_response,
+)
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
@@ -1515,3 +1522,44 @@ async def test_tick_advances_per_group_on_failure(tmp_path, monkeypatch) -> None
     assert f"Schedule: {past}" not in balance_block
     assert "Last-run:" in balance_block
     assert call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# filter_heartbeat_response — stop_reason-based suppression logic
+# ---------------------------------------------------------------------------
+
+def _make_resp(content: str, stop_reason: str = STOP_COMPLETED) -> OutboundMessage:
+    return OutboundMessage(channel="whatsapp", chat_id="user", content=content, stop_reason=stop_reason)
+
+
+class TestFilterHeartbeatResponse:
+
+    def test_none_response_returns_empty(self):
+        assert filter_heartbeat_response(None, "Gmail scan") == ""
+
+    def test_completed_returns_content(self):
+        resp = _make_resp("You have 3 new emails.")
+        assert filter_heartbeat_response(resp, "Gmail scan") == "You have 3 new emails."
+
+    def test_completed_none_content_returns_empty(self):
+        resp = _make_resp("", stop_reason=STOP_COMPLETED)
+        assert filter_heartbeat_response(resp, "Gmail scan") == ""
+
+    def test_empty_final_suppressed(self):
+        resp = _make_resp("I completed the tool steps but couldn't produce a final answer.", stop_reason=STOP_EMPTY_FINAL)
+        assert filter_heartbeat_response(resp, "Gmail scan") == ""
+
+    def test_error_notifies_admin_by_default(self):
+        resp = _make_resp("Sorry, I encountered an error.", stop_reason=STOP_ERROR)
+        result = filter_heartbeat_response(resp, "Gmail scan")
+        assert "⚠️" in result
+        assert "Gmail scan" in result
+
+    def test_error_suppressed_when_suppress_errors_true(self):
+        resp = _make_resp("Sorry, I encountered an error.", stop_reason=STOP_ERROR)
+        assert filter_heartbeat_response(resp, "Gmail scan", suppress_errors=True) == ""
+
+    def test_error_notification_includes_task_name(self):
+        resp = _make_resp("error", stop_reason=STOP_ERROR)
+        result = filter_heartbeat_response(resp, "Balance check (system)")
+        assert "Balance check (system)" in result

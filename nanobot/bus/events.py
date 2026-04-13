@@ -35,6 +35,7 @@ class OutboundMessage:
     reply_to: str | None = None
     media: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    stop_reason: str = "completed"
     _delivery_future: asyncio.Future | None = field(default=None, repr=False)
 
 

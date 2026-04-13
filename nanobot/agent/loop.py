@@ -17,7 +17,14 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
-from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunSpec, AgentRunner
+from nanobot.agent.runner import (
+    STOP_EMPTY_FINAL,
+    STOP_ERROR,
+    STOP_MAX_ITERATIONS,
+    _MAX_INJECTIONS_PER_TURN,
+    AgentRunSpec,
+    AgentRunner,
+)
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
@@ -538,9 +545,9 @@ class AgentLoop:
             injection_callback=_drain_pending,
         ))
         self._last_usage = result.usage
-        if result.stop_reason == "max_iterations":
+        if result.stop_reason == STOP_MAX_ITERATIONS:
             logger.warning("Max iterations ({}) reached", self.max_iterations)
-        elif result.stop_reason == "error":
+        elif result.stop_reason == STOP_ERROR:
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
         return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections
 
@@ -857,20 +864,21 @@ class AgentLoop:
         # placeholder, suppress it when the real user-visible output already
         # came from MessageTool.
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
-            if not had_injections or stop_reason == "empty_final_response":
+            if not had_injections or stop_reason == STOP_EMPTY_FINAL:
                 return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         meta = dict(msg.metadata or {})
-        if on_stream is not None and stop_reason != "error":
+        if on_stream is not None and stop_reason != STOP_ERROR:
             meta["_streamed"] = True
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
             metadata=meta,
+            stop_reason=stop_reason,
         )
 
     def _sanitize_persisted_blocks(
