@@ -252,7 +252,7 @@ class FeishuConfig(Base):
     encrypt_key: str = ""
     verification_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
-    react_emoji: str = "THUMBSUP"
+    react_emoji: str = "OK"
     done_emoji: str | None = None  # Emoji to show when task is completed (e.g., "DONE", "OK")
     tool_hint_prefix: str = "\U0001f527"  # Prefix for inline tool hints (default: 🔧)
     group_policy: Literal["open", "mention"] = "mention"
@@ -552,7 +552,7 @@ class FeishuChannel(BaseChannel):
             logger.warning("Error adding reaction: {}", e)
             return None
 
-    async def _add_reaction(self, message_id: str, emoji_type: str = "THUMBSUP") -> str | None:
+    async def _add_reaction(self, message_id: str, emoji_type: str = "OK") -> str | None:
         """
         Add a reaction emoji to a message (non-blocking).
 
@@ -1308,7 +1308,7 @@ class FeishuChannel(BaseChannel):
         # --- stream end: final update or fallback ---
         if meta.get("_stream_end"):
             if (message_id := meta.get("message_id")) and (reaction_id := meta.get("reaction_id")):
-                await self._remove_reaction(message_id, reaction_id)
+                # await self._remove_reaction(message_id, reaction_id)
                 # Add completion emoji if configured
                 if self.config.done_emoji and message_id:
                     await self._add_reaction(message_id, self.config.done_emoji)

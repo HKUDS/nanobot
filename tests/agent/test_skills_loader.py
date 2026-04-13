@@ -310,3 +310,101 @@ def test_disabled_skills_excluded_from_get_always_skills(tmp_path: Path) -> None
     always = loader.get_always_skills()
     assert "alpha" not in always
     assert "beta" in always
+
+
+def test_channel_filter_keeps_feishu_and_lark_skills_only_for_feishu(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    _write_skill(ws_skills, "lark-doc", body="# Lark")
+    _write_skill(ws_skills, "feishu-bitable", body="# Feishu")
+    _write_skill(ws_skills, "wecomcli-msg", body="# WeCom")
+    _write_skill(ws_skills, "weather", body="# Weather")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    entries = sorted(
+        loader.list_skills(filter_unavailable=False, channel="feishu"),
+        key=lambda item: item["name"],
+    )
+
+    assert [entry["name"] for entry in entries] == [
+        "feishu-bitable",
+        "lark-doc",
+        "weather",
+    ]
+
+
+def test_channel_filter_is_case_insensitive(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    _write_skill(ws_skills, "LARK-DOC", body="# Lark")
+    _write_skill(ws_skills, "WeComCli-Msg", body="# WeCom")
+    _write_skill(ws_skills, "memory", body="# Memory")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    entries = sorted(
+        loader.list_skills(filter_unavailable=False, channel="FEISHU"),
+        key=lambda item: item["name"].lower(),
+    )
+
+    assert [entry["name"] for entry in entries] == ["LARK-DOC", "memory"]
+
+
+def test_channel_filter_keeps_only_wecom_channel_skills_for_wecom(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    _write_skill(ws_skills, "lark-doc", body="# Lark")
+    _write_skill(ws_skills, "feishu-bitable", body="# Feishu")
+    _write_skill(ws_skills, "wecomcli-msg", body="# WeCom")
+    _write_skill(ws_skills, "pdf", body="# PDF")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    entries = sorted(
+        loader.list_skills(filter_unavailable=False, channel="wecom"),
+        key=lambda item: item["name"],
+    )
+
+    assert [entry["name"] for entry in entries] == ["pdf", "wecomcli-msg"]
+
+
+def test_channel_filter_is_disabled_for_unknown_channel(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    _write_skill(ws_skills, "lark-doc", body="# Lark")
+    _write_skill(ws_skills, "wecomcli-msg", body="# WeCom")
+    _write_skill(ws_skills, "weather", body="# Weather")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    entries = sorted(
+        loader.list_skills(filter_unavailable=False, channel="telegram"),
+        key=lambda item: item["name"],
+    )
+
+    assert [entry["name"] for entry in entries] == ["lark-doc", "weather", "wecomcli-msg"]
+
+
+def test_channel_filter_applies_to_always_skills(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    _write_skill(ws_skills, "lark-doc", metadata_json={"always": True}, body="# Lark")
+    _write_skill(ws_skills, "wecomcli-msg", metadata_json={"always": True}, body="# WeCom")
+    _write_skill(ws_skills, "memory", metadata_json={"always": True}, body="# Memory")
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    always = sorted(loader.get_always_skills(channel="feishu"))
+
+    assert always == ["lark-doc", "memory"]

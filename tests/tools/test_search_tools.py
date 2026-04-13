@@ -347,3 +347,34 @@ def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:
 
     assert "alpha" not in prompt
     assert "beta" in prompt
+
+
+def test_subagent_prompt_filters_channel_skills_by_origin_channel(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock
+
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    provider = MagicMock()
+    bus = MessageBus()
+    provider.get_default_model.return_value = "test-model"
+    skills_dir = tmp_path / "skills"
+    (skills_dir / "lark-doc").mkdir(parents=True)
+    (skills_dir / "lark-doc" / "SKILL.md").write_text("# Lark\n\nshown\n", encoding="utf-8")
+    (skills_dir / "wecomcli-msg").mkdir(parents=True)
+    (skills_dir / "wecomcli-msg" / "SKILL.md").write_text("# WeCom\n\nhidden\n", encoding="utf-8")
+    (skills_dir / "memory").mkdir(parents=True)
+    (skills_dir / "memory" / "SKILL.md").write_text("# Memory\n\nshown\n", encoding="utf-8")
+
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=4096,
+    )
+
+    prompt = mgr._build_subagent_prompt(channel="feishu")
+
+    assert "lark-doc" in prompt
+    assert "memory" in prompt
+    assert "wecomcli-msg" not in prompt

@@ -36,6 +36,40 @@ class SkillsLoader:
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self.disabled_skills = disabled_skills or set()
 
+    @staticmethod
+    def _normalize_channel(channel: str | None) -> str | None:
+        return channel.strip().lower() if isinstance(channel, str) and channel.strip() else None
+
+    @classmethod
+    def _channel_skill_prefixes(cls, channel: str | None) -> set[str]:
+        normalized = cls._normalize_channel(channel)
+        if normalized == "feishu":
+            return {"feishu", "lark"}
+        if normalized == "wecom":
+            return {"wecom"}
+        if normalized == "dingtalk":
+            return {"dingtalk"}
+        return set()
+
+    @staticmethod
+    def _known_channel_skill_prefixes() -> set[str]:
+        return {"feishu", "lark", "wecom", "dingtalk"}
+
+    @classmethod
+    def _is_channel_skill(cls, name: str) -> bool:
+        lowered = name.lower()
+        return any(lowered.startswith(prefix) for prefix in cls._known_channel_skill_prefixes())
+
+    @classmethod
+    def _should_keep_for_channel(cls, name: str, channel: str | None) -> bool:
+        allowed_prefixes = cls._channel_skill_prefixes(channel)
+        if not allowed_prefixes:
+            return True
+        lowered = name.lower()
+        if not cls._is_channel_skill(lowered):
+            return True
+        return any(lowered.startswith(prefix) for prefix in allowed_prefixes)
+
     def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
         if not base.exists():
             return []
@@ -52,7 +86,9 @@ class SkillsLoader:
             entries.append({"name": name, "path": str(skill_file), "source": source})
         return entries
 
-    def list_skills(self, filter_unavailable: bool = True) -> list[dict[str, str]]:
+    def list_skills(
+        self, filter_unavailable: bool = True, channel: str | None = None
+    ) -> list[dict[str, str]]:
         """
         List all available skills.
 
@@ -71,6 +107,8 @@ class SkillsLoader:
 
         if self.disabled_skills:
             skills = [s for s in skills if s["name"] not in self.disabled_skills]
+
+        skills = [s for s in skills if self._should_keep_for_channel(s["name"], channel)]
 
         if filter_unavailable:
             return [skill for skill in skills if self._check_requirements(self._get_skill_meta(skill["name"]))]
@@ -124,7 +162,7 @@ class SkillsLoader:
         ]
         return "\n\n---\n\n".join(parts)
 
-    def build_skills_summary(self) -> str:
+    def build_skills_summary(self, channel: str | None = None) -> str:
         """
         Build a summary of all skills (name, description, path, availability).
 
@@ -134,7 +172,7 @@ class SkillsLoader:
         Returns:
             XML-formatted skills summary.
         """
-        all_skills = self.list_skills(filter_unavailable=False)
+        all_skills = self.list_skills(filter_unavailable=False, channel=channel)
         if not all_skills:
             return ""
 
@@ -210,11 +248,11 @@ class SkillsLoader:
         meta = self.get_skill_metadata(name) or {}
         return self._parse_nanobot_metadata(meta.get("metadata", ""))
 
-    def get_always_skills(self) -> list[str]:
+    def get_always_skills(self, channel: str | None = None) -> list[str]:
         """Get skills marked as always=true that meet requirements."""
         return [
             entry["name"]
-            for entry in self.list_skills(filter_unavailable=True)
+            for entry in self.list_skills(filter_unavailable=True, channel=channel)
             if (meta := self.get_skill_metadata(entry["name"]) or {})
             and (
                 self._parse_nanobot_metadata(meta.get("metadata", "")).get("always")

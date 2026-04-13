@@ -52,8 +52,11 @@ RUN apt-get update && \
         libxrandr2 \
         libpango-1.0-0 \
         libcairo2 \
+        unzip \
         libatspi2.0-0 && \
     rm -rf /var/lib/apt/lists/* && \
+    npm install -g @larksuite/cli && \
+    npm install -g dingtalk-workspace-cli && \
     npm install -g agent-browser && \
     agent-browser install --with-deps
 
