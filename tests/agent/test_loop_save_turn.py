@@ -229,6 +229,7 @@ async def test_process_message_persists_user_message_before_turn_completes(tmp_p
     persisted = loop.sessions.get_or_create("feishu:c1")
     assert [m["role"] for m in persisted.messages] == ["user"]
     assert persisted.messages[0]["content"] == "persist me"
+    assert persisted.metadata.get(AgentLoop._PENDING_USER_TURN_KEY) is True
     assert persisted.updated_at >= persisted.created_at
 
 
@@ -262,3 +263,48 @@ async def test_process_message_does_not_duplicate_early_persisted_user_message(t
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "done"},
     ]
+    assert AgentLoop._PENDING_USER_TURN_KEY not in session.metadata
+
+
+@pytest.mark.asyncio
+async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.provider.chat_with_retry = AsyncMock(return_value=MagicMock())  # unused because _run_agent_loop is stubbed
+
+    session = loop.sessions.get_or_create("feishu:c3")
+    session.add_message("user", "old question")
+    session.metadata[AgentLoop._PENDING_USER_TURN_KEY] = True
+    loop.sessions.save(session)
+
+    loop._run_agent_loop = AsyncMock(return_value=(
+        "new answer",
+        None,
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "old question"},
+            {"role": "assistant", "content": "Error: Task interrupted before a response was generated."},
+            {"role": "user", "content": "new question"},
+            {"role": "assistant", "content": "new answer"},
+        ],
+        "stop",
+        False,
+    ))  # type: ignore[method-assign]
+
+    result = await loop._process_message(
+        InboundMessage(channel="feishu", sender_id="u1", chat_id="c3", content="new question")
+    )
+
+    assert result is not None
+    assert result.content == "new answer"
+    session = loop.sessions.get_or_create("feishu:c3")
+    assert [
+        {k: v for k, v in m.items() if k in {"role", "content"}}
+        for m in session.messages
+    ] == [
+        {"role": "user", "content": "old question"},
+        {"role": "assistant", "content": "Error: Task interrupted before a response was generated."},
+        {"role": "user", "content": "new question"},
+        {"role": "assistant", "content": "new answer"},
+    ]
+    assert AgentLoop._PENDING_USER_TURN_KEY not in session.metadata

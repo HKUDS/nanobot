@@ -129,6 +129,7 @@ class AgentLoop:
     """
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
+    _PENDING_USER_TURN_KEY = "pending_user_turn"
 
     def __init__(
         self,
@@ -618,6 +619,8 @@ class AgentLoop:
             session = self.sessions.get_or_create(key)
             if self._restore_runtime_checkpoint(session):
                 self.sessions.save(session)
+            if self._restore_pending_user_turn(session):
+                self.sessions.save(session)
 
             session, pending = self.auto_compact.prepare_session(session, key)
 
@@ -652,6 +655,8 @@ class AgentLoop:
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
         if self._restore_runtime_checkpoint(session):
+            self.sessions.save(session)
+        if self._restore_pending_user_turn(session):
             self.sessions.save(session)
 
         session, pending = self.auto_compact.prepare_session(session, key)
@@ -702,6 +707,7 @@ class AgentLoop:
         user_persisted_early = False
         if isinstance(msg.content, str) and msg.content.strip():
             session.add_message("user", msg.content)
+            self._mark_pending_user_turn(session)
             self.sessions.save(session)
             user_persisted_early = True
 
@@ -723,6 +729,7 @@ class AgentLoop:
         # Skip the already-persisted user message when saving the turn
         save_skip = 1 + len(history) + (1 if user_persisted_early else 0)
         self._save_turn(session, all_msgs, save_skip)
+        self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
         self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
@@ -840,6 +847,12 @@ class AgentLoop:
         session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
         self.sessions.save(session)
 
+    def _mark_pending_user_turn(self, session: Session) -> None:
+        session.metadata[self._PENDING_USER_TURN_KEY] = True
+
+    def _clear_pending_user_turn(self, session: Session) -> None:
+        session.metadata.pop(self._PENDING_USER_TURN_KEY, None)
+
     def _clear_runtime_checkpoint(self, session: Session) -> None:
         if self._RUNTIME_CHECKPOINT_KEY in session.metadata:
             session.metadata.pop(self._RUNTIME_CHECKPOINT_KEY, None)
@@ -906,7 +919,28 @@ class AgentLoop:
                 break
         session.messages.extend(restored_messages[overlap:])
 
+        self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
+        return True
+
+    def _restore_pending_user_turn(self, session: Session) -> bool:
+        """Close a turn that only persisted the user message before crashing."""
+        from datetime import datetime
+
+        if not session.metadata.get(self._PENDING_USER_TURN_KEY):
+            return False
+
+        if session.messages and session.messages[-1].get("role") == "user":
+            session.messages.append(
+                {
+                    "role": "assistant",
+                    "content": "Error: Task interrupted before a response was generated.",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+            session.updated_at = datetime.now()
+
+        self._clear_pending_user_turn(session)
         return True
 
     async def process_direct(
