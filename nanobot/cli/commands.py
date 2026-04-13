@@ -714,7 +714,7 @@ def gateway(
         cron_tool = agent.tools.get("cron")
         cron_token = None
         if isinstance(cron_tool, CronTool):
-            cron_token = cron_tool.set_cron_context(True)
+            cron_token = cron_tool.set_cron_context(job.id)
         try:
             resp = await agent.process_direct(
                 reminder_note,
