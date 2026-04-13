@@ -2,23 +2,10 @@
 
 from typing import Any, Awaitable, Callable
 
-from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
+from nanobot.agent.tools.base import Tool
 from nanobot.bus.events import OutboundMessage
 
 
-@tool_parameters(
-    tool_parameters_schema(
-        content=StringSchema("The message content to send"),
-        channel=StringSchema("Optional: target channel (telegram, discord, etc.)"),
-        chat_id=StringSchema("Optional: target chat/user ID"),
-        media=ArraySchema(
-            StringSchema(""),
-            description="Optional: list of file paths to attach (images, audio, documents)",
-        ),
-        required=["content"],
-    )
-)
 class MessageTool(Tool):
     """Tool to send messages to users on chat channels."""
 
@@ -34,6 +21,7 @@ class MessageTool(Tool):
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
         self._sent_in_turn: bool = False
+        self._turn_messages: list[OutboundMessage] = []
 
     def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Set the current message context."""
@@ -48,6 +36,12 @@ class MessageTool(Tool):
     def start_turn(self) -> None:
         """Reset per-turn send tracking."""
         self._sent_in_turn = False
+        self._turn_messages = []
+
+    @property
+    def turn_messages(self) -> list[OutboundMessage]:
+        """Messages emitted during the current turn."""
+        return list(self._turn_messages)
 
     @property
     def name(self) -> str:
@@ -55,12 +49,33 @@ class MessageTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "Send a message to the user, optionally with file attachments. "
-            "This is the ONLY way to deliver files (images, documents, audio, video) to the user. "
-            "Use the 'media' parameter with file paths to attach files. "
-            "Do NOT use read_file to send files — that only reads content for your own analysis."
-        )
+        return "Send a message to the user. Use this when you want to communicate something."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "The message content to send"
+                },
+                "channel": {
+                    "type": "string",
+                    "description": "Optional: target channel (telegram, discord, etc.)"
+                },
+                "chat_id": {
+                    "type": "string",
+                    "description": "Optional: target chat/user ID"
+                },
+                "media": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional: list of file paths to attach (images, audio, documents)"
+                }
+            },
+            "required": ["content"]
+        }
 
     async def execute(
         self,
@@ -71,20 +86,9 @@ class MessageTool(Tool):
         media: list[str] | None = None,
         **kwargs: Any
     ) -> str:
-        from nanobot.utils.helpers import strip_think
-        content = strip_think(content)
-        
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
-        # Only inherit default message_id when targeting the same channel+chat.
-        # Cross-chat sends must not carry the original message_id, because
-        # some channels (e.g. Feishu) use it to determine the target
-        # conversation via their Reply API, which would route the message
-        # to the wrong chat entirely.
-        if channel == self._default_channel and chat_id == self._default_chat_id:
-            message_id = message_id or self._default_message_id
-        else:
-            message_id = None
+        message_id = message_id or self._default_message_id
 
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
@@ -99,10 +103,16 @@ class MessageTool(Tool):
             media=media or [],
             metadata={
                 "message_id": message_id,
-            } if message_id else {},
+            },
         )
 
         try:
+            if channel == "desktop":
+                self._turn_messages.append(msg)
+                if channel == self._default_channel and chat_id == self._default_chat_id:
+                    self._sent_in_turn = True
+                media_info = f" with {len(media)} attachments" if media else ""
+                return f"Message queued to {channel}:{chat_id}{media_info}"
             await self._send_callback(msg)
             if channel == self._default_channel and chat_id == self._default_chat_id:
                 self._sent_in_turn = True

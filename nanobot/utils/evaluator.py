@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from nanobot.utils.prompt_templates import render_template
+from nanobot.agent.subagent_result import SubagentResult
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -39,11 +39,25 @@ _EVALUATE_TOOL = [
     }
 ]
 
+_SYSTEM_PROMPT = (
+    "You are a notification gate for a background agent. "
+    "You will be given the original task and the agent's response. "
+    "Call the evaluate_notification tool to decide whether the user "
+    "should be notified.\n\n"
+    "Notify when the response contains actionable information, errors, "
+    "completed deliverables, or anything the user explicitly asked to "
+    "be reminded about.\n\n"
+    "Suppress when the response is a routine status check with nothing "
+    "new, a confirmation that everything is normal, or essentially empty."
+)
+
+
 async def evaluate_response(
     response: str,
     task_context: str,
     provider: LLMProvider,
     model: str,
+    result_payload: dict | None = None,
 ) -> bool:
     """Decide whether a background-task result should be delivered to the user.
 
@@ -52,14 +66,23 @@ async def evaluate_response(
     that important messages are never silently dropped.
     """
     try:
+        if isinstance(result_payload, dict):
+            structured = SubagentResult.from_payload(result_payload)
+            fast_path = _evaluate_structured_result(structured)
+            if fast_path is not None:
+                logger.info(
+                    "evaluate_response: structured fast-path should_notify={} status={}",
+                    fast_path,
+                    structured.status,
+                )
+                return fast_path
+
         llm_response = await provider.chat_with_retry(
             messages=[
-                {"role": "system", "content": render_template("agent/evaluator.md", part="system")},
-                {"role": "user", "content": render_template(
-                    "agent/evaluator.md",
-                    part="user",
-                    task_context=task_context,
-                    response=response,
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": (
+                    f"## Original task\n{task_context}\n\n"
+                    f"## Agent response\n{response}"
                 )},
             ],
             tools=_EVALUATE_TOOL,
@@ -81,3 +104,23 @@ async def evaluate_response(
     except Exception:
         logger.exception("evaluate_response failed, defaulting to notify")
         return True
+
+
+def _evaluate_structured_result(result: SubagentResult) -> bool | None:
+    """Return a deterministic notify decision when the structured result is clear."""
+    if result.status in {"error", "timeout", "cancelled"}:
+        return True
+    if result.status == "ok" and result.artifacts:
+        return True
+    if result.status == "ok" and not result.artifacts and not result.error:
+        summary = result.summary.strip().lower()
+        if summary in {
+            "",
+            "ok",
+            "done",
+            "all clear, no updates",
+            "no updates",
+            "nothing to report",
+        }:
+            return False
+    return None

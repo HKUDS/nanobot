@@ -8,14 +8,12 @@ import json
 import os
 import re
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 
 import httpx
 from loguru import logger
 
-from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
-from nanobot.utils.helpers import build_image_content_blocks
+from nanobot.agent.tools.base import Tool
 
 if TYPE_CHECKING:
     from nanobot.config.schema import WebSearchConfig
@@ -73,32 +71,25 @@ def _format_results(query: str, items: list[dict[str, Any]], n: int) -> str:
     return "\n".join(lines)
 
 
-@tool_parameters(
-    tool_parameters_schema(
-        query=StringSchema("Search query"),
-        count=IntegerSchema(1, description="Results (1-10)", minimum=1, maximum=10),
-        required=["query"],
-    )
-)
 class WebSearchTool(Tool):
     """Search the web using configured provider."""
 
     name = "web_search"
-    description = (
-        "Search the web. Returns titles, URLs, and snippets. "
-        "count defaults to 5 (max 10). "
-        "Use web_fetch to read a specific page in full."
-    )
+    description = "Search the web. Returns titles, URLs, and snippets."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query"},
+            "count": {"type": "integer", "description": "Results (1-10)", "minimum": 1, "maximum": 10},
+        },
+        "required": ["query"],
+    }
 
     def __init__(self, config: WebSearchConfig | None = None, proxy: str | None = None):
         from nanobot.config.schema import WebSearchConfig
 
         self.config = config if config is not None else WebSearchConfig()
         self.proxy = proxy
-
-    @property
-    def read_only(self) -> bool:
-        return True
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
         provider = self.config.provider.strip().lower() or "brave"
@@ -114,8 +105,6 @@ class WebSearchTool(Tool):
             return await self._search_jina(query, n)
         elif provider == "brave":
             return await self._search_brave(query, n)
-        elif provider == "kagi":
-            return await self._search_kagi(query, n)
         else:
             return f"Error: unknown search provider '{provider}'"
 
@@ -188,10 +177,10 @@ class WebSearchTool(Tool):
             return await self._search_duckduckgo(query, n)
         try:
             headers = {"Accept": "application/json", "Authorization": f"Bearer {api_key}"}
-            encoded_query = quote(query, safe="")
             async with httpx.AsyncClient(proxy=self.proxy) as client:
                 r = await client.get(
-                    f"https://s.jina.ai/{encoded_query}",
+                    f"https://s.jina.ai/",
+                    params={"q": query},
                     headers=headers,
                     timeout=15.0,
                 )
@@ -203,43 +192,14 @@ class WebSearchTool(Tool):
             ]
             return _format_results(query, items, n)
         except Exception as e:
-            logger.warning("Jina search failed ({}), falling back to DuckDuckGo", e)
-            return await self._search_duckduckgo(query, n)
-
-    async def _search_kagi(self, query: str, n: int) -> str:
-        api_key = self.config.api_key or os.environ.get("KAGI_API_KEY", "")
-        if not api_key:
-            logger.warning("KAGI_API_KEY not set, falling back to DuckDuckGo")
-            return await self._search_duckduckgo(query, n)
-        try:
-            async with httpx.AsyncClient(proxy=self.proxy) as client:
-                r = await client.get(
-                    "https://kagi.com/api/v0/search",
-                    params={"q": query, "limit": n},
-                    headers={"Authorization": f"Bot {api_key}"},
-                    timeout=10.0,
-                )
-                r.raise_for_status()
-            # t=0 items are search results; other values are related searches, etc.
-            items = [
-                {"title": d.get("title", ""), "url": d.get("url", ""), "content": d.get("snippet", "")}
-                for d in r.json().get("data", []) if d.get("t") == 0
-            ]
-            return _format_results(query, items, n)
-        except Exception as e:
             return f"Error: {e}"
 
     async def _search_duckduckgo(self, query: str, n: int) -> str:
         try:
-            # Note: duckduckgo_search is synchronous and does its own requests
-            # We run it in a thread to avoid blocking the loop
             from ddgs import DDGS
 
             ddgs = DDGS(timeout=10)
-            raw = await asyncio.wait_for(
-                asyncio.to_thread(ddgs.text, query, max_results=n),
-                timeout=self.config.timeout,
-            )
+            raw = await asyncio.to_thread(ddgs.text, query, max_results=n)
             if not raw:
                 return f"No results for: {query}"
             items = [
@@ -252,59 +212,30 @@ class WebSearchTool(Tool):
             return f"Error: DuckDuckGo search failed ({e})"
 
 
-@tool_parameters(
-    tool_parameters_schema(
-        url=StringSchema("URL to fetch"),
-        extractMode={
-            "type": "string",
-            "enum": ["markdown", "text"],
-            "default": "markdown",
-        },
-        maxChars=IntegerSchema(0, minimum=100),
-        required=["url"],
-    )
-)
 class WebFetchTool(Tool):
     """Fetch and extract content from a URL."""
 
     name = "web_fetch"
-    description = (
-        "Fetch a URL and extract readable content (HTML → markdown/text). "
-        "Output is capped at maxChars (default 50 000). "
-        "Works for most web pages and docs; may fail on login-walled or JS-heavy sites."
-    )
+    description = "Fetch URL and extract readable content (HTML → markdown/text)."
+    parameters = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "URL to fetch"},
+            "extractMode": {"type": "string", "enum": ["markdown", "text"], "default": "markdown"},
+            "maxChars": {"type": "integer", "minimum": 100},
+        },
+        "required": ["url"],
+    }
 
     def __init__(self, max_chars: int = 50000, proxy: str | None = None):
         self.max_chars = max_chars
         self.proxy = proxy
 
-    @property
-    def read_only(self) -> bool:
-        return True
-
-    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> Any:
+    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
         max_chars = maxChars or self.max_chars
         is_valid, error_msg = _validate_url_safe(url)
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
-
-        # Detect and fetch images directly to avoid Jina's textual image captioning
-        try:
-            async with httpx.AsyncClient(proxy=self.proxy, follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=15.0) as client:
-                async with client.stream("GET", url, headers={"User-Agent": USER_AGENT}) as r:
-                    from nanobot.security.network import validate_resolved_url
-
-                    redir_ok, redir_err = validate_resolved_url(str(r.url))
-                    if not redir_ok:
-                        return json.dumps({"error": f"Redirect blocked: {redir_err}", "url": url}, ensure_ascii=False)
-
-                    ctype = r.headers.get("content-type", "")
-                    if ctype.startswith("image/"):
-                        r.raise_for_status()
-                        raw = await r.aread()
-                        return build_image_content_blocks(raw, ctype, url, f"(Image fetched from: {url})")
-        except Exception as e:
-            logger.debug("Pre-fetch image detection failed for {}: {}", url, e)
 
         result = await self._fetch_jina(url, max_chars)
         if result is None:
@@ -347,7 +278,7 @@ class WebFetchTool(Tool):
             logger.debug("Jina Reader failed for {}, falling back to readability: {}", url, e)
             return None
 
-    async def _fetch_readability(self, url: str, extract_mode: str, max_chars: int) -> Any:
+    async def _fetch_readability(self, url: str, extract_mode: str, max_chars: int) -> str:
         """Local fallback using readability-lxml."""
         from readability import Document
 
@@ -367,8 +298,6 @@ class WebFetchTool(Tool):
                 return json.dumps({"error": f"Redirect blocked: {redir_err}", "url": url}, ensure_ascii=False)
 
             ctype = r.headers.get("content-type", "")
-            if ctype.startswith("image/"):
-                return build_image_content_blocks(r.content, ctype, url, f"(Image fetched from: {url})")
 
             if "application/json" in ctype:
                 text, extractor = json.dumps(r.json(), indent=2, ensure_ascii=False), "json"

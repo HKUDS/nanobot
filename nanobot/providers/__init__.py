@@ -7,29 +7,17 @@ from typing import TYPE_CHECKING
 
 from nanobot.providers.base import LLMProvider, LLMResponse
 
-__all__ = [
-    "LLMProvider",
-    "LLMResponse",
-    "AnthropicProvider",
-    "OpenAICompatProvider",
-    "OpenAICodexProvider",
-    "GitHubCopilotProvider",
-    "AzureOpenAIProvider",
-]
+__all__ = ["LLMProvider", "LLMResponse", "LiteLLMProvider", "OpenAICodexProvider", "AzureOpenAIProvider"]
 
 _LAZY_IMPORTS = {
-    "AnthropicProvider": ".anthropic_provider",
-    "OpenAICompatProvider": ".openai_compat_provider",
+    "LiteLLMProvider": ".litellm_provider",
     "OpenAICodexProvider": ".openai_codex_provider",
-    "GitHubCopilotProvider": ".github_copilot_provider",
     "AzureOpenAIProvider": ".azure_openai_provider",
 }
 
 if TYPE_CHECKING:
-    from nanobot.providers.anthropic_provider import AnthropicProvider
     from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
-    from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
-    from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+    from nanobot.providers.litellm_provider import LiteLLMProvider
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
 

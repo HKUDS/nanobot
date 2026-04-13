@@ -1,14 +1,10 @@
 """Configuration loading utilities."""
 
 import json
-import os
-import re
 from pathlib import Path
 
-import pydantic
-from loguru import logger
-
 from nanobot.config.schema import Config
+
 
 # Global variable to store current config path (for multi-instance support)
 _current_config_path: Path | None = None
@@ -39,26 +35,17 @@ def load_config(config_path: Path | None = None) -> Config:
     """
     path = config_path or get_config_path()
 
-    config = Config()
     if path.exists():
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
             data = _migrate_config(data)
-            config = Config.model_validate(data)
-        except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
-            logger.warning(f"Failed to load config from {path}: {e}")
-            logger.warning("Using default configuration.")
+            return Config.model_validate(data)
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"Warning: Failed to load config from {path}: {e}")
+            print("Using default configuration.")
 
-    _apply_ssrf_whitelist(config)
-    return config
-
-
-def _apply_ssrf_whitelist(config: Config) -> None:
-    """Apply SSRF whitelist from config to the network security module."""
-    from nanobot.security.network import configure_ssrf_whitelist
-
-    configure_ssrf_whitelist(config.tools.ssrf_whitelist)
+    return Config()
 
 
 def save_config(config: Config, config_path: Path | None = None) -> None:
@@ -72,42 +59,11 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
     path = config_path or get_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    data = config.model_dump(mode="json", by_alias=True)
+    config.sync_legacy_defaults()
+    data = config.model_dump(by_alias=True)
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def resolve_config_env_vars(config: Config) -> Config:
-    """Return a copy of *config* with ``${VAR}`` env-var references resolved.
-
-    Only string values are affected; other types pass through unchanged.
-    Raises :class:`ValueError` if a referenced variable is not set.
-    """
-    data = config.model_dump(mode="json", by_alias=True)
-    data = _resolve_env_vars(data)
-    return Config.model_validate(data)
-
-
-def _resolve_env_vars(obj: object) -> object:
-    """Recursively resolve ``${VAR}`` patterns in string values."""
-    if isinstance(obj, str):
-        return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", _env_replace, obj)
-    if isinstance(obj, dict):
-        return {k: _resolve_env_vars(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_resolve_env_vars(v) for v in obj]
-    return obj
-
-
-def _env_replace(match: re.Match[str]) -> str:
-    name = match.group(1)
-    value = os.environ.get(name)
-    if value is None:
-        raise ValueError(
-            f"Environment variable '{name}' referenced in config is not set"
-        )
-    return value
 
 
 def _migrate_config(data: dict) -> dict:
@@ -117,4 +73,36 @@ def _migrate_config(data: dict) -> dict:
     exec_cfg = tools.get("exec", {})
     if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
         tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
+
+    agents = data.setdefault("agents", {})
+    defaults = agents.setdefault("defaults", {})
+    models = agents.get("models")
+
+    if not models:
+        legacy_model = defaults.get("model") or "anthropic/claude-opus-4-5"
+        legacy_provider = defaults.get("provider") or "auto"
+        agents["models"] = [
+            {
+                "id": defaults.get("modelId") or "default",
+                "name": legacy_model,
+                "provider": legacy_provider,
+                "model": legacy_model,
+                "apiKey": None,
+                "apiBase": None,
+                "extraHeaders": None,
+                "maxTokens": defaults.get("maxTokens", 8192),
+                "contextWindowTokens": defaults.get("contextWindowTokens", 65_536),
+                "temperature": defaults.get("temperature", 0.1),
+                "reasoningEffort": defaults.get("reasoningEffort"),
+                "enabled": True,
+            }
+        ]
+    else:
+        for item in models:
+            if isinstance(item, dict) and item.get("name") == "默认模型":
+                item["name"] = item.get("model") or "默认模型"
+
+    if "modelId" not in defaults:
+        first_enabled = next((item for item in agents["models"] if item.get("enabled", True)), None)
+        defaults["modelId"] = (first_enabled or agents["models"][0]).get("id", "default")
     return data
