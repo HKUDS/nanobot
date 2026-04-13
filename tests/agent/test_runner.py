@@ -74,9 +74,12 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
 
     assert result.final_content == "done"
     assert result.tools_used == ["list_dir"]
-    assert result.tool_events == [
-        {"name": "list_dir", "status": "ok", "detail": "tool result"}
-    ]
+    assert len(result.tool_events) == 1
+    evt = result.tool_events[0]
+    assert evt["name"] == "list_dir"
+    assert evt["status"] == "ok"
+    assert evt["detail"] == "tool result"
+    assert "duration_ms" in evt
 
     assistant_messages = [
         msg for msg in captured_second_call
@@ -126,12 +129,17 @@ async def test_runner_calls_hooks_in_order():
             ))
 
         async def after_iteration(self, context: AgentHookContext) -> None:
+            # Strip duration_ms from events for deterministic assertions
+            cleaned_events = [
+                {k: v for k, v in e.items() if k != "duration_ms"}
+                for e in context.tool_events
+            ]
             events.append((
                 "after_iteration",
                 context.iteration,
                 context.final_content,
                 list(context.tool_results),
-                list(context.tool_events),
+                cleaned_events,
                 context.stop_reason,
             ))
 
@@ -268,9 +276,12 @@ async def test_runner_returns_structured_tool_error():
 
     assert result.stop_reason == "tool_error"
     assert result.error == "Error: RuntimeError: boom"
-    assert result.tool_events == [
-        {"name": "list_dir", "status": "error", "detail": "boom"}
-    ]
+    assert len(result.tool_events) == 1
+    evt = result.tool_events[0]
+    assert evt["name"] == "list_dir"
+    assert evt["status"] == "error"
+    assert evt["detail"] == "boom"
+    assert "duration_ms" in evt
 
 
 @pytest.mark.asyncio

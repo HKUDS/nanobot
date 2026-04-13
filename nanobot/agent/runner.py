@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 import inspect
+import time
 from pathlib import Path
 from typing import Any
 
@@ -602,6 +603,7 @@ class AgentRunner:
                 "name": tool_call.name,
                 "status": "error",
                 "detail": "repeated external lookup blocked",
+                "duration_ms": 0,
             }
             if spec.fail_on_tool_error:
                 return lookup_error + _HINT, event, RuntimeError(lookup_error)
@@ -620,8 +622,10 @@ class AgentRunner:
                 "name": tool_call.name,
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
+                "duration_ms": 0,
             }
             return prep_error + _HINT, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
+        t0 = time.time()
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -630,20 +634,24 @@ class AgentRunner:
         except asyncio.CancelledError:
             raise
         except BaseException as exc:
+            duration_ms = round((time.time() - t0) * 1000)
             event = {
                 "name": tool_call.name,
                 "status": "error",
                 "detail": str(exc),
+                "duration_ms": duration_ms,
             }
             if spec.fail_on_tool_error:
                 return f"Error: {type(exc).__name__}: {exc}", event, exc
             return f"Error: {type(exc).__name__}: {exc}", event, None
+        duration_ms = round((time.time() - t0) * 1000)
 
         if isinstance(result, str) and result.startswith("Error"):
             event = {
                 "name": tool_call.name,
                 "status": "error",
                 "detail": result.replace("\n", " ").strip()[:120],
+                "duration_ms": duration_ms,
             }
             if spec.fail_on_tool_error:
                 return result + _HINT, event, RuntimeError(result)
@@ -655,7 +663,7 @@ class AgentRunner:
             detail = "(empty)"
         elif len(detail) > 120:
             detail = detail[:120] + "..."
-        return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
+        return result, {"name": tool_call.name, "status": "ok", "detail": detail, "duration_ms": duration_ms}, None
 
     async def _emit_checkpoint(
         self,
