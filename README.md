@@ -1498,6 +1498,75 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 - Set `enabledTools` to `[]` to register no tools from that server.
 - Set `enabledTools` to a non-empty list of names to register only that subset.
 
+#### Example: GitHub MCP Server
+
+The official GitHub MCP server works with nanobot using the same config shape as Claude Desktop / Cursor.
+If your MCP host supports remote servers, prefer GitHub's hosted endpoint:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "github": {
+        "url": "https://api.githubcopilot.com/mcp/",
+        "headers": {
+          "Authorization": "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"
+        },
+        "enabledTools": [
+          "search_repositories",
+          "search_code",
+          "get_file_contents",
+          "list_pull_requests",
+          "get_pull_request",
+          "list_issues",
+          "get_issue"
+        ]
+      }
+    }
+  }
+}
+```
+
+For local Docker-based setups, the following also works:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "github": {
+        "command": "docker",
+        "args": [
+          "run",
+          "-i",
+          "--rm",
+          "-e",
+          "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "ghcr.io/github/github-mcp-server"
+        ],
+        "env": {
+          "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+        },
+        "enabledTools": [
+          "search_repositories",
+          "search_code",
+          "get_file_contents",
+          "list_pull_requests",
+          "get_pull_request",
+          "list_issues",
+          "get_issue"
+        ]
+      }
+    }
+  }
+}
+```
+
+Notes:
+
+- nanobot automatically discovers MCP tools on startup. GitHub tools are registered with names like `mcp_github_get_issue`.
+- The startup logs printed by the GitHub MCP server are normal as long as the MCP session initializes successfully.
+- The GitHub server exposes write actions too (for example `create_repository`). Using `enabledTools` is the easiest way to keep the toolset read-only while validating your setup.
+
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
 
