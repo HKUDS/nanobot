@@ -772,6 +772,19 @@ def gateway(
         return "cli", "direct"
 
     # Create heartbeat service
+    def _drop_last_turn(session: "Session") -> None:
+        """Remove the most recent user→assistant turn from session history.
+
+        Prevents error/noise responses from poisoning future LLM context.
+        Walks backward from the end, removing messages until (and including)
+        the last user message.
+        """
+        msgs = session.messages
+        while msgs and msgs[-1].get("role") != "user":
+            msgs.pop()
+        if msgs and msgs[-1].get("role") == "user":
+            msgs.pop()
+
     async def on_heartbeat_execute(tasks: str, model_override: str | None = None) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
@@ -789,13 +802,17 @@ def gateway(
             model_override=model_override,
         )
 
-        # Keep a small tail of heartbeat history so the loop stays bounded
-        # without losing all short-term context between runs.
         session = agent.sessions.get_or_create("heartbeat")
+        result = filter_heartbeat_response(resp, tasks, suppress_errors=hb_cfg.suppress_errors)
+
+        if not result:
+            # Suppressed turn — drop it from session so the LLM never sees
+            # error messages in its history and learns to reproduce them.
+            _drop_last_turn(session)
+
         session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
         agent.sessions.save(session)
-
-        return filter_heartbeat_response(resp, tasks, suppress_errors=hb_cfg.suppress_errors)
+        return result
 
     async def on_heartbeat_notify(response: str) -> None:
         """Deliver a heartbeat response to the user's channel."""
