@@ -167,3 +167,18 @@ class TestMessageToolTurnTracking:
         tool._sent_in_turn = True
         tool.start_turn()
         assert not tool._sent_in_turn
+
+    @pytest.mark.asyncio
+    async def test_delivery_suppression_skips_send_callback(self) -> None:
+        send_callback = AsyncMock()
+        tool = MessageTool(send_callback=send_callback, default_channel="feishu", default_chat_id="chat1")
+
+        token = tool.set_delivery_suppressed(True)
+        try:
+            result = await tool.execute("Hello")
+        finally:
+            tool.reset_delivery_suppressed(token)
+
+        assert "suppressed" in result
+        send_callback.assert_not_awaited()
+        assert tool._sent_in_turn is False
