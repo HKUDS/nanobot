@@ -1717,17 +1717,17 @@ def test_sender_id_formatting():
     
     channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc"), MessageBus())
     
-    # Case 1: Username present (prefers username)
+    # Case 1: Both present (prefers descriptive name + username)
     user_both = MagicMock(id=123, username="alice", full_name="Alice Name", is_bot=False)
-    assert channel._sender_id(user_both) == "123|alice"
+    assert channel._sender_id(user_both) == "123|Alice Name (alice)"
     
     # Case 2: Only full_name present
     user_full = MagicMock(id=456, username=None, full_name="Bob Smith", is_bot=False)
     assert channel._sender_id(user_full) == "456|Bob Smith"
     
-    # Case 3: Bot status included
+    # Case 3: Bot status and both names included
     user_bot = MagicMock(id=789, username="helper_bot", full_name="Helper Bot", is_bot=True)
-    assert channel._sender_id(user_bot) == "789|helper_bot [BOT]"
+    assert channel._sender_id(user_bot) == "789|Helper Bot (helper_bot) [BOT]"
     
     # Case 4: Neither present -> just ID
     user_none = MagicMock(id=101, username=None, full_name=None, first_name=None, is_bot=False)

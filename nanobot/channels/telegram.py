@@ -749,15 +749,17 @@ class TelegramChannel(BaseChannel):
         """Build sender_id with username or full_name for allowlist matching and logging."""
         sid = str(user.id)
         is_bot = " [BOT]" if getattr(user, "is_bot", False) else ""
-        
+
+        # Use full_name (combines first and last) if available, it's more descriptive than username
+        name = getattr(user, "full_name", None) or user.first_name or ""
+        suffix = f" ({user.username})" if user.username else ""
+
+        if name:
+            return f"{sid}|{name}{suffix}{is_bot}"
+
         if user.username:
             return f"{sid}|{user.username}{is_bot}"
-        
-        # Use full_name (combines first and last) for better identification
-        name = getattr(user, "full_name", None) or user.first_name or ""
-        if name:
-            return f"{sid}|{name}{is_bot}"
-            
+
         return f"{sid}{is_bot}"
 
     @staticmethod
