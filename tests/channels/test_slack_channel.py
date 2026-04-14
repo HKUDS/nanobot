@@ -407,4 +407,3 @@ async def test_send_raises_when_named_target_cannot_be_resolved() -> None:
                 content="hello",
             )
         )
->>>>>>> upstream/main
