@@ -174,6 +174,7 @@ class DingTalkChannel(BaseChannel):
     _AUDIO_EXTS = {".amr", ".mp3", ".wav", ".ogg", ".m4a", ".aac"}
     _VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
     _ZIP_BEFORE_UPLOAD_EXTS = {".htm", ".html"}
+    _HTTP_TIMEOUT = 30.0  # default timeout for all DingTalk HTTP requests (seconds)
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -208,7 +209,7 @@ class DingTalkChannel(BaseChannel):
                 return
 
             self._running = True
-            self._http = httpx.AsyncClient()
+            self._http = httpx.AsyncClient(timeout=self._HTTP_TIMEOUT)
 
             logger.info(
                 "Initializing DingTalk Stream Client with Client ID: {}...",
@@ -264,13 +265,16 @@ class DingTalkChannel(BaseChannel):
             return None
 
         try:
-            resp = await self._http.post(url, json=data)
+            resp = await self._http.post(url, json=data, timeout=self._HTTP_TIMEOUT)
             resp.raise_for_status()
             res_data = resp.json()
             self._access_token = res_data.get("accessToken")
             # Expire 60s early to be safe
             self._token_expiry = time.time() + int(res_data.get("expireIn", 7200)) - 60
             return self._access_token
+        except httpx.TimeoutException:
+            logger.error("Timed out getting DingTalk access token ({}s)", self._HTTP_TIMEOUT)
+            return None
         except Exception as e:
             logger.error("Failed to get DingTalk access token: {}", e)
             return None
@@ -326,7 +330,7 @@ class DingTalkChannel(BaseChannel):
             if not self._http:
                 return None, None, None
             try:
-                resp = await self._http.get(media_ref, follow_redirects=True)
+                resp = await self._http.get(media_ref, follow_redirects=True, timeout=self._HTTP_TIMEOUT)
                 if resp.status_code >= 400:
                     logger.warning(
                         "DingTalk media download failed status={} ref={}",
@@ -337,6 +341,9 @@ class DingTalkChannel(BaseChannel):
                 content_type = (resp.headers.get("content-type") or "").split(";")[0].strip()
                 filename = self._guess_filename(media_ref, self._guess_upload_type(media_ref))
                 return resp.content, filename, content_type or None
+            except httpx.TimeoutException:
+                logger.error("DingTalk media download timed out ref={}", media_ref)
+                return None, None, None
             except Exception as e:
                 logger.error("DingTalk media download error ref={} err={}", media_ref, e)
                 return None, None, None
@@ -372,7 +379,7 @@ class DingTalkChannel(BaseChannel):
         files = {"media": (filename, data, mime)}
 
         try:
-            resp = await self._http.post(url, files=files)
+            resp = await self._http.post(url, files=files, timeout=self._HTTP_TIMEOUT)
             text = resp.text
             result = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
             if resp.status_code >= 400:
@@ -388,6 +395,9 @@ class DingTalkChannel(BaseChannel):
                 logger.error("DingTalk media upload missing media_id body={}", text[:500])
                 return None
             return str(media_id)
+        except httpx.TimeoutException:
+            logger.error("DingTalk media upload timed out type={}", media_type)
+            return None
         except Exception as e:
             logger.error("DingTalk media upload error type={} err={}", media_type, e)
             return None
@@ -424,7 +434,7 @@ class DingTalkChannel(BaseChannel):
             }
 
         try:
-            resp = await self._http.post(url, json=payload, headers=headers)
+            resp = await self._http.post(url, json=payload, headers=headers, timeout=self._HTTP_TIMEOUT)
             body = resp.text
             if resp.status_code != 200:
                 logger.error("DingTalk send failed msgKey={} status={} body={}", msg_key, resp.status_code, body[:500])
@@ -437,6 +447,9 @@ class DingTalkChannel(BaseChannel):
                 return False
             logger.debug("DingTalk message sent to {} with msgKey={}", chat_id, msg_key)
             return True
+        except httpx.TimeoutException:
+            logger.error("DingTalk send timed out msgKey={} ({}s)", msg_key, self._HTTP_TIMEOUT)
+            return False
         except Exception as e:
             logger.error("Error sending DingTalk message msgKey={} err={}", msg_key, e)
             return False
@@ -580,7 +593,7 @@ class DingTalkChannel(BaseChannel):
             api_url = "https://api.dingtalk.com/v1.0/robot/messageFiles/download"
             headers = {"x-acs-dingtalk-access-token": token, "Content-Type": "application/json"}
             payload = {"downloadCode": download_code, "robotCode": self.config.client_id}
-            resp = await self._http.post(api_url, json=payload, headers=headers)
+            resp = await self._http.post(api_url, json=payload, headers=headers, timeout=self._HTTP_TIMEOUT)
             if resp.status_code != 200:
                 logger.error("DingTalk get download URL failed: status={}, body={}", resp.status_code, resp.text)
                 return None
@@ -592,7 +605,7 @@ class DingTalkChannel(BaseChannel):
                 return None
 
             # Step 2: Download the file content
-            file_resp = await self._http.get(download_url, follow_redirects=True)
+            file_resp = await self._http.get(download_url, follow_redirects=True, timeout=self._HTTP_TIMEOUT)
             if file_resp.status_code != 200:
                 logger.error("DingTalk file download failed: status={}", file_resp.status_code)
                 return None
