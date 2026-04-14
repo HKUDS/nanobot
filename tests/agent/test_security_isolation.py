@@ -131,9 +131,9 @@ class TestSecurityIsolation:
         loop.tools.register(ReadFileTool(workspace=loop.workspace))
         loop.tools.register(MessageTool(send_callback=bus.publish_outbound))
         
-        captured_tools = []
+        captured_spec = []
         async def mock_run(spec: AgentRunSpec):
-            captured_tools.append(spec.tools.tool_names)
+            captured_spec.append(spec)
             return AgentRunResult(final_content="ok", messages=[])
         loop.runner.run = AsyncMock(side_effect=mock_run)
         
@@ -142,7 +142,7 @@ class TestSecurityIsolation:
         await loop._handle_inbound(msg_user)
         while any(loop._active_tasks.values()): await asyncio.sleep(0.1)
         
-        user_tools = captured_tools[0]
+        user_tools = captured_spec[0].tools.tool_names
         assert "read_file" not in user_tools
         assert "message" in user_tools # Non-CLI tool preserved
         
@@ -151,6 +151,41 @@ class TestSecurityIsolation:
         await loop._handle_inbound(msg_admin)
         while any(loop._active_tasks.values()): await asyncio.sleep(0.1)
         
-        admin_tools = captured_tools[1]
+        admin_tools = captured_spec[1].tools.tool_names
         assert "read_file" in admin_tools
         assert "message" in admin_tools
+
+        # 3. Empty sender_id (should be non-privileged by default in strict channel)
+        msg_empty = InboundMessage(channel="telegram", sender_id="", chat_id="c1", content="hi")
+        await loop._handle_inbound(msg_empty)
+        while any(loop._active_tasks.values()): await asyncio.sleep(0.1)
+        
+        empty_tools = captured_spec[2].tools.tool_names
+        assert "read_file" not in empty_tools
+
+    @pytest.mark.asyncio
+    async def test_privilege_propagation_to_context(self):
+        """Verify that is_privileged is correctly passed to ContextBuilder.build_messages."""
+        channels_config = MagicMock()
+        channels_config.model_extra = {"telegram": {"allowFrom": ["alice"]}}
+        loop, bus = _make_loop(channels_config=channels_config)
+        
+        # Mock ContextBuilder.build_messages
+        loop.context.build_messages = MagicMock(return_value=[{"role": "system", "content": "prompt"}])
+        loop.runner.run = AsyncMock(return_value=AgentRunResult(final_content="ok", messages=[]))
+        
+        # 1. Non-privileged user
+        msg_bob = InboundMessage(channel="telegram", sender_id="bob", chat_id="c1", content="hi")
+        await loop._handle_inbound(msg_bob)
+        while any(loop._active_tasks.values()): await asyncio.sleep(0.1)
+        
+        args, kwargs = loop.context.build_messages.call_args
+        assert kwargs["is_privileged"] is False
+        
+        # 2. Privileged user
+        msg_alice = InboundMessage(channel="telegram", sender_id="alice", chat_id="c1", content="hi")
+        await loop._handle_inbound(msg_alice)
+        while any(loop._active_tasks.values()): await asyncio.sleep(0.1)
+        
+        args, kwargs = loop.context.build_messages.call_args
+        assert kwargs["is_privileged"] is True

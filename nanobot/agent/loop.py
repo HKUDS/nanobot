@@ -38,8 +38,15 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import image_placeholder_text, truncate_text as truncate_text_fn
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
+from nanobot.config.schema import (
+    AgentDefaults,
+    ChannelsConfig,
+    ExecToolConfig,
+    WebToolsConfig,
+)
+
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
+    from nanobot.config.schema import ToolsConfig
     from nanobot.cron.service import CronService
 
 
@@ -188,12 +195,14 @@ class AgentLoop:
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
+        tools_config: ToolsConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 
         defaults = AgentDefaults()
         self.bus = bus
         self.channels_config = channels_config
+        self.tools_config = tools_config
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -475,13 +484,42 @@ class AgentLoop:
 
         # Point 1: Filter tools if the user is not privileged (explicitly in allowFrom).
         run_tools = self.tools
-        if sender_id and not self._is_privileged(channel, sender_id):
+        is_privileged = self._is_privileged(channel, sender_id)
+        if not is_privileged:
             run_tools = ToolRegistry()
+            admin_tools = self.CLI_TOOLS
+            if (
+                self.tools_config
+                and self.tools_config.admin_tools is not None
+            ):
+                admin_tools = frozenset(self.tools_config.admin_tools)
+
             for name in self.tools.tool_names:
-                # We block CLI_TOOLS and MCP tools for unprivileged users.
-                if name not in self.CLI_TOOLS and not name.startswith("mcp_"):
+                # We block admin tools and MCP tools for unprivileged users.
+                if name not in admin_tools and not name.startswith("mcp_"):
                     if tool := self.tools.get(name):
                         run_tools.register(tool)
+
+        async def _log_unauthorized_tool(payload: dict[str, Any]) -> None:
+            await _checkpoint(payload)
+            if not is_privileged and payload.get("phase") == "awaiting_tools":
+                for tc in payload.get("pending_tool_calls", []):
+                    name = tc.get("function", {}).get("name")
+                    # Use the same admin_tools set here (fall back to CLI_TOOLS)
+                    check_tools = self.CLI_TOOLS
+                    if (
+                        self.tools_config
+                        and self.tools_config.admin_tools is not None
+                    ):
+                        check_tools = frozenset(self.tools_config.admin_tools)
+
+                    if name in check_tools or (name and name.startswith("mcp_")):
+                        logger.warning(
+                            "Unauthorized tool call attempt by {}: {}({})",
+                            sender_id,
+                            name,
+                            tc.get("function", {}).get("arguments", ""),
+                        )
 
         result = await self.runner.run(AgentRunSpec(
             initial_messages=initial_messages,
@@ -498,7 +536,7 @@ class AgentLoop:
             context_block_limit=self.context_block_limit,
             provider_retry_mode=self.provider_retry_mode,
             progress_callback=on_progress,
-            checkpoint_callback=_checkpoint,
+            checkpoint_callback=_log_unauthorized_tool,
             injection_callback=_drain_pending,
         ))
         self._last_usage = result.usage
@@ -728,12 +766,14 @@ class AgentLoop:
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
+            is_privileged = self._is_privileged(channel, msg.sender_id)
 
             messages = self.context.build_messages(
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 session_summary=pending,
                 current_role=current_role,
+                is_privileged=is_privileged,
             )
             final_content, _, all_msgs, _, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
@@ -790,6 +830,7 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=0)
+        is_privileged = self._is_privileged(msg.channel, msg.sender_id)
 
         initial_messages = self.context.build_messages(
             history=history,
@@ -798,6 +839,7 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            is_privileged=is_privileged,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
