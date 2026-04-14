@@ -159,6 +159,12 @@ class AgentLoop:
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
 
+    # Tools that require explicit allowFrom privilege in the channel config.
+    CLI_TOOLS = frozenset({
+        "read_file", "write_file", "edit_file", "list_dir", "grep", "glob",
+        "exec", "notebook_edit", "spawn"
+    })
+
     def __init__(
         self,
         bus: MessageBus,
@@ -355,11 +361,50 @@ class AgentLoop:
 
         return format_tool_hints(tool_calls)
 
+    def _is_strict_policy(self, channel_name: str) -> bool:
+        """True if the channel has an explicit allow-list of user IDs."""
+        if channel_name == "cli":
+            return True
+        if not self.channels_config:
+            return False
+        cfg = self.channels_config.model_extra.get(channel_name)
+        if not isinstance(cfg, dict):
+            return False
+        allow_from = cfg.get("allowFrom") or cfg.get("allow_from", [])
+        if not allow_from:
+            return False
+        # If it's just ["*"], it's not a strict policy (back to old logic).
+        if len(allow_from) == 1 and allow_from[0] == "*":
+            return False
+        return True
+
+    def _is_privileged(self, channel_name: str, sender_id: str) -> bool:
+        """Check if sender_id has explicit permission to use CLI tools in this channel."""
+        if channel_name == "cli":
+            return True
+        if not self._is_strict_policy(channel_name):
+            # Back to old logic: if no strict allow-list, everyone who can talk is privileged.
+            return True
+        if not self.channels_config or not sender_id:
+            return False
+        cfg = self.channels_config.model_extra.get(channel_name)
+        if not isinstance(cfg, dict):
+            return False
+        allow_from = cfg.get("allowFrom") or cfg.get("allow_from", [])
+        # We grant CLI tool access if the sender_id is explicitly listed.
+        return str(sender_id) in allow_from
+
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
         if self._unified_session and not msg.session_key_override:
             return UNIFIED_SESSION_KEY
-        return msg.session_key
+        if msg.session_key_override:
+            return msg.session_key_override
+        if not self._is_strict_policy(msg.channel):
+            # Point 4: Back to old logic (group-based session) if not strict.
+            return f"{msg.channel}:{msg.chat_id}"
+        # Point 2: Ensure session isolation by including sender_id for strict channels.
+        return f"{msg.channel}:{msg.chat_id}:{msg.sender_id}"
 
     async def _run_agent_loop(
         self,
@@ -371,6 +416,7 @@ class AgentLoop:
         session: Session | None = None,
         channel: str = "cli",
         chat_id: str = "direct",
+        sender_id: str | None = None,
         message_id: str | None = None,
         pending_queue: asyncio.Queue | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
@@ -427,9 +473,19 @@ class AgentLoop:
                 items.append({"role": "user", "content": merged})
             return items
 
+        # Point 1: Filter tools if the user is not privileged (explicitly in allowFrom).
+        run_tools = self.tools
+        if sender_id and not self._is_privileged(channel, sender_id):
+            run_tools = ToolRegistry()
+            for name in self.tools.tool_names:
+                # We block CLI_TOOLS and MCP tools for unprivileged users.
+                if name not in self.CLI_TOOLS and not name.startswith("mcp_"):
+                    if tool := self.tools.get(name):
+                        run_tools.register(tool)
+
         result = await self.runner.run(AgentRunSpec(
             initial_messages=initial_messages,
-            tools=self.tools,
+            tools=run_tools,
             model=self.model,
             max_iterations=self.max_iterations,
             max_tool_result_chars=self.max_tool_result_chars,
@@ -534,7 +590,10 @@ class AgentLoop:
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
-        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        
+        # Point 3: Group-level queueing. Use channel:chat_id for the lock.
+        gate_key = f"{msg.channel}:{msg.chat_id}"
+        lock = self._session_locks.setdefault(gate_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
 
         # Register a pending queue so follow-up messages for this session are
@@ -678,6 +737,7 @@ class AgentLoop:
             )
             final_content, _, all_msgs, _, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
+                sender_id=msg.sender_id,
                 message_id=msg.metadata.get("message_id"),
             )
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -774,6 +834,7 @@ class AgentLoop:
             session=session,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            sender_id=msg.sender_id,
             message_id=msg.metadata.get("message_id"),
             pending_queue=pending_queue,
         )
@@ -1004,13 +1065,14 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        sender_id: str = "user",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        msg = InboundMessage(channel=channel, sender_id=sender_id, chat_id=chat_id, content=content)
         return await self._process_message(
             msg,
             session_key=session_key,
