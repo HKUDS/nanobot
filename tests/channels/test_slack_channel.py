@@ -271,6 +271,38 @@ async def test_send_updates_reaction_on_origin_channel_for_cross_channel_send() 
 
 
 @pytest.mark.asyncio
+async def test_send_does_not_reuse_origin_thread_ts_for_cross_channel_send() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    fake_web._conversations_pages = [
+        {
+            "channels": [{"id": "C999", "name": "channel_x"}],
+            "response_metadata": {"next_cursor": ""},
+        }
+    ]
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="channel_x",
+            content="done",
+            metadata={
+                "slack": {
+                    "event": {"ts": "1700000000.000100", "channel": "C_ORIGIN"},
+                    "thread_ts": "1700000000.000200",
+                    "channel_type": "channel",
+                },
+            },
+        )
+    )
+
+    assert fake_web.chat_post_calls == [
+        {"channel": "C999", "text": "done\n", "thread_ts": None}
+    ]
+
+
+@pytest.mark.asyncio
 async def test_send_raises_when_named_target_cannot_be_resolved() -> None:
     channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
     fake_web = _FakeAsyncWebClient()

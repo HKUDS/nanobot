@@ -120,8 +120,13 @@ class SlackChannel(BaseChannel):
             slack_meta = msg.metadata.get("slack", {}) if msg.metadata else {}
             thread_ts = slack_meta.get("thread_ts")
             channel_type = slack_meta.get("channel_type")
+            origin_chat_id = str((slack_meta.get("event", {}) or {}).get("channel") or msg.chat_id)
             # Slack DMs don't use threads; channel/group replies may keep thread_ts.
-            thread_ts_param = thread_ts if thread_ts and channel_type != "im" else None
+            thread_ts_param = (
+                thread_ts
+                if thread_ts and channel_type != "im" and target_chat_id == origin_chat_id
+                else None
+            )
 
             # Slack rejects empty text payloads. Keep media-only messages media-only,
             # but send a single blank message when the bot has no text or files to send.
@@ -145,7 +150,7 @@ class SlackChannel(BaseChannel):
             # Update reaction emoji when the final (non-progress) response is sent
             if not (msg.metadata or {}).get("_progress"):
                 event = slack_meta.get("event", {})
-                await self._update_react_emoji(event.get("channel") or msg.chat_id, event.get("ts"))
+                await self._update_react_emoji(origin_chat_id, event.get("ts"))
 
         except Exception as e:
             logger.error("Error sending Slack message: {}", e)
