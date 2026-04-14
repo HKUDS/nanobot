@@ -77,7 +77,10 @@ class ChannelManager:
         for name, ch in self.channels.items():
             cfg = ch.config
             if isinstance(cfg, dict):
-                allow = cfg.get("allow_from") or cfg.get("allowFrom")
+                if "allow_from" in cfg:
+                    allow = cfg.get("allow_from")
+                else:
+                    allow = cfg.get("allowFrom")
             else:
                 allow = getattr(cfg, "allow_from", None)
             if allow == []:

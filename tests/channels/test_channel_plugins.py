@@ -646,7 +646,10 @@ class _ChannelWithAllowFrom(BaseChannel):
 
     def __init__(self, config, bus, allow_from):
         super().__init__(config, bus)
-        self.config.allow_from = allow_from
+        if isinstance(self.config, dict):
+            self.config["allow_from"] = allow_from
+        else:
+            self.config.allow_from = allow_from
 
     async def start(self) -> None:
         pass
@@ -712,6 +715,25 @@ async def test_validate_allow_from_passes_with_asterisk():
 
     # Should not raise
     mgr._validate_allow_from()
+
+
+@pytest.mark.asyncio
+async def test_validate_allow_from_raises_on_empty_dict_allow_from():
+    """_validate_allow_from should reject empty dict-backed allow_from lists."""
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.channels = {"test": _ChannelWithAllowFrom({"enabled": True}, None, [])}
+    mgr._dispatch_task = None
+
+    with pytest.raises(SystemExit) as exc_info:
+        mgr._validate_allow_from()
+
+    assert "empty allowFrom" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
