@@ -290,7 +290,6 @@ async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | 
 |------|---------|
 | `_stream_delta: True` | A content chunk (delta contains the new text) |
 | `_stream_end: True` | Streaming finished (delta is empty) |
-| `_resuming: True` | More streaming rounds coming (e.g. tool call then another response) |
 
 ### Example: Webhook with Streaming
 
