@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from contextlib import suppress
 from typing import Any
 
 from aiohttp import web
@@ -175,21 +176,48 @@ async def handle_health(request: web.Request) -> web.Response:
 # App factory
 # ---------------------------------------------------------------------------
 
-def create_app(agent_loop, model_name: str = "nanobot", request_timeout: float = 120.0) -> web.Application:
+def create_app(
+    agent_loop,
+    model_name: str = "nanobot",
+    request_timeout: float = 120.0,
+    channel_manager: Any | None = None,
+) -> web.Application:
     """Create the aiohttp application.
 
     Args:
         agent_loop: An initialized AgentLoop instance.
         model_name: Model name reported in responses.
         request_timeout: Per-request timeout in seconds.
+        channel_manager: Optional ChannelManager used to dispatch outbound
+            message-tool sends to real chat channels while the API server runs.
     """
     app = web.Application()
     app["agent_loop"] = agent_loop
     app["model_name"] = model_name
     app["request_timeout"] = request_timeout
     app["session_locks"] = {}  # per-user locks, keyed by session_key
+    app["channel_manager"] = channel_manager
+    app["channel_manager_task"] = None
+
+    async def _start_channels(_app: web.Application) -> None:
+        manager = _app.get("channel_manager")
+        if manager is None:
+            return
+        _app["channel_manager_task"] = asyncio.create_task(manager.start_all())
+
+    async def _stop_channels(_app: web.Application) -> None:
+        manager = _app.get("channel_manager")
+        task = _app.get("channel_manager_task")
+        if manager is not None:
+            await manager.stop_all()
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
     app.router.add_get("/v1/models", handle_models)
     app.router.add_get("/health", handle_health)
+    app.on_startup.append(_start_channels)
+    app.on_cleanup.append(_stop_channels)
     return app

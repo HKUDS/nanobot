@@ -776,10 +776,16 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         async def close_mcp(self) -> None:
             return None
 
-    def _fake_create_app(agent_loop, model_name: str, request_timeout: float):
+    class _FakeChannelManager:
+        def __init__(self, _config, _bus) -> None:
+            self.enabled_channels = ["email"]
+            seen["channel_manager"] = self
+
+    def _fake_create_app(agent_loop, model_name: str, request_timeout: float, channel_manager=None):
         seen["agent_loop"] = agent_loop
         seen["model_name"] = model_name
         seen["request_timeout"] = request_timeout
+        seen["create_app_channel_manager"] = channel_manager
         return _FakeApiApp()
 
     def _fake_run_app(api_app, host: str, port: int, print):
@@ -794,6 +800,7 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         session_manager=lambda _workspace: object(),
     )
     monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
     monkeypatch.setattr("nanobot.api.server.create_app", _fake_create_app)
     monkeypatch.setattr("aiohttp.web.run_app", _fake_run_app)
 
@@ -817,6 +824,19 @@ def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Pa
     assert isinstance(result.exception, _StopGatewayError)
     assert seen["config_path"] == config_file.resolve()
     assert seen["workspace"] == Path(config.agents.defaults.workspace)
+
+
+def test_serve_passes_channel_manager_to_api_app(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    seen: dict[str, object] = {}
+
+    _patch_serve_runtime(monkeypatch, config, seen)
+
+    result = runner.invoke(app, ["serve", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert seen["create_app_channel_manager"] is seen["channel_manager"]
 
 
 def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) -> None:
