@@ -740,9 +740,13 @@ class TelegramChannel(BaseChannel):
 
     @staticmethod
     def _sender_id(user) -> str:
-        """Build sender_id with username for allowlist matching."""
+        """Build sender_id with username or first_name for allowlist matching and logging."""
         sid = str(user.id)
-        return f"{sid}|{user.username}" if user.username else sid
+        if user.username:
+            return f"{sid}|{user.username}"
+        if user.first_name:
+            return f"{sid}|{user.first_name}"
+        return sid
 
     @staticmethod
     def _derive_topic_session_key(message) -> str | None:

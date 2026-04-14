@@ -1707,3 +1707,23 @@ async def test_send_text_bad_request_plain_fallback_exhausted() -> None:
     # so HTML fails after 1 attempt → fallback to plain also fails after 1 attempt.
     # Before the fix: 2 total. After the fix: still 2 (BadRequest SHOULD fallback).
     assert call_count == 2, f"Expected 2 calls (1 HTML + 1 plain), got {call_count}"
+
+def test_sender_id_with_first_name():
+    """_sender_id should include first_name if username is missing."""
+    from nanobot.channels.telegram import TelegramChannel, TelegramConfig
+    from nanobot.bus.queue import MessageBus
+    from unittest.mock import MagicMock
+    
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc"), MessageBus())
+    
+    # Case 1: Both username and first_name present -> prefer username
+    user_both = MagicMock(id=123, username="alice", first_name="AliceName")
+    assert channel._sender_id(user_both) == "123|alice"
+    
+    # Case 2: Only first_name present -> use first_name
+    user_first = MagicMock(id=456, username=None, first_name="Bob")
+    assert channel._sender_id(user_first) == "456|Bob"
+    
+    # Case 3: Neither present -> just ID
+    user_none = MagicMock(id=789, username=None, first_name=None)
+    assert channel._sender_id(user_none) == "789"
