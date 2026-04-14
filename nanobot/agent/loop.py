@@ -400,8 +400,16 @@ class AgentLoop:
         if not isinstance(cfg, dict):
             return False
         allow_from = cfg.get("allowFrom") or cfg.get("allow_from", [])
-        # We grant CLI tool access if the sender_id is explicitly listed.
-        return str(sender_id) in allow_from
+        
+        # Support "id|name" format by checking both the full string and just the ID part
+        sender_str = str(sender_id)
+        is_allowed = sender_str in allow_from
+        if not is_allowed and "|" in sender_str:
+            sid = sender_str.split("|")[0]
+            is_allowed = sid in allow_from
+            
+        logger.debug("Privilege check for {}:{}: {}", channel_name, sender_id, is_allowed)
+        return is_allowed
 
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""

@@ -122,6 +122,11 @@ class TestSecurityIsolation:
         assert loop._is_privileged("telegram", "alice") is True
         assert loop._is_privileged("telegram", "bob") is False
 
+        # 5. Telegram-style ID|Name format
+        channels_config.model_extra = {"telegram": {"allowFrom": ["307822770"]}}
+        assert loop._is_privileged("telegram", "307822770|toan huynh (J4k3n_7y)") is True
+        assert loop._is_privileged("telegram", "999|unknown user") is False
+
     @pytest.mark.asyncio
     async def test_tool_filtering_execution(self):
         """Point 1: Filter tools if the user is not privileged."""
