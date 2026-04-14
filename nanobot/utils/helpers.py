@@ -17,11 +17,26 @@ from loguru import logger
 def strip_think(text: str) -> str:
     """Remove thinking blocks and any unclosed trailing tag."""
     text = re.sub(r"<think>[\s\S]*?</think>", "", text)
-    text = re.sub(r"^\s*<think>[\s\S]*$", "", text)
+    text = re.sub(r"<think>[\s\S]*$", "", text)  # Handle unclosed tags anywhere
     # Gemma 4 and similar models use <thought>...</thought> blocks
     text = re.sub(r"<thought>[\s\S]*?</thought>", "", text)
-    text = re.sub(r"^\s*<thought>[\s\S]*$", "", text)
+    text = re.sub(r"<thought>[\s\S]*$", "", text)  # Handle unclosed tags anywhere
     return text.strip()
+
+
+def extract_thinking(text: str) -> str:
+    """Extract thinking content from text (including unclosed trailing tags)."""
+    thinking_parts = []
+    
+    # Extract <think>...</think> blocks
+    for match in re.finditer(r"<think>([\s\S]*?)(?:</think>|$)", text):
+        thinking_parts.append(match.group(1))
+    
+    # Extract <thought>...</thought> blocks
+    for match in re.finditer(r"<thought>([\s\S]*?)(?:</thought>|$)", text):
+        thinking_parts.append(match.group(1))
+    
+    return "".join(thinking_parts)
 
 
 def detect_image_mime(data: bytes) -> str | None:

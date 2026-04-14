@@ -80,6 +80,11 @@ discord = [
 langsmith = [
     "langsmith>=0.1.0",
 ]
+web = [
+    "fastapi>=0.115.0,<1.0.0",
+    "uvicorn[standard]>=0.34.0,<1.0.0",
+    "python-multipart>=0.0.20,<1.0.0",
+]
 pdf = [
     "pymupdf>=1.25.0",
 ]

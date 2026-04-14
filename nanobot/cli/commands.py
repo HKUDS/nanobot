@@ -425,11 +425,15 @@ def _make_provider(config: Config):
             console.print("Use the model field to specify the deployment name.")
             raise typer.Exit(1)
     elif backend == "openai_compat" and not model.startswith("bedrock/"):
-        needs_key = not (p and p.api_key)
+        # Check for API key in config or OPENAI_API_KEY environment variable
+        has_key = p and p.api_key
+        has_env_key = bool(os.environ.get("OPENAI_API_KEY"))
+        needs_key = not (has_key or has_env_key)
         exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
         if needs_key and not exempt:
             console.print("[red]Error: No API key configured.[/red]")
             console.print("Set one in ~/.nanobot/config.json under providers section")
+            console.print("Or set OPENAI_API_KEY environment variable.")
             raise typer.Exit(1)
 
     # --- instantiation by backend ---
@@ -1447,6 +1451,81 @@ def _login_github_copilot() -> None:
         console.print(f"[green]✓ Authenticated with GitHub Copilot[/green]  [dim]{account}[/dim]")
     except Exception as e:
         console.print(f"[red]Authentication error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+# ============================================================================
+# Web UI Command
+# ============================================================================
+
+
+@app.command()
+def web(
+    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind to"),
+    port: int = typer.Option(18790, "--port", "-p", help="Web UI port"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    auth_token: str | None = typer.Option(None, "--auth-token", help="Authentication token (or set NANOBOT_WEB_AUTH_TOKEN env var)"),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug mode"),
+):
+    """Start the nanobot web UI."""
+    from nanobot.config.loader import get_config_path
+
+    config_path = None
+    if config:
+        config_path = Path(config).expanduser().resolve()
+        # Don't fail if config doesn't exist - Web UI can create it
+        if not config_path.exists():
+            console.print(f"[yellow]Config file will be created at: {config_path}[/yellow]")
+    else:
+        config_path = get_config_path()
+        if not config_path.exists():
+            console.print(f"[yellow]No config found. Web UI will create default config at: {config_path}[/yellow]")
+
+    workspace_path = None
+    if workspace:
+        workspace_path = Path(workspace).expanduser().resolve()
+    else:
+        # Default workspace path
+        workspace_path = Path("~/.nanobot/workspace").expanduser()
+
+    # Ensure workspace directory exists
+    workspace_path.mkdir(parents=True, exist_ok=True)
+
+    # Set auth token from argument or environment
+    if auth_token:
+        os.environ["NANOBOT_WEB_AUTH_TOKEN"] = auth_token
+
+    console.print(f"{__logo__} Starting nanobot Web UI")
+    console.print(f"[dim]Config: {config_path}[/dim]")
+    console.print(f"[dim]Workspace: {workspace_path}[/dim]")
+    console.print(f"[dim]Host: {host}[/dim]")
+    console.print(f"[dim]Port: {port}[/dim]")
+
+    if os.environ.get("NANOBOT_WEB_AUTH_TOKEN"):
+        console.print("[dim]Authentication: Enabled[/dim]")
+    else:
+        console.print("[yellow]Warning: No authentication token set. Anyone with access to the URL can use the web UI.[/yellow]")
+        console.print("[dim]Set NANOBOT_WEB_AUTH_TOKEN environment variable or use --auth-token to enable authentication.[/dim]")
+
+    console.print()
+    console.print(f"[green]✓ Web UI available at: http://localhost:{port}[/green]")
+    console.print()
+    console.print("[dim]Use the Configuration page to set up your API keys and model.[/dim]")
+    console.print()
+
+    try:
+        from nanobot.web.server import run_server
+        run_server(host=host, port=port, config_path=config_path, workspace_path=workspace_path, debug=debug)
+    except ImportError as e:
+        console.print(f"[red]Error: FastAPI is not installed.[/red]")
+        console.print("Install the web dependencies with: pip install nanobot-ai[web]")
+        console.print(f"[dim]Details: {e}[/dim]")
+        raise typer.Exit(1)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Web UI stopped by user.[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error starting web UI: {e}[/red]")
         raise typer.Exit(1)
 
 

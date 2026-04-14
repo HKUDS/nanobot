@@ -11,6 +11,11 @@ from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
+try:
+    from builtins import BaseExceptionGroup
+except ImportError:
+    BaseExceptionGroup = Exception  # Python < 3.11
+
 from loguru import logger
 
 from nanobot.agent.autocompact import AutoCompact
@@ -56,6 +61,7 @@ class _LoopHook(AgentHook):
         agent_loop: AgentLoop,
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         *,
         channel: str = "cli",
@@ -66,22 +72,35 @@ class _LoopHook(AgentHook):
         self._loop = agent_loop
         self._on_progress = on_progress
         self._on_stream = on_stream
+        self._on_thinking = on_thinking
         self._on_stream_end = on_stream_end
         self._channel = channel
         self._chat_id = chat_id
         self._message_id = message_id
         self._stream_buf = ""
+        self._thinking_buf = ""
 
     def wants_streaming(self) -> bool:
-        return self._on_stream is not None
+        return self._on_stream is not None or self._on_thinking is not None
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
-        from nanobot.utils.helpers import strip_think
+        from nanobot.utils.helpers import extract_thinking, strip_think
 
-        prev_clean = strip_think(self._stream_buf)
         self._stream_buf += delta
+        
+        # Extract thinking content
+        thinking_delta = extract_thinking(self._stream_buf)
+        if thinking_delta and self._on_thinking:
+            # Get only the new thinking portion
+            prev_thinking = extract_thinking(self._stream_buf[:-len(delta)] if delta else "")
+            new_thinking = thinking_delta[len(prev_thinking):]
+            if new_thinking:
+                await self._on_thinking(new_thinking)
+        
+        # Extract clean content (without thinking)
+        prev_clean = strip_think(self._stream_buf[:-len(delta)] if delta else "")
         new_clean = strip_think(self._stream_buf)
-        incremental = new_clean[len(prev_clean) :]
+        incremental = new_clean[len(prev_clean):]
         if incremental and self._on_stream:
             await self._on_stream(incremental)
 
@@ -340,6 +359,7 @@ class AgentLoop:
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         *,
         session: Session | None = None,
@@ -351,6 +371,7 @@ class AgentLoop:
         """Run the agent iteration loop.
 
         *on_stream*: called with each content delta during streaming.
+        *on_thinking*: called with each thinking/reasoning delta during streaming.
         *on_stream_end(resuming)*: called when a streaming session finishes.
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
@@ -361,6 +382,7 @@ class AgentLoop:
             self,
             on_progress=on_progress,
             on_stream=on_stream,
+            on_thinking=on_thinking,
             on_stream_end=on_stream_end,
             channel=channel,
             chat_id=chat_id,
@@ -511,7 +533,7 @@ class AgentLoop:
         try:
             async with lock, gate:
                 try:
-                    on_stream = on_stream_end = None
+                    on_stream = on_thinking = on_stream_end = None
                     if msg.metadata.get("_wants_stream"):
                         # Split one answer into distinct stream segments.
                         stream_base_id = f"{msg.session_key}:{time.time_ns()}"
@@ -523,6 +545,16 @@ class AgentLoop:
                         async def on_stream(delta: str) -> None:
                             meta = dict(msg.metadata or {})
                             meta["_stream_delta"] = True
+                            meta["_stream_id"] = _current_stream_id()
+                            await self.bus.publish_outbound(OutboundMessage(
+                                channel=msg.channel, chat_id=msg.chat_id,
+                                content=delta,
+                                metadata=meta,
+                            ))
+
+                        async def on_thinking(delta: str) -> None:
+                            meta = dict(msg.metadata or {})
+                            meta["_thinking_delta"] = True
                             meta["_stream_id"] = _current_stream_id()
                             await self.bus.publish_outbound(OutboundMessage(
                                 channel=msg.channel, chat_id=msg.chat_id,
@@ -544,7 +576,7 @@ class AgentLoop:
                             stream_segment += 1
 
                     response = await self._process_message(
-                        msg, on_stream=on_stream, on_stream_end=on_stream_end,
+                        msg, on_stream=on_stream, on_thinking=on_thinking, on_stream_end=on_stream_end,
                         pending_queue=pending,
                     )
                     if response is not None:
@@ -612,6 +644,7 @@ class AgentLoop:
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         pending_queue: asyncio.Queue | None = None,
     ) -> OutboundMessage | None:
@@ -728,6 +761,7 @@ class AgentLoop:
             initial_messages,
             on_progress=on_progress or _bus_progress,
             on_stream=on_stream,
+            on_thinking=on_thinking,
             on_stream_end=on_stream_end,
             session=session,
             channel=msg.channel,
@@ -965,6 +999,7 @@ class AgentLoop:
         media: list[str] | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
@@ -978,5 +1013,6 @@ class AgentLoop:
             session_key=session_key,
             on_progress=on_progress,
             on_stream=on_stream,
+            on_thinking=on_thinking,
             on_stream_end=on_stream_end,
         )

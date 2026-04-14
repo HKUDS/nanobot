@@ -17,13 +17,13 @@ WORKDIR /app
 # Install Python dependencies first (cached layer)
 COPY pyproject.toml README.md LICENSE ./
 RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
-    uv pip install --system --no-cache . && \
+    uv pip install --system --no-cache ".[web]" && \
     rm -rf nanobot bridge
 
 # Copy the full source and install
 COPY nanobot/ nanobot/
 COPY bridge/ bridge/
-RUN uv pip install --system --no-cache .
+RUN uv pip install --system --no-cache ".[web]"
 
 # Build the WhatsApp bridge
 WORKDIR /app/bridge
@@ -43,8 +43,12 @@ RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/ent
 USER nanobot
 ENV HOME=/home/nanobot
 
-# Gateway default port
+# Web UI port (can be overridden by PORT env var)
+ENV PORT=18790
+# Mode: gateway or web (default to web for UI access)
+ENV MODE=web
 EXPOSE 18790
 
-ENTRYPOINT ["entrypoint.sh"]
-CMD ["status"]
+# Use shell form to allow environment variable expansion
+# MODE=web starts the web UI, MODE=gateway starts the gateway
+CMD exec sh -c 'nanobot "$MODE" --port "$PORT"'
