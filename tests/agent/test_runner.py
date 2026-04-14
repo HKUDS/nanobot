@@ -643,10 +643,208 @@ def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch
 
     trimmed = runner._snip_history(spec, messages)
 
-    assert trimmed == [
+    assert trimmed[0] == {"role": "system", "content": "system"}
+    # _fixup_messages inserts a user placeholder when no user message exists
+    assert any(m.get("role") == "user" for m in trimmed)
+    assert trimmed[-1] == {"role": "assistant", "content": "after tool"}
+
+
+def test_snip_history_soft_consolidation_when_summary_fits(monkeypatch):
+    """When over budget, _snip_history should try soft consolidation first:
+    summarize the older half and keep the newer half."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    # _summarize_evicted calls provider.chat — mock it
+    provider.chat = AsyncMock(return_value=LLMResponse(content="Summary of older conversation.", tool_calls=[]))
+
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    runner = AgentRunner(provider)
+
+    messages = [
         {"role": "system", "content": "system"},
-        {"role": "assistant", "content": "after tool"},
+        {"role": "user", "content": "old user 1"},
+        {"role": "assistant", "content": "old assistant 1"},
+        {"role": "user", "content": "old user 2"},
+        {"role": "assistant", "content": "old assistant 2"},
+        {"role": "user", "content": "new user 1"},
+        {"role": "assistant", "content": "new assistant 1"},
+        {"role": "user", "content": "new user 2"},
+        {"role": "assistant", "content": "new assistant 2"},
     ]
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=500,
+    )
+
+    call_count = [0]
+
+    def fake_estimate_chain(*_args, **_kwargs):
+        call_count[0] += 1
+        # First call: over budget (600 > 500)
+        # Second call (after consolidation): fits (300 <= 500)
+        return (600, None) if call_count[0] == 1 else (300, None)
+
+    monkeypatch.setattr("nanobot.agent.runner.estimate_prompt_tokens_chain", fake_estimate_chain)
+    monkeypatch.setattr("nanobot.agent.runner.estimate_message_tokens", lambda msg: 50)
+
+    trimmed = runner._snip_history(spec, messages)
+
+    # Should contain a summary message and the newer half
+    assert any("[Previous conversation summary]" in m.get("content", "") for m in trimmed)
+    # The system message should still be first
+    assert trimmed[0]["role"] == "system"
+    # Newer messages should be preserved
+    assert any(m.get("content") == "new assistant 2" for m in trimmed)
+
+
+def test_snip_history_falls_back_to_hard_snip_when_summary_still_over_budget(monkeypatch):
+    """When soft consolidation result is still over budget, should fall back to hard snip."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    provider.chat = AsyncMock(return_value=LLMResponse(
+        content="This is a very long summary that doesn't help reduce size enough " * 10,
+        tool_calls=[],
+    ))
+
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    runner = AgentRunner(provider)
+
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "old user"},
+        {"role": "assistant", "content": "old assistant"},
+        {"role": "user", "content": "new user"},
+        {"role": "assistant", "content": "new assistant"},
+    ]
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=200,
+    )
+
+    # Always return over budget
+    monkeypatch.setattr("nanobot.agent.runner.estimate_prompt_tokens_chain", lambda *_a, **_k: (600, None))
+    monkeypatch.setattr("nanobot.agent.runner.estimate_message_tokens", lambda msg: 50)
+
+    trimmed = runner._snip_history(spec, messages)
+
+    # Should have applied hard snip — result must be shorter than input
+    non_sys_trimmed = [m for m in trimmed if m.get("role") != "system"]
+    non_sys_original = [m for m in messages if m.get("role") != "system"]
+    assert len(non_sys_trimmed) <= len(non_sys_original)
+    # Must have at least one user message
+    assert any(m.get("role") == "user" for m in trimmed)
+
+
+def test_snip_history_hard_snip_when_summary_fails(monkeypatch):
+    """When _summarize_evicted returns None, should fall back to pure hard snip."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    provider.chat = AsyncMock(side_effect=Exception("LLM unavailable"))
+
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    runner = AgentRunner(provider)
+
+    # Make messages long enough (>1500 chars) so _summarize_evicted actually calls LLM
+    long_content = "x" * 800
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": f"old user {long_content}"},
+        {"role": "assistant", "content": f"old assistant {long_content}"},
+        {"role": "user", "content": "new user"},
+        {"role": "assistant", "content": "new assistant"},
+    ]
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=200,
+    )
+
+    monkeypatch.setattr("nanobot.agent.runner.estimate_prompt_tokens_chain", lambda *_a, **_k: (600, None))
+    monkeypatch.setattr("nanobot.agent.runner.estimate_message_tokens", lambda msg: 50)
+
+    trimmed = runner._snip_history(spec, messages)
+
+    # No summary message should exist (LLM call failed)
+    assert not any("[Previous conversation summary]" in m.get("content", "") for m in trimmed)
+    # Should still have system + some messages
+    assert trimmed[0]["role"] == "system"
+    assert any(m.get("role") == "user" for m in trimmed)
+
+
+def test_fixup_messages_inserts_user_placeholder():
+    """_fixup_messages should insert a user placeholder when no user message exists."""
+    from nanobot.agent.runner import AgentRunner
+
+    msgs = [
+        {"role": "assistant", "content": "hello"},
+        {"role": "assistant", "content": "world"},
+    ]
+    result = AgentRunner._fixup_messages(msgs)
+    assert result[0]["role"] == "user"
+    assert "(continuing previous conversation)" in result[0]["content"]
+
+
+def test_fixup_messages_preserves_user_start():
+    """_fixup_messages should not insert a placeholder when user message exists."""
+    from nanobot.agent.runner import AgentRunner
+
+    msgs = [
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "world"},
+    ]
+    result = AgentRunner._fixup_messages(msgs)
+    assert result[0] == {"role": "user", "content": "hello"}
+    assert len(result) == 2
+
+
+def test_snip_history_returns_original_when_under_budget(monkeypatch):
+    """When estimate is under budget, messages should be returned unchanged."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    runner = AgentRunner(provider)
+
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "hello"},
+        {"role": "assistant", "content": "world"},
+    ]
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=500,
+    )
+
+    monkeypatch.setattr("nanobot.agent.runner.estimate_prompt_tokens_chain", lambda *_a, **_k: (100, None))
+
+    result = runner._snip_history(spec, messages)
+    assert result is messages  # identity check — no modification
 
 
 @pytest.mark.asyncio

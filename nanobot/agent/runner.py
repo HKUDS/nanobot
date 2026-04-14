@@ -884,63 +884,105 @@ class AgentRunner:
         return updated
 
     def _snip_history(
-        self,
-        spec: AgentRunSpec,
-        messages: list[dict[str, Any]],
+        self, spec: AgentRunSpec, messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         if not messages or not spec.context_window_tokens:
             return messages
-
-        provider_max_tokens = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
-        max_output = spec.max_tokens if isinstance(spec.max_tokens, int) else (
-            provider_max_tokens if isinstance(provider_max_tokens, int) else 4096
-        )
-        budget = spec.context_block_limit or (
-            spec.context_window_tokens - max_output - _SNIP_SAFETY_BUFFER
-        )
+        provider_max = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
+        max_output = spec.max_tokens if isinstance(spec.max_tokens, int) else (provider_max if isinstance(provider_max, int) else 4096)
+        budget = spec.context_block_limit or (spec.context_window_tokens - max_output - _SNIP_SAFETY_BUFFER)
         if budget <= 0:
             return messages
-
-        estimate, _ = estimate_prompt_tokens_chain(
-            self.provider,
-            spec.model,
-            messages,
-            spec.tools.get_definitions(),
-        )
+        estimate, _ = estimate_prompt_tokens_chain(self.provider, spec.model, messages, spec.tools.get_definitions())
         if estimate <= budget:
             return messages
 
-        system_messages = [dict(msg) for msg in messages if msg.get("role") == "system"]
-        non_system = [dict(msg) for msg in messages if msg.get("role") != "system"]
-        if not non_system:
+        sys_msgs = [dict(m) for m in messages if m.get("role") == "system"]
+        non_sys = [dict(m) for m in messages if m.get("role") != "system"]
+        if not non_sys:
             return messages
 
-        system_tokens = sum(estimate_message_tokens(msg) for msg in system_messages)
-        remaining_budget = max(128, budget - system_tokens)
-        kept: list[dict[str, Any]] = []
-        kept_tokens = 0
-        for message in reversed(non_system):
-            msg_tokens = estimate_message_tokens(message)
-            if kept and kept_tokens + msg_tokens > remaining_budget:
-                break
-            kept.append(message)
-            kept_tokens += msg_tokens
-        kept.reverse()
+        # Try soft consolidation: summarize older half, keep newer half
+        mid = len(non_sys) // 2
+        if mid > 0:
+            summary = self._summarize_evicted(non_sys[:mid], spec)
+            if summary:
+                consolidated = [{"role": "user", "content": f"[Previous conversation summary]\n{summary}"}] + non_sys[mid:]
+                consolidated = self._fixup_messages(consolidated)
+                result = sys_msgs + consolidated
+                new_est, _ = estimate_prompt_tokens_chain(self.provider, spec.model, result, spec.tools.get_definitions())
+                if new_est <= budget:
+                    logger.info("Soft consolidation: {} msgs summarized for {} ({}/{} → {}/{})", mid, spec.session_key or "default", estimate, budget, new_est, budget)
+                    return result
+                non_sys = consolidated  # use consolidated for hard snip
 
-        if kept:
-            for i, message in enumerate(kept):
-                if message.get("role") == "user":
-                    kept = kept[i:]
-                    break
-            start = find_legal_message_start(kept)
-            if start:
-                kept = kept[start:]
-        if not kept:
-            kept = non_system[-min(len(non_system), 4) :]
-            start = find_legal_message_start(kept)
-            if start:
-                kept = kept[start:]
-        return system_messages + kept
+        # Hard snip: keep newest messages that fit
+        sys_tokens = sum(estimate_message_tokens(m) for m in sys_msgs)
+        remaining = max(128, budget - sys_tokens)
+        kept, kept_tokens = [], 0
+        for msg in reversed(non_sys):
+            t = estimate_message_tokens(msg)
+            if kept and kept_tokens + t > remaining:
+                break
+            kept.append(msg)
+            kept_tokens += t
+        kept.reverse()
+        kept = self._fixup_messages(kept or non_sys[-4:])
+        logger.info("Hard snip: {} → {} msgs for {}", len(non_sys), len(kept), spec.session_key or "default")
+        return sys_msgs + kept
+
+    @staticmethod
+    def _fixup_messages(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Ensure legal message start and at least one user message."""
+        start = find_legal_message_start(msgs)
+        if start:
+            msgs = msgs[start:]
+        for i, m in enumerate(msgs):
+            if m.get("role") == "user":
+                return msgs[i:] if i else msgs
+        if msgs:
+            msgs.insert(0, {"role": "user", "content": "(continuing previous conversation)"})
+        return msgs
+
+    _CONSOLIDATION_PROMPT = (
+        "Summarize the following conversation excerpt concisely. "
+        "Preserve key facts, decisions, data, and any important context. "
+        "Use the same language as the conversation. "
+        "Keep the summary under 500 tokens."
+    )
+
+    def _summarize_evicted(self, evicted: list[dict[str, Any]], spec: AgentRunSpec) -> str | None:
+        try:
+            import asyncio, concurrent.futures
+            parts = []
+            for msg in evicted:
+                content = msg.get("content", "")
+                if isinstance(content, list):
+                    content = "\n".join(b.get("text", "") if isinstance(b, dict) and b.get("type") == "text" else (b if isinstance(b, str) else "") for b in content)
+                if content:
+                    parts.append(f"[{msg.get('role', '?')}]: {content[:2000]}")
+            text = "\n\n".join(parts)
+            if not text:
+                return None
+            if len(text) <= 1500:
+                return text
+            summary_msgs = [{"role": "system", "content": self._CONSOLIDATION_PROMPT}, {"role": "user", "content": text}]
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    return pool.submit(asyncio.run, self._do_summary(spec, summary_msgs)).result(timeout=30)
+            return loop.run_until_complete(self._do_summary(spec, summary_msgs))
+        except Exception:
+            logger.debug("Summary failed, falling back to hard snip")
+            return None
+
+    async def _do_summary(self, spec: AgentRunSpec, msgs: list[dict[str, Any]]) -> str | None:
+        try:
+            resp = await self.provider.chat(messages=msgs, model=spec.model, max_tokens=1024, temperature=0.1)
+            c = resp.content.strip() if resp and resp.content else ""
+            return c if len(c) > 20 else None
+        except Exception:
+            return None
 
     def _partition_tool_batches(
         self,
