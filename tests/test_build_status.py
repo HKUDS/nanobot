@@ -15,6 +15,7 @@ def test_status_shows_cache_hit_rate():
     )
     assert "60% cached" in content
     assert "2000 in / 300 out" in content
+    assert "Tasks: 0 active" in content
 
 
 def test_status_no_cache_info():
@@ -30,6 +31,7 @@ def test_status_no_cache_info():
     )
     assert "cached" not in content.lower()
     assert "2000 in / 300 out" in content
+    assert "Tasks: 0 active" in content
 
 
 def test_status_zero_cached_tokens():
