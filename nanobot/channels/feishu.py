@@ -1331,34 +1331,40 @@ class FeishuChannel(BaseChannel):
                 return
             if buf.card_id:
                 buf.sequence += 1
-                await loop.run_in_executor(
+                ok = await loop.run_in_executor(
                     None,
                     self._stream_update_text_sync,
                     buf.card_id,
                     buf.text,
                     buf.sequence,
                 )
-                # Required so the chat list preview exits the streaming placeholder (Feishu streaming card docs).
-                buf.sequence += 1
-                await loop.run_in_executor(
-                    None,
-                    self._close_streaming_mode_sync,
+                if ok:
+                    # Required so the chat list preview exits the streaming placeholder
+                    # (Feishu streaming card docs).
+                    buf.sequence += 1
+                    await loop.run_in_executor(
+                        None,
+                        self._close_streaming_mode_sync,
+                        buf.card_id,
+                        buf.sequence,
+                    )
+                    return
+                logger.warning(
+                    "Streaming card {} final update failed, falling back to regular card",
                     buf.card_id,
-                    buf.sequence,
                 )
+            raw_table_count = len(self._TABLE_RE.findall(buf.text))
+            if raw_table_count > 1:
+                elements = [{"tag": "markdown", "content": buf.text}]
             else:
-                raw_table_count = len(self._TABLE_RE.findall(buf.text))
-                if raw_table_count > 1:
-                    elements = [{"tag": "markdown", "content": buf.text}]
-                else:
-                    elements = self._build_card_elements(buf.text)
-                card = json.dumps(
-                    {"config": {"wide_screen_mode": True}, "elements": elements},
-                    ensure_ascii=False,
-                )
-                await loop.run_in_executor(
-                    None, self._send_message_sync, rid_type, chat_id, "interactive", card
-                )
+                elements = self._build_card_elements(buf.text)
+            card = json.dumps(
+                {"config": {"wide_screen_mode": True}, "elements": elements},
+                ensure_ascii=False,
+            )
+            await loop.run_in_executor(
+                None, self._send_message_sync, rid_type, chat_id, "interactive", card
+            )
             return
 
         # --- accumulate delta ---
