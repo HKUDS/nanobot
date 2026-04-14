@@ -139,6 +139,14 @@ class HeartbeatConfig(Base):
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
     keep_recent_messages: int = 8
+    eval_model_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("evalModelOverride", "eval_model_override"),
+    )
+    exec_model_override: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("execModelOverride", "exec_model_override"),
+    )
 
 
 class ApiConfig(Base):

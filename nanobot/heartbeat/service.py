@@ -60,10 +60,14 @@ class HeartbeatService:
         interval_s: int = 30 * 60,
         enabled: bool = True,
         timezone: str | None = None,
+        eval_model: str | None = None,
+        exec_model: str | None = None,
     ):
         self.workspace = workspace
         self.provider = provider
         self.model = model
+        self.eval_model = eval_model or model
+        self.exec_model = exec_model or model
         self.on_execute = on_execute
         self.on_notify = on_notify
         self.interval_s = interval_s
@@ -101,7 +105,7 @@ class HeartbeatService:
                 )},
             ],
             tools=_HEARTBEAT_TOOL,
-            model=self.model,
+            model=self.eval_model,
         )
 
         if not response.has_tool_calls:
@@ -166,7 +170,7 @@ class HeartbeatService:
 
                 if response:
                     should_notify = await evaluate_response(
-                        response, tasks, self.provider, self.model,
+                        response, tasks, self.provider, self.exec_model,
                     )
                     if should_notify and self.on_notify:
                         logger.info("Heartbeat: completed, delivering response")

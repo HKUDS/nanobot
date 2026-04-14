@@ -1878,6 +1878,32 @@ The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspac
 
 The agent can also manage this file itself — ask it to "add a periodic task" and it will update `HEARTBEAT.md` for you.
 
+**Heartbeat runs in two phases:**
+
+1. **Eval phase** — a lightweight LLM call reads `HEARTBEAT.md` and decides whether there are active tasks (`skip` or `run`).
+2. **Exec phase** — only triggered when phase 1 returns `run`. The full agent loop executes the tasks, then a post-run evaluation decides whether to deliver the response.
+
+Each phase can use a different model, so you can keep costs low by routing the cheap decision step to a free/mini model:
+
+```json
+"gateway": {
+  "heartbeat": {
+    "enabled": true,
+    "intervalS": 1800,
+    "keepRecentMessages": 8,
+    "evalModelOverride": "github-copilot/gpt-4.1-mini",
+    "execModelOverride": "github-copilot/gpt-4.1-mini"
+  }
+}
+```
+
+| Key | Default | Description |
+|---|---|---|
+| `evalModelOverride` | agent model | Model for Phase 1 (decision). Use a free/mini model to minimise cost. |
+| `execModelOverride` | agent model | Model for Phase 2 (execution + post-run evaluation). |
+
+Both keys are optional. When omitted, the agent's default model is used for that phase.
+
 > **Note:** The gateway must be running (`nanobot gateway`) and you must have chatted with the bot at least once so it knows which channel to deliver to.
 
 </details>

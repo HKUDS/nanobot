@@ -287,3 +287,162 @@ async def test_decide_prompt_includes_current_time(tmp_path) -> None:
     assert user_msg["role"] == "user"
     assert "Current Time:" in user_msg["content"]
 
+
+class CapturingProvider(LLMProvider):
+    """Provider that records every (model, messages) pair passed to chat()."""
+
+    def __init__(self, responses: list[LLMResponse]) -> None:
+        super().__init__()
+        self._responses = list(responses)
+        self.calls: list[dict] = []
+
+    async def chat(self, *, messages=None, model=None, **kwargs) -> LLMResponse:
+        self.calls.append({"model": model, "messages": messages})
+        if self._responses:
+            return self._responses.pop(0)
+        return LLMResponse(content="", tool_calls=[])
+
+    def get_default_model(self) -> str:
+        return "default-model"
+
+
+def _run_response() -> LLMResponse:
+    return LLMResponse(
+        content="",
+        tool_calls=[
+            ToolCallRequest(
+                id="hb_1",
+                name="heartbeat",
+                arguments={"action": "run", "tasks": "check things"},
+            )
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_decide_uses_eval_model_when_set(tmp_path) -> None:
+    """Phase 1 _decide() must pass eval_model to the provider, not the default model."""
+    provider = CapturingProvider([_run_response()])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="default-model",
+        eval_model="cheap-eval-model",
+    )
+
+    await service._decide("content")
+
+    assert len(provider.calls) == 1
+    assert provider.calls[0]["model"] == "cheap-eval-model"
+
+
+@pytest.mark.asyncio
+async def test_decide_falls_back_to_model_when_eval_model_not_set(tmp_path) -> None:
+    """When eval_model is not provided it defaults to model."""
+    provider = CapturingProvider([_run_response()])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="default-model",
+    )
+
+    await service._decide("content")
+
+    assert provider.calls[0]["model"] == "default-model"
+
+
+@pytest.mark.asyncio
+async def test_tick_uses_exec_model_for_evaluate_response(tmp_path, monkeypatch) -> None:
+    """Phase 2 post-execution evaluate_response() must receive exec_model."""
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] task", encoding="utf-8")
+
+    provider = CapturingProvider([_run_response()])
+
+    captured_eval_model: list[str] = []
+
+    async def _fake_evaluate(response, tasks, prov, model):
+        captured_eval_model.append(model)
+        return False  # silence notification
+
+    monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _fake_evaluate)
+
+    async def _on_execute(_tasks: str) -> str:
+        return "done"
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="default-model",
+        exec_model="exec-model",
+        on_execute=_on_execute,
+    )
+
+    await service._tick()
+
+    assert captured_eval_model == ["exec-model"]
+
+
+@pytest.mark.asyncio
+async def test_tick_exec_model_defaults_to_model_when_not_set(tmp_path, monkeypatch) -> None:
+    """When exec_model is not provided evaluate_response receives the default model."""
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] task", encoding="utf-8")
+
+    provider = CapturingProvider([_run_response()])
+
+    captured_eval_model: list[str] = []
+
+    async def _fake_evaluate(response, tasks, prov, model):
+        captured_eval_model.append(model)
+        return False
+
+    monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _fake_evaluate)
+
+    async def _on_execute(_tasks: str) -> str:
+        return "done"
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="default-model",
+        on_execute=_on_execute,
+    )
+
+    await service._tick()
+
+    assert captured_eval_model == ["default-model"]
+
+
+@pytest.mark.asyncio
+async def test_eval_model_and_exec_model_are_independent(tmp_path, monkeypatch) -> None:
+    """eval_model and exec_model can differ from each other and from the default model."""
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] task", encoding="utf-8")
+
+    provider = CapturingProvider([_run_response()])
+
+    captured_eval_model: list[str] = []
+
+    async def _fake_evaluate(response, tasks, prov, model):
+        captured_eval_model.append(model)
+        return False
+
+    monkeypatch.setattr("nanobot.utils.evaluator.evaluate_response", _fake_evaluate)
+
+    async def _on_execute(_tasks: str) -> str:
+        return "done"
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="expensive-default",
+        eval_model="free-eval-model",
+        exec_model="mid-tier-exec-model",
+        on_execute=_on_execute,
+    )
+
+    await service._tick()
+
+    # Phase 1 used free-eval-model
+    assert provider.calls[0]["model"] == "free-eval-model"
+    # Phase 2 post-eval used mid-tier-exec-model
+    assert captured_eval_model == ["mid-tier-exec-model"]
+
