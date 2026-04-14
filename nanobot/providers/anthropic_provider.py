@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
 import re
 import secrets
@@ -10,7 +11,6 @@ import string
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-import importlib.util
 import json_repair
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest

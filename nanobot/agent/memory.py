@@ -21,6 +21,13 @@ from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_
 from nanobot.agent.runner import AgentRunSpec, AgentRunner, _ls_traceable
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.utils.gitstore import GitStore
+from nanobot.utils.helpers import (
+    ensure_dir,
+    estimate_message_tokens,
+    estimate_prompt_tokens_chain,
+    strip_think,
+)
+from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider

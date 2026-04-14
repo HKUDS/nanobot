@@ -8,7 +8,6 @@ import hashlib
 import importlib.metadata
 import json
 import os
-import re
 import time
 import uuid
 from contextlib import AsyncExitStack, nullcontext, suppress
