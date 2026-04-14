@@ -718,9 +718,22 @@ class LLMProvider(ABC):
                     identical_error_count,
                     (response.content or "")[:120].lower(),
                 )
+                if on_retry_wait:
+                    await on_retry_wait(
+                        f"Persistent retry stopped after {identical_error_count} identical errors."
+                    )
                 return response
 
             if not persistent and attempt > len(delays):
+                logger.warning(
+                    "LLM request failed after {} retries, giving up: {}",
+                    attempt,
+                    (response.content or "")[:120].lower(),
+                )
+                if on_retry_wait:
+                    await on_retry_wait(
+                        f"Model request failed after {attempt} retries, giving up."
+                    )
                 break
 
             base_delay = delays[min(attempt - 1, len(delays) - 1)]
