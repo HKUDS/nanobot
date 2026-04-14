@@ -88,6 +88,33 @@ async def test_chat_with_retry_returns_final_error_after_retries(monkeypatch) ->
 
 
 @pytest.mark.asyncio
+async def test_chat_with_retry_emits_terminal_progress_when_standard_retries_exhaust(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        LLMResponse(content="429 rate limit a", finish_reason="error"),
+        LLMResponse(content="429 rate limit b", finish_reason="error"),
+        LLMResponse(content="429 rate limit c", finish_reason="error"),
+        LLMResponse(content="503 final server error", finish_reason="error"),
+    ])
+    progress: list[str] = []
+
+    async def _fake_sleep(delay: int) -> None:
+        return None
+
+    async def _progress(msg: str) -> None:
+        progress.append(msg)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_retry_wait=_progress,
+    )
+
+    assert response.content == "503 final server error"
+    assert progress[-1] == "Model request failed after 4 retries, giving up."
+
+
+@pytest.mark.asyncio
 async def test_chat_with_retry_preserves_cancelled_error() -> None:
     provider = ScriptedProvider([asyncio.CancelledError()])
 
@@ -469,3 +496,28 @@ async def test_persistent_retry_aborts_after_ten_identical_transient_errors(monk
     assert response.content == "429 rate limit"
     assert provider.calls == 10
     assert delays == [1, 2, 4, 4, 4, 4, 4, 4, 4]
+
+
+@pytest.mark.asyncio
+async def test_persistent_retry_emits_terminal_progress_on_identical_error_limit(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        *[LLMResponse(content="429 rate limit", finish_reason="error") for _ in range(10)],
+    ])
+    progress: list[str] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        return None
+
+    async def _progress(msg: str) -> None:
+        progress.append(msg)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        retry_mode="persistent",
+        on_retry_wait=_progress,
+    )
+
+    assert response.finish_reason == "error"
+    assert progress[-1] == "Persistent retry stopped after 10 identical errors."
