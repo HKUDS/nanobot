@@ -620,6 +620,9 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
+            if "session_role" in msg.metadata:
+                session.metadata["session_role"] = msg.metadata["session_role"]
+                self.sessions.save(session)
             if self._restore_runtime_checkpoint(session):
                 self.sessions.save(session)
             if self._restore_pending_user_turn(session):
@@ -637,6 +640,7 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 session_summary=pending,
                 current_role=current_role,
+                session_role=session.metadata.get("session_role"),
             )
             final_content, _, all_msgs, _, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
@@ -657,6 +661,9 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
+        if "session_role" in msg.metadata:
+            session.metadata["session_role"] = msg.metadata["session_role"]
+            self.sessions.save(session)
         if self._restore_runtime_checkpoint(session):
             self.sessions.save(session)
         if self._restore_pending_user_turn(session):
@@ -686,6 +693,7 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            session_role=session.metadata.get("session_role"),
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:

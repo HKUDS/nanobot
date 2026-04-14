@@ -425,6 +425,7 @@ class Consolidator:
             current_message="[token-probe]",
             channel=channel,
             chat_id=chat_id,
+            session_role=session.metadata.get("session_role"),
         )
         return estimate_prompt_tokens_chain(
             self.provider,
