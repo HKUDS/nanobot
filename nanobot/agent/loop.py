@@ -219,6 +219,11 @@ class AgentLoop:
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
         )
+        self.dream = Dream(
+            store=self.context.memory,
+            provider=provider,
+            model=self.model,
+        )
         self.consolidator = Consolidator(
             store=self.context.memory,
             provider=provider,
@@ -228,16 +233,12 @@ class AgentLoop:
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
+            on_archive=lambda: self._schedule_background(self.dream.run()),
         )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
-        )
-        self.dream = Dream(
-            store=self.context.memory,
-            provider=provider,
-            model=self.model,
         )
         self._register_default_tools()
         self.commands = CommandRouter()
