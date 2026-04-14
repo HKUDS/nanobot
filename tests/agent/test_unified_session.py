@@ -545,7 +545,7 @@ class TestStoreOnlyMessages:
             metadata={"_store_only": True},
         )
 
-        await loop._dispatch(msg)
+        await loop._handle_inbound(msg)
 
         # Should not have been dispatched
         assert dispatched == []
@@ -572,12 +572,7 @@ class TestStoreOnlyMessages:
             metadata={"_store_only": True},
         )
 
-        # Simulate the run loop behavior
-        if msg.metadata.get("_store_only"):
-            pass  # Should skip
-        else:
-            if "telegram:123" in loop._pending_queues:
-                loop._pending_queues["telegram:123"].put_nowait(msg)
+        await loop._handle_inbound(msg)
 
         # Should not have been queued
         assert queued_messages == []

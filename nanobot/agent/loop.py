@@ -475,54 +475,59 @@ class AgentLoop:
                 continue
             except Exception as e:
                 logger.warning("Error consuming inbound message: {}, continuing...", e)
-        continue
+                continue
 
+            await self._handle_inbound(msg)
+
+    async def _handle_inbound(self, msg: InboundMessage) -> None:
+        """Handle an inbound message: priority commands, filters, and dispatching."""
         raw = msg.content.strip()
         if self.commands.is_priority(raw):
             ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, loop=self)
             result = await self.commands.dispatch_priority(ctx)
             if result:
                 await self.bus.publish_outbound(result)
-            continue
+            return
 
         # Skip _store_only messages - they're for logging only, not processing
         if msg.metadata.get("_store_only"):
-            continue
+            return
 
         effective_key = self._effective_session_key(msg)
-            # If this session already has an active pending queue (i.e. a task
-            # is processing this session), route the message there for mid-turn
-            # injection instead of creating a competing task.
-            if effective_key in self._pending_queues:
-                pending_msg = msg
-                if effective_key != msg.session_key:
-                    pending_msg = dataclasses.replace(
-                        msg,
-                        session_key_override=effective_key,
-                    )
-                try:
-                    self._pending_queues[effective_key].put_nowait(pending_msg)
-                except asyncio.QueueFull:
-                    logger.warning(
-                        "Pending queue full for session {}, falling back to queued task",
-                        effective_key,
-                    )
-                else:
-                    logger.info(
-                        "Routed follow-up message to pending queue for session {}",
-                        effective_key,
-                    )
-                    continue
-            # Compute the effective session key before dispatching
-            # This ensures /stop command can find tasks correctly when unified session is enabled
-            task = asyncio.create_task(self._dispatch(msg))
-            self._active_tasks.setdefault(effective_key, []).append(task)
-            task.add_done_callback(
-                lambda t, k=effective_key: self._active_tasks.get(k, [])
-                and self._active_tasks[k].remove(t)
-                if t in self._active_tasks.get(k, [])
-                else None
-            )
+        # If this session already has an active pending queue (i.e. a task
+        # is processing this session), route the message there for mid-turn
+        # injection instead of creating a competing task.
+        if effective_key in self._pending_queues:
+            pending_msg = msg
+            if effective_key != msg.session_key:
+                pending_msg = dataclasses.replace(
+                    msg,
+                    session_key_override=effective_key,
+                )
+            try:
+                self._pending_queues[effective_key].put_nowait(pending_msg)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "Pending queue full for session {}, falling back to queued task",
+                    effective_key,
+                )
+            else:
+                logger.info(
+                    "Routed follow-up message to pending queue for session {}",
+                    effective_key,
+                )
+                return
+
+        # Compute the effective session key before dispatching
+        # This ensures /stop command can find tasks correctly when unified session is enabled
+        task = asyncio.create_task(self._dispatch(msg))
+        self._active_tasks.setdefault(effective_key, []).append(task)
+        task.add_done_callback(
+            lambda t, k=effective_key: self._active_tasks.get(k, [])
+            and self._active_tasks[k].remove(t)
+            if t in self._active_tasks.get(k, [])
+            else None
+        )
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""

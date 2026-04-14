@@ -957,7 +957,7 @@ class TelegramChannel(BaseChannel):
             if bot_username:
                 handle = f"@{bot_username}".lower()
                 cmd_part, *rest = content.split(" ", 1)
-                if handle in cmd_part.lower():
+                if cmd_part.lower().endswith(handle):
                     # Command is for this bot - strip the @username
                     cmd_part = cmd_part.split("@")[0]
                     content = f"{cmd_part} {rest[0]}" if rest else cmd_part
