@@ -1,0 +1,39 @@
+{
+  "test_cases": [
+    {
+      "name": "查询用户信息",
+      "input": "查询用户 zhangsan 的信息",
+      "expected_skill": "wecom-contact",
+      "expected_action": "get_user",
+      "description": "测试获取单个用户信息"
+    },
+    {
+      "name": "获取部门成员列表",
+      "input": "获取部门 1 的所有成员",
+      "expected_skill": "wecom-contact",
+      "expected_action": "list_department_users",
+      "description": "测试获取部门下用户列表"
+    },
+    {
+      "name": "查询部门信息",
+      "input": "查询部门 2 的详细信息",
+      "expected_skill": "wecom-contact",
+      "expected_action": "get_department",
+      "description": "测试获取部门信息"
+    },
+    {
+      "name": "获取子部门列表",
+      "input": "获取部门 1 的所有子部门",
+      "expected_skill": "wecom-contact",
+      "expected_action": "list_departments",
+      "description": "测试获取子部门列表"
+    },
+    {
+      "name": "通过手机号搜索用户",
+      "input": "通过手机号 13800138000 查找用户",
+      "expected_skill": "wecom-contact",
+      "expected_action": "search_user",
+      "description": "测试通过手机号搜索用户"
+    }
+  ]
+}
