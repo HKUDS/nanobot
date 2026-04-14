@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 import inspect
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, ToolCallRequest
 from nanobot.utils.helpers import (
@@ -22,6 +21,7 @@ from nanobot.utils.helpers import (
     maybe_persist_tool_result,
     truncate_text,
 )
+from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     build_finalization_retry_message,
@@ -45,6 +45,10 @@ _COMPACTABLE_TOOLS = frozenset({
     "web_search", "web_fetch", "list_dir",
 })
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
+_CONTEXT_TRIM_WARNING = (
+    "Context window nearly full; using a shortened view of older history and tool output "
+    "to continue. If something seems missing, ask me to revisit it."
+)
 
 
 
@@ -237,8 +241,11 @@ class AgentRunner:
         length_recovery_count = 0
         had_injections = False
         injection_cycles = 0
+        context_trim_warned = False
 
         for iteration in range(spec.max_iterations):
+            microcompacted = False
+            snipped = False
             try:
                 # Keep the persisted conversation untouched. Context governance
                 # may repair or compact historical messages for the model, but
@@ -246,9 +253,13 @@ class AgentRunner:
                 # later when the caller saves only the new turn.
                 messages_for_model = self._drop_orphan_tool_results(messages)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
-                messages_for_model = self._microcompact(messages_for_model)
+                compacted_messages = self._microcompact(messages_for_model)
+                microcompacted = compacted_messages != messages_for_model
+                messages_for_model = compacted_messages
                 messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
+                pre_snip_messages = messages_for_model
                 messages_for_model = self._snip_history(spec, messages_for_model)
+                snipped = messages_for_model != pre_snip_messages
                 # Snipping may have created new orphans; clean them up.
                 messages_for_model = self._drop_orphan_tool_results(messages_for_model)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
@@ -264,6 +275,13 @@ class AgentRunner:
                     messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 except Exception:
                     messages_for_model = messages
+            if not context_trim_warned:
+                context_trim_warned = await self._maybe_warn_context_trim(
+                    spec,
+                    warned=context_trim_warned,
+                    microcompacted=microcompacted,
+                    snipped=snipped,
+                )
             context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
             response = await self._request_model(spec, messages_for_model, hook, context)
@@ -645,7 +663,7 @@ class AgentRunner:
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None]:
-        _HINT = "\n\n[Analyze the error above and try a different approach.]"
+        hint = "\n\n[Analyze the error above and try a different approach.]"
         lookup_error = repeated_external_lookup_error(
             tool_call.name,
             tool_call.arguments,
@@ -658,8 +676,8 @@ class AgentRunner:
                 "detail": "repeated external lookup blocked",
             }
             if spec.fail_on_tool_error:
-                return lookup_error + _HINT, event, RuntimeError(lookup_error)
-            return lookup_error + _HINT, event, None
+                return lookup_error + hint, event, RuntimeError(lookup_error)
+            return lookup_error + hint, event, None
         prepare_call = getattr(spec.tools, "prepare_call", None)
         tool, params, prep_error = None, tool_call.arguments, None
         if callable(prepare_call):
@@ -675,7 +693,7 @@ class AgentRunner:
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
-            return prep_error + _HINT, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
+            return prep_error + hint, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -700,8 +718,8 @@ class AgentRunner:
                 "detail": result.replace("\n", " ").strip()[:120],
             }
             if spec.fail_on_tool_error:
-                return result + _HINT, event, RuntimeError(result)
-            return result + _HINT, event, None
+                return result + hint, event, RuntimeError(result)
+            return result + hint, event, None
 
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()
@@ -719,6 +737,19 @@ class AgentRunner:
         callback = spec.checkpoint_callback
         if callback is not None:
             await callback(payload)
+
+    @staticmethod
+    async def _maybe_warn_context_trim(
+        spec: AgentRunSpec,
+        *,
+        warned: bool,
+        microcompacted: bool,
+        snipped: bool,
+    ) -> bool:
+        if warned or spec.progress_callback is None or not (microcompacted or snipped):
+            return warned
+        await spec.progress_callback(_CONTEXT_TRIM_WARNING)
+        return True
 
     @staticmethod
     def _append_final_message(messages: list[dict[str, Any]], content: str | None) -> None:
@@ -966,4 +997,3 @@ class AgentRunner:
         if current:
             batches.append(current)
         return batches
-
