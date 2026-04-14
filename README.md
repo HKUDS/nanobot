@@ -1772,6 +1772,12 @@ time.
 
 If you want the full design, see [docs/MEMORY.md](docs/MEMORY.md).
 
+## 📊 Observability
+
+nanobot supports [LangSmith](https://smith.langchain.com) tracing out of the box. When enabled, each conversation turn emits a trace tree covering the full pipeline: context build → LLM calls → tool execution → memory consolidation. Traces carry correlation metadata (`session_id`, `channel`, `nanobot_version`, `prompt_hash`) and join keys to link turns within a session.
+
+See [docs/LANGSMITH.md](docs/LANGSMITH.md) for setup and usage.
+
 ## 💻 CLI Reference
 
 | Command | Description |
