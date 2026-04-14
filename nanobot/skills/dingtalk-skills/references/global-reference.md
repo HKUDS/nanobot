@@ -16,6 +16,8 @@ dws auth logout
 dws auth reset
 ```
 
+以上认证命令供 agent 内部执行参考；如果需要用户参与扫码或授权，只把返回的授权链接发给用户，不要让最终用户自己执行这些命令。
+
 登录后自动管理 token 刷新，日常使用无需重复登录。
 
 | Token | 有效期 | 说明 |
@@ -26,7 +28,7 @@ dws auth reset
 30 天内使用一次即自动续期。
 
 ### 认证失败处理
-- 命令返回 `AUTH_TOKEN_EXPIRED` / `USER_TOKEN_ILLEGAL` / "Token验证失败" → 执行 `dws auth login` 重新登录
+- 命令返回 `AUTH_TOKEN_EXPIRED` / `USER_TOKEN_ILLEGAL` / "Token验证失败" → 由 agent 在后台执行 `dws auth login` 重新登录，并把返回的授权链接发给用户；不要让最终用户执行该命令
 
 ### Headless 环境 (CI/CD)
 
@@ -39,6 +41,8 @@ dws auth login
 # 或使用 --device 设备流登录（远程服务器/Docker）
 dws auth login --device
 ```
+
+以上命令仍然是 agent 内部执行的参考形式；如果触发设备流登录，只把授权链接返回给用户，不要把命令原样发给用户。
 refresh_token 单设备独占，远程刷新后源设备凭证失效。
 
 ## Recovery
