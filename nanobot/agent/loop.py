@@ -774,6 +774,7 @@ class AgentLoop:
                 session_summary=pending,
                 current_role=current_role,
                 is_privileged=is_privileged,
+                sender_id=msg.sender_id,
             )
             final_content, _, all_msgs, _, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
@@ -840,6 +841,7 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
             is_privileged=is_privileged,
+            sender_id=msg.sender_id,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:

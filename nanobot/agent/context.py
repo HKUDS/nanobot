@@ -92,11 +92,14 @@ class ContextBuilder:
     def _build_runtime_context(
         channel: str | None, chat_id: str | None, timezone: str | None = None,
         session_summary: str | None = None,
+        sender_id: str | None = None,
     ) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
         lines = [f"Current Time: {current_time_str(timezone)}"]
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
+        if sender_id:
+            lines += [f"Sender: {sender_id}"]
         if session_summary:
             lines += ["", "[Resumed Session]", session_summary]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines) + "\n" + ContextBuilder._RUNTIME_CONTEXT_END
@@ -135,12 +138,17 @@ class ContextBuilder:
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        sender_id: str | None = None,
         current_role: str = "user",
         session_summary: str | None = None,
         is_privileged: bool = True,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
-        runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone, session_summary=session_summary)
+        runtime_ctx = self._build_runtime_context(
+            channel, chat_id, self.timezone, 
+            session_summary=session_summary,
+            sender_id=sender_id,
+        )
         user_content = self._build_user_content(current_message, media)
 
         # Merge runtime context and user content into a single user message

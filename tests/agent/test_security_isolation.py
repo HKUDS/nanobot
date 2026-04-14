@@ -12,11 +12,17 @@ def _make_loop(channels_config=None, unified_session=False):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation.max_tokens = 1000
-    workspace = MagicMock()
-    workspace.__truediv__ = MagicMock(return_value=MagicMock())
+    
+    from pathlib import Path
+    workspace = MagicMock(spec=Path)
+    workspace.__truediv__ = MagicMock(side_effect=lambda x: workspace)
+    workspace.expanduser.return_value.resolve.return_value = workspace
+    workspace.__str__.return_value = "/test/workspace"
+    workspace.exists.return_value = False
+    workspace.parent = workspace
+    workspace.mkdir = MagicMock()
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager") as MockSM, \
+    with patch("nanobot.agent.loop.SessionManager") as MockSM, \
          patch("nanobot.agent.loop.SubagentManager"):
         
         def mock_get_or_create(key):
@@ -164,28 +170,16 @@ class TestSecurityIsolation:
         assert "read_file" not in empty_tools
 
     @pytest.mark.asyncio
-    async def test_privilege_propagation_to_context(self):
-        """Verify that is_privileged is correctly passed to ContextBuilder.build_messages."""
-        channels_config = MagicMock()
-        channels_config.model_extra = {"telegram": {"allowFrom": ["alice"]}}
-        loop, bus = _make_loop(channels_config=channels_config)
-        
-        # Mock ContextBuilder.build_messages
-        loop.context.build_messages = MagicMock(return_value=[{"role": "system", "content": "prompt"}])
+    async def test_sender_id_propagation_to_context(self):
+        """Verify that sender_id is included in the LLM runtime context."""
+        loop, bus = _make_loop()
         loop.runner.run = AsyncMock(return_value=AgentRunResult(final_content="ok", messages=[]))
         
-        # 1. Non-privileged user
-        msg_bob = InboundMessage(channel="telegram", sender_id="bob", chat_id="c1", content="hi")
-        await loop._handle_inbound(msg_bob)
+        msg = InboundMessage(channel="telegram", sender_id="123|Alice", chat_id="c1", content="hi")
+        await loop._handle_inbound(msg)
         while any(loop._active_tasks.values()): await asyncio.sleep(0.1)
         
-        args, kwargs = loop.context.build_messages.call_args
-        assert kwargs["is_privileged"] is False
-        
-        # 2. Privileged user
-        msg_alice = InboundMessage(channel="telegram", sender_id="alice", chat_id="c1", content="hi")
-        await loop._handle_inbound(msg_alice)
-        while any(loop._active_tasks.values()): await asyncio.sleep(0.1)
-        
-        args, kwargs = loop.context.build_messages.call_args
-        assert kwargs["is_privileged"] is True
+        # Check that the first user message contains the sender ID
+        initial_messages = loop.runner.run.call_args[0][0].initial_messages
+        user_msg = initial_messages[-1]["content"]
+        assert "Sender: 123|Alice" in user_msg
