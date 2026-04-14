@@ -18,6 +18,7 @@ from nanobot.channels.matrix import (
     MATRIX_HTML_FORMAT,
     TYPING_NOTICE_TIMEOUT_MS,
     MatrixChannel,
+    _StreamBuf,
 )
 from nanobot.channels.matrix import MatrixConfig
 
@@ -1640,3 +1641,135 @@ async def test_send_delta_ignores_whitespace_only_delta(monkeypatch) -> None:
     assert "!room:matrix.org" in channel._stream_bufs
     assert channel._stream_bufs["!room:matrix.org"].text == "   "
     assert client.room_send_calls == []
+
+
+@pytest.mark.asyncio
+async def test_send_delta_increment_edits_counter_each_call(monkeypatch) -> None:
+    """Test that the edits counter increments with each edit of the same message."""
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    client.room_send_response.event_id = "$8E2XVyINbEhcuAxvxd1d9JhQosNPzkVoU8TrbCAvyHo"
+
+    times = [100.0, 102.0, 104.0, 106.0, 108.0]
+    times.reverse()
+    monkeypatch.setattr(channel, "monotonic_time", lambda: times and times.pop())
+
+    # Send initial message
+    await channel.send_delta("!room:matrix.org", "Hello")
+
+    # Verify initial state
+    buf = channel._stream_bufs["!room:matrix.org"]
+    assert buf.edits == 1
+    assert len(client.room_send_calls) == 1
+
+    # Send multiple deltas to trigger edits
+    await channel.send_delta("!room:matrix.org", " world")
+    assert buf.edits == 2
+    assert len(client.room_send_calls) == 2
+
+    await channel.send_delta("!room:matrix.org", "!")
+    assert buf.edits == 3
+    assert len(client.room_send_calls) == 3
+
+    await channel.send_delta("!room:matrix.org", " It's working")
+    assert buf.edits == 4
+    assert len(client.room_send_calls) == 4
+
+    # Verify the final text accumulates correctly
+    assert buf.text == "Hello world! It's working"
+
+    # Verify each edit call has the correct body
+    for i, call in enumerate(client.room_send_calls):
+        expected_body = {
+            0: "Hello",
+            1: "Hello world",
+            2: "Hello world!",
+            3: "Hello world! It's working"
+        }[i]
+        assert call["content"]["body"] == expected_body
+
+@pytest.mark.asyncio
+async def test_send_delta_edits_counter_respects_limit(monkeypatch) -> None:
+    """Test that the edits counter respects _STREAM_EDIT_LIMIT and stops sending after limit."""
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    client.room_send_response.event_id = "$8E2XVyINbEhcuAxvxd1d9JhQosNPzkVoU8TrbCAvyHo"
+
+    # Set edit limit to 3 for testing
+    original_limit = channel._STREAM_EDIT_LIMIT
+    channel._STREAM_EDIT_LIMIT = 3
+
+    channel._stream_bufs["!room:matrix.org"] = _StreamBuf()
+    
+    times = [100.0, 102.0, 104.0, 106.0, 108.0]
+    times.reverse()
+    monkeypatch.setattr(channel, "monotonic_time", lambda: times and times.pop())
+
+    try:
+        buf = channel._stream_bufs["!room:matrix.org"]
+
+        # Send initial message
+        await channel.send_delta("!room:matrix.org", "Hello")
+        assert buf.edits == 1
+        assert len(client.room_send_calls) == 1
+
+        # Send deltas that would exceed the limit
+        await channel.send_delta("!room:matrix.org", " world")
+        assert buf.edits == 2
+        assert len(client.room_send_calls) == 2
+
+        await channel.send_delta("!room:matrix.org", "!")
+        assert buf.edits == 3
+        assert len(client.room_send_calls) == 3
+
+        # This should NOT trigger another send because we hit the limit
+        await channel.send_delta("!room:matrix.org", " Test")
+        assert buf.edits == 3  # Counter should not increment
+        assert len(client.room_send_calls) == 3  # No new send call
+
+        # Verify text still accumulates in buffer
+        assert buf.text == "Hello world! Test"
+
+    finally:
+        # Restore original limit
+        channel._STREAM_EDIT_LIMIT = original_limit
+
+
+def test_build_matrix_text_content_with_notice_type() -> None:
+    """Test that when is_notice is True, msgtype is set to 'm.notice'."""
+    result = _build_matrix_text_content("This is a notice", is_notice=True)
+    assert result["msgtype"] == "m.notice"
+    assert result["body"] == "This is a notice"
+    assert result["m.mentions"] == {}
+
+
+def test_build_matrix_text_content_with_notice_and_html() -> None:
+    """Test that is_notice works correctly with markdown formatting."""
+    text = "*Hello* **World**"
+    result = _build_matrix_text_content(text, is_notice=True)
+    assert result["msgtype"] == "m.notice"
+    assert result["body"] == text
+    assert "format" in result
+    assert result["format"] == MATRIX_HTML_FORMAT
+    assert "formatted_body" in result
+
+
+def test_build_matrix_text_content_with_notice_and_event_id() -> None:
+    """Test that is_notice works correctly with event_id for replacement."""
+    text = "Updated notice"
+    event_id = "$8E2XVyINbEhcuAxvxd1d9JhQosNPzkVoU8TrbCAvyHo"
+    result = _build_matrix_text_content(text, event_id=event_id, is_notice=True)
+    assert result["msgtype"] == "m.notice"
+    assert result["body"] == text
+    assert result["m.new_content"]["msgtype"] == "m.text"
+    assert result["m.new_content"]["body"] == text
+    assert result["m.relates_to"]["rel_type"] == "m.replace"
+    assert result["m.relates_to"]["event_id"] == event_id
+
+
+def test_build_matrix_text_content_default_is_not_notice() -> None:
+    """Test that default behavior (is_notice=False) uses 'm.text' type."""
+    result = _build_matrix_text_content("Regular message")
+    assert result["msgtype"] == "m.text"

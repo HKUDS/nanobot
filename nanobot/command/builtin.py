@@ -270,6 +270,7 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
         return OutboundMessage(
             channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
             content="Dream history is not available because memory versioning is not initialized.",
+            metadata={"source": "command"}
         )
 
     args = ctx.args.strip()
