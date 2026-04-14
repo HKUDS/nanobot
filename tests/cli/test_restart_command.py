@@ -156,6 +156,30 @@ class TestRestartCommand:
         assert response.metadata == {"render_as": "text"}
 
     @pytest.mark.asyncio
+    async def test_status_counts_running_dispatch_and_subagent_tasks(self):
+        loop, _bus = _make_loop()
+        session = MagicMock()
+        session.get_history.return_value = [{"role": "user"}]
+        loop.sessions.get_or_create.return_value = session
+        loop.consolidator.estimate_session_prompt_tokens = MagicMock(
+            return_value=(1000, "tiktoken")
+        )
+
+        running_task = MagicMock()
+        running_task.done.return_value = False
+        finished_task = MagicMock()
+        finished_task.done.return_value = True
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
+        loop._active_tasks[msg.session_key] = [running_task, finished_task]
+        loop.subagents.get_running_count_by_session.return_value = 2
+
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "Tasks: 3 active" in response.content
+
+    @pytest.mark.asyncio
     async def test_run_agent_loop_resets_usage_when_provider_omits_it(self):
         loop, _bus = _make_loop()
         loop.provider.chat_with_retry = AsyncMock(side_effect=[
