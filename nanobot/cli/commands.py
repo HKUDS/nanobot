@@ -554,9 +554,11 @@ def serve(
         raise typer.Exit(1)
 
     from loguru import logger
+
     from nanobot.agent.loop import AgentLoop
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
+    from nanobot.channels.manager import ChannelManager
     from nanobot.session.manager import SessionManager
 
     if verbose:
@@ -594,6 +596,7 @@ def serve(
         disabled_skills=runtime_config.agents.defaults.disabled_skills,
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
     )
+    channel_manager = ChannelManager(runtime_config, bus)
 
     model_name = runtime_config.agents.defaults.model
     console.print(f"{__logo__} Starting OpenAI-compatible API server")
@@ -601,6 +604,11 @@ def serve(
     console.print(f"  [cyan]Model[/cyan]    : {model_name}")
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
+    if channel_manager.enabled_channels:
+        console.print(
+            f"  [cyan]Outbound[/cyan] : channels enabled for message tool delivery "
+            f"({', '.join(channel_manager.enabled_channels)})"
+        )
     if host in {"0.0.0.0", "::"}:
         console.print(
             "[yellow]Warning:[/yellow] API is bound to all interfaces. "
@@ -608,7 +616,12 @@ def serve(
         )
     console.print()
 
-    api_app = create_app(agent_loop, model_name=model_name, request_timeout=timeout)
+    api_app = create_app(
+        agent_loop,
+        model_name=model_name,
+        request_timeout=timeout,
+        channel_manager=channel_manager,
+    )
 
     async def on_startup(_app):
         await agent_loop._connect_mcp()

@@ -17,6 +17,8 @@ from nanobot.api.server import (
     create_app,
     handle_chat_completions,
 )
+from nanobot.bus.events import OutboundMessage
+from nanobot.bus.queue import MessageBus
 
 try:
     from aiohttp.test_utils import TestClient, TestServer
@@ -285,6 +287,86 @@ async def test_health_endpoint(aiohttp_client, app) -> None:
     assert resp.status == 200
     body = await resp.json()
     assert body["status"] == "ok"
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_channel_manager_lifecycle_runs_with_app(aiohttp_client, mock_agent) -> None:
+    class _FakeChannelManager:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.stopped = asyncio.Event()
+
+        async def start_all(self) -> None:
+            self.started.set()
+            await asyncio.Event().wait()
+
+        async def stop_all(self) -> None:
+            self.stopped.set()
+
+    manager = _FakeChannelManager()
+    app = create_app(mock_agent, model_name="m", channel_manager=manager)
+    client = await aiohttp_client(app)
+    await asyncio.wait_for(manager.started.wait(), timeout=1.0)
+    await client.close()
+    await asyncio.wait_for(manager.stopped.wait(), timeout=1.0)
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_api_server_dispatches_outbound_messages_through_channel_manager(aiohttp_client) -> None:
+    bus = MessageBus()
+
+    class _FakeChannelManager:
+        def __init__(self, bus: MessageBus) -> None:
+            self.bus = bus
+            self.sent: list[OutboundMessage] = []
+            self._running = True
+
+        async def start_all(self) -> None:
+            while self._running:
+                msg = await self.bus.consume_outbound()
+                self.sent.append(msg)
+
+        async def stop_all(self) -> None:
+            self._running = False
+
+    async def fake_process(content, session_key="", channel="", chat_id=""):
+        await bus.publish_outbound(
+            OutboundMessage(
+                channel="email",
+                chat_id="user@example.com",
+                content=f"forwarded:{content}",
+            )
+        )
+        return "ok"
+
+    agent = MagicMock()
+    agent.process_direct = fake_process
+    agent._connect_mcp = AsyncMock()
+    agent.close_mcp = AsyncMock()
+
+    manager = _FakeChannelManager(bus)
+    app = create_app(agent, model_name="m", channel_manager=manager)
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hello"}]},
+    )
+
+    assert resp.status == 200
+    for _ in range(20):
+        if manager.sent:
+            break
+        await asyncio.sleep(0.01)
+    assert manager.sent == [
+        OutboundMessage(
+            channel="email",
+            chat_id="user@example.com",
+            content="forwarded:hello",
+        )
+    ]
 
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
