@@ -2,16 +2,16 @@
 
 import asyncio
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults
 from nanobot.command import CommandContext
+from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse
 
 
@@ -187,7 +187,7 @@ class TestAutoCompact:
     async def test_auto_compact_empty_session(self, tmp_path):
         """_archive on empty session should not archive."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
-        session = loop.sessions.get_or_create("cli:test")
+        loop.sessions.get_or_create("cli:test")
 
         archive_called = False
 
@@ -1007,4 +1007,58 @@ class TestSummaryPersistence:
         assert summary is not None
         # Metadata should also be cleaned up
         assert "_last_summary" not in reloaded.metadata
+        await loop.close_mcp()
+
+
+class TestResumeSummaryPersistence:
+    """Test that interrupted-task summaries survive until the next turn."""
+
+    @pytest.mark.asyncio
+    async def test_resume_summary_recovered_after_restart(self, tmp_path):
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        loop.auto_compact.stash_resume_summary(
+            session,
+            "cli:test",
+            "- User goal: finish the interrupted task",
+        )
+        loop.sessions.save(session)
+
+        loop.auto_compact._resume_summaries.clear()
+        loop.sessions.invalidate("cli:test")
+        reloaded = loop.sessions.get_or_create("cli:test")
+
+        _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
+
+        assert summary is not None
+        assert "Previous task was stopped before completion." in summary
+        assert "finish the interrupted task" in summary
+        assert "_resume_summary" not in reloaded.metadata
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_prepare_session_combines_resume_and_idle_summaries(self, tmp_path):
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        session.metadata["_last_summary"] = {
+            "text": "Old conversation summary.",
+            "last_active": (datetime.now() - timedelta(minutes=20)).isoformat(),
+        }
+        loop.auto_compact.stash_resume_summary(
+            session,
+            "cli:test",
+            "- Pending tool call: exec",
+        )
+        loop.auto_compact._summaries.clear()
+        loop.sessions.save(session)
+
+        _, summary = loop.auto_compact.prepare_session(session, "cli:test")
+
+        assert summary is not None
+        assert "Previous task was stopped before completion." in summary
+        assert "Pending tool call: exec" in summary
+        assert "Inactive for" in summary
+        assert "Old conversation summary." in summary
+        assert "_resume_summary" not in session.metadata
+        assert "_last_summary" not in session.metadata
         await loop.close_mcp()

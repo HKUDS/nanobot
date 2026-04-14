@@ -8,6 +8,8 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.command import CommandContext
+from nanobot.command.builtin import cmd_stop
 from nanobot.session.manager import Session
 
 
@@ -312,6 +314,111 @@ async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(t
 
 
 @pytest.mark.asyncio
+async def test_capture_resume_summary_restores_checkpoint_and_stashes_summary(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.summarize_interrupted = AsyncMock(return_value="- User goal: finish the task")  # type: ignore[method-assign]
+    session = loop.sessions.get_or_create("cli:test")
+    session.add_message("user", "finish the task")
+    session.metadata[AgentLoop._RUNTIME_CHECKPOINT_KEY] = {
+        "assistant_message": {
+            "role": "assistant",
+            "content": "Working on it",
+            "tool_calls": [
+                {
+                    "id": "call_pending",
+                    "type": "function",
+                    "function": {"name": "exec", "arguments": "{}"},
+                }
+            ],
+        },
+        "completed_tool_results": [],
+        "pending_tool_calls": [
+            {
+                "id": "call_pending",
+                "type": "function",
+                "function": {"name": "exec", "arguments": "{}"},
+            }
+        ],
+    }
+    loop.sessions.save(session)
+
+    saved = await loop.capture_resume_summary("cli:test")
+
+    assert saved is True
+    reloaded = loop.sessions.get_or_create("cli:test")
+    assert reloaded.metadata["_resume_summary"]["text"] == "- User goal: finish the task"
+    assert AgentLoop._RUNTIME_CHECKPOINT_KEY not in reloaded.metadata
+    assert reloaded.messages[-2]["role"] == "assistant"
+    assert reloaded.messages[-1]["role"] == "tool"
+    assert "interrupted before this tool finished" in reloaded.messages[-1]["content"].lower()
+
+
+@pytest.mark.asyncio
+async def test_next_turn_consumes_resume_summary_from_stop(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.consolidator.summarize_interrupted = AsyncMock(return_value="- Next step: inspect failing command output")  # type: ignore[method-assign]
+    session = loop.sessions.get_or_create("cli:test")
+    session.add_message("user", "debug the failing command")
+    session.metadata[AgentLoop._RUNTIME_CHECKPOINT_KEY] = {
+        "assistant_message": {"role": "assistant", "content": "Inspecting logs"},
+        "completed_tool_results": [],
+        "pending_tool_calls": [],
+    }
+    loop.sessions.save(session)
+
+    async def long_running():
+        await asyncio.sleep(10)
+
+    task = asyncio.create_task(long_running())
+    loop._active_tasks["cli:test"] = [task]
+
+    stop_msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/stop")
+    stop_ctx = CommandContext(msg=stop_msg, session=session, key="cli:test", raw="/stop", loop=loop)
+    stop_result = await cmd_stop(stop_ctx)
+
+    assert "Saved resume context" in stop_result.content
+    assert task.cancelled() or task.done()
+
+    captured_messages: list[dict] = []
+
+    async def _fake_run_agent_loop(
+        initial_messages,
+        on_progress=None,
+        on_stream=None,
+        on_stream_end=None,
+        *,
+        session=None,
+        channel="cli",
+        chat_id="direct",
+        message_id=None,
+        pending_queue=None,
+    ):
+        nonlocal captured_messages
+        captured_messages = initial_messages
+        return (
+            "done",
+            [],
+            initial_messages + [{"role": "assistant", "content": "done"}],
+            "completed",
+            False,
+        )
+
+    loop._run_agent_loop = _fake_run_agent_loop  # type: ignore[method-assign]
+
+    result = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="user", chat_id="test", content="continue")
+    )
+
+    assert result is not None
+    assert result.content == "done"
+    assert captured_messages[-1]["role"] == "user"
+    assert "[Resumed Session]" in captured_messages[-1]["content"]
+    assert "Previous task was stopped before completion." in captured_messages[-1]["content"]
+    assert "Next step: inspect failing command output" in captured_messages[-1]["content"]
+
+
+@pytest.mark.asyncio
 async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -> None:
     from nanobot.command.builtin import cmd_stop
     from nanobot.command.router import CommandContext
@@ -373,13 +480,28 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
     stop_ctx = CommandContext(msg=stop_msg, session=None, key=stop_msg.session_key, raw="/stop", loop=loop)
     stop_result = await cmd_stop(stop_ctx)
 
-    assert "Stopped 1 task" in stop_result.content
+    assert "Saved resume context" in stop_result.content
     assert task.done()
 
     loop.sessions.invalidate("feishu:c4")
     interrupted = loop.sessions.get_or_create("feishu:c4")
-    assert interrupted.metadata.get(AgentLoop._PENDING_USER_TURN_KEY) is True
-    assert interrupted.metadata.get(AgentLoop._RUNTIME_CHECKPOINT_KEY) is not None
+    assert AgentLoop._PENDING_USER_TURN_KEY not in interrupted.metadata
+    assert AgentLoop._RUNTIME_CHECKPOINT_KEY not in interrupted.metadata
+    assert interrupted.metadata.get("_resume_summary") is not None
+    assert [
+        {k: v for k, v in m.items() if k in {"role", "content", "tool_call_id", "name"}}
+        for m in interrupted.messages
+    ] == [
+        {"role": "user", "content": "keep progress"},
+        {"role": "assistant", "content": "working"},
+        {"role": "tool", "tool_call_id": "call_done", "name": "read_file", "content": "ok"},
+        {
+            "role": "tool",
+            "tool_call_id": "call_pending",
+            "name": "exec",
+            "content": "Error: Task interrupted before this tool finished.",
+        },
+    ]
 
     async def resumed_run_agent_loop(initial_messages, **_kwargs):
         return (

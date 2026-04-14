@@ -17,10 +17,10 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
-from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunSpec, AgentRunner
+from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.notebook import NotebookEditTool
@@ -30,12 +30,13 @@ from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
+from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.helpers import image_placeholder_text, truncate_text as truncate_text_fn
+from nanobot.utils.helpers import image_placeholder_text
+from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
@@ -872,13 +873,12 @@ class AgentLoop:
             message.get("thinking_blocks"),
         )
 
-    def _restore_runtime_checkpoint(self, session: Session) -> bool:
-        """Materialize an unfinished turn into session history before a new request."""
+    def _materialize_runtime_checkpoint_messages(
+        self,
+        checkpoint: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Expand checkpoint metadata into restorable assistant/tool messages."""
         from datetime import datetime
-
-        checkpoint = session.metadata.get(self._RUNTIME_CHECKPOINT_KEY)
-        if not isinstance(checkpoint, dict):
-            return False
 
         assistant_message = checkpoint.get("assistant_message")
         completed_tool_results = checkpoint.get("completed_tool_results") or []
@@ -908,6 +908,15 @@ class AgentLoop:
                     "timestamp": datetime.now().isoformat(),
                 }
             )
+        return restored_messages
+
+    def _restore_runtime_checkpoint(self, session: Session) -> bool:
+        """Materialize an unfinished turn into session history before a new request."""
+        checkpoint = session.metadata.get(self._RUNTIME_CHECKPOINT_KEY)
+        if not isinstance(checkpoint, dict):
+            return False
+
+        restored_messages = self._materialize_runtime_checkpoint_messages(checkpoint)
 
         overlap = 0
         max_overlap = min(len(session.messages), len(restored_messages))
@@ -925,6 +934,67 @@ class AgentLoop:
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         return True
+
+    def _interrupted_turn_messages(self, session: Session) -> list[dict[str, Any]]:
+        """Collect the current interrupted turn for resume summarization."""
+        checkpoint = session.metadata.get(self._RUNTIME_CHECKPOINT_KEY)
+        pending_user = bool(session.metadata.get(self._PENDING_USER_TURN_KEY))
+        if not pending_user and not isinstance(checkpoint, dict):
+            return []
+
+        user_start = next(
+            (index for index in range(len(session.messages) - 1, -1, -1)
+             if session.messages[index].get("role") == "user"),
+            None,
+        )
+        current_turn = (
+            [dict(message) for message in session.messages[user_start:]]
+            if user_start is not None
+            else []
+        )
+
+        checkpoint_messages = (
+            self._materialize_runtime_checkpoint_messages(checkpoint)
+            if isinstance(checkpoint, dict)
+            else []
+        )
+        overlap = 0
+        max_overlap = min(len(current_turn), len(checkpoint_messages))
+        for size in range(max_overlap, 0, -1):
+            existing = current_turn[-size:]
+            restored = checkpoint_messages[:size]
+            if all(
+                self._checkpoint_message_key(left) == self._checkpoint_message_key(right)
+                for left, right in zip(existing, restored)
+            ):
+                overlap = size
+                break
+        combined = current_turn + checkpoint_messages[overlap:]
+        if pending_user and not checkpoint_messages:
+            combined.append(
+                {
+                    "role": "assistant",
+                    "content": "Error: Task interrupted before a response was generated.",
+                }
+            )
+        return combined
+
+    async def capture_resume_summary(self, key: str) -> bool:
+        """Persist a one-shot summary for the next turn after `/stop` interrupts work."""
+        session = self.sessions.get_or_create(key)
+        interrupted = self._interrupted_turn_messages(session)
+        if not interrupted:
+            return False
+
+        summary = await self.consolidator.summarize_interrupted(interrupted)
+        if summary:
+            self.auto_compact.stash_resume_summary(session, key, summary)
+
+        restored = self._restore_runtime_checkpoint(session)
+        if not restored:
+            self._restore_pending_user_turn(session)
+        self.sessions.save(session)
+        return bool(summary)
 
     def _restore_pending_user_turn(self, session: Session) -> bool:
         """Close a turn that only persisted the user message before crashing."""

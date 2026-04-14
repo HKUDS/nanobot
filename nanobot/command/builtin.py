@@ -17,16 +17,22 @@ async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
     """Cancel all active tasks and subagents for the session."""
     loop = ctx.loop
     msg = ctx.msg
-    tasks = loop._active_tasks.pop(msg.session_key, [])
+    tasks = loop._active_tasks.pop(ctx.key, [])
     cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
     for t in tasks:
         try:
             await t
         except (asyncio.CancelledError, Exception):
             pass
-    sub_cancelled = await loop.subagents.cancel_by_session(msg.session_key)
+    sub_cancelled = await loop.subagents.cancel_by_session(ctx.key)
     total = cancelled + sub_cancelled
-    content = f"Stopped {total} task(s)." if total else "No active task to stop."
+    saved_resume = False
+    if total:
+        saved_resume = await loop.capture_resume_summary(ctx.key)
+    if total and saved_resume:
+        content = f"Stopped {total} task(s). Saved resume context for the next turn."
+    else:
+        content = f"Stopped {total} task(s)." if total else "No active task to stop."
     return OutboundMessage(
         channel=msg.channel, chat_id=msg.chat_id, content=content,
         metadata=dict(msg.metadata or {})

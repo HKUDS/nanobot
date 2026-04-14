@@ -12,12 +12,17 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
-from nanobot.utils.prompt_templates import render_template
-from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, strip_think
-
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.utils.gitstore import GitStore
+from nanobot.utils.helpers import (
+    ensure_dir,
+    estimate_message_tokens,
+    estimate_prompt_tokens_chain,
+    strip_think,
+    truncate_text,
+)
+from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -433,6 +438,59 @@ class Consolidator:
             self._get_tool_definitions(),
         )
 
+    @staticmethod
+    def _fallback_interrupted_summary(messages: list[dict]) -> str | None:
+        """Best-effort structured summary when the LLM summary call fails."""
+
+        def _content_preview(content: Any) -> str:
+            if isinstance(content, str):
+                return truncate_text(content.strip(), 400)
+            if isinstance(content, list):
+                parts: list[str] = []
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "text" and isinstance(block.get("text"), str):
+                        parts.append(block["text"].strip())
+                return truncate_text("\n".join(part for part in parts if part), 400)
+            return ""
+
+        user_goal = ""
+        assistant_state = ""
+        completed_tools: list[str] = []
+        pending_tools: list[str] = []
+        seen_tools: set[str] = set()
+
+        for message in messages:
+            role = message.get("role")
+            if role == "user" and not user_goal:
+                user_goal = _content_preview(message.get("content"))
+            elif role == "assistant":
+                assistant_state = _content_preview(message.get("content")) or assistant_state
+            elif role == "tool":
+                name = str(message.get("name") or "tool")
+                preview = _content_preview(message.get("content"))
+                line = f"{name}: {preview}" if preview else name
+                if "interrupted before this tool finished" in preview.lower():
+                    pending_tools.append(line)
+                    continue
+                if line not in seen_tools:
+                    seen_tools.add(line)
+                    completed_tools.append(line)
+
+        lines: list[str] = []
+        if user_goal:
+            lines.append(f"- User goal: {user_goal}")
+        if assistant_state:
+            lines.append(f"- Last assistant state: {assistant_state}")
+        if completed_tools:
+            lines.append("- Completed tool results: " + "; ".join(completed_tools[:4]))
+        if pending_tools:
+            lines.append("- Pending tool calls: " + "; ".join(pending_tools[:4]))
+        if not pending_tools and not completed_tools:
+            lines.append("- Task status: The turn was interrupted before it fully completed.")
+        return "\n".join(lines) if lines else None
+
     async def archive(self, messages: list[dict]) -> str | None:
         """Summarize messages via LLM and append to history.jsonl.
 
@@ -464,6 +522,33 @@ class Consolidator:
             logger.warning("Consolidation LLM call failed, raw-dumping to history")
             self.store.raw_archive(messages)
             return None
+
+    async def summarize_interrupted(self, messages: list[dict]) -> str | None:
+        """Summarize an interrupted in-flight task for one-shot resume injection."""
+        if not messages:
+            return None
+        formatted = MemoryStore._format_messages(messages)
+        try:
+            response = await self.provider.chat_with_retry(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": render_template(
+                            "agent/interrupted_resume_summary.md",
+                            strip=True,
+                        ),
+                    },
+                    {"role": "user", "content": formatted},
+                ],
+                tools=None,
+                tool_choice=None,
+            )
+            summary = (response.content or "").strip()
+            return summary or None
+        except Exception:
+            logger.warning("Interrupted-task summary failed; using deterministic fallback")
+            return self._fallback_interrupted_summary(messages)
 
     async def maybe_consolidate_by_tokens(self, session: Session) -> None:
         """Loop: archive old messages until prompt fits within safe budget.

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
+
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -15,6 +16,8 @@ if TYPE_CHECKING:
 
 class AutoCompact:
     _RECENT_SUFFIX_MESSAGES = 8
+    _LAST_SUMMARY_KEY = "_last_summary"
+    _RESUME_SUMMARY_KEY = "_resume_summary"
 
     def __init__(self, sessions: SessionManager, consolidator: Consolidator,
                  session_ttl_minutes: int = 0):
@@ -23,6 +26,7 @@ class AutoCompact:
         self._ttl = session_ttl_minutes
         self._archiving: set[str] = set()
         self._summaries: dict[str, tuple[str, datetime]] = {}
+        self._resume_summaries: dict[str, str] = {}
 
     def _is_expired(self, ts: datetime | str | None,
                     now: datetime | None = None) -> bool:
@@ -36,6 +40,10 @@ class AutoCompact:
     def _format_summary(text: str, last_active: datetime) -> str:
         idle_min = int((datetime.now() - last_active).total_seconds() / 60)
         return f"Inactive for {idle_min} minutes.\nPrevious conversation summary: {text}"
+
+    @staticmethod
+    def _format_resume_summary(text: str) -> str:
+        return f"Previous task was stopped before completion.\nInterrupted task summary: {text}"
 
     def _split_unconsolidated(
         self, session: Session,
@@ -88,7 +96,10 @@ class AutoCompact:
                 summary = await self.consolidator.archive(archive_msgs) or ""
             if summary and summary != "(nothing)":
                 self._summaries[key] = (summary, last_active)
-                session.metadata["_last_summary"] = {"text": summary, "last_active": last_active.isoformat()}
+                session.metadata[self._LAST_SUMMARY_KEY] = {
+                    "text": summary,
+                    "last_active": last_active.isoformat(),
+                }
             session.messages = kept_msgs
             session.last_consolidated = 0
             session.updated_at = datetime.now()
@@ -106,18 +117,48 @@ class AutoCompact:
         finally:
             self._archiving.discard(key)
 
+    def stash_resume_summary(self, session: Session, key: str, summary: str) -> None:
+        """Persist a one-shot interrupted-task summary for the next turn."""
+        text = summary.strip()
+        if not text or text == "(nothing)":
+            return
+        self._resume_summaries[key] = text
+        session.metadata[self._RESUME_SUMMARY_KEY] = {"text": text}
+
+    def _consume_resume_summary(self, session: Session, key: str) -> str | None:
+        text = self._resume_summaries.pop(key, None)
+        if text:
+            session.metadata.pop(self._RESUME_SUMMARY_KEY, None)
+            return self._format_resume_summary(text)
+        if self._RESUME_SUMMARY_KEY not in session.metadata:
+            return None
+        meta = session.metadata.pop(self._RESUME_SUMMARY_KEY)
+        self.sessions.save(session)
+        return self._format_resume_summary(meta["text"])
+
+    def _consume_idle_summary(self, session: Session, key: str) -> str | None:
+        # Hot path: summary from in-memory dict (process hasn't restarted).
+        # Also clean metadata copy so stale summary never leaks to disk.
+        entry = self._summaries.pop(key, None)
+        if entry:
+            session.metadata.pop(self._LAST_SUMMARY_KEY, None)
+            return self._format_summary(entry[0], entry[1])
+        if self._LAST_SUMMARY_KEY not in session.metadata:
+            return None
+        meta = session.metadata.pop(self._LAST_SUMMARY_KEY)
+        self.sessions.save(session)
+        return self._format_summary(meta["text"], datetime.fromisoformat(meta["last_active"]))
+
     def prepare_session(self, session: Session, key: str) -> tuple[Session, str | None]:
         if key in self._archiving or self._is_expired(session.updated_at):
             logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
             session = self.sessions.get_or_create(key)
-        # Hot path: summary from in-memory dict (process hasn't restarted).
-        # Also clean metadata copy so stale _last_summary never leaks to disk.
-        entry = self._summaries.pop(key, None)
-        if entry:
-            session.metadata.pop("_last_summary", None)
-            return session, self._format_summary(entry[0], entry[1])
-        if "_last_summary" in session.metadata:
-            meta = session.metadata.pop("_last_summary")
-            self.sessions.save(session)
-            return session, self._format_summary(meta["text"], datetime.fromisoformat(meta["last_active"]))
-        return session, None
+        summaries = [
+            text
+            for text in (
+                self._consume_resume_summary(session, key),
+                self._consume_idle_summary(session, key),
+            )
+            if text
+        ]
+        return session, "\n\n".join(summaries) if summaries else None
