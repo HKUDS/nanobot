@@ -262,3 +262,11 @@ class SubagentManager:
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""
         return len(self._running_tasks)
+
+    def get_running_count_by_session(self, session_key: str) -> int:
+        """Return the number of currently running subagents for a session."""
+        tids = self._session_tasks.get(session_key, set())
+        return sum(
+            1 for tid in tids
+            if tid in self._running_tasks and not self._running_tasks[tid].done()
+        )

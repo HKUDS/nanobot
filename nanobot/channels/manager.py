@@ -75,7 +75,15 @@ class ChannelManager:
 
     def _validate_allow_from(self) -> None:
         for name, ch in self.channels.items():
-            if getattr(ch.config, "allow_from", None) == []:
+            cfg = ch.config
+            if isinstance(cfg, dict):
+                if "allow_from" in cfg:
+                    allow = cfg.get("allow_from")
+                else:
+                    allow = cfg.get("allowFrom")
+            else:
+                allow = getattr(cfg, "allow_from", None)
+            if allow == []:
                 raise SystemExit(
                     f'Error: "{name}" has empty allowFrom (denies all). '
                     f'Set ["*"] to allow everyone, or add specific user IDs.'
