@@ -632,6 +632,30 @@ def test_openai_compat_repairs_non_json_tool_arguments_string() -> None:
     assert sanitized[1]["tool_calls"][0]["function"]["arguments"] == '{"cmd": "pwd"}'
 
 
+def test_openai_compat_defaults_missing_tool_arguments_to_empty_object() -> None:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    sanitized = provider._sanitize_messages([
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "exec"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "name": "exec", "content": "ok"},
+        {"role": "user", "content": "done"},
+    ])
+
+    assert sanitized[1]["tool_calls"][0]["function"]["arguments"] == "{}"
+
+
 @pytest.mark.asyncio
 async def test_openai_compat_stream_watchdog_returns_error_on_stall(monkeypatch) -> None:
     monkeypatch.setenv("NANOBOT_STREAM_IDLE_TIMEOUT_S", "0")
