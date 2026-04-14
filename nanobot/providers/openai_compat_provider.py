@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import hashlib
 import importlib.util
 import os
@@ -222,6 +223,24 @@ class OpenAICompatProvider(LLMProvider):
             return tool_call_id
         return hashlib.sha1(tool_call_id.encode()).hexdigest()[:9]
 
+    @staticmethod
+    def _normalize_tool_call_arguments(arguments: Any) -> str:
+        """Force function.arguments into a valid JSON object string."""
+        if isinstance(arguments, str):
+            stripped = arguments.strip()
+            if not stripped:
+                return "{}"
+            try:
+                parsed = json_repair.loads(stripped)
+            except Exception:
+                return "{}"
+            if isinstance(parsed, dict):
+                return json.dumps(parsed, ensure_ascii=False)
+            return "{}"
+        if isinstance(arguments, dict):
+            return json.dumps(arguments, ensure_ascii=False)
+        return "{}"
+
     def _sanitize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Strip non-standard keys, normalize tool_call IDs."""
         sanitized = LLMProvider._sanitize_request_messages(messages, _ALLOWED_MSG_KEYS)
@@ -241,6 +260,16 @@ class OpenAICompatProvider(LLMProvider):
                         continue
                     tc_clean = dict(tc)
                     tc_clean["id"] = map_id(tc_clean.get("id"))
+                    function = tc_clean.get("function")
+                    if isinstance(function, dict):
+                        function_clean = dict(function)
+                        if "arguments" in function_clean:
+                            function_clean["arguments"] = self._normalize_tool_call_arguments(
+                                function_clean.get("arguments")
+                            )
+                        else:
+                            function_clean["arguments"] = "{}"
+                        tc_clean["function"] = function_clean
                     normalized.append(tc_clean)
                 clean["tool_calls"] = normalized
                 if clean.get("role") == "assistant":
