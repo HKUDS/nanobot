@@ -1891,6 +1891,7 @@ By default, the API binds to `127.0.0.1:8900`. You can change this in `config.js
 - Single-message input: each request must contain exactly one `user` message
 - Fixed model: omit `model`, or pass the same model shown by `/v1/models`
 - No streaming: `stream=true` is not supported
+- **File uploads**: supports images, PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx) via JSON base64 or `multipart/form-data` (max 10MB per file)
 - API requests run in the synthetic `api` channel, so the `message` tool does **not** automatically deliver to Telegram/Discord/etc. To proactively send to another chat, call `message` with an explicit `channel` and `chat_id` for an enabled channel.
 
 Example tool call for cross-channel delivery from an API session:
@@ -1921,6 +1922,44 @@ curl http://127.0.0.1:8900/v1/chat/completions \
     "session_id": "my-session"
   }'
 ```
+
+### File Upload (JSON base64)
+
+Send images inline using the OpenAI multimodal content format:
+
+```bash
+curl http://127.0.0.1:8900/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": [
+      {"type": "text", "text": "Describe this image"},
+      {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBOR..."}}
+    ]}]
+  }'
+```
+
+### File Upload (multipart/form-data)
+
+Upload any supported file type (images, PDF, Word, Excel, PPT) via multipart:
+
+```bash
+# Single file
+curl http://127.0.0.1:8900/v1/chat/completions \
+  -F "message=Summarize this report" \
+  -F "files=@report.docx"
+
+# Multiple files with session isolation
+curl http://127.0.0.1:8900/v1/chat/completions \
+  -F "message=Compare these files" \
+  -F "files=@chart.png" \
+  -F "files=@data.xlsx" \
+  -F "session_id=my-session"
+```
+
+Supported file types:
+- **Images**: PNG, JPEG, GIF, WebP (sent to AI as base64 for vision analysis)
+- **Documents**: PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx) (text extracted and sent to AI)
+- **Text**: TXT, Markdown, CSV, JSON, etc. (read directly)
 
 ### Python (`requests`)
 

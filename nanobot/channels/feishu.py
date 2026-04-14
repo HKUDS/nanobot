@@ -1290,7 +1290,6 @@ class FeishuChannel(BaseChannel):
 
         Supported metadata keys:
             _stream_end: Finalize the streaming card.
-            _resuming:   Mid-turn pause – flush but keep the buffer alive.
             _tool_hint:  Delta is a formatted tool hint (for display only).
             message_id:  Original message id (used with _stream_end for reaction cleanup).
             reaction_id: Reaction id to remove on stream end.
@@ -1309,50 +1308,44 @@ class FeishuChannel(BaseChannel):
                 if self.config.done_emoji and message_id:
                     await self._add_reaction(message_id, self.config.done_emoji)
 
-            resuming = meta.get("_resuming", False)
-            if resuming:
-                # Mid-turn pause (e.g. tool call between streaming segments).
-                # Flush current text to card but keep the buffer alive so the
-                # next segment appends to the same card.
-                buf = self._stream_bufs.get(chat_id)
-                if buf and buf.card_id and buf.text:
-                    buf.sequence += 1
-                    await loop.run_in_executor(
-                        None, self._stream_update_text_sync, buf.card_id, buf.text, buf.sequence,
-                    )
-                return
-
             buf = self._stream_bufs.pop(chat_id, None)
             if not buf or not buf.text:
                 return
+            # Try to finalize via streaming card; if that fails (e.g.
+            # streaming mode was closed by Feishu due to timeout), fall
+            # back to sending a regular interactive card.
             if buf.card_id:
                 buf.sequence += 1
-                await loop.run_in_executor(
+                ok = await loop.run_in_executor(
                     None,
                     self._stream_update_text_sync,
                     buf.card_id,
                     buf.text,
                     buf.sequence,
                 )
-                # Required so the chat list preview exits the streaming placeholder (Feishu streaming card docs).
-                buf.sequence += 1
-                await loop.run_in_executor(
-                    None,
-                    self._close_streaming_mode_sync,
-                    buf.card_id,
-                    buf.sequence,
-                )
-            else:
-                for chunk in self._split_elements_by_table_limit(
-                    self._build_card_elements(buf.text)
-                ):
-                    card = json.dumps(
-                        {"config": {"wide_screen_mode": True}, "elements": chunk},
-                        ensure_ascii=False,
-                    )
+                if ok:
+                    buf.sequence += 1
                     await loop.run_in_executor(
-                        None, self._send_message_sync, rid_type, chat_id, "interactive", card
+                        None,
+                        self._close_streaming_mode_sync,
+                        buf.card_id,
+                        buf.sequence,
                     )
+                    return
+                logger.warning(
+                    "Streaming card {} final update failed, falling back to regular card",
+                    buf.card_id,
+                )
+            for chunk in self._split_elements_by_table_limit(
+                self._build_card_elements(buf.text)
+            ):
+                card = json.dumps(
+                    {"config": {"wide_screen_mode": True}, "elements": chunk},
+                    ensure_ascii=False,
+                )
+                await loop.run_in_executor(
+                    None, self._send_message_sync, rid_type, chat_id, "interactive", card
+                )
             return
 
         # --- accumulate delta ---
@@ -1404,14 +1397,21 @@ class FeishuChannel(BaseChannel):
                 if buf and buf.card_id:
                     # Delegate to send_delta so tool hints get the same
                     # throttling (and card creation) as regular text deltas.
-                    lines = self.__class__._format_tool_hint_lines(hint).split("\n")
-                    delta = "\n\n" + "\n".join(
-                        f"{self.config.tool_hint_prefix} {ln}" for ln in lines if ln.strip()
-                    ) + "\n\n"
-                    await self.send_delta(msg.chat_id, delta)
+                    await self.send_delta(
+                        msg.chat_id,
+                        "\n\n" + self._format_tool_hint_delta(hint) + "\n\n",
+                    )
                     return
-                await self._send_tool_hint_card(
-                    receive_id_type, msg.chat_id, hint
+                # No active streaming card — send as a regular
+                # interactive card with the same 🔧 prefix style.
+                card = json.dumps(
+                    {"config": {"wide_screen_mode": True}, "elements": [
+                        {"tag": "markdown", "content": self._format_tool_hint_delta(hint)},
+                    ]},
+                    ensure_ascii=False,
+                )
+                await loop.run_in_executor(
+                    None, self._send_message_sync, receive_id_type, msg.chat_id, "interactive", card
                 )
                 return
 
@@ -1708,33 +1708,9 @@ class FeishuChannel(BaseChannel):
 
         return "\n".join(part for part in parts if part)
 
-    async def _send_tool_hint_card(
-        self, receive_id_type: str, receive_id: str, tool_hint: str
-    ) -> None:
-        """Send tool hint as an interactive card with formatted code block.
-
-        Args:
-            receive_id_type: "chat_id" or "open_id"
-            receive_id: The target chat or user ID
-            tool_hint: Formatted tool hint string (e.g., 'web_search("q"), read_file("path")')
-        """
-        loop = asyncio.get_running_loop()
-
-        # Put each top-level tool call on its own line without altering commas inside arguments.
-        formatted_code = self.__class__._format_tool_hint_lines(tool_hint)
-
-        card = {
-            "config": {"wide_screen_mode": True},
-            "elements": [
-                {"tag": "markdown", "content": f"**Tool Calls**\n\n```text\n{formatted_code}\n```"}
-            ],
-        }
-
-        await loop.run_in_executor(
-            None,
-            self._send_message_sync,
-            receive_id_type,
-            receive_id,
-            "interactive",
-            json.dumps(card, ensure_ascii=False),
+    def _format_tool_hint_delta(self, tool_hint: str) -> str:
+        """Format a tool hint string with the 🔧 prefix for each line."""
+        lines = self.__class__._format_tool_hint_lines(tool_hint).split("\n")
+        return "\n".join(
+            f"{self.config.tool_hint_prefix} {ln}" for ln in lines if ln.strip()
         )
