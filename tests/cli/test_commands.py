@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.cli.commands import _make_provider, app
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, MCPServerConfig
 from nanobot.cron.types import CronJob, CronPayload
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_name
@@ -25,10 +25,12 @@ class _StopGatewayError(RuntimeError):
 @pytest.fixture
 def mock_paths():
     """Mock config/workspace paths for test isolation."""
-    with patch("nanobot.config.loader.get_config_path") as mock_cp, \
-         patch("nanobot.config.loader.save_config") as mock_sc, \
-         patch("nanobot.config.loader.load_config") as mock_lc, \
-         patch("nanobot.cli.commands.get_workspace_path") as mock_ws:
+    with (
+        patch("nanobot.config.loader.get_config_path") as mock_cp,
+        patch("nanobot.config.loader.save_config") as mock_sc,
+        patch("nanobot.config.loader.load_config") as mock_lc,
+        patch("nanobot.cli.commands.get_workspace_path") as mock_ws,
+    ):
         base_dir = Path("./test_onboard_data")
         if base_dir.exists():
             shutil.rmtree(base_dir)
@@ -114,8 +116,8 @@ def test_onboard_existing_workspace_safe_create(mock_paths):
 
 def _strip_ansi(text):
     """Remove ANSI escape codes from text."""
-    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
-    return ansi_escape.sub('', text)
+    ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
+    return ansi_escape.sub("", text)
 
 
 def test_onboard_help_shows_workspace_and_config_options():
@@ -194,6 +196,458 @@ def test_onboard_wizard_preserves_explicit_config_in_next_steps(tmp_path, monkey
     resolved_config = str(config_path.resolve())
     assert f'nanobot agent -m "Hello!" --config {resolved_config}' in compact_output
     assert f"nanobot gateway --config {resolved_config}" in compact_output
+
+
+def test_setup_agenthifive_installs_skill_and_configures_mcp(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    workspace_path = tmp_path / "workspace"
+    skill_source = tmp_path / "skill-source" / "agenthifive"
+    skill_source.mkdir(parents=True)
+    (skill_source / "SKILL.md").write_text("# test skill\n", encoding="utf-8")
+
+    monkeypatch.setattr("nanobot.cli.commands._get_agenthifive_skill_source", lambda: skill_source)
+    monkeypatch.setenv("AGENTHIFIVE_BASE_URL", "https://ah5.agenthifive.it")
+    monkeypatch.setenv("AGENTHIFIVE_AGENT_ID", "agt_test")
+    monkeypatch.setenv("AGENTHIFIVE_PRIVATE_KEY_PATH", "/tmp/agenthifive-agent.jwk")
+
+    result = runner.invoke(
+        app,
+        [
+            "setup-agenthifive",
+            "--config",
+            str(config_path),
+            "--workspace",
+            str(workspace_path),
+            "--mcp-path",
+            "/tmp/agenthifive-mcp/dist/index.js",
+        ],
+    )
+
+    assert result.exit_code == 0
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    server = saved.tools.mcp_servers["agenthifive"]
+    assert server.command == "node"
+    assert server.args == ["/tmp/agenthifive-mcp/dist/index.js"]
+    assert server.env["AGENTHIFIVE_BASE_URL"] == "${AGENTHIFIVE_BASE_URL}"
+    assert server.env["AGENTHIFIVE_AGENT_ID"] == "${AGENTHIFIVE_AGENT_ID}"
+    assert server.env["AGENTHIFIVE_PRIVATE_KEY_PATH"] == "${AGENTHIFIVE_PRIVATE_KEY_PATH}"
+    assert "AGENTHIFIVE_BEARER_TOKEN" not in server.env
+    assert server.enabled_tools == ["*"]
+    assert (workspace_path / "skills" / "agenthifive" / "SKILL.md").exists()
+
+
+def test_setup_agenthifive_preserves_existing_mcp_settings_without_force(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    workspace_path = tmp_path / "workspace"
+    skill_source = tmp_path / "skill-source" / "agenthifive"
+    skill_source.mkdir(parents=True)
+    (skill_source / "SKILL.md").write_text("# test skill\n", encoding="utf-8")
+
+    monkeypatch.setattr("nanobot.cli.commands._get_agenthifive_skill_source", lambda: skill_source)
+    monkeypatch.setenv("AGENTHIFIVE_BASE_URL", "https://ah5.agenthifive.it")
+    monkeypatch.setenv("AGENTHIFIVE_AGENT_ID", "agt_test")
+    monkeypatch.setenv("AGENTHIFIVE_PRIVATE_KEY_PATH", "/tmp/agenthifive-agent.jwk")
+
+    config = Config()
+    config.agents.defaults.workspace = str(workspace_path)
+    config.tools.mcp_servers["agenthifive"] = MCPServerConfig.model_validate(
+        {
+            "type": "stdio",
+            "command": "custom-ah5",
+            "args": ["--serve"],
+            "env": {"AGENTHIFIVE_BASE_URL": "https://existing.example"},
+            "toolTimeout": 45,
+            "enabledTools": ["mcp_agenthifive_execute"],
+        }
+    )
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(config.model_dump(mode="json", by_alias=True)), encoding="utf-8"
+    )
+
+    result = runner.invoke(
+        app,
+        ["setup-agenthifive", "--config", str(config_path), "--workspace", str(workspace_path)],
+    )
+
+    assert result.exit_code == 0
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    server = saved.tools.mcp_servers["agenthifive"]
+    assert server.command == "custom-ah5"
+    assert server.args == ["--serve"]
+    assert server.env["AGENTHIFIVE_BASE_URL"] == "https://existing.example"
+    assert server.env["AGENTHIFIVE_AGENT_ID"] == "${AGENTHIFIVE_AGENT_ID}"
+    assert server.env["AGENTHIFIVE_PRIVATE_KEY_PATH"] == "${AGENTHIFIVE_PRIVATE_KEY_PATH}"
+    assert server.tool_timeout == 45
+    assert server.enabled_tools == ["mcp_agenthifive_execute"]
+
+
+def test_setup_agenthifive_supports_bearer_override(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    workspace_path = tmp_path / "workspace"
+    skill_source = tmp_path / "skill-source" / "agenthifive"
+    skill_source.mkdir(parents=True)
+    (skill_source / "SKILL.md").write_text("# test skill\n", encoding="utf-8")
+
+    monkeypatch.setattr("nanobot.cli.commands._get_agenthifive_skill_source", lambda: skill_source)
+    monkeypatch.setenv("AGENTHIFIVE_BASE_URL", "https://ah5.agenthifive.it")
+
+    result = runner.invoke(
+        app,
+        [
+            "setup-agenthifive",
+            "--config",
+            str(config_path),
+            "--workspace",
+            str(workspace_path),
+            "--bearer-token",
+            "ah5t_test",
+        ],
+    )
+
+    assert result.exit_code == 0
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    server = saved.tools.mcp_servers["agenthifive"]
+    assert server.env["AGENTHIFIVE_BEARER_TOKEN"] == "ah5t_test"
+    assert "AGENTHIFIVE_AGENT_ID" not in server.env
+
+
+def test_setup_agenthifive_bootstraps_when_agent_auth_missing(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    workspace_path = tmp_path / "workspace"
+    monkeypatch.setenv("HOME", str(tmp_path))
+    private_key_path = tmp_path / ".nanobot" / "agenthifive-agent.jwk"
+    skill_source = tmp_path / "skill-source" / "agenthifive"
+    skill_source.mkdir(parents=True)
+    (skill_source / "SKILL.md").write_text("# test skill\n", encoding="utf-8")
+
+    monkeypatch.setattr("nanobot.cli.commands._get_agenthifive_skill_source", lambda: skill_source)
+    fake_private_jwk = {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "private-x",
+        "y": "private-y",
+        "d": "private-d",
+    }
+    fake_public_jwk = {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "public-x",
+        "y": "public-y",
+    }
+    monkeypatch.setattr(
+        "nanobot.cli.commands._generate_agenthifive_jwk_pair",
+        lambda: (fake_private_jwk, fake_public_jwk),
+    )
+    monkeypatch.setattr(
+        "nanobot.cli.commands._bootstrap_agenthifive_public_key",
+        lambda **_kwargs: "agt_live",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "setup-agenthifive",
+            "--config",
+            str(config_path),
+            "--workspace",
+            str(workspace_path),
+        ],
+        input="https://ah5.agenthifive.it\nah5b_live_secret\n~/.nanobot/agenthifive-agent.jwk\n",
+    )
+
+    assert result.exit_code == 0
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    server = saved.tools.mcp_servers["agenthifive"]
+    assert server.env["AGENTHIFIVE_BASE_URL"] == "https://ah5.agenthifive.it"
+    assert server.env["AGENTHIFIVE_AGENT_ID"] == "agt_live"
+    assert server.env["AGENTHIFIVE_PRIVATE_KEY_PATH"] == str(private_key_path)
+    assert json.loads(private_key_path.read_text(encoding="utf-8")) == fake_private_jwk
+
+
+def test_setup_agenthifive_can_launch_channel_setup(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    workspace_path = tmp_path / "workspace"
+    skill_source = tmp_path / "skill-source" / "agenthifive"
+    skill_source.mkdir(parents=True)
+    (skill_source / "SKILL.md").write_text("# test skill\n", encoding="utf-8")
+
+    monkeypatch.setattr("nanobot.cli.commands._get_agenthifive_skill_source", lambda: skill_source)
+    monkeypatch.setenv("AGENTHIFIVE_BASE_URL", "https://ah5.agenthifive.it")
+    monkeypatch.setenv("AGENTHIFIVE_AGENT_ID", "agt_test")
+    monkeypatch.setenv("AGENTHIFIVE_PRIVATE_KEY_PATH", "/tmp/agenthifive-agent.jwk")
+
+    seen: dict[str, object] = {}
+
+    def _fake_channel_setup(*, config_path: Path) -> None:
+        seen["config_path"] = config_path
+
+    monkeypatch.setattr("nanobot.cli.commands._run_agenthifive_channel_setup", _fake_channel_setup)
+
+    result = runner.invoke(
+        app,
+        [
+            "setup-agenthifive",
+            "--config",
+            str(config_path),
+            "--workspace",
+            str(workspace_path),
+            "--setup-channels",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen["config_path"] == config_path.resolve()
+
+
+def test_setup_agenthifive_menu_can_launch_channel_setup(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    seen: dict[str, object] = {}
+
+    def _fake_channel_setup(*, config_path: Path) -> None:
+        seen["config_path"] = config_path
+
+    monkeypatch.setattr("nanobot.cli.commands._run_agenthifive_channel_setup", _fake_channel_setup)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._setup_agenthifive_should_show_menu",
+        lambda **_kwargs: True,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "setup-agenthifive",
+            "--config",
+            str(config_path),
+        ],
+        input="3\n",
+    )
+
+    assert result.exit_code == 0
+    assert seen["config_path"] == config_path.resolve()
+
+
+def test_setup_agenthifive_channel_wizard_writes_curated_config(tmp_path):
+    config_path = tmp_path / "instance" / "config.json"
+    config_path.parent.mkdir(parents=True)
+
+    config = Config()
+    config.channels.agenthifive = {
+        "enabled": True,
+        "providers": {
+            "telegram": {
+                "enabled": False,
+                "allowFrom": ["8279370215"],
+                "replyToMessage": True,
+            },
+            "slack": {
+                "enabled": True,
+                "allowFrom": ["U123"],
+                "replyInThread": True,
+                "channelTypes": ["im", "public_channel"],
+            },
+        },
+    }
+    config_path.write_text(json.dumps(config.model_dump(by_alias=True)), encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["setup-agenthifive", "--config", str(config_path), "--setup-channels"],
+        input="1\n2\n\n",
+    )
+
+    assert result.exit_code == 0
+    clean = _strip_ansi(result.stdout)
+    assert "allowFrom" not in clean
+    assert "Reply to the triggering Telegram message?" not in clean
+    assert "Reply in the original Slack thread when possible?" not in clean
+    assert "1. Telegram" in clean
+    assert "2. Slack" in clean
+
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    channel_cfg = saved.channels.agenthifive
+    assert channel_cfg["enabled"] is True
+    assert channel_cfg["providers"]["telegram"]["enabled"] is True
+    assert channel_cfg["providers"]["telegram"]["replyToMessage"] is True
+    assert channel_cfg["providers"]["telegram"]["allowFrom"] == ["8279370215"]
+    assert channel_cfg["providers"]["slack"]["enabled"] is False
+    assert channel_cfg["providers"]["slack"]["allowFrom"] == ["U123"]
+
+
+def test_setup_agenthifive_channel_wizard_uses_detected_services(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(json.dumps(Config().model_dump(by_alias=True)), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "nanobot.cli.commands._discover_agenthifive_channel_connections",
+        lambda _config_path: (
+            {"telegram": [{"service": "telegram", "label": "Team Telegram"}]},
+            None,
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        ["setup-agenthifive", "--config", str(config_path), "--setup-channels"],
+        input="1\n\n",
+    )
+
+    assert result.exit_code == 0
+    clean = _strip_ansi(result.stdout)
+    assert "Detected healthy AgentHiFive channel connections" in clean
+    assert "Telegram (disabled)" in clean
+    assert "Team Telegram" in clean
+    assert "Use AgentHiFive Slack channel?" not in clean
+    assert "Reply to the triggering Telegram message?" not in clean
+    assert "1. Telegram: OFF" in clean
+
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    assert saved.channels.agenthifive["enabled"] is True
+    assert saved.channels.agenthifive["providers"]["telegram"]["enabled"] is True
+    assert saved.channels.agenthifive["providers"]["slack"]["enabled"] is False
+
+
+def test_setup_agenthifive_channel_wizard_defaults_telegram_reply_to_yes(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    config_path.parent.mkdir(parents=True)
+
+    config = Config()
+    config.channels.agenthifive = {
+        "enabled": False,
+        "providers": {
+            "telegram": {
+                "enabled": False,
+                "allowFrom": [],
+                "replyToMessage": False,
+            },
+            "slack": {
+                "enabled": False,
+                "allowFrom": [],
+                "replyInThread": True,
+                "channelTypes": ["im", "public_channel"],
+            },
+        },
+    }
+    config_path.write_text(json.dumps(config.model_dump(by_alias=True)), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "nanobot.cli.commands._discover_agenthifive_channel_connections",
+        lambda _config_path: (
+            {"telegram": [{"service": "telegram", "label": "Team Telegram"}]},
+            None,
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        ["setup-agenthifive", "--config", str(config_path), "--setup-channels"],
+        input="1\n\n",
+    )
+
+    assert result.exit_code == 0
+    assert "Reply to the triggering Telegram message?" not in _strip_ansi(result.stdout)
+
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    assert saved.channels.agenthifive["providers"]["telegram"]["enabled"] is True
+    assert saved.channels.agenthifive["providers"]["telegram"]["replyToMessage"] is True
+
+
+def test_setup_agenthifive_channel_wizard_can_migrate_native_telegram(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    config_path.parent.mkdir(parents=True)
+
+    config = Config()
+    config.channels.telegram = {
+        "enabled": True,
+        "token": "123:abc",
+        "allowFrom": ["8279370215"],
+        "replyToMessage": False,
+    }
+    config_path.write_text(json.dumps(config.model_dump(by_alias=True)), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "nanobot.cli.commands._discover_agenthifive_channel_connections",
+        lambda _config_path: ({"telegram": [{"service": "telegram", "label": "Ops Bot"}]}, None),
+    )
+
+    result = runner.invoke(
+        app,
+        ["setup-agenthifive", "--config", str(config_path), "--setup-channels"],
+        input="1\ny\n\n",
+    )
+
+    assert result.exit_code == 0
+    clean = _strip_ansi(result.stdout)
+    assert "native NanoBot credentials" in clean
+    assert "Switch Telegram to AgentHiFive-managed messaging?" in clean
+
+    saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
+    assert saved.channels.agenthifive["enabled"] is True
+    assert saved.channels.agenthifive["providers"]["telegram"]["enabled"] is True
+    assert saved.channels.telegram["enabled"] is False
+    assert saved.channels.telegram["token"] == "123:abc"
+
+
+def test_setup_agenthifive_channel_wizard_shows_all_detected_connection_labels(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "instance" / "config.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(json.dumps(Config().model_dump(by_alias=True)), encoding="utf-8")
+
+    monkeypatch.setattr(
+        "nanobot.cli.commands._discover_agenthifive_channel_connections",
+        lambda _config_path: (
+            {
+                "telegram": [
+                    {"service": "telegram", "label": "Telegram @MarcoOpyBot"},
+                    {"service": "telegram", "label": "Telegram @BackupBot"},
+                ],
+                "slack": [
+                    {"service": "slack", "label": "Slack Agenthifive.it"},
+                ],
+            },
+            None,
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        ["setup-agenthifive", "--config", str(config_path), "--setup-channels"],
+        input="\n",
+    )
+
+    clean = _strip_ansi(result.stdout)
+    assert result.exit_code == 0
+    assert "Telegram @MarcoOpyBot" in clean
+    assert "Telegram @BackupBot" in clean
+    assert "Slack Agenthifive.it" in clean
+    assert "1. Telegram: OFF" in clean
+    assert "2. Slack: OFF" in clean
+
+
+def test_setup_channels_command_runs_channel_setup(tmp_path, monkeypatch):
+    config_path = tmp_path / "instance" / "config.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(json.dumps(Config().model_dump(by_alias=True)), encoding="utf-8")
+
+    seen: dict[str, object] = {}
+
+    def _fake_setup_channels(*, config_path: Path, channel_name: str | None = None) -> None:
+        seen["config_path"] = config_path
+        seen["channel_name"] = channel_name
+
+    monkeypatch.setattr("nanobot.cli.commands._run_setup_channels", _fake_setup_channels)
+
+    result = runner.invoke(
+        app,
+        ["setup-channels", "telegram", "--config", str(config_path)],
+    )
+
+    assert result.exit_code == 0
+    assert seen["config_path"] == config_path.resolve()
+    assert seen["channel_name"] == "telegram"
 
 
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():
@@ -415,10 +869,12 @@ async def test_github_copilot_provider_refreshes_client_api_key_before_chat():
 
     mock_client = MagicMock()
     mock_client.api_key = "no-key"
-    mock_client.chat.completions.create = AsyncMock(return_value={
-        "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
-        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-    })
+    mock_client.chat.completions.create = AsyncMock(
+        return_value={
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI", return_value=mock_client):
         provider = GitHubCopilotProvider(default_model="github-copilot/gpt-4")
@@ -476,14 +932,16 @@ def mock_agent_runtime(tmp_path):
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "default-workspace")
 
-    with patch("nanobot.config.loader.load_config", return_value=config) as mock_load_config, \
-         patch("nanobot.config.loader.resolve_config_env_vars", side_effect=lambda c: c), \
-         patch("nanobot.cli.commands.sync_workspace_templates") as mock_sync_templates, \
-         patch("nanobot.cli.commands._make_provider", return_value=object()), \
-         patch("nanobot.cli.commands._print_agent_response") as mock_print_response, \
-         patch("nanobot.bus.queue.MessageBus"), \
-         patch("nanobot.cron.service.CronService"), \
-         patch("nanobot.agent.loop.AgentLoop") as mock_agent_loop_cls:
+    with (
+        patch("nanobot.config.loader.load_config", return_value=config) as mock_load_config,
+        patch("nanobot.config.loader.resolve_config_env_vars", side_effect=lambda c: c),
+        patch("nanobot.cli.commands.sync_workspace_templates") as mock_sync_templates,
+        patch("nanobot.cli.commands._make_provider", return_value=object()),
+        patch("nanobot.cli.commands._print_agent_response") as mock_print_response,
+        patch("nanobot.bus.queue.MessageBus"),
+        patch("nanobot.cron.service.CronService"),
+        patch("nanobot.agent.loop.AgentLoop") as mock_agent_loop_cls,
+    ):
         agent_loop = MagicMock()
         agent_loop.channels_config = None
         agent_loop.process_direct = AsyncMock(
@@ -526,7 +984,9 @@ def test_agent_uses_default_config_when_no_workspace_or_config_flags(mock_agent_
     )
     mock_agent_runtime["agent_loop"].process_direct.assert_awaited_once()
     mock_agent_runtime["print_response"].assert_called_once_with(
-        "mock-response", render_markdown=True, metadata={},
+        "mock-response",
+        render_markdown=True,
+        metadata={},
     )
 
 
@@ -569,7 +1029,9 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
             return None
 
     monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None
+    )
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
 
@@ -608,7 +1070,9 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
     monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None
+    )
 
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
 
@@ -616,9 +1080,7 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
     assert seen["cron_store"] == config.workspace_path / "cron" / "jobs.json"
 
 
-def test_agent_workspace_override_does_not_migrate_legacy_cron(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_agent_workspace_override_does_not_migrate_legacy_cron(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
     config_file.write_text("{}")
@@ -655,7 +1117,9 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
 
     monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
     monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None
+    )
 
     result = runner.invoke(
         app,
@@ -1301,7 +1765,6 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
     assert isinstance(result.exception, _StopGatewayError)
     assert "port 18792" in result.stdout
 
-
 def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -1454,9 +1917,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
     assert missing_response.endswith("\r\n\r\nNot Found")
 
 
-def test_serve_uses_api_config_defaults_and_workspace_override(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_serve_uses_api_config_defaults_and_workspace_override(monkeypatch, tmp_path: Path) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "config-workspace")

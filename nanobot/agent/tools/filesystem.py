@@ -1,5 +1,6 @@
 """File system tools: read, write, edit, list."""
 
+import base64
 import difflib
 import mimetypes
 import os
@@ -7,11 +8,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.agent.tools import file_state
-from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.schema import (
+    BooleanSchema,
+    IntegerSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.config.paths import get_media_dir
+from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
 def _resolve_path(
@@ -27,7 +33,7 @@ def _resolve_path(
     resolved = p.resolve()
     if allowed_dir:
         media_path = get_media_dir().resolve()
-        all_dirs = [allowed_dir] + [media_path] + (extra_allowed_dirs or []) 
+        all_dirs = [allowed_dir] + [media_path] + (extra_allowed_dirs or [])
         if not any(_is_under(resolved, d) for d in all_dirs):
             raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
     return resolved
@@ -63,17 +69,28 @@ class _FsTool(Tool):
 # ---------------------------------------------------------------------------
 
 
-_BLOCKED_DEVICE_PATHS = frozenset({
-    "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
-    "/dev/stdin", "/dev/stdout", "/dev/stderr",
-    "/dev/tty", "/dev/console",
-    "/dev/fd/0", "/dev/fd/1", "/dev/fd/2",
-})
+_BLOCKED_DEVICE_PATHS = frozenset(
+    {
+        "/dev/zero",
+        "/dev/random",
+        "/dev/urandom",
+        "/dev/full",
+        "/dev/stdin",
+        "/dev/stdout",
+        "/dev/stderr",
+        "/dev/tty",
+        "/dev/console",
+        "/dev/fd/0",
+        "/dev/fd/1",
+        "/dev/fd/2",
+    }
+)
 
 
 def _is_blocked_device(path: str | Path) -> bool:
     """Check if path is a blocked device that could hang or produce infinite output."""
     import re
+
     raw = str(path)
 
     # Resolve symlinks to check the actual target
@@ -149,7 +166,14 @@ class ReadFileTool(_FsTool):
     def read_only(self) -> bool:
         return True
 
-    async def execute(self, path: str | None = None, offset: int = 1, limit: int | None = None, pages: str | None = None, **kwargs: Any) -> Any:
+    async def execute(
+        self,
+        path: str | None = None,
+        offset: int = 1,
+        limit: int | None = None,
+        pages: str | None = None,
+        **kwargs: Any,
+    ) -> Any:
         try:
             if not path:
                 return "Error reading file: Unknown path"
@@ -306,7 +330,7 @@ class ReadFileTool(_FsTool):
         if end < total_pages - 1:
             result += f"\n\n(Showing pages {start + 1}-{end + 1} of {total_pages}. Use pages='{end + 2}-{min(end + 1 + self._MAX_PDF_PAGES, total_pages)}' to continue.)"
         if len(result) > self._MAX_CHARS:
-            result = result[:self._MAX_CHARS] + "\n\n(PDF text truncated at ~128K chars)"
+            result = result[: self._MAX_CHARS] + "\n\n(PDF text truncated at ~128K chars)"
         return result
 
     def _read_office_doc(self, fp: Path) -> str:
@@ -338,6 +362,12 @@ class ReadFileTool(_FsTool):
     tool_parameters_schema(
         path=StringSchema("The file path to write to"),
         content=StringSchema("The content to write"),
+        encoding=StringSchema(
+            "How to interpret content before writing. Use 'utf-8' for normal text, "
+            "'base64' for standard base64 bytes, or 'base64url' for URL-safe base64 "
+            "like Gmail attachment payloads.",
+            enum=["utf-8", "base64", "base64url"],
+        ),
         required=["path", "content"],
     )
 )
@@ -351,12 +381,18 @@ class WriteFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Write content to a file. Overwrites if the file already exists; "
-            "creates parent directories as needed. "
-            "For partial edits, prefer edit_file instead."
+            "Write content to a file at the given path. Creates parent directories if needed. "
+            "Supports plain UTF-8 text, standard base64 bytes, and base64url bytes. "
+            "Overwrites existing files; for partial edits, prefer edit_file instead."
         )
 
-    async def execute(self, path: str | None = None, content: str | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        path: str | None = None,
+        content: str | None = None,
+        encoding: str = "utf-8",
+        **kwargs: Any,
+    ) -> str:
         try:
             if not path:
                 raise ValueError("Unknown path")
@@ -364,9 +400,22 @@ class WriteFileTool(_FsTool):
                 raise ValueError("Unknown content")
             fp = self._resolve(path)
             fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(content, encoding="utf-8")
+            if encoding == "utf-8":
+                fp.write_text(content, encoding="utf-8")
+                written_bytes = len(content.encode("utf-8"))
+            elif encoding == "base64":
+                data = base64.b64decode(content, validate=True)
+                fp.write_bytes(data)
+                written_bytes = len(data)
+            elif encoding == "base64url":
+                padding = "=" * (-len(content) % 4)
+                data = base64.urlsafe_b64decode(content + padding)
+                fp.write_bytes(data)
+                written_bytes = len(data)
+            else:
+                raise ValueError(f"Unsupported encoding: {encoding}")
             file_state.record_write(fp)
-            return f"Successfully wrote {len(content)} characters to {fp}"
+            return f"Successfully wrote {written_bytes} bytes to {fp}"
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:
@@ -377,11 +426,16 @@ class WriteFileTool(_FsTool):
 # edit_file
 # ---------------------------------------------------------------------------
 
-_QUOTE_TABLE = str.maketrans({
-    "\u2018": "'", "\u2019": "'",  # curly single → straight
-    "\u201c": '"', "\u201d": '"',  # curly double → straight
-    "'": "'", '"': '"',            # identity (kept for completeness)
-})
+_QUOTE_TABLE = str.maketrans(
+    {
+        "\u2018": "'",
+        "\u2019": "'",  # curly single → straight
+        "\u201c": '"',
+        "\u201d": '"',  # curly double → straight
+        "'": "'",
+        '"': '"',  # identity (kept for completeness)
+    }
+)
 
 
 def _normalize_quotes(s: str) -> str:
@@ -419,7 +473,10 @@ def _curly_single_quotes(text: str) -> str:
 
 def _preserve_quote_style(old_text: str, actual_text: str, new_text: str) -> str:
     """Preserve curly quote style when a quote-normalized fallback matched."""
-    if _normalize_quotes(old_text.strip()) != _normalize_quotes(actual_text.strip()) or old_text == actual_text:
+    if (
+        _normalize_quotes(old_text.strip()) != _normalize_quotes(actual_text.strip())
+        or old_text == actual_text
+    ):
         return new_text
 
     styled = new_text
@@ -460,7 +517,7 @@ def _reindent_like_match(old_text: str, actual_text: str, new_text: str) -> str:
     if old_ws:
         if not actual_ws.startswith(old_ws):
             return new_text
-        delta = actual_ws[len(old_ws):]
+        delta = actual_ws[len(old_ws) :]
     else:
         delta = actual_ws
 
@@ -497,7 +554,9 @@ def _find_exact_matches(content: str, old_text: str) -> list[_MatchSpan]:
     return matches
 
 
-def _find_trim_matches(content: str, old_text: str, *, normalize_quotes: bool = False) -> list[_MatchSpan]:
+def _find_trim_matches(
+    content: str, old_text: str, *, normalize_quotes: bool = False
+) -> list[_MatchSpan]:
     old_lines = old_text.splitlines()
     if not old_lines:
         return []
@@ -595,7 +654,10 @@ def _diagnose_near_match(old_text: str, actual_text: str) -> list[str]:
 
     if old_text.lower() == actual_text.lower() and old_text != actual_text:
         hints.append("letter case differs")
-    if _collapse_internal_whitespace(old_text) == _collapse_internal_whitespace(actual_text) and old_text != actual_text:
+    if (
+        _collapse_internal_whitespace(old_text) == _collapse_internal_whitespace(actual_text)
+        and old_text != actual_text
+    ):
         hints.append("whitespace differs")
     if old_text.rstrip("\n") == actual_text.rstrip("\n") and old_text != actual_text:
         hints.append("trailing newline differs")
@@ -676,9 +738,12 @@ class EditFileTool(_FsTool):
         return "\n".join(line.rstrip() for line in text.split("\n"))
 
     async def execute(
-        self, path: str | None = None, old_text: str | None = None,
+        self,
+        path: str | None = None,
+        old_text: str | None = None,
         new_text: str | None = None,
-        replace_all: bool = False, **kwargs: Any,
+        replace_all: bool = False,
+        **kwargs: Any,
     ) -> str:
         try:
             if not path:
@@ -759,7 +824,11 @@ class EditFileTool(_FsTool):
                 # Delete-line cleanup: when deleting text (new_text=''), consume trailing
                 # newline to avoid leaving a blank line
                 end = match.end
-                if replacement == "" and not match.text.endswith("\n") and content[end:end + 1] == "\n":
+                if (
+                    replacement == ""
+                    and not match.text.endswith("\n")
+                    and content[end : end + 1] == "\n"
+                ):
                     end += 1
 
                 new_content = new_content[: match.start] + replacement + new_content[end:]
@@ -794,13 +863,15 @@ class EditFileTool(_FsTool):
     def _not_found_msg(old_text: str, content: str, path: str) -> str:
         best_ratio, best_start, best_window_lines, hints = _best_window(old_text, content)
         if best_ratio > 0.5:
-            diff = "\n".join(difflib.unified_diff(
-                old_text.splitlines(keepends=True),
-                best_window_lines,
-                fromfile="old_text (provided)",
-                tofile=f"{path} (actual, line {best_start + 1})",
-                lineterm="",
-            ))
+            diff = "\n".join(
+                difflib.unified_diff(
+                    old_text.splitlines(keepends=True),
+                    best_window_lines,
+                    fromfile="old_text (provided)",
+                    tofile=f"{path} (actual, line {best_start + 1})",
+                    lineterm="",
+                )
+            )
             hint_text = ""
             if hints:
                 hint_text = "\nPossible cause: " + ", ".join(hints) + "."
@@ -815,12 +886,15 @@ class EditFileTool(_FsTool):
                 f"Possible cause: {', '.join(hints)}. "
                 "Copy the exact text from read_file and try again."
             )
-        return f"Error: old_text not found in {path}. No similar text found. Verify the file content."
+        return (
+            f"Error: old_text not found in {path}. No similar text found. Verify the file content."
+        )
 
 
 # ---------------------------------------------------------------------------
 # list_dir
 # ---------------------------------------------------------------------------
+
 
 @tool_parameters(
     tool_parameters_schema(
@@ -839,9 +913,19 @@ class ListDirTool(_FsTool):
 
     _DEFAULT_MAX = 200
     _IGNORE_DIRS = {
-        ".git", "node_modules", "__pycache__", ".venv", "venv",
-        "dist", "build", ".tox", ".mypy_cache", ".pytest_cache",
-        ".ruff_cache", ".coverage", "htmlcov",
+        ".git",
+        "node_modules",
+        "__pycache__",
+        ".venv",
+        "venv",
+        "dist",
+        "build",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".coverage",
+        "htmlcov",
     }
 
     @property
@@ -861,8 +945,11 @@ class ListDirTool(_FsTool):
         return True
 
     async def execute(
-        self, path: str | None = None, recursive: bool = False,
-        max_entries: int | None = None, **kwargs: Any,
+        self,
+        path: str | None = None,
+        recursive: bool = False,
+        max_entries: int | None = None,
+        **kwargs: Any,
     ) -> str:
         try:
             if path is None:

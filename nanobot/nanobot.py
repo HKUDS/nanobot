@@ -47,7 +47,7 @@ class Nanobot:
                 ``~/.nanobot/config.json``.
             workspace: Override the workspace directory from config.
         """
-        from nanobot.config.loader import load_config, resolve_config_env_vars
+        from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
         from nanobot.config.schema import Config
 
         resolved: Path | None = None
@@ -55,12 +55,11 @@ class Nanobot:
             resolved = Path(config_path).expanduser().resolve()
             if not resolved.exists():
                 raise FileNotFoundError(f"Config not found: {resolved}")
+            set_config_path(resolved)
 
         config: Config = resolve_config_env_vars(load_config(resolved))
         if workspace is not None:
-            config.agents.defaults.workspace = str(
-                Path(workspace).expanduser().resolve()
-            )
+            config.agents.defaults.workspace = str(Path(workspace).expanduser().resolve())
 
         provider = _make_provider(config)
         bus = MessageBus()
@@ -109,7 +108,8 @@ class Nanobot:
             self._loop._extra_hooks = list(hooks)
         try:
             response = await self._loop.process_direct(
-                message, session_key=session_key,
+                message,
+                session_key=session_key,
             )
         finally:
             self._loop._extra_hooks = prev
@@ -149,9 +149,7 @@ def _make_provider(config: Any) -> Any:
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
-        provider = AzureOpenAIProvider(
-            api_key=p.api_key, api_base=p.api_base, default_model=model
-        )
+        provider = AzureOpenAIProvider(api_key=p.api_key, api_base=p.api_base, default_model=model)
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
