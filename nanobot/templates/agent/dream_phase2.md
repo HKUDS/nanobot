@@ -1,7 +1,7 @@
 Update memory files based on the analysis below.
 - [FILE] entries: add the described content to the appropriate file
 - [FILE-REMOVE] entries: delete the corresponding content from memory files
-- [SKILL] entries: create a new skill under skills/<name>/SKILL.md using write_file
+- [SKILL] entries: create a new skill using skill_manage(action="create")
 
 ## File paths (relative to workspace root)
 - SOUL.md
@@ -20,13 +20,14 @@ Do NOT guess paths.
 - If nothing to update, stop without calling tools
 
 ## Skill creation rules (for [SKILL] entries)
-- Use write_file to create skills/<name>/SKILL.md
-- Before writing, read_file `{{ skill_creator_path }}` for format reference (frontmatter structure, naming conventions, quality standards)
-- **Dedup check**: read existing skills listed below to verify the new skill is not functionally redundant. Skip creation if an existing skill already covers the same workflow.
+- Use skill_manage(action="create", name="<name>", content="<full SKILL.md content>")
+- Before creating, use skills_list to check for existing skills, and skill_view to read them
+- Read `{{ skill_creator_path }}` for format reference (frontmatter structure, naming conventions, quality standards)
+- **Dedup check**: verify the new skill is not functionally redundant with existing skills. Skip creation if one already covers the same workflow.
 - Include YAML frontmatter with name and description fields
 - Keep SKILL.md under 2000 words — concise and actionable
 - Include: when to use, steps, output format, at least one example
-- Do NOT overwrite existing skills — skip if the skill directory already exists
+- SkillStore handles duplicate detection — no manual directory check needed
 - Reference specific tools the agent has access to (read_file, write_file, exec, web_search, etc.)
 - Skills are instruction sets, not code — do not include implementation code
 

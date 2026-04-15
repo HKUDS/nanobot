@@ -59,6 +59,23 @@ class DreamConfig(Base):
         return f"every {hours}h"
 
 
+class SkillsConfig(Base):
+    """Skill self-evolution configuration."""
+
+    enabled: bool = True
+    review_enabled: bool = False
+    review_mode: Literal["off", "suggest", "auto_patch", "auto_create"] = "auto_patch"
+    review_trigger_iterations: int = 8
+    review_min_tool_calls: int = 5
+    review_max_iterations: int = 8
+    review_model_override: str | None = None
+    allow_create: bool = True
+    allow_patch: bool = True
+    allow_delete: bool = False
+    guard_enabled: bool = True
+    notify_user_on_change: bool = True
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -85,6 +102,7 @@ class AgentDefaults(Base):
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
     dream: DreamConfig = Field(default_factory=DreamConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
 
 
 class AgentsConfig(Base):

@@ -594,6 +594,7 @@ def serve(
         unified_session=runtime_config.agents.defaults.unified_session,
         disabled_skills=runtime_config.agents.defaults.disabled_skills,
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
+        skills_config=runtime_config.agents.defaults.skills,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -689,6 +690,7 @@ def gateway(
         unified_session=config.agents.defaults.unified_session,
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        skills_config=config.agents.defaults.skills,
     )
 
     # Set cron callback (needs agent)
@@ -967,6 +969,7 @@ def agent(
         unified_session=config.agents.defaults.unified_session,
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        skills_config=config.agents.defaults.skills,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
@@ -1392,6 +1395,7 @@ def web(
         channels_config=config.channels,
         openviking_config=config.openviking,
         timezone=config.agents.defaults.timezone,
+        skills_config=config.agents.defaults.skills,
     )
 
     # Set cron callback (needs agent + heartbeat)

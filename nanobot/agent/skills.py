@@ -286,3 +286,77 @@ class SkillsLoader:
             key, value = line.split(":", 1)
             metadata[key.strip()] = value.strip().strip('"\'')
         return metadata
+
+    # ------------------------------------------------------------------
+    # Source-aware catalog extensions
+    # ------------------------------------------------------------------
+
+    ALLOWED_SUPPORTING_DIRS = frozenset({"references", "templates", "scripts", "assets"})
+
+    def find_skill_dir(self, name: str) -> tuple[Path, str] | None:
+        """Locate a skill directory and return ``(path, source)``."""
+        ws = self.workspace_skills / name
+        if ws.is_dir() and (ws / "SKILL.md").exists():
+            return ws, "workspace"
+        if self.builtin_skills:
+            bi = self.builtin_skills / name
+            if bi.is_dir() and (bi / "SKILL.md").exists():
+                return bi, "builtin"
+        return None
+
+    def is_mutable(self, name: str) -> bool:
+        """A skill is mutable when it lives in the workspace directory."""
+        result = self.find_skill_dir(name)
+        if result is None:
+            return False
+        return result[1] == "workspace"
+
+    def list_supporting_files(self, name: str) -> dict[str, list[str]]:
+        """Return supporting files grouped by subdirectory."""
+        result = self.find_skill_dir(name)
+        if result is None:
+            return {}
+        skill_dir = result[0]
+        grouped: dict[str, list[str]] = {}
+        for subdir in sorted(self.ALLOWED_SUPPORTING_DIRS):
+            sub_path = skill_dir / subdir
+            if not sub_path.is_dir():
+                continue
+            files = [
+                f.relative_to(skill_dir).as_posix()
+                for f in sub_path.rglob("*")
+                if f.is_file()
+            ]
+            if files:
+                grouped[subdir] = sorted(files)
+        return grouped
+
+    def load_skill_file(self, name: str, relative_path: str) -> str | None:
+        """Load a supporting file within a skill directory.
+
+        Only files under :attr:`ALLOWED_SUPPORTING_DIRS` are accessible.
+        Returns ``None`` if the file does not exist or the path is invalid.
+        """
+        result = self.find_skill_dir(name)
+        if result is None:
+            return None
+        skill_dir = result[0]
+
+        normalized = Path(relative_path)
+        if not normalized.parts or normalized.parts[0] not in self.ALLOWED_SUPPORTING_DIRS:
+            return None
+        if ".." in normalized.parts:
+            return None
+
+        target = (skill_dir / normalized).resolve()
+        try:
+            target.relative_to(skill_dir.resolve())
+        except ValueError:
+            return None
+
+        if not target.is_file():
+            return None
+        try:
+            return target.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            return None

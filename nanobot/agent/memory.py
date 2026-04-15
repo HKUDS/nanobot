@@ -603,12 +603,15 @@ class Dream:
 
     def _build_tools(self) -> ToolRegistry:
         """Build a minimal tool registry for the Dream agent."""
-        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
-        from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
+        from nanobot.agent.skill_guard import SkillGuard
+        from nanobot.agent.skill_store import SkillStore
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR, SkillsLoader
+        from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool
+        from nanobot.agent.tools.skills import SkillManageTool, SkillsListTool, SkillViewTool
+        from nanobot.config.schema import SkillsConfig
 
         tools = ToolRegistry()
         workspace = self.store.workspace
-        # Allow reading builtin skills for reference during skill creation
         extra_read = [BUILTIN_SKILLS_DIR] if BUILTIN_SKILLS_DIR.exists() else None
         tools.register(ReadFileTool(
             workspace=workspace,
@@ -616,11 +619,19 @@ class Dream:
             extra_allowed_dirs=extra_read,
         ))
         tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace))
-        # write_file resolves relative paths from workspace root, but can only
-        # write under skills/ so the prompt can safely use skills/<name>/SKILL.md.
-        skills_dir = workspace / "skills"
-        skills_dir.mkdir(parents=True, exist_ok=True)
-        tools.register(WriteFileTool(workspace=workspace, allowed_dir=skills_dir))
+
+        catalog = SkillsLoader(workspace, builtin_skills_dir=BUILTIN_SKILLS_DIR)
+        tools.register(SkillsListTool(catalog=catalog))
+        tools.register(SkillViewTool(catalog=catalog))
+
+        skills_config = SkillsConfig()
+        store = SkillStore(
+            workspace=workspace,
+            builtin_skills_dir=BUILTIN_SKILLS_DIR,
+            guard=SkillGuard() if skills_config.guard_enabled else None,
+            session_key="dream",
+        )
+        tools.register(SkillManageTool(store=store, catalog=catalog, config=skills_config))
         return tools
 
     # -- skill listing --------------------------------------------------------

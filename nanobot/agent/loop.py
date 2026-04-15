@@ -32,7 +32,7 @@ from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
-from nanobot.config.schema import AgentDefaults
+from nanobot.config.schema import AgentDefaults, SkillsConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.document import extract_documents
@@ -157,10 +157,12 @@ class AgentLoop:
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
+        skills_config: SkillsConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 
         defaults = AgentDefaults()
+        self.skills_config = skills_config or SkillsConfig()
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -248,6 +250,18 @@ class AgentLoop:
             model=self.model,
         )
         self._register_default_tools()
+
+        self._skill_review: Any = None
+        if self.skills_config.review_enabled and hasattr(self, "_skill_store"):
+            from nanobot.agent.skill_review import SkillReviewService
+            self._skill_review = SkillReviewService(
+                provider=provider,
+                model=self.model,
+                store=self._skill_store,
+                catalog=self.context.skills,
+                config=self.skills_config,
+            )
+
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
@@ -289,6 +303,28 @@ class AgentLoop:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
             )
+
+        from nanobot.agent.tools.skills import SkillsListTool, SkillViewTool
+        self.tools.register(SkillsListTool(catalog=self.context.skills))
+        self.tools.register(SkillViewTool(catalog=self.context.skills))
+
+        if self.skills_config.enabled:
+            from nanobot.agent.skill_store import SkillStore
+            from nanobot.agent.tools.skills import SkillManageTool
+            guard = None
+            if self.skills_config.guard_enabled:
+                from nanobot.agent.skill_guard import SkillGuard
+                guard = SkillGuard()
+            self._skill_store = SkillStore(
+                workspace=self.workspace,
+                builtin_skills_dir=self.context.skills.builtin_skills,
+                guard=guard,
+            )
+            self.tools.register(SkillManageTool(
+                store=self._skill_store,
+                catalog=self.context.skills,
+                config=self.skills_config,
+            ))
 
         if self.openviking_config and self.openviking_config.enabled:
             self._register_openviking_tools()
@@ -794,7 +830,7 @@ class AgentLoop:
             self.sessions.save(session)
             user_persisted_early = True
 
-        final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
+        final_content, tools_used, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
             on_stream=on_stream,
@@ -816,6 +852,20 @@ class AgentLoop:
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
         self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
+
+        if self._skill_review is not None:
+            tool_call_count = len(tools_used) if tools_used else 0
+            iteration_count = sum(
+                1 for m in all_msgs
+                if m.get("role") == "assistant" and m.get("tool_calls")
+            )
+            if (
+                iteration_count >= self.skills_config.review_trigger_iterations
+                or tool_call_count >= self.skills_config.review_min_tool_calls
+            ):
+                self._schedule_background(
+                    self._skill_review.review_turn(list(all_msgs), key)
+                )
 
         # When follow-up messages were injected mid-turn, a later natural
         # language reply may address those follow-ups and should not be

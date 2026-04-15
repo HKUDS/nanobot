@@ -110,16 +110,18 @@ class TestDreamRun:
         expected = str(BUILTIN_SKILLS_DIR / "skill-creator" / "SKILL.md")
         assert expected in system_prompt
 
-    async def test_skill_write_tool_accepts_workspace_relative_skill_path(self, dream, store):
-        """Dream skill creation should allow skills/<name>/SKILL.md relative to workspace root."""
-        write_tool = dream._tools.get("write_file")
-        assert write_tool is not None
+    async def test_skill_manage_tool_creates_skill_in_workspace(self, dream, store):
+        """Dream skill creation should go through skill_manage tool."""
+        manage_tool = dream._tools.get("skill_manage")
+        assert manage_tool is not None
 
-        result = await write_tool.execute(
-            path="skills/test-skill/SKILL.md",
-            content="---\nname: test-skill\ndescription: Test\n---\n",
-        )
+        import json
+        result = json.loads(await manage_tool.execute(
+            action="create",
+            name="test-skill",
+            content="---\nname: test-skill\ndescription: Test\n---\n\n# Test Skill\n\nDo things.\n",
+        ))
 
-        assert "Successfully wrote" in result
+        assert result["success"]
         assert (store.workspace / "skills" / "test-skill" / "SKILL.md").exists()
 
