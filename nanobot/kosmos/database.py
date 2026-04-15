@@ -67,6 +67,22 @@ CREATE TABLE IF NOT EXISTS task_comments (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS task_artifacts (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'screenshot',
+    filename TEXT NOT NULL,
+    path TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size_bytes INTEGER DEFAULT 0,
+    created_by TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_artifacts_task_id ON task_artifacts(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_artifacts_created_at ON task_artifacts(created_at);
 """
 
 TASKS_EXTRA_COLUMNS: list[tuple[str, str]] = [
@@ -83,6 +99,22 @@ TASKS_EXTRA_COLUMNS: list[tuple[str, str]] = [
     ("retry_count", "INTEGER DEFAULT 0"),
     ("last_failure_reason", "TEXT"),
 ]
+
+ARTIFACTS_EXTRA_COLUMNS: list[tuple[str, str]] = [
+    ("size_bytes", "INTEGER DEFAULT 0"),
+    ("created_by", "TEXT"),
+]
+
+
+async def _ensure_artifacts_columns(db: aiosqlite.Connection) -> None:
+    """Apply idempotent schema upgrades for artifacts table."""
+    async with db.execute("PRAGMA table_info(task_artifacts)") as cursor:
+        rows = await cursor.fetchall()
+    existing = {str(row[1]) for row in rows}
+    for column, definition in ARTIFACTS_EXTRA_COLUMNS:
+        if column in existing:
+            continue
+        await db.execute(f"ALTER TABLE task_artifacts ADD COLUMN {column} {definition}")
 
 
 async def _ensure_tasks_columns(db: aiosqlite.Connection) -> None:
@@ -108,6 +140,7 @@ async def init_db(db_path: Path = DATABASE_PATH) -> aiosqlite.Connection:
     db.row_factory = aiosqlite.Row
     await db.executescript(SCHEMA)
     await _ensure_tasks_columns(db)
+    await _ensure_artifacts_columns(db)
     await db.commit()
     logger.info("Kosmos database initialized at {}", db_path)
     return db
@@ -530,3 +563,125 @@ async def delete_task_comment(db: aiosqlite.Connection, comment_id: str) -> bool
     cursor = await db.execute("DELETE FROM task_comments WHERE id = ?", (comment_id,))
     await db.commit()
     return cursor.rowcount > 0
+
+
+async def create_artifact(
+    db: aiosqlite.Connection,
+    task_id: str,
+    filename: str,
+    path: str,
+    mime_type: str,
+    kind: str = "screenshot",
+    size_bytes: int = 0,
+    created_by: Optional[str] = None,
+) -> dict[str, Any]:
+    """Create a new artifact record."""
+    artifact_id = str(uuid.uuid4())
+    created_at = datetime.utcnow().isoformat()
+
+    await db.execute(
+        """INSERT INTO task_artifacts (id, task_id, kind, filename, path, mime_type, size_bytes, created_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (artifact_id, task_id, kind, filename, path, mime_type, size_bytes, created_by, created_at),
+    )
+    await db.commit()
+
+    logger.info("Created artifact {} for task {}", artifact_id, task_id)
+    return {
+        "id": artifact_id,
+        "task_id": task_id,
+        "kind": kind,
+        "filename": filename,
+        "path": path,
+        "mime_type": mime_type,
+        "size_bytes": size_bytes,
+        "created_by": created_by,
+        "created_at": created_at,
+    }
+
+
+async def get_artifacts_for_task(
+    db: aiosqlite.Connection,
+    task_id: str,
+) -> list[dict[str, Any]]:
+    """Get all artifacts for a task, ordered by creation time."""
+    async with db.execute(
+        "SELECT * FROM task_artifacts WHERE task_id = ? ORDER BY created_at ASC",
+        (task_id,),
+    ) as cursor:
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+async def get_artifact_by_id(
+    db: aiosqlite.Connection,
+    artifact_id: str,
+) -> Optional[dict[str, Any]]:
+    """Get a single artifact by ID."""
+    async with db.execute(
+        "SELECT * FROM task_artifacts WHERE id = ?",
+        (artifact_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+        if row:
+            return dict(row)
+        return None
+
+
+async def delete_artifact(db: aiosqlite.Connection, artifact_id: str) -> bool:
+    """Delete an artifact record. Returns True if deleted."""
+    cursor = await db.execute("DELETE FROM task_artifacts WHERE id = ?", (artifact_id,))
+    await db.commit()
+    return cursor.rowcount > 0
+
+
+async def count_artifacts_for_task(db: aiosqlite.Connection, task_id: str) -> int:
+    """Count artifacts for a specific task."""
+    async with db.execute(
+        "SELECT COUNT(*) FROM task_artifacts WHERE task_id = ?",
+        (task_id,),
+    ) as cursor:
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+
+async def delete_expired_artifacts(
+    db: aiosqlite.Connection,
+    older_than_days: int = 14,
+) -> tuple[int, int]:
+    """Delete artifacts older than specified days.
+
+    Returns tuple of (count_deleted, bytes_freed).
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.utcnow() - timedelta(days=older_than_days)
+    cutoff_str = cutoff.isoformat()
+
+    async with db.execute(
+        "SELECT id, path, size_bytes FROM task_artifacts WHERE created_at < ?",
+        (cutoff_str,),
+    ) as cursor:
+        rows = await cursor.fetchall()
+
+    count = 0
+    bytes_freed = 0
+    for row in rows:
+        artifact_id = str(row["id"])
+        file_path = str(row["path"])
+        size = int(row["size_bytes"] or 0)
+
+        actual_path = Path(file_path)
+        if actual_path.exists():
+            try:
+                actual_path.unlink()
+                bytes_freed += size
+            except OSError:
+                pass
+
+        await db.execute("DELETE FROM task_artifacts WHERE id = ?", (artifact_id,))
+        count += 1
+
+    await db.commit()
+    logger.info("Cleaned {} expired artifacts, freed {} bytes", count, bytes_freed)
+    return count, bytes_freed

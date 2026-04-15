@@ -219,6 +219,31 @@ class KosmosServer(EventBroadcaster):
         return app
 
     # ------------------------------------------------------------------------
+    # Artifact cleanup
+    # ------------------------------------------------------------------------
+
+    async def _run_cleanup_loop(self):
+        """Run daily artifact cleanup."""
+        from nanobot.kosmos import database as db_module
+
+        while True:
+            try:
+                await asyncio.sleep(86400)
+                if self.db:
+                    count, bytes_freed = await db_module.delete_expired_artifacts(
+                        self.db, older_than_days=14
+                    )
+                    logger.info(
+                        "Artifact cleanup: {} deleted, {} bytes freed",
+                        count,
+                        bytes_freed,
+                    )
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning("Artifact cleanup failed: {}", e)
+
+    # ------------------------------------------------------------------------
     # Server lifecycle
     # ------------------------------------------------------------------------
 
@@ -250,9 +275,13 @@ class KosmosServer(EventBroadcaster):
         # Start both servers
         await rest_site.start()
 
+        # Background artifact cleanup task (daily)
+        cleanup_task = asyncio.create_task(self._run_cleanup_loop())
+
         try:
             await run_websocket()
         finally:
+            cleanup_task.cancel()
             await rest_runner.cleanup()
             await self.close_db()
 

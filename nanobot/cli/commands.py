@@ -1282,6 +1282,52 @@ def gateway(
 
         return True, ""
 
+    async def _collect_and_upload_artifacts(
+        result_text: str,
+        kanban_task_id: str,
+        agent_name: str,
+        workspace_path: str,
+    ) -> list[dict[str, Any]]:
+        """Parse artifact paths from subagent output and upload to Kosmos."""
+        uploaded = []
+        if not result_text:
+            return uploaded
+
+        possible_roots: list[Path] = []
+        if workspace_path:
+            possible_roots.append(Path(workspace_path))
+        possible_roots.append(Path.home() / ".nanobot" / "artifacts" / kanban_task_id)
+
+        artifact_paths: list[tuple[str, Path]] = []
+        for line in result_text.splitlines():
+            line = line.strip()
+            for suffix in (".png", ".jpg", ".jpeg", ".webp"):
+                if suffix in line:
+                    idx = line.find(suffix)
+                    maybe_path = line[max(0, idx - 200) : idx + len(suffix)].strip()
+                    for root in possible_roots:
+                        if root.exists():
+                            candidate = root / Path(maybe_path).name
+                            if candidate.exists():
+                                artifact_paths.append((candidate.name, candidate))
+                                break
+                    break
+
+        for filename, file_path in artifact_paths[:6]:
+            try:
+                artifact = await kosmos_tasks.upload_artifact(
+                    task_id=kanban_task_id,
+                    file_path=str(file_path),
+                    filename=filename,
+                    created_by=agent_name,
+                )
+                if artifact:
+                    uploaded.append(artifact)
+            except Exception:
+                logger.warning("Failed to upload artifact {} for task {}", filename, kanban_task_id)
+
+        return uploaded
+
     async def _on_subagent_task_complete(payload: dict[str, Any]) -> None:
         task_meta = payload.get("task_meta") or {}
         kanban_task_id = task_meta.get("kanban_task_id")
@@ -1355,6 +1401,22 @@ def gateway(
         if status == "ok" and role == dev_subagent:
             diff_comment = await _build_vicks_diff_comment(task_meta)
             comment_text = f"{comment_text}\n\n{diff_comment}"
+
+        if status == "ok" and role == qa_subagent:
+            workspace_path = str(task_meta.get("workspace_path") or "")
+            uploaded = await _collect_and_upload_artifacts(
+                result_preview,
+                str(kanban_task_id),
+                role,
+                workspace_path,
+            )
+            if uploaded:
+                lines = ["\n\n## Evidencia visual\n"]
+                for art in uploaded:
+                    art_id = art.get("id", "")
+                    filename = art.get("filename", "")
+                    lines.append(f"![{filename}](/api/artifacts/{art_id})")
+                comment_text = f"{comment_text}\n\n" + "\n".join(lines)
 
         # Ensure identities exist for backend ACL checks on comments.
         if runtime_subagent_id:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -234,6 +235,59 @@ class KosmosTasksClient:
                 json=activity,
             ) as resp:
                 return resp.status in {200, 201, 202}
+
+    async def upload_artifact(
+        self,
+        task_id: str,
+        file_path: str,
+        filename: str,
+        mime_type: str = "image/png",
+        created_by: str | None = None,
+    ) -> dict[str, Any] | None:
+        boundary = aiohttp.helpers.gen_boundary()
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+            async with session.post(
+                f"{self.base_url}/api/tasks/{task_id}/artifacts",
+                data=self._multipart_file(file_path, filename, boundary, created_by),
+                headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            ) as resp:
+                if resp.status not in {200, 201}:
+                    return None
+                data = await resp.json()
+                return data if isinstance(data, dict) else None
+
+    @staticmethod
+    def _multipart_file(
+        file_path: str, filename: str, boundary: str, created_by: str | None
+    ) -> bytes:
+        import mimetypes
+
+        content = Path(file_path).read_bytes()
+        mime_type = mimetypes.guess_type(filename)[0] or "image/png"
+
+        crlf = b"\r\n"
+        body = crlf.join(
+            [
+                b"--" + boundary.encode(),
+                b'Content-Disposition: form-data; name="file"; filename="'
+                + filename.encode()
+                + b'"',
+                b"Content-Type: " + mime_type.encode(),
+                b"",
+                content,
+                b"--" + boundary.encode() + b"--",
+                b"",
+            ]
+        )
+        return body
+
+    async def list_artifacts(self, task_id: str) -> list[dict[str, Any]]:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.get(f"{self.base_url}/api/tasks/{task_id}/artifacts") as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+                return data if isinstance(data, list) else []
 
 
 # Backward compatibility alias (legacy NanoCats naming).
