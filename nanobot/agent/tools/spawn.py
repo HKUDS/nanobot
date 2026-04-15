@@ -53,4 +53,5 @@ class SpawnTool(Tool):
             origin_channel=self._origin_channel,
             origin_chat_id=self._origin_chat_id,
             session_key=self._session_key,
+            task_meta=kwargs.get("task_meta"),
         )

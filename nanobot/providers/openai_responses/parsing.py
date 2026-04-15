@@ -118,7 +118,7 @@ async def consume_sse(
                     ToolCallRequest(
                         id=f"{call_id}|{buf.get('id') or item.get('id') or 'fc_0'}",
                         name=buf.get("name") or item.get("name") or "",
-                        arguments=args,
+                        arguments=args if isinstance(args, dict) else {},
                     )
                 )
         elif event_type == "response.completed":
@@ -177,11 +177,13 @@ def parse_response_output(response: Any) -> LLMResponse:
                 args = json_repair.loads(args_raw) if isinstance(args_raw, str) else args_raw
                 if not isinstance(args, dict):
                     args = {"raw": args_raw}
-            tool_calls.append(ToolCallRequest(
-                id=f"{call_id}|{item_id}",
-                name=item.get("name") or "",
-                arguments=args if isinstance(args, dict) else {},
-            ))
+            tool_calls.append(
+                ToolCallRequest(
+                    id=f"{call_id}|{item_id}",
+                    name=item.get("name") or "",
+                    arguments=args if isinstance(args, dict) else {},
+                )
+            )
 
     usage_raw = response.get("usage") or {}
     if not isinstance(usage_raw, dict):

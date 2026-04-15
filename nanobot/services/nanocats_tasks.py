@@ -1,0 +1,218 @@
+"""NanoCats task API client used by tools and heartbeat automation."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import aiohttp
+
+
+class NanoCatsTasksClient:
+    """Small async client for NanoCats REST endpoints."""
+
+    def __init__(self, base_url: str = "http://localhost:18794"):
+        self.base_url = base_url.rstrip("/")
+
+    async def list_tasks(self, project_id: str | None = None) -> list[dict[str, Any]]:
+        params = {}
+        if project_id:
+            params["project_id"] = project_id
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.get(f"{self.base_url}/api/tasks", params=params) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+                return data if isinstance(data, list) else []
+
+    async def get_task(self, task_id: str) -> dict[str, Any] | None:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.get(f"{self.base_url}/api/tasks/{task_id}") as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                return data if isinstance(data, dict) else None
+
+    async def list_pending_tasks(self) -> list[dict[str, Any]]:
+        tasks = await self.list_tasks()
+        pending = [
+            t
+            for t in tasks
+            if str(t.get("status") or "").strip().lower()
+            in {"todo", "progress", "in_progress", "qa", "release"}
+        ]
+        pending.sort(key=lambda t: str(t.get("created_at", "")))
+        return pending
+
+    async def update_task(self, task_id: str, **updates: Any) -> dict[str, Any] | None:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.patch(
+                f"{self.base_url}/api/tasks/{task_id}",
+                json=updates,
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                return data if isinstance(data, dict) else None
+
+    async def transition_task(
+        self,
+        task_id: str,
+        to_status: str,
+        comment_text: str,
+        *,
+        agent_id: str | None = None,
+        agent_name: str | None = None,
+        assigned_to: str | None = None,
+    ) -> dict[str, Any] | None:
+        payload: dict[str, Any] = {
+            "to_status": to_status,
+            "comment_text": comment_text,
+        }
+        if agent_id:
+            payload["agent_id"] = agent_id
+        if agent_name:
+            payload["agent_name"] = agent_name
+        if assigned_to is not None:
+            payload["assigned_to"] = assigned_to
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.post(
+                f"{self.base_url}/api/tasks/{task_id}/transition",
+                json=payload,
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                return data if isinstance(data, dict) else None
+
+    async def approve_release(
+        self,
+        task_id: str,
+        *,
+        approved_by: str,
+        branch: str,
+        push: bool,
+        comment_text: str | None = None,
+    ) -> dict[str, Any] | None:
+        payload: dict[str, Any] = {
+            "approved_by": approved_by,
+            "branch": branch,
+            "push": push,
+        }
+        if comment_text:
+            payload["comment_text"] = comment_text
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.post(
+                f"{self.base_url}/api/tasks/{task_id}/approve_release",
+                json=payload,
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                return data if isinstance(data, dict) else None
+
+    async def create_task(
+        self,
+        project_id: str,
+        title: str,
+        description: str = "",
+        priority: str = "medium",
+    ) -> dict[str, Any] | None:
+        payload = {
+            "project_id": project_id,
+            "title": title,
+            "description": description,
+            "priority": priority,
+            "status": "todo",
+        }
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.post(f"{self.base_url}/api/tasks", json=payload) as resp:
+                if resp.status not in {200, 201}:
+                    return None
+                data = await resp.json()
+                return data if isinstance(data, dict) else None
+
+    async def delete_task(self, task_id: str) -> bool:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.delete(f"{self.base_url}/api/tasks/{task_id}") as resp:
+                return resp.status == 200
+
+    async def list_projects(self, include_hidden: bool = True) -> list[dict[str, Any]]:
+        params = {"include_hidden": "true"} if include_hidden else {}
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.get(f"{self.base_url}/api/projects", params=params) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+                return data if isinstance(data, list) else []
+
+    async def list_agents(self) -> list[dict[str, Any]]:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.get(f"{self.base_url}/api/agents") as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+                return data if isinstance(data, list) else []
+
+    async def resolve_agent_id_by_name(self, agent_name: str) -> str | None:
+        target = (agent_name or "").strip().lower()
+        if not target:
+            return None
+        agents = await self.list_agents()
+        for agent in agents:
+            name = str(agent.get("name") or "").strip().lower()
+            if name == target:
+                return str(agent.get("id") or "") or None
+        return None
+
+    async def list_task_comments(self, task_id: str) -> list[dict[str, Any]]:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.get(f"{self.base_url}/api/tasks/{task_id}/comments") as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+                return data if isinstance(data, list) else []
+
+    async def create_task_comment(
+        self,
+        task_id: str,
+        agent_id: str,
+        comment: str,
+    ) -> dict[str, Any] | None:
+        payload = {
+            "agent_id": agent_id,
+            "comment_text": comment,
+        }
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.post(
+                f"{self.base_url}/api/tasks/{task_id}/comments",
+                json=payload,
+            ) as resp:
+                if resp.status not in {200, 201}:
+                    return None
+                data = await resp.json()
+                return data if isinstance(data, dict) else None
+
+    async def upsert_agent_identity(
+        self,
+        agent_id: str,
+        agent_name: str,
+        project_id: str = "",
+        status: str = "working",
+        mood: str = "focused",
+        current_task: str = "",
+    ) -> dict[str, Any] | None:
+        payload = {
+            "id": agent_id,
+            "name": agent_name,
+            "status": status,
+            "mood": mood,
+            "currentTask": current_task,
+            "projectId": project_id,
+            "lastActivity": "",
+        }
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.post(f"{self.base_url}/api/agents", json=payload) as resp:
+                if resp.status not in {200, 201}:
+                    return None
+                data = await resp.json()
+                return data if isinstance(data, dict) else None
