@@ -947,6 +947,7 @@ IMAP_PASSWORD=your-password-here
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `mimo` | LLM (MiMo) | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
 | `ollama` | LLM (local, Ollama) | — |
+| `lm_studio` | LLM (local, LM Studio) | — |
 | `mistral` | LLM | [docs.mistral.ai](https://docs.mistral.ai/) |
 | `stepfun` | LLM (Step Fun/阶跃星辰) | [platform.stepfun.com](https://platform.stepfun.com) |
 | `ovms` | LLM (local, OpenVINO Model Server) | [docs.openvino.ai](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html) |
@@ -1034,7 +1035,7 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 <details>
 <summary><b>Custom Provider (Any OpenAI-compatible API)</b></summary>
 
-Connects directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, Together AI, Fireworks, Azure OpenAI, or any self-hosted server. Model name is passed as-is.
+Connects directly to any OpenAI-compatible endpoint — llama.cpp, Together AI, Fireworks, Azure OpenAI, or any self-hosted server. Model name is passed as-is.
 
 ```json
 {
@@ -1052,7 +1053,7 @@ Connects directly to any OpenAI-compatible endpoint — LM Studio, llama.cpp, To
 }
 ```
 
-> For local servers that don't require a key, set `apiKey` to any non-empty string (e.g. `"no-key"`).
+> For local servers that don't require authentication, set `apiKey` to `null`.
 >
 > `custom` is the right choice for providers that expose an OpenAI-compatible **chat completions** API. It does **not** force third-party endpoints onto the OpenAI/Azure **Responses API**.
 >
@@ -1108,6 +1109,40 @@ ollama run llama3.2
 ```
 
 > `provider: "auto"` also works when `providers.ollama.apiBase` is configured, but setting `"provider": "ollama"` is the clearest option.
+
+</details>
+
+<details>
+<summary><b>LM Studio (local)</b></summary>
+
+[LM Studio](https://lmstudio.ai/) provides a local OpenAI-compatible server for running LLMs. Download models through the LM Studio UI, then start the local server.
+
+**1. Start LM Studio server:**
+- Launch LM Studio
+- Go to the "Local Server" tab
+- Load a model (e.g., Llama, Mistral, Qwen)
+- Click "Start Server" (default port: 1234)
+
+**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
+```json
+{
+  "providers": {
+    "lm_studio": {
+      "apiKey": null,
+      "apiBase": "http://localhost:1234/v1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "lm_studio",
+      "model": "local-model"
+    }
+  }
+}
+```
+
+> **Note:** Set `apiKey` to `null` for LM Studio since it runs locally and doesn't require authentication. The model name should match what's shown in the LM Studio UI.
+> `provider: "auto"` also works when `providers.lm_studio.apiBase` is configured, but setting `"provider": "lm_studio"` is the clearest option.
 
 </details>
 
@@ -1198,12 +1233,12 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct --port 8000
 
 **2. Add to config** (partial — merge into `~/.nanobot/config.json`):
 
-*Provider (key can be any non-empty string for local):*
+*Provider (set API key to null for local servers):*
 ```json
 {
   "providers": {
     "vllm": {
-      "apiKey": "dummy",
+      "apiKey": null,
       "apiBase": "http://localhost:8000/v1"
     }
   }
