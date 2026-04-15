@@ -517,20 +517,8 @@ async def test_start_logs_install_hint_when_pyjwt_missing(make_channel, monkeypa
 def test_msteams_default_config_includes_restart_notify_fields():
     cfg = MSTeamsChannel.default_config()
 
-    assert cfg["restartNotifyEnabled"] is False
-    assert "restartNotifyPreMessage" in cfg
-    assert "restartNotifyPostMessage" in cfg
+    assert "restartNotifyEnabled" not in cfg
+    assert "restartNotifyPreMessage" not in cfg
+    assert "restartNotifyPostMessage" not in cfg
 
 
-def test_msteams_config_accepts_restart_notify_aliases():
-    cfg = MSTeamsConfig.model_validate(
-        {
-            "restartNotifyEnabled": True,
-            "restartNotifyPreMessage": "Restarting now.",
-            "restartNotifyPostMessage": "Back online.",
-        }
-    )
-
-    assert cfg.restart_notify_enabled is True
-    assert cfg.restart_notify_pre_message == "Restarting now."
-    assert cfg.restart_notify_post_message == "Back online."
