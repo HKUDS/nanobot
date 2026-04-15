@@ -372,4 +372,14 @@ def find_by_name(name: str) -> ProviderSpec | None:
     for spec in PROVIDERS:
         if spec.name == normalized:
             return spec
-    return None
+
+    # Fallback for dynamic/custom providers not in the static registry.
+    # Defaults to openai_compat backend.
+    return ProviderSpec(
+        name=normalized,
+        keywords=(),
+        env_key="",
+        display_name=name.replace("_", " ").title(),
+        backend="openai_compat",
+        is_direct=True,
+    )
