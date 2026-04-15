@@ -31,6 +31,10 @@ from nanobot.utils.runtime import (
     repeated_external_lookup_error,
 )
 
+import time as _time_mod
+from nanobot.agent.profiling import is_profiling_enabled as _is_profiling_enabled
+_PROFILING = _is_profiling_enabled()
+
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _PERSISTED_MODEL_ERROR_PLACEHOLDER = "[Assistant reply unavailable due to model error.]"
 _MAX_EMPTY_RETRIES = 2
@@ -240,6 +244,7 @@ class AgentRunner:
         injection_cycles = 0
 
         for iteration in range(spec.max_iterations):
+            _gov_t0 = _time_mod.perf_counter() if _PROFILING else 0.0
             try:
                 # Keep the persisted conversation untouched. Context governance
                 # may repair or compact historical messages for the model, but
@@ -265,6 +270,8 @@ class AgentRunner:
                     messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 except Exception:
                     messages_for_model = messages
+            if _PROFILING:
+                logger.debug("[profiling] governance: {:.1f}ms", (_time_mod.perf_counter() - _gov_t0) * 1000)
             context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
             response = await self._request_model(spec, messages_for_model, hook, context)

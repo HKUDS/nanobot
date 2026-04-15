@@ -19,6 +19,10 @@ from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.utils.gitstore import GitStore
 
+import time as _time_mod
+from nanobot.agent.profiling import is_profiling_enabled as _is_profiling_enabled
+_PROFILING = _is_profiling_enabled()
+
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session, SessionManager
@@ -478,11 +482,15 @@ class Consolidator:
         async with lock:
             budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
             target = budget // 2
+            if _PROFILING:
+                _est_t0 = _time_mod.perf_counter()
             try:
                 estimated, source = self.estimate_session_prompt_tokens(session)
             except Exception:
                 logger.exception("Token estimation failed for {}", session.key)
                 estimated, source = 0, "error"
+            if _PROFILING:
+                logger.debug("[profiling] estimation: {:.1f}ms", (_time_mod.perf_counter() - _est_t0) * 1000)
             if estimated <= 0:
                 return
             if estimated < budget:

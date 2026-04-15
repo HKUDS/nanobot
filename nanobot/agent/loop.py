@@ -38,6 +38,10 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.helpers import image_placeholder_text, truncate_text as truncate_text_fn
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
+import time as _time_mod
+from nanobot.agent.profiling import is_profiling_enabled as _is_profiling_enabled
+_PROFILING = _is_profiling_enabled()
+
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
     from nanobot.cron.service import CronService
@@ -621,6 +625,7 @@ class AgentLoop:
         pending_queue: asyncio.Queue | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        _turn_t0 = _time_mod.perf_counter() if _PROFILING else 0.0
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (
@@ -762,6 +767,8 @@ class AgentLoop:
         meta = dict(msg.metadata or {})
         if on_stream is not None and stop_reason != "error":
             meta["_streamed"] = True
+        if _PROFILING:
+            logger.debug("[profiling] turn: {:.0f}ms", (_time_mod.perf_counter() - _turn_t0) * 1000)
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
