@@ -5,7 +5,12 @@ from datetime import datetime
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
+from nanobot.agent.tools.schema import (
+    BooleanSchema,
+    IntegerSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronJobState, CronSchedule
 
@@ -105,12 +110,27 @@ class CronTool(Tool):
         at: str | None = None,
         job_id: str | None = None,
         deliver: bool = True,
+        *,
+        _routing_context: dict | None = None,
         **kwargs: Any,
     ) -> str:
+        ctx = _routing_context or {}
+        channel = ctx.get("channel", self._channel)
+        chat_id = ctx.get("chat_id", self._chat_id)
         if action == "add":
             if self._in_cron_context.get():
                 return "Error: cannot schedule new jobs from within a cron job execution"
-            return self._add_job(name, message, every_seconds, cron_expr, tz, at, deliver)
+            return self._add_job(
+                name,
+                message,
+                every_seconds,
+                cron_expr,
+                tz,
+                at,
+                deliver,
+                channel=channel,
+                chat_id=chat_id,
+            )
         elif action == "list":
             return self._list_jobs()
         elif action == "remove":
@@ -126,10 +146,15 @@ class CronTool(Tool):
         tz: str | None,
         at: str | None,
         deliver: bool = True,
+        *,
+        channel: str | None = None,
+        chat_id: str | None = None,
     ) -> str:
         if not message:
             return "Error: message is required for add"
-        if not self._channel or not self._chat_id:
+        channel = channel or self._channel
+        chat_id = chat_id or self._chat_id
+        if not channel or not chat_id:
             return "Error: no session context (channel/chat_id)"
         if tz and not cron_expr:
             return "Error: tz can only be used with cron_expr"
@@ -168,8 +193,8 @@ class CronTool(Tool):
             schedule=schedule,
             message=message,
             deliver=deliver,
-            channel=self._channel,
-            to=self._chat_id,
+            channel=channel,
+            to=chat_id,
             delete_after_run=delete_after,
         )
         return f"Created job '{job.name}' (id: {job.id})"
@@ -243,8 +268,5 @@ class CronTool(Tool):
                     "This is a system-managed Dream memory consolidation job for long-term memory.\n"
                     "It remains visible so you can inspect it, but it cannot be removed."
                 )
-            return (
-                f"Cannot remove job `{job_id}`.\n"
-                "This is a protected system-managed cron job."
-            )
+            return f"Cannot remove job `{job_id}`.\nThis is a protected system-managed cron job."
         return f"Job {job_id} not found"

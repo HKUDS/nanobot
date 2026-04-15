@@ -69,20 +69,26 @@ class MessageTool(Tool):
         chat_id: str | None = None,
         message_id: str | None = None,
         media: list[str] | None = None,
-        **kwargs: Any
+        *,
+        _routing_context: dict | None = None,
+        **kwargs: Any,
     ) -> str:
         from nanobot.utils.helpers import strip_think
+
         content = strip_think(content)
-        
-        channel = channel or self._default_channel
-        chat_id = chat_id or self._default_chat_id
+
+        ctx = _routing_context or {}
+        home_channel = ctx.get("channel") or self._default_channel
+        home_chat_id = ctx.get("chat_id") or self._default_chat_id
+        channel = channel or home_channel
+        chat_id = chat_id or home_chat_id
         # Only inherit default message_id when targeting the same channel+chat.
         # Cross-chat sends must not carry the original message_id, because
         # some channels (e.g. Feishu) use it to determine the target
         # conversation via their Reply API, which would route the message
         # to the wrong chat entirely.
-        if channel == self._default_channel and chat_id == self._default_chat_id:
-            message_id = message_id or self._default_message_id
+        if channel == home_channel and chat_id == home_chat_id:
+            message_id = message_id or ctx.get("message_id") or self._default_message_id
         else:
             message_id = None
 
@@ -99,12 +105,16 @@ class MessageTool(Tool):
             media=media or [],
             metadata={
                 "message_id": message_id,
-            } if message_id else {},
+            }
+            if message_id
+            else {},
         )
 
         try:
-            await self._send_callback(msg)
-            if channel == self._default_channel and chat_id == self._default_chat_id:
+            result = await self._send_callback(msg)
+            if result is False:
+                return "Error: message could not be delivered (outbound queue full)"
+            if channel == home_channel and chat_id == home_chat_id:
                 self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
             return f"Message sent to {channel}:{chat_id}{media_info}"

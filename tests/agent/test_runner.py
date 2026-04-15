@@ -641,8 +641,9 @@ def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch
         lambda msg: token_sizes.get(str(msg.get("content")), 40),
     )
 
-    trimmed = runner._snip_history(spec, messages)
+    trimmed, did_remove = runner._snip_history(spec, messages)
 
+    assert did_remove is True
     assert trimmed == [
         {"role": "system", "content": "system"},
         {"role": "assistant", "content": "after tool"},

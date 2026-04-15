@@ -105,7 +105,6 @@ class _LoopHook(AgentHook):
         for tc in context.tool_calls:
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
-        self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         u = context.usage or {}
@@ -423,6 +422,12 @@ class AgentLoop:
             context_window_tokens=self.context_window_tokens,
             context_block_limit=self.context_block_limit,
             provider_retry_mode=self.provider_retry_mode,
+            routing_context={
+                "channel": channel,
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "session_key": session.key if session else f"{channel}:{chat_id}",
+            },
             progress_callback=on_progress,
             checkpoint_callback=_checkpoint,
             injection_callback=_drain_pending,

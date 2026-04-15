@@ -45,12 +45,23 @@ class SpawnTool(Tool):
             "and use a dedicated subdirectory when helpful."
         )
 
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        task: str,
+        label: str | None = None,
+        *,
+        _routing_context: dict | None = None,
+        **kwargs: Any,
+    ) -> str:
         """Spawn a subagent to execute the given task."""
+        ctx = _routing_context or {}
+        channel = ctx.get("channel", self._origin_channel)
+        chat_id = ctx.get("chat_id", self._origin_chat_id)
+        session_key = ctx.get("session_key", self._session_key)
         return await self._manager.spawn(
             task=task,
             label=label,
-            origin_channel=self._origin_channel,
-            origin_chat_id=self._origin_chat_id,
-            session_key=self._session_key,
+            origin_channel=channel,
+            origin_chat_id=chat_id,
+            session_key=session_key,
         )
