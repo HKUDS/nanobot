@@ -35,6 +35,18 @@ CREATE TABLE IF NOT EXISTS tasks (
     description TEXT,
     status TEXT DEFAULT 'todo',
     assigned_to TEXT,
+    release_approved INTEGER DEFAULT 0,
+    approved_by TEXT,
+    approved_branch TEXT,
+    approved_push INTEGER DEFAULT 0,
+    approved_at TEXT,
+    workspace_path TEXT,
+    work_branch TEXT,
+    base_branch TEXT,
+    release_note TEXT,
+    jira_ready INTEGER DEFAULT 0,
+    retry_count INTEGER DEFAULT 0,
+    last_failure_reason TEXT,
     priority TEXT DEFAULT 'medium',
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -57,6 +69,32 @@ CREATE TABLE IF NOT EXISTS task_comments (
 );
 """
 
+TASKS_EXTRA_COLUMNS: list[tuple[str, str]] = [
+    ("release_approved", "INTEGER DEFAULT 0"),
+    ("approved_by", "TEXT"),
+    ("approved_branch", "TEXT"),
+    ("approved_push", "INTEGER DEFAULT 0"),
+    ("approved_at", "TEXT"),
+    ("workspace_path", "TEXT"),
+    ("work_branch", "TEXT"),
+    ("base_branch", "TEXT"),
+    ("release_note", "TEXT"),
+    ("jira_ready", "INTEGER DEFAULT 0"),
+    ("retry_count", "INTEGER DEFAULT 0"),
+    ("last_failure_reason", "TEXT"),
+]
+
+
+async def _ensure_tasks_columns(db: aiosqlite.Connection) -> None:
+    """Apply idempotent schema upgrades for task release workflow fields."""
+    async with db.execute("PRAGMA table_info(tasks)") as cursor:
+        rows = await cursor.fetchall()
+    existing = {str(row[1]) for row in rows}
+    for column, definition in TASKS_EXTRA_COLUMNS:
+        if column in existing:
+            continue
+        await db.execute(f"ALTER TABLE tasks ADD COLUMN {column} {definition}")
+
 
 # ---------------------------------------------------------------------------
 # Database initialization
@@ -69,6 +107,7 @@ async def init_db(db_path: Path = DATABASE_PATH) -> aiosqlite.Connection:
     db = await aiosqlite.connect(str(db_path))
     db.row_factory = aiosqlite.Row
     await db.executescript(SCHEMA)
+    await _ensure_tasks_columns(db)
     await db.commit()
     logger.info("Kosmos database initialized at {}", db_path)
     return db
@@ -240,6 +279,18 @@ async def create_task(
         "description": description,
         "status": status,
         "assigned_to": assigned_to,
+        "release_approved": False,
+        "approved_by": None,
+        "approved_branch": None,
+        "approved_push": False,
+        "approved_at": None,
+        "workspace_path": None,
+        "work_branch": None,
+        "base_branch": None,
+        "release_note": None,
+        "jira_ready": False,
+        "retry_count": 0,
+        "last_failure_reason": None,
         "priority": priority,
         "created_at": now,
         "updated_at": now,
@@ -279,11 +330,42 @@ async def update_task(
     **fields,
 ) -> Optional[dict[str, Any]]:
     """Update task fields. Returns updated task or None if not found."""
-    allowed = {"project_id", "title", "description", "status", "assigned_to", "priority"}
+    allowed = {
+        "project_id",
+        "title",
+        "description",
+        "status",
+        "assigned_to",
+        "priority",
+        "release_approved",
+        "approved_by",
+        "approved_branch",
+        "approved_push",
+        "approved_at",
+        "workspace_path",
+        "work_branch",
+        "base_branch",
+        "release_note",
+        "jira_ready",
+        "retry_count",
+        "last_failure_reason",
+    }
     updates = {k: v for k, v in fields.items() if k in allowed}
 
     if not updates:
         return await get_task(db, task_id)
+
+    if "release_approved" in updates:
+        updates["release_approved"] = int(bool(updates["release_approved"]))
+    if "approved_push" in updates:
+        updates["approved_push"] = int(bool(updates["approved_push"]))
+    if "jira_ready" in updates:
+        updates["jira_ready"] = int(bool(updates["jira_ready"]))
+    if "retry_count" in updates:
+        try:
+            updates["retry_count"] = max(0, int(updates["retry_count"]))
+        except Exception:
+            updates["retry_count"] = 0
 
     updates["updated_at"] = datetime.utcnow().isoformat()
 
@@ -389,8 +471,9 @@ async def get_tasks_with_comment_count(
     """Get all tasks with comment count."""
     if project_id:
         async with db.execute(
-            """SELECT t.*, COUNT(c.id) as comment_count
+            """SELECT t.*, p.name as project_name, p.path as project_path, COUNT(c.id) as comment_count
                FROM tasks t
+               LEFT JOIN projects p ON t.project_id = p.id
                LEFT JOIN task_comments c ON t.id = c.task_id
                WHERE t.project_id = ?
                GROUP BY t.id
@@ -400,8 +483,9 @@ async def get_tasks_with_comment_count(
             rows = await cursor.fetchall()
     else:
         async with db.execute(
-            """SELECT t.*, COUNT(c.id) as comment_count
+            """SELECT t.*, p.name as project_name, p.path as project_path, COUNT(c.id) as comment_count
                FROM tasks t
+               LEFT JOIN projects p ON t.project_id = p.id
                LEFT JOIN task_comments c ON t.id = c.task_id
                GROUP BY t.id
                ORDER BY t.created_at DESC"""
