@@ -280,6 +280,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.minimax.io/v1",
     ),
+    # MiniMax (Anthropic): Anthropic-compatible API for M2.x thinking/reasoning
+    ProviderSpec(
+        name="minimax_anthropic",
+        keywords=("minimax-anthropic",),
+        env_key="MINIMAX_API_KEY",
+        display_name="MiniMax (Anthropic)",
+        backend="anthropic",
+        default_api_base="https://api.minimax.io/anthropic",
+    ),
     # Mistral AI: OpenAI-compatible API
     ProviderSpec(
         name="mistral",
