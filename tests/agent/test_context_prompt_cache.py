@@ -219,3 +219,55 @@ def test_subagent_result_does_not_create_consecutive_assistant_messages(tmp_path
 
     for left, right in zip(messages, messages[1:]):
         assert not (left.get("role") == right.get("role") == "assistant")
+
+
+def test_always_skills_excluded_from_skills_index(tmp_path) -> None:
+    """Always skills should appear in Active Skills but NOT in the skills index."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt = builder.build_system_prompt()
+
+    # memory skill should be in Active Skills section
+    assert "# Active Skills" in prompt
+    assert "### Skill: memory" in prompt
+
+    # memory skill should NOT appear in the skills index
+    skills_section = prompt.split("# Skills\n", 1)
+    if len(skills_section) > 1:
+        index_text = skills_section[1].split("\n\n---")[0]
+        assert "**memory**" not in index_text
+
+
+def test_template_memory_md_is_skipped(tmp_path) -> None:
+    """MEMORY.md matching the bundled template should not inject the Memory section."""
+    workspace = _make_workspace(tmp_path)
+    from nanobot.utils.helpers import sync_workspace_templates
+    sync_workspace_templates(workspace, silent=True)
+
+    builder = ContextBuilder(workspace)
+    prompt = builder.build_system_prompt()
+
+    # The "# Memory\n\n## Long-term Memory" block is produced only by
+    # build_system_prompt() when MEMORY.md is injected.  The memory skill
+    # also contains "# Memory" but is followed by "## Structure", not
+    # "## Long-term Memory".
+    assert "# Memory\n\n## Long-term Memory" not in prompt
+    assert "This file is automatically updated by nanobot" not in prompt
+
+
+def test_customized_memory_md_is_injected(tmp_path) -> None:
+    """A Dream-populated MEMORY.md should be injected normally."""
+    workspace = _make_workspace(tmp_path)
+    from nanobot.utils.helpers import sync_workspace_templates
+    sync_workspace_templates(workspace, silent=True)
+
+    (workspace / "memory" / "MEMORY.md").write_text(
+        "# Long-term Memory\n\nUser prefers dark mode.\n", encoding="utf-8"
+    )
+
+    builder = ContextBuilder(workspace)
+    prompt = builder.build_system_prompt()
+
+    assert "# Memory\n\n## Long-term Memory" in prompt
+    assert "User prefers dark mode" in prompt
