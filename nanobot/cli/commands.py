@@ -46,6 +46,8 @@ class SafeFileHistory(FileHistory):
     def store_string(self, string: str) -> None:
         safe = string.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
         super().store_string(safe)
+
+
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
@@ -180,10 +182,9 @@ def _response_renderable(content: str, render_markdown: bool, metadata: dict | N
 
 async def _print_interactive_line(text: str) -> None:
     """Print async interactive updates with prompt_toolkit-safe Rich styling."""
+
     def _write() -> None:
-        ansi = _render_interactive_ansi(
-            lambda c: c.print(f"  [dim]↳ {text}[/dim]")
-        )
+        ansi = _render_interactive_ansi(lambda c: c.print(f"  [dim]↳ {text}[/dim]"))
         print_formatted_text(ANSI(ansi), end="")
 
     await run_in_terminal(_write)
@@ -195,6 +196,7 @@ async def _print_interactive_response(
     metadata: dict | None = None,
 ) -> None:
     """Print async interactive replies with prompt_toolkit-safe Rich styling."""
+
     def _write() -> None:
         content = response or ""
         ansi = _render_interactive_ansi(
@@ -254,9 +256,7 @@ def version_callback(value: bool):
 
 @app.callback()
 def main(
-    version: bool = typer.Option(
-        None, "--version", "-v", callback=version_callback, is_eager=True
-    ),
+    version: bool = typer.Option(None, "--version", "-v", callback=version_callback, is_eager=True),
 ):
     """nanobot - Personal AI Assistant."""
     pass
@@ -447,6 +447,7 @@ def _make_provider(config: Config):
         )
     elif backend == "github_copilot":
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+
         provider = GitHubCopilotProvider(default_model=model)
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
@@ -541,7 +542,9 @@ def _migrate_cron_store(config: "Config") -> None:
 def serve(
     port: int | None = typer.Option(None, "--port", "-p", help="API server port"),
     host: str | None = typer.Option(None, "--host", "-H", help="Bind address"),
-    timeout: float | None = typer.Option(None, "--timeout", "-t", help="Per-request timeout (seconds)"),
+    timeout: float | None = typer.Option(
+        None, "--timeout", "-t", help="Per-request timeout (seconds)"
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show nanobot runtime logs"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -641,6 +644,7 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
+    from nanobot.services.nanocats_tasks import NanoCatsTasksClient
     from nanobot.session.manager import SessionManager
 
     if verbose:
@@ -689,6 +693,336 @@ def gateway(
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
     )
 
+    # Register NanoCats agent hook for real-time events
+    from nanobot.agent.hooks import create_nanocats_hook
+
+    nanocats_hook = create_nanocats_hook(workspace=config.workspace_path)
+    agent._extra_hooks.append(nanocats_hook)
+
+    nanocats_tasks = NanoCatsTasksClient(base_url="http://localhost:18794")
+    nanocats_task_lock = asyncio.Lock()
+    active_subagent_roles: set[str] = set()
+    DEV_SUBAGENT = "Vicks"
+    QA_SUBAGENT = "Wedge"
+    RELEASE_SUBAGENT = "Rydia"
+
+    def _task_status(task: dict[str, Any]) -> str:
+        return str(task.get("status") or "").strip().lower()
+
+    async def _build_task_instruction(task: dict[str, Any], role: str) -> str:
+        project_id = task.get("project_id") or ""
+        title = task.get("title") or "Untitled task"
+        description = task.get("description") or ""
+        status = str(task.get("status") or "").strip().lower()
+        project_path = (
+            str(Path.home() / "proyectos" / str(project_id))
+            if project_id
+            else str(config.workspace_path)
+        )
+        role_instruction = (
+            "You are Vicks (developer). Implement/fix the task and leave it ready for QA."
+            if role == DEV_SUBAGENT
+            else (
+                "You are Wedge (code reviewer / QA). Validate implementation, run checks, and approve or report issues."
+                if role == QA_SUBAGENT
+                else (
+                    "You are Rydia (release lead). Prepare the final handoff summary and propose conventional commits. "
+                    "Do not run git commit or git push until explicit human approval is provided with branch details."
+                )
+            )
+        )
+        return (
+            f"Resolve NanoCats task {task.get('id')} for project '{project_id}' as {role}.\n"
+            f"Title: {title}\n"
+            f"Description: {description}\n"
+            f"Current Kanban status: {status or 'todo'}\n"
+            f"Workspace: {project_path}\n"
+            "Requirements:\n"
+            f"- {role_instruction}\n"
+            "- Do the implementation work needed to complete this task.\n"
+            "- Run relevant checks/tests when applicable.\n"
+            "- Return a concise completion report with what changed and verification status."
+        )
+
+    async def _on_subagent_task_complete(payload: dict[str, Any]) -> None:
+        task_meta = payload.get("task_meta") or {}
+        kanban_task_id = task_meta.get("kanban_task_id")
+        if not kanban_task_id:
+            return
+        status = payload.get("status")
+        role = str(task_meta.get("subagent_name") or "")
+        active_subagent_roles.discard(role)
+        runtime_subagent_id = str(payload.get("subagent_runtime_id") or "")
+        reviewer = runtime_subagent_id if runtime_subagent_id else role or "nanobot"
+        result_preview = str(payload.get("result") or "")
+        headline = "Completed successfully" if status == "ok" else "Failed / needs follow-up"
+        role_label = role or "Subagent"
+        body = (
+            result_preview[:900].strip() if result_preview else "No detailed output was produced."
+        )
+        comment_text = f"[{role_label}] {headline}\n\n{body}"
+
+        # Ensure identities exist for backend ACL checks on comments.
+        if runtime_subagent_id:
+            await nanocats_tasks.upsert_agent_identity(
+                agent_id=runtime_subagent_id,
+                agent_name=role or runtime_subagent_id,
+                project_id=str(task_meta.get("project_id") or ""),
+                status="coding" if role == DEV_SUBAGENT else "consulting",
+                mood="focused",
+                current_task=str(task_meta.get("title") or "Task"),
+            )
+        if role in {DEV_SUBAGENT, QA_SUBAGENT, RELEASE_SUBAGENT}:
+            await nanocats_tasks.upsert_agent_identity(
+                agent_id=role,
+                agent_name=role,
+                project_id=str(task_meta.get("project_id") or ""),
+                status="coding" if role == DEV_SUBAGENT else "consulting",
+                mood="focused",
+                current_task=str(task_meta.get("title") or "Task"),
+            )
+
+        async def _ensure_assigned_to(expected_name: str) -> bool:
+            task_snapshot = await nanocats_tasks.get_task(str(kanban_task_id))
+            if not task_snapshot:
+                logger.warning("Task {} not found before comment", kanban_task_id)
+                return False
+            current_assigned = str(task_snapshot.get("assigned_to") or "").strip()
+            if current_assigned.lower() != expected_name.lower():
+                updated = await nanocats_tasks.update_task(
+                    str(kanban_task_id),
+                    assigned_to=expected_name,
+                )
+                if not updated:
+                    logger.warning(
+                        "Task {} assigned_to mismatch and could not be fixed (wanted={}, had={})",
+                        kanban_task_id,
+                        expected_name,
+                        current_assigned,
+                    )
+                    return False
+            return True
+
+        # Comment as the assigned subagent before changing status.
+        expected_owner_for_comment = (
+            role if role in {DEV_SUBAGENT, QA_SUBAGENT, RELEASE_SUBAGENT} else reviewer
+        )
+        owner_ok = await _ensure_assigned_to(expected_owner_for_comment)
+        if not owner_ok:
+            logger.warning(
+                "Task {} completion skipped because owner check failed for {}",
+                kanban_task_id,
+                expected_owner_for_comment,
+            )
+            return
+
+        created_comment = await nanocats_tasks.create_task_comment(
+            task_id=str(kanban_task_id),
+            agent_id=expected_owner_for_comment,
+            comment=comment_text,
+        )
+
+        # Enforce rule: task completion requires a comment.
+        if not created_comment:
+            logger.warning(
+                "Task {} completion skipped because comment creation failed (agent_id={}, role={})",
+                kanban_task_id,
+                reviewer,
+                role,
+            )
+            return
+
+        if status == "ok":
+            if role == DEV_SUBAGENT:
+                transition = "in progress -> qa"
+                await nanocats_tasks.transition_task(
+                    kanban_task_id,
+                    to_status="qa",
+                    comment_text=f"[{role}] Transition: {transition}\n\n{body}",
+                    agent_id=role,
+                    agent_name=role,
+                    assigned_to=QA_SUBAGENT,
+                )
+            elif role == QA_SUBAGENT:
+                transition = "qa -> release"
+                await nanocats_tasks.transition_task(
+                    kanban_task_id,
+                    to_status="release",
+                    comment_text=f"[{role}] Transition: {transition}\n\n{body}",
+                    agent_id=role,
+                    agent_name=role,
+                    assigned_to=RELEASE_SUBAGENT,
+                )
+            else:
+                task_snapshot = await nanocats_tasks.get_task(str(kanban_task_id))
+                approved = bool((task_snapshot or {}).get("release_approved"))
+                if approved:
+                    transition = "release -> done"
+                    await nanocats_tasks.transition_task(
+                        kanban_task_id,
+                        to_status="done",
+                        comment_text=f"[{role}] Transition: {transition}\n\n{body}",
+                        agent_id=role,
+                        agent_name=role,
+                        assigned_to=RELEASE_SUBAGENT,
+                    )
+                else:
+                    transition = "release -> release (awaiting human approval)"
+                    await nanocats_tasks.update_task(
+                        kanban_task_id,
+                        assigned_to=RELEASE_SUBAGENT,
+                    )
+                    await nanocats_tasks.create_task_comment(
+                        task_id=str(kanban_task_id),
+                        agent_id=RELEASE_SUBAGENT,
+                        comment=(
+                            "[Rydia] Release prepared. Waiting for explicit human approval "
+                            "(approved_by, branch, push) before moving to done.\n\n"
+                            f"{body}"
+                        ),
+                    )
+        else:
+            if role == DEV_SUBAGENT:
+                transition = "in progress -> todo"
+                await nanocats_tasks.transition_task(
+                    kanban_task_id,
+                    to_status="todo",
+                    comment_text=f"[{role}] Transition: {transition}\n\n{body}",
+                    agent_id=role,
+                    agent_name=role,
+                    assigned_to="",
+                )
+            elif role == QA_SUBAGENT:
+                transition = "qa -> todo"
+                await nanocats_tasks.transition_task(
+                    kanban_task_id,
+                    to_status="todo",
+                    comment_text=f"[{role}] Transition: {transition}\n\n{body}",
+                    agent_id=role,
+                    agent_name=role,
+                    assigned_to="",
+                )
+            else:
+                transition = "release -> todo"
+                await nanocats_tasks.transition_task(
+                    kanban_task_id,
+                    to_status="todo",
+                    comment_text=f"[{role}] Transition: {transition}\n\n{body}",
+                    agent_id=role,
+                    agent_name=role,
+                    assigned_to="",
+                )
+
+        # Keep assignment aligned with role name for backend ACL on comments.
+        if role in {DEV_SUBAGENT, QA_SUBAGENT, RELEASE_SUBAGENT}:
+            await nanocats_tasks.update_task(
+                kanban_task_id,
+                assigned_to=role,
+            )
+
+            owner_ok = await _ensure_assigned_to(role)
+            if not owner_ok:
+                logger.warning(
+                    "Task {} transition comment skipped because owner check failed for role {}",
+                    kanban_task_id,
+                    role,
+                )
+                return
+
+            transition_comment = f"[{role}] Handoff note: {transition}\n\n{body}"
+            transition_comment_created = await nanocats_tasks.create_task_comment(
+                task_id=str(kanban_task_id),
+                agent_id=role,
+                comment=transition_comment,
+            )
+            if not transition_comment_created:
+                logger.warning(
+                    "Task {} transition comment missing for role {} ({})",
+                    kanban_task_id,
+                    role,
+                    transition,
+                )
+
+        project_id = str(task_meta.get("project_id") or "")
+        title = str(task_meta.get("title") or "Task")
+        if status == "ok":
+            done_status = "consulting"
+            done_message = (
+                f"{title} - {transition}" if role == DEV_SUBAGENT else f"{title} - {transition}"
+            )
+        else:
+            done_status = "error"
+            done_message = (
+                f"{title} - {transition}" if role == DEV_SUBAGENT else f"{title} - {transition}"
+            )
+        from nanobot.services.nanocats import get_nanocats
+
+        nanocats = get_nanocats()
+        if nanocats and nanocats._running:
+            await nanocats.send_activity(
+                {
+                    "id": f"task-end-{kanban_task_id}",
+                    "agentId": payload.get("task_id", "main"),
+                    "agentName": payload.get("label", "Subagent"),
+                    "projectId": project_id,
+                    "type": "status",
+                    "status": done_status,
+                    "currentTask": done_message,
+                    "mood": "focused" if status == "ok" else "tired",
+                    "message": done_message,
+                }
+            )
+
+    async def _on_subagent_task_start(payload: dict[str, Any]) -> None:
+        task_meta = payload.get("task_meta") or {}
+        kanban_task_id = task_meta.get("kanban_task_id")
+        if not kanban_task_id:
+            return
+        role = str(task_meta.get("subagent_name") or "")
+        if role:
+            active_subagent_roles.add(role)
+
+        # Keep the task owner aligned with the running subagent.
+        await nanocats_tasks.update_task(
+            kanban_task_id,
+            assigned_to=role or str(payload.get("task_id") or "nanobot"),
+        )
+
+        target_status = (
+            "progress" if role == DEV_SUBAGENT else ("qa" if role == QA_SUBAGENT else "release")
+        )
+        await nanocats_tasks.transition_task(
+            kanban_task_id,
+            to_status=target_status,
+            comment_text=f"[{role}] Started work in {target_status}.",
+            agent_id=role or str(payload.get("task_id") or "nanobot"),
+            agent_name=role or str(payload.get("label") or "nanobot"),
+            assigned_to=role or str(payload.get("task_id") or "nanobot"),
+        )
+
+        project_id = str(task_meta.get("project_id") or "")
+        title = str(task_meta.get("title") or "Working on task")
+        from nanobot.services.nanocats import get_nanocats
+
+        nanocats = get_nanocats()
+        if nanocats and nanocats._running:
+            await nanocats.send_activity(
+                {
+                    "id": f"task-start-{kanban_task_id}",
+                    "agentId": payload.get("task_id", "main"),
+                    "agentName": payload.get("label", "Subagent"),
+                    "projectId": project_id,
+                    "type": "coding",
+                    "status": "coding",
+                    "currentTask": title,
+                    "mood": "focused",
+                    "message": title,
+                }
+            )
+
+    agent.subagents.set_on_task_start(_on_subagent_task_start)
+    agent.subagents.set_on_task_complete(_on_subagent_task_complete)
+
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
@@ -734,15 +1068,21 @@ def gateway(
 
         if job.payload.deliver and job.payload.to and response:
             should_notify = await evaluate_response(
-                response, reminder_note, provider, agent.model,
+                response,
+                reminder_note,
+                provider,
+                agent.model,
             )
             if should_notify:
                 from nanobot.bus.events import OutboundMessage
-                await bus.publish_outbound(OutboundMessage(
-                    channel=job.payload.channel or "cli",
-                    chat_id=job.payload.to,
-                    content=response,
-                ))
+
+                await bus.publish_outbound(
+                    OutboundMessage(
+                        channel=job.payload.channel or "cli",
+                        chat_id=job.payload.to,
+                        content=response,
+                    )
+                )
         return response
 
     cron.on_job = on_cron_job
@@ -768,35 +1108,177 @@ def gateway(
 
     # Create heartbeat service
     async def on_heartbeat_execute(tasks: str) -> str:
-        """Phase 2: execute heartbeat tasks through the full agent loop."""
-        channel, chat_id = _pick_heartbeat_target()
+        """Heartbeat execution for NanoCats task dispatch.
 
-        async def _silent(*_args, **_kwargs):
-            pass
+        Important: do NOT call `agent.process_direct(...)` here.
+        Doing so allows the model to spawn additional subagents from heartbeat
+        instructions, which can violate the one-subagent-at-a-time policy.
+        """
+        llm_summary = ""
 
-        resp = await agent.process_direct(
-            tasks,
-            session_key="heartbeat",
-            channel=channel,
-            chat_id=chat_id,
-            on_progress=_silent,
-        )
+        if nanocats_task_lock.locked():
+            return f"{llm_summary}\n\nNanoCats heartbeat: task worker is busy.".strip()
 
-        # Keep a small tail of heartbeat history so the loop stays bounded
-        # without losing all short-term context between runs.
-        session = agent.sessions.get_or_create("heartbeat")
-        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-        agent.sessions.save(session)
+        async with nanocats_task_lock:
+            pending = await nanocats_tasks.list_pending_tasks()
+            in_progress = [t for t in pending if _task_status(t) in {"progress", "in_progress"}]
+            qa_tasks = [t for t in pending if _task_status(t) == "qa"]
+            release_tasks = [t for t in pending if _task_status(t) == "release"]
 
-        return resp.content if resp else ""
+            if agent.subagents.get_running_count() > 0:
+                if in_progress and DEV_SUBAGENT in active_subagent_roles:
+                    progress_id = str(in_progress[0].get("id") or "")
+                    return (
+                        f"{llm_summary}\n\n"
+                        f"NanoCats heartbeat: {DEV_SUBAGENT} already working on task {progress_id}."
+                    ).strip()
+                if qa_tasks and QA_SUBAGENT in active_subagent_roles:
+                    qa_id = str(qa_tasks[0].get("id") or "")
+                    return (
+                        f"{llm_summary}\n\n"
+                        f"NanoCats heartbeat: {QA_SUBAGENT} already reviewing task {qa_id}."
+                    ).strip()
+                if release_tasks and RELEASE_SUBAGENT in active_subagent_roles:
+                    release_id = str(release_tasks[0].get("id") or "")
+                    return (
+                        f"{llm_summary}\n\n"
+                        f"NanoCats heartbeat: {RELEASE_SUBAGENT} already releasing task {release_id}."
+                    ).strip()
+                return f"{llm_summary}\n\nNanoCats heartbeat: subagent busy.".strip()
+
+            if in_progress and DEV_SUBAGENT in active_subagent_roles:
+                progress_id = str(in_progress[0].get("id") or "")
+                progress_title = str(in_progress[0].get("title") or "")
+                return (
+                    f"{llm_summary}\n\n"
+                    f"NanoCats heartbeat: {DEV_SUBAGENT} is still on task {progress_id} ({progress_title})."
+                ).strip()
+
+            if release_tasks and RELEASE_SUBAGENT not in active_subagent_roles:
+                release_task = release_tasks[0]
+                release_task_id = str(release_task.get("id") or "")
+                release_project_id = str(release_task.get("project_id") or "")
+                release_title = str(release_task.get("title") or "Untitled task")
+
+                await nanocats_tasks.update_task(
+                    release_task_id,
+                    assigned_to=RELEASE_SUBAGENT,
+                )
+
+                release_instruction = await _build_task_instruction(release_task, RELEASE_SUBAGENT)
+                spawn_tool = agent.tools.get("spawn")
+                if not spawn_tool or not hasattr(spawn_tool, "execute"):
+                    return (
+                        f"{llm_summary}\n\nNanoCats heartbeat: spawn tool unavailable for Release."
+                    ).strip()
+
+                if hasattr(spawn_tool, "set_context"):
+                    spawn_tool.set_context("cli", "direct")
+
+                release_result = await spawn_tool.execute(
+                    task=release_instruction,
+                    label=RELEASE_SUBAGENT,
+                    task_meta={
+                        "kanban_task_id": release_task_id,
+                        "project_id": release_project_id,
+                        "title": release_title,
+                        "subagent_name": RELEASE_SUBAGENT,
+                    },
+                )
+                return (
+                    f"{llm_summary}\n\n"
+                    f"NanoCats heartbeat: dispatched release task {release_task_id}. {release_result}"
+                ).strip()
+
+            if qa_tasks and QA_SUBAGENT not in active_subagent_roles:
+                qa_task = qa_tasks[0]
+                qa_task_id = str(qa_task.get("id") or "")
+                qa_project_id = str(qa_task.get("project_id") or "")
+                qa_title = str(qa_task.get("title") or "Untitled task")
+
+                await nanocats_tasks.update_task(
+                    qa_task_id,
+                    assigned_to=QA_SUBAGENT,
+                )
+
+                qa_instruction = await _build_task_instruction(qa_task, QA_SUBAGENT)
+                spawn_tool = agent.tools.get("spawn")
+                if not spawn_tool or not hasattr(spawn_tool, "execute"):
+                    return f"{llm_summary}\n\nNanoCats heartbeat: spawn tool unavailable for QA.".strip()
+
+                if hasattr(spawn_tool, "set_context"):
+                    spawn_tool.set_context("cli", "direct")
+
+                qa_result = await spawn_tool.execute(
+                    task=qa_instruction,
+                    label=QA_SUBAGENT,
+                    task_meta={
+                        "kanban_task_id": qa_task_id,
+                        "project_id": qa_project_id,
+                        "title": qa_title,
+                        "subagent_name": QA_SUBAGENT,
+                    },
+                )
+                return f"{llm_summary}\n\nNanoCats heartbeat: dispatched QA task {qa_task_id}. {qa_result}".strip()
+
+            todo = [t for t in pending if _task_status(t) == "todo"]
+            if not todo:
+                return f"{llm_summary}\n\nNanoCats heartbeat: no pending tasks for {DEV_SUBAGENT}.".strip()
+
+            if DEV_SUBAGENT in active_subagent_roles:
+                return (
+                    f"{llm_summary}\n\nNanoCats heartbeat: {DEV_SUBAGENT} already running.".strip()
+                )
+
+            next_task = todo[0]
+            task_id = str(next_task.get("id"))
+            project_id = str(next_task.get("project_id") or "")
+            title = str(next_task.get("title") or "Untitled task")
+            claimed = await nanocats_tasks.transition_task(
+                task_id,
+                to_status="progress",
+                comment_text=f"[{DEV_SUBAGENT}] Claimed task and started implementation.",
+                agent_id=DEV_SUBAGENT,
+                agent_name=DEV_SUBAGENT,
+                assigned_to=DEV_SUBAGENT,
+            )
+            if not claimed:
+                return (
+                    f"{llm_summary}\n\n"
+                    f"NanoCats heartbeat: could not move task {task_id} to progress (likely 409)."
+                ).strip()
+
+            instruction = await _build_task_instruction(next_task, DEV_SUBAGENT)
+            spawn_tool = agent.tools.get("spawn")
+            if not spawn_tool or not hasattr(spawn_tool, "execute"):
+                return f"{llm_summary}\n\nNanoCats heartbeat: spawn tool unavailable.".strip()
+
+            if hasattr(spawn_tool, "set_context"):
+                spawn_tool.set_context("cli", "direct")
+
+            result = await spawn_tool.execute(
+                task=instruction,
+                label=DEV_SUBAGENT,
+                task_meta={
+                    "kanban_task_id": task_id,
+                    "project_id": project_id,
+                    "title": title,
+                    "subagent_name": DEV_SUBAGENT,
+                },
+            )
+            dispatch_info = f"NanoCats heartbeat: dispatched task {task_id}. {result}"
+            return f"{llm_summary}\n\n{dispatch_info}".strip()
 
     async def on_heartbeat_notify(response: str) -> None:
         """Deliver a heartbeat response to the user's channel."""
         from nanobot.bus.events import OutboundMessage
+
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
             return  # No external channel available to deliver to
-        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+        await bus.publish_outbound(
+            OutboundMessage(channel=channel, chat_id=chat_id, content=response)
+        )
 
     hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(
@@ -807,6 +1289,7 @@ def gateway(
         on_notify=on_heartbeat_notify,
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
+        deliver=hb_cfg.deliver,
         timezone=config.agents.defaults.timezone,
     )
 
@@ -863,6 +1346,17 @@ def gateway(
         console.print(f"[green]✓[/green] Health endpoint: http://{host}:{health_port}/health")
         async with server:
             await server.serve_forever()
+
+    # Start NanoCats service for agent monitoring (inside async run)
+    async def start_nanocats_bg():
+        try:
+            from nanobot.services.nanocats import start_nanocats
+
+            await start_nanocats()
+            console.print(f"[green]✓[/green] NanoCats: ws://0.0.0.0:18791 & http://0.0.0.0:18792")
+        except Exception as e:
+            console.print(f"[yellow]Warning: NanoCats failed to start: {e}[/yellow]")
+
     # Register Dream system job (always-on, idempotent on restart)
     dream_cfg = config.agents.defaults.dream
     if dream_cfg.model_override:
@@ -870,16 +1364,20 @@ def gateway(
     agent.dream.max_batch_size = dream_cfg.max_batch_size
     agent.dream.max_iterations = dream_cfg.max_iterations
     from nanobot.cron.types import CronJob, CronPayload
-    cron.register_system_job(CronJob(
-        id="dream",
-        name="dream",
-        schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
-        payload=CronPayload(kind="system_event"),
-    ))
+
+    cron.register_system_job(
+        CronJob(
+            id="dream",
+            name="dream",
+            schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
+            payload=CronPayload(kind="system_event"),
+        )
+    )
     console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
 
     async def run():
         try:
+            await start_nanocats_bg()
             await cron.start()
             await heartbeat.start()
             await asyncio.gather(
@@ -900,6 +1398,15 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            # Stop NanoCats
+            try:
+                from nanobot.services.nanocats import get_nanocats
+
+                nanocats = get_nanocats()
+                if nanocats:
+                    await nanocats.stop()
+            except Exception:
+                pass
 
     asyncio.run(run())
 
@@ -915,8 +1422,12 @@ def agent(
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
-    markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
-    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    markdown: bool = typer.Option(
+        True, "--markdown/--no-markdown", help="Render assistant output as Markdown"
+    ),
+    logs: bool = typer.Option(
+        False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"
+    ),
 ):
     """Interact with the agent directly."""
     from loguru import logger
@@ -988,7 +1499,8 @@ def agent(
         async def run_once():
             renderer = StreamRenderer(render_markdown=markdown)
             response = await agent_loop.process_direct(
-                message, session_id,
+                message,
+                session_id,
                 on_progress=_cli_progress,
                 on_stream=renderer.on_delta,
                 on_stream_end=renderer.on_end,
@@ -1006,8 +1518,14 @@ def agent(
     else:
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
+
         _init_prompt_session()
-        console.print(f"{__logo__} Interactive mode [bold blue]({config.agents.defaults.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
+        console.print(
+            f"{__logo__} Interactive mode [bold blue]({config.agents.defaults.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n"
+        )
+        console.print(
+            f"{__logo__} Interactive mode [bold blue]({config.agents.defaults.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n"
+        )
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)
@@ -1023,11 +1541,11 @@ def agent(
         signal.signal(signal.SIGINT, _handle_signal)
         signal.signal(signal.SIGTERM, _handle_signal)
         # SIGHUP is not available on Windows
-        if hasattr(signal, 'SIGHUP'):
+        if hasattr(signal, "SIGHUP"):
             signal.signal(signal.SIGHUP, _handle_signal)
         # Ignore SIGPIPE to prevent silent process termination when writing to closed pipes
         # SIGPIPE is not available on Windows
-        if hasattr(signal, 'SIGPIPE'):
+        if hasattr(signal, "SIGPIPE"):
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive():
@@ -1106,13 +1624,15 @@ def agent(
                         turn_response.clear()
                         renderer = StreamRenderer(render_markdown=markdown)
 
-                        await bus.publish_inbound(InboundMessage(
-                            channel=cli_channel,
-                            sender_id="user",
-                            chat_id=cli_chat_id,
-                            content=user_input,
-                            metadata={"_wants_stream": True},
-                        ))
+                        await bus.publish_inbound(
+                            InboundMessage(
+                                channel=cli_channel,
+                                sender_id="user",
+                                chat_id=cli_chat_id,
+                                content=user_input,
+                                metadata={"_wants_stream": True},
+                            )
+                        )
 
                         await turn_done.wait()
 
@@ -1122,7 +1642,9 @@ def agent(
                                 if renderer:
                                     await renderer.close()
                                 _print_agent_response(
-                                    content, render_markdown=markdown, metadata=meta,
+                                    content,
+                                    render_markdown=markdown,
+                                    metadata=meta,
                                 )
                         elif renderer and not renderer.streamed:
                             await renderer.close()
@@ -1250,7 +1772,9 @@ def _get_bridge_dir() -> Path:
 @channels_app.command("login")
 def channels_login(
     channel_name: str = typer.Argument(..., help="Channel name (e.g. weixin, whatsapp)"),
-    force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Force re-authentication even if already logged in"
+    ),
     config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with a channel via QR code or other interactive login."""
@@ -1329,6 +1853,46 @@ def plugins_list():
 # ============================================================================
 
 
+@app.command("approve-release")
+def approve_release(
+    task_id: str = typer.Argument(..., help="Task ID in release stage"),
+    branch: str = typer.Option(..., "--branch", help="Approved branch for commit/push"),
+    push: bool = typer.Option(False, "--push/--no-push", help="Whether push is approved"),
+    approved_by: str = typer.Option("human", "--approved-by", help="Approver identity"),
+    comment: str = typer.Option(
+        "", "--comment", help="Optional approval comment stored in task comments"
+    ),
+    api_url: str = typer.Option(
+        "http://localhost:18794", "--api-url", help="NanoCats API base URL"
+    ),
+):
+    """Approve a release task so Rydia can move it to done."""
+    from nanobot.services.nanocats_tasks import NanoCatsTasksClient
+
+    client = NanoCatsTasksClient(base_url=api_url)
+
+    async def _run() -> dict[str, Any] | None:
+        return await client.approve_release(
+            task_id,
+            approved_by=approved_by,
+            branch=branch,
+            push=push,
+            comment_text=comment.strip() or None,
+        )
+
+    result = asyncio.run(_run())
+    if not result:
+        console.print(
+            f"[red]✗ Failed to approve release for task {task_id}[/red] [dim](api={api_url})[/dim]"
+        )
+        raise typer.Exit(1)
+
+    console.print(
+        f"[green]✓ Release approved[/green] task={task_id} "
+        f"branch={branch} push={'yes' if push else 'no'} by={approved_by}"
+    )
+
+
 @app.command()
 def status():
     """Show nanobot status."""
@@ -1340,8 +1904,12 @@ def status():
 
     console.print(f"{__logo__} nanobot Status\n")
 
-    console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
-    console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
+    console.print(
+        f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}"
+    )
+    console.print(
+        f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}"
+    )
 
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
@@ -1363,7 +1931,9 @@ def status():
                     console.print(f"{spec.label}: [dim]not set[/dim]")
             else:
                 has_key = bool(p.api_key)
-                console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+                console.print(
+                    f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}"
+                )
 
 
 # ============================================================================
@@ -1387,7 +1957,9 @@ def _register_login(name: str):
 
 @provider_app.command("login")
 def provider_login(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(
+        ..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"
+    ),
 ):
     """Authenticate with an OAuth provider."""
     from nanobot.providers.registry import PROVIDERS
@@ -1427,7 +1999,9 @@ def _login_openai_codex() -> None:
         if not (token and token.access):
             console.print("[red]✗ Authentication failed[/red]")
             raise typer.Exit(1)
-        console.print(f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]")
+        console.print(
+            f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]"
+        )
     except ImportError:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         raise typer.Exit(1)

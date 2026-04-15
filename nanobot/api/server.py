@@ -18,6 +18,7 @@ from typing import Any
 from aiohttp import web
 from loguru import logger
 
+from nanobot.api import nanocats
 from nanobot.config.paths import get_media_dir
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
@@ -29,6 +30,7 @@ _DATA_URL_RE = re.compile(r"^data:([^;]+);base64,(.+)$", re.DOTALL)
 class _FileSizeExceeded(Exception):
     """Raised when an uploaded file exceeds the size limit."""
 
+
 API_SESSION_KEY = "api:default"
 API_CHAT_ID = "default"
 
@@ -36,6 +38,7 @@ API_CHAT_ID = "default"
 # ---------------------------------------------------------------------------
 # Response helpers
 # ---------------------------------------------------------------------------
+
 
 def _error_json(status: int, message: str, err_type: str = "invalid_request_error") -> web.Response:
     return web.json_response(
@@ -74,6 +77,7 @@ def _response_text(value: Any) -> str:
 # Upload helpers
 # ---------------------------------------------------------------------------
 
+
 def _save_base64_data_url(data_url: str, media_dir: Path) -> str | None:
     """Decode a data:...;base64,... URL and save to disk."""
     m = _DATA_URL_RE.match(data_url)
@@ -85,9 +89,7 @@ def _save_base64_data_url(data_url: str, media_dir: Path) -> str | None:
     except Exception:
         return None
     if len(raw) > MAX_FILE_SIZE:
-        raise _FileSizeExceeded(
-            f"File exceeds {MAX_FILE_SIZE // (1024 * 1024)}MB limit"
-        )
+        raise _FileSizeExceeded(f"File exceeds {MAX_FILE_SIZE // (1024 * 1024)}MB limit")
     ext = mimetypes.guess_extension(mime_type) or ".bin"
     filename = f"{uuid.uuid4().hex[:12]}{ext}"
     dest = media_dir / safe_filename(filename)
@@ -149,7 +151,9 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
         elif part.name == "files":
             raw = await part.read()
             if len(raw) > MAX_FILE_SIZE:
-                raise _FileSizeExceeded(f"File '{part.filename}' exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
+                raise _FileSizeExceeded(
+                    f"File '{part.filename}' exceeds {MAX_FILE_SIZE // (1024 * 1024)}MB limit"
+                )
             filename = safe_filename(part.filename or f"{uuid.uuid4().hex[:12]}.bin")
             dest = media_dir / filename
             dest.write_bytes(raw)
@@ -164,6 +168,7 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
+
 
 async def handle_chat_completions(request: web.Request) -> web.Response:
     """POST /v1/chat/completions — supports JSON and multipart/form-data."""
@@ -184,7 +189,9 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
             except Exception:
                 return _error_json(400, "Invalid JSON body")
             if body.get("stream", False):
-                return _error_json(400, "stream=true is not supported yet. Set stream=false or omit it.")
+                return _error_json(
+                    400, "stream=true is not supported yet. Set stream=false or omit it."
+                )
             if (requested_model := body.get("model")) and requested_model != model_name:
                 return _error_json(400, f"Only configured model '{model_name}' is available")
             text, media_paths = _parse_json_content(body)
@@ -201,7 +208,9 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
     session_locks: dict[str, asyncio.Lock] = request.app["session_locks"]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
-    logger.info("API request session_key={} media={} text={}", session_key, len(media_paths), text[:80])
+    logger.info(
+        "API request session_key={} media={} text={}", session_key, len(media_paths), text[:80]
+    )
 
     _FALLBACK = EMPTY_FINAL_RESPONSE_MESSAGE
 
@@ -252,17 +261,19 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
 async def handle_models(request: web.Request) -> web.Response:
     """GET /v1/models"""
     model_name = request.app.get("model_name", "nanobot")
-    return web.json_response({
-        "object": "list",
-        "data": [
-            {
-                "id": model_name,
-                "object": "model",
-                "created": 0,
-                "owned_by": "nanobot",
-            }
-        ],
-    })
+    return web.json_response(
+        {
+            "object": "list",
+            "data": [
+                {
+                    "id": model_name,
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": "nanobot",
+                }
+            ],
+        }
+    )
 
 
 async def handle_health(request: web.Request) -> web.Response:
@@ -274,7 +285,10 @@ async def handle_health(request: web.Request) -> web.Response:
 # App factory
 # ---------------------------------------------------------------------------
 
-def create_app(agent_loop, model_name: str = "nanobot", request_timeout: float = 120.0) -> web.Application:
+
+def create_app(
+    agent_loop, model_name: str = "nanobot", request_timeout: float = 120.0
+) -> web.Application:
     """Create the aiohttp application.
 
     Args:
@@ -291,4 +305,22 @@ def create_app(agent_loop, model_name: str = "nanobot", request_timeout: float =
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
     app.router.add_get("/v1/models", handle_models)
     app.router.add_get("/health", handle_health)
+
+    # Add nanocat routes
+    for route in nanocats.routes:
+        if hasattr(route, "path"):
+            method = (
+                getattr(route, "methods", {"GET"}).pop() if hasattr(route, "methods") else "GET"
+            )
+            if method == "GET":
+                app.router.add_get(route.path, route.handler)
+            elif method == "POST":
+                app.router.add_post(route.path, route.handler)
+            elif method == "PUT":
+                app.router.add_put(route.path, route.handler)
+            elif method == "PATCH":
+                app.router.add_patch(route.path, route.handler)
+            elif method == "DELETE":
+                app.router.add_delete(route.path, route.handler)
+
     return app
