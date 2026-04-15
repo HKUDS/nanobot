@@ -113,6 +113,7 @@ class ProvidersConfig(Base):
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
+    dashscope_coding_plan: ProviderConfig = Field(default_factory=ProviderConfig)  # DashScope Coding Plan
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
     ovms: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenVINO Model Server (OVMS)
@@ -304,17 +305,26 @@ class Config(BaseSettings):
         return p.api_key if p else None
 
     def get_api_base(self, model: str | None = None) -> str | None:
-        """Get API base URL for the given model. Applies default URLs for gateway/local providers."""
+        """Get API base URL for the given model.
+
+        Gateways/local providers always expose their default base URLs here.
+        Some dedicated coding endpoints also need a stable default base URL so
+        CLI tests, onboarding, and explicit provider selection can surface the
+        resolved endpoint before provider construction.
+        """
         from nanobot.providers.registry import find_by_name
 
         p, name = self._match_provider(model)
         if p and p.api_base:
             return p.api_base
-        # Only gateways get a default api_base here. Standard providers
-        # resolve their base URL from the registry in the provider constructor.
+        # Most standard providers resolve their base URL in the provider
+        # constructor, but dedicated coding endpoints should still surface
+        # their defaults here when explicitly selected.
         if name:
             spec = find_by_name(name)
-            if spec and (spec.is_gateway or spec.is_local) and spec.default_api_base:
+            if spec and spec.default_api_base and (
+                spec.is_gateway or spec.is_local or spec.detect_by_base_keyword
+            ):
                 return spec.default_api_base
         return None
 

@@ -257,9 +257,34 @@ def test_config_accepts_camel_case_explicit_provider_name_for_coding_plan():
     assert config.get_api_base() == "https://ark.cn-beijing.volces.com/api/coding/v3"
 
 
+def test_config_accepts_camel_case_explicit_provider_name_for_dashscope_coding_plan():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "dashscopeCodingPlan",
+                    "model": "qwen3-coder-plus",
+                }
+            },
+            "providers": {
+                "dashscopeCodingPlan": {
+                    "apiKey": "test-key",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "dashscope_coding_plan"
+    assert config.get_api_base() == "https://coding.dashscope.aliyuncs.com/v1"
+
+
 def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
     assert find_by_name("volcengineCodingPlan") is not None
     assert find_by_name("volcengineCodingPlan").name == "volcengine_coding_plan"
+    assert find_by_name("dashscopeCodingPlan") is not None
+    assert find_by_name("dashscopeCodingPlan").name == "dashscope_coding_plan"
+    assert find_by_name("dashscope-coding-plan") is not None
+    assert find_by_name("dashscope-coding-plan").name == "dashscope_coding_plan"
     assert find_by_name("github-copilot") is not None
     assert find_by_name("github-copilot").name == "github_copilot"
 
@@ -303,6 +328,28 @@ def test_config_falls_back_to_vllm_when_ollama_not_configured():
 
     assert config.get_provider_name() == "vllm"
     assert config.get_api_base() == "http://localhost:8000"
+
+
+def test_config_dashscope_coding_plan_supports_international_api_base_override():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "dashscopeCodingPlan",
+                    "model": "qwen3-coder-plus",
+                }
+            },
+            "providers": {
+                "dashscopeCodingPlan": {
+                    "apiKey": "test-key",
+                    "apiBase": "https://coding-intl.dashscope.aliyuncs.com/v1",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "dashscope_coding_plan"
+    assert config.get_api_base() == "https://coding-intl.dashscope.aliyuncs.com/v1"
 
 
 def test_openai_compat_provider_passes_model_through():

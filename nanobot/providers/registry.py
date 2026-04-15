@@ -261,6 +261,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
     ),
+    # DashScope Coding Plan (通义灵码): dedicated coding endpoint
+    ProviderSpec(
+        name="dashscope_coding_plan",
+        keywords=("dashscope-coding-plan", "dashscope_coding_plan"),
+        env_key="DASHSCOPE_API_KEY",
+        display_name="DashScope Coding Plan",
+        backend="openai_compat",
+        detect_by_base_keyword="coding.dashscope",
+        default_api_base="https://coding.dashscope.aliyuncs.com/v1",
+    ),
     # Moonshot (月之暗面): Kimi models. K2.5 enforces temperature >= 1.0.
     ProviderSpec(
         name="moonshot",
