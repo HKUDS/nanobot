@@ -1,10 +1,12 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import json
 import os
 import select
 import signal
 import sys
+from datetime import datetime
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
@@ -772,6 +774,30 @@ def gateway(
         return "cli", "direct"
 
     # Create heartbeat service
+    def _log_outbound_messages(session: "Session", task_name: str) -> None:
+        """Persist outbound message tool calls before session trimming."""
+        log_path = runtime_config.workspace_path / "state" / "message_log.jsonl"
+        entries = []
+        for msg in session.messages:
+            for tc in msg.get("tool_calls", []):
+                if tc.get("function", {}).get("name") != "message":
+                    continue
+                try:
+                    args = json.loads(tc["function"].get("arguments", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                entries.append(json.dumps({
+                    "timestamp": msg.get("timestamp", datetime.now().isoformat()),
+                    "task": task_name,
+                    "channel": args.get("channel", ""),
+                    "chat_id": args.get("chat_id", ""),
+                    "content": args.get("content", ""),
+                }, ensure_ascii=False))
+        if entries:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as f:
+                f.write("\n".join(entries) + "\n")
+
     def _drop_last_turn(session: "Session") -> None:
         """Remove the most recent user→assistant turn from session history.
 
@@ -810,6 +836,7 @@ def gateway(
             # error messages in its history and learns to reproduce them.
             _drop_last_turn(session)
 
+        _log_outbound_messages(session, tasks)
         session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
         agent.sessions.save(session)
         return result
