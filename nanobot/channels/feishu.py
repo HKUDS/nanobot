@@ -1101,17 +1101,23 @@ class FeishuChannel(BaseChannel):
             logger.debug("Feishu: error fetching parent message {}: {}", message_id, e)
             return None
 
-    def _reply_message_sync(self, parent_message_id: str, msg_type: str, content: str) -> bool:
-        """Reply to an existing Feishu message using the Reply API (synchronous)."""
+    def _reply_message_sync(self, parent_message_id: str, msg_type: str, content: str, *, reply_in_thread: bool = False) -> bool:
+        """Reply to an existing Feishu message using the Reply API (synchronous).
+
+        Args:
+            reply_in_thread: If True, reply as a thread/topic message
+                in the Feishu client.
+        """
         from lark_oapi.api.im.v1 import ReplyMessageRequest, ReplyMessageRequestBody
 
         try:
+            body_builder = ReplyMessageRequestBody.builder().msg_type(msg_type).content(content)
+            if reply_in_thread:
+                body_builder = body_builder.reply_in_thread(True)
             request = (
                 ReplyMessageRequest.builder()
                 .message_id(parent_message_id)
-                .request_body(
-                    ReplyMessageRequestBody.builder().msg_type(msg_type).content(content).build()
-                )
+                .request_body(body_builder.build())
                 .build()
             )
             response = self._client.im.v1.message.reply(request)
@@ -1430,11 +1436,18 @@ class FeishuChannel(BaseChannel):
             first_send = True  # tracks whether the reply has already been used
 
             def _do_send(m_type: str, content: str) -> None:
-                """Send via reply (first message) or create (subsequent)."""
+                """Send via reply (first message) or create (subsequent).
+
+                When reply_to_message is enabled, the first message uses
+                reply_in_thread=True to create a visual topic thread.
+                """
                 nonlocal first_send
                 if reply_message_id and first_send:
                     first_send = False
-                    ok = self._reply_message_sync(reply_message_id, m_type, content)
+                    ok = self._reply_message_sync(
+                        reply_message_id, m_type, content,
+                        reply_in_thread=self.config.reply_to_message,
+                    )
                     if ok:
                         return
                     # Fall back to regular send if reply fails

@@ -534,3 +534,75 @@ async def test_session_key_private_chat_no_override() -> None:
 
     assert len(bus_spy) == 1
     assert bus_spy[0].session_key_override is None
+
+
+# ---------------------------------------------------------------------------
+# reply_in_thread tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reply_uses_reply_in_thread_when_enabled() -> None:
+    """When reply_to_message is True, reply includes reply_in_thread=True."""
+    channel = _make_feishu_channel(reply_to_message=True)
+
+    reply_resp = MagicMock()
+    reply_resp.success.return_value = True
+    channel._client.im.v1.message.reply.return_value = reply_resp
+
+    await channel.send(OutboundMessage(
+        channel="feishu",
+        chat_id="oc_abc",
+        content="hello",
+        metadata={"message_id": "om_001"},
+    ))
+
+    channel._client.im.v1.message.reply.assert_called_once()
+    call_args = channel._client.im.v1.message.reply.call_args
+    request = call_args[0][0]
+    assert request.request_body.reply_in_thread is True
+
+
+@pytest.mark.asyncio
+async def test_reply_without_reply_in_thread_when_disabled() -> None:
+    """When reply_to_message is False, reply does NOT use reply_in_thread."""
+    channel = _make_feishu_channel(reply_to_message=False)
+
+    create_resp = MagicMock()
+    create_resp.success.return_value = True
+    channel._client.im.v1.message.create.return_value = create_resp
+
+    await channel.send(OutboundMessage(
+        channel="feishu",
+        chat_id="oc_abc",
+        content="hello",
+    ))
+
+    # No message_id in metadata → no reply attempt, direct create
+    channel._client.im.v1.message.create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_reply_keeps_fallback_when_reply_fails() -> None:
+    """Even with reply_to_message=True, fallback to create on reply failure."""
+    channel = _make_feishu_channel(reply_to_message=True)
+
+    reply_resp = MagicMock()
+    reply_resp.success.return_value = False
+    reply_resp.code = 99991400
+    reply_resp.msg = "rate limited"
+    channel._client.im.v1.message.reply.return_value = reply_resp
+
+    create_resp = MagicMock()
+    create_resp.success.return_value = True
+    channel._client.im.v1.message.create.return_value = create_resp
+
+    await channel.send(OutboundMessage(
+        channel="feishu",
+        chat_id="oc_abc",
+        content="hello",
+        metadata={"message_id": "om_001"},
+    ))
+
+    channel._client.im.v1.message.reply.assert_called()
+    channel._client.im.v1.message.create.assert_called()
