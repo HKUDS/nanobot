@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -9,11 +10,11 @@ from typing import Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
-from nanobot.agent.hooks.nanocats_hook import create_subagent_hook
+from nanobot.agent.hooks.kosmos_hook import create_kosmos_subagent_hook
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
-from nanobot.agent.tools.nanocats import NanoCatsTaskTool
+from nanobot.agent.tools.kosmos import KosmosTaskTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
@@ -37,16 +38,55 @@ class SubagentManager:
             self._task_id = task_id
             self._label = label
 
+        @staticmethod
+        def _extract_target(arguments: dict[str, Any]) -> str:
+            if not isinstance(arguments, dict):
+                return ""
+            for key in (
+                "filePath",
+                "file_path",
+                "path",
+                "target_path",
+                "target",
+                "source",
+                "destination",
+                "workdir",
+                "file",
+            ):
+                value = arguments.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            return ""
+
+        @staticmethod
+        def _short(value: str, limit: int = 140) -> str:
+            if len(value) <= limit:
+                return value
+            return f"...{value[-(limit - 3) :]}"
+
+        async def before_iteration(self, context: AgentHookContext) -> None:
+            logger.info(
+                "Subagent iter start [{} {}|{}] iter={} messages={}",
+                self._agent_name,
+                self._task_id,
+                self._label,
+                context.iteration + 1,
+                len(context.messages),
+            )
+
         async def before_execute_tools(self, context: AgentHookContext) -> None:
             for tc in context.tool_calls:
                 args_str = json.dumps(tc.arguments, ensure_ascii=False)
+                target = self._extract_target(tc.arguments)
+                target_part = f" target={self._short(target)}" if target else ""
                 logger.info(
-                    "Tool call [{} {}|{}]: {}({})",
+                    "Tool call [{} {}|{}]: {}({}){}",
                     self._agent_name,
                     self._task_id,
                     self._label,
                     tc.name,
                     args_str[:200],
+                    target_part,
                 )
 
         async def after_iteration(self, context: AgentHookContext) -> None:
@@ -60,6 +100,36 @@ class SubagentManager:
                 u.get("completion_tokens", 0),
                 u.get("cached_tokens", 0),
             )
+            if context.tool_events:
+                for event in context.tool_events:
+                    logger.info(
+                        "Tool result [{} {}|{}]: {} status={} detail={}",
+                        self._agent_name,
+                        self._task_id,
+                        self._label,
+                        event.get("name", "unknown"),
+                        event.get("status", "unknown"),
+                        str(event.get("detail", ""))[:220],
+                    )
+            if context.final_content:
+                final_preview = context.final_content.replace("\n", " ")[:220]
+                logger.info(
+                    "Subagent iter end [{} {}|{}] stop_reason={} final={}",
+                    self._agent_name,
+                    self._task_id,
+                    self._label,
+                    context.stop_reason or "unknown",
+                    final_preview,
+                )
+            elif context.error:
+                logger.warning(
+                    "Subagent iter end [{} {}|{}] stop_reason={} error={}",
+                    self._agent_name,
+                    self._task_id,
+                    self._label,
+                    context.stop_reason or "error",
+                    context.error[:220],
+                )
 
     def __init__(
         self,
@@ -89,8 +159,17 @@ class SubagentManager:
         self.runner = AgentRunner(provider)
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._running_roles: dict[str, str] = {}  # role -> runtime task_id
+        self._running_kanban_tasks: dict[str, str] = {}  # kanban_task_id -> runtime task_id
+        self._duplicate_spawn_prevented: dict[str, int] = {
+            "role": 0,
+            "kanban_task": 0,
+        }
+        self._spawn_lock = asyncio.Lock()
         self._on_task_start = on_task_start
         self._on_task_complete = on_task_complete
+        timeout_raw = int(os.environ.get("NANOBOT_SUBAGENT_MAX_SECONDS", "1800"))
+        self._max_task_seconds = timeout_raw if timeout_raw > 0 else 0
 
     def set_on_task_start(
         self,
@@ -132,38 +211,84 @@ class SubagentManager:
 
         origin = {"channel": origin_channel, "chat_id": origin_chat_id}
 
-        if self._on_task_start:
-            try:
-                await self._on_task_start(
-                    {
-                        "task_id": task_id,
-                        "label": display_label,
-                        "task": task,
-                        "origin": origin,
-                        "task_meta": task_meta or {},
-                    }
+        role_slot = display_label if display_label in {"Vicks", "Wedge", "Rydia"} else ""
+        kanban_task_id = str((task_meta or {}).get("kanban_task_id") or "").strip()
+
+        async with self._spawn_lock:
+            if role_slot and role_slot in self._running_roles:
+                existing = self._running_roles.get(role_slot, "")
+                self._duplicate_spawn_prevented["role"] += 1
+                logger.warning(
+                    "Rejected duplicate spawn for role {} (already running runtime task {})",
+                    role_slot,
+                    existing,
                 )
-            except Exception:
-                logger.exception("Subagent [{}] start callback failed", task_id)
+                return (
+                    f"Subagent [{role_slot}] is already running (id: {existing or 'active'}). "
+                    "Skipping duplicate spawn."
+                )
+            if kanban_task_id and kanban_task_id in self._running_kanban_tasks:
+                existing = self._running_kanban_tasks.get(kanban_task_id, "")
+                self._duplicate_spawn_prevented["kanban_task"] += 1
+                logger.warning(
+                    "Rejected duplicate spawn for kanban task {} (already running runtime task {})",
+                    kanban_task_id,
+                    existing,
+                )
+                return (
+                    f"Task {kanban_task_id} already has an active subagent run "
+                    f"(id: {existing or 'active'}). Skipping duplicate spawn."
+                )
+            if role_slot:
+                self._running_roles[role_slot] = task_id
+            if kanban_task_id:
+                self._running_kanban_tasks[kanban_task_id] = task_id
 
-        bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, task_meta or {})
-        )
-        self._running_tasks[task_id] = bg_task
-        if session_key:
-            self._session_tasks.setdefault(session_key, set()).add(task_id)
+        try:
+            if self._on_task_start:
+                try:
+                    await self._on_task_start(
+                        {
+                            "task_id": task_id,
+                            "label": display_label,
+                            "task": task,
+                            "origin": origin,
+                            "task_meta": task_meta or {},
+                        }
+                    )
+                except Exception:
+                    logger.exception("Subagent [{}] start callback failed", task_id)
 
-        def _cleanup(_: asyncio.Task) -> None:
-            self._running_tasks.pop(task_id, None)
-            if session_key and (ids := self._session_tasks.get(session_key)):
-                ids.discard(task_id)
-                if not ids:
-                    del self._session_tasks[session_key]
+            bg_task = asyncio.create_task(
+                self._run_subagent_with_timeout(
+                    task_id, task, display_label, origin, task_meta or {}
+                )
+            )
+            self._running_tasks[task_id] = bg_task
+            if session_key:
+                self._session_tasks.setdefault(session_key, set()).add(task_id)
 
-        bg_task.add_done_callback(_cleanup)
+            def _cleanup(_: asyncio.Task) -> None:
+                self._running_tasks.pop(task_id, None)
+                if session_key and (ids := self._session_tasks.get(session_key)):
+                    ids.discard(task_id)
+                    if not ids:
+                        del self._session_tasks[session_key]
+                if role_slot and self._running_roles.get(role_slot) == task_id:
+                    self._running_roles.pop(role_slot, None)
+                if kanban_task_id and self._running_kanban_tasks.get(kanban_task_id) == task_id:
+                    self._running_kanban_tasks.pop(kanban_task_id, None)
 
-        logger.info("Spawned subagent [{}]: {}", task_id, display_label)
-        return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
+            bg_task.add_done_callback(_cleanup)
+
+            logger.info("Spawned subagent [{}]: {}", task_id, display_label)
+            return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
+        except Exception:
+            if role_slot and self._running_roles.get(role_slot) == task_id:
+                self._running_roles.pop(role_slot, None)
+            if kanban_task_id and self._running_kanban_tasks.get(kanban_task_id) == task_id:
+                self._running_kanban_tasks.pop(kanban_task_id, None)
+            raise
 
     async def _run_subagent(
         self,
@@ -176,28 +301,48 @@ class SubagentManager:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
 
+        workspace_override = str(task_meta.get("workspace_path") or "").strip()
+        subagent_workspace = Path(workspace_override) if workspace_override else self.workspace
+        source_project_path = str(task_meta.get("project_path") or "").strip()
+
+        if workspace_override:
+            logger.info(
+                "Subagent [{}] workspace override active: worktree={} source={}",
+                task_id,
+                subagent_workspace,
+                source_project_path or "(unknown)",
+            )
+        if not subagent_workspace.exists() or not subagent_workspace.is_dir():
+            raise RuntimeError(
+                f"Task workspace does not exist or is not a directory: {subagent_workspace}"
+            )
+
         try:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
             allowed_dir = (
-                self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
+                subagent_workspace
+                if (self.restrict_to_workspace or self.exec_config.sandbox)
+                else None
             )
             extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
             tools.register(
                 ReadFileTool(
-                    workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read
+                    workspace=subagent_workspace,
+                    allowed_dir=allowed_dir,
+                    extra_allowed_dirs=extra_read,
                 )
             )
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(GlobTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(GrepTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(NanoCatsTaskTool())
+            tools.register(WriteFileTool(workspace=subagent_workspace, allowed_dir=allowed_dir))
+            tools.register(EditFileTool(workspace=subagent_workspace, allowed_dir=allowed_dir))
+            tools.register(ListDirTool(workspace=subagent_workspace, allowed_dir=allowed_dir))
+            tools.register(GlobTool(workspace=subagent_workspace, allowed_dir=allowed_dir))
+            tools.register(GrepTool(workspace=subagent_workspace, allowed_dir=allowed_dir))
+            tools.register(KosmosTaskTool())
             if self.exec_config.enable:
                 tools.register(
                     ExecTool(
-                        working_dir=str(self.workspace),
+                        working_dir=str(subagent_workspace),
                         timeout=self.exec_config.timeout,
                         restrict_to_workspace=self.restrict_to_workspace,
                         sandbox=self.exec_config.sandbox,
@@ -224,7 +369,7 @@ class SubagentManager:
                     max_tool_result_chars=self.max_tool_result_chars,
                     hook=CompositeHook(
                         [
-                            create_subagent_hook(task_id, label, self.workspace),
+                            create_kosmos_subagent_hook(task_id, label, self.workspace),
                             self._SubagentTraceHook(label, task_id, label),
                         ]
                     ),
@@ -266,6 +411,44 @@ class SubagentManager:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
             await self._announce_result(task_id, label, task, error_msg, origin, "error", task_meta)
+
+    async def _run_subagent_with_timeout(
+        self,
+        task_id: str,
+        task: str,
+        label: str,
+        origin: dict[str, str],
+        task_meta: dict[str, Any],
+    ) -> None:
+        """Run subagent with watchdog timeout and forced despawn."""
+        if self._max_task_seconds <= 0:
+            await self._run_subagent(task_id, task, label, origin, task_meta)
+            return
+
+        try:
+            await asyncio.wait_for(
+                self._run_subagent(task_id, task, label, origin, task_meta),
+                timeout=self._max_task_seconds,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Subagent [{}] timed out after {}s and will be despawned",
+                task_id,
+                self._max_task_seconds,
+            )
+            timeout_result = (
+                f"Subagent timed out after {self._max_task_seconds}s and was despawned. "
+                "Please split the task or retry with narrower scope."
+            )
+            await self._announce_result(
+                task_id,
+                label,
+                task,
+                timeout_result,
+                origin,
+                "error",
+                task_meta,
+            )
 
     async def _announce_result(
         self,
@@ -379,3 +562,10 @@ class SubagentManager:
         return sum(
             1 for tid in tids if tid in self._running_tasks and not self._running_tasks[tid].done()
         )
+
+    def get_spawn_guard_stats(self) -> dict[str, int]:
+        """Return duplicate-spawn prevention counters."""
+        return {
+            "role": int(self._duplicate_spawn_prevented.get("role", 0)),
+            "kanban_task": int(self._duplicate_spawn_prevented.get("kanban_task", 0)),
+        }
