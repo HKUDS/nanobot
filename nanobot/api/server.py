@@ -18,7 +18,6 @@ from typing import Any
 from aiohttp import web
 from loguru import logger
 
-from nanobot.api import nanocats
 from nanobot.config.paths import get_media_dir
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
@@ -305,22 +304,5 @@ def create_app(
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
     app.router.add_get("/v1/models", handle_models)
     app.router.add_get("/health", handle_health)
-
-    # Add nanocat routes
-    for route in nanocats.routes:
-        if hasattr(route, "path"):
-            method = (
-                getattr(route, "methods", {"GET"}).pop() if hasattr(route, "methods") else "GET"
-            )
-            if method == "GET":
-                app.router.add_get(route.path, route.handler)
-            elif method == "POST":
-                app.router.add_post(route.path, route.handler)
-            elif method == "PUT":
-                app.router.add_put(route.path, route.handler)
-            elif method == "PATCH":
-                app.router.add_patch(route.path, route.handler)
-            elif method == "DELETE":
-                app.router.add_delete(route.path, route.handler)
 
     return app

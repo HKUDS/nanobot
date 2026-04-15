@@ -39,8 +39,8 @@ def parse_args():
     parser.add_argument(
         "--port",
         type=int,
-        default=18792,
-        help="REST API port (default: 18792, WebSocket on port+1)",
+        default=18794,
+        help="REST API port (default: 18794, WebSocket on port+1)",
     )
     parser.add_argument(
         "--db-path",

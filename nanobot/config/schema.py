@@ -178,6 +178,8 @@ class GatewayConfig(Base):
 
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 18790
+    kosmos_api_url: str = "http://127.0.0.1:18794"
+    task_retry_limit: int = Field(default=3, ge=1, le=10)
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 

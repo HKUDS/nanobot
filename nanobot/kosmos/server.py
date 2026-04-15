@@ -7,17 +7,19 @@ import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
+from urllib.parse import urlparse
 
 import aiosqlite
 from aiohttp import web
-from nanobot.api.kosmos import EventBroadcaster, database
 from websockets.server import WebSocketServerProtocol, serve
 
-from nanobot.api import kosmos as kosmos_api
+from nanobot.kosmos import api as kosmos_api
+from nanobot.kosmos import database
+from nanobot.kosmos.api import EventBroadcaster
 
 logger = logging.getLogger("nanobot.kosmos")
 
-DEFAULT_PORT = 18792
+DEFAULT_PORT = 18794
 DATABASE_PATH = Path.home() / ".nanobot" / "kosmos.db"
 
 
@@ -84,10 +86,6 @@ class KosmosServer(EventBroadcaster):
         logger.debug(
             "Broadcast {} to {} clients", event_type, len(self.clients) - len(dead_clients)
         )
-
-    async def broadcast_to_rest(self, event_type: str, payload: Any):
-        """Alias for broadcast_event for REST API handlers."""
-        await self.broadcast_event(event_type, payload)
 
     # ------------------------------------------------------------------------
     # Agent state management (from nanobot WebSocket events)
@@ -188,7 +186,23 @@ class KosmosServer(EventBroadcaster):
 
     def create_app(self) -> web.Application:
         """Create the aiohttp REST application."""
-        app = web.Application()
+
+        @web.middleware
+        async def cors_middleware(request: web.Request, handler):
+            headers = {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET,POST,PATCH,DELETE,OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type,Authorization",
+            }
+            if request.method == "OPTIONS":
+                return web.Response(status=204, headers=headers)
+
+            response = await handler(request)
+            for key, value in headers.items():
+                response.headers[key] = value
+            return response
+
+        app = web.Application(middlewares=[cors_middleware])
 
         # Store references
         app["kosmos_db"] = self.db
@@ -247,42 +261,9 @@ class KosmosServer(EventBroadcaster):
         asyncio.run(self.start())
 
 
-# Global instance
-_kosmos_server: Optional[KosmosServer] = None
-
-
-def get_kosmos_server() -> Optional[KosmosServer]:
-    """Get the global Kosmos server instance."""
-    return _kosmos_server
-
-
-async def start_kosmos_server(
-    host: str = "0.0.0.0",
-    port: int = DEFAULT_PORT,
-    db_path: Path = DATABASE_PATH,
-) -> KosmosServer:
-    """Start the Kosmos server and return the instance."""
-    global _kosmos_server
-    _kosmos_server = KosmosServer(host=host, port=port, db_path=db_path)
-    return _kosmos_server
-
-
-def start_kosmos_background(
-    host: str = "0.0.0.0",
-    port: int = DEFAULT_PORT,
-    db_path: Path = DATABASE_PATH,
-) -> KosmosServer:
-    """Start the Kosmos server in a background thread."""
-    import threading
-
-    global _kosmos_server
-    _kosmos_server = KosmosServer(host=host, port=port, db_path=db_path)
-
-    thread = threading.Thread(
-        target=lambda: asyncio.run(_kosmos_server.start()),
-        daemon=True,
-    )
-    thread.start()
-
-    logger.info("Kosmos server started in background on http://{}:{}", host, port)
-    return _kosmos_server
+def parse_kosmos_base_url(base_url: str) -> tuple[str, int]:
+    """Parse a Kosmos API base URL into host/port."""
+    parsed = urlparse(base_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or DEFAULT_PORT
+    return host, port
