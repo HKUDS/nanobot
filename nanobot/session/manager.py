@@ -57,6 +57,12 @@ class Session:
             for key in ("tool_calls", "tool_call_id", "name", "reasoning_content"):
                 if key in message:
                     entry[key] = message[key]
+            # Annotate cross-channel messages so the LLM knows the provenance,
+            # but keep the entry clean of internal metadata keys.
+            if message.get("_cross_channel"):
+                source = message.get("_source_session", "unknown")
+                prefix = f"[Sent from {source}] "
+                entry["content"] = prefix + (entry.get("content") or "")
             out.append(entry)
         return out
 

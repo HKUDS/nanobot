@@ -861,6 +861,14 @@ class AgentLoop:
 
         This method detects such cross-channel sends and appends a lightweight
         assistant entry to the target session so it has the necessary context.
+
+        Improvements over the initial implementation:
+        - Use ``sessions.get_or_create()`` instead of accessing ``_cache``
+          directly, so sessions persisted on disk but evicted from memory are
+          still found.
+        - Persist ``media`` file paths alongside ``content`` so the target
+          session retains full context about attachments.
+        - Record ``_source_session`` to make the provenance traceable.
         """
         from datetime import datetime
 
@@ -885,19 +893,24 @@ class AgentLoop:
                     continue  # same session, nothing to do
 
                 content = args.get("content", "")
-                if not content:
+                media = args.get("media")
+                if not content and not media:
                     continue
 
-                target_session = self.sessions._cache.get(target_key)
-                if target_session is None:
-                    continue  # target session doesn't exist yet, skip silently
+                # Use the public API so disk-persisted sessions are loaded too.
+                target_session = self.sessions.get_or_create(target_key)
 
-                target_session.messages.append({
+                entry: dict[str, Any] = {
                     "role": "assistant",
                     "content": content,
                     "timestamp": datetime.now().isoformat(),
                     "_cross_channel": True,
-                })
+                    "_source_session": source_session.key,
+                }
+                if media:
+                    entry["_media"] = media
+
+                target_session.messages.append(entry)
                 target_session.updated_at = datetime.now()
                 self.sessions.save(target_session)
                 logger.info(
