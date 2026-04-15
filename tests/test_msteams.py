@@ -223,11 +223,11 @@ def test_sanitize_inbound_text_keeps_normal_inline_message(make_channel):
     assert ch._sanitize_inbound_text(activity) == "normal inline message"
 
 
-def test_sanitize_inbound_text_normalizes_fwdioc_wrapper_without_reply_metadata(make_channel):
+def test_sanitize_inbound_text_normalizes_quoted_reply_wrapper_without_reply_metadata(make_channel):
     ch = make_channel()
 
     activity = {
-        "text": "FWDIOC-BOT \r\nQuoted prior message\r\n\r\nThis is a reply with quote test",
+        "text": "Quoted reply \r\nQuoted prior message\r\n\r\nThis is a reply with quote test",
         "channelData": {},
     }
 
@@ -249,11 +249,11 @@ def test_sanitize_inbound_text_structures_reply_quote_prefix(make_channel):
     assert ch._sanitize_inbound_text(activity) == "User is replying to: Bob Smith\nUser reply: actual reply text"
 
 
-def test_sanitize_inbound_text_structures_live_fwdioc_quote_shape(make_channel):
+def test_sanitize_inbound_text_structures_live_quoted_reply_shape(make_channel):
     ch = make_channel()
 
     activity = {
-        "text": "FWDIOC-BOT Got it. I’ll watch for the exact text reply with quote test and then inspect that turn specifically. Reply with quote test",
+        "text": "Quoted reply Got it. I’ll watch for the exact text reply with quote test and then inspect that turn specifically. Reply with quote test",
         "replyToId": "parent-activity",
         "channelData": {"messageType": "reply"},
     }
@@ -272,12 +272,12 @@ def test_normalize_teams_reply_quote_leaves_plain_text_test_phrase_untouched(mak
     assert ch._normalize_teams_reply_quote(text) == text
 
 
-def test_sanitize_inbound_text_structures_multiline_fwdioc_quote_shape(make_channel):
+def test_sanitize_inbound_text_structures_multiline_quoted_reply_shape(make_channel):
     ch = make_channel()
 
     activity = {
         "text": (
-            "FWDIOC-BOT\r\n"
+            "Quoted reply\r\n"
             "Understood — then the restart already happened, and the new Teams quote normalization should now be live. "
             "Next best step: • send one more real reply-with-quote message in Teams • I&rsquo…\r\n"
             "\r\n"
@@ -294,12 +294,12 @@ def test_sanitize_inbound_text_structures_multiline_fwdioc_quote_shape(make_chan
     )
 
 
-def test_sanitize_inbound_text_structures_exact_live_crlf_fwdioc_shape(make_channel):
+def test_sanitize_inbound_text_structures_exact_live_crlf_quoted_reply_shape(make_channel):
     ch = make_channel()
 
     activity = {
         "text": (
-            "FWDIOC-BOT \r\n"
+            "Quoted reply \r\n"
             "Please send one real reply-with-quote message in Teams. That single test should be enough now: "
             "• I’ll check the new MSTeams sanitized inbound text ... log • and compare it to the prompt…\r\n"
             "\r\n"
