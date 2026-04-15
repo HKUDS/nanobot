@@ -237,15 +237,17 @@ class MemoryStore:
                 return int(self._cursor_file.read_text(encoding="utf-8").strip()) + 1
             except (ValueError, OSError):
                 pass
-        # Fallback: read last line's cursor from the JSONL file.
-        last = self._read_last_entry()
-        if last:
-            return last["cursor"] + 1
-        return 1
+        # Fallback: scan all entries for the highest integer cursor.
+        max_cursor = 0
+        for e in self._read_entries():
+            c = e.get("cursor")
+            if isinstance(c, int) and c > max_cursor:
+                max_cursor = c
+        return max_cursor + 1
 
     def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
         """Return history entries with cursor > *since_cursor*."""
-        return [e for e in self._read_entries() if e["cursor"] > since_cursor]
+        return [e for e in self._read_entries() if isinstance(e.get("cursor"), int) and e["cursor"] > since_cursor]
 
     def compact_history(self) -> None:
         """Drop oldest entries if the file exceeds *max_history_entries*."""
@@ -274,24 +276,6 @@ class MemoryStore:
         except FileNotFoundError:
             pass
         return entries
-
-    def _read_last_entry(self) -> dict[str, Any] | None:
-        """Read the last entry from the JSONL file efficiently."""
-        try:
-            with open(self.history_file, "rb") as f:
-                f.seek(0, 2)
-                size = f.tell()
-                if size == 0:
-                    return None
-                read_size = min(size, 4096)
-                f.seek(size - read_size)
-                data = f.read().decode("utf-8")
-                lines = [l for l in data.split("\n") if l.strip()]
-                if not lines:
-                    return None
-                return json.loads(lines[-1])
-        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
-            return None
 
     def _write_entries(self, entries: list[dict[str, Any]]) -> None:
         """Overwrite history.jsonl with the given entries."""

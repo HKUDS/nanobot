@@ -73,6 +73,7 @@ class AgentRunSpec:
     progress_callback: Any | None = None
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
+    iteration_warning_threshold: int = 0
 
 
 @dataclass(slots=True)
@@ -252,6 +253,19 @@ class AgentRunner:
                 # Snipping may have created new orphans; clean them up.
                 messages_for_model = self._drop_orphan_tool_results(messages_for_model)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
+                # Inject iteration budget warning if approaching the limit.
+                # remaining = iterations left INCLUDING the current one.
+                if spec.iteration_warning_threshold > 0:
+                    remaining = spec.max_iterations - iteration
+                    if 0 < remaining <= spec.iteration_warning_threshold:
+                        messages_for_model.append({
+                            "role": "user",
+                            "content": (
+                                f"[System] You have {remaining} iteration(s) remaining. "
+                                "If you haven't saved your deliverable yet, you MUST "
+                                "call write_file NOW. Stop researching and start writing."
+                            ),
+                        })
             except Exception as exc:
                 logger.warning(
                     "Context governance failed on turn {} for {}: {}; applying minimal repair",

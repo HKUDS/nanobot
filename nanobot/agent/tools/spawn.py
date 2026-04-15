@@ -13,6 +13,15 @@ if TYPE_CHECKING:
     tool_parameters_schema(
         task=StringSchema("The task for the subagent to complete"),
         label=StringSchema("Optional short label for the task (for display)"),
+        timeout_seconds=StringSchema(
+            "Optional maximum wall-clock time in seconds before the subagent is cancelled (default 300)"
+        ),
+        max_iterations=StringSchema(
+            "Optional maximum model iterations for the subagent loop (default 15)"
+        ),
+        expected_files=StringSchema(
+            "Optional comma-separated list of file paths the subagent must create"
+        ),
         required=["task"],
     )
 )
@@ -47,10 +56,16 @@ class SpawnTool(Tool):
 
     async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
         """Spawn a subagent to execute the given task."""
+        timeout_seconds = int(kwargs["timeout_seconds"]) if kwargs.get("timeout_seconds") else None
+        max_iterations = int(kwargs["max_iterations"]) if kwargs.get("max_iterations") else None
+        expected_files = kwargs.get("expected_files")
         return await self._manager.spawn(
             task=task,
             label=label,
             origin_channel=self._origin_channel,
             origin_chat_id=self._origin_chat_id,
             session_key=self._session_key,
+            timeout_seconds=timeout_seconds,
+            max_iterations=max_iterations,
+            expected_files=expected_files,
         )

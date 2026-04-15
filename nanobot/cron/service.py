@@ -510,8 +510,9 @@ class CronService:
         if delete_after_run is not None:
             job.delete_after_run = delete_after_run
 
+        schedule_changed = schedule is not None
         job.updated_at_ms = _now_ms()
-        if job.enabled:
+        if job.enabled and schedule_changed:
             job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
 
         if self._running:

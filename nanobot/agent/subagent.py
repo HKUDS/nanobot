@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,19 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 from nanobot.providers.base import LLMProvider
+
+
+@dataclass
+class _TaskInfo:
+    """Tracks metadata for a spawned subagent task."""
+    task_id: str
+    label: str
+    task: str
+    started_at: float
+    status: str = "running"  # running | done | error | incomplete
+    final_content: str | None = None
+    elapsed: float = 0.0
+    missing_files: list[str] = field(default_factory=list)
 
 
 class _SubagentHook(AgentHook):
@@ -68,6 +83,8 @@ class SubagentManager:
         self.runner = AgentRunner(provider)
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
+        self._task_info: dict[str, _TaskInfo] = {}
+        self._completed_tasks: dict[str, _TaskInfo] = {}  # keeps last 10
 
     async def spawn(
         self,
@@ -76,14 +93,29 @@ class SubagentManager:
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
         session_key: str | None = None,
+        timeout_seconds: int | None = None,
+        max_iterations: int | None = None,
+        expected_files: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id}
 
+        self._task_info[task_id] = _TaskInfo(
+            task_id=task_id,
+            label=display_label,
+            task=task,
+            started_at=time.time(),
+        )
+
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin)
+            self._run_subagent(
+                task_id, task, display_label, origin,
+                timeout_seconds=timeout_seconds,
+                max_iterations=max_iterations,
+                expected_files=expected_files,
+            )
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -95,6 +127,15 @@ class SubagentManager:
                 ids.discard(task_id)
                 if not ids:
                     del self._session_tasks[session_key]
+            # Move to completed
+            info = self._task_info.pop(task_id, None)
+            if info:
+                info.elapsed = round(time.time() - info.started_at, 1)
+                self._completed_tasks[task_id] = info
+                # Keep only last 10
+                while len(self._completed_tasks) > 10:
+                    oldest = next(iter(self._completed_tasks))
+                    del self._completed_tasks[oldest]
 
         bg_task.add_done_callback(_cleanup)
 
@@ -107,9 +148,44 @@ class SubagentManager:
         task: str,
         label: str,
         origin: dict[str, str],
+        timeout_seconds: int | None = None,
+        max_iterations: int | None = None,
+        expected_files: str | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
+
+        # Optional timeout wrapper
+        run_coro = self._execute_subagent(task_id, task, label, origin, max_iterations)
+        if timeout_seconds is not None:
+            try:
+                await asyncio.wait_for(run_coro, timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                info = self._task_info.get(task_id)
+                if info:
+                    info.status = "error"
+                logger.warning("Subagent [{}] timed out after {}s", task_id, timeout_seconds)
+                await self._announce_result(
+                    task_id, label, task,
+                    f"Subagent timed out after {timeout_seconds} seconds.",
+                    origin, "error",
+                )
+        else:
+            await run_coro
+
+        # Verify expected files
+        if expected_files:
+            self._check_expected_files(task_id, expected_files)
+
+    async def _execute_subagent(
+        self,
+        task_id: str,
+        task: str,
+        label: str,
+        origin: dict[str, str],
+        max_iterations: int | None = None,
+    ) -> None:
+        """Core subagent execution logic."""
 
         try:
             # Build subagent tools (no message tool, no spawn tool)
@@ -143,7 +219,7 @@ class SubagentManager:
                 initial_messages=messages,
                 tools=tools,
                 model=self.model,
-                max_iterations=15,
+                max_iterations=max_iterations or 15,
                 max_tool_result_chars=self.max_tool_result_chars,
                 hook=_SubagentHook(task_id),
                 max_iterations_message="Task completed but no final response was generated.",
@@ -174,11 +250,27 @@ class SubagentManager:
 
             logger.info("Subagent [{}] completed successfully", task_id)
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
+            return
 
         except Exception as e:
+            info = self._task_info.get(task_id)
+            if info:
+                info.status = "error"
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
+
+    def _check_expected_files(self, task_id: str, expected_files: str) -> None:
+        """Verify expected files exist; mark task incomplete if any missing."""
+        paths = [p.strip() for p in expected_files.split(",") if p.strip()]
+        missing = [p for p in paths if not Path(p).exists()]
+        info = self._completed_tasks.get(task_id)
+        if info and missing:
+            info.status = "incomplete"
+            info.missing_files = missing
+            logger.warning(
+                "Subagent [{}] missing expected files: {}", task_id, ", ".join(missing)
+            )
 
     async def _announce_result(
         self,
@@ -270,3 +362,47 @@ class SubagentManager:
             1 for tid in tids
             if tid in self._running_tasks and not self._running_tasks[tid].done()
         )
+
+    def get_task_status(self, task_id: str | None = None) -> str:
+        """Return status of running or recently completed subagents."""
+        if task_id:
+            # Check running first, then completed
+            info = self._task_info.get(task_id) or self._completed_tasks.get(task_id)
+            if info is None:
+                return f"Task {task_id} not found."
+            status_line = f"Task [{info.label}] (id: {info.task_id}) — {info.status}"
+            if info.elapsed:
+                status_line += f" — {info.elapsed}s"
+            if info.missing_files:
+                status_line += f"\nMissing files: {', '.join(info.missing_files)}"
+            return status_line
+
+        # List all running + recently completed
+        lines: list[str] = []
+        for tid, info in self._task_info.items():
+            elapsed = round(time.time() - info.started_at, 1)
+            lines.append(f"[{info.status}] {info.label} (id: {tid}) — {elapsed}s")
+        for tid, info in self._completed_tasks.items():
+            lines.append(f"[{info.status}] {info.label} (id: {tid}) — {info.elapsed}s")
+            if info.missing_files:
+                lines.append(f"  Missing: {', '.join(info.missing_files)}")
+        if not lines:
+            return "No running or recently completed subagents."
+        return "\n".join(lines)
+
+    async def cancel_by_task_id(self, task_id: str) -> str:
+        """Cancel a running subagent by task ID. Returns status message."""
+        if task_id not in self._running_tasks:
+            return f"Task {task_id} is not currently running."
+        task = self._running_tasks[task_id]
+        if task.done():
+            return f"Task {task_id} has already finished."
+        task.cancel()
+        info = self._task_info.get(task_id)
+        if info:
+            info.status = "error"
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        return f"Task {task_id} cancelled."
