@@ -26,7 +26,7 @@ class _FakeAsyncWebClient:
         self._users_pages: list[dict[str, object]] = []
         self._open_dm_response: dict[str, object] = {"channel": {"id": "D_OPENED"}}
 
-    async def chat_postMessage(
+    async def chat_postMessage(  # noqa: N802
         self,
         *,
         channel: str,
@@ -194,9 +194,7 @@ async def test_send_resolves_channel_name_to_channel_id() -> None:
         )
     )
 
-    assert fake_web.chat_post_calls == [
-        {"channel": "C999", "text": "hello\n", "thread_ts": None}
-    ]
+    assert fake_web.chat_post_calls == [{"channel": "C999", "text": "hello\n", "thread_ts": None}]
     assert len(fake_web.conversations_list_calls) == 1
 
 
@@ -228,9 +226,7 @@ async def test_send_resolves_user_handle_to_dm_channel() -> None:
     )
 
     assert fake_web.conversations_open_calls == [{"users": "U234"}]
-    assert fake_web.chat_post_calls == [
-        {"channel": "D234", "text": "hello\n", "thread_ts": None}
-    ]
+    assert fake_web.chat_post_calls == [{"channel": "D234", "text": "hello\n", "thread_ts": None}]
 
 
 @pytest.mark.asyncio
@@ -259,9 +255,7 @@ async def test_send_updates_reaction_on_origin_channel_for_cross_channel_send() 
         )
     )
 
-    assert fake_web.chat_post_calls == [
-        {"channel": "C999", "text": "done\n", "thread_ts": None}
-    ]
+    assert fake_web.chat_post_calls == [{"channel": "C999", "text": "done\n", "thread_ts": None}]
     assert fake_web.reactions_remove_calls == [
         {"channel": "D_ORIGIN", "name": "eyes", "timestamp": "1700000000.000100"}
     ]
@@ -297,9 +291,7 @@ async def test_send_does_not_reuse_origin_thread_ts_for_cross_channel_send() -> 
         )
     )
 
-    assert fake_web.chat_post_calls == [
-        {"channel": "C999", "text": "done\n", "thread_ts": None}
-    ]
+    assert fake_web.chat_post_calls == [{"channel": "C999", "text": "done\n", "thread_ts": None}]
 
 
 @pytest.mark.asyncio

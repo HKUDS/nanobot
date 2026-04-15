@@ -252,6 +252,7 @@ class GlobTool(_SearchTool):
 
 class GrepTool(_SearchTool):
     """Search file contents using a regex-like pattern."""
+
     _MAX_RESULT_CHARS = 128_000
     _MAX_FILE_BYTES = 2_000_000
 
@@ -326,9 +327,7 @@ class GrepTool(_SearchTool):
                 },
                 "max_matches": {
                     "type": "integer",
-                    "description": (
-                        "Legacy alias for head_limit in content mode"
-                    ),
+                    "description": ("Legacy alias for head_limit in content mode"),
                     "minimum": 1,
                     "maximum": 1000,
                 },
@@ -525,15 +524,11 @@ class GrepTool(_SearchTool):
 
             notes: list[str] = []
             if output_mode == "content" and truncated:
-                notes.append(
-                    f"(pagination: limit={limit}, offset={offset})"
-                )
+                notes.append(f"(pagination: limit={limit}, offset={offset})")
             elif output_mode == "content" and size_truncated:
                 notes.append("(output truncated due to size)")
             elif truncated and output_mode in {"count", "files_with_matches"}:
-                notes.append(
-                    f"(pagination: limit={limit}, offset={offset})"
-                )
+                notes.append(f"(pagination: limit={limit}, offset={offset})")
             elif output_mode in {"count", "files_with_matches"} and offset > 0:
                 notes.append(f"(pagination: offset={offset})")
             elif output_mode == "content" and offset > 0 and blocks:
@@ -543,9 +538,7 @@ class GrepTool(_SearchTool):
             if skipped_large:
                 notes.append(f"(skipped {skipped_large} large files)")
             if output_mode == "count" and counts:
-                notes.append(
-                    f"(total matches: {sum(counts.values())} in {len(counts)} files)"
-                )
+                notes.append(f"(total matches: {sum(counts.values())} in {len(counts)} files)")
             if notes:
                 result += "\n\n" + "\n".join(notes)
             return result

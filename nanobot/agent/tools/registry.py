@@ -69,41 +69,49 @@ class ToolRegistry:
     ) -> tuple[Tool | None, dict[str, Any], str | None]:
         """Resolve, cast, and validate one tool call."""
         # Guard against invalid parameter types (e.g., list instead of dict)
-        if not isinstance(params, dict) and name in ('write_file', 'read_file'):
-            return None, params, (
-                f"Error: Tool '{name}' parameters must be a JSON object, got {type(params).__name__}. "
-                "Use named parameters: tool_name(param1=\"value1\", param2=\"value2\")"
+        if not isinstance(params, dict) and name in ("write_file", "read_file"):
+            return (
+                None,
+                params,
+                (
+                    f"Error: Tool '{name}' parameters must be a JSON object, got {type(params).__name__}. "
+                    'Use named parameters: tool_name(param1="value1", param2="value2")'
+                ),
             )
 
         tool = self._tools.get(name)
         if not tool:
-            return None, params, (
-                f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+            return (
+                None,
+                params,
+                (f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"),
             )
 
         cast_params = tool.cast_params(params)
         errors = tool.validate_params(cast_params)
         if errors:
-            return tool, cast_params, (
-                f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
+            return (
+                tool,
+                cast_params,
+                (f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)),
             )
         return tool, cast_params, None
 
     async def execute(self, name: str, params: dict[str, Any]) -> Any:
         """Execute a tool by name with given parameters."""
-        _HINT = "\n\n[Analyze the error above and try a different approach.]"
+        hint = "\n\n[Analyze the error above and try a different approach.]"
         tool, params, error = self.prepare_call(name, params)
         if error:
-            return error + _HINT
+            return error + hint
 
         try:
             assert tool is not None  # guarded by prepare_call()
             result = await tool.execute(**params)
             if isinstance(result, str) and result.startswith("Error"):
-                return result + _HINT
+                return result + hint
             return result
         except Exception as e:
-            return f"Error executing {name}: {str(e)}" + _HINT
+            return f"Error executing {name}: {str(e)}" + hint
 
     @property
     def tool_names(self) -> list[str]:

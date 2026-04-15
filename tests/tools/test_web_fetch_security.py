@@ -32,8 +32,10 @@ async def test_web_fetch_blocks_private_ip():
 @pytest.mark.asyncio
 async def test_web_fetch_blocks_localhost():
     tool = WebFetchTool()
+
     def _resolve_localhost(hostname, port, family=0, type_=0):
         return [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0))]
+
     with patch("nanobot.security.network.socket.getaddrinfo", _resolve_localhost):
         result = await tool.execute(url="http://localhost/admin")
     data = json.loads(result)
@@ -47,21 +49,25 @@ async def test_web_fetch_result_contains_untrusted_flag():
 
     fake_html = "<html><head><title>Test</title></head><body><p>Hello world</p></body></html>"
 
-    import httpx
-
     class FakeResponse:
         status_code = 200
         url = "https://example.com/page"
         text = fake_html
         headers = {"content-type": "text/html"}
-        def raise_for_status(self): pass
-        def json(self): return {}
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {}
 
     async def _fake_get(self, url, **kwargs):
         return FakeResponse()
 
-    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public), \
-         patch("httpx.AsyncClient.get", _fake_get):
+    with (
+        patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public),
+        patch("httpx.AsyncClient.get", _fake_get),
+    ):
         result = await tool.execute(url="https://example.com/page")
 
     data = json.loads(result)

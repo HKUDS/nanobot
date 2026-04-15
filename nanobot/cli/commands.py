@@ -33,6 +33,15 @@ from rich.table import Table
 from rich.text import Text
 
 from nanobot import __logo__, __version__
+from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
+from nanobot.config.paths import get_workspace_path, is_default_workspace
+from nanobot.config.schema import Config
+from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.restart import (
+    consume_restart_notice_from_env,
+    format_restart_completed_message,
+    should_show_cli_restart_notice,
+)
 
 
 class SafeFileHistory(FileHistory):
@@ -47,16 +56,6 @@ class SafeFileHistory(FileHistory):
         safe = string.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
         super().store_string(safe)
 
-
-from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
-from nanobot.config.paths import get_workspace_path, is_default_workspace
-from nanobot.config.schema import Config
-from nanobot.utils.helpers import sync_workspace_templates
-from nanobot.utils.restart import (
-    consume_restart_notice_from_env,
-    format_restart_completed_message,
-    should_show_cli_restart_notice,
-)
 
 app = typer.Typer(
     name="nanobot",
@@ -557,6 +556,7 @@ def serve(
         raise typer.Exit(1)
 
     from loguru import logger
+
     from nanobot.agent.loop import AgentLoop
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
@@ -702,9 +702,9 @@ def gateway(
     nanocats_tasks = NanoCatsTasksClient(base_url="http://localhost:18794")
     nanocats_task_lock = asyncio.Lock()
     active_subagent_roles: set[str] = set()
-    DEV_SUBAGENT = "Vicks"
-    QA_SUBAGENT = "Wedge"
-    RELEASE_SUBAGENT = "Rydia"
+    dev_subagent = "Vicks"
+    qa_subagent = "Wedge"
+    release_subagent = "Rydia"
 
     def _task_status(task: dict[str, Any]) -> str:
         return str(task.get("status") or "").strip().lower()
@@ -721,10 +721,10 @@ def gateway(
         )
         role_instruction = (
             "You are Vicks (developer). Implement/fix the task and leave it ready for QA."
-            if role == DEV_SUBAGENT
+            if role == dev_subagent
             else (
                 "You are Wedge (code reviewer / QA). Validate implementation, run checks, and approve or report issues."
-                if role == QA_SUBAGENT
+                if role == qa_subagent
                 else (
                     "You are Rydia (release lead). Prepare the final handoff summary and propose conventional commits. "
                     "Do not run git commit or git push until explicit human approval is provided with branch details."
@@ -768,16 +768,16 @@ def gateway(
                 agent_id=runtime_subagent_id,
                 agent_name=role or runtime_subagent_id,
                 project_id=str(task_meta.get("project_id") or ""),
-                status="coding" if role == DEV_SUBAGENT else "consulting",
+                status="coding" if role == dev_subagent else "consulting",
                 mood="focused",
                 current_task=str(task_meta.get("title") or "Task"),
             )
-        if role in {DEV_SUBAGENT, QA_SUBAGENT, RELEASE_SUBAGENT}:
+        if role in {dev_subagent, qa_subagent, release_subagent}:
             await nanocats_tasks.upsert_agent_identity(
                 agent_id=role,
                 agent_name=role,
                 project_id=str(task_meta.get("project_id") or ""),
-                status="coding" if role == DEV_SUBAGENT else "consulting",
+                status="coding" if role == dev_subagent else "consulting",
                 mood="focused",
                 current_task=str(task_meta.get("title") or "Task"),
             )
@@ -805,7 +805,7 @@ def gateway(
 
         # Comment as the assigned subagent before changing status.
         expected_owner_for_comment = (
-            role if role in {DEV_SUBAGENT, QA_SUBAGENT, RELEASE_SUBAGENT} else reviewer
+            role if role in {dev_subagent, qa_subagent, release_subagent} else reviewer
         )
         owner_ok = await _ensure_assigned_to(expected_owner_for_comment)
         if not owner_ok:
@@ -833,7 +833,7 @@ def gateway(
             return
 
         if status == "ok":
-            if role == DEV_SUBAGENT:
+            if role == dev_subagent:
                 transition = "in progress -> qa"
                 await nanocats_tasks.transition_task(
                     kanban_task_id,
@@ -841,9 +841,9 @@ def gateway(
                     comment_text=f"[{role}] Transition: {transition}\n\n{body}",
                     agent_id=role,
                     agent_name=role,
-                    assigned_to=QA_SUBAGENT,
+                    assigned_to=qa_subagent,
                 )
-            elif role == QA_SUBAGENT:
+            elif role == qa_subagent:
                 transition = "qa -> release"
                 await nanocats_tasks.transition_task(
                     kanban_task_id,
@@ -851,7 +851,7 @@ def gateway(
                     comment_text=f"[{role}] Transition: {transition}\n\n{body}",
                     agent_id=role,
                     agent_name=role,
-                    assigned_to=RELEASE_SUBAGENT,
+                    assigned_to=release_subagent,
                 )
             else:
                 task_snapshot = await nanocats_tasks.get_task(str(kanban_task_id))
@@ -864,17 +864,17 @@ def gateway(
                         comment_text=f"[{role}] Transition: {transition}\n\n{body}",
                         agent_id=role,
                         agent_name=role,
-                        assigned_to=RELEASE_SUBAGENT,
+                        assigned_to=release_subagent,
                     )
                 else:
                     transition = "release -> release (awaiting human approval)"
                     await nanocats_tasks.update_task(
                         kanban_task_id,
-                        assigned_to=RELEASE_SUBAGENT,
+                        assigned_to=release_subagent,
                     )
                     await nanocats_tasks.create_task_comment(
                         task_id=str(kanban_task_id),
-                        agent_id=RELEASE_SUBAGENT,
+                        agent_id=release_subagent,
                         comment=(
                             "[Rydia] Release prepared. Waiting for explicit human approval "
                             "(approved_by, branch, push) before moving to done.\n\n"
@@ -882,7 +882,7 @@ def gateway(
                         ),
                     )
         else:
-            if role == DEV_SUBAGENT:
+            if role == dev_subagent:
                 transition = "in progress -> todo"
                 await nanocats_tasks.transition_task(
                     kanban_task_id,
@@ -892,7 +892,7 @@ def gateway(
                     agent_name=role,
                     assigned_to="",
                 )
-            elif role == QA_SUBAGENT:
+            elif role == qa_subagent:
                 transition = "qa -> todo"
                 await nanocats_tasks.transition_task(
                     kanban_task_id,
@@ -914,7 +914,7 @@ def gateway(
                 )
 
         # Keep assignment aligned with role name for backend ACL on comments.
-        if role in {DEV_SUBAGENT, QA_SUBAGENT, RELEASE_SUBAGENT}:
+        if role in {dev_subagent, qa_subagent, release_subagent}:
             await nanocats_tasks.update_task(
                 kanban_task_id,
                 assigned_to=role,
@@ -948,12 +948,12 @@ def gateway(
         if status == "ok":
             done_status = "consulting"
             done_message = (
-                f"{title} - {transition}" if role == DEV_SUBAGENT else f"{title} - {transition}"
+                f"{title} - {transition}" if role == dev_subagent else f"{title} - {transition}"
             )
         else:
             done_status = "error"
             done_message = (
-                f"{title} - {transition}" if role == DEV_SUBAGENT else f"{title} - {transition}"
+                f"{title} - {transition}" if role == dev_subagent else f"{title} - {transition}"
             )
         from nanobot.services.nanocats import get_nanocats
 
@@ -989,7 +989,7 @@ def gateway(
         )
 
         target_status = (
-            "progress" if role == DEV_SUBAGENT else ("qa" if role == QA_SUBAGENT else "release")
+            "progress" if role == dev_subagent else ("qa" if role == qa_subagent else "release")
         )
         await nanocats_tasks.transition_task(
             kanban_task_id,
@@ -1126,35 +1126,35 @@ def gateway(
             release_tasks = [t for t in pending if _task_status(t) == "release"]
 
             if agent.subagents.get_running_count() > 0:
-                if in_progress and DEV_SUBAGENT in active_subagent_roles:
+                if in_progress and dev_subagent in active_subagent_roles:
                     progress_id = str(in_progress[0].get("id") or "")
                     return (
                         f"{llm_summary}\n\n"
-                        f"NanoCats heartbeat: {DEV_SUBAGENT} already working on task {progress_id}."
+                        f"NanoCats heartbeat: {dev_subagent} already working on task {progress_id}."
                     ).strip()
-                if qa_tasks and QA_SUBAGENT in active_subagent_roles:
+                if qa_tasks and qa_subagent in active_subagent_roles:
                     qa_id = str(qa_tasks[0].get("id") or "")
                     return (
                         f"{llm_summary}\n\n"
-                        f"NanoCats heartbeat: {QA_SUBAGENT} already reviewing task {qa_id}."
+                        f"NanoCats heartbeat: {qa_subagent} already reviewing task {qa_id}."
                     ).strip()
-                if release_tasks and RELEASE_SUBAGENT in active_subagent_roles:
+                if release_tasks and release_subagent in active_subagent_roles:
                     release_id = str(release_tasks[0].get("id") or "")
                     return (
                         f"{llm_summary}\n\n"
-                        f"NanoCats heartbeat: {RELEASE_SUBAGENT} already releasing task {release_id}."
+                        f"NanoCats heartbeat: {release_subagent} already releasing task {release_id}."
                     ).strip()
                 return f"{llm_summary}\n\nNanoCats heartbeat: subagent busy.".strip()
 
-            if in_progress and DEV_SUBAGENT in active_subagent_roles:
+            if in_progress and dev_subagent in active_subagent_roles:
                 progress_id = str(in_progress[0].get("id") or "")
                 progress_title = str(in_progress[0].get("title") or "")
                 return (
                     f"{llm_summary}\n\n"
-                    f"NanoCats heartbeat: {DEV_SUBAGENT} is still on task {progress_id} ({progress_title})."
+                    f"NanoCats heartbeat: {dev_subagent} is still on task {progress_id} ({progress_title})."
                 ).strip()
 
-            if release_tasks and RELEASE_SUBAGENT not in active_subagent_roles:
+            if release_tasks and release_subagent not in active_subagent_roles:
                 release_task = release_tasks[0]
                 release_task_id = str(release_task.get("id") or "")
                 release_project_id = str(release_task.get("project_id") or "")
@@ -1162,10 +1162,10 @@ def gateway(
 
                 await nanocats_tasks.update_task(
                     release_task_id,
-                    assigned_to=RELEASE_SUBAGENT,
+                    assigned_to=release_subagent,
                 )
 
-                release_instruction = await _build_task_instruction(release_task, RELEASE_SUBAGENT)
+                release_instruction = await _build_task_instruction(release_task, release_subagent)
                 spawn_tool = agent.tools.get("spawn")
                 if not spawn_tool or not hasattr(spawn_tool, "execute"):
                     return (
@@ -1177,12 +1177,12 @@ def gateway(
 
                 release_result = await spawn_tool.execute(
                     task=release_instruction,
-                    label=RELEASE_SUBAGENT,
+                    label=release_subagent,
                     task_meta={
                         "kanban_task_id": release_task_id,
                         "project_id": release_project_id,
                         "title": release_title,
-                        "subagent_name": RELEASE_SUBAGENT,
+                        "subagent_name": release_subagent,
                     },
                 )
                 return (
@@ -1190,7 +1190,7 @@ def gateway(
                     f"NanoCats heartbeat: dispatched release task {release_task_id}. {release_result}"
                 ).strip()
 
-            if qa_tasks and QA_SUBAGENT not in active_subagent_roles:
+            if qa_tasks and qa_subagent not in active_subagent_roles:
                 qa_task = qa_tasks[0]
                 qa_task_id = str(qa_task.get("id") or "")
                 qa_project_id = str(qa_task.get("project_id") or "")
@@ -1198,10 +1198,10 @@ def gateway(
 
                 await nanocats_tasks.update_task(
                     qa_task_id,
-                    assigned_to=QA_SUBAGENT,
+                    assigned_to=qa_subagent,
                 )
 
-                qa_instruction = await _build_task_instruction(qa_task, QA_SUBAGENT)
+                qa_instruction = await _build_task_instruction(qa_task, qa_subagent)
                 spawn_tool = agent.tools.get("spawn")
                 if not spawn_tool or not hasattr(spawn_tool, "execute"):
                     return f"{llm_summary}\n\nNanoCats heartbeat: spawn tool unavailable for QA.".strip()
@@ -1211,23 +1211,23 @@ def gateway(
 
                 qa_result = await spawn_tool.execute(
                     task=qa_instruction,
-                    label=QA_SUBAGENT,
+                    label=qa_subagent,
                     task_meta={
                         "kanban_task_id": qa_task_id,
                         "project_id": qa_project_id,
                         "title": qa_title,
-                        "subagent_name": QA_SUBAGENT,
+                        "subagent_name": qa_subagent,
                     },
                 )
                 return f"{llm_summary}\n\nNanoCats heartbeat: dispatched QA task {qa_task_id}. {qa_result}".strip()
 
             todo = [t for t in pending if _task_status(t) == "todo"]
             if not todo:
-                return f"{llm_summary}\n\nNanoCats heartbeat: no pending tasks for {DEV_SUBAGENT}.".strip()
+                return f"{llm_summary}\n\nNanoCats heartbeat: no pending tasks for {dev_subagent}.".strip()
 
-            if DEV_SUBAGENT in active_subagent_roles:
+            if dev_subagent in active_subagent_roles:
                 return (
-                    f"{llm_summary}\n\nNanoCats heartbeat: {DEV_SUBAGENT} already running.".strip()
+                    f"{llm_summary}\n\nNanoCats heartbeat: {dev_subagent} already running.".strip()
                 )
 
             next_task = todo[0]
@@ -1237,10 +1237,10 @@ def gateway(
             claimed = await nanocats_tasks.transition_task(
                 task_id,
                 to_status="progress",
-                comment_text=f"[{DEV_SUBAGENT}] Claimed task and started implementation.",
-                agent_id=DEV_SUBAGENT,
-                agent_name=DEV_SUBAGENT,
-                assigned_to=DEV_SUBAGENT,
+                comment_text=f"[{dev_subagent}] Claimed task and started implementation.",
+                agent_id=dev_subagent,
+                agent_name=dev_subagent,
+                assigned_to=dev_subagent,
             )
             if not claimed:
                 return (
@@ -1248,7 +1248,7 @@ def gateway(
                     f"NanoCats heartbeat: could not move task {task_id} to progress (likely 409)."
                 ).strip()
 
-            instruction = await _build_task_instruction(next_task, DEV_SUBAGENT)
+            instruction = await _build_task_instruction(next_task, dev_subagent)
             spawn_tool = agent.tools.get("spawn")
             if not spawn_tool or not hasattr(spawn_tool, "execute"):
                 return f"{llm_summary}\n\nNanoCats heartbeat: spawn tool unavailable.".strip()
@@ -1258,12 +1258,12 @@ def gateway(
 
             result = await spawn_tool.execute(
                 task=instruction,
-                label=DEV_SUBAGENT,
+                label=dev_subagent,
                 task_meta={
                     "kanban_task_id": task_id,
                     "project_id": project_id,
                     "title": title,
-                    "subagent_name": DEV_SUBAGENT,
+                    "subagent_name": dev_subagent,
                 },
             )
             dispatch_info = f"NanoCats heartbeat: dispatched task {task_id}. {result}"
@@ -1353,7 +1353,7 @@ def gateway(
             from nanobot.services.nanocats import start_nanocats
 
             await start_nanocats()
-            console.print(f"[green]✓[/green] NanoCats: ws://0.0.0.0:18791 & http://0.0.0.0:18792")
+            console.print("[green]✓[/green] NanoCats: ws://0.0.0.0:18791 & http://0.0.0.0:18792")
         except Exception as e:
             console.print(f"[yellow]Warning: NanoCats failed to start: {e}[/yellow]")
 

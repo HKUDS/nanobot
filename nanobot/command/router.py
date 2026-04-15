@@ -73,7 +73,7 @@ class CommandRouter:
 
         for pfx, handler in self._prefix:
             if cmd.startswith(pfx):
-                ctx.args = ctx.raw[len(pfx):]
+                ctx.args = ctx.raw[len(pfx) :]
                 return await handler(ctx)
 
         for interceptor in self._interceptors:

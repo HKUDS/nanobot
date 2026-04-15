@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import hashlib
 import importlib.util
+import json
 import os
 import secrets
 import string
@@ -58,10 +58,12 @@ _DEFAULT_OPENROUTER_HEADERS = {
     "X-OpenRouter-Title": "nanobot",
     "X-OpenRouter-Categories": "cli-agent,personal-agent",
 }
-_KIMI_THINKING_MODELS: frozenset[str] = frozenset({
-    "kimi-k2.5",
-    "k2.6-code-preview",
-})
+_KIMI_THINKING_MODELS: frozenset[str] = frozenset(
+    {
+        "kimi-k2.5",
+        "k2.6-code-preview",
+    }
+)
 
 
 def _is_kimi_thinking_model(model_name: str) -> bool:

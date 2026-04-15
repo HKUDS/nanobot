@@ -11,11 +11,11 @@ from unittest.mock import patch
 from nanobot.providers.base import ToolCallRequest
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
-
 GEMINI_EXTRA = {"google": {"thought_signature": "sig-abc-123"}}
 
 
 # ── ToolCallRequest serialization ──────────────────────────────────────
+
 
 def test_tool_call_request_serializes_extra_content() -> None:
     tc = ToolCallRequest(
@@ -57,6 +57,7 @@ def test_tool_call_request_omits_absent_extras() -> None:
 
 # ── _parse: SDK-object branch ──────────────────────────────────────────
 
+
 def _make_sdk_response_with_extra_content():
     """Simulate a Gemini response via the OpenAI SDK (SimpleNamespace)."""
     fn = SimpleNamespace(name="get_weather", arguments='{"city":"Tokyo"}')
@@ -94,23 +95,28 @@ def test_parse_sdk_object_preserves_extra_content() -> None:
 
 # ── _parse: dict/mapping branch ───────────────────────────────────────
 
+
 def test_parse_dict_preserves_extra_content() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
     response_dict = {
-        "choices": [{
-            "message": {
-                "content": None,
-                "tool_calls": [{
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {"name": "get_weather", "arguments": '{"city":"Tokyo"}'},
-                    "extra_content": GEMINI_EXTRA,
-                }],
-            },
-            "finish_reason": "tool_calls",
-        }],
+        "choices": [
+            {
+                "message": {
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": '{"city":"Tokyo"}'},
+                            "extra_content": GEMINI_EXTRA,
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
         "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
     }
 
@@ -126,6 +132,7 @@ def test_parse_dict_preserves_extra_content() -> None:
 
 
 # ── _parse_chunks: streaming round-trip ───────────────────────────────
+
 
 def test_parse_chunks_sdk_preserves_extra_content() -> None:
     fn_delta = SimpleNamespace(name="get_weather", arguments='{"city":"Tokyo"}')
@@ -151,18 +158,22 @@ def test_parse_chunks_sdk_preserves_extra_content() -> None:
 
 def test_parse_chunks_dict_preserves_extra_content() -> None:
     chunk = {
-        "choices": [{
-            "finish_reason": "tool_calls",
-            "delta": {
-                "content": None,
-                "tool_calls": [{
-                    "index": 0,
-                    "id": "call_1",
-                    "function": {"name": "get_weather", "arguments": '{"city":"Tokyo"}'},
-                    "extra_content": GEMINI_EXTRA,
-                }],
-            },
-        }],
+        "choices": [
+            {
+                "finish_reason": "tool_calls",
+                "delta": {
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "index": 0,
+                            "id": "call_1",
+                            "function": {"name": "get_weather", "arguments": '{"city":"Tokyo"}'},
+                            "extra_content": GEMINI_EXTRA,
+                        }
+                    ],
+                },
+            }
+        ],
     }
 
     result = OpenAICompatProvider._parse_chunks([chunk])
@@ -177,6 +188,7 @@ def test_parse_chunks_dict_preserves_extra_content() -> None:
 
 # ── Model switching: stale extras shouldn't break other providers ─────
 
+
 def test_stale_extra_content_in_tool_calls_survives_sanitize() -> None:
     """When switching from Gemini to OpenAI, extra_content inside tool_calls
     should survive message sanitization (it lives inside the tool_call dict,
@@ -189,12 +201,14 @@ def test_stale_extra_content_in_tool_calls_survives_sanitize() -> None:
         {
             "role": "assistant",
             "content": None,
-            "tool_calls": [{
-                "id": "call_1",
-                "type": "function",
-                "function": {"name": "fn", "arguments": "{}"},
-                "extra_content": GEMINI_EXTRA,
-            }],
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "fn", "arguments": "{}"},
+                    "extra_content": GEMINI_EXTRA,
+                }
+            ],
         },
         {"role": "tool", "content": "ok", "tool_call_id": "call_1"},
         {"role": "user", "content": "thanks"},

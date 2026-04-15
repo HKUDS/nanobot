@@ -8,21 +8,21 @@ from typing import Any, Awaitable, Callable
 
 from loguru import logger
 
-from nanobot.agent.hooks.nanocats_hook import create_subagent_hook
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
-from nanobot.utils.prompt_templates import render_template
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.hooks.nanocats_hook import create_subagent_hook
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.nanocats import NanoCatsTaskTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.nanocats import NanoCatsTaskTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 from nanobot.providers.base import LLMProvider
+from nanobot.utils.prompt_templates import render_template
 
 
 class SubagentManager:
@@ -377,6 +377,5 @@ class SubagentManager:
         """Return the number of currently running subagents for a session."""
         tids = self._session_tasks.get(session_key, set())
         return sum(
-            1 for tid in tids
-            if tid in self._running_tasks and not self._running_tasks[tid].done()
+            1 for tid in tids if tid in self._running_tasks and not self._running_tasks[tid].done()
         )

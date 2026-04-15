@@ -66,6 +66,7 @@ def test_build_user_content_mixed_image_and_non_image(tmp_path: Path) -> None:
 # This simulates the _drain_pending code path.
 # ---------------------------------------------------------------------------
 
+
 def test_drain_pending_path_preserves_document_text(tmp_path: Path) -> None:
     """Simulates the _drain_pending path: a pending follow-up message
     with a document attachment must have its text extracted before being

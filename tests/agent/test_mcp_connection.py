@@ -25,7 +25,9 @@ def _make_loop(tmp_path, *, mcp_servers: dict | None = None) -> AgentLoop:
 
 
 @pytest.mark.asyncio
-async def test_connect_mcp_retries_when_no_servers_connect(tmp_path, monkeypatch: pytest.MonkeyPatch):
+async def test_connect_mcp_retries_when_no_servers_connect(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
     loop = _make_loop(tmp_path)
     attempts = 0
 

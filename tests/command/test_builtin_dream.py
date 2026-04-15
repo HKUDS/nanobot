@@ -46,7 +46,9 @@ class _FakeGit:
         return self._revert_result
 
 
-def _make_ctx(raw: str, git: _FakeGit, *, args: str = "", last_dream_cursor: int = 1) -> CommandContext:
+def _make_ctx(
+    raw: str, git: _FakeGit, *, args: str = "", last_dream_cursor: int = 1
+) -> CommandContext:
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content=raw)
     store = _FakeStore(git, last_dream_cursor=last_dream_cursor)
     loop = SimpleNamespace(consolidator=SimpleNamespace(store=store))
@@ -55,15 +57,10 @@ def _make_ctx(raw: str, git: _FakeGit, *, args: str = "", last_dream_cursor: int
 
 @pytest.mark.asyncio
 async def test_dream_log_latest_is_more_user_friendly() -> None:
-    commit = CommitInfo(sha="abcd1234", message="dream: 2026-04-04, 2 change(s)", timestamp="2026-04-04 12:00")
-    diff = (
-        "diff --git a/SOUL.md b/SOUL.md\n"
-        "--- a/SOUL.md\n"
-        "+++ b/SOUL.md\n"
-        "@@ -1 +1 @@\n"
-        "-old\n"
-        "+new\n"
+    commit = CommitInfo(
+        sha="abcd1234", message="dream: 2026-04-04, 2 change(s)", timestamp="2026-04-04 12:00"
     )
+    diff = "diff --git a/SOUL.md b/SOUL.md\n--- a/SOUL.md\n+++ b/SOUL.md\n@@ -1 +1 @@\n-old\n+new\n"
     git = _FakeGit(commits=[commit], diff_map={commit.sha: (commit, diff)})
 
     out = await cmd_dream_log(_make_ctx("/dream-log", git))

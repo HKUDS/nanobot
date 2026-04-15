@@ -70,7 +70,9 @@ def check_read(path: str | Path) -> str | None:
     p = str(Path(path).resolve())
     entry = _state.get(p)
     if entry is None:
-        return "Warning: file has not been read yet. Read it first to verify content before editing."
+        return (
+            "Warning: file has not been read yet. Read it first to verify content before editing."
+        )
     try:
         current_mtime = os.path.getmtime(p)
     except OSError:

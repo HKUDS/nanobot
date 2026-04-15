@@ -104,9 +104,7 @@ def _env_replace(match: re.Match[str]) -> str:
     name = match.group(1)
     value = os.environ.get(name)
     if value is None:
-        raise ValueError(
-            f"Environment variable '{name}' referenced in config is not set"
-        )
+        raise ValueError(f"Environment variable '{name}' referenced in config is not set")
     return value
 
 

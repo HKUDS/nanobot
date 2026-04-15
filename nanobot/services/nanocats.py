@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from aiohttp import web
-from websockets.server import serve, WebSocketServerProtocol
+from websockets.server import WebSocketServerProtocol, serve
 
 from nanobot.db.nanocats import get_nanocats_db
 

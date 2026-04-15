@@ -8,6 +8,9 @@ import pytest
 
 discord = pytest.importorskip("discord")
 
+# Ruff E402: these imports intentionally follow importorskip guard
+# ruff: noqa: E402
+
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.discord import (
@@ -872,6 +875,7 @@ async def test_start_no_proxy_auth_when_only_password(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 # Tests for the send() exception propagation fix
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_send_re_raises_network_error() -> None:

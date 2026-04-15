@@ -69,11 +69,12 @@ class MessageTool(Tool):
         chat_id: str | None = None,
         message_id: str | None = None,
         media: list[str] | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> str:
         from nanobot.utils.helpers import strip_think
+
         content = strip_think(content)
-        
+
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
         # Only inherit default message_id when targeting the same channel+chat.
@@ -99,7 +100,9 @@ class MessageTool(Tool):
             media=media or [],
             metadata={
                 "message_id": message_id,
-            } if message_id else {},
+            }
+            if message_id
+            else {},
         )
 
         try:

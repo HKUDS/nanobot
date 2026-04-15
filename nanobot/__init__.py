@@ -2,9 +2,12 @@
 nanobot - A lightweight AI agent framework
 """
 
-from importlib.metadata import PackageNotFoundError, version as _pkg_version
-from pathlib import Path
 import tomllib
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+from pathlib import Path
+
+# ruff: noqa: E402
 
 
 def _read_pyproject_version() -> str | None:

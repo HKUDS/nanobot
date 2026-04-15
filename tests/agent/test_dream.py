@@ -1,8 +1,8 @@
 """Tests for the Dream class — two-phase memory consolidation via AgentRunner."""
 
-import pytest
-
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from nanobot.agent.memory import Dream, MemoryStore
 from nanobot.agent.runner import AgentRunResult
@@ -61,13 +61,17 @@ class TestDreamRun:
         mock_provider.chat_with_retry.assert_not_called()
         mock_runner.run.assert_not_called()
 
-    async def test_calls_runner_for_unprocessed_entries(self, dream, mock_provider, mock_runner, store):
+    async def test_calls_runner_for_unprocessed_entries(
+        self, dream, mock_provider, mock_runner, store
+    ):
         """Dream should call AgentRunner when there are unprocessed history entries."""
         store.append_history("User prefers dark mode")
         mock_provider.chat_with_retry.return_value = MagicMock(content="New fact")
-        mock_runner.run = AsyncMock(return_value=_make_run_result(
-            tool_events=[{"name": "edit_file", "status": "ok", "detail": "memory/MEMORY.md"}],
-        ))
+        mock_runner.run = AsyncMock(
+            return_value=_make_run_result(
+                tool_events=[{"name": "edit_file", "status": "ok", "detail": "memory/MEMORY.md"}],
+            )
+        )
         result = await dream.run()
         assert result is True
         mock_runner.run.assert_called_once()
@@ -96,11 +100,15 @@ class TestDreamRun:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert all(e["cursor"] > 0 for e in entries)
 
-    async def test_skill_phase_uses_builtin_skill_creator_path(self, dream, mock_provider, mock_runner, store):
+    async def test_skill_phase_uses_builtin_skill_creator_path(
+        self, dream, mock_provider, mock_runner, store
+    ):
         """Dream should point skill creation guidance at the builtin skill-creator template."""
         store.append_history("Repeated workflow one")
         store.append_history("Repeated workflow two")
-        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKILL] test-skill: test description")
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="[SKILL] test-skill: test description"
+        )
         mock_runner.run = AsyncMock(return_value=_make_run_result())
 
         await dream.run()
@@ -122,4 +130,3 @@ class TestDreamRun:
 
         assert "Successfully wrote" in result
         assert (store.workspace / "skills" / "test-skill" / "SKILL.md").exists()
-

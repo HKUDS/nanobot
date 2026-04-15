@@ -26,21 +26,45 @@ def _bwrap(command: str, workspace: str, cwd: str) -> str:
     except ValueError:
         sandbox_cwd = str(ws)
 
-    required  = ["/usr"]
-    optional  = ["/bin", "/lib", "/lib64", "/etc/alternatives",
-                 "/etc/ssl/certs", "/etc/resolv.conf", "/etc/ld.so.cache"]
+    required = ["/usr"]
+    optional = [
+        "/bin",
+        "/lib",
+        "/lib64",
+        "/etc/alternatives",
+        "/etc/ssl/certs",
+        "/etc/resolv.conf",
+        "/etc/ld.so.cache",
+    ]
 
     args = ["bwrap", "--new-session", "--die-with-parent"]
-    for p in required: args += ["--ro-bind",     p, p]
-    for p in optional: args += ["--ro-bind-try", p, p]
+    for p in required:
+        args += ["--ro-bind", p, p]
+    for p in optional:
+        args += ["--ro-bind-try", p, p]
     args += [
-        "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
-        "--tmpfs", str(ws.parent),        # mask config dir
-        "--dir", str(ws),                 # recreate workspace mount point
-        "--bind", str(ws), str(ws),
-        "--ro-bind-try", str(media), str(media),  # read-only access to media
-        "--chdir", sandbox_cwd,
-        "--", "sh", "-c", command,
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+        "--tmpfs",
+        str(ws.parent),  # mask config dir
+        "--dir",
+        str(ws),  # recreate workspace mount point
+        "--bind",
+        str(ws),
+        str(ws),
+        "--ro-bind-try",
+        str(media),
+        str(media),  # read-only access to media
+        "--chdir",
+        sandbox_cwd,
+        "--",
+        "sh",
+        "-c",
+        command,
     ]
     return shlex.join(args)
 

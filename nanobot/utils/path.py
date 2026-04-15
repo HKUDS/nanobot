@@ -29,7 +29,7 @@ def abbreviate_path(path: str, max_len: int = 40) -> str:
     # Replace home directory
     home = os.path.expanduser("~").replace("\\", "/")
     if normalized.startswith(home + "/"):
-        normalized = "~" + normalized[len(home):]
+        normalized = "~" + normalized[len(home) :]
     elif normalized == home:
         normalized = "~"
 
@@ -40,7 +40,7 @@ def abbreviate_path(path: str, max_len: int = 40) -> str:
     # Split into segments
     parts = normalized.rstrip("/").split("/")
     if len(parts) <= 1:
-        return normalized[:max_len - 1] + "\u2026"
+        return normalized[: max_len - 1] + "\u2026"
 
     # Always keep the basename
     basename = parts[-1]

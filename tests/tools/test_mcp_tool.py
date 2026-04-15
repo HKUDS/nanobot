@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import AsyncExitStack, asynccontextmanager
 import sys
+from contextlib import asynccontextmanager
 from types import ModuleType, SimpleNamespace
 
 import pytest
 
 from nanobot.agent.tools.mcp import (
-    MCPResourceWrapper,
     MCPPromptWrapper,
+    MCPResourceWrapper,
     MCPToolWrapper,
     connect_mcp_servers,
 )

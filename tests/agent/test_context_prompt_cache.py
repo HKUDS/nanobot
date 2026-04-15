@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import datetime as datetime_module
 import re
 from datetime import datetime as real_datetime
 from importlib.resources import files as pkg_files
 from pathlib import Path
-import datetime as datetime_module
 
 from nanobot.agent.context import ContextBuilder
 
@@ -133,7 +133,7 @@ def test_partial_dream_processing_shows_only_remainder(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
-    c1 = builder.memory.append_history("old conversation about Python")
+    builder.memory.append_history("old conversation about Python")
     c2 = builder.memory.append_history("old conversation about Rust")
     builder.memory.append_history("recent question about Docker")
     builder.memory.append_history("recent question about K8s")
@@ -197,8 +197,10 @@ def test_build_messages_passes_channel_to_system_prompt(tmp_path) -> None:
     builder = ContextBuilder(workspace)
 
     messages = builder.build_messages(
-        history=[], current_message="hi",
-        channel="telegram", chat_id="123",
+        history=[],
+        current_message="hi",
+        channel="telegram",
+        chat_id="123",
     )
     system = messages[0]["content"]
     assert "Format Hint" in system

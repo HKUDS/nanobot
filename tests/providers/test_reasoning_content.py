@@ -9,7 +9,6 @@ from unittest.mock import patch
 
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
-
 # ── _parse: non-streaming ─────────────────────────────────────────────────
 
 
@@ -19,13 +18,15 @@ def test_parse_dict_extracts_reasoning_content() -> None:
         provider = OpenAICompatProvider()
 
     response = {
-        "choices": [{
-            "message": {
-                "content": "42",
-                "reasoning_content": "Let me think step by step…",
-            },
-            "finish_reason": "stop",
-        }],
+        "choices": [
+            {
+                "message": {
+                    "content": "42",
+                    "reasoning_content": "Let me think step by step…",
+                },
+                "finish_reason": "stop",
+            }
+        ],
         "usage": {"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15},
     }
 
@@ -41,10 +42,12 @@ def test_parse_dict_reasoning_content_none_when_absent() -> None:
         provider = OpenAICompatProvider()
 
     response = {
-        "choices": [{
-            "message": {"content": "hello"},
-            "finish_reason": "stop",
-        }],
+        "choices": [
+            {
+                "message": {"content": "hello"},
+                "finish_reason": "stop",
+            }
+        ],
     }
 
     result = provider._parse(response)
@@ -59,22 +62,28 @@ def test_parse_chunks_dict_accumulates_reasoning_content() -> None:
     """reasoning_content deltas in dict chunks are joined into one string."""
     chunks = [
         {
-            "choices": [{
-                "finish_reason": None,
-                "delta": {"content": None, "reasoning_content": "Step 1. "},
-            }],
+            "choices": [
+                {
+                    "finish_reason": None,
+                    "delta": {"content": None, "reasoning_content": "Step 1. "},
+                }
+            ],
         },
         {
-            "choices": [{
-                "finish_reason": None,
-                "delta": {"content": None, "reasoning_content": "Step 2."},
-            }],
+            "choices": [
+                {
+                    "finish_reason": None,
+                    "delta": {"content": None, "reasoning_content": "Step 2."},
+                }
+            ],
         },
         {
-            "choices": [{
-                "finish_reason": "stop",
-                "delta": {"content": "answer"},
-            }],
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "delta": {"content": "answer"},
+                }
+            ],
         },
     ]
 

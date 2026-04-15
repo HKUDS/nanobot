@@ -30,7 +30,7 @@ async def iter_sse(response: httpx.Response) -> AsyncGenerator[dict[str, Any], N
     buffer: list[str] = []
 
     def _flush() -> dict[str, Any] | None:
-        data_lines = [l[5:].strip() for l in buffer if l.startswith("data:")]
+        data_lines = [line[5:].strip() for line in buffer if line.startswith("data:")]
         buffer.clear()
         if not data_lines:
             return None

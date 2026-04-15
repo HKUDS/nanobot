@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from nanobot.utils.helpers import build_status_content
 from nanobot.utils.searchusage import (
     SearchUsageInfo,
     _parse_tavily_usage,
     fetch_search_usage,
 )
-from nanobot.utils.helpers import build_status_content
-
 
 # ---------------------------------------------------------------------------
 # SearchUsageInfo.format() tests
 # ---------------------------------------------------------------------------
+
 
 class TestSearchUsageInfoFormat:
     def test_unsupported_provider_shows_no_tracking(self):
@@ -59,9 +60,7 @@ class TestSearchUsageInfoFormat:
         assert "/" not in text.split("Usage:")[1].split("\n")[0]
 
     def test_no_breakdown_when_none(self):
-        info = SearchUsageInfo(
-            provider="tavily", supported=True, used=10, limit=100, remaining=90
-        )
+        info = SearchUsageInfo(provider="tavily", supported=True, used=10, limit=100, remaining=90)
         text = info.format()
         assert "Breakdown" not in text
 
@@ -75,6 +74,7 @@ class TestSearchUsageInfoFormat:
 # ---------------------------------------------------------------------------
 # _parse_tavily_usage tests
 # ---------------------------------------------------------------------------
+
 
 class TestParseTavilyUsage:
     def test_full_response(self):
@@ -131,6 +131,7 @@ class TestParseTavilyUsage:
 # fetch_search_usage routing tests
 # ---------------------------------------------------------------------------
 
+
 class TestFetchSearchUsageRouting:
     @pytest.mark.asyncio
     async def test_duckduckgo_returns_unsupported(self):
@@ -164,6 +165,7 @@ class TestFetchSearchUsageRouting:
         with patch.dict("os.environ", {}, clear=True):
             # Ensure TAVILY_API_KEY is not set
             import os
+
             os.environ.pop("TAVILY_API_KEY", None)
             info = await fetch_search_usage("tavily", api_key=None)
         assert info.provider == "tavily"
@@ -249,6 +251,7 @@ class TestFetchSearchUsageRouting:
 # ---------------------------------------------------------------------------
 # build_status_content integration tests
 # ---------------------------------------------------------------------------
+
 
 class TestBuildStatusContentWithSearchUsage:
     _BASE_KWARGS = dict(

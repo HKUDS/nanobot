@@ -12,14 +12,14 @@ class SearchUsageInfo:
     """Structured usage info returned by a provider fetcher."""
 
     provider: str
-    supported: bool = False          # True if the provider has a usage API
-    error: str | None = None         # Set when the API call failed
+    supported: bool = False  # True if the provider has a usage API
+    error: str | None = None  # Set when the API call failed
 
     # Usage counters (None = not available for this provider)
     used: int | None = None
     limit: int | None = None
     remaining: int | None = None
-    reset_date: str | None = None    # ISO date string, e.g. "2026-05-01"
+    reset_date: str | None = None  # ISO date string, e.g. "2026-05-01"
 
     # Tavily-specific breakdown
     search_used: int | None = None
@@ -89,6 +89,7 @@ async def fetch_search_usage(
 # ---------------------------------------------------------------------------
 # Tavily
 # ---------------------------------------------------------------------------
+
 
 async def _fetch_tavily_usage(api_key: str | None) -> SearchUsageInfo:
     """Fetch usage from GET https://api.tavily.com/usage."""
@@ -164,5 +165,3 @@ def _parse_tavily_usage(data: dict[str, Any]) -> SearchUsageInfo:
         extract_used=account.get("extract_usage"),
         crawl_used=account.get("crawl_usage"),
     )
-
-

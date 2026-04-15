@@ -7,7 +7,6 @@ import pytest
 from nanobot.agent.tools.cron import CronTool
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
-from tests.test_openai_api import pytest_plugins
 
 
 def _make_tool(tmp_path) -> CronTool:
@@ -237,6 +236,7 @@ async def test_list_shows_last_run_state(tmp_path) -> None:
     assert "ok" in result
     assert "(UTC)" in result
 
+
 @pytest.mark.asyncio
 async def test_list_shows_error_message(tmp_path) -> None:
     tool = _make_tool(tmp_path)
@@ -270,12 +270,14 @@ def test_list_shows_next_run(tmp_path) -> None:
 
 def test_list_includes_protected_dream_system_job_with_memory_purpose(tmp_path) -> None:
     tool = _make_tool(tmp_path)
-    tool._cron.register_system_job(CronJob(
-        id="dream",
-        name="dream",
-        schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
-        payload=CronPayload(kind="system_event"),
-    ))
+    tool._cron.register_system_job(
+        CronJob(
+            id="dream",
+            name="dream",
+            schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
+            payload=CronPayload(kind="system_event"),
+        )
+    )
 
     result = tool._list_jobs()
 
@@ -286,12 +288,14 @@ def test_list_includes_protected_dream_system_job_with_memory_purpose(tmp_path) 
 
 def test_remove_protected_dream_job_returns_clear_feedback(tmp_path) -> None:
     tool = _make_tool(tmp_path)
-    tool._cron.register_system_job(CronJob(
-        id="dream",
-        name="dream",
-        schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
-        payload=CronPayload(kind="system_event"),
-    ))
+    tool._cron.register_system_job(
+        CronJob(
+            id="dream",
+            name="dream",
+            schedule=CronSchedule(kind="cron", expr="0 */2 * * *", tz="UTC"),
+            payload=CronPayload(kind="system_event"),
+        )
+    )
 
     result = tool._remove_job("dream")
 

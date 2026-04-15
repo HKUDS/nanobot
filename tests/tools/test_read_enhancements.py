@@ -2,8 +2,8 @@
 
 import pytest
 
-from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 from nanobot.agent.tools import file_state
+from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
 
 
 @pytest.fixture(autouse=True)
@@ -17,8 +17,8 @@ def _clear_file_state():
 # Description fix
 # ---------------------------------------------------------------------------
 
-class TestReadDescriptionFix:
 
+class TestReadDescriptionFix:
     def test_description_mentions_image_support(self):
         tool = ReadFileTool()
         assert "image" in tool.description.lower()
@@ -31,6 +31,7 @@ class TestReadDescriptionFix:
 # ---------------------------------------------------------------------------
 # Read deduplication
 # ---------------------------------------------------------------------------
+
 
 class TestReadDedup:
     """Same file + same offset/limit + unchanged mtime -> short stub."""
@@ -97,8 +98,8 @@ class TestReadDedup:
 # PDF support
 # ---------------------------------------------------------------------------
 
-class TestReadPdf:
 
+class TestReadPdf:
     @pytest.fixture()
     def tool(self, tmp_path):
         return ReadFileTool(workspace=tmp_path)
@@ -143,8 +144,8 @@ class TestReadPdf:
 # Device path blacklist
 # ---------------------------------------------------------------------------
 
-class TestReadDeviceBlacklist:
 
+class TestReadDeviceBlacklist:
     @pytest.fixture()
     def tool(self):
         return ReadFileTool()

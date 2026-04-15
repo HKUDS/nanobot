@@ -8,15 +8,15 @@ from nanobot.utils.path import abbreviate_path
 
 # Registry: tool_name -> (key_args, template, is_path, is_command)
 _TOOL_FORMATS: dict[str, tuple[list[str], str, bool, bool]] = {
-    "read_file":  (["path", "file_path"],              "read {}",     True,  False),
-    "write_file": (["path", "file_path"],              "write {}",    True,  False),
-    "edit":       (["file_path", "path"],              "edit {}",     True,  False),
-    "glob":       (["pattern"],                        'glob "{}"',   False, False),
-    "grep":       (["pattern"],                        'grep "{}"',   False, False),
-    "exec":       (["command"],                        "$ {}",        False, True),
-    "web_search": (["query"],                          'search "{}"', False, False),
-    "web_fetch":  (["url"],                            "fetch {}",    True,  False),
-    "list_dir":   (["path"],                           "ls {}",       True,  False),
+    "read_file": (["path", "file_path"], "read {}", True, False),
+    "write_file": (["path", "file_path"], "write {}", True, False),
+    "edit": (["file_path", "path"], "edit {}", True, False),
+    "glob": (["pattern"], 'glob "{}"', False, False),
+    "grep": (["pattern"], 'grep "{}"', False, False),
+    "exec": (["command"], "$ {}", False, True),
+    "web_search": (["query"], 'search "{}"', False, False),
+    "web_fetch": (["url"], "fetch {}", True, False),
+    "list_dir": (["path"], "ls {}", True, False),
 }
 
 # Matches file paths embedded in shell commands, including quoted paths with spaces.
@@ -49,9 +49,7 @@ def format_tool_hints(tool_calls: list) -> str:
         else:
             hints.append((hint, 1))
 
-    return ", ".join(
-        f"{h} \u00d7 {c}" if c > 1 else h for h, c in hints
-    )
+    return ", ".join(f"{h} \u00d7 {c}" if c > 1 else h for h, c in hints)
 
 
 def _get_args(tc) -> dict:
@@ -94,6 +92,7 @@ def _fmt_known(tc, fmt: tuple) -> str:
 
 def _abbreviate_command(cmd: str, max_len: int = 40) -> str:
     """Abbreviate paths in a command string, then truncate."""
+
     def _replace_path(match: re.Match[str]) -> str:
         if match.group("double") is not None:
             return f'"{abbreviate_path(match.group("double"), max_len=25)}"'
@@ -104,7 +103,7 @@ def _abbreviate_command(cmd: str, max_len: int = 40) -> str:
     abbreviated = _PATH_IN_CMD_RE.sub(_replace_path, cmd)
     if len(abbreviated) <= max_len:
         return abbreviated
-    return abbreviated[:max_len - 1] + "\u2026"
+    return abbreviated[: max_len - 1] + "\u2026"
 
 
 def _fmt_mcp(tc) -> str:

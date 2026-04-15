@@ -28,4 +28,3 @@ def test_sanitize_persisted_blocks_truncate_text_shadowing_regression() -> None:
     assert out and out[0]["type"] == "text"
     assert isinstance(out[0]["text"], str)
     assert out[0]["text"] != content[0]["text"]
-
