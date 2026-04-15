@@ -450,7 +450,6 @@ class DiscordChannel(BaseChannel):
         await self._start_typing(message.channel)
 
         # Add read receipt reaction immediately, working emoji after delay
-        channel_id = self._channel_key(message.channel)
         try:
             await message.add_reaction(self.config.read_receipt_emoji)
             self._pending_reactions[channel_id] = message
