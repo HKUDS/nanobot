@@ -1,11 +1,13 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import hashlib
 import os
 import select
 import signal
+import subprocess
 import sys
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +68,37 @@ app = typer.Typer(
 
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
+
+
+def _setup_gateway_logging(verbose: bool) -> None:
+    """Configure loguru sinks for gateway runtime visibility."""
+    configured_level = (os.environ.get("NANOBOT_LOG_LEVEL") or "").strip().upper()
+    console_level = configured_level or ("DEBUG" if verbose else "INFO")
+
+    logger.remove()
+    logger.add(
+        sys.stderr,
+        level=console_level,
+        format=(
+            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
+            "<level>{level: <8}</level> | "
+            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
+            "<level>{message}</level>"
+        ),
+    )
+
+    logs_dir = Path.home() / ".nanobot" / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(
+        str(logs_dir / "gateway.log"),
+        level="DEBUG",
+        encoding="utf-8",
+        rotation="10 MB",
+        retention=5,
+        enqueue=True,
+        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}",
+    )
+
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -642,15 +675,17 @@ def gateway(
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
-    from nanobot.cron.types import CronJob
+    from nanobot.cron.types import CronJob, CronSchedule
     from nanobot.heartbeat.service import HeartbeatService
-    from nanobot.services.nanocats_tasks import NanoCatsTasksClient
+    from nanobot.services.kosmos_tasks import KosmosTasksClient
     from nanobot.session.manager import SessionManager
 
-    if verbose:
-        import logging
-
-        logging.basicConfig(level=logging.DEBUG)
+    _setup_gateway_logging(verbose)
+    logger.info(
+        "Gateway starting (verbose={}, log_level={})",
+        verbose,
+        (os.environ.get("NANOBOT_LOG_LEVEL") or ("DEBUG" if verbose else "INFO")).upper(),
+    )
 
     config = _load_runtime_config(config, workspace)
     port = port if port is not None else config.gateway.port
@@ -693,31 +728,149 @@ def gateway(
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
     )
 
-    # Register NanoCats agent hook for real-time events
-    from nanobot.agent.hooks import create_nanocats_hook
+    # Register Kosmos agent hook for real-time events
+    from nanobot.agent.hooks import create_kosmos_hook
 
-    nanocats_hook = create_nanocats_hook(workspace=config.workspace_path)
-    agent._extra_hooks.append(nanocats_hook)
+    kosmos_hook = create_kosmos_hook(workspace=config.workspace_path)
+    extra_hooks = getattr(agent, "_extra_hooks", None)
+    if isinstance(extra_hooks, list):
+        extra_hooks.append(kosmos_hook)
 
-    nanocats_tasks = NanoCatsTasksClient(base_url="http://localhost:18794")
+    kosmos_api_url = str(config.gateway.kosmos_api_url or "http://127.0.0.1:18794").strip()
+    kosmos_tasks = KosmosTasksClient(base_url=kosmos_api_url)
     nanocats_task_lock = asyncio.Lock()
     active_subagent_roles: set[str] = set()
+    subagents = getattr(agent, "subagents", None)
     dev_subagent = "Vicks"
     qa_subagent = "Wedge"
     release_subagent = "Rydia"
+    logger.debug(
+        "Kosmos task processor ready: base_url={}, roles={}/{}/{}",
+        kosmos_api_url,
+        dev_subagent,
+        qa_subagent,
+        release_subagent,
+    )
 
     def _task_status(task: dict[str, Any]) -> str:
         return str(task.get("status") or "").strip().lower()
 
+    def _is_legacy_task_checker_job(job: CronJob) -> bool:
+        name = str(job.name or "").strip().lower()
+        msg = str(job.payload.message or "").strip().lower()
+        if name in {"nanocats-task-checker", "kosmos-task-checker"}:
+            return True
+        # Legacy checker prompts usually call the task tool directly.
+        if "nanocats_tasks" in msg and "list_pending" in msg:
+            return True
+        if "kosmos" in msg and "task checker" in msg:
+            return True
+        return False
+
+    def _remove_legacy_task_checker_jobs() -> int:
+        removed = 0
+        try:
+            for existing in cron.list_jobs(include_disabled=True):
+                if not _is_legacy_task_checker_job(existing):
+                    continue
+                result = cron.remove_job(existing.id)
+                if result == "removed":
+                    removed += 1
+                    logger.info(
+                        "Removed legacy task checker cron job: {} ({})",
+                        existing.name,
+                        existing.id,
+                    )
+                else:
+                    logger.warning(
+                        "Legacy task checker job not removed ({}): {} ({})",
+                        result,
+                        existing.name,
+                        existing.id,
+                    )
+        except Exception:
+            logger.exception("Failed to cleanup legacy task checker cron jobs")
+        return removed
+
+    async def _build_vicks_diff_comment(task_meta: dict[str, Any]) -> str:
+        project_id = str(task_meta.get("project_id") or "").strip()
+        project_name = str(task_meta.get("project_name") or project_id or "unknown").strip()
+        project_path_raw = (
+            str(task_meta.get("workspace_path") or "").strip()
+            or str(task_meta.get("project_path") or "").strip()
+        )
+        project_path = (
+            Path(project_path_raw)
+            if project_path_raw
+            else (Path.home() / "proyectos" / project_id if project_id else config.workspace_path)
+        )
+
+        if not project_path.exists():
+            return (
+                "Diff generado automáticamente\n"
+                f"Proyecto: {project_name} ({project_id or 'unknown'})\n"
+                f"Workspace: {project_path}\n"
+                "No se pudo generar diff: el workspace no existe."
+            )
+
+        def _run_git(args: list[str]) -> tuple[int, str, str]:
+            proc = subprocess.run(
+                ["git", *args],
+                cwd=str(project_path),
+                capture_output=True,
+                text=True,
+                errors="replace",
+            )
+            return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+        rc, inside, _ = await asyncio.to_thread(_run_git, ["rev-parse", "--is-inside-work-tree"])
+        if rc != 0 or inside.lower() != "true":
+            return (
+                "Diff generado automáticamente\n"
+                f"Proyecto: {project_name} ({project_id or 'unknown'})\n"
+                f"Workspace: {project_path}\n"
+                "No se pudo generar diff: el workspace no es un repositorio git."
+            )
+
+        _, status_out, _ = await asyncio.to_thread(_run_git, ["status", "--short"])
+        _, staged_stat, _ = await asyncio.to_thread(_run_git, ["diff", "--cached", "--stat"])
+        _, unstaged_stat, _ = await asyncio.to_thread(_run_git, ["diff", "--stat"])
+        _, staged_patch, _ = await asyncio.to_thread(_run_git, ["diff", "--cached", "--no-color"])
+        _, unstaged_patch, _ = await asyncio.to_thread(_run_git, ["diff", "--no-color"])
+
+        combined_stat = "\n".join(filter(None, [unstaged_stat, staged_stat]))
+        combined_patch = "\n\n".join(filter(None, [unstaged_patch, staged_patch]))
+        if len(combined_patch) > 5000:
+            combined_patch = combined_patch[:5000].rstrip() + "\n... (diff truncado)"
+
+        return (
+            "Diff generado automáticamente\n"
+            f"Proyecto: {project_name} ({project_id or 'unknown'})\n"
+            f"Workspace: {project_path}\n"
+            "\n"
+            "Estado git:\n"
+            f"{status_out or '(sin cambios detectados)'}\n"
+            "\n"
+            "Diff --stat:\n"
+            f"{combined_stat or '(sin cambios en diff --stat)'}\n"
+            "\n"
+            "Patch preview:\n"
+            f"{combined_patch or '(sin patch disponible)'}"
+        )
+
     async def _build_task_instruction(task: dict[str, Any], role: str) -> str:
         project_id = task.get("project_id") or ""
+        project_name = str(task.get("project_name") or "").strip()
         title = task.get("title") or "Untitled task"
         description = task.get("description") or ""
         status = str(task.get("status") or "").strip().lower()
-        project_path = (
-            str(Path.home() / "proyectos" / str(project_id))
-            if project_id
-            else str(config.workspace_path)
+        workspace_path_from_backend = str(task.get("workspace_path") or "").strip()
+        project_path_from_backend = str(task.get("project_path") or "").strip()
+        workspace_path = (
+            workspace_path_from_backend
+            or project_path_from_backend
+            or (str(Path.home() / "proyectos" / str(project_id)) if project_id else "")
+            or str(config.workspace_path)
         )
         role_instruction = (
             "You are Vicks (developer). Implement/fix the task and leave it ready for QA."
@@ -732,17 +885,402 @@ def gateway(
             )
         )
         return (
-            f"Resolve NanoCats task {task.get('id')} for project '{project_id}' as {role}.\n"
+            f"Resolve Kosmos task {task.get('id')} for project '{project_id}' as {role}.\n"
+            f"Project name: {project_name or project_id or 'unknown'}\n"
             f"Title: {title}\n"
             f"Description: {description}\n"
             f"Current Kanban status: {status or 'todo'}\n"
-            f"Workspace: {project_path}\n"
+            f"Workspace: {workspace_path}\n"
+            f"Project source path (do not edit directly): {project_path_from_backend or '(unknown)'}\n"
             "Requirements:\n"
             f"- {role_instruction}\n"
+            "- Work ONLY inside the provided Workspace (git worktree path).\n"
+            "- Do NOT modify files directly in the original project source path.\n"
+            "- Do NOT call nanocats_tasks claim/qa/release/done (workflow transitions are managed by Kosmos gateway).\n"
+            "- If edit_file fails with old_text/oldString not found, re-read the exact file and retry with a smaller exact anchor.\n"
+            "- Always use complete file paths with extension (never truncated paths like src/components/Task).\n"
             "- Do the implementation work needed to complete this task.\n"
             "- Run relevant checks/tests when applicable.\n"
             "- Return a concise completion report with what changed and verification status."
         )
+
+    def _resolve_project_path(task: dict[str, Any]) -> Path:
+        project_id = str(task.get("project_id") or "").strip()
+        project_path_from_backend = str(task.get("project_path") or "").strip()
+        if project_path_from_backend:
+            return Path(project_path_from_backend)
+        if project_id:
+            return Path.home() / "proyectos" / project_id
+        return config.workspace_path
+
+    def _workspace_root() -> Path:
+        return Path.home() / ".nanobot" / "worktrees"
+
+    def _slugify(value: str, limit: int = 42) -> str:
+        raw = "".join(ch.lower() if ch.isalnum() else "-" for ch in value)
+        while "--" in raw:
+            raw = raw.replace("--", "-")
+        raw = raw.strip("-")
+        if not raw:
+            return "task"
+        return raw[:limit].rstrip("-")
+
+    def _branch_prefix_from_task(task: dict[str, Any]) -> str:
+        title = str(task.get("title") or "").lower()
+        desc = str(task.get("description") or "").lower()
+        text = f"{title}\n{desc}"
+        if any(k in text for k in ["bug", "fix", "error", "issue", "hotfix", "broken"]):
+            return "fix"
+        return "feature"
+
+    def _run_git(args: list[str], cwd: Path) -> tuple[int, str, str]:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+        )
+        return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+    def _ensure_task_worktree(task: dict[str, Any]) -> tuple[bool, dict[str, str], str]:
+        task_id = str(task.get("id") or "").strip()
+        if not task_id:
+            return False, {}, "missing task id"
+
+        existing_workspace = str(task.get("workspace_path") or "").strip()
+        existing_branch = str(task.get("work_branch") or "").strip()
+        existing_base = str(task.get("base_branch") or "").strip()
+        if existing_workspace and existing_branch:
+            p = Path(existing_workspace)
+            if p.exists() and (p / ".git").exists():
+                return (
+                    True,
+                    {
+                        "workspace_path": str(p),
+                        "work_branch": existing_branch,
+                        "base_branch": existing_base,
+                    },
+                    "",
+                )
+
+        project_path = _resolve_project_path(task)
+        if not project_path.exists() or not project_path.is_dir():
+            return False, {}, f"project path missing: {project_path}"
+
+        code, base_branch, err = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], project_path)
+        if code != 0 or not base_branch:
+            return False, {}, f"failed to detect base branch: {err or 'unknown git error'}"
+
+        prefix = _branch_prefix_from_task(task)
+        task_title = str(task.get("title") or "task")
+        slug = _slugify(task_title)
+        digest = hashlib.sha1(task_id.encode("utf-8")).hexdigest()[:8]
+        work_branch = f"{prefix}/{slug}-{digest}"
+
+        work_root = _workspace_root()
+        work_root.mkdir(parents=True, exist_ok=True)
+        workspace_path = work_root / task_id
+
+        if workspace_path.exists() and not (workspace_path / ".git").exists():
+            return False, {}, f"workspace exists but is not a git checkout: {workspace_path}"
+
+        if workspace_path.exists() and (workspace_path / ".git").exists():
+            return (
+                True,
+                {
+                    "workspace_path": str(workspace_path),
+                    "work_branch": work_branch,
+                    "base_branch": base_branch,
+                },
+                "",
+            )
+
+        # Ensure branch exists from base branch tip.
+        branch_code, _, _ = _run_git(["rev-parse", "--verify", work_branch], project_path)
+        if branch_code != 0:
+            create_code, _, create_err = _run_git(
+                ["branch", work_branch, base_branch],
+                project_path,
+            )
+            if create_code != 0:
+                return False, {}, f"failed creating branch {work_branch}: {create_err}"
+
+        add_code, _, add_err = _run_git(
+            ["worktree", "add", str(workspace_path), work_branch],
+            project_path,
+        )
+        if add_code != 0:
+            return False, {}, f"failed creating worktree: {add_err}"
+
+        return (
+            True,
+            {
+                "workspace_path": str(workspace_path),
+                "work_branch": work_branch,
+                "base_branch": base_branch,
+            },
+            "",
+        )
+
+    def _read_text_safe(path: Path, limit: int = 4000) -> str:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return ""
+        text = text.strip()
+        if len(text) > limit:
+            return text[:limit].rstrip() + "\n... (truncated)"
+        return text
+
+    def _build_agents_md(project_path: Path, project_name: str) -> str:
+        key_files = [
+            "README.md",
+            "README",
+            "pyproject.toml",
+            "requirements.txt",
+            "package.json",
+            "Makefile",
+            "docker-compose.yml",
+            "Dockerfile",
+        ]
+        found_files: list[Path] = []
+        for name in key_files:
+            p = project_path / name
+            if p.exists() and p.is_file():
+                found_files.append(p)
+
+        top_entries: list[str] = []
+        try:
+            for child in sorted(project_path.iterdir(), key=lambda p: p.name.lower()):
+                if child.name.startswith("."):
+                    continue
+                suffix = "/" if child.is_dir() else ""
+                top_entries.append(f"- {child.name}{suffix}")
+                if len(top_entries) >= 40:
+                    break
+        except Exception:
+            top_entries = ["- (could not scan project root)"]
+
+        snippets: list[str] = []
+        for p in found_files:
+            body = _read_text_safe(p, limit=2500)
+            if not body:
+                continue
+            snippets.append(f"### {p.name}\n\n```text\n{body}\n```")
+
+        snippets_block = "\n\n".join(snippets) if snippets else "No key files were readable."
+        top_block = "\n".join(top_entries) if top_entries else "- (empty project root)"
+
+        return (
+            f"# AGENTS.md\n\n"
+            f"Project: {project_name or project_path.name}\n"
+            f"Path: {project_path}\n\n"
+            "## Purpose\n"
+            "This file gives execution context to Kosmos subagents (Vicks, Wedge, Rydia).\n"
+            "Read this first before making code changes.\n\n"
+            "## Project Root Snapshot\n"
+            f"{top_block}\n\n"
+            "## Working Agreement\n"
+            "- Keep changes scoped to the assigned task.\n"
+            "- Prefer existing patterns over introducing new architecture.\n"
+            "- Run relevant checks before marking work complete.\n"
+            "- Document assumptions in task comments.\n\n"
+            "## Key Files Context\n\n"
+            f"{snippets_block}\n"
+        )
+
+    def _normalize_jira_description(task: dict[str, Any], original: str) -> str:
+        title = str(task.get("title") or "Untitled task").strip()
+        project_id = str(task.get("project_id") or "").strip()
+        status = str(task.get("status") or "todo").strip().lower()
+        orig = original.strip() or "No original description provided."
+
+        def _summary_from_original(text: str) -> str:
+            base = " ".join(line.strip() for line in text.splitlines() if line.strip())
+            if not base:
+                return "Implement the task using current project patterns and verify expected behavior."
+
+            pieces: list[str] = []
+            for separator in [". ", "? ", "! "]:
+                if separator in base:
+                    parts = [p.strip() for p in base.split(separator) if p.strip()]
+                    for part in parts:
+                        if part[-1:] not in {".", "?", "!"}:
+                            part = part + "."
+                        pieces.append(part)
+                    break
+
+            if not pieces:
+                pieces = [base if base[-1:] in {".", "?", "!"} else base + "."]
+
+            summary = " ".join(pieces[:2])
+            if len(summary) > 300:
+                summary = summary[:300].rstrip() + "..."
+            return summary
+
+        summary_seed = _summary_from_original(orig)
+
+        return (
+            f"# {title}\n"
+            f"{summary_seed}\n\n"
+            "## Contexto y motivación\n"
+            "¿Por qué se necesita? ¿Qué problema resuelve?\n\n"
+            "**Contexto actual:**\n"
+            f"- Proyecto: {project_id or 'unknown'}\n"
+            f"- Estado actual: {status or 'todo'}\n"
+            "- Esta tarea fue normalizada por Kosmos para ejecución consistente.\n"
+            "- Descripción original preservada al final para trazabilidad.\n\n"
+            "## Criterios de éxito\n"
+            "- Métricas cuantificables\n"
+            "- La funcionalidad objetivo está operativa end-to-end\n"
+            "- Pruebas/checks relevantes ejecutados sin errores críticos\n"
+            "- Resultado verificable documentado en comentarios de tarea\n\n"
+            "## Requisitos funcionales\n"
+            "- Comportamientos esperados\n"
+            "- Implementar únicamente lo necesario para cumplir el objetivo\n"
+            "- Mantener compatibilidad con el flujo actual del proyecto\n\n"
+            "## Restricciones\n"
+            "- Stack, APIs, patrones del proyecto\n"
+            "- Respetar convenciones existentes de arquitectura y estilo\n"
+            "- Evitar cambios no relacionados al alcance definido\n\n"
+            "## Fuera de alcance ⚠️\n"
+            "- Qué NO construir\n"
+            "- No introducir refactors masivos fuera del problema objetivo\n"
+            "- No cambiar contratos públicos sin justificación explícita\n\n"
+            "## Criterios de aceptación\n"
+            "- Given/When/Then verificables\n"
+            "- Given el estado actual del proyecto, When se implementa la solución, Then el comportamiento esperado funciona correctamente\n"
+            "- Given casos de validación relevantes, When se ejecutan checks/tests, Then no hay fallas bloqueantes\n"
+            "- Given los cambios completados, When se revisa la tarea, Then existe evidencia clara de verificación\n\n"
+            "## Descripción original\n"
+            f"{orig}\n"
+        )
+
+    async def _prepare_todo_task(task: dict[str, Any]) -> tuple[bool, str]:
+        task_id = str(task.get("id") or "")
+        project_id = str(task.get("project_id") or "")
+        project_name = str(task.get("project_name") or project_id or "unknown")
+        if not task_id:
+            return False, "Kosmos heartbeat: invalid todo task id."
+
+        project_path = _resolve_project_path(task)
+        agents_md_path = project_path / "AGENTS.md"
+        if not project_path.exists() or not project_path.is_dir():
+            await kosmos_tasks.create_task_comment(
+                task_id=task_id,
+                agent_id="Kosmos",
+                comment=(f"Project workspace not found. Expected path: {project_path}"),
+            )
+            await kosmos_tasks.publish_activity(
+                {
+                    "id": f"precheck-path-missing-{task_id}",
+                    "agentId": "Kosmos",
+                    "agentName": "Kosmos",
+                    "projectId": project_id,
+                    "taskId": task_id,
+                    "type": "status",
+                    "status": "blocked",
+                    "currentTask": f"Workspace missing for {task_id}",
+                    "mood": "focused",
+                    "message": f"Workspace not found: {project_path}",
+                }
+            )
+            return False, f"Kosmos heartbeat: workspace not found for task {task_id}."
+
+        ok_worktree, worktree_meta, worktree_error = _ensure_task_worktree(task)
+        if not ok_worktree:
+            await kosmos_tasks.create_task_comment(
+                task_id=task_id,
+                agent_id="Kosmos",
+                comment=(f"Failed to create task worktree/branch. Error: {worktree_error}"),
+            )
+            return False, f"Kosmos heartbeat: worktree precheck failed for task {task_id}."
+
+        await kosmos_tasks.update_task(
+            task_id,
+            workspace_path=worktree_meta.get("workspace_path"),
+            work_branch=worktree_meta.get("work_branch"),
+            base_branch=worktree_meta.get("base_branch"),
+        )
+
+        if not agents_md_path.exists():
+            logger.info(
+                "Kosmos preflight: generating AGENTS.md for {} at {}", task_id, project_path
+            )
+            agents_md_content = _build_agents_md(project_path, project_name)
+            try:
+                agents_md_path.write_text(agents_md_content, encoding="utf-8")
+            except Exception as e:
+                await kosmos_tasks.create_task_comment(
+                    task_id=task_id,
+                    agent_id="Kosmos",
+                    comment=(f"Failed to create AGENTS.md before task execution. Error: {e}"),
+                )
+                return False, f"Kosmos heartbeat: failed creating AGENTS.md for task {task_id}."
+
+            await kosmos_tasks.create_task_comment(
+                task_id=task_id,
+                agent_id="Kosmos",
+                comment=(
+                    "[KOSMOS_CONTEXT_READY] AGENTS.md was created and project context is now available. "
+                    "Task execution will continue on next heartbeat."
+                ),
+            )
+            await kosmos_tasks.publish_activity(
+                {
+                    "id": f"precheck-context-created-{task_id}",
+                    "agentId": "Kosmos",
+                    "agentName": "Kosmos",
+                    "projectId": project_id,
+                    "taskId": task_id,
+                    "type": "status",
+                    "status": "waiting",
+                    "currentTask": f"Context prepared for {task_id}",
+                    "mood": "focused",
+                    "message": "AGENTS.md created; waiting next tick to continue.",
+                }
+            )
+            return False, f"Kosmos heartbeat: created AGENTS.md for task {task_id}."
+
+        description = str(task.get("description") or "")
+        jira_ready = bool(task.get("jira_ready"))
+        if not jira_ready:
+            jira_description = _normalize_jira_description(task, description)
+            updated = await kosmos_tasks.update_task(
+                task_id,
+                description=jira_description,
+                jira_ready=True,
+            )
+            if not updated:
+                return (
+                    False,
+                    f"Kosmos heartbeat: failed to normalize task {task_id} to Jira format.",
+                )
+            await kosmos_tasks.create_task_comment(
+                task_id=task_id,
+                agent_id="Kosmos",
+                comment=(
+                    "Task description normalized to Jira format "
+                    "(summary, scope, acceptance criteria, DoD, original description)."
+                ),
+            )
+            await kosmos_tasks.publish_activity(
+                {
+                    "id": f"precheck-jira-normalized-{task_id}",
+                    "agentId": "Kosmos",
+                    "agentName": "Kosmos",
+                    "projectId": project_id,
+                    "taskId": task_id,
+                    "type": "status",
+                    "status": "waiting",
+                    "currentTask": f"Task {task_id} normalized",
+                    "mood": "focused",
+                    "message": "Task rewritten to Jira format; waiting next tick.",
+                }
+            )
+            return False, f"Kosmos heartbeat: normalized task {task_id} to Jira format."
+
+        return True, ""
 
     async def _on_subagent_task_complete(payload: dict[str, Any]) -> None:
         task_meta = payload.get("task_meta") or {}
@@ -751,20 +1289,76 @@ def gateway(
             return
         status = payload.get("status")
         role = str(task_meta.get("subagent_name") or "")
+        logger.info(
+            "Subagent completion callback: runtime_id={} role={} status={} task_id={} project_id={}",
+            payload.get("task_id", ""),
+            role,
+            status,
+            kanban_task_id,
+            task_meta.get("project_id", ""),
+        )
         active_subagent_roles.discard(role)
         runtime_subagent_id = str(payload.get("subagent_runtime_id") or "")
         reviewer = runtime_subagent_id if runtime_subagent_id else role or "nanobot"
         result_preview = str(payload.get("result") or "")
         headline = "Completed successfully" if status == "ok" else "Failed / needs follow-up"
-        role_label = role or "Subagent"
+        transition = "status unchanged"
         body = (
             result_preview[:900].strip() if result_preview else "No detailed output was produced."
         )
-        comment_text = f"[{role_label}] {headline}\n\n{body}"
+        max_retry_count = int(getattr(config.gateway, "task_retry_limit", 3) or 3)
+
+        def _looks_like_non_blocking_edit_anchor_error(text: str) -> bool:
+            t = (text or "").lower()
+            if "old_text not found" in t or "oldstring not found" in t:
+                return True
+            if "edit_file" in t and "not found" in t and "src/components/task" in t:
+                return True
+            return False
+
+        async def _notify_release_approval_prompt(task_snapshot: dict[str, Any] | None) -> None:
+            if role != release_subagent:
+                return
+            if not task_snapshot:
+                return
+            if bool(task_snapshot.get("release_approved")):
+                return
+
+            task_id = str(task_snapshot.get("id") or kanban_task_id)
+            task_title = str(task_snapshot.get("title") or "Task")
+            work_branch = str(task_snapshot.get("work_branch") or "").strip()
+            base_branch = str(task_snapshot.get("base_branch") or "").strip()
+
+            msg = (
+                "Rydia terminó el release y está listo para aprobación humana.\n\n"
+                f"Task: {task_id} - {task_title}\n"
+                f"Rama de trabajo temporal: {work_branch or '(no definida)'}\n"
+                f"Rama base: {base_branch or '(no definida)'}\n\n"
+                "Responde con una de estas opciones:\n"
+                "1) Aprobar en rama temporal (sin push):\n"
+                f"   nanobot approve-release {task_id} --branch {work_branch or 'feature/...'} --no-push\n"
+                "2) Aprobar en rama temporal (con push):\n"
+                f"   nanobot approve-release {task_id} --branch {work_branch or 'feature/...'} --push\n"
+                "3) Aprobar en otra rama:\n"
+                f"   nanobot approve-release {task_id} --branch <rama-destino> --push\n"
+            )
+
+            from nanobot.bus.events import OutboundMessage
+
+            channel, chat_id = _pick_heartbeat_target()
+            if channel != "cli":
+                await bus.publish_outbound(
+                    OutboundMessage(channel=channel, chat_id=chat_id, content=msg)
+                )
+
+        comment_text = f"{headline}\n\n{body}"
+        if status == "ok" and role == dev_subagent:
+            diff_comment = await _build_vicks_diff_comment(task_meta)
+            comment_text = f"{comment_text}\n\n{diff_comment}"
 
         # Ensure identities exist for backend ACL checks on comments.
         if runtime_subagent_id:
-            await nanocats_tasks.upsert_agent_identity(
+            await kosmos_tasks.upsert_agent_identity(
                 agent_id=runtime_subagent_id,
                 agent_name=role or runtime_subagent_id,
                 project_id=str(task_meta.get("project_id") or ""),
@@ -773,7 +1367,7 @@ def gateway(
                 current_task=str(task_meta.get("title") or "Task"),
             )
         if role in {dev_subagent, qa_subagent, release_subagent}:
-            await nanocats_tasks.upsert_agent_identity(
+            await kosmos_tasks.upsert_agent_identity(
                 agent_id=role,
                 agent_name=role,
                 project_id=str(task_meta.get("project_id") or ""),
@@ -783,13 +1377,13 @@ def gateway(
             )
 
         async def _ensure_assigned_to(expected_name: str) -> bool:
-            task_snapshot = await nanocats_tasks.get_task(str(kanban_task_id))
+            task_snapshot = await kosmos_tasks.get_task(str(kanban_task_id))
             if not task_snapshot:
                 logger.warning("Task {} not found before comment", kanban_task_id)
                 return False
             current_assigned = str(task_snapshot.get("assigned_to") or "").strip()
             if current_assigned.lower() != expected_name.lower():
-                updated = await nanocats_tasks.update_task(
+                updated = await kosmos_tasks.update_task(
                     str(kanban_task_id),
                     assigned_to=expected_name,
                 )
@@ -816,7 +1410,7 @@ def gateway(
             )
             return
 
-        created_comment = await nanocats_tasks.create_task_comment(
+        created_comment = await kosmos_tasks.create_task_comment(
             task_id=str(kanban_task_id),
             agent_id=expected_owner_for_comment,
             comment=comment_text,
@@ -833,144 +1427,228 @@ def gateway(
             return
 
         if status == "ok":
+            await kosmos_tasks.update_task(
+                str(kanban_task_id),
+                retry_count=0,
+                last_failure_reason="",
+            )
             if role == dev_subagent:
                 transition = "in progress -> qa"
-                await nanocats_tasks.transition_task(
+                await kosmos_tasks.transition_task(
                     kanban_task_id,
                     to_status="qa",
-                    comment_text=f"[{role}] Transition: {transition}\n\n{body}",
+                    comment_text=f"Transition: {transition}\n\n{body}",
                     agent_id=role,
                     agent_name=role,
                     assigned_to=qa_subagent,
                 )
+                await kosmos_tasks.update_task(
+                    str(kanban_task_id),
+                    retry_count=0,
+                    last_failure_reason="",
+                )
             elif role == qa_subagent:
                 transition = "qa -> release"
-                await nanocats_tasks.transition_task(
+                await kosmos_tasks.transition_task(
                     kanban_task_id,
                     to_status="release",
-                    comment_text=f"[{role}] Transition: {transition}\n\n{body}",
+                    comment_text=f"Transition: {transition}\n\n{body}",
                     agent_id=role,
                     agent_name=role,
                     assigned_to=release_subagent,
                 )
+                await kosmos_tasks.update_task(
+                    str(kanban_task_id),
+                    retry_count=0,
+                    last_failure_reason="",
+                )
             else:
-                task_snapshot = await nanocats_tasks.get_task(str(kanban_task_id))
+                task_snapshot = await kosmos_tasks.get_task(str(kanban_task_id))
                 approved = bool((task_snapshot or {}).get("release_approved"))
                 if approved:
                     transition = "release -> done"
-                    await nanocats_tasks.transition_task(
+                    await kosmos_tasks.transition_task(
                         kanban_task_id,
                         to_status="done",
-                        comment_text=f"[{role}] Transition: {transition}\n\n{body}",
+                        comment_text=f"Transition: {transition}\n\n{body}",
                         agent_id=role,
                         agent_name=role,
                         assigned_to=release_subagent,
                     )
                 else:
                     transition = "release -> release (awaiting human approval)"
-                    await nanocats_tasks.update_task(
+                    await kosmos_tasks.update_task(
                         kanban_task_id,
                         assigned_to=release_subagent,
                     )
-                    await nanocats_tasks.create_task_comment(
+                    await kosmos_tasks.create_task_comment(
                         task_id=str(kanban_task_id),
                         agent_id=release_subagent,
                         comment=(
-                            "[Rydia] Release prepared. Waiting for explicit human approval "
+                            "Release prepared. Waiting for explicit human approval "
                             "(approved_by, branch, push) before moving to done.\n\n"
                             f"{body}"
                         ),
                     )
+                    refreshed = await kosmos_tasks.get_task(str(kanban_task_id))
+                    await _notify_release_approval_prompt(refreshed)
         else:
-            if role == dev_subagent:
+            if role == dev_subagent and _looks_like_non_blocking_edit_anchor_error(body):
+                snapshot = await kosmos_tasks.get_task(str(kanban_task_id))
+                retry_count = int(snapshot.get("retry_count") or 0) if snapshot else 0
+                retry_count += 1
+                if retry_count >= max_retry_count:
+                    transition = "in progress -> todo (retry limit reached)"
+                    await kosmos_tasks.transition_task(
+                        kanban_task_id,
+                        to_status="todo",
+                        comment_text=(
+                            f"Transition: {transition}\n\n"
+                            f"Automatic retry limit reached ({retry_count}/{max_retry_count}) for edit anchor mismatch.\n\n{body}"
+                        ),
+                        agent_id=role,
+                        agent_name=role,
+                        assigned_to="",
+                    )
+                    await kosmos_tasks.update_task(
+                        str(kanban_task_id),
+                        retry_count=0,
+                        last_failure_reason="edit_anchor_mismatch",
+                    )
+                else:
+                    transition = "in progress -> in progress (retry required: edit anchor mismatch)"
+                    await kosmos_tasks.update_task(
+                        kanban_task_id,
+                        status="progress",
+                        assigned_to=dev_subagent,
+                        retry_count=retry_count,
+                        last_failure_reason="edit_anchor_mismatch",
+                    )
+                    await kosmos_tasks.create_task_comment(
+                        task_id=str(kanban_task_id),
+                        agent_id=dev_subagent,
+                        comment=(
+                            "Detected edit anchor mismatch (old_text not found). "
+                            "Keeping task in progress for automatic retry in the same worktree "
+                            f"({retry_count}/{max_retry_count})."
+                        ),
+                    )
+            elif role == release_subagent:
+                transition = "release -> release (needs follow-up)"
+                await kosmos_tasks.update_task(
+                    kanban_task_id,
+                    status="release",
+                    assigned_to=release_subagent,
+                )
+                await kosmos_tasks.create_task_comment(
+                    task_id=str(kanban_task_id),
+                    agent_id=release_subagent,
+                    comment=(
+                        "Release step reported a non-fatal failure. "
+                        "Task stays in release for retry/follow-up instead of returning to todo."
+                    ),
+                )
+            elif role == dev_subagent:
                 transition = "in progress -> todo"
-                await nanocats_tasks.transition_task(
+                await kosmos_tasks.transition_task(
                     kanban_task_id,
                     to_status="todo",
-                    comment_text=f"[{role}] Transition: {transition}\n\n{body}",
+                    comment_text=f"Transition: {transition}\n\n{body}",
                     agent_id=role,
                     agent_name=role,
                     assigned_to="",
                 )
             elif role == qa_subagent:
                 transition = "qa -> todo"
-                await nanocats_tasks.transition_task(
+                await kosmos_tasks.transition_task(
                     kanban_task_id,
                     to_status="todo",
-                    comment_text=f"[{role}] Transition: {transition}\n\n{body}",
+                    comment_text=f"Transition: {transition}\n\n{body}",
                     agent_id=role,
                     agent_name=role,
                     assigned_to="",
                 )
             else:
                 transition = "release -> todo"
-                await nanocats_tasks.transition_task(
+                await kosmos_tasks.transition_task(
                     kanban_task_id,
                     to_status="todo",
-                    comment_text=f"[{role}] Transition: {transition}\n\n{body}",
+                    comment_text=f"Transition: {transition}\n\n{body}",
                     agent_id=role,
                     agent_name=role,
                     assigned_to="",
                 )
 
-        # Keep assignment aligned with role name for backend ACL on comments.
+        # Keep handoff comments aligned with the current assignee after transition.
         if role in {dev_subagent, qa_subagent, release_subagent}:
-            await nanocats_tasks.update_task(
-                kanban_task_id,
-                assigned_to=role,
-            )
-
-            owner_ok = await _ensure_assigned_to(role)
+            post_transition = await kosmos_tasks.get_task(str(kanban_task_id))
+            handoff_owner = str((post_transition or {}).get("assigned_to") or "").strip() or role
+            owner_ok = await _ensure_assigned_to(handoff_owner)
             if not owner_ok:
                 logger.warning(
-                    "Task {} transition comment skipped because owner check failed for role {}",
+                    "Task {} transition comment skipped because owner check failed for {}",
                     kanban_task_id,
-                    role,
+                    handoff_owner,
                 )
                 return
 
-            transition_comment = f"[{role}] Handoff note: {transition}\n\n{body}"
-            transition_comment_created = await nanocats_tasks.create_task_comment(
+            transition_comment = f"Handoff note: {transition}\n\n{body}"
+            transition_comment_created = await kosmos_tasks.create_task_comment(
                 task_id=str(kanban_task_id),
-                agent_id=role,
+                agent_id=handoff_owner,
                 comment=transition_comment,
             )
             if not transition_comment_created:
                 logger.warning(
-                    "Task {} transition comment missing for role {} ({})",
+                    "Task {} transition comment missing for handoff owner {} ({})",
                     kanban_task_id,
-                    role,
+                    handoff_owner,
                     transition,
                 )
 
         project_id = str(task_meta.get("project_id") or "")
         title = str(task_meta.get("title") or "Task")
-        if status == "ok":
-            done_status = "consulting"
-            done_message = (
-                f"{title} - {transition}" if role == dev_subagent else f"{title} - {transition}"
-            )
-        else:
-            done_status = "error"
-            done_message = (
-                f"{title} - {transition}" if role == dev_subagent else f"{title} - {transition}"
-            )
-        from nanobot.services.nanocats import get_nanocats
+        done_message = f"{title} - {transition}"
+        await kosmos_tasks.publish_activity(
+            {
+                "id": f"task-end-{kanban_task_id}",
+                "agentId": payload.get("task_id", "main"),
+                "agentName": payload.get("label", "Subagent"),
+                "projectId": project_id,
+                "type": "status",
+                "status": "resting",
+                "currentTask": "",
+                "mood": "sleepy",
+                "message": done_message,
+            }
+        )
 
-        nanocats = get_nanocats()
-        if nanocats and nanocats._running:
-            await nanocats.send_activity(
-                {
-                    "id": f"task-end-{kanban_task_id}",
-                    "agentId": payload.get("task_id", "main"),
-                    "agentName": payload.get("label", "Subagent"),
-                    "projectId": project_id,
-                    "type": "status",
-                    "status": done_status,
-                    "currentTask": done_message,
-                    "mood": "focused" if status == "ok" else "tired",
-                    "message": done_message,
-                }
+        # Despawn/idle bookkeeping: once a subagent finishes, mark it as resting
+        # so the UI and scheduler do not keep showing it as active.
+        try:
+            if runtime_subagent_id:
+                await kosmos_tasks.upsert_agent_identity(
+                    agent_id=runtime_subagent_id,
+                    agent_name=role or runtime_subagent_id,
+                    project_id=str(task_meta.get("project_id") or ""),
+                    status="resting",
+                    mood="sleepy",
+                    current_task="",
+                )
+            if role in {dev_subagent, qa_subagent, release_subagent}:
+                await kosmos_tasks.upsert_agent_identity(
+                    agent_id=role,
+                    agent_name=role,
+                    project_id=str(task_meta.get("project_id") or ""),
+                    status="resting",
+                    mood="sleepy",
+                    current_task="",
+                )
+        except Exception:
+            logger.exception(
+                "Failed to mark subagent as resting after completion: role={} runtime_id={}",
+                role,
+                runtime_subagent_id,
             )
 
     async def _on_subagent_task_start(payload: dict[str, Any]) -> None:
@@ -979,11 +1657,18 @@ def gateway(
         if not kanban_task_id:
             return
         role = str(task_meta.get("subagent_name") or "")
+        logger.info(
+            "Subagent start callback: runtime_id={} role={} task_id={} project_id={}",
+            payload.get("task_id", ""),
+            role,
+            kanban_task_id,
+            task_meta.get("project_id", ""),
+        )
         if role:
             active_subagent_roles.add(role)
 
         # Keep the task owner aligned with the running subagent.
-        await nanocats_tasks.update_task(
+        await kosmos_tasks.update_task(
             kanban_task_id,
             assigned_to=role or str(payload.get("task_id") or "nanobot"),
         )
@@ -991,10 +1676,10 @@ def gateway(
         target_status = (
             "progress" if role == dev_subagent else ("qa" if role == qa_subagent else "release")
         )
-        await nanocats_tasks.transition_task(
+        await kosmos_tasks.transition_task(
             kanban_task_id,
             to_status=target_status,
-            comment_text=f"[{role}] Started work in {target_status}.",
+            comment_text=f"Started work in {target_status}.",
             agent_id=role or str(payload.get("task_id") or "nanobot"),
             agent_name=role or str(payload.get("label") or "nanobot"),
             assigned_to=role or str(payload.get("task_id") or "nanobot"),
@@ -1002,30 +1687,55 @@ def gateway(
 
         project_id = str(task_meta.get("project_id") or "")
         title = str(task_meta.get("title") or "Working on task")
-        from nanobot.services.nanocats import get_nanocats
+        await kosmos_tasks.publish_activity(
+            {
+                "id": f"task-start-{kanban_task_id}",
+                "agentId": payload.get("task_id", "main"),
+                "agentName": payload.get("label", "Subagent"),
+                "projectId": project_id,
+                "type": "coding",
+                "status": "coding",
+                "currentTask": title,
+                "mood": "focused",
+                "message": title,
+            }
+        )
 
-        nanocats = get_nanocats()
-        if nanocats and nanocats._running:
-            await nanocats.send_activity(
-                {
-                    "id": f"task-start-{kanban_task_id}",
-                    "agentId": payload.get("task_id", "main"),
-                    "agentName": payload.get("label", "Subagent"),
-                    "projectId": project_id,
-                    "type": "coding",
-                    "status": "coding",
-                    "currentTask": title,
-                    "mood": "focused",
-                    "message": title,
-                }
-            )
+    if subagents and hasattr(subagents, "set_on_task_start"):
+        subagents.set_on_task_start(_on_subagent_task_start)
+    if subagents and hasattr(subagents, "set_on_task_complete"):
+        subagents.set_on_task_complete(_on_subagent_task_complete)
 
-    agent.subagents.set_on_task_start(_on_subagent_task_start)
-    agent.subagents.set_on_task_complete(_on_subagent_task_complete)
+    def _running_subagent_count() -> int:
+        if not subagents or not hasattr(subagents, "get_running_count"):
+            return 0
+        try:
+            return int(subagents.get_running_count())
+        except Exception:
+            return 0
+
+    def _is_role_running(role: str) -> bool:
+        if role in active_subagent_roles:
+            return True
+        if not subagents:
+            return False
+        running_roles = getattr(subagents, "_running_roles", None)
+        if isinstance(running_roles, dict):
+            return role in running_roles
+        return False
+
+    def _is_kanban_task_running(task_id: str) -> bool:
+        if not task_id or not subagents:
+            return False
+        running_map = getattr(subagents, "_running_kanban_tasks", None)
+        if isinstance(running_map, dict):
+            return task_id in running_map
+        return False
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
+        logger.info("Cron tick: id={} name={} kind={}", job.id, job.name, job.schedule.kind)
         # Dream is an internal job — run directly, not through the agent loop.
         if job.name == "dream":
             try:
@@ -1035,14 +1745,119 @@ def gateway(
                 logger.exception("Dream cron job failed")
             return None
 
+        if _is_legacy_task_checker_job(job):
+            logger.info(
+                "Routing legacy task checker cron job to heartbeat preflight flow: {} ({})",
+                job.name,
+                job.id,
+            )
+            try:
+                routed = await on_heartbeat_execute("")
+            except Exception:
+                logger.exception(
+                    "Legacy task checker routing failed for {} ({})",
+                    job.name,
+                    job.id,
+                )
+                return "Kosmos heartbeat routing failed."
+
+            # Keep cron session stateless even for routed executions.
+            session_key = f"cron:{job.id}"
+            try:
+                cron_session = agent.sessions.get_or_create(session_key)
+                cron_session.clear()
+                agent.sessions.save(cron_session)
+                agent.sessions.invalidate(session_key)
+            except Exception:
+                logger.exception("Failed to clear cron session {}", session_key)
+            return routed
+
+        session_key = f"cron:{job.id}"
+
+        # Hard guard: cron must not start a new planning turn while any
+        # subagent is still running. This keeps execution strictly serial and
+        # avoids duplicate dispatches on frequent schedules.
+        running_subagents = _running_subagent_count()
+        if running_subagents > 0:
+            logger.info(
+                "Cron skip: {} running subagent(s); job={} ({})",
+                running_subagents,
+                job.id,
+                job.name,
+            )
+            active_task_id = ""
+            active_project_id = ""
+            active_role = ""
+            try:
+                pending_tasks = await kosmos_tasks.list_pending_tasks()
+                active_candidates = [
+                    t
+                    for t in pending_tasks
+                    if _task_status(t) in {"progress", "in_progress", "qa", "release"}
+                    and str(t.get("assigned_to") or "")
+                    in {dev_subagent, qa_subagent, release_subagent}
+                ]
+                if active_candidates:
+                    active = active_candidates[0]
+                    active_task_id = str(active.get("id") or "")
+                    active_project_id = str(active.get("project_id") or "")
+                    active_role = str(active.get("assigned_to") or "")
+            except Exception:
+                logger.exception("Failed to resolve active task context for cron skip")
+
+            try:
+                active_suffix = (
+                    f" [{active_role}:{active_task_id}]" if active_task_id and active_role else ""
+                )
+                await kosmos_tasks.publish_activity(
+                    {
+                        "id": f"cron-skip-{job.id}",
+                        "agentId": "cron",
+                        "agentName": "Kosmos Task Checker",
+                        "projectId": active_project_id,
+                        "taskId": active_task_id,
+                        "type": "status",
+                        "status": "waiting",
+                        "currentTask": (
+                            f"Cron skipped: {running_subagents} subagent(s) active{active_suffix}"
+                        ),
+                        "mood": "focused",
+                        "message": (
+                            "0 acciones - subagente activo"
+                            + (f" ({active_role} -> {active_task_id})" if active_task_id else "")
+                        ),
+                    }
+                )
+            except Exception:
+                logger.exception("Failed to publish cron skip activity")
+
+            try:
+                cron_session = agent.sessions.get_or_create(session_key)
+                cron_session.clear()
+                agent.sessions.save(cron_session)
+                agent.sessions.invalidate(session_key)
+            except Exception:
+                logger.exception("Failed to clear cron session {}", session_key)
+            return f"0 acciones - subagente activo ({running_subagents})"
+
         from nanobot.agent.tools.cron import CronTool
         from nanobot.agent.tools.message import MessageTool
         from nanobot.utils.evaluator import evaluate_response
 
-        reminder_note = (
+        scheduled_context = (
             "[Scheduled Task] Timer finished.\n\n"
             f"Task '{job.name}' has been triggered.\n"
             f"Scheduled instruction: {job.payload.message}"
+        )
+
+        reminder_note = (
+            f"{scheduled_context}\n\n"
+            "[CRON RUNTIME OVERRIDES - OBLIGATORIO]\n"
+            "- Ignora cualquier preferencia histórica de proyecto en MEMORY.md para esta ejecución.\n"
+            "- No asumas proyecto por defecto (ej: fractalmind).\n"
+            "- Primero usa nanocats_tasks(action='list_pending').\n"
+            "- Solo usa nanocats_tasks(action='list_project', project_id=...) si ese project_id proviene de una tarea pendiente real.\n"
+            "- Si no hay pendientes accionables, responde exactamente: 0 acciones."
         )
 
         cron_tool = agent.tools.get("cron")
@@ -1050,9 +1865,10 @@ def gateway(
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
         try:
+            logger.debug("Cron executing agent turn: job={} ({})", job.id, job.name)
             resp = await agent.process_direct(
                 reminder_note,
-                session_key=f"cron:{job.id}",
+                session_key=session_key,
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
             )
@@ -1060,7 +1876,23 @@ def gateway(
             if isinstance(cron_tool, CronTool) and cron_token is not None:
                 cron_tool.reset_cron_context(cron_token)
 
+            # Cron jobs should be stateless between runs. Persisted session
+            # context can make future executions act on stale assumptions.
+            try:
+                cron_session = agent.sessions.get_or_create(session_key)
+                cron_session.clear()
+                agent.sessions.save(cron_session)
+                agent.sessions.invalidate(session_key)
+            except Exception:
+                logger.exception("Failed to clear cron session {}", session_key)
+
         response = resp.content if resp else ""
+        logger.info(
+            "Cron completed: job={} ({}) response_chars={}",
+            job.id,
+            job.name,
+            len(response or ""),
+        )
 
         message_tool = agent.tools.get("message")
         if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
@@ -1069,7 +1901,7 @@ def gateway(
         if job.payload.deliver and job.payload.to and response:
             should_notify = await evaluate_response(
                 response,
-                reminder_note,
+                scheduled_context,
                 provider,
                 agent.model,
             )
@@ -1108,7 +1940,7 @@ def gateway(
 
     # Create heartbeat service
     async def on_heartbeat_execute(tasks: str) -> str:
-        """Heartbeat execution for NanoCats task dispatch.
+        """Heartbeat execution for Kosmos task dispatch.
 
         Important: do NOT call `agent.process_direct(...)` here.
         Doing so allows the model to spawn additional subagents from heartbeat
@@ -1117,50 +1949,149 @@ def gateway(
         llm_summary = ""
 
         if nanocats_task_lock.locked():
-            return f"{llm_summary}\n\nNanoCats heartbeat: task worker is busy.".strip()
+            return f"{llm_summary}\n\nKosmos heartbeat: task worker is busy.".strip()
 
         async with nanocats_task_lock:
-            pending = await nanocats_tasks.list_pending_tasks()
+            pending = await kosmos_tasks.list_pending_tasks()
             in_progress = [t for t in pending if _task_status(t) in {"progress", "in_progress"}]
             qa_tasks = [t for t in pending if _task_status(t) == "qa"]
             release_tasks = [t for t in pending if _task_status(t) == "release"]
 
-            if agent.subagents.get_running_count() > 0:
-                if in_progress and dev_subagent in active_subagent_roles:
+            def _assigned_to(task: dict[str, Any]) -> str:
+                return str(task.get("assigned_to") or "").strip()
+
+            def _pick_for_role(
+                candidates: list[dict[str, Any]], role: str
+            ) -> dict[str, Any] | None:
+                exact = [t for t in candidates if _assigned_to(t).lower() == role.lower()]
+                if exact:
+                    return exact[0]
+                unassigned = [t for t in candidates if not _assigned_to(t)]
+                if unassigned:
+                    return unassigned[0]
+                return candidates[0] if candidates else None
+
+            if _running_subagent_count() > 0:
+                if subagents and hasattr(subagents, "get_spawn_guard_stats"):
+                    try:
+                        stats = subagents.get_spawn_guard_stats()
+                        if int(stats.get("role", 0)) > 0 or int(stats.get("kanban_task", 0)) > 0:
+                            logger.info(
+                                "Spawn guard stats: role_prevented={} task_prevented={}",
+                                stats.get("role", 0),
+                                stats.get("kanban_task", 0),
+                            )
+                    except Exception:
+                        logger.exception("Failed to read spawn guard stats")
+                if in_progress and _is_role_running(dev_subagent):
                     progress_id = str(in_progress[0].get("id") or "")
                     return (
                         f"{llm_summary}\n\n"
-                        f"NanoCats heartbeat: {dev_subagent} already working on task {progress_id}."
+                        f"Kosmos heartbeat: {dev_subagent} already working on task {progress_id}."
                     ).strip()
-                if qa_tasks and qa_subagent in active_subagent_roles:
+                if qa_tasks and _is_role_running(qa_subagent):
                     qa_id = str(qa_tasks[0].get("id") or "")
                     return (
                         f"{llm_summary}\n\n"
-                        f"NanoCats heartbeat: {qa_subagent} already reviewing task {qa_id}."
+                        f"Kosmos heartbeat: {qa_subagent} already reviewing task {qa_id}."
                     ).strip()
-                if release_tasks and release_subagent in active_subagent_roles:
+                if release_tasks and _is_role_running(release_subagent):
                     release_id = str(release_tasks[0].get("id") or "")
                     return (
                         f"{llm_summary}\n\n"
-                        f"NanoCats heartbeat: {release_subagent} already releasing task {release_id}."
+                        f"Kosmos heartbeat: {release_subagent} already releasing task {release_id}."
                     ).strip()
-                return f"{llm_summary}\n\nNanoCats heartbeat: subagent busy.".strip()
+                return f"{llm_summary}\n\nKosmos heartbeat: subagent busy.".strip()
 
-            if in_progress and dev_subagent in active_subagent_roles:
+            if in_progress and _is_role_running(dev_subagent):
                 progress_id = str(in_progress[0].get("id") or "")
                 progress_title = str(in_progress[0].get("title") or "")
                 return (
                     f"{llm_summary}\n\n"
-                    f"NanoCats heartbeat: {dev_subagent} is still on task {progress_id} ({progress_title})."
+                    f"Kosmos heartbeat: {dev_subagent} is still on task {progress_id} ({progress_title})."
                 ).strip()
 
-            if release_tasks and release_subagent not in active_subagent_roles:
-                release_task = release_tasks[0]
+            if in_progress and not _is_role_running(dev_subagent):
+                progress_task = _pick_for_role(in_progress, dev_subagent)
+                if progress_task:
+                    progress_task_id = str(progress_task.get("id") or "")
+                    if _is_kanban_task_running(progress_task_id):
+                        return (
+                            f"{llm_summary}\n\n"
+                            f"Kosmos heartbeat: task {progress_task_id} already has an active subagent run."
+                        ).strip()
+
+                    progress_path = _resolve_project_path(progress_task)
+                    if not (progress_path / "AGENTS.md").exists():
+                        _ = await _prepare_todo_task(
+                            {
+                                **progress_task,
+                                "description": str(
+                                    progress_task.get("description") or "[resumed task]"
+                                ),
+                            }
+                        )
+                        return (
+                            f"{llm_summary}\n\n"
+                            f"Kosmos heartbeat: prepared missing AGENTS.md/context before resuming {progress_task.get('id')}."
+                        ).strip()
+
+                    progress_project_id = str(progress_task.get("project_id") or "")
+                    progress_title = str(progress_task.get("title") or "Untitled task")
+
+                    await kosmos_tasks.update_task(
+                        progress_task_id,
+                        assigned_to=dev_subagent,
+                    )
+
+                    progress_instruction = await _build_task_instruction(
+                        progress_task, dev_subagent
+                    )
+                    spawn_tool = agent.tools.get("spawn")
+                    if not spawn_tool or not hasattr(spawn_tool, "execute"):
+                        return (
+                            f"{llm_summary}\n\nKosmos heartbeat: spawn tool unavailable for in-progress task."
+                        ).strip()
+
+                    if hasattr(spawn_tool, "set_context"):
+                        spawn_tool.set_context("cli", "direct")
+
+                    progress_result = await spawn_tool.execute(
+                        task=progress_instruction,
+                        label=dev_subagent,
+                        task_meta={
+                            "kanban_task_id": progress_task_id,
+                            "project_id": progress_project_id,
+                            "project_name": str(
+                                progress_task.get("project_name") or progress_project_id
+                            ),
+                            "project_path": str(progress_task.get("project_path") or ""),
+                            "workspace_path": str(progress_task.get("workspace_path") or ""),
+                            "work_branch": str(progress_task.get("work_branch") or ""),
+                            "base_branch": str(progress_task.get("base_branch") or ""),
+                            "title": progress_title,
+                            "subagent_name": dev_subagent,
+                        },
+                    )
+                    return (
+                        f"{llm_summary}\n\n"
+                        f"Kosmos heartbeat: resumed in-progress task {progress_task_id}. {progress_result}"
+                    ).strip()
+
+            if release_tasks and not _is_role_running(release_subagent):
+                release_task = _pick_for_role(release_tasks, release_subagent)
+                if not release_task:
+                    return f"{llm_summary}\n\nKosmos heartbeat: no release task available.".strip()
                 release_task_id = str(release_task.get("id") or "")
+                if _is_kanban_task_running(release_task_id):
+                    return (
+                        f"{llm_summary}\n\n"
+                        f"Kosmos heartbeat: task {release_task_id} already has an active subagent run."
+                    ).strip()
                 release_project_id = str(release_task.get("project_id") or "")
                 release_title = str(release_task.get("title") or "Untitled task")
 
-                await nanocats_tasks.update_task(
+                await kosmos_tasks.update_task(
                     release_task_id,
                     assigned_to=release_subagent,
                 )
@@ -1169,7 +2100,7 @@ def gateway(
                 spawn_tool = agent.tools.get("spawn")
                 if not spawn_tool or not hasattr(spawn_tool, "execute"):
                     return (
-                        f"{llm_summary}\n\nNanoCats heartbeat: spawn tool unavailable for Release."
+                        f"{llm_summary}\n\nKosmos heartbeat: spawn tool unavailable for Release."
                     ).strip()
 
                 if hasattr(spawn_tool, "set_context"):
@@ -1181,22 +2112,34 @@ def gateway(
                     task_meta={
                         "kanban_task_id": release_task_id,
                         "project_id": release_project_id,
+                        "project_name": str(release_task.get("project_name") or release_project_id),
+                        "project_path": str(release_task.get("project_path") or ""),
+                        "workspace_path": str(release_task.get("workspace_path") or ""),
+                        "work_branch": str(release_task.get("work_branch") or ""),
+                        "base_branch": str(release_task.get("base_branch") or ""),
                         "title": release_title,
                         "subagent_name": release_subagent,
                     },
                 )
                 return (
                     f"{llm_summary}\n\n"
-                    f"NanoCats heartbeat: dispatched release task {release_task_id}. {release_result}"
+                    f"Kosmos heartbeat: dispatched release task {release_task_id}. {release_result}"
                 ).strip()
 
-            if qa_tasks and qa_subagent not in active_subagent_roles:
-                qa_task = qa_tasks[0]
+            if qa_tasks and not _is_role_running(qa_subagent):
+                qa_task = _pick_for_role(qa_tasks, qa_subagent)
+                if not qa_task:
+                    return f"{llm_summary}\n\nKosmos heartbeat: no QA task available.".strip()
                 qa_task_id = str(qa_task.get("id") or "")
+                if _is_kanban_task_running(qa_task_id):
+                    return (
+                        f"{llm_summary}\n\n"
+                        f"Kosmos heartbeat: task {qa_task_id} already has an active subagent run."
+                    ).strip()
                 qa_project_id = str(qa_task.get("project_id") or "")
                 qa_title = str(qa_task.get("title") or "Untitled task")
 
-                await nanocats_tasks.update_task(
+                await kosmos_tasks.update_task(
                     qa_task_id,
                     assigned_to=qa_subagent,
                 )
@@ -1204,7 +2147,9 @@ def gateway(
                 qa_instruction = await _build_task_instruction(qa_task, qa_subagent)
                 spawn_tool = agent.tools.get("spawn")
                 if not spawn_tool or not hasattr(spawn_tool, "execute"):
-                    return f"{llm_summary}\n\nNanoCats heartbeat: spawn tool unavailable for QA.".strip()
+                    return (
+                        f"{llm_summary}\n\nKosmos heartbeat: spawn tool unavailable for QA.".strip()
+                    )
 
                 if hasattr(spawn_tool, "set_context"):
                     spawn_tool.set_context("cli", "direct")
@@ -1215,26 +2160,41 @@ def gateway(
                     task_meta={
                         "kanban_task_id": qa_task_id,
                         "project_id": qa_project_id,
+                        "project_name": str(qa_task.get("project_name") or qa_project_id),
+                        "project_path": str(qa_task.get("project_path") or ""),
+                        "workspace_path": str(qa_task.get("workspace_path") or ""),
+                        "work_branch": str(qa_task.get("work_branch") or ""),
+                        "base_branch": str(qa_task.get("base_branch") or ""),
                         "title": qa_title,
                         "subagent_name": qa_subagent,
                     },
                 )
-                return f"{llm_summary}\n\nNanoCats heartbeat: dispatched QA task {qa_task_id}. {qa_result}".strip()
+                return f"{llm_summary}\n\nKosmos heartbeat: dispatched QA task {qa_task_id}. {qa_result}".strip()
 
             todo = [t for t in pending if _task_status(t) == "todo"]
             if not todo:
-                return f"{llm_summary}\n\nNanoCats heartbeat: no pending tasks for {dev_subagent}.".strip()
+                return f"{llm_summary}\n\nKosmos heartbeat: no pending tasks for {dev_subagent}.".strip()
 
-            if dev_subagent in active_subagent_roles:
-                return (
-                    f"{llm_summary}\n\nNanoCats heartbeat: {dev_subagent} already running.".strip()
-                )
+            if _is_role_running(dev_subagent):
+                return f"{llm_summary}\n\nKosmos heartbeat: {dev_subagent} already running.".strip()
 
-            next_task = todo[0]
+            next_task = _pick_for_role(todo, dev_subagent)
+            if not next_task:
+                return f"{llm_summary}\n\nKosmos heartbeat: no todo task available.".strip()
+
+            ready, prep_message = await _prepare_todo_task(next_task)
+            if not ready:
+                return f"{llm_summary}\n\n{prep_message}".strip()
+
             task_id = str(next_task.get("id"))
+            if _is_kanban_task_running(task_id):
+                return (
+                    f"{llm_summary}\n\n"
+                    f"Kosmos heartbeat: task {task_id} already has an active subagent run."
+                ).strip()
             project_id = str(next_task.get("project_id") or "")
             title = str(next_task.get("title") or "Untitled task")
-            claimed = await nanocats_tasks.transition_task(
+            claimed = await kosmos_tasks.transition_task(
                 task_id,
                 to_status="progress",
                 comment_text=f"[{dev_subagent}] Claimed task and started implementation.",
@@ -1245,13 +2205,13 @@ def gateway(
             if not claimed:
                 return (
                     f"{llm_summary}\n\n"
-                    f"NanoCats heartbeat: could not move task {task_id} to progress (likely 409)."
+                    f"Kosmos heartbeat: could not move task {task_id} to progress (likely 409)."
                 ).strip()
 
             instruction = await _build_task_instruction(next_task, dev_subagent)
             spawn_tool = agent.tools.get("spawn")
             if not spawn_tool or not hasattr(spawn_tool, "execute"):
-                return f"{llm_summary}\n\nNanoCats heartbeat: spawn tool unavailable.".strip()
+                return f"{llm_summary}\n\nKosmos heartbeat: spawn tool unavailable.".strip()
 
             if hasattr(spawn_tool, "set_context"):
                 spawn_tool.set_context("cli", "direct")
@@ -1262,11 +2222,16 @@ def gateway(
                 task_meta={
                     "kanban_task_id": task_id,
                     "project_id": project_id,
+                    "project_name": str(next_task.get("project_name") or project_id),
+                    "project_path": str(next_task.get("project_path") or ""),
+                    "workspace_path": str(next_task.get("workspace_path") or ""),
+                    "work_branch": str(next_task.get("work_branch") or ""),
+                    "base_branch": str(next_task.get("base_branch") or ""),
                     "title": title,
                     "subagent_name": dev_subagent,
                 },
             )
-            dispatch_info = f"NanoCats heartbeat: dispatched task {task_id}. {result}"
+            dispatch_info = f"Kosmos heartbeat: dispatched task {task_id}. {result}"
             return f"{llm_summary}\n\n{dispatch_info}".strip()
 
     async def on_heartbeat_notify(response: str) -> None:
@@ -1347,15 +2312,25 @@ def gateway(
         async with server:
             await server.serve_forever()
 
-    # Start NanoCats service for agent monitoring (inside async run)
-    async def start_nanocats_bg():
+    async def start_kosmos_bg() -> tuple[asyncio.Task | None, Any]:
         try:
-            from nanobot.services.nanocats import start_nanocats
+            from nanobot.kosmos.server import KosmosServer, parse_kosmos_base_url
 
-            await start_nanocats()
-            console.print("[green]✓[/green] NanoCats: ws://0.0.0.0:18791 & http://0.0.0.0:18792")
+            host, kosmos_port = parse_kosmos_base_url(kosmos_api_url)
+            kosmos_server = KosmosServer(host=host, port=kosmos_port)
+            kosmos_task = asyncio.create_task(kosmos_server.start(), name="kosmos-server")
+            await asyncio.sleep(0.2)
+            if kosmos_task.done():
+                exc = kosmos_task.exception()
+                if exc:
+                    raise exc
+            console.print(
+                f"[green]✓[/green] Kosmos API: http://{host}:{kosmos_port} & ws://{host}:{kosmos_port + 1}"
+            )
+            return kosmos_task, kosmos_server
         except Exception as e:
-            console.print(f"[yellow]Warning: NanoCats failed to start: {e}[/yellow]")
+            console.print(f"[yellow]Warning: Kosmos failed to start: {e}[/yellow]")
+            return None, None
 
     # Register Dream system job (always-on, idempotent on restart)
     dream_cfg = config.agents.defaults.dream
@@ -1363,7 +2338,7 @@ def gateway(
         agent.dream.model = dream_cfg.model_override
     agent.dream.max_batch_size = dream_cfg.max_batch_size
     agent.dream.max_iterations = dream_cfg.max_iterations
-    from nanobot.cron.types import CronJob, CronPayload
+    from nanobot.cron.types import CronPayload
 
     cron.register_system_job(
         CronJob(
@@ -1375,11 +2350,44 @@ def gateway(
     )
     console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
 
+    removed_legacy_jobs = _remove_legacy_task_checker_jobs()
+    if removed_legacy_jobs:
+        console.print(
+            f"[yellow]✓[/yellow] Removed {removed_legacy_jobs} legacy task-checker cron job(s)"
+        )
+
+    checker_interval_s = max(30, min(60, int(hb_cfg.interval_s)))
+    checker_job = CronJob(
+        id="kosmos-task-checker",
+        name="kosmos-task-checker",
+        enabled=True,
+        schedule=CronSchedule(kind="every", every_ms=checker_interval_s * 1000),
+        payload=CronPayload(
+            kind="system_event",
+            message="Kosmos task checker (heartbeat preflight dispatcher)",
+        ),
+    )
+    cron.register_system_job(checker_job)
+    console.print(
+        f"[green]✓[/green] Kosmos Task Checker: every {checker_interval_s}s (preflight enforced)"
+    )
+
     async def run():
+        kosmos_task: asyncio.Task | None = None
+        kosmos_server = None
         try:
-            await start_nanocats_bg()
+            kosmos_task, kosmos_server = await start_kosmos_bg()
             await cron.start()
             await heartbeat.start()
+
+            # Run one checker cycle immediately on startup so users don't need
+            # to wait for the first full cron interval.
+            try:
+                startup_result = await on_heartbeat_execute("")
+                logger.info("Kosmos startup checker executed: {}", startup_result)
+            except Exception:
+                logger.exception("Kosmos startup checker failed")
+
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
@@ -1398,15 +2406,13 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
-            # Stop NanoCats
-            try:
-                from nanobot.services.nanocats import get_nanocats
-
-                nanocats = get_nanocats()
-                if nanocats:
-                    await nanocats.stop()
-            except Exception:
-                pass
+            if kosmos_task:
+                kosmos_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await kosmos_task
+            if kosmos_server:
+                with suppress(Exception):
+                    await kosmos_server.close_db()
 
     asyncio.run(run())
 
@@ -1862,34 +2868,114 @@ def approve_release(
     comment: str = typer.Option(
         "", "--comment", help="Optional approval comment stored in task comments"
     ),
-    api_url: str = typer.Option(
-        "http://localhost:18794", "--api-url", help="NanoCats API base URL"
-    ),
+    api_url: str | None = typer.Option(None, "--api-url", help="Kosmos API base URL"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Approve a release task so Rydia can move it to done."""
-    from nanobot.services.nanocats_tasks import NanoCatsTasksClient
+    from nanobot.services.kosmos_tasks import KosmosTasksClient
 
-    client = NanoCatsTasksClient(base_url=api_url)
+    runtime_config = _load_runtime_config(config, workspace=None)
+    resolved_api_url = str(api_url or runtime_config.gateway.kosmos_api_url).strip()
+    client = KosmosTasksClient(base_url=resolved_api_url)
 
-    async def _run() -> dict[str, Any] | None:
-        return await client.approve_release(
+    async def _run() -> tuple[dict[str, Any] | None, str]:
+        task = await client.get_task(task_id)
+        if not task:
+            return None, f"Task {task_id} not found"
+
+        workspace_path = str(task.get("workspace_path") or "").strip()
+        work_branch = str(task.get("work_branch") or "").strip()
+        selected_branch = branch.strip() or work_branch
+        if not selected_branch:
+            return None, "No branch available to approve release"
+
+        if not workspace_path:
+            return None, "Task has no workspace_path; cannot run release git steps"
+
+        ws = Path(workspace_path)
+        if not ws.exists() or not ws.is_dir():
+            return None, f"Workspace path not found: {workspace_path}"
+
+        def _git(args: list[str]) -> tuple[int, str, str]:
+            proc = subprocess.run(
+                ["git", *args],
+                cwd=str(ws),
+                capture_output=True,
+                text=True,
+            )
+            return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+        code, current_branch, err = _git(["rev-parse", "--abbrev-ref", "HEAD"])
+        if code != 0:
+            return None, f"Failed to detect current branch in workspace: {err}"
+
+        if current_branch != selected_branch:
+            checkout_code, _, checkout_err = _git(["checkout", selected_branch])
+            if checkout_code != 0:
+                create_code, _, create_err = _git(["checkout", "-b", selected_branch])
+                if create_code != 0:
+                    return None, (
+                        f"Failed to checkout/create branch {selected_branch}: "
+                        f"{checkout_err or create_err}"
+                    )
+
+        status_code, status_out, status_err = _git(["status", "--porcelain"])
+        if status_code != 0:
+            return None, f"Failed to inspect git status: {status_err}"
+
+        if status_out.strip():
+            add_code, _, add_err = _git(["add", "-A"])
+            if add_code != 0:
+                return None, f"Failed to stage changes: {add_err}"
+
+            commit_message = f"release: finalize task {task_id}"
+            commit_code, commit_out, commit_err = _git(["commit", "-m", commit_message])
+            if commit_code != 0:
+                return None, f"Failed to create commit: {commit_err or commit_out}"
+
+        if push:
+            push_code, push_out, push_err = _git(["push", "-u", "origin", selected_branch])
+            if push_code != 0:
+                return None, f"Failed to push branch {selected_branch}: {push_err or push_out}"
+
+        approved = await client.approve_release(
             task_id,
             approved_by=approved_by,
-            branch=branch,
+            branch=selected_branch,
             push=push,
             comment_text=comment.strip() or None,
         )
+        if not approved:
+            return None, f"Failed to approve release for task {task_id}"
 
-    result = asyncio.run(_run())
+        moved = await client.transition_task(
+            task_id,
+            to_status="done",
+            comment_text=(
+                f"Release approved by {approved_by}. "
+                f"Branch={selected_branch}, push={'yes' if push else 'no'}. "
+                "Task moved to done."
+            ),
+            agent_id="Kosmos",
+            agent_name="Kosmos",
+            assigned_to=str(task.get("assigned_to") or "Rydia"),
+        )
+        if not moved:
+            return None, (f"Release approved but failed to transition task {task_id} to done.")
+
+        return moved, selected_branch
+
+    result, branch_used_or_error = asyncio.run(_run())
     if not result:
         console.print(
-            f"[red]✗ Failed to approve release for task {task_id}[/red] [dim](api={api_url})[/dim]"
+            f"[red]✗ Release approval failed for task {task_id}[/red] "
+            f"[dim](api={resolved_api_url})[/dim]\n{branch_used_or_error}"
         )
         raise typer.Exit(1)
 
     console.print(
         f"[green]✓ Release approved[/green] task={task_id} "
-        f"branch={branch} push={'yes' if push else 'no'} by={approved_by}"
+        f"branch={branch_used_or_error} push={'yes' if push else 'no'} by={approved_by} -> done"
     )
 
 
