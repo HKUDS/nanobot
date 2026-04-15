@@ -427,10 +427,74 @@ class Consolidator:
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
+        # Maps session_key -> (estimate, msg_count, last_consolidated, history_cursor, workspace_mtime_sum)
+        self._last_estimate: dict[str, tuple[int, int, int, int, float]] = {}
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
         return self._locks.setdefault(session_key, asyncio.Lock())
+
+    def _workspace_mtime_sum(self) -> float:
+        """Sum of mtimes for prompt-contributing workspace files."""
+        total = 0.0
+        try:
+            workspace = self.store.workspace
+        except AttributeError:
+            return 0.0
+        for name in ("AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "memory/MEMORY.md"):
+            path = workspace / name
+            try:
+                total += path.stat().st_mtime
+            except OSError:
+                pass
+        skills_dir = workspace / "skills"
+        try:
+            total += skills_dir.stat().st_mtime
+        except OSError:
+            pass
+        return total
+
+    def _get_history_cursor(self) -> int:
+        """Read current history cursor from store."""
+        try:
+            cursor_file = self.store._cursor_file
+        except AttributeError:
+            return 0
+        if cursor_file.exists():
+            try:
+                return int(cursor_file.read_text(encoding="utf-8").strip())
+            except (ValueError, OSError):
+                pass
+        return 0
+
+    def _should_skip_estimation(self, session: Session) -> bool:
+        """Check if estimation can be safely skipped."""
+        cached = self._last_estimate.get(session.key)
+        if not cached:
+            return False
+        estimate, msg_count, last_consol, cursor, mtime_sum = cached
+        budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
+        if estimate >= budget * 0.5:
+            return False
+        if len(session.messages) != msg_count:
+            return False
+        if session.last_consolidated != last_consol:
+            return False
+        if self._get_history_cursor() != cursor:
+            return False
+        if abs(self._workspace_mtime_sum() - mtime_sum) > 0.001:
+            return False
+        return True
+
+    def _record_estimation(self, session: Session, estimate: int) -> None:
+        """Store estimation result for future skip checks."""
+        self._last_estimate[session.key] = (
+            estimate,
+            len(session.messages),
+            session.last_consolidated,
+            self._get_history_cursor(),
+            self._workspace_mtime_sum(),
+        )
 
     def pick_consolidation_boundary(
         self,
@@ -531,6 +595,9 @@ class Consolidator:
 
         lock = self.get_lock(session.key)
         async with lock:
+            if self._should_skip_estimation(session):
+                return
+
             budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
             target = budget // 2
             if _PROFILING:
@@ -542,6 +609,7 @@ class Consolidator:
                 estimated, source = 0, "error"
             if _PROFILING:
                 logger.debug("[profiling] estimation: {:.1f}ms", (_time_mod.perf_counter() - _est_t0) * 1000)
+            self._record_estimation(session, estimated)
             if estimated <= 0:
                 return
             if estimated < budget:
@@ -594,6 +662,7 @@ class Consolidator:
                 )
                 if not await self.archive(chunk):
                     return
+                self._last_estimate.pop(session.key, None)
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
 
