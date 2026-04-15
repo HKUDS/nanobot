@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import mimetypes
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Coroutine
@@ -626,13 +628,118 @@ async def update_setting(request: web.Request) -> web.Response:
 
 
 # ---------------------------------------------------------------------------
-# Health check
+# Artifacts
 # ---------------------------------------------------------------------------
 
+ARTIFACTS_ROOT = Path.home() / ".nanobot" / "artifacts"
+ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+MAX_ARTIFACTS_PER_TASK = 6
+MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
-async def health_check(request: web.Request) -> web.Response:
-    """GET /health - Health check endpoint."""
-    return json_response({"status": "ok", "service": "kosmos"})
+
+def _safe_artifact_path(task_id: str, filename: str, artifacts_root: Path = ARTIFACTS_ROOT) -> Path:
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
+    task_dir = artifacts_root / task_id
+    return task_dir / safe_name
+
+
+async def upload_artifact(request: web.Request) -> web.Response:
+    """POST /api/tasks/{id}/artifacts - Upload a screenshot artifact."""
+    task_id = request.match_info["id"]
+    db = request.app["kosmos_db"]
+
+    task = await request.app["db_ops"].get_task(db, task_id)
+    if not task:
+        return not_found(f"Task {task_id} not found")
+
+    count = await request.app["db_ops"].count_artifacts_for_task(db, task_id)
+    if count >= MAX_ARTIFACTS_PER_TASK:
+        return error_response(
+            f"Maximum {MAX_ARTIFACTS_PER_TASK} artifacts per task reached",
+            status=409,
+        )
+
+    reader = await request.multipart()
+    field = await reader.next()
+    if field is None or field.name != "file":
+        return error_response("Missing 'file' field in multipart form")
+
+    filename = field.filename or "screenshot.png"
+    ext = Path(filename).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return error_response(f"File type not allowed: {ext}")
+
+    content = b""
+    async for chunk in field.iter_chunked(8192):
+        content += chunk
+        if len(content) > MAX_FILE_SIZE_BYTES:
+            return error_response(f"File exceeds maximum size of {MAX_FILE_SIZE_BYTES} bytes")
+
+    mime_type = mimetypes.guess_type(filename)[0] or "image/png"
+
+    task_dir = ARTIFACTS_ROOT / task_id
+    task_dir.mkdir(parents=True, exist_ok=True)
+
+    target_path = _safe_artifact_path(task_id, filename)
+    target_path.write_bytes(content)
+
+    created_by = request.headers.get("X-Agent-Name", "unknown")
+
+    artifact = await request.app["db_ops"].create_artifact(
+        db=db,
+        task_id=task_id,
+        filename=filename,
+        path=str(target_path),
+        mime_type=mime_type,
+        kind="screenshot",
+        size_bytes=len(content),
+        created_by=created_by,
+    )
+
+    broadcaster: EventBroadcaster = request.app.get("broadcaster")
+    if broadcaster:
+        await broadcaster.broadcast_event("artifact:created", artifact)
+
+    return json_response(artifact, status=201)
+
+
+async def list_artifacts(request: web.Request) -> web.Response:
+    """GET /api/tasks/{id}/artifacts - List artifacts for a task."""
+    task_id = request.match_info["id"]
+    db = request.app["kosmos_db"]
+
+    task = await request.app["db_ops"].get_task(db, task_id)
+    if not task:
+        return not_found(f"Task {task_id} not found")
+
+    artifacts = await request.app["db_ops"].get_artifacts_for_task(db, task_id)
+    return json_response(artifacts)
+
+
+async def serve_artifact(request: web.Request) -> web.Response:
+    """GET /api/artifacts/{artifact_id} - Serve artifact file."""
+    artifact_id = request.match_info["id"]
+    db = request.app["kosmos_db"]
+
+    artifact = await request.app["db_ops"].get_artifact_by_id(db, artifact_id)
+    if not artifact:
+        return not_found(f"Artifact {artifact_id} not found")
+
+    file_path = Path(artifact["path"])
+
+    resolved = file_path.resolve()
+    artifacts_root_resolved = ARTIFACTS_ROOT.resolve()
+    if not str(resolved).startswith(str(artifacts_root_resolved)):
+        return error_response("Access denied", status=403)
+
+    if not resolved.exists():
+        return not_found("Artifact file not found on disk")
+
+    return web.Response(
+        body=resolved.read_bytes(),
+        content_type=artifact["mime_type"],
+        headers={"Content-Disposition": f'inline; filename="{artifact["filename"]}"'},
+    )
 
 
 async def publish_activity(request: web.Request) -> web.Response:
@@ -650,6 +757,16 @@ async def publish_activity(request: web.Request) -> web.Response:
         await broadcaster.broadcast_event("activity", payload)
 
     return json_response({"status": "ok"}, status=202)
+
+
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+
+
+async def health_check(request: web.Request) -> web.Response:
+    """GET /health - Health check endpoint."""
+    return json_response({"status": "ok", "service": "kosmos"})
 
 
 # ---------------------------------------------------------------------------
@@ -681,6 +798,10 @@ ROUTES = [
     ("PATCH", "/api/settings/{key}", update_setting),
     # Events
     ("POST", "/api/events/activity", publish_activity),
+    # Artifacts
+    ("POST", "/api/tasks/{id}/artifacts", upload_artifact),
+    ("GET", "/api/tasks/{id}/artifacts", list_artifacts),
+    ("GET", "/api/artifacts/{id}", serve_artifact),
     # Health
     ("GET", "/health", health_check),
 ]
