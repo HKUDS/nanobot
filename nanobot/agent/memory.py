@@ -260,9 +260,17 @@ class MemoryStore:
         return 1
 
     def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
-        """Return history entries with cursor > *since_cursor*."""
+        """Return history entries with cursor > *since_cursor*.
+
+        Uses a cached byte offset for incremental reads when the caller
+        advances to a *new* cursor that is greater than the previous call's
+        cursor.  When the same cursor is re-requested (e.g. context.py
+        rebuilding Recent History each turn with the same dream cursor),
+        a full scan is performed to guarantee all matching entries are
+        returned.
+        """
         if (
-            since_cursor == self._cached_since_cursor
+            since_cursor > self._cached_since_cursor
             and self._cursor_byte_offset > 0
             and self.history_file.exists()
         ):
@@ -435,7 +443,12 @@ class Consolidator:
         return self._locks.setdefault(session_key, asyncio.Lock())
 
     def _workspace_mtime_sum(self) -> float:
-        """Sum of mtimes for prompt-contributing workspace files."""
+        """Sum of mtimes for prompt-contributing workspace files.
+
+        Includes bootstrap files, MEMORY.md, and all SKILL.md files
+        inside skills/ subdirectories (not just the directory mtime,
+        which doesn't change when files inside subdirs are edited).
+        """
         total = 0.0
         try:
             workspace = self.store.workspace
@@ -449,7 +462,13 @@ class Consolidator:
                 pass
         skills_dir = workspace / "skills"
         try:
-            total += skills_dir.stat().st_mtime
+            for d in skills_dir.iterdir():
+                if d.is_dir():
+                    skill_md = d / "SKILL.md"
+                    try:
+                        total += skill_md.stat().st_mtime
+                    except OSError:
+                        pass
         except OSError:
             pass
         return total

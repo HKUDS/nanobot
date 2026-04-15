@@ -112,7 +112,10 @@ class MessageTool(Tool):
         )
 
         try:
-            await self._send_callback(msg)
+            result = await self._send_callback(msg)
+            # publish_outbound returns bool; treat False as a delivery failure
+            if result is False:
+                return "Error: message could not be delivered (outbound queue full)"
             if channel == home_channel and chat_id == home_chat_id:
                 self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""

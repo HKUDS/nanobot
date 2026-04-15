@@ -899,7 +899,10 @@ class OpenAICompatProvider(LLMProvider):
     ) -> LLMResponse:
         idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
-            if self._should_use_responses_api(model, reasoning_effort):
+            if (
+                self._should_use_responses_api(model, reasoning_effort)
+                and not self._should_skip_responses_api(model, reasoning_effort)
+            ):
                 try:
                     body = self._build_responses_body(
                         messages, tools, model, max_tokens, temperature,
@@ -923,6 +926,7 @@ class OpenAICompatProvider(LLMProvider):
                         _timed_stream(),
                         on_content_delta,
                     )
+                    self._record_responses_api_success(model, reasoning_effort)
                     return LLMResponse(
                         content=content or None,
                         tool_calls=tool_calls,
@@ -933,6 +937,7 @@ class OpenAICompatProvider(LLMProvider):
                 except Exception as responses_error:
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise
+                    self._record_responses_api_failure(model, reasoning_effort)
 
             kwargs = self._build_kwargs(
                 messages, tools, model, max_tokens, temperature,
