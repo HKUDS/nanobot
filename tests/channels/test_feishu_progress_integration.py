@@ -394,8 +394,11 @@ class TestProgressConcurrency:
         for i in range(5):
             assert f"Progress {i}" in buf.text
 
-        # Sequence should increment correctly
-        assert buf.sequence == 6  # initial 1 + 5 updates
+        # Sequence should have incremented at least once
+        # (throttling may merge rapid updates, so we don't expect exactly 6)
+        assert buf.sequence >= 2  # initial 1 + at least 1 update
+        # Verify API was called at least once
+        assert ch._client.cardkit.v1.card_element.content.call_count >= 1
 
     @pytest.mark.asyncio
     async def test_progress_messages_different_chats_isolated(self):
