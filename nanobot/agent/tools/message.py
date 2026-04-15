@@ -1,5 +1,6 @@
 """Message tool for sending messages to users."""
 
+from contextvars import ContextVar
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool, tool_parameters
@@ -34,6 +35,10 @@ class MessageTool(Tool):
         self._default_chat_id = default_chat_id
         self._default_message_id = default_message_id
         self._sent_in_turn: bool = False
+        self._delivery_suppressed: ContextVar[bool] = ContextVar(
+            "message_delivery_suppressed",
+            default=False,
+        )
 
     def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Set the current message context."""
@@ -48,6 +53,14 @@ class MessageTool(Tool):
     def start_turn(self) -> None:
         """Reset per-turn send tracking."""
         self._sent_in_turn = False
+
+    def set_delivery_suppressed(self, active: bool):
+        """Mute delivery for the current task without affecting other turns."""
+        return self._delivery_suppressed.set(active)
+
+    def reset_delivery_suppressed(self, token) -> None:
+        """Restore the previous delivery suppression state."""
+        self._delivery_suppressed.reset(token)
 
     @property
     def name(self) -> str:
@@ -73,7 +86,7 @@ class MessageTool(Tool):
     ) -> str:
         from nanobot.utils.helpers import strip_think
         content = strip_think(content)
-        
+
         channel = channel or self._default_channel
         chat_id = chat_id or self._default_chat_id
         # Only inherit default message_id when targeting the same channel+chat.
@@ -88,6 +101,9 @@ class MessageTool(Tool):
 
         if not channel or not chat_id:
             return "Error: No target channel/chat specified"
+
+        if self._delivery_suppressed.get():
+            return f"Message delivery suppressed for {channel}:{chat_id}"
 
         if not self._send_callback:
             return "Error: Message sending not configured"
