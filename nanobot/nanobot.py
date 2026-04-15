@@ -44,7 +44,7 @@ class Nanobot:
 
         Args:
             config_path: Path to ``config.json``.  Defaults to
-                ``~/.nanobot/config.json``.
+                ``~/.hiperone/config.json``.
             workspace: Override the workspace directory from config.
         """
         from nanobot.config.loader import load_config, resolve_config_env_vars
@@ -80,6 +80,7 @@ class Nanobot:
             exec_config=config.tools.exec,
             restrict_to_workspace=config.tools.restrict_to_workspace,
             mcp_servers=config.tools.mcp_servers,
+            openviking_config=config.openviking,
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
             disabled_skills=defaults.disabled_skills,

@@ -48,7 +48,7 @@ class SafeFileHistory(FileHistory):
         super().store_string(safe)
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, WebConfig
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.utils.restart import (
     consume_restart_notice_from_env,
@@ -59,7 +59,7 @@ from nanobot.utils.restart import (
 app = typer.Typer(
     name="nanobot",
     context_settings={"help_option_names": ["-h", "--help"]},
-    help=f"{__logo__} nanobot - Personal AI Assistant",
+    help=f"Personal AI Assistant",
     no_args_is_help=True,
 )
 
@@ -164,7 +164,7 @@ def _print_agent_response(
     content = response or ""
     body = _response_renderable(content, render_markdown, metadata)
     console.print()
-    console.print(f"[cyan]{__logo__} nanobot[/cyan]")
+    console.print(f"[cyan]{__logo__} HiperOne[/cyan]")
     console.print(body)
     console.print()
 
@@ -200,7 +200,7 @@ async def _print_interactive_response(
         ansi = _render_interactive_ansi(
             lambda c: (
                 c.print(),
-                c.print(f"[cyan]{__logo__} nanobot[/cyan]"),
+                c.print(f"[cyan]{__logo__} HiperOne[/cyan]"),
                 c.print(_response_renderable(content, render_markdown, metadata)),
                 c.print(),
             )
@@ -248,7 +248,7 @@ async def _read_interactive_input_async() -> str:
 
 def version_callback(value: bool):
     if value:
-        console.print(f"{__logo__} nanobot v{__version__}")
+        console.print(f"{__logo__} HiperOne v{__version__}")
         raise typer.Exit()
 
 
@@ -351,7 +351,7 @@ def onboard(
         agent_cmd += f" --config {config_path}"
         gateway_cmd += f" --config {config_path}"
 
-    console.print(f"\n{__logo__} nanobot is ready!")
+    console.print(f"\n{__logo__} HiperOne is ready!")
     console.print("\nNext steps:")
     if wizard:
         console.print(f"  1. Chat: [cyan]{agent_cmd}[/cyan]")
@@ -421,7 +421,7 @@ def _make_provider(config: Config):
     if backend == "azure_openai":
         if not p or not p.api_key or not p.api_base:
             console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
-            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
+            console.print("Set them in ~/.hiperone/config.json under providers.azure_openai section")
             console.print("Use the model field to specify the deployment name.")
             raise typer.Exit(1)
     elif backend == "openai_compat" and not model.startswith("bedrock/"):
@@ -429,7 +429,7 @@ def _make_provider(config: Config):
         exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
         if needs_key and not exempt:
             console.print("[red]Error: No API key configured.[/red]")
-            console.print("Set one in ~/.nanobot/config.json under providers section")
+            console.print("Set one in ~/.hiperone/config.json under providers section")
             raise typer.Exit(1)
 
     # --- instantiation by backend ---
@@ -589,6 +589,7 @@ def serve(
         session_manager=session_manager,
         mcp_servers=runtime_config.tools.mcp_servers,
         channels_config=runtime_config.channels,
+        openviking_config=runtime_config.openviking,
         timezone=runtime_config.agents.defaults.timezone,
         unified_session=runtime_config.agents.defaults.unified_session,
         disabled_skills=runtime_config.agents.defaults.disabled_skills,
@@ -651,7 +652,7 @@ def gateway(
     config = _load_runtime_config(config, workspace)
     port = port if port is not None else config.gateway.port
 
-    console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
+    console.print(f"{__logo__} Starting HiperOne gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
@@ -683,6 +684,7 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        openviking_config=config.openviking,
         timezone=config.agents.defaults.timezone,
         unified_session=config.agents.defaults.unified_session,
         disabled_skills=config.agents.defaults.disabled_skills,
@@ -960,6 +962,7 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        openviking_config=config.openviking,
         timezone=config.agents.defaults.timezone,
         unified_session=config.agents.defaults.unified_session,
         disabled_skills=config.agents.defaults.disabled_skills,
@@ -1323,6 +1326,216 @@ def plugins_list():
 
     console.print(table)
 
+@app.command()
+def web(
+    port: int = typer.Option(18080, "--port", "-p", help="Web server port"),
+    host: str = typer.Option("0.0.0.0", "--host", help="Web server host"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Start the web interface with full gateway stack.
+
+    Runs the agent loop, all enabled channels (including web), cron, and
+    heartbeat services.  The web channel is force-enabled so the browser
+    can communicate via WebSocket.
+    """
+    from nanobot.bus.queue import MessageBus
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.channels.manager import ChannelManager
+    from nanobot.session.manager import SessionManager
+    from nanobot.cron.service import CronService
+    from nanobot.cron.types import CronJob
+    from nanobot.heartbeat.service import HeartbeatService
+
+    if verbose:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
+
+    config = _load_runtime_config(config, workspace)
+
+    web_cfg = getattr(config.channels, "web", None)
+    base = web_cfg if isinstance(web_cfg, dict) else (web_cfg.model_dump() if web_cfg else {})
+    web_cfg = WebConfig(**{**base, "enabled": True, "host": host, "port": port or base.get("port", 18080)})
+    config.channels.web = web_cfg
+    port = web_cfg.port
+
+    console.print(f"{__logo__} Starting HiperOne web on {host}:{port}...")
+    sync_workspace_templates(config.workspace_path)
+
+    bus = MessageBus()
+    provider = _make_provider(config)
+    session_manager = SessionManager(config.workspace_path)
+
+    if is_default_workspace(config.workspace_path):
+        _migrate_cron_store(config)
+
+    cron_store_path = config.workspace_path / "cron" / "jobs.json"
+    cron = CronService(cron_store_path)
+
+    agent = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=config.workspace_path,
+        model=config.agents.defaults.model,
+        max_iterations=config.agents.defaults.max_tool_iterations,
+        context_window_tokens=config.agents.defaults.context_window_tokens,
+        web_config=config.tools.web,
+        context_block_limit=config.agents.defaults.context_block_limit,
+        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
+        provider_retry_mode=config.agents.defaults.provider_retry_mode,
+        exec_config=config.tools.exec,
+        cron_service=cron,
+        restrict_to_workspace=config.tools.restrict_to_workspace,
+        session_manager=session_manager,
+        mcp_servers=config.tools.mcp_servers,
+        channels_config=config.channels,
+        openviking_config=config.openviking,
+        timezone=config.agents.defaults.timezone,
+    )
+
+    # Set cron callback (needs agent + heartbeat)
+    async def on_cron_job(job: CronJob) -> str | None:
+        """Execute a cron job through the agent (isolated or main session)."""
+        from nanobot.agent.tools.cron import CronTool
+        from nanobot.agent.tools.message import MessageTool
+        from nanobot.utils.evaluator import evaluate_response
+
+        reminder_note = (
+            "[Scheduled Task] Timer finished.\n\n"
+            f"Task '{job.name}' has been triggered.\n"
+            f"Scheduled instruction: {job.payload.message}"
+        )
+
+        cron_tool = agent.tools.get("cron")
+        cron_token = None
+        if isinstance(cron_tool, CronTool):
+            cron_token = cron_tool.set_cron_context(True)
+
+        try:
+            resp = await agent.process_direct(
+                reminder_note,
+                session_key=f"cron:{job.id}",
+                channel=job.payload.channel or "cli",
+                chat_id=job.payload.to or "direct",
+            )
+        finally:
+            if isinstance(cron_tool, CronTool) and cron_token is not None:
+                cron_tool.reset_cron_context(cron_token)
+
+        response = resp.content if resp else ""
+
+        message_tool = agent.tools.get("message")
+        if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+            return response
+
+        if job.payload.deliver and job.payload.to and response:
+            should_notify = await evaluate_response(
+                response, job.payload.message, provider, agent.model,
+            )
+            if should_notify:
+                from nanobot.bus.events import OutboundMessage
+                await bus.publish_outbound(OutboundMessage(
+                    channel=job.payload.channel or "cli",
+                    chat_id=job.payload.to,
+                    content=response,
+                ))
+        return response
+
+    cron.on_job = on_cron_job
+
+    # Channel manager (web channel will be created here since we set enabled=True)
+    channels = ChannelManager(config, bus, session_manager=session_manager, cron_service=cron)
+
+    def _pick_heartbeat_target() -> tuple[str, str]:
+        """Pick a routable channel/chat target for heartbeat-triggered messages."""
+        enabled = set(channels.enabled_channels)
+        for item in session_manager.list_sessions():
+            key = item.get("key") or ""
+            if ":" not in key:
+                continue
+            ch, cid = key.split(":", 1)
+            if ch in {"cli", "system"}:
+                continue
+            if ch in enabled and cid:
+                return ch, cid
+        return "cli", "direct"
+
+    # Create heartbeat service
+    hb_cfg = config.gateway.heartbeat
+
+    async def on_heartbeat_execute(tasks: str) -> str:
+        """Phase 2: execute heartbeat tasks through the full agent loop."""
+        channel, chat_id = _pick_heartbeat_target()
+
+        async def _silent(*_args, **_kwargs):
+            pass
+
+        resp = await agent.process_direct(
+            tasks,
+            session_key="heartbeat",
+            channel=channel,
+            chat_id=chat_id,
+            on_progress=_silent,
+        )
+
+        session = agent.sessions.get_or_create("heartbeat")
+        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+        agent.sessions.save(session)
+
+        return resp.content if resp else ""
+
+    async def on_heartbeat_notify(response: str) -> None:
+        """Deliver a heartbeat response to the user's channel."""
+        from nanobot.bus.events import OutboundMessage
+        channel, chat_id = _pick_heartbeat_target()
+        if channel == "cli":
+            return  # No external channel available to deliver to
+        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+
+    heartbeat = HeartbeatService(
+        workspace=config.workspace_path,
+        provider=provider,
+        model=agent.model,
+        on_execute=on_heartbeat_execute,
+        on_notify=on_heartbeat_notify,
+        interval_s=hb_cfg.interval_s,
+        enabled=hb_cfg.enabled,
+    )
+
+    if channels.enabled_channels:
+        console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
+    else:
+        console.print("[yellow]Warning: No channels enabled[/yellow]")
+
+    cron_status = cron.status()
+    if cron_status["jobs"] > 0:
+        console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
+
+    console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+
+    async def run():
+        try:
+            await cron.start()
+            await heartbeat.start()
+            await asyncio.gather(
+                agent.run(),
+                channels.start_all(),
+            )
+        except KeyboardInterrupt:
+            console.print("\nShutting down...")
+        except Exception:
+            import traceback
+            console.print("\n[red]Error: Web server crashed unexpectedly[/red]")
+            console.print(traceback.format_exc())
+        finally:
+            await agent.close_mcp()
+            heartbeat.stop()
+            cron.stop()
+            agent.stop()
+            await channels.stop_all()
+
+    asyncio.run(run())
 
 # ============================================================================
 # Status Commands
@@ -1338,7 +1551,7 @@ def status():
     config = load_config()
     workspace = config.workspace_path
 
-    console.print(f"{__logo__} nanobot Status\n")
+    console.print(f"{__logo__} HiperOne Status\n")
 
     console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
     console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")

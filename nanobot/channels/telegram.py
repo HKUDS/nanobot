@@ -647,7 +647,7 @@ class TelegramChannel(BaseChannel):
 
         user = update.effective_user
         await update.message.reply_text(
-            f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
+            f"👋 Hi {user.first_name}! I'm HiperOne.\n\n"
             "Send me a message and I'll respond!\n"
             "Type /help to see available commands."
         )

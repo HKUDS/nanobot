@@ -8,7 +8,7 @@ import re
 import weakref
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
@@ -20,6 +20,7 @@ from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.utils.gitstore import GitStore
 
 if TYPE_CHECKING:
+    from nanobot.openviking.client import VikingClient
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session, SessionManager
 
@@ -218,6 +219,26 @@ class MemoryStore:
         long_term = self.read_memory()
         return f"## Long-term Memory\n{long_term}" if long_term else ""
 
+    async def get_viking_memory_context(
+        self,
+        current_message: str,
+        viking_client: VikingClient,
+    ) -> str:
+        """Fetch relevant memories from OpenViking for the current message."""
+        try:
+            return await viking_client.get_viking_memory_context(current_message)
+        except Exception as e:
+            logger.warning("OpenViking memory context failed: {}", e)
+            return ""
+
+    async def get_viking_user_profile(self, viking_client: VikingClient) -> str:
+        """Fetch user profile from OpenViking."""
+        try:
+            return await viking_client.get_viking_user_profile()
+        except Exception as e:
+            logger.warning("OpenViking user profile failed: {}", e)
+            return ""
+
     # -- history.jsonl — append-only, JSONL format ---------------------------
 
     def append_history(self, entry: str) -> int:
@@ -358,7 +379,7 @@ class Consolidator:
         model: str,
         sessions: SessionManager,
         context_window_tokens: int,
-        build_messages: Callable[..., list[dict[str, Any]]],
+        build_messages: Callable[..., Awaitable[list[dict[str, Any]]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         max_completion_tokens: int = 4096,
     ):
@@ -416,11 +437,11 @@ class Consolidator:
                 return idx
         return None
 
-    def estimate_session_prompt_tokens(self, session: Session) -> tuple[int, str]:
+    async def estimate_session_prompt_tokens(self, session: Session) -> tuple[int, str]:
         """Estimate current prompt size for the normal session history view."""
         history = session.get_history(max_messages=0)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
-        probe_messages = self._build_messages(
+        probe_messages = await self._build_messages(
             history=history,
             current_message="[token-probe]",
             channel=channel,
@@ -479,7 +500,7 @@ class Consolidator:
             budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
             target = budget // 2
             try:
-                estimated, source = self.estimate_session_prompt_tokens(session)
+                estimated, source = await self.estimate_session_prompt_tokens(session)
             except Exception:
                 logger.exception("Token estimation failed for {}", session.key)
                 estimated, source = 0, "error"
@@ -539,7 +560,7 @@ class Consolidator:
                 self.sessions.save(session)
 
                 try:
-                    estimated, source = self.estimate_session_prompt_tokens(session)
+                    estimated, source = await self.estimate_session_prompt_tokens(session)
                 except Exception:
                     logger.exception("Token estimation failed for {}", session.key)
                     estimated, source = 0, "error"

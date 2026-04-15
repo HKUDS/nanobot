@@ -27,11 +27,13 @@ class ChannelManager:
     - Route outbound messages
     """
 
-    def __init__(self, config: Config, bus: MessageBus):
+    def __init__(self, config: Config, bus: MessageBus,session_manager: "SessionManager | None" = None,cron_service: Any = None):
         self.config = config
         self.bus = bus
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
+        self.session_manager = session_manager
+        self.cron_service = cron_service
 
         self._init_channels()
 
@@ -54,7 +56,16 @@ class ChannelManager:
             if not enabled:
                 continue
             try:
-                channel = cls(section, self.bus)
+                if name == "web":
+                    channel = cls(
+                        section,
+                        self.bus,
+                        session_manager=self.session_manager,
+                        full_config=self.config,
+                        cron_service=self.cron_service,
+                    )
+                else:
+                    channel = cls(section, self.bus)
                 channel.transcription_provider = transcription_provider
                 channel.transcription_api_key = transcription_key
                 self.channels[name] = channel
@@ -62,7 +73,7 @@ class ChannelManager:
             except Exception as e:
                 logger.warning("{} channel not available: {}", name, e)
 
-        self._validate_allow_from()
+        # self._validate_allow_from()
 
     def _resolve_transcription_key(self, provider: str) -> str:
         """Pick the API key for the configured transcription provider."""

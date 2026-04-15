@@ -1,10 +1,16 @@
 """Context builder for assembling agent prompts."""
 
+from __future__ import annotations
+
+import asyncio
 import base64
 import mimetypes
 import platform
+import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from loguru import logger
 
 from nanobot.utils.helpers import current_time_str
 
@@ -13,6 +19,9 @@ from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import build_assistant_message, detect_image_mime
 
+if TYPE_CHECKING:
+    from nanobot.openviking.client import VikingClient
+
 
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
@@ -20,21 +29,56 @@ class ContextBuilder:
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
     _MAX_RECENT_HISTORY = 50
+    _VIKING_TIMEOUT = 5.0       # seconds before giving up on a Viking API call
+    _PROFILE_CACHE_TTL = 300.0  # seconds to reuse a cached user profile
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        timezone: str | None = None,
+        disabled_skills: list[str] | None = None,
+        viking_client: VikingClient | None = None,
+    ):
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+        self._viking_client = viking_client
+        self._cached_profile: str | None = None
+        self._profile_cache_time: float = 0.0
 
-    def build_system_prompt(
-        self,
-        skill_names: list[str] | None = None,
-        channel: str | None = None,
-    ) -> str:
+    def set_viking_client(self, client: VikingClient) -> None:
+        self._viking_client = client
+        self._cached_profile = None  # invalidate cache when client changes
+        self._profile_cache_time = 0.0
+
+    async def _get_cached_profile(self) -> str:
+        """Return user profile from cache, refreshing if stale. Timeout-protected."""
+        now = time.monotonic()
+        if self._cached_profile is not None and now - self._profile_cache_time < self._PROFILE_CACHE_TTL:
+            return self._cached_profile
+        try:
+            profile = await asyncio.wait_for(
+                self.memory.get_viking_user_profile(self._viking_client),
+                timeout=self._VIKING_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("OpenViking user profile fetch timed out ({}s)", self._VIKING_TIMEOUT)
+            return self._cached_profile or ""
+        self._cached_profile = profile
+        self._profile_cache_time = now
+        return profile
+
+    async def build_system_prompt(self, skill_names: list[str] | None = None,channel: str | None = None,) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity(channel=channel)]
+
+        # Semantic user profile (cached, with timeout)
+        if self._viking_client:
+            profile = await self._get_cached_profile()
+            if profile:
+                parts.append(profile)
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -44,13 +88,13 @@ class ContextBuilder:
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
-        always_skills = self.skills.get_always_skills()
+        always_skills = self.skills.get_always_skills(channel=channel)
         if always_skills:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
 
-        skills_summary = self.skills.build_skills_summary()
+        skills_summary = self.skills.build_skills_summary(channel=channel)
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
@@ -79,13 +123,21 @@ class ContextBuilder:
 
     @staticmethod
     def _build_runtime_context(
-        channel: str | None, chat_id: str | None, timezone: str | None = None,
+        channel: str | None,
+        chat_id: str | None,
+        timezone: str | None = None,
         session_summary: str | None = None,
+        sender_id: str | None = None,
+        sender_name: str | None = None,
     ) -> str:
         """Build untrusted runtime metadata block for injection before the user message."""
         lines = [f"Current Time: {current_time_str(timezone)}"]
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
+        if sender_id:
+            lines.append(f"Sender ID: {sender_id}")
+        if sender_name:
+            lines.append(f"Sender Name: {sender_name}")
         if session_summary:
             lines += ["", "[Resumed Session]", session_summary]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines) + "\n" + ContextBuilder._RUNTIME_CONTEXT_END
@@ -116,7 +168,7 @@ class ContextBuilder:
 
         return "\n\n".join(parts) if parts else ""
 
-    def build_messages(
+    async def build_messages(
         self,
         history: list[dict[str, Any]],
         current_message: str,
@@ -124,21 +176,46 @@ class ContextBuilder:
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        sender_id: str | None = None,
+        sender_name: str | None = None,
         current_role: str = "user",
         session_summary: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
-        runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone, session_summary=session_summary)
+        runtime_ctx = self._build_runtime_context(
+            channel,
+            chat_id,
+            self.timezone,
+            session_summary=session_summary,
+            sender_id=sender_id,
+            sender_name=sender_name,
+        )
         user_content = self._build_user_content(current_message, media)
 
-        # Merge runtime context and user content into a single user message
-        # to avoid consecutive same-role messages that some providers reject.
         if isinstance(user_content, str):
             merged = f"{runtime_ctx}\n\n{user_content}"
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
+        system_prompt = await self.build_system_prompt(skill_names, channel=channel)
+
+        if self._viking_client and current_message:
+            try:
+                viking_mem = await asyncio.wait_for(
+                    self.memory.get_viking_memory_context(current_message, self._viking_client),
+                    timeout=self._VIKING_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("OpenViking memory context fetch timed out ({}s)", self._VIKING_TIMEOUT)
+                viking_mem = ""
+            if viking_mem:
+                logger.info("OpenViking User Memory : {}", str(viking_mem)[:100])
+                system_prompt += (
+                    "\n\n## Your memories about the current conversation. "
+                    "If you need more details, use the tools.\n"
+                    + viking_mem
+                )
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel)},
+            {"role": "system", "content": system_prompt},
             *history,
         ]
         if messages[-1].get("role") == current_role:

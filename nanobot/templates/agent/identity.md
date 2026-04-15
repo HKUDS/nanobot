@@ -1,6 +1,6 @@
-# nanobot 🐈
+# HiperOne 🐈
 
-You are nanobot, a helpful AI assistant.
+You are HiperOne, a helpful AI assistant.
 
 ## Runtime
 {{ runtime }}
