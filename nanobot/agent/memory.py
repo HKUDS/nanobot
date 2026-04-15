@@ -609,9 +609,9 @@ class Consolidator:
                 estimated, source = 0, "error"
             if _PROFILING:
                 logger.debug("[profiling] estimation: {:.1f}ms", (_time_mod.perf_counter() - _est_t0) * 1000)
-            self._record_estimation(session, estimated)
             if estimated <= 0:
                 return
+            self._record_estimation(session, estimated)
             if estimated < budget:
                 unconsolidated_count = len(session.messages) - session.last_consolidated
                 logger.debug(
