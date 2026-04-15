@@ -871,21 +871,37 @@ class AgentLoop:
             self.sessions.save(session)
             user_persisted_early = True
 
-        final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
-            initial_messages,
-            on_progress=on_progress or _bus_progress,
-            on_stream=on_stream,
-            on_stream_end=on_stream_end,
-            on_retry_wait=_on_retry_wait,
-            session=session,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            message_id=msg.metadata.get("message_id"),
-            pending_queue=pending_queue,
-        )
+        from nanobot.observability.tracer import set_trace_attributes, detach_trace_context
+        tracer = self.provider.tracer
+        user_id = f"{msg.channel}:{msg.sender_id}" if msg.sender_id else None
 
-        if final_content is None or not final_content.strip():
-            final_content = EMPTY_FINAL_RESPONSE_MESSAGE
+        with tracer.start_as_current_span("message-processing") as trace_span:
+            baggage_tokens = set_trace_attributes(
+                trace_span, session_id=key, user_id=user_id,
+                input=msg.content,
+            )
+            try:
+                final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
+                    initial_messages,
+                    on_progress=on_progress or _bus_progress,
+                    on_stream=on_stream,
+                    on_stream_end=on_stream_end,
+                    on_retry_wait=_on_retry_wait,
+                    session=session,
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    message_id=msg.metadata.get("message_id"),
+                    pending_queue=pending_queue,
+                )
+
+                if final_content is None or not final_content.strip():
+                    final_content = EMPTY_FINAL_RESPONSE_MESSAGE
+
+                trace_span.set_attribute("langfuse.trace.output", final_content)
+                trace_span.set_attribute("langfuse.observation.output", final_content)
+                trace_span.set_attribute("output.value", final_content)
+            finally:
+                detach_trace_context(baggage_tokens)
 
         # Skip the already-persisted user message when saving the turn
         save_skip = 1 + len(history) + (1 if user_persisted_early else 0)

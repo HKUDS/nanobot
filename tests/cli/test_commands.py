@@ -479,7 +479,8 @@ def mock_agent_runtime(tmp_path):
     with patch("nanobot.config.loader.load_config", return_value=config) as mock_load_config, \
          patch("nanobot.config.loader.resolve_config_env_vars", side_effect=lambda c: c), \
          patch("nanobot.cli.commands.sync_workspace_templates") as mock_sync_templates, \
-         patch("nanobot.cli.commands._make_provider", return_value=object()), \
+         patch("nanobot.cli.commands._make_provider", return_value=MagicMock()), \
+         patch("nanobot.cli.commands._make_tracer", return_value=MagicMock()), \
          patch("nanobot.cli.commands._print_agent_response") as mock_print_response, \
          patch("nanobot.bus.queue.MessageBus"), \
          patch("nanobot.cron.service.CronService"), \
@@ -554,7 +555,8 @@ def test_agent_config_sets_active_path(monkeypatch, tmp_path: Path) -> None:
     )
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: MagicMock())
+    monkeypatch.setattr("nanobot.cli.commands._make_tracer", lambda _config: MagicMock())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: object())
 
@@ -589,7 +591,8 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: MagicMock())
+    monkeypatch.setattr("nanobot.cli.commands._make_tracer", lambda _config: MagicMock())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
 
     class _FakeCron:
@@ -635,7 +638,8 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: MagicMock())
+    monkeypatch.setattr("nanobot.cli.commands._make_tracer", lambda _config: MagicMock())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
 
@@ -688,7 +692,8 @@ def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: MagicMock())
+    monkeypatch.setattr("nanobot.cli.commands._make_tracer", lambda _config: MagicMock())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
     monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
 
@@ -798,9 +803,10 @@ def _patch_cli_command_runtime(
         "nanobot.cli.commands.sync_workspace_templates",
         sync_templates or (lambda _path: None),
     )
+    from types import SimpleNamespace
     monkeypatch.setattr(
         "nanobot.cli.commands._make_provider",
-        make_provider or (lambda _config: object()),
+        make_provider or (lambda _config: SimpleNamespace()),
     )
 
     if message_bus is not None:
@@ -932,7 +938,8 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
 
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "config-workspace")
-    provider = object()
+    from types import SimpleNamespace
+    provider = SimpleNamespace()
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
     seen: dict[str, object] = {}
@@ -1051,7 +1058,8 @@ def test_gateway_cron_job_suppresses_intermediate_progress(
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: MagicMock())
+    monkeypatch.setattr("nanobot.cli.commands._make_tracer", lambda _config: MagicMock())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
     monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
 

@@ -477,6 +477,18 @@ def _make_provider(config: Config):
     return provider
 
 
+def _make_tracer(config: Config):
+    """Create an OTel tracer from config."""
+    from nanobot.observability.tracer import create_tracer
+    return create_tracer(config.observability)
+
+
+def shutdown_tracer(tracer) -> None:
+    """Flush and shut down the tracer provider."""
+    from nanobot.observability.tracer import shutdown_tracer as _shutdown
+    _shutdown(tracer)
+
+
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
     from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
@@ -665,6 +677,8 @@ def _run_gateway(
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(config)
+    tracer = _make_tracer(config)
+    provider.tracer = tracer
     session_manager = SessionManager(config.workspace_path)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
@@ -941,6 +955,7 @@ def _run_gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
+            shutdown_tracer(tracer)
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
@@ -982,6 +997,8 @@ def agent(
 
     bus = MessageBus()
     provider = _make_provider(config)
+    tracer = _make_tracer(config)
+    provider.tracer = tracer
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
@@ -1053,6 +1070,7 @@ def agent(
                     render_markdown=markdown,
                     metadata=response.metadata if response else None,
                 )
+            shutdown_tracer(tracer)
             await agent_loop.close_mcp()
 
         asyncio.run(run_once())
@@ -1191,6 +1209,7 @@ def agent(
                 agent_loop.stop()
                 outbound_task.cancel()
                 await asyncio.gather(bus_task, outbound_task, return_exceptions=True)
+                shutdown_tracer(tracer)
                 await agent_loop.close_mcp()
 
         asyncio.run(run_interactive())

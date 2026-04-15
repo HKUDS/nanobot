@@ -224,6 +224,29 @@ class ToolsConfig(Base):
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
 
 
+class LangfuseConfig(Base):
+    """Langfuse backend configuration."""
+
+    public_key: str = ""
+    secret_key: str = ""
+    base_url: str = "https://cloud.langfuse.com"
+
+
+class LangsmithConfig(Base):
+    """LangSmith backend configuration."""
+
+    api_key: str = ""
+    project: str = "default"
+
+
+class ObservabilityConfig(Base):
+    """Observability/tracing configuration."""
+
+    backends: list[str] = Field(default_factory=list)  # ["langfuse", "langsmith"] for fan-out
+    langfuse: LangfuseConfig = Field(default_factory=LangfuseConfig)
+    langsmith: LangsmithConfig = Field(default_factory=LangsmithConfig)
+
+
 class Config(BaseSettings):
     """Root configuration for nanobot."""
 
@@ -233,6 +256,7 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
     @property
     def workspace_path(self) -> Path:

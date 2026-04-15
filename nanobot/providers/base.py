@@ -164,6 +164,18 @@ class LLMProvider(ABC):
         self.api_key = api_key
         self.api_base = api_base
         self.generation: GenerationSettings = GenerationSettings()
+        self._tracer = None
+
+    @property
+    def tracer(self):
+        if self._tracer is None:
+            from opentelemetry.trace import NoOpTracer
+            self._tracer = NoOpTracer()
+        return self._tracer
+
+    @tracer.setter
+    def tracer(self, value) -> None:
+        self._tracer = value
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -543,19 +555,37 @@ class LLMProvider(ABC):
         if reasoning_effort is self._SENTINEL:
             reasoning_effort = self.generation.reasoning_effort
 
-        kw: dict[str, Any] = dict(
-            messages=messages, tools=tools, model=model,
-            max_tokens=max_tokens, temperature=temperature,
-            reasoning_effort=reasoning_effort, tool_choice=tool_choice,
-            on_content_delta=on_content_delta,
-        )
-        return await self._run_with_retry(
-            self._safe_chat_stream,
-            kw,
-            messages,
-            retry_mode=retry_mode,
-            on_retry_wait=on_retry_wait,
-        )
+        from opentelemetry.trace import StatusCode
+        from nanobot.observability.tracer import set_llm_request_attributes, set_llm_response_attributes
+
+        with self.tracer.start_as_current_span("llm-call") as span:
+            set_llm_request_attributes(
+                span, model=model or "", messages=messages,
+                tools_count=len(tools) if tools else 0,
+            )
+
+            kw: dict[str, Any] = dict(
+                messages=messages, tools=tools, model=model,
+                max_tokens=max_tokens, temperature=temperature,
+                reasoning_effort=reasoning_effort, tool_choice=tool_choice,
+                on_content_delta=on_content_delta,
+            )
+            response = await self._run_with_retry(
+                self._safe_chat_stream,
+                kw,
+                messages,
+                retry_mode=retry_mode,
+                on_retry_wait=on_retry_wait,
+            )
+            if response.finish_reason == "error":
+                span.set_status(StatusCode.ERROR, response.content or "")
+            else:
+                set_llm_response_attributes(
+                    span, model=model or "",
+                    content=response.content,
+                    usage=response.usage or {}, finish_reason=response.finish_reason,
+                )
+            return response
 
     async def chat_with_retry(
         self,
@@ -585,18 +615,36 @@ class LLMProvider(ABC):
         if reasoning_effort is self._SENTINEL:
             reasoning_effort = self.generation.reasoning_effort
 
-        kw: dict[str, Any] = dict(
-            messages=messages, tools=tools, model=model,
-            max_tokens=max_tokens, temperature=temperature,
-            reasoning_effort=reasoning_effort, tool_choice=tool_choice,
-        )
-        return await self._run_with_retry(
-            self._safe_chat,
-            kw,
-            messages,
-            retry_mode=retry_mode,
-            on_retry_wait=on_retry_wait,
-        )
+        from opentelemetry.trace import StatusCode
+        from nanobot.observability.tracer import set_llm_request_attributes, set_llm_response_attributes
+
+        with self.tracer.start_as_current_span("llm-call") as span:
+            set_llm_request_attributes(
+                span, model=model or "", messages=messages,
+                tools_count=len(tools) if tools else 0,
+            )
+
+            kw: dict[str, Any] = dict(
+                messages=messages, tools=tools, model=model,
+                max_tokens=max_tokens, temperature=temperature,
+                reasoning_effort=reasoning_effort, tool_choice=tool_choice,
+            )
+            response = await self._run_with_retry(
+                self._safe_chat,
+                kw,
+                messages,
+                retry_mode=retry_mode,
+                on_retry_wait=on_retry_wait,
+            )
+            if response.finish_reason == "error":
+                span.set_status(StatusCode.ERROR, response.content or "")
+            else:
+                set_llm_response_attributes(
+                    span, model=model or "",
+                    content=response.content,
+                    usage=response.usage or {}, finish_reason=response.finish_reason,
+                )
+            return response
 
     @classmethod
     def _extract_retry_after(cls, content: str | None) -> float | None:
