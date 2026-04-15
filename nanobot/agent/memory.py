@@ -53,6 +53,7 @@ class MemoryStore:
         self.user_file = workspace / "USER.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
+        self._pending_entries: list[dict[str, Any]] = []
         self._cursor_byte_offset: int = 0
         self._cached_since_cursor: int = -1
         self._git = GitStore(workspace, tracked_files=[
@@ -227,17 +228,26 @@ class MemoryStore:
     # -- history.jsonl — append-only, JSONL format ---------------------------
 
     def append_history(self, entry: str) -> int:
-        """Append *entry* to history.jsonl and return its auto-incrementing cursor."""
+        """Buffer *entry* for later flush and return its auto-incrementing cursor."""
         cursor = self._next_cursor()
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
         record = {"cursor": cursor, "timestamp": ts, "content": strip_think(entry.rstrip()) or entry.rstrip()}
-        with open(self.history_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self._pending_entries.append(record)
         self._cursor_file.write_text(str(cursor), encoding="utf-8")
         return cursor
 
+    def flush_history(self) -> None:
+        """Write all buffered entries to history.jsonl."""
+        if not self._pending_entries:
+            return
+        with open(self.history_file, "a", encoding="utf-8") as f:
+            f.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in self._pending_entries)
+        self._pending_entries.clear()
+
     def _next_cursor(self) -> int:
         """Read the current cursor counter and return next value."""
+        if self._pending_entries:
+            return self._pending_entries[-1]["cursor"] + 1
         if self._cursor_file.exists():
             try:
                 return int(self._cursor_file.read_text(encoding="utf-8").strip()) + 1
@@ -262,10 +272,15 @@ class MemoryStore:
         if self.history_file.exists():
             self._cursor_byte_offset = self.history_file.stat().st_size
         self._cached_since_cursor = since_cursor
+        # Include buffered entries not yet flushed to disk.
+        for e in self._pending_entries:
+            if e["cursor"] > since_cursor:
+                entries.append(e)
         return entries
 
     def compact_history(self) -> None:
         """Drop oldest entries if the file exceeds *max_history_entries*."""
+        self.flush_history()  # flush pending before rewrite
         if self.max_history_entries <= 0:
             return
         entries = self._read_entries()
@@ -498,6 +513,7 @@ class Consolidator:
             )
             summary = response.content or "[no summary]"
             self.store.append_history(summary)
+            self.store.flush_history()
             return summary
         except Exception:
             logger.warning("Consolidation LLM call failed, raw-dumping to history")
@@ -785,6 +801,7 @@ class Dream:
         # Advance cursor — always, to avoid re-processing Phase 1
         new_cursor = batch[-1]["cursor"]
         self.store.set_last_dream_cursor(new_cursor)
+        self.store.flush_history()
         self.store.compact_history()
 
         if result and result.stop_reason == "completed":

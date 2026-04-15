@@ -55,6 +55,7 @@ class TestHistoryWithCursor:
 
     def test_append_history_includes_cursor_in_file(self, store):
         store.append_history("event 1")
+        store.flush_history()
         content = store.read_file(store.history_file)
         data = json.loads(content)
         assert data["cursor"] == 1
