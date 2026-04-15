@@ -1,18 +1,4 @@
-"""PythonRuntimeTool — stateful Python code execution powered by cave-agent's runtime.
-
-This tool gives nanobot a Jupyter-like execution environment where variables,
-imports, and function definitions persist across calls. It wraps cave-agent's
-IPythonRuntime or IPyKernelRuntime as a nanobot Tool.
-
-Architecture:
-    LLM → tool_call("python", {"code": "..."}) → PythonRuntimeTool → cave-agent Runtime
-
-Key advantages over nanobot's existing ExecTool (subprocess):
-    - State persistence: variables/imports survive across tool calls
-    - Object injection: arbitrary Python objects can be injected into the namespace
-    - Direct manipulation: LLM generates Python code to operate on complex objects
-    - AST security: fine-grained security rules (ImportRule, FunctionRule, etc.)
-"""
+"""Stateful Python code execution tool wrapping cave-agent's IPython/IPyKernel runtime."""
 
 from __future__ import annotations
 
@@ -26,7 +12,7 @@ from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 
 if TYPE_CHECKING:
-    pass
+    from nanobot.config.schema import SecurityRulesConfig
 
 # ---------------------------------------------------------------------------
 # Lazy import helpers — cave-agent may not be installed, so we import
@@ -98,17 +84,7 @@ def _get_ipykernel_runtime() -> type:
     )
 )
 class PythonRuntimeTool(Tool):
-    """Stateful Python code execution tool backed by cave-agent's runtime.
-
-    Unlike ExecTool (which spawns an independent subprocess each call),
-    this tool maintains a persistent IPython namespace where all variables,
-    imports, and definitions survive across invocations.
-
-    Usage from nanobot's LLM:
-        tool_call("python", {"code": "import pandas as pd\\ndf = pd.read_csv('data.csv')\\nprint(df.head())"})
-        # df persists! Next call can reference it directly:
-        tool_call("python", {"code": "result = df[df['age'] > 30]\\nprint(result.shape)"})
-    """
+    """Stateful Python execution backed by cave-agent's IPython/IPyKernel runtime."""
 
     _MAX_OUTPUT = 10_000
     _MAX_TRACEBACK = 2_000
@@ -118,26 +94,31 @@ class PythonRuntimeTool(Tool):
         *,
         backend: str = "ipython",
         security_rules: list | None = None,
+        security_config: SecurityRulesConfig | None = None,
         max_output_chars: int = 10_000,
+        timeout: int = 60,
         inject_functions: list[dict] | None = None,
         inject_variables: list[dict] | None = None,
         inject_types: list[dict] | None = None,
     ):
-        """
-        Args:
-            backend: "ipython" (in-process, zero-overhead) or
-                     "ipykernel" (separate process, crash-safe).
-            security_rules: cave-agent SecurityRule instances.
-            max_output_chars: Truncate output beyond this limit.
-            inject_functions: List of {"func": callable, "description": str} to pre-inject.
-            inject_variables: List of {"name": str, "value": Any, "description": str} to pre-inject.
-            inject_types: List of {"cls": type, "description": str} to pre-inject.
-        """
         _ensure_cave_agent()
+
+        if security_config and not security_rules:
+            from cave_agent.security import AttributeRule, FunctionRule, ImportRule
+
+            rules: list = []
+            if security_config.blocked_imports:
+                rules.append(ImportRule(set(security_config.blocked_imports)))
+            if security_config.blocked_functions:
+                rules.append(FunctionRule(set(security_config.blocked_functions)))
+            if security_config.blocked_attributes:
+                rules.append(AttributeRule(set(security_config.blocked_attributes)))
+            security_rules = rules or None
 
         self._backend = backend
         self._security_rules = security_rules
         self._max_output = max_output_chars
+        self._timeout = timeout
         self._inject_functions = inject_functions or []
         self._inject_variables = inject_variables or []
         self._inject_types = inject_types or []
@@ -189,6 +170,7 @@ class PythonRuntimeTool(Tool):
         if self._backend == "ipykernel":
             IPyKernelRuntime = _get_ipykernel_runtime()
             self._runtime = IPyKernelRuntime(security_checker=checker)
+            # NOTE: _executor.start() is a private API of IPyKernelRuntime — file upstream issue if it breaks
             await self._runtime._executor.start()
         else:
             self._runtime = _IPythonRuntime(security_checker=checker)
@@ -210,10 +192,21 @@ class PythonRuntimeTool(Tool):
         return self._runtime
 
     async def reset(self) -> None:
-        """Reset the runtime, clearing all state."""
+        """Reset the runtime kernel. Registered injections (variables/functions/types) are preserved and will be re-injected on next execute."""
         if self._runtime is not None:
             await self._runtime.reset()
             logger.info("PythonRuntimeTool reset")
+
+    async def cleanup(self) -> None:
+        if self._runtime is None:
+            return
+        if hasattr(self._runtime, "shutdown"):
+            await self._runtime.shutdown()
+        else:
+            await self.reset()
+        self._runtime = None
+        self._started = False
+        logger.info("PythonRuntimeTool cleaned up")
 
     # ------------------------------------------------------------------
     # Execution
@@ -231,10 +224,20 @@ class PythonRuntimeTool(Tool):
         runtime = await self._ensure_runtime()
 
         try:
-            result = await runtime.execute(code)
+            result = await asyncio.wait_for(runtime.execute(code), timeout=self._timeout)
+        except asyncio.TimeoutError:
+            return f"Error: Code execution timed out after {self._timeout}s"
         except Exception as exc:
-            # If kernel crashed, attempt reset and report
             logger.warning("PythonRuntime execution error: {}", exc)
+            if await self._is_runtime_dead():
+                logger.info("PythonRuntime appears dead, attempting restart...")
+                self._runtime = None
+                self._started = False
+                try:
+                    runtime = await self._ensure_runtime()
+                    return f"Runtime crashed and was restarted. Previous error: {exc}\nPlease retry your code."
+                except Exception as restart_exc:
+                    return self._format_error(restart_exc)
             return self._format_error(exc)
 
         if result.success:
@@ -288,14 +291,29 @@ class PythonRuntimeTool(Tool):
         runtime = await self._ensure_runtime()
         return await runtime.retrieve(name)
 
-    def describe_namespace(self) -> str:
-        """Generate a text description of the namespace for system prompt injection.
-
-        Returns a formatted string listing available functions, variables, and types.
-        """
+    def describe_namespace(self, max_chars: int = 2000) -> str:
+        """Generate a text description of the namespace for system prompt injection."""
         if self._runtime is None:
-            return self._describe_pending_injections()
-        return self._describe_active_runtime()
+            description = self._describe_pending_injections()
+        else:
+            description = self._describe_active_runtime()
+        if len(description) > max_chars:
+            lines = description.split("\n")
+            truncated = []
+            total = 0
+            skipped = 0
+            for line in lines:
+                if total + len(line) + 1 > max_chars:
+                    skipped += 1
+                else:
+                    truncated.append(line)
+                    total += len(line) + 1
+            description = "\n".join(truncated)
+            if skipped:
+                description += (
+                    f"\n... ({skipped} more items, description truncated at {max_chars} chars)"
+                )
+        return description
 
     def _describe_pending_injections(self) -> str:
         """Describe objects that will be injected on first use."""
@@ -345,6 +363,15 @@ class PythonRuntimeTool(Tool):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    async def _is_runtime_dead(self) -> bool:
+        if self._runtime is None:
+            return True
+        try:
+            result = await asyncio.wait_for(self._runtime.execute("1"), timeout=5)
+            return not result.success
+        except (asyncio.TimeoutError, Exception):
+            return True
 
     def _format_error(self, exc: BaseException | None) -> str:
         """Format an error for LLM consumption."""

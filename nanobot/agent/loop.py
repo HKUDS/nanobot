@@ -297,6 +297,7 @@ class AgentLoop:
                 python_tool = PythonRuntimeTool(
                     backend=self.python_runtime_config.backend,
                     max_output_chars=self.python_runtime_config.max_output_chars,
+                    security_config=self.python_runtime_config.security,
                 )
                 self.tools.register(python_tool)
                 self._python_runtime_tool = python_tool
@@ -640,11 +641,20 @@ class AgentLoop:
                         session_key,
                     )
 
+    async def close_runtime(self) -> None:
+        if self._python_runtime_tool is not None:
+            try:
+                await self._python_runtime_tool.cleanup()
+            except Exception:
+                logger.warning("PythonRuntime cleanup error (can be ignored)")
+            self._python_runtime_tool = None
+
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
+        await self.close_runtime()
         for name, stack in self._mcp_stacks.items():
             try:
                 await stack.aclose()

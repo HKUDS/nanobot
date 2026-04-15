@@ -225,12 +225,41 @@ class MCPServerConfig(Base):
     )  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
 
+class SecurityRulesConfig(Base):
+    """Security rules for the Python runtime (AST-level validation).
+
+    Defense-in-depth security rules. These are NOT a sandbox — process isolation
+    (bubblewrap/containers) is required for untrusted code. These rules only
+    block obvious escape vectors for convenience.
+    """
+
+    blocked_imports: list[str] = Field(
+        default_factory=lambda: [
+            "os",
+            "subprocess",
+            "sys",
+            "shutil",
+            "socket",
+            "ctypes",
+            "signal",
+            "multiprocessing",
+            "importlib",
+            "pathlib",
+        ]
+    )
+    blocked_functions: list[str] = Field(
+        default_factory=lambda: ["eval", "exec", "compile", "breakpoint", "__import__"]
+    )
+    blocked_attributes: list[str] = Field(default_factory=list)
+
+
 class PythonRuntimeConfig(Base):
     """cave-agent Python runtime tool configuration."""
 
     enable: bool = False
     backend: str = "ipython"  # "ipython" (in-process) or "ipykernel" (process-isolated)
     max_output_chars: int = 10_000
+    security: SecurityRulesConfig = Field(default_factory=SecurityRulesConfig)
 
 
 class ToolsConfig(Base):
