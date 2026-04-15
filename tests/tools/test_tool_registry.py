@@ -62,6 +62,35 @@ def test_prepare_call_read_file_rejects_non_object_params_with_actionable_hint()
     assert "Use named parameters" in error
 
 
+def test_get_definitions_caches_result() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool("read_file"))
+    result1 = registry.get_definitions()
+    result2 = registry.get_definitions()
+    assert result1 is result2  # same object — cache hit
+
+
+def test_cache_invalidated_on_register() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool("read_file"))
+    result1 = registry.get_definitions()
+    registry.register(_FakeTool("write_file"))
+    result2 = registry.get_definitions()
+    assert result1 is not result2
+    assert len(result2) == 2
+
+
+def test_cache_invalidated_on_unregister() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool("read_file"))
+    registry.register(_FakeTool("write_file"))
+    result1 = registry.get_definitions()
+    registry.unregister("write_file")
+    result2 = registry.get_definitions()
+    assert result1 is not result2
+    assert len(result2) == 1
+
+
 def test_prepare_call_other_tools_keep_generic_object_validation() -> None:
     registry = ToolRegistry()
     registry.register(_FakeTool("grep"))
