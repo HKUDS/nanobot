@@ -237,7 +237,6 @@ class SecurityRulesConfig(Base):
         default_factory=lambda: [
             "os",
             "subprocess",
-            "sys",
             "shutil",
             "socket",
             "ctypes",
@@ -248,7 +247,15 @@ class SecurityRulesConfig(Base):
         ]
     )
     blocked_functions: list[str] = Field(
-        default_factory=lambda: ["eval", "exec", "compile", "breakpoint", "__import__"]
+        default_factory=lambda: [
+            "eval",
+            "exec",
+            "compile",
+            "breakpoint",
+            "__import__",
+            "exit",
+            "settrace",
+        ]
     )
     blocked_attributes: list[str] = Field(default_factory=list)
 

@@ -1,10 +1,20 @@
-"""Stateful Python code execution tool wrapping cave-agent's IPython/IPyKernel runtime."""
+"""Stateful Python code execution tools wrapping cave-agent's IPython/IPyKernel runtime.
+
+Provides a ``PythonRuntimeManager`` that owns the cave-agent runtime lifecycle,
+and three ``Tool`` subclasses that share a single manager instance:
+
+- ``PythonExecuteTool`` (name="python") — main code execution with dynamic description
+- ``PythonResetTool`` (name="python_reset") — resets the runtime
+- ``PythonDescribeTool`` (name="python_describe") — returns current namespace description
+
+``PythonRuntimeTool`` is kept as a backward-compatibility alias for ``PythonExecuteTool``.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import traceback
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -38,7 +48,7 @@ def _ensure_cave_agent() -> None:
 
     try:
         from cave_agent.runtime.ipython_runtime import IPythonRuntime
-        from cave_agent.runtime.primitives import Variable, Function, Type
+        from cave_agent.runtime.primitives import Function, Type, Variable
         from cave_agent.security import SecurityChecker
 
         _IPythonRuntime = IPythonRuntime
@@ -69,22 +79,16 @@ def _get_ipykernel_runtime() -> type:
 
 
 # ---------------------------------------------------------------------------
-# Tool implementation
+# PythonRuntimeManager — owns the cave-agent runtime lifecycle
 # ---------------------------------------------------------------------------
 
 
-@tool_parameters(
-    tool_parameters_schema(
-        code=StringSchema(
-            "Python code to execute in the stateful runtime. "
-            "Variables, imports, and functions persist across calls. "
-            "Use print() to see output.",
-        ),
-        required=["code"],
-    )
-)
-class PythonRuntimeTool(Tool):
-    """Stateful Python execution backed by cave-agent's IPython/IPyKernel runtime."""
+class PythonRuntimeManager:
+    """Manages the cave-agent IPython/IPyKernel runtime lifecycle.
+
+    Provides execution, namespace management, and cleanup APIs.
+    Shared by all Python-related Tool classes.
+    """
 
     _MAX_OUTPUT = 10_000
     _MAX_TRACEBACK = 2_000
@@ -126,33 +130,6 @@ class PythonRuntimeTool(Tool):
         self._started = False
 
     # ------------------------------------------------------------------
-    # Tool interface
-    # ------------------------------------------------------------------
-
-    @property
-    def name(self) -> str:
-        return "python"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Execute Python code in a STATEFUL runtime. "
-            "Variables, imports, and functions persist across calls — "
-            "like a Jupyter notebook where each call is a new cell. "
-            "Use print() to see output. "
-            "Prefer this over exec for data analysis, object manipulation, "
-            "and multi-step Python workflows."
-        )
-
-    @property
-    def exclusive(self) -> bool:
-        return True  # modifies namespace state
-
-    @property
-    def read_only(self) -> bool:
-        return False
-
-    # ------------------------------------------------------------------
     # Runtime lifecycle
     # ------------------------------------------------------------------
 
@@ -188,14 +165,26 @@ class PythonRuntimeTool(Tool):
             self._runtime.inject_type(_Type(item["cls"], description=item.get("description", "")))
 
         self._started = True
-        logger.info("PythonRuntimeTool initialized (backend={})", self._backend)
+        logger.info("PythonRuntimeManager initialized (backend={})", self._backend)
         return self._runtime
 
     async def reset(self) -> None:
         """Reset the runtime kernel. Registered injections (variables/functions/types) are preserved and will be re-injected on next execute."""
         if self._runtime is not None:
             await self._runtime.reset()
-            logger.info("PythonRuntimeTool reset")
+            for item in self._inject_variables:
+                self._runtime.inject_variable(
+                    _Variable(item["name"], item["value"], item.get("description", ""))
+                )
+            for item in self._inject_functions:
+                self._runtime.inject_function(
+                    _Function(item["func"], description=item.get("description", ""))
+                )
+            for item in self._inject_types:
+                self._runtime.inject_type(
+                    _Type(item["cls"], description=item.get("description", ""))
+                )
+            logger.info("PythonRuntimeManager reset")
 
     async def cleanup(self) -> None:
         if self._runtime is None:
@@ -206,13 +195,13 @@ class PythonRuntimeTool(Tool):
             await self.reset()
         self._runtime = None
         self._started = False
-        logger.info("PythonRuntimeTool cleaned up")
+        logger.info("PythonRuntimeManager cleaned up")
 
     # ------------------------------------------------------------------
     # Execution
     # ------------------------------------------------------------------
 
-    async def execute(self, code: str, **kwargs: Any) -> str:
+    async def execute(self, code: str) -> str:
         """Execute Python code in the stateful runtime.
 
         Args:
@@ -348,17 +337,21 @@ class PythonRuntimeTool(Tool):
 
     def _describe_active_runtime(self) -> str:
         """Describe objects currently in the active runtime."""
-        parts = []
-        funcs = self._runtime.describe_functions()
-        vars_ = self._runtime.describe_variables()
-        types = self._runtime.describe_types()
-        if funcs and "No functions" not in funcs:
-            parts.append(f"Functions:\n{funcs}")
-        if vars_ and "No variables" not in vars_:
-            parts.append(f"Variables:\n{vars_}")
-        if types and "No types" not in types:
-            parts.append(f"Types:\n{types}")
-        return "\n\n".join(parts) if parts else "Empty namespace"
+        try:
+            parts = []
+            funcs = self._runtime.describe_functions()
+            vars_ = self._runtime.describe_variables()
+            types = self._runtime.describe_types()
+            if funcs and "No functions" not in funcs:
+                parts.append(f"Functions:\n{funcs}")
+            if vars_ and "No variables" not in vars_:
+                parts.append(f"Variables:\n{vars_}")
+            if types and "No types" not in types:
+                parts.append(f"Types:\n{types}")
+            return "\n\n".join(parts) if parts else "Empty namespace"
+        except Exception:
+            logger.warning("Failed to describe active runtime namespace", exc_info=True)
+            return "Namespace unavailable (runtime error)"
 
     # ------------------------------------------------------------------
     # Helpers
@@ -384,3 +377,172 @@ class PythonRuntimeTool(Tool):
         if len(tb_str) > self._MAX_TRACEBACK:
             tb_str = tb_str[: self._MAX_TRACEBACK] + "\n... (traceback truncated)"
         return f"Error: {name}: {msg}\n\nTraceback:\n{tb_str}"
+
+
+# ---------------------------------------------------------------------------
+# Tool implementations — thin wrappers that delegate to the manager
+# ---------------------------------------------------------------------------
+
+
+@tool_parameters(
+    tool_parameters_schema(
+        code=StringSchema(
+            "Python code to execute in the stateful runtime. "
+            "Variables, imports, and functions persist across calls. "
+            "Use print() to see output.",
+        ),
+        required=["code"],
+    )
+)
+class PythonExecuteTool(Tool):
+    """Stateful Python execution backed by cave-agent's IPython/IPyKernel runtime."""
+
+    def __init__(self, *, manager: PythonRuntimeManager) -> None:
+        self._manager = manager
+
+    @property
+    def name(self) -> str:
+        return "python"
+
+    @property
+    def description(self) -> str:
+        base = (
+            "Execute Python code in a STATEFUL runtime. "
+            "Variables, imports, and functions persist across calls — "
+            "like a Jupyter notebook where each call is a new cell. "
+            "Use print() to see output. "
+            "Prefer this over exec for data analysis, object manipulation, "
+            "and multi-step Python workflows."
+        )
+        ns = self._manager.describe_namespace(max_chars=1500)
+        if ns and "Empty namespace" not in ns:
+            return f"{base}\n\nCurrent namespace:\n{ns}"
+        return base
+
+    @property
+    def exclusive(self) -> bool:
+        return True  # modifies namespace state
+
+    @property
+    def read_only(self) -> bool:
+        return False
+
+    async def execute(self, code: str, **kwargs: Any) -> str:
+        return await self._manager.execute(code)
+
+
+class PythonResetTool(Tool):
+    """Reset the Python runtime state."""
+
+    def __init__(self, *, manager: PythonRuntimeManager) -> None:
+        self._manager = manager
+
+    @property
+    def name(self) -> str:
+        return "python_reset"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Reset the Python runtime. Clears all variables, imports, and functions "
+            "from the namespace. Use when the runtime is in a bad state or you want "
+            "a clean slate."
+        )
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return tool_parameters_schema()
+
+    @property
+    def exclusive(self) -> bool:
+        return True
+
+    @property
+    def read_only(self) -> bool:
+        return False
+
+    async def execute(self, **kwargs: Any) -> str:
+        try:
+            await self._manager.reset()
+            return (
+                "Runtime reset. All variables and imports cleared. Configured injections preserved."
+            )
+        except Exception as exc:
+            logger.warning("PythonResetTool error: {}", exc)
+            return f"Error: Failed to reset runtime — {exc}"
+
+
+class PythonDescribeTool(Tool):
+    """Show the current Python namespace."""
+
+    def __init__(self, *, manager: PythonRuntimeManager) -> None:
+        self._manager = manager
+
+    @property
+    def name(self) -> str:
+        return "python_describe"
+
+    @property
+    def description(self) -> str:
+        return "Show the current Python namespace — all variables, functions, and types available in the runtime."
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return tool_parameters_schema()
+
+    @property
+    def exclusive(self) -> bool:
+        return False
+
+    @property
+    def read_only(self) -> bool:
+        return True
+
+    async def execute(self, **kwargs: Any) -> str:
+        try:
+            return self._manager.describe_namespace()
+        except Exception as exc:
+            logger.warning("PythonDescribeTool error: {}", exc)
+            return f"Error: Failed to describe namespace — {exc}"
+
+
+# ---------------------------------------------------------------------------
+# Backward compatibility
+# ---------------------------------------------------------------------------
+
+# PythonRuntimeTool is now constructed via PythonRuntimeManager.
+# We provide a factory-like constructor that creates a manager and delegates.
+# This preserves the existing constructor signature so downstream code
+# (loop.py, tests) can keep doing PythonRuntimeTool(backend=..., ...) unchanged.
+
+
+class PythonRuntimeTool(PythonExecuteTool):
+    """Backward-compatible alias for PythonExecuteTool.
+
+    Accepts the same constructor parameters as the original PythonRuntimeTool
+    and internally creates a PythonRuntimeManager + PythonExecuteTool.
+    """
+
+    def __init__(
+        self,
+        *,
+        backend: str = "ipython",
+        security_rules: list | None = None,
+        security_config: SecurityRulesConfig | None = None,
+        max_output_chars: int = 10_000,
+        timeout: int = 60,
+        inject_functions: list[dict] | None = None,
+        inject_variables: list[dict] | None = None,
+        inject_types: list[dict] | None = None,
+    ):
+        self._runtime_manager = PythonRuntimeManager(
+            backend=backend,
+            security_rules=security_rules,
+            security_config=security_config,
+            max_output_chars=max_output_chars,
+            timeout=timeout,
+            inject_functions=inject_functions,
+            inject_variables=inject_variables,
+            inject_types=inject_types,
+        )
+        super().__init__(manager=self._runtime_manager)
