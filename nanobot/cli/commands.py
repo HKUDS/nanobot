@@ -1282,6 +1282,26 @@ def gateway(
 
         return True, ""
 
+    def _is_frontend_task(task_meta: dict[str, Any]) -> bool:
+        project_path_raw = (
+            str(task_meta.get("workspace_path") or "").strip()
+            or str(task_meta.get("project_path") or "").strip()
+        )
+        if not project_path_raw:
+            return False
+        p = Path(project_path_raw)
+        if not p.exists():
+            return False
+        frontend_indicators = (
+            (p / "package.json").exists()
+            or (p / "vite.config.ts").exists()
+            or (p / "vite.config.js").exists()
+            or (p / "src" / "App.tsx").exists()
+            or (p / "src" / "main.tsx").exists()
+            or (p / "src" / "index.tsx").exists()
+        )
+        return frontend_indicators
+
     async def _collect_and_upload_artifacts(
         result_text: str,
         kanban_task_id: str,
@@ -1402,7 +1422,7 @@ def gateway(
             diff_comment = await _build_vicks_diff_comment(task_meta)
             comment_text = f"{comment_text}\n\n{diff_comment}"
 
-        if status == "ok" and role == qa_subagent:
+        if status == "ok" and role == qa_subagent and _is_frontend_task(task_meta):
             workspace_path = str(task_meta.get("workspace_path") or "")
             uploaded = await _collect_and_upload_artifacts(
                 result_preview,
