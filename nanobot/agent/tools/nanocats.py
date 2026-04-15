@@ -1,4 +1,4 @@
-"""Tooling to manage NanoCats Kanban tasks from the agent."""
+"""Tooling to manage Kosmos Kanban tasks from the agent."""
 
 from __future__ import annotations
 
@@ -6,11 +6,23 @@ from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
-from nanobot.services.nanocats_tasks import NanoCatsTasksClient
+from nanobot.services.kosmos_tasks import KosmosTasksClient
+
+ALLOWED_KOSMOS_ACTORS = {"Kosmos", "Vicks", "Wedge", "Rydia"}
 
 
 def _truncate(text: str, limit: int = 120) -> str:
     return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def _canonical_actor(value: str | None) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    for actor in ALLOWED_KOSMOS_ACTORS:
+        if raw.lower() == actor.lower():
+            return actor
+    return None
 
 
 @tool_parameters(
@@ -46,10 +58,10 @@ def _truncate(text: str, limit: int = 120) -> str:
     )
 )
 class NanoCatsTaskTool(Tool):
-    """Manage NanoCats tasks in the kanban board API."""
+    """Manage Kosmos tasks in the kanban board API."""
 
     def __init__(self, base_url: str = "http://localhost:18794"):
-        self._client = NanoCatsTasksClient(base_url=base_url)
+        self._client = KosmosTasksClient(base_url=base_url)
 
     @property
     def name(self) -> str:
@@ -58,7 +70,7 @@ class NanoCatsTaskTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Manage NanoCats kanban tasks by project. "
+            "Manage Kosmos kanban tasks by project. "
             "Use list_pending to get tasks waiting to be done, claim to move task to progress, "
             "qa/release/done for workflow transitions, block/unblock for blockers, "
             "create/delete for task maintenance, "
@@ -104,6 +116,37 @@ class NanoCatsTaskTool(Tool):
         if action == "claim":
             if not task_id:
                 return "Error: task_id is required"
+            requested_assignee = _canonical_actor(assignee) or _canonical_actor(agent_id)
+            task = await self._client.get_task(task_id)
+            if not task:
+                return f"Error: task {task_id} not found"
+
+            if not requested_assignee:
+                requested_assignee = _canonical_actor(str(task.get("assigned_to") or ""))
+            if not requested_assignee:
+                return (
+                    "Error: claim requires a valid assignee. "
+                    "Allowed actors: Kosmos, Vicks, Wedge, Rydia."
+                )
+
+            current_status = str(task.get("status") or "").strip().lower()
+            current_owner = str(task.get("assigned_to") or "").strip()
+
+            if current_status in {"progress", "in_progress"}:
+                if not current_owner or current_owner.lower() == requested_assignee.lower():
+                    return (
+                        f"Task {task_id} is already in progress"
+                        + (f" (owner: {current_owner})" if current_owner else "")
+                        + ". Claim skipped."
+                    )
+
+            if current_status in {"qa", "release", "done"}:
+                return (
+                    f"Task {task_id} is already in status '{current_status}'"
+                    + (f" (owner: {current_owner})" if current_owner else "")
+                    + ". Claim skipped."
+                )
+
             transition_comment = comment_text or str(kwargs.get("transition_comment") or "").strip()
             if not transition_comment:
                 transition_comment = "Task claimed for implementation"
@@ -111,11 +154,20 @@ class NanoCatsTaskTool(Tool):
                 task_id,
                 to_status="progress",
                 comment_text=transition_comment,
-                agent_id=agent_id or assignee or "nanobot",
-                agent_name=assignee or agent_id or "nanobot",
-                assigned_to=assignee or "nanobot",
+                agent_id=requested_assignee,
+                agent_name=requested_assignee,
+                assigned_to=requested_assignee,
             )
             if not updated:
+                latest = await self._client.get_task(task_id)
+                latest_status = str((latest or {}).get("status") or "").strip().lower()
+                latest_owner = str((latest or {}).get("assigned_to") or "").strip()
+                if latest_status in {"progress", "qa", "release", "done"}:
+                    return (
+                        f"Task {task_id} is now in status '{latest_status}'"
+                        + (f" (owner: {latest_owner})" if latest_owner else "")
+                        + ". Claim skipped."
+                    )
                 return f"Error: failed to claim task {task_id}"
             project_info = updated.get("project_id", "")
             return f"Task {task_id} claimed and moved to progress." + (
@@ -125,6 +177,9 @@ class NanoCatsTaskTool(Tool):
         if action == "done":
             if not task_id:
                 return "Error: task_id is required"
+            actor = _canonical_actor(agent_id) or _canonical_actor(assignee)
+            if not actor:
+                return "Error: done requires actor in {Kosmos, Vicks, Wedge, Rydia}"
             transition_comment = comment_text or str(kwargs.get("transition_comment") or "").strip()
             if not transition_comment:
                 transition_comment = "Task completed and ready to close"
@@ -132,8 +187,8 @@ class NanoCatsTaskTool(Tool):
                 task_id,
                 to_status="done",
                 comment_text=transition_comment,
-                agent_id=agent_id or assignee or "nanobot",
-                agent_name=assignee or agent_id or "nanobot",
+                agent_id=actor,
+                agent_name=actor,
                 assigned_to=assignee,
             )
             if not updated:
@@ -143,6 +198,9 @@ class NanoCatsTaskTool(Tool):
         if action == "qa":
             if not task_id:
                 return "Error: task_id is required"
+            actor = _canonical_actor(agent_id) or _canonical_actor(assignee)
+            if not actor:
+                return "Error: qa requires actor in {Kosmos, Vicks, Wedge, Rydia}"
             transition_comment = comment_text or str(kwargs.get("transition_comment") or "").strip()
             if not transition_comment:
                 transition_comment = "Implementation finished and handed off to QA"
@@ -150,8 +208,8 @@ class NanoCatsTaskTool(Tool):
                 task_id,
                 to_status="qa",
                 comment_text=transition_comment,
-                agent_id=agent_id or assignee or "nanobot",
-                agent_name=assignee or agent_id or "nanobot",
+                agent_id=actor,
+                agent_name=actor,
                 assigned_to=assignee,
             )
             if not updated:
@@ -161,6 +219,9 @@ class NanoCatsTaskTool(Tool):
         if action == "release":
             if not task_id:
                 return "Error: task_id is required"
+            actor = _canonical_actor(agent_id) or _canonical_actor(assignee)
+            if not actor:
+                return "Error: release requires actor in {Kosmos, Vicks, Wedge, Rydia}"
             transition_comment = comment_text or str(kwargs.get("transition_comment") or "").strip()
             if not transition_comment:
                 transition_comment = "QA passed and handed off to Release"
@@ -168,8 +229,8 @@ class NanoCatsTaskTool(Tool):
                 task_id,
                 to_status="release",
                 comment_text=transition_comment,
-                agent_id=agent_id or assignee or "nanobot",
-                agent_name=assignee or agent_id or "nanobot",
+                agent_id=actor,
+                agent_name=actor,
                 assigned_to=assignee,
             )
             if not updated:
@@ -261,7 +322,13 @@ class NanoCatsTaskTool(Tool):
             comment = comment_text or task_description or str(kwargs.get("comment") or "")
             if not comment.strip():
                 return "Error: comment text is required"
-            actor = agent_id or assignee or str(kwargs.get("agent_id") or "nanobot")
+            actor = (
+                _canonical_actor(agent_id)
+                or _canonical_actor(assignee)
+                or _canonical_actor(str(kwargs.get("agent_id") or ""))
+            )
+            if not actor:
+                return "Error: comment requires actor in {Kosmos, Vicks, Wedge, Rydia}"
 
             created = await self._client.create_task_comment(
                 task_id=task_id,
@@ -282,3 +349,6 @@ class NanoCatsTaskTool(Tool):
             return f"Task {task_id} deleted." if ok else f"Error: failed to delete task {task_id}"
 
         return f"Unknown action: {action}"
+
+
+KosmosTaskTool = NanoCatsTaskTool
