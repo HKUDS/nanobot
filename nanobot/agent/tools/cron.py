@@ -36,7 +36,7 @@ from nanobot.cron.types import CronJob, CronJobState, CronSchedule
             default=True,
         ),
         job_id=StringSchema("Job ID (for remove)"),
-        required=["action"],
+        required=["action", "message"],
     )
 )
 class CronTool(Tool):
@@ -128,7 +128,11 @@ class CronTool(Tool):
         deliver: bool = True,
     ) -> str:
         if not message:
-            return "Error: message is required for add"
+            return (
+                "Error: cron action='add' requires a non-empty 'message' "
+                "parameter describing what to do when the job triggers "
+                "(e.g. the reminder text). Retry including message=\"...\"."
+            )
         if not self._channel or not self._chat_id:
             return "Error: no session context (channel/chat_id)"
         if tz and not cron_expr:
