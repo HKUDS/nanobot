@@ -27,6 +27,7 @@ class ContextBuilder:
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+        self._file_cache: dict[Path, tuple[float, str]] = {}
 
     def build_system_prompt(
         self,
@@ -105,15 +106,21 @@ class ContextBuilder:
         return _to_blocks(left) + _to_blocks(right)
 
     def _load_bootstrap_files(self) -> str:
-        """Load all bootstrap files from workspace."""
+        """Load all bootstrap files from workspace, caching by mtime."""
         parts = []
-
         for filename in self.BOOTSTRAP_FILES:
             file_path = self.workspace / filename
-            if file_path.exists():
+            if not file_path.exists():
+                self._file_cache.pop(file_path, None)
+                continue
+            mtime = file_path.stat().st_mtime
+            cached = self._file_cache.get(file_path)
+            if cached and cached[0] == mtime:
+                content = cached[1]
+            else:
                 content = file_path.read_text(encoding="utf-8")
-                parts.append(f"## {filename}\n\n{content}")
-
+                self._file_cache[file_path] = (mtime, content)
+            parts.append(f"## {filename}\n\n{content}")
         return "\n\n".join(parts) if parts else ""
 
     def build_messages(
