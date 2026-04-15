@@ -39,7 +39,7 @@ class AnthropicProvider(LLMProvider):
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
 
-        from anthropic import AsyncAnthropic
+        from anthropic import Anthropic, AsyncAnthropic
 
         client_kw: dict[str, Any] = {}
         if api_key:
@@ -51,6 +51,7 @@ class AnthropicProvider(LLMProvider):
         # Keep retries centralized in LLMProvider._run_with_retry to avoid retry amplification.
         client_kw["max_retries"] = 0
         self._client = AsyncAnthropic(**client_kw)
+        self._sync_client = Anthropic(**client_kw)
 
     @classmethod
     def _handle_error(cls, e: Exception) -> LLMResponse:
@@ -531,6 +532,31 @@ class AnthropicProvider(LLMProvider):
             )
         except Exception as e:
             return self._handle_error(e)
+
+    def estimate_prompt_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        model: str | None = None,
+    ) -> tuple[int, str] | None:
+        """Use Anthropic's native token counting for higher accuracy."""
+        try:
+            system, converted = self._convert_messages(
+                self._sanitize_empty_content(messages),
+            )
+            kwargs: dict[str, Any] = {
+                "model": self._strip_prefix(model or self.default_model),
+                "messages": converted,
+            }
+            if system:
+                kwargs["system"] = system
+            anthropic_tools = self._convert_tools(tools)
+            if anthropic_tools:
+                kwargs["tools"] = anthropic_tools
+            result = self._sync_client.messages.count_tokens(**kwargs)
+            return (result.input_tokens, "anthropic_count_tokens")
+        except Exception:
+            return None
 
     def get_default_model(self) -> str:
         return self.default_model
