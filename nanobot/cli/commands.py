@@ -774,11 +774,11 @@ def gateway(
         return "cli", "direct"
 
     # Create heartbeat service
-    def _log_outbound_messages(session: "Session", task_name: str) -> None:
+    def _log_outbound_messages(session: "Session", task_name: str, since_idx: int = 0) -> None:
         """Persist outbound message tool calls before session trimming."""
         log_path = runtime_config.workspace_path / "state" / "message_log.jsonl"
         entries = []
-        for msg in session.messages:
+        for msg in session.messages[since_idx:]:
             for tc in msg.get("tool_calls", []):
                 if tc.get("function", {}).get("name") != "message":
                     continue
@@ -819,6 +819,7 @@ def gateway(
             pass
 
         session_key = f"{channel}:{chat_id}" if hb_cfg.shared_session else "heartbeat"
+        pre_exec_msg_count = len(agent.sessions.get_or_create(session_key).messages)
         resp = await agent.process_direct(
             tasks,
             session_key=session_key,
@@ -836,7 +837,7 @@ def gateway(
             # error messages in its history and learns to reproduce them.
             _drop_last_turn(session)
 
-        _log_outbound_messages(session, tasks)
+        _log_outbound_messages(session, tasks, since_idx=pre_exec_msg_count)
         session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
         agent.sessions.save(session)
         return result
