@@ -77,15 +77,29 @@ def _extract_interactive_content(content: dict) -> list[str]:
         elif isinstance(title, str):
             parts.append(f"title: {title}")
 
-    for elements in (
-        content.get("elements", []) if isinstance(content.get("elements"), list) else []
-    ):
+    elements = content.get("elements", [])
+    if isinstance(elements, list):
         for element in elements:
-            parts.extend(_extract_element_content(element))
+            if isinstance(element, dict):
+                parts.extend(_extract_element_content(element))
+            elif isinstance(element, list):
+                for nested in element:
+                    parts.extend(_extract_element_content(nested))
 
     card = content.get("card", {})
     if card:
         parts.extend(_extract_interactive_content(card))
+
+    body = content.get("body", {})
+    if body:
+        parts.extend(_extract_interactive_content(body))
+
+    data = content.get("data", {})
+    if isinstance(data, dict) and data:
+        if card_id := data.get("card_id"):
+            parts.append(f"[interactive card: {card_id}]")
+        else:
+            parts.extend(_extract_interactive_content(data))
 
     header = content.get("header", {})
     if header:
@@ -163,6 +177,11 @@ def _extract_element_content(element: dict) -> list[str]:
         content = element.get("content", "")
         if content:
             parts.append(content)
+
+    elif tag == "text":
+        text = element.get("text", "")
+        if text:
+            parts.append(text)
 
     else:
         for ne in element.get("elements", []):
@@ -1067,6 +1086,42 @@ class FeishuChannel(BaseChannel):
         return None, f"[{msg_type}: download failed]"
 
     _REPLY_CONTEXT_MAX_LEN = 200
+    _USER_NAME_FAILURE_TTL = 60.0
+
+    @staticmethod
+    def _extract_message_text(msg_type: str, content_json: Any) -> str:
+        """Extract plain-text context from a fetched Feishu message payload."""
+        if isinstance(content_json, str):
+            try:
+                content_json = json.loads(content_json)
+            except (json.JSONDecodeError, TypeError):
+                return content_json
+
+        if msg_type == "text" and isinstance(content_json, dict):
+            return str(content_json.get("text", "")).strip()
+
+        if msg_type == "post":
+            return _extract_post_text(content_json).strip()
+
+        if msg_type == "interactive":
+            return "\n".join(_extract_interactive_content(content_json)).strip()
+
+        if msg_type in (
+            "share_chat",
+            "share_user",
+            "share_calendar_event",
+            "system",
+            "merge_forward",
+        ):
+            return _extract_share_card_content(content_json, msg_type).strip()
+
+        if msg_type in MSG_TYPE_MAP:
+            return MSG_TYPE_MAP[msg_type]
+
+        if msg_type in ("media", "video"):
+            return f"[{msg_type}]"
+
+        return f"[{msg_type}]" if msg_type else ""
 
     def _get_message_content_sync(self, message_id: str) -> str | None:
         """Fetch the text content of a Feishu message by ID (synchronous).
@@ -1094,18 +1149,11 @@ class FeishuChannel(BaseChannel):
             raw_content = getattr(raw_content, "content", None) if raw_content else None
             if not raw_content:
                 return None
-            try:
-                content_json = json.loads(raw_content)
-            except (json.JSONDecodeError, TypeError):
-                return None
             msg_type = getattr(msg_obj, "msg_type", "")
-            if msg_type == "text":
-                text = content_json.get("text", "").strip()
-            elif msg_type == "post":
-                text, _ = _extract_post_content(content_json)
-                text = text.strip()
-            else:
-                text = ""
+            text = self._extract_message_text(msg_type, raw_content)
+            mentions = getattr(msg_obj, "mentions", None) or None
+            if mentions:
+                text = self._resolve_parent_mentions(text, mentions)
             if not text:
                 return None
             if len(text) > self._REPLY_CONTEXT_MAX_LEN:
@@ -1114,6 +1162,42 @@ class FeishuChannel(BaseChannel):
         except Exception as e:
             logger.debug("Feishu: error fetching parent message {}: {}", message_id, e)
             return None
+
+    def _resolve_parent_mentions(self, text: str, mentions: list[Any] | None) -> str:
+        """Resolve @mentions in fetched parent messages.
+
+        ``message.get`` returns mention items in a different shape from inbound
+        webhook events, so we normalize both structures here.
+        """
+        if not mentions or not text:
+            return text
+
+        for mention in mentions:
+            key = getattr(mention, "key", None) or None
+            if not key or key not in text:
+                continue
+
+            mention_id = getattr(mention, "id", None) or None
+            open_id = ""
+            user_id = ""
+            if isinstance(mention_id, str):
+                open_id = mention_id
+            else:
+                open_id = getattr(mention_id, "open_id", None) or ""
+                user_id = getattr(mention_id, "user_id", None) or ""
+
+            name = getattr(mention, "name", None) or key
+
+            if open_id and user_id:
+                replacement = f"@{name} ({open_id}, user id: {user_id})"
+            elif open_id:
+                replacement = f"@{name} ({open_id})"
+            else:
+                replacement = f"@{name}"
+
+            text = text.replace(key, replacement)
+
+        return text
 
     def _reply_message_sync(self, parent_message_id: str, msg_type: str, content: str) -> bool:
         """Reply to an existing Feishu message using the Reply API (synchronous)."""
@@ -1317,7 +1401,7 @@ class FeishuChannel(BaseChannel):
         # --- stream end: final update or fallback ---
         if meta.get("_stream_end"):
             if (message_id := meta.get("message_id")) and (reaction_id := meta.get("reaction_id")):
-                # await self._remove_reaction(message_id, reaction_id)
+                await self._remove_reaction(message_id, reaction_id)
                 # Add completion emoji if configured
                 if self.config.done_emoji and message_id:
                     await self._add_reaction(message_id, self.config.done_emoji)
@@ -1567,13 +1651,6 @@ class FeishuChannel(BaseChannel):
             # Add reaction
             reaction_id = await self._add_reaction(message_id, self.config.react_emoji)
 
-            # Build mention key-to-name map (e.g. "@_user_1" -> "@张三")
-            mention_map: dict[str, str] = {}
-            if message.mentions:
-                for m in message.mentions:
-                    if m.key and m.name:
-                        mention_map[m.key] = f"@{m.name}"
-
             # Parse content
             content_parts = []
             media_paths = []
@@ -1626,7 +1703,7 @@ class FeishuChannel(BaseChannel):
                 "merge_forward",
             ):
                 # Handle share cards and interactive messages
-                text = _extract_share_card_content(content_json, msg_type)
+                text = self._extract_message_text(msg_type, content_json)
                 if text:
                     content_parts.append(text)
 
@@ -1648,11 +1725,6 @@ class FeishuChannel(BaseChannel):
                     content_parts.insert(0, reply_ctx)
 
             content = "\n".join(content_parts) if content_parts else ""
-
-            # Replace mention placeholders with display names
-            if mention_map:
-                for key, display in mention_map.items():
-                    content = content.replace(key, display)
 
             if not content and not media_paths:
                 return
