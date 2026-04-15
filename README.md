@@ -1773,10 +1773,34 @@ Example config:
   },
   "gateway": {
     "host": "127.0.0.1",
-    "port": 18790
+    "port": 18790,
+    "kosmos_api_url": "http://127.0.0.1:18794"
   }
 }
 ```
+
+### Kosmos Frontend Endpoints
+
+If you're building a dashboard or frontend, point it directly to Kosmos:
+
+- REST API: `http://127.0.0.1:18794`
+- WebSocket stream: `ws://127.0.0.1:18795`
+
+Core REST routes:
+
+- `GET /api/projects`
+- `GET /api/tasks`
+- `GET /api/tasks/{id}/comments`
+- `POST /api/tasks/{id}/transition`
+- `POST /api/tasks/{id}/approve_release`
+- `POST /api/events/activity`
+
+WebSocket event types sent by Kosmos include:
+
+- `project_status`
+- `task_status`
+- `agent_update`
+- `activity`
 
 Start separate instances:
 
