@@ -368,7 +368,7 @@ class AnthropicProvider(LLMProvider):
                 system, anthropic_msgs, anthropic_tools,
             )
 
-        max_tokens = max(1, max_tokens)
+        max_tokens = max(1, max_tokens or 4096)
         thinking_enabled = bool(reasoning_effort)
 
         kwargs: dict[str, Any] = {

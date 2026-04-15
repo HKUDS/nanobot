@@ -156,6 +156,8 @@ class AgentLoop:
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 
@@ -179,6 +181,8 @@ class AgentLoop:
             if max_tool_result_chars is not None
             else defaults.max_tool_result_chars
         )
+        self.max_tokens = max_tokens
+        self.temperature = temperature
         self.provider_retry_mode = provider_retry_mode
         self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
@@ -403,12 +407,15 @@ class AgentLoop:
                 items.append({"role": "user", "content": merged})
             return items
 
+        provider_gen = getattr(self.provider, "generation", None)
         result = await self.runner.run(AgentRunSpec(
             initial_messages=initial_messages,
             tools=self.tools,
             model=self.model,
             max_iterations=self.max_iterations,
             max_tool_result_chars=self.max_tool_result_chars,
+            max_tokens=self.max_tokens if self.max_tokens is not None else getattr(provider_gen, "max_tokens", None),
+            temperature=self.temperature if self.temperature is not None else getattr(provider_gen, "temperature", None),
             hook=hook,
             error_message="Sorry, I encountered an error calling the AI model.",
             concurrent_tools=True,

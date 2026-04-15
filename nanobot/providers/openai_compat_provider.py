@@ -354,9 +354,9 @@ class OpenAICompatProvider(LLMProvider):
             kwargs["temperature"] = temperature
 
         if spec and getattr(spec, "supports_max_completion_tokens", False):
-            kwargs["max_completion_tokens"] = max(1, max_tokens)
+            kwargs["max_completion_tokens"] = max(1, max_tokens or 4096)
         else:
-            kwargs["max_tokens"] = max(1, max_tokens)
+            kwargs["max_tokens"] = max(1, max_tokens or 4096)
 
         if spec:
             model_lower = model_name.lower()
@@ -466,7 +466,7 @@ class OpenAICompatProvider(LLMProvider):
             "model": model_name,
             "instructions": instructions or None,
             "input": input_items,
-            "max_output_tokens": max(1, max_tokens),
+            "max_output_tokens": max(1, max_tokens or 4096),
             "store": False,
             "stream": False,
         }

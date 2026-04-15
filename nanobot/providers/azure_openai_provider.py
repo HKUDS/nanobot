@@ -94,7 +94,7 @@ class AzureOpenAIProvider(LLMProvider):
             "model": deployment,
             "instructions": instructions or None,
             "input": input_items,
-            "max_output_tokens": max(1, max_tokens),
+            "max_output_tokens": max(1, max_tokens or 4096),
             "store": False,
             "stream": False,
         }
