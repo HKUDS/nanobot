@@ -1386,6 +1386,21 @@ class FeishuChannel(BaseChannel):
             receive_id_type = "chat_id" if msg.chat_id.startswith("oc_") else "open_id"
             loop = asyncio.get_running_loop()
 
+            # Handle progress messages. When a streaming card is active for
+            # this chat, add progress to it. Otherwise, send as a regular message
+            # with a special format for progress.
+            if msg.metadata.get("_progress"):
+                buf = self._stream_bufs.get(msg.chat_id)
+                if buf and buf.card_id:
+                    await self.send_delta(
+                        msg.chat_id,
+                        "\n\n" + msg.content + "\n\n",
+                        msg.metadata
+                    )
+                    return
+                # No active streaming card, send as a regular message with progress format
+                msg.content = "🔄 Progress: " + msg.content
+
             # Handle tool hint messages.  When a streaming card is active for
             # this chat, inline the hint into the card instead of sending a
             # separate message so the user experience stays cohesive.
