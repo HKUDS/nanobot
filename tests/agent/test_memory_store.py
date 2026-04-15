@@ -3,6 +3,7 @@
 from datetime import datetime
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -266,3 +267,26 @@ class TestLegacyHistoryMigration:
         assert entries[0]["timestamp"] == "2026-04-01 10:00"
         assert "Broken" in entries[0]["content"]
         assert "migration." in entries[0]["content"]
+
+
+def test_dream_skill_list_caching(tmp_path):
+    from nanobot.agent.memory import Dream
+
+    skills_dir = tmp_path / "skills" / "my_skill"
+    skills_dir.mkdir(parents=True)
+    (skills_dir / "SKILL.md").write_text("---\ndescription: test skill\n---\nContent")
+
+    store = MagicMock()
+    store.workspace = tmp_path
+
+    # Patch BUILTIN_SKILLS_DIR so no real builtin skills are included
+    with patch("nanobot.agent.skills.BUILTIN_SKILLS_DIR", tmp_path / "no_builtins"):
+        dream = Dream(store=store, provider=MagicMock(), model="test")
+
+        result1 = dream._list_existing_skills()
+        result2 = dream._list_existing_skills()
+
+    assert result1 == result2
+    assert dream._skills_cache is not None
+    assert len(result1) == 1
+    assert "my_skill" in result1[0]

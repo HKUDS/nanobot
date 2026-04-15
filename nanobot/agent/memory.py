@@ -705,6 +705,7 @@ class Dream:
         self.max_tool_result_chars = max_tool_result_chars
         self._runner = AgentRunner(provider)
         self._tools = self._build_tools()
+        self._skills_cache: tuple[str, list[str]] | None = None
 
     # -- tool registry -------------------------------------------------------
 
@@ -734,10 +735,28 @@ class Dream:
 
     def _list_existing_skills(self) -> list[str]:
         """List existing skills as 'name — description' for dedup context."""
+        import hashlib
         import re as _re
 
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 
+        # Collect (path, mtime) for all SKILL.md files
+        mtimes: list[tuple[str, float]] = []
+        for base in (self.store.workspace / "skills", BUILTIN_SKILLS_DIR):
+            if not base.exists():
+                continue
+            for d in base.iterdir():
+                if not d.is_dir():
+                    continue
+                skill_md = d / "SKILL.md"
+                if skill_md.exists():
+                    mtimes.append((str(skill_md), skill_md.stat().st_mtime))
+
+        cache_key = hashlib.md5(repr(sorted(mtimes)).encode()).hexdigest()
+        if self._skills_cache and self._skills_cache[0] == cache_key:
+            return self._skills_cache[1]
+
+        # Full read — existing logic
         _DESC_RE = _re.compile(r"^description:\s*(.+)$", _re.MULTILINE | _re.IGNORECASE)
         entries: dict[str, str] = {}
         for base in (self.store.workspace / "skills", BUILTIN_SKILLS_DIR):
@@ -756,7 +775,10 @@ class Dream:
                 m = _DESC_RE.search(content)
                 desc = m.group(1).strip() if m else "(no description)"
                 entries[d.name] = desc
-        return [f"{name} — {desc}" for name, desc in sorted(entries.items())]
+
+        result = [f"{name} — {desc}" for name, desc in sorted(entries.items())]
+        self._skills_cache = (cache_key, result)
+        return result
 
     # -- main entry ----------------------------------------------------------
 
