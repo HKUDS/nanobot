@@ -51,25 +51,28 @@ class ExecTool(Tool):
         self.timeout = timeout
         self.working_dir = working_dir
         self.sandbox = sandbox
-        self.deny_patterns = deny_patterns or [
-            r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
-            r"\bdel\s+/[fq]\b",              # del /f, del /q
-            r"\brmdir\s+/s\b",               # rmdir /s
-            r"(?:^|[;&|]\s*)format\b",       # format (as standalone command only)
-            r"\b(mkfs|diskpart)\b",          # disk operations
-            r"\bdd\s+if=",                   # dd
-            r">\s*/dev/sd",                  # write to disk
-            r"\b(shutdown|reboot|poweroff)\b",  # system power
-            r":\(\)\s*\{.*\};\s*:",          # fork bomb
-            # Block writes to nanobot internal state files (#2989).
-            # history.jsonl / .dream_cursor are managed by append_history();
-            # direct writes corrupt the cursor format and crash /dream.
-            r">>?\s*\S*(?:history\.jsonl|\.dream_cursor)",            # > / >> redirect
-            r"\btee\b[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",     # tee / tee -a
-            r"\b(?:cp|mv)\b(?:\s+[^\s|;&<>]+)+\s+\S*(?:history\.jsonl|\.dream_cursor)",  # cp/mv target
-            r"\bdd\b[^|;&<>]*\bof=\S*(?:history\.jsonl|\.dream_cursor)",  # dd of=
-            r"\bsed\s+-i[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",  # sed -i
-        ]
+        self.deny_patterns = (
+            deny_patterns
+            or [
+                r"\brm\s+-[rf]{1,2}\b",  # rm -r, rm -rf, rm -fr
+                r"\bdel\s+/[fq]\b",  # del /f, del /q
+                r"\brmdir\s+/s\b",  # rmdir /s
+                r"(?:^|[;&|]\s*)format\b",  # format (as standalone command only)
+                r"\b(mkfs|diskpart)\b",  # disk operations
+                r"\bdd\s+if=",  # dd
+                r">\s*/dev/sd",  # write to disk
+                r"\b(shutdown|reboot|poweroff)\b",  # system power
+                r":\(\)\s*\{.*\};\s*:",  # fork bomb
+                # Block writes to nanobot internal state files (#2989).
+                # history.jsonl / .dream_cursor are managed by append_history();
+                # direct writes corrupt the cursor format and crash /dream.
+                r">>?\s*\S*(?:history\.jsonl|\.dream_cursor)",  # > / >> redirect
+                r"\btee\b[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",  # tee / tee -a
+                r"\b(?:cp|mv)\b(?:\s+[^\s|;&<>]+)+\s+\S*(?:history\.jsonl|\.dream_cursor)",  # cp/mv target
+                r"\bdd\b[^|;&<>]*\bof=\S*(?:history\.jsonl|\.dream_cursor)",  # dd of=
+                r"\bsed\s+-i[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",  # sed -i
+            ]
+        )
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
@@ -97,8 +100,11 @@ class ExecTool(Tool):
         return True
 
     async def execute(
-        self, command: str, working_dir: str | None = None,
-        timeout: int | None = None, **kwargs: Any,
+        self,
+        command: str,
+        working_dir: str | None = None,
+        timeout: int | None = None,
+        **kwargs: Any,
     ) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
 
@@ -185,13 +191,17 @@ class ExecTool(Tool):
 
     @staticmethod
     async def _spawn(
-        command: str, cwd: str, env: dict[str, str],
+        command: str,
+        cwd: str,
+        env: dict[str, str],
     ) -> asyncio.subprocess.Process:
         """Launch *command* in a platform-appropriate shell."""
         if _IS_WINDOWS:
             comspec = env.get("COMSPEC", os.environ.get("COMSPEC", "cmd.exe"))
             return await asyncio.create_subprocess_exec(
-                comspec, "/c", command,
+                comspec,
+                "/c",
+                command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
@@ -199,7 +209,10 @@ class ExecTool(Tool):
             )
         bash = shutil.which("bash") or "/bin/bash"
         return await asyncio.create_subprocess_exec(
-            bash, "-l", "-c", command,
+            bash,
+            "-l",
+            "-c",
+            command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
@@ -281,6 +294,7 @@ class ExecTool(Tool):
                 return "Error: Command blocked by safety guard (not in allowlist)"
 
         from nanobot.security.network import contains_internal_url
+
         if contains_internal_url(cmd):
             return "Error: Command blocked by safety guard (internal/private URL detected)"
 
@@ -298,8 +312,9 @@ class ExecTool(Tool):
                     continue
 
                 media_path = get_media_dir().resolve()
-                if (p.is_absolute() 
-                    and cwd_path not in p.parents 
+                if (
+                    p.is_absolute()
+                    and cwd_path not in p.parents
                     and p != cwd_path
                     and media_path not in p.parents
                     and p != media_path
@@ -313,6 +328,10 @@ class ExecTool(Tool):
         # Windows: match drive-root paths like `C:\` as well as `C:\path\to\file`
         # NOTE: `*` is required so `C:\` (nothing after the slash) is still extracted.
         win_paths = re.findall(r"[A-Za-z]:\\[^\s\"'|><;]*", command)
-        posix_paths = re.findall(r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
-        home_paths = re.findall(r"(?:^|[\s|>'\"])(~[^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~
+        posix_paths = re.findall(
+            r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command
+        )  # POSIX: /absolute only
+        home_paths = re.findall(
+            r"(?:^|[\s|>'\"])(~[^\s\"'>;|<]*)", command
+        )  # POSIX/Windows home shortcut: ~
         return win_paths + posix_paths + home_paths

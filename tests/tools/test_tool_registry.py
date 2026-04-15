@@ -70,4 +70,6 @@ def test_prepare_call_other_tools_keep_generic_object_validation() -> None:
 
     assert tool is not None
     assert params == ["TODO"]
-    assert error == "Error: Invalid parameters for tool 'grep': parameters must be an object, got list"
+    assert (
+        error == "Error: Invalid parameters for tool 'grep': parameters must be an object, got list"
+    )

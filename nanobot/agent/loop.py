@@ -1017,8 +1017,11 @@ class AgentLoop:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
         msg = InboundMessage(
-            channel=channel, sender_id="user", chat_id=chat_id,
-            content=content, media=media or [],
+            channel=channel,
+            sender_id="user",
+            chat_id=chat_id,
+            content=content,
+            media=media or [],
         )
         return await self._process_message(
             msg,

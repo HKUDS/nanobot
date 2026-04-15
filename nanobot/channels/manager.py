@@ -124,14 +124,16 @@ class ChannelManager:
         target = self.channels.get(notice.channel)
         if not target:
             return
-        asyncio.create_task(self._send_with_retry(
-            target,
-            OutboundMessage(
-                channel=notice.channel,
-                chat_id=notice.chat_id,
-                content=format_restart_completed_message(notice.started_at_raw),
-            ),
-        ))
+        asyncio.create_task(
+            self._send_with_retry(
+                target,
+                OutboundMessage(
+                    channel=notice.channel,
+                    chat_id=notice.chat_id,
+                    content=format_restart_completed_message(notice.started_at_raw),
+                ),
+            )
+        )
 
     async def stop_all(self) -> None:
         """Stop all channels and the dispatcher."""
@@ -167,15 +169,15 @@ class ChannelManager:
                 if pending:
                     msg = pending.pop(0)
                 else:
-                    msg = await asyncio.wait_for(
-                        self.bus.consume_outbound(),
-                        timeout=1.0
-                    )
+                    msg = await asyncio.wait_for(self.bus.consume_outbound(), timeout=1.0)
 
                 if msg.metadata.get("_progress"):
                     if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
                         continue
-                    if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
+                    if (
+                        not msg.metadata.get("_tool_hint")
+                        and not self.config.channels.send_progress
+                    ):
                         continue
 
                 # Coalesce consecutive _stream_delta messages for the same (channel, chat_id)
@@ -270,13 +272,20 @@ class ChannelManager:
                 if attempt == max_attempts - 1:
                     logger.error(
                         "Failed to send to {} after {} attempts: {} - {}",
-                        msg.channel, max_attempts, type(e).__name__, e
+                        msg.channel,
+                        max_attempts,
+                        type(e).__name__,
+                        e,
                     )
                     return
                 delay = _SEND_RETRY_DELAYS[min(attempt, len(_SEND_RETRY_DELAYS) - 1)]
                 logger.warning(
                     "Send to {} failed (attempt {}/{}): {}, retrying in {}s",
-                    msg.channel, attempt + 1, max_attempts, type(e).__name__, delay
+                    msg.channel,
+                    attempt + 1,
+                    max_attempts,
+                    type(e).__name__,
+                    delay,
                 )
                 try:
                     await asyncio.sleep(delay)
@@ -290,10 +299,7 @@ class ChannelManager:
     def get_status(self) -> dict[str, Any]:
         """Get status of all channels."""
         return {
-            name: {
-                "enabled": True,
-                "running": channel.is_running
-            }
+            name: {"enabled": True, "running": channel.is_running}
             for name, channel in self.channels.items()
         }
 

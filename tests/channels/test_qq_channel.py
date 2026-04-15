@@ -1,13 +1,14 @@
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 # Check optional QQ dependencies before running tests
 try:
     from nanobot.channels import qq
+
     QQ_AVAILABLE = getattr(qq, "QQ_AVAILABLE", False)
 except ImportError:
     QQ_AVAILABLE = False
@@ -179,6 +180,7 @@ async def test_read_media_bytes_missing_file() -> None:
 # Tests for _send_media exception handling
 # -------------------------------------------------------
 
+
 def _make_channel_with_local_file(suffix: str = ".png", content: bytes = b"\x89PNG\r\n"):
     """Create a QQChannel with a fake client and a temp file for media."""
     channel = QQChannel(
@@ -220,6 +222,7 @@ async def test_send_media_client_connector_error_propagates() -> None:
     channel, tmp_path = _make_channel_with_local_file()
 
     from aiohttp.client_reqrep import ConnectionKey
+
     conn_key = ConnectionKey("api.qq.com", 443, True, None, None, None, None)
     connector_error = aiohttp.ClientConnectorError(
         connection_key=conn_key,

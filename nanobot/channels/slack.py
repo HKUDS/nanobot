@@ -265,7 +265,9 @@ class SlackChannel(BaseChannel):
             str(profile.get("real_name") or ""),
             str(profile.get("real_name_normalized") or ""),
         }
-        return normalized in {cls._normalize_target_name(candidate) for candidate in candidates if candidate}
+        return normalized in {
+            cls._normalize_target_name(candidate) for candidate in candidates if candidate
+        }
 
     async def _on_socket_request(
         self,
@@ -277,9 +279,7 @@ class SlackChannel(BaseChannel):
             return
 
         # Acknowledge right away
-        await client.send_socket_mode_response(
-            SocketModeResponse(envelope_id=req.envelope_id)
-        )
+        await client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
 
         payload = req.payload or {}
         event = payload.get("event") or {}

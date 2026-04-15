@@ -1,10 +1,10 @@
 """
 NanoCats API - REST endpoints for the web UI
 """
-import json
+
 import logging
 from pathlib import Path
-from typing import Optional
+
 from aiohttp import web
 
 from nanobot.db.nanocats import get_nanocats_db
@@ -21,16 +21,16 @@ async def get_projects(request: web.Request) -> web.Response:
     """Get all projects (optionally filtered by hidden status)"""
     db = get_nanocats_db()
     include_hidden = request.query.get("hidden", "false").lower() == "true"
-    
+
     projects = db.get_projects(include_hidden=include_hidden)
-    
+
     # If no projects in DB, scan the directory
     if not projects:
         projects = db.scan_projects(str(PROJECTS_PATH))
         for p in projects:
             db.save_project(p)
         projects = db.get_projects(include_hidden=include_hidden)
-    
+
     return web.json_response(projects)
 
 
@@ -39,19 +39,19 @@ async def scan_projects(request: web.Request) -> web.Response:
     """Rescan projects directory"""
     db = get_nanocats_db()
     include_hidden = request.query.get("include_hidden", "true").lower() == "true"
-    
+
     # Get current hidden status
     current_projects = db.get_projects(include_hidden=True)
     hidden_ids = {p["id"] for p in current_projects if p.get("is_hidden")}
-    
+
     # Scan directory
     new_projects = db.scan_projects(str(PROJECTS_PATH))
-    
+
     # Preserve hidden status
     for p in new_projects:
         p["is_hidden"] = 1 if p["id"] in hidden_ids else 0
         db.save_project(p)
-    
+
     projects = db.get_projects(include_hidden=include_hidden)
     return web.json_response(projects)
 
@@ -61,12 +61,12 @@ async def toggle_hidden(request: web.Request) -> web.Response:
     """Toggle project hidden status"""
     db = get_nanocats_db()
     project_id = request.match_info["project_id"]
-    
+
     body = await request.json()
     hidden = body.get("hidden", True)
-    
+
     db.toggle_hidden(project_id, hidden)
-    
+
     return web.json_response({"success": True, "hidden": hidden})
 
 
@@ -111,23 +111,25 @@ async def set_setting(request: web.Request) -> web.Response:
 async def get_stats(request: web.Request) -> web.Response:
     """Get usage statistics"""
     db = get_nanocats_db()
-    
+
     # Count projects
     all_projects = db.get_projects(include_hidden=True)
     visible_projects = [p for p in all_projects if not p.get("is_hidden")]
     hidden_projects = [p for p in all_projects if p.get("is_hidden")]
-    
+
     # Count agents
     agents = db.get_agents()
     active_agents = [a for a in agents if a.get("status") != "idle"]
-    
-    return web.json_response({
-        "total_projects": len(all_projects),
-        "visible_projects": len(visible_projects),
-        "hidden_projects": len(hidden_projects),
-        "total_agents": len(agents),
-        "active_agents": len(active_agents)
-    })
+
+    return web.json_response(
+        {
+            "total_projects": len(all_projects),
+            "visible_projects": len(visible_projects),
+            "hidden_projects": len(hidden_projects),
+            "total_agents": len(agents),
+            "active_agents": len(active_agents),
+        }
+    )
 
 
 def create_app() -> web.Application:

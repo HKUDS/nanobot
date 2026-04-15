@@ -179,11 +179,13 @@ class GitStore:
                         time.localtime(commit.commit_time),
                     )
                     msg = commit.message.decode("utf-8", errors="replace").strip()
-                    entries.append(CommitInfo(
-                        sha=sha.hex()[:8],
-                        message=msg,
-                        timestamp=ts,
-                    ))
+                    entries.append(
+                        CommitInfo(
+                            sha=sha.hex()[:8],
+                            message=msg,
+                            timestamp=ts,
+                        )
+                    )
                     sha = commit.parents[0] if commit.parents else None
 
             return entries
@@ -223,7 +225,9 @@ class GitStore:
                 return c
         return None
 
-    def show_commit_diff(self, short_sha: str, max_entries: int = 20) -> tuple[CommitInfo, str] | None:
+    def show_commit_diff(
+        self, short_sha: str, max_entries: int = 20
+    ) -> tuple[CommitInfo, str] | None:
         """Find a commit and return it with its diff vs the parent."""
         commits = self.log(max_entries=max_entries)
         for i, c in enumerate(commits):

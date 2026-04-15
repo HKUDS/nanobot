@@ -5,7 +5,12 @@ from datetime import datetime
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
+from nanobot.agent.tools.schema import (
+    BooleanSchema,
+    IntegerSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronJobState, CronSchedule
 
@@ -243,8 +248,5 @@ class CronTool(Tool):
                     "This is a system-managed Dream memory consolidation job for long-term memory.\n"
                     "It remains visible so you can inspect it, but it cannot be removed."
                 )
-            return (
-                f"Cannot remove job `{job_id}`.\n"
-                "This is a protected system-managed cron job."
-            )
+            return f"Cannot remove job `{job_id}`.\nThis is a protected system-managed cron job."
         return f"Job {job_id} not found"

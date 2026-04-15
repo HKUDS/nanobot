@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import InboundMessage
 from nanobot.providers.base import LLMResponse
 
 
@@ -24,15 +24,16 @@ def _make_loop():
     workspace = MagicMock()
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager"):
+    with (
+        patch("nanobot.agent.loop.ContextBuilder"),
+        patch("nanobot.agent.loop.SessionManager"),
+        patch("nanobot.agent.loop.SubagentManager"),
+    ):
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
     return loop, bus
 
 
 class TestRestartCommand:
-
     @pytest.mark.asyncio
     async def test_restart_sends_message_and_calls_execv(self):
         from nanobot.command.builtin import cmd_restart
@@ -47,8 +48,10 @@ class TestRestartCommand:
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
-        with patch.dict(os.environ, {}, clear=False), \
-             patch("nanobot.command.builtin.os.execv") as mock_execv:
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch("nanobot.command.builtin.os.execv") as mock_execv,
+        ):
             out = await cmd_restart(ctx)
             assert "Restarting" in out.content
             assert os.environ.get(RESTART_NOTIFY_CHANNEL_ENV) == "cli"
@@ -64,8 +67,10 @@ class TestRestartCommand:
         loop, bus = _make_loop()
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/restart")
 
-        with patch.object(loop, "_dispatch", new_callable=AsyncMock) as mock_dispatch, \
-             patch("nanobot.command.builtin.os.execv"):
+        with (
+            patch.object(loop, "_dispatch", new_callable=AsyncMock) as mock_dispatch,
+            patch("nanobot.command.builtin.os.execv"),
+        ):
             await bus.publish_inbound(msg)
 
             loop._running = True
@@ -182,10 +187,12 @@ class TestRestartCommand:
     @pytest.mark.asyncio
     async def test_run_agent_loop_resets_usage_when_provider_omits_it(self):
         loop, _bus = _make_loop()
-        loop.provider.chat_with_retry = AsyncMock(side_effect=[
-            LLMResponse(content="first", usage={"prompt_tokens": 9, "completion_tokens": 4}),
-            LLMResponse(content="second", usage={}),
-        ])
+        loop.provider.chat_with_retry = AsyncMock(
+            side_effect=[
+                LLMResponse(content="first", usage={"prompt_tokens": 9, "completion_tokens": 4}),
+                LLMResponse(content="second", usage={}),
+            ]
+        )
 
         await loop._run_agent_loop([])
         assert loop._last_usage["prompt_tokens"] == 9
@@ -202,9 +209,7 @@ class TestRestartCommand:
         session.get_history.return_value = [{"role": "user"}]
         loop.sessions.get_or_create.return_value = session
         loop._last_usage = {"prompt_tokens": 1200, "completion_tokens": 34}
-        loop.consolidator.estimate_session_prompt_tokens = MagicMock(
-            return_value=(0, "none")
-        )
+        loop.consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(0, "none"))
         loop.subagents.get_running_count_by_session.return_value = 0
 
         response = await loop._process_message(

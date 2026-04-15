@@ -27,7 +27,7 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
 _DATA_URL_RE = re.compile(r"^data:([^;]+);base64,(.+)$", re.DOTALL)
 
 
-class _FileSizeExceeded(Exception):
+class _FileSizeExceededError(Exception):
     """Raised when an uploaded file exceeds the size limit."""
 
 
@@ -89,7 +89,7 @@ def _save_base64_data_url(data_url: str, media_dir: Path) -> str | None:
     except Exception:
         return None
     if len(raw) > MAX_FILE_SIZE:
-        raise _FileSizeExceeded(f"File exceeds {MAX_FILE_SIZE // (1024 * 1024)}MB limit")
+        raise _FileSizeExceededError(f"File exceeds {MAX_FILE_SIZE // (1024 * 1024)}MB limit")
     ext = mimetypes.guess_extension(mime_type) or ".bin"
     filename = f"{uuid.uuid4().hex[:12]}{ext}"
     dest = media_dir / safe_filename(filename)
@@ -151,7 +151,7 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
         elif part.name == "files":
             raw = await part.read()
             if len(raw) > MAX_FILE_SIZE:
-                raise _FileSizeExceeded(
+                raise _FileSizeExceededError(
                     f"File '{part.filename}' exceeds {MAX_FILE_SIZE // (1024 * 1024)}MB limit"
                 )
             filename = safe_filename(part.filename or f"{uuid.uuid4().hex[:12]}.bin")
@@ -198,7 +198,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
             session_id = body.get("session_id")
     except ValueError as e:
         return _error_json(400, str(e))
-    except _FileSizeExceeded as e:
+    except _FileSizeExceededError as e:
         return _error_json(413, str(e), err_type="invalid_request_error")
     except Exception:
         logger.exception("Error parsing upload")
@@ -212,7 +212,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         "API request session_key={} media={} text={}", session_key, len(media_paths), text[:80]
     )
 
-    _FALLBACK = EMPTY_FINAL_RESPONSE_MESSAGE
+    fallback = EMPTY_FINAL_RESPONSE_MESSAGE
 
     try:
         async with session_lock:
@@ -244,7 +244,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                     response_text = _response_text(retry_response)
                     if not response_text or not response_text.strip():
                         logger.warning("Empty response after retry, using fallback")
-                        response_text = _FALLBACK
+                        response_text = fallback
 
             except asyncio.TimeoutError:
                 return _error_json(504, f"Request timed out after {timeout_s}s")

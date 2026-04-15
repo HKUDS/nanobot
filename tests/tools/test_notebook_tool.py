@@ -7,18 +7,28 @@ import pytest
 from nanobot.agent.tools.notebook import NotebookEditTool
 
 
-def _make_notebook(cells: list[dict] | None = None, nbformat: int = 4, nbformat_minor: int = 5) -> dict:
+def _make_notebook(
+    cells: list[dict] | None = None, nbformat: int = 4, nbformat_minor: int = 5
+) -> dict:
     """Build a minimal valid .ipynb structure."""
     return {
         "nbformat": nbformat,
         "nbformat_minor": nbformat_minor,
-        "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}},
+        "metadata": {
+            "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}
+        },
         "cells": cells or [],
     }
 
 
 def _code_cell(source: str, cell_id: str | None = None) -> dict:
-    cell = {"cell_type": "code", "source": source, "metadata": {}, "outputs": [], "execution_count": None}
+    cell = {
+        "cell_type": "code",
+        "source": source,
+        "metadata": {},
+        "outputs": [],
+        "execution_count": None,
+    }
     if cell_id:
         cell["id"] = cell_id
     return cell
@@ -38,7 +48,6 @@ def _write_nb(tmp_path, name: str, nb: dict) -> str:
 
 
 class TestNotebookEdit:
-
     @pytest.fixture()
     def tool(self, tmp_path):
         return NotebookEditTool(workspace=tmp_path)
@@ -57,7 +66,9 @@ class TestNotebookEdit:
     async def test_insert_cell_after_target(self, tool, tmp_path):
         nb = _make_notebook([_code_cell("cell 0"), _code_cell("cell 1")])
         path = _write_nb(tmp_path, "test.ipynb", nb)
-        result = await tool.execute(path=path, cell_index=0, new_source="inserted", edit_mode="insert")
+        result = await tool.execute(
+            path=path, cell_index=0, new_source="inserted", edit_mode="insert"
+        )
         assert "Successfully" in result
         saved = json.loads((tmp_path / "test.ipynb").read_text())
         assert len(saved["cells"]) == 3
@@ -79,7 +90,9 @@ class TestNotebookEdit:
     @pytest.mark.asyncio
     async def test_create_new_notebook_from_scratch(self, tool, tmp_path):
         path = str(tmp_path / "new.ipynb")
-        result = await tool.execute(path=path, cell_index=0, new_source="# Hello", edit_mode="insert", cell_type="markdown")
+        result = await tool.execute(
+            path=path, cell_index=0, new_source="# Hello", edit_mode="insert", cell_type="markdown"
+        )
         assert "Successfully" in result or "created" in result.lower()
         saved = json.loads((tmp_path / "new.ipynb").read_text())
         assert saved["nbformat"] == 4
@@ -126,7 +139,9 @@ class TestNotebookEdit:
     async def test_insert_with_cell_type_markdown(self, tool, tmp_path):
         nb = _make_notebook([_code_cell("code")])
         path = _write_nb(tmp_path, "test.ipynb", nb)
-        await tool.execute(path=path, cell_index=0, new_source="# Title", edit_mode="insert", cell_type="markdown")
+        await tool.execute(
+            path=path, cell_index=0, new_source="# Title", edit_mode="insert", cell_type="markdown"
+        )
         saved = json.loads((tmp_path / "test.ipynb").read_text())
         assert saved["cells"][1]["cell_type"] == "markdown"
 

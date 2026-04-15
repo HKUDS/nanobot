@@ -66,7 +66,10 @@ class OpenAICodexProvider(LLMProvider):
         try:
             try:
                 content, tool_calls, finish_reason = await _request_codex(
-                    DEFAULT_CODEX_URL, headers, body, verify=True,
+                    DEFAULT_CODEX_URL,
+                    headers,
+                    body,
+                    verify=True,
                     on_content_delta=on_content_delta,
                 )
             except Exception as e:
@@ -74,7 +77,10 @@ class OpenAICodexProvider(LLMProvider):
                     raise
                 logger.warning("SSL verification failed for Codex API; retrying with verify=False")
                 content, tool_calls, finish_reason = await _request_codex(
-                    DEFAULT_CODEX_URL, headers, body, verify=False,
+                    DEFAULT_CODEX_URL,
+                    headers,
+                    body,
+                    verify=False,
                     on_content_delta=on_content_delta,
                 )
             return LLMResponse(content=content, tool_calls=tool_calls, finish_reason=finish_reason)
@@ -84,21 +90,31 @@ class OpenAICodexProvider(LLMProvider):
             return LLMResponse(content=msg, finish_reason="error", retry_after=retry_after)
 
     async def chat(
-        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
-        model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice)
 
     async def chat_stream(
-        self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
-        model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        model: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        return await self._call_codex(messages, tools, model, reasoning_effort, tool_choice, on_content_delta)
+        return await self._call_codex(
+            messages, tools, model, reasoning_effort, tool_choice, on_content_delta
+        )
 
     def get_default_model(self) -> str:
         return self.default_model

@@ -7,8 +7,8 @@ import uuid
 from typing import Any
 
 from nanobot.agent.tools.base import tool_parameters
-from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.agent.tools.filesystem import _FsTool
+from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 
 
 def _new_cell(source: str, cell_type: str = "code", generate_id: bool = False) -> dict:
@@ -91,15 +91,11 @@ class NotebookEditTool(_FsTool):
 
             if edit_mode not in self._VALID_EDIT_MODES:
                 return (
-                    f"Error: Invalid edit_mode '{edit_mode}'. "
-                    "Use one of: replace, insert, delete."
+                    f"Error: Invalid edit_mode '{edit_mode}'. Use one of: replace, insert, delete."
                 )
 
             if cell_type not in self._VALID_CELL_TYPES:
-                return (
-                    f"Error: Invalid cell_type '{cell_type}'. "
-                    "Use one of: code, markdown."
-                )
+                return f"Error: Invalid cell_type '{cell_type}'. Use one of: code, markdown."
 
             fp = self._resolve(path)
 
@@ -141,7 +137,9 @@ class NotebookEditTool(_FsTool):
 
             # Default: replace
             if cell_index < 0 or cell_index >= len(cells):
-                return f"Error: cell_index {cell_index} out of range (notebook has {len(cells)} cells)"
+                return (
+                    f"Error: cell_index {cell_index} out of range (notebook has {len(cells)} cells)"
+                )
             cells[cell_index]["source"] = new_source
             if cell_type and cells[cell_index].get("cell_type") != cell_type:
                 cells[cell_index]["cell_type"] = cell_type

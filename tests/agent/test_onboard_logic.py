@@ -4,12 +4,10 @@ These tests focus on the business logic behind the onboard wizard,
 without testing the interactive UI components.
 """
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-import pytest
 from pydantic import BaseModel, Field
 
 from nanobot.cli import onboard as onboard_wizard
@@ -198,6 +196,7 @@ class TestGetFieldTypeInfo:
 
     def test_handles_none_annotation(self):
         """Field with None annotation defaults to str."""
+
         class Model(BaseModel):
             field: Any = None
 
@@ -487,7 +486,9 @@ class TestRunOnboardExitBehavior:
 
         monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
         monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
-        monkeypatch.setattr(onboard_wizard, "_configure_general_settings", fake_configure_general_settings)
+        monkeypatch.setattr(
+            onboard_wizard, "_configure_general_settings", fake_configure_general_settings
+        )
 
         result = run_onboard(initial_config=initial_config)
 

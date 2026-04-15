@@ -24,10 +24,12 @@ def _make_loop(*, exec_config=None):
     workspace = MagicMock()
     workspace.__truediv__ = MagicMock(return_value=MagicMock())
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+    with (
+        patch("nanobot.agent.loop.ContextBuilder"),
+        patch("nanobot.agent.loop.SessionManager"),
+        patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr,
+    ):
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace, exec_config=exec_config)
     return loop, bus
 
@@ -250,12 +252,15 @@ class TestSubagentCancellation:
             if call_count["n"] == 1:
                 return LLMResponse(
                     content="thinking",
-                    tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
+                    tool_calls=[
+                        ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})
+                    ],
                     reasoning_content="hidden reasoning",
                     thinking_blocks=[{"type": "thinking", "thinking": "step"}],
                 )
             captured_second_call[:] = messages
             return LLMResponse(content="done", tool_calls=[])
+
         provider.chat_with_retry = scripted_chat_with_retry
         mgr = SubagentManager(
             provider=provider,
@@ -272,12 +277,15 @@ class TestSubagentCancellation:
         await mgr._run_subagent("sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"})
 
         assistant_messages = [
-            msg for msg in captured_second_call
+            msg
+            for msg in captured_second_call
             if msg.get("role") == "assistant" and msg.get("tool_calls")
         ]
         assert len(assistant_messages) == 1
         assert assistant_messages[0]["reasoning_content"] == "hidden reasoning"
-        assert assistant_messages[0]["thinking_blocks"] == [{"type": "thinking", "thinking": "step"}]
+        assert assistant_messages[0]["thinking_blocks"] == [
+            {"type": "thinking", "thinking": "step"}
+        ]
 
     @pytest.mark.asyncio
     async def test_subagent_exec_tool_not_registered_when_disabled(self, tmp_path):
@@ -322,10 +330,12 @@ class TestSubagentCancellation:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-            content="thinking",
-            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
-        ))
+        provider.chat_with_retry = AsyncMock(
+            return_value=LLMResponse(
+                content="thinking",
+                tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
+            )
+        )
         mgr = SubagentManager(
             provider=provider,
             workspace=tmp_path,
@@ -363,10 +373,12 @@ class TestSubagentCancellation:
         bus = MessageBus()
         provider = MagicMock()
         provider.get_default_model.return_value = "test-model"
-        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-            content="thinking",
-            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
-        ))
+        provider.chat_with_retry = AsyncMock(
+            return_value=LLMResponse(
+                content="thinking",
+                tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
+            )
+        )
         mgr = SubagentManager(
             provider=provider,
             workspace=tmp_path,

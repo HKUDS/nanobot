@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.config.schema import AgentDefaults
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
@@ -20,11 +20,13 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 def _make_injection_callback(queue: asyncio.Queue):
     """Return an async callback that drains *queue* into a list of dicts."""
+
     async def inject_cb():
         items = []
         while not queue.empty():
             items.append(await queue.get())
         return items
+
     return inject_cb
 
 
@@ -36,17 +38,19 @@ def _make_loop(tmp_path):
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
-        MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
+    with (
+        patch("nanobot.agent.loop.ContextBuilder"),
+        patch("nanobot.agent.loop.SessionManager"),
+        patch("nanobot.agent.loop.SubagentManager") as mock_sub_mgr,
+    ):
+        mock_sub_mgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
     return loop
 
 
 @pytest.mark.asyncio
 async def test_runner_preserves_reasoning_fields_and_tool_results():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -71,25 +75,26 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
     tools.execute = AsyncMock(return_value="tool result")
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": "do task"},
-        ],
-        tools=tools,
-        model="test-model",
-        max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[
+                {"role": "system", "content": "system"},
+                {"role": "user", "content": "do task"},
+            ],
+            tools=tools,
+            model="test-model",
+            max_iterations=3,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     assert result.final_content == "done"
     assert result.tools_used == ["list_dir"]
-    assert result.tool_events == [
-        {"name": "list_dir", "status": "ok", "detail": "tool result"}
-    ]
+    assert result.tool_events == [{"name": "list_dir", "status": "ok", "detail": "tool result"}]
 
     assistant_messages = [
-        msg for msg in captured_second_call
+        msg
+        for msg in captured_second_call
         if msg.get("role") == "assistant" and msg.get("tool_calls")
     ]
     assert len(assistant_messages) == 1
@@ -104,7 +109,7 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
 @pytest.mark.asyncio
 async def test_runner_calls_hooks_in_order():
     from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     call_count = {"n": 0}
@@ -129,35 +134,41 @@ async def test_runner_calls_hooks_in_order():
             events.append(("before_iteration", context.iteration))
 
         async def before_execute_tools(self, context: AgentHookContext) -> None:
-            events.append((
-                "before_execute_tools",
-                context.iteration,
-                [tc.name for tc in context.tool_calls],
-            ))
+            events.append(
+                (
+                    "before_execute_tools",
+                    context.iteration,
+                    [tc.name for tc in context.tool_calls],
+                )
+            )
 
         async def after_iteration(self, context: AgentHookContext) -> None:
-            events.append((
-                "after_iteration",
-                context.iteration,
-                context.final_content,
-                list(context.tool_results),
-                list(context.tool_events),
-                context.stop_reason,
-            ))
+            events.append(
+                (
+                    "after_iteration",
+                    context.iteration,
+                    context.final_content,
+                    list(context.tool_results),
+                    list(context.tool_events),
+                    context.stop_reason,
+                )
+            )
 
         def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
             events.append(("finalize_content", context.iteration, content))
             return content.upper() if content else content
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[],
-        tools=tools,
-        model="test-model",
-        max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        hook=RecordingHook(),
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[],
+            tools=tools,
+            model="test-model",
+            max_iterations=3,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            hook=RecordingHook(),
+        )
+    )
 
     assert result.final_content == "DONE"
     assert events == [
@@ -180,7 +191,7 @@ async def test_runner_calls_hooks_in_order():
 @pytest.mark.asyncio
 async def test_runner_streaming_hook_receives_deltas_and_end_signal():
     from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     streamed: list[str] = []
@@ -207,14 +218,16 @@ async def test_runner_streaming_hook_receives_deltas_and_end_signal():
             endings.append(resuming)
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        hook=StreamingHook(),
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[],
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            hook=StreamingHook(),
+        )
+    )
 
     assert result.final_content == "hello"
     assert streamed == ["he", "llo"]
@@ -224,25 +237,29 @@ async def test_runner_streaming_hook_receives_deltas_and_end_signal():
 
 @pytest.mark.asyncio
 async def test_runner_returns_max_iterations_fallback():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="still working",
-        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
-    ))
+    provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(
+            content="still working",
+            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
+        )
+    )
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(return_value="tool result")
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[],
-        tools=tools,
-        model="test-model",
-        max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[],
+            tools=tools,
+            model="test-model",
+            max_iterations=2,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     assert result.stop_reason == "max_iterations"
     assert result.final_content == (
@@ -252,40 +269,43 @@ async def test_runner_returns_max_iterations_fallback():
     assert result.messages[-1]["role"] == "assistant"
     assert result.messages[-1]["content"] == result.final_content
 
+
 @pytest.mark.asyncio
 async def test_runner_returns_structured_tool_error():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="working",
-        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
-    ))
+    provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(
+            content="working",
+            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
+        )
+    )
     tools = MagicMock()
     tools.get_definitions.return_value = []
     tools.execute = AsyncMock(side_effect=RuntimeError("boom"))
 
     runner = AgentRunner(provider)
 
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[],
-        tools=tools,
-        model="test-model",
-        max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        fail_on_tool_error=True,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[],
+            tools=tools,
+            model="test-model",
+            max_iterations=2,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            fail_on_tool_error=True,
+        )
+    )
 
     assert result.stop_reason == "tool_error"
     assert result.error == "Error: RuntimeError: boom"
-    assert result.tool_events == [
-        {"name": "list_dir", "status": "error", "detail": "boom"}
-    ]
+    assert result.tool_events == [{"name": "list_dir", "status": "error", "detail": "boom"}]
 
 
 @pytest.mark.asyncio
 async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -296,7 +316,9 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
         if call_count["n"] == 1:
             return LLMResponse(
                 content="working",
-                tool_calls=[ToolCallRequest(id="call_big", name="list_dir", arguments={"path": "."})],
+                tool_calls=[
+                    ToolCallRequest(id="call_big", name="list_dir", arguments={"path": "."})
+                ],
                 usage={"prompt_tokens": 5, "completion_tokens": 3},
             )
         captured_second_call[:] = messages
@@ -308,15 +330,17 @@ async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     tools.execute = AsyncMock(return_value="x" * 20_000)
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "do task"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=2,
-        workspace=tmp_path,
-        session_key="test:runner",
-        max_tool_result_chars=2048,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "do task"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=2,
+            workspace=tmp_path,
+            session_key="test:runner",
+            max_tool_result_chars=2048,
+        )
+    )
 
     assert result.final_content == "done"
     tool_message = next(msg for msg in captured_second_call if msg.get("role") == "tool")
@@ -398,7 +422,7 @@ def test_persist_tool_result_logs_cleanup_failures(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_runner_replaces_empty_tool_result_with_marker():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -421,13 +445,15 @@ async def test_runner_replaces_empty_tool_result_with_marker():
     tools.execute = AsyncMock(return_value="")
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "do task"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "do task"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=2,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     assert result.final_content == "done"
     tool_message = next(msg for msg in captured_second_call if msg.get("role") == "tool")
@@ -436,7 +462,7 @@ async def test_runner_replaces_empty_tool_result_with_marker():
 
 @pytest.mark.asyncio
 async def test_runner_uses_raw_messages_when_context_governance_fails():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_messages: list[dict] = []
@@ -455,13 +481,15 @@ async def test_runner_uses_raw_messages_when_context_governance_fails():
 
     runner = AgentRunner(provider)
     runner._snip_history = MagicMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
-    result = await runner.run(AgentRunSpec(
-        initial_messages=initial_messages,
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=initial_messages,
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     assert result.final_content == "done"
     assert captured_messages == initial_messages
@@ -470,7 +498,7 @@ async def test_runner_uses_raw_messages_when_context_governance_fails():
 @pytest.mark.asyncio
 async def test_runner_retries_empty_final_response_with_summary_prompt():
     """Empty responses get 2 silent retries before finalization kicks in."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     calls: list[dict] = []
@@ -494,13 +522,15 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
     tools.get_definitions.return_value = []
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "do task"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "do task"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=3,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     assert result.final_content == "final answer"
     # 2 silent retries (iterations 0,1) + finalization on iteration 1
@@ -515,7 +545,7 @@ async def test_runner_retries_empty_final_response_with_summary_prompt():
 @pytest.mark.asyncio
 async def test_runner_uses_specific_message_after_empty_finalization_retry():
     """After silent retries + finalization all return empty, stop_reason is empty_final_response."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
     from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
     provider = MagicMock()
@@ -528,13 +558,15 @@ async def test_runner_uses_specific_message_after_empty_finalization_retry():
     tools.get_definitions.return_value = []
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "do task"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "do task"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=3,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     assert result.final_content == EMPTY_FINAL_RESPONSE_MESSAGE
     assert result.stop_reason == "empty_final_response"
@@ -547,7 +579,7 @@ async def test_runner_empty_response_does_not_break_tool_chain():
     Sequence: tool_call → empty → tool_call → final text.
     The runner should recover via silent retry and complete normally.
     """
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     call_count = 0
@@ -558,15 +590,21 @@ async def test_runner_empty_response_does_not_break_tool_chain():
         if call_count == 1:
             return LLMResponse(
                 content=None,
-                tool_calls=[ToolCallRequest(id="tc1", name="read_file", arguments={"path": "a.txt"})],
+                tool_calls=[
+                    ToolCallRequest(id="tc1", name="read_file", arguments={"path": "a.txt"})
+                ],
                 usage={"prompt_tokens": 10, "completion_tokens": 5},
             )
         if call_count == 2:
-            return LLMResponse(content=None, tool_calls=[], usage={"prompt_tokens": 10, "completion_tokens": 1})
+            return LLMResponse(
+                content=None, tool_calls=[], usage={"prompt_tokens": 10, "completion_tokens": 1}
+            )
         if call_count == 3:
             return LLMResponse(
                 content=None,
-                tool_calls=[ToolCallRequest(id="tc2", name="read_file", arguments={"path": "b.txt"})],
+                tool_calls=[
+                    ToolCallRequest(id="tc2", name="read_file", arguments={"path": "b.txt"})
+                ],
                 usage={"prompt_tokens": 10, "completion_tokens": 5},
             )
         return LLMResponse(
@@ -582,17 +620,21 @@ async def test_runner_empty_response_does_not_break_tool_chain():
         return "file content"
 
     tool_registry = MagicMock()
-    tool_registry.get_definitions.return_value = [{"type": "function", "function": {"name": "read_file"}}]
+    tool_registry.get_definitions.return_value = [
+        {"type": "function", "function": {"name": "read_file"}}
+    ]
     tool_registry.execute = AsyncMock(side_effect=fake_tool)
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "read both files"}],
-        tools=tool_registry,
-        model="test-model",
-        max_iterations=10,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "read both files"}],
+            tools=tool_registry,
+            model="test-model",
+            max_iterations=10,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     assert result.final_content == "Here are the results."
     assert result.stop_reason == "completed"
@@ -601,7 +643,7 @@ async def test_runner_empty_response_does_not_break_tool_chain():
 
 
 def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch):
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     tools = MagicMock()
@@ -613,7 +655,9 @@ def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch
         {
             "role": "assistant",
             "content": "tool call",
-            "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "ls", "arguments": "{}"}}],
+            "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "ls", "arguments": "{}"}}
+            ],
         },
         {"role": "tool", "tool_call_id": "call_1", "content": "tool output"},
         {"role": "assistant", "content": "after tool"},
@@ -628,7 +672,9 @@ def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch
         context_block_limit=100,
     )
 
-    monkeypatch.setattr("nanobot.agent.runner.estimate_prompt_tokens_chain", lambda *_args, **_kwargs: (500, None))
+    monkeypatch.setattr(
+        "nanobot.agent.runner.estimate_prompt_tokens_chain", lambda *_args, **_kwargs: (500, None)
+    )
     token_sizes = {
         "old user": 120,
         "tool call": 120,
@@ -651,7 +697,7 @@ def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch
 
 @pytest.mark.asyncio
 async def test_runner_keeps_going_when_tool_result_persistence_fails():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -674,14 +720,18 @@ async def test_runner_keeps_going_when_tool_result_persistence_fails():
     tools.execute = AsyncMock(return_value="tool result")
 
     runner = AgentRunner(provider)
-    with patch("nanobot.agent.runner.maybe_persist_tool_result", side_effect=RuntimeError("disk full")):
-        result = await runner.run(AgentRunSpec(
-            initial_messages=[{"role": "user", "content": "do task"}],
-            tools=tools,
-            model="test-model",
-            max_iterations=2,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        ))
+    with patch(
+        "nanobot.agent.runner.maybe_persist_tool_result", side_effect=RuntimeError("disk full")
+    ):
+        result = await runner.run(
+            AgentRunSpec(
+                initial_messages=[{"role": "user", "content": "do task"}],
+                tools=tools,
+                model="test-model",
+                max_iterations=2,
+                max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            )
+        )
 
     assert result.final_content == "done"
     tool_message = next(msg for msg in captured_second_call if msg.get("role") == "tool")
@@ -733,7 +783,7 @@ class _DelayTool(Tool):
 
 @pytest.mark.asyncio
 async def test_runner_batches_read_only_tools_before_exclusive_work():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     tools = ToolRegistry()
     shared_events: list[str] = []
@@ -771,7 +821,7 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
 
 @pytest.mark.asyncio
 async def test_runner_does_not_batch_exclusive_read_only_tools():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     tools = ToolRegistry()
     shared_events: list[str] = []
@@ -813,7 +863,7 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
 
 @pytest.mark.asyncio
 async def test_runner_blocks_repeated_external_fetches():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_final_call: list[dict] = []
@@ -824,7 +874,13 @@ async def test_runner_blocks_repeated_external_fetches():
         if call_count["n"] <= 3:
             return LLMResponse(
                 content="working",
-                tool_calls=[ToolCallRequest(id=f"call_{call_count['n']}", name="web_fetch", arguments={"url": "https://example.com"})],
+                tool_calls=[
+                    ToolCallRequest(
+                        id=f"call_{call_count['n']}",
+                        name="web_fetch",
+                        arguments={"url": "https://example.com"},
+                    )
+                ],
                 usage={},
             )
         captured_final_call[:] = messages
@@ -836,18 +892,21 @@ async def test_runner_blocks_repeated_external_fetches():
     tools.execute = AsyncMock(return_value="page content")
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "research task"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=4,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "research task"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=4,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     assert result.final_content == "done"
     assert tools.execute.await_count == 2
     blocked_tool_message = [
-        msg for msg in captured_final_call
+        msg
+        for msg in captured_final_call
         if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_3"
     ][0]
     assert "repeated external lookup blocked" in blocked_tool_message["content"]
@@ -856,10 +915,12 @@ async def test_runner_blocks_repeated_external_fetches():
 @pytest.mark.asyncio
 async def test_loop_max_iterations_message_stays_stable(tmp_path):
     loop = _make_loop(tmp_path)
-    loop.provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="working",
-        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
-    ))
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(
+            content="working",
+            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={})],
+        )
+    )
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.tools.execute = AsyncMock(return_value="ok")
     loop.max_iterations = 2
@@ -926,32 +987,40 @@ async def test_llm_error_not_appended_to_session_messages():
     """When LLM returns finish_reason='error', the error content must NOT be
     appended to the messages list (prevents polluting session history)."""
     from nanobot.agent.runner import (
-        AgentRunSpec,
-        AgentRunner,
         _PERSISTED_MODEL_ERROR_PLACEHOLDER,
+        AgentRunner,
+        AgentRunSpec,
     )
 
     provider = MagicMock()
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage={},
-    ))
+    provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(
+            content="429 rate limit exceeded",
+            finish_reason="error",
+            tool_calls=[],
+            usage={},
+        )
+    )
     tools = MagicMock()
     tools.get_definitions.return_value = []
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "hello"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "hello"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=5,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     assert result.stop_reason == "error"
     assert result.final_content == "429 rate limit exceeded"
     assistant_msgs = [m for m in result.messages if m.get("role") == "assistant"]
-    assert all("429" not in (m.get("content") or "") for m in assistant_msgs), \
+    assert all("429" not in (m.get("content") or "") for m in assistant_msgs), (
         "Error content should not appear in session messages"
+    )
     assert assistant_msgs[-1]["content"] == _PERSISTED_MODEL_ERROR_PLACEHOLDER
 
 
@@ -968,14 +1037,20 @@ async def test_streamed_flag_not_set_on_llm_error(tmp_path):
     provider.get_default_model.return_value = "test-model"
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
     error_resp = LLMResponse(
-        content="503 service unavailable", finish_reason="error", tool_calls=[], usage={},
+        content="503 service unavailable",
+        finish_reason="error",
+        tool_calls=[],
+        usage={},
     )
     loop.provider.chat_with_retry = AsyncMock(return_value=error_resp)
     loop.provider.chat_stream_with_retry = AsyncMock(return_value=error_resp)
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     msg = InboundMessage(
-        channel="feishu", sender_id="u1", chat_id="c1", content="hi",
+        channel="feishu",
+        sender_id="u1",
+        chat_id="c1",
+        content="hi",
     )
     result = await loop._process_message(
         msg,
@@ -985,8 +1060,9 @@ async def test_streamed_flag_not_set_on_llm_error(tmp_path):
 
     assert result is not None
     assert "503" in result.content
-    assert not result.metadata.get("_streamed"), \
+    assert not result.metadata.get("_streamed"), (
         "_streamed must not be set when stop_reason is error"
+    )
 
 
 @pytest.mark.asyncio
@@ -998,10 +1074,14 @@ async def test_next_turn_after_llm_error_keeps_turn_boundary(tmp_path):
 
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    provider.chat_with_retry = AsyncMock(side_effect=[
-        LLMResponse(content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage={}),
-        LLMResponse(content="Recovered answer", tool_calls=[], usage={}),
-    ])
+    provider.chat_with_retry = AsyncMock(
+        side_effect=[
+            LLMResponse(
+                content="429 rate limit exceeded", finish_reason="error", tool_calls=[], usage={}
+            ),
+            LLMResponse(content="Recovered answer", tool_calls=[], usage={}),
+        ]
+    )
 
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
@@ -1041,7 +1121,7 @@ async def test_next_turn_after_llm_error_keeps_turn_boundary(tmp_path):
 
 @pytest.mark.asyncio
 async def test_runner_tool_error_sets_final_content():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 
@@ -1058,14 +1138,16 @@ async def test_runner_tool_error_sets_final_content():
     tools.execute = AsyncMock(side_effect=RuntimeError("boom"))
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "do task"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        fail_on_tool_error=True,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "do task"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            fail_on_tool_error=True,
+        )
+    )
 
     assert result.final_content == "Error: RuntimeError: boom"
     assert result.stop_reason == "tool_error"
@@ -1079,10 +1161,12 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="working",
-        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
-    ))
+    provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(
+            content="working",
+            tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
+        )
+    )
     mgr = SubagentManager(
         provider=provider,
         workspace=tmp_path,
@@ -1108,7 +1192,7 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
 async def test_runner_accumulates_usage_and_preserves_cached_tokens():
     """Runner should accumulate prompt/completion tokens across iterations
     and preserve cached_tokens from provider responses."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     call_count = {"n": 0}
@@ -1118,7 +1202,9 @@ async def test_runner_accumulates_usage_and_preserves_cached_tokens():
         if call_count["n"] == 1:
             return LLMResponse(
                 content="thinking",
-                tool_calls=[ToolCallRequest(id="call_1", name="read_file", arguments={"path": "x"})],
+                tool_calls=[
+                    ToolCallRequest(id="call_1", name="read_file", arguments={"path": "x"})
+                ],
                 usage={"prompt_tokens": 100, "completion_tokens": 10, "cached_tokens": 80},
             )
         return LLMResponse(
@@ -1133,13 +1219,15 @@ async def test_runner_accumulates_usage_and_preserves_cached_tokens():
     tools.execute = AsyncMock(return_value="file content")
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "do task"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "do task"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=3,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     # Usage should be accumulated across iterations
     assert result.usage["prompt_tokens"] == 300  # 100 + 200
@@ -1151,7 +1239,7 @@ async def test_runner_accumulates_usage_and_preserves_cached_tokens():
 async def test_runner_passes_cached_tokens_to_hook_context():
     """Hook context.usage should contain cached_tokens."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_usage: list[dict] = []
@@ -1172,14 +1260,16 @@ async def test_runner_passes_cached_tokens_to_hook_context():
     tools.get_definitions.return_value = []
 
     runner = AgentRunner(provider)
-    await runner.run(AgentRunSpec(
-        initial_messages=[],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        hook=UsageHook(),
-    ))
+    await runner.run(
+        AgentRunSpec(
+            initial_messages=[],
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            hook=UsageHook(),
+        )
+    )
 
     assert len(captured_usage) == 1
     assert captured_usage[0]["cached_tokens"] == 150
@@ -1194,7 +1284,7 @@ async def test_runner_passes_cached_tokens_to_hook_context():
 async def test_length_recovery_continues_from_truncated_output():
     """When finish_reason is 'length', runner should insert a continuation
     prompt and retry, stitching partial outputs into the final result."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     call_count = {"n": 0}
@@ -1214,13 +1304,15 @@ async def test_length_recovery_continues_from_truncated_output():
     tools.get_definitions.return_value = []
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "write a long essay"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=10,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "write a long essay"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=10,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     assert result.stop_reason == "completed"
     assert result.final_content == "final"
@@ -1234,7 +1326,7 @@ async def test_length_recovery_streaming_calls_on_stream_end_with_resuming():
     """During length recovery with streaming, on_stream_end should be called
     with resuming=True so the hook knows the conversation is continuing."""
     from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     call_count = {"n": 0}
@@ -1261,24 +1353,26 @@ async def test_length_recovery_streaming_calls_on_stream_end_with_resuming():
     tools.get_definitions.return_value = []
 
     runner = AgentRunner(provider)
-    await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "go"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=10,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        hook=StreamHook(),
-    ))
+    await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "go"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=10,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            hook=StreamHook(),
+        )
+    )
 
     assert len(stream_end_calls) == 2
-    assert stream_end_calls[0] is True   # length recovery: resuming
+    assert stream_end_calls[0] is True  # length recovery: resuming
     assert stream_end_calls[1] is False  # final response: done
 
 
 @pytest.mark.asyncio
 async def test_length_recovery_gives_up_after_max_retries():
     """After _MAX_LENGTH_RECOVERIES attempts the runner should stop retrying."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _MAX_LENGTH_RECOVERIES
+    from nanobot.agent.runner import _MAX_LENGTH_RECOVERIES, AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     call_count = {"n": 0}
@@ -1296,13 +1390,15 @@ async def test_length_recovery_gives_up_after_max_retries():
     tools.get_definitions.return_value = []
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "go"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=20,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "go"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=20,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     assert call_count["n"] == _MAX_LENGTH_RECOVERIES + 1
     assert result.final_content is not None
@@ -1316,7 +1412,7 @@ async def test_length_recovery_gives_up_after_max_retries():
 @pytest.mark.asyncio
 async def test_backfill_missing_tool_results_inserts_error():
     """Orphaned tool_use (no matching tool_result) should get a synthetic error."""
-    from nanobot.agent.runner import AgentRunner, _BACKFILL_CONTENT
+    from nanobot.agent.runner import _BACKFILL_CONTENT, AgentRunner
 
     messages = [
         {"role": "user", "content": "hi"},
@@ -1324,8 +1420,16 @@ async def test_backfill_missing_tool_results_inserts_error():
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "call_a", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
-                {"id": "call_b", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+                {
+                    "id": "call_a",
+                    "type": "function",
+                    "function": {"name": "exec", "arguments": "{}"},
+                },
+                {
+                    "id": "call_b",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                },
             ],
         },
         {"role": "tool", "tool_call_id": "call_a", "name": "exec", "content": "ok"},
@@ -1349,7 +1453,11 @@ def test_drop_orphan_tool_results_removes_unmatched_tool_messages():
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "call_ok", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+                {
+                    "id": "call_ok",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                },
             ],
         },
         {"role": "tool", "tool_call_id": "call_ok", "name": "read_file", "content": "ok"},
@@ -1366,7 +1474,11 @@ def test_drop_orphan_tool_results_removes_unmatched_tool_messages():
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "call_ok", "type": "function", "function": {"name": "read_file", "arguments": "{}"}},
+                {
+                    "id": "call_ok",
+                    "type": "function",
+                    "function": {"name": "read_file", "arguments": "{}"},
+                },
             ],
         },
         {"role": "tool", "tool_call_id": "call_ok", "name": "read_file", "content": "ok"},
@@ -1385,7 +1497,11 @@ async def test_backfill_noop_when_complete():
             "role": "assistant",
             "content": "",
             "tool_calls": [
-                {"id": "call_x", "type": "function", "function": {"name": "exec", "arguments": "{}"}},
+                {
+                    "id": "call_x",
+                    "type": "function",
+                    "function": {"name": "exec", "arguments": "{}"},
+                },
             ],
         },
         {"role": "tool", "tool_call_id": "call_x", "name": "exec", "content": "done"},
@@ -1397,7 +1513,7 @@ async def test_backfill_noop_when_complete():
 
 @pytest.mark.asyncio
 async def test_runner_drops_orphan_tool_results_before_model_request():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_messages: list[dict] = []
@@ -1411,19 +1527,21 @@ async def test_runner_drops_orphan_tool_results_before_model_request():
     tools.get_definitions.return_value = []
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[
-            {"role": "system", "content": "system"},
-            {"role": "user", "content": "old user"},
-            {"role": "tool", "tool_call_id": "call_orphan", "name": "exec", "content": "stale"},
-            {"role": "assistant", "content": "after orphan"},
-            {"role": "user", "content": "new prompt"},
-        ],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[
+                {"role": "system", "content": "system"},
+                {"role": "user", "content": "old user"},
+                {"role": "tool", "tool_call_id": "call_orphan", "name": "exec", "content": "stale"},
+                {"role": "assistant", "content": "after orphan"},
+                {"role": "user", "content": "new prompt"},
+            ],
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     assert all(
         message.get("tool_call_id") != "call_orphan"
@@ -1522,7 +1640,7 @@ async def test_backfill_repairs_model_context_without_shifting_save_turn_boundar
 @pytest.mark.asyncio
 async def test_runner_backfill_only_mutates_model_context_not_returned_messages():
     """Runner should repair orphaned tool calls for the model without rewriting result.messages."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _BACKFILL_CONTENT
+    from nanobot.agent.runner import _BACKFILL_CONTENT, AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_messages: list[dict] = []
@@ -1554,13 +1672,15 @@ async def test_runner_backfill_only_mutates_model_context_not_returned_messages(
     ]
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=initial_messages,
-        tools=tools,
-        model="test-model",
-        max_iterations=3,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=initial_messages,
+            tools=tools,
+            model="test-model",
+            max_iterations=3,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     synthetic = [
         message
@@ -1605,21 +1725,33 @@ async def test_runner_backfill_only_mutates_model_context_not_returned_messages(
 @pytest.mark.asyncio
 async def test_microcompact_replaces_old_tool_results():
     """Tool results beyond _MICROCOMPACT_KEEP_RECENT should be summarized."""
-    from nanobot.agent.runner import AgentRunner, _MICROCOMPACT_KEEP_RECENT
+    from nanobot.agent.runner import _MICROCOMPACT_KEEP_RECENT, AgentRunner
 
     total = _MICROCOMPACT_KEEP_RECENT + 5
     long_content = "x" * 600
     messages: list[dict] = [{"role": "system", "content": "sys"}]
     for i in range(total):
-        messages.append({
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}],
-        })
-        messages.append({
-            "role": "tool", "tool_call_id": f"c{i}", "name": "read_file",
-            "content": long_content,
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"c{i}",
+                        "type": "function",
+                        "function": {"name": "read_file", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": f"c{i}",
+                "name": "read_file",
+                "content": long_content,
+            }
+        )
 
     result = AgentRunner._microcompact(messages)
     tool_msgs = [m for m in result if m.get("role") == "tool"]
@@ -1633,20 +1765,32 @@ async def test_microcompact_replaces_old_tool_results():
 @pytest.mark.asyncio
 async def test_microcompact_preserves_short_results():
     """Short tool results (< _MICROCOMPACT_MIN_CHARS) should not be replaced."""
-    from nanobot.agent.runner import AgentRunner, _MICROCOMPACT_KEEP_RECENT
+    from nanobot.agent.runner import _MICROCOMPACT_KEEP_RECENT, AgentRunner
 
     total = _MICROCOMPACT_KEEP_RECENT + 5
     messages: list[dict] = []
     for i in range(total):
-        messages.append({
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": "exec", "arguments": "{}"}}],
-        })
-        messages.append({
-            "role": "tool", "tool_call_id": f"c{i}", "name": "exec",
-            "content": "short",
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"c{i}",
+                        "type": "function",
+                        "function": {"name": "exec", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": f"c{i}",
+                "name": "exec",
+                "content": "short",
+            }
+        )
 
     result = AgentRunner._microcompact(messages)
     assert result is messages  # no copy needed — all stale results are short
@@ -1655,21 +1799,33 @@ async def test_microcompact_preserves_short_results():
 @pytest.mark.asyncio
 async def test_microcompact_skips_non_compactable_tools():
     """Non-compactable tools (e.g. 'message') should never be replaced."""
-    from nanobot.agent.runner import AgentRunner, _MICROCOMPACT_KEEP_RECENT
+    from nanobot.agent.runner import _MICROCOMPACT_KEEP_RECENT, AgentRunner
 
     total = _MICROCOMPACT_KEEP_RECENT + 5
     long_content = "y" * 1000
     messages: list[dict] = []
     for i in range(total):
-        messages.append({
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [{"id": f"c{i}", "type": "function", "function": {"name": "message", "arguments": "{}"}}],
-        })
-        messages.append({
-            "role": "tool", "tool_call_id": f"c{i}", "name": "message",
-            "content": long_content,
-        })
+        messages.append(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"c{i}",
+                        "type": "function",
+                        "function": {"name": "message", "arguments": "{}"},
+                    }
+                ],
+            }
+        )
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": f"c{i}",
+                "name": "message",
+                "content": long_content,
+            }
+        )
 
     result = AgentRunner._microcompact(messages)
     assert result is messages  # no compactable tools found
@@ -1679,7 +1835,7 @@ async def test_microcompact_skips_non_compactable_tools():
 async def test_runner_tool_error_preserves_tool_results_in_messages():
     """When a tool raises a fatal error, its results must still be appended
     to messages so the session never contains orphan tool_calls (#2943)."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 
@@ -1710,14 +1866,16 @@ async def test_runner_tool_error_preserves_tool_results_in_messages():
     tools.execute = AsyncMock(side_effect=fake_execute)
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "do stuff"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        fail_on_tool_error=True,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "do stuff"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            fail_on_tool_error=True,
+        )
+    )
 
     assert result.stop_reason == "tool_error"
     # Both tool results must be in messages even though tc2 had a fatal error.
@@ -1727,12 +1885,11 @@ async def test_runner_tool_error_preserves_tool_results_in_messages():
     assert tool_msgs[1]["tool_call_id"] == "tc2"
     # The assistant message with tool_calls must precede the tool results.
     asst_tc_idx = next(
-        i for i, m in enumerate(result.messages)
+        i
+        for i, m in enumerate(result.messages)
         if m.get("role") == "assistant" and m.get("tool_calls")
     )
-    tool_indices = [
-        i for i, m in enumerate(result.messages) if m.get("role") == "tool"
-    ]
+    tool_indices = [i for i, m in enumerate(result.messages) if m.get("role") == "tool"]
     assert all(ti > asst_tc_idx for ti in tool_indices)
 
 
@@ -1741,34 +1898,18 @@ def test_governance_repairs_orphans_after_snip():
     _drop_orphan_tool_results pass must clean up the resulting orphans."""
     from nanobot.agent.runner import AgentRunner
 
-    messages = [
-        {"role": "system", "content": "system"},
-        {"role": "user", "content": "old msg"},
-        {"role": "assistant", "content": None,
-         "tool_calls": [{"id": "tc_old", "type": "function",
-                         "function": {"name": "search", "arguments": "{}"}}]},
-        {"role": "tool", "tool_call_id": "tc_old", "name": "search",
-         "content": "old result"},
-        {"role": "assistant", "content": "old answer"},
-        {"role": "user", "content": "new msg"},
-    ]
-
     # Simulate snipping that keeps only the tail: drop the assistant with
     # tool_calls but keep its tool result (orphan).
     snipped = [
         {"role": "system", "content": "system"},
-        {"role": "tool", "tool_call_id": "tc_old", "name": "search",
-         "content": "old result"},
+        {"role": "tool", "tool_call_id": "tc_old", "name": "search", "content": "old result"},
         {"role": "assistant", "content": "old answer"},
         {"role": "user", "content": "new msg"},
     ]
 
     cleaned = AgentRunner._drop_orphan_tool_results(snipped)
     # The orphan tool result should be removed.
-    assert not any(
-        m.get("role") == "tool" and m.get("tool_call_id") == "tc_old"
-        for m in cleaned
-    )
+    assert not any(m.get("role") == "tool" and m.get("tool_call_id") == "tc_old" for m in cleaned)
 
 
 def test_governance_fallback_still_repairs_orphans():
@@ -1779,8 +1920,7 @@ def test_governance_fallback_still_repairs_orphans():
     # Messages with an orphan tool result (no matching assistant tool_call).
     messages = [
         {"role": "user", "content": "hello"},
-        {"role": "tool", "tool_call_id": "orphan_tc", "name": "read",
-         "content": "stale"},
+        {"role": "tool", "tool_call_id": "orphan_tc", "name": "read", "content": "stale"},
         {"role": "assistant", "content": "hi"},
     ]
 
@@ -1788,21 +1928,26 @@ def test_governance_fallback_still_repairs_orphans():
     repaired = AgentRunner._backfill_missing_tool_results(repaired)
     # Orphan tool result should be gone.
     assert not any(m.get("tool_call_id") == "orphan_tc" for m in repaired)
+
+
 # ── Mid-turn injection tests ──────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_drain_injections_returns_empty_when_no_callback():
     """No injection_callback → empty list."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     runner = AgentRunner(provider)
     tools = MagicMock()
     tools.get_definitions.return_value = []
     spec = AgentRunSpec(
-        initial_messages=[], tools=tools, model="m",
-        max_iterations=1, max_tool_result_chars=1000,
+        initial_messages=[],
+        tools=tools,
+        model="m",
+        max_iterations=1,
+        max_tool_result_chars=1000,
         injection_callback=None,
     )
     result = await runner._drain_injections(spec)
@@ -1812,7 +1957,7 @@ async def test_drain_injections_returns_empty_when_no_callback():
 @pytest.mark.asyncio
 async def test_drain_injections_extracts_content_from_inbound_messages():
     """Should extract .content from InboundMessage objects."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
@@ -1829,8 +1974,11 @@ async def test_drain_injections_extracts_content_from_inbound_messages():
         return msgs
 
     spec = AgentRunSpec(
-        initial_messages=[], tools=tools, model="m",
-        max_iterations=1, max_tool_result_chars=1000,
+        initial_messages=[],
+        tools=tools,
+        model="m",
+        max_iterations=1,
+        max_tool_result_chars=1000,
         injection_callback=cb,
     )
     result = await runner._drain_injections(spec)
@@ -1843,7 +1991,7 @@ async def test_drain_injections_extracts_content_from_inbound_messages():
 @pytest.mark.asyncio
 async def test_drain_injections_passes_limit_to_callback_when_supported():
     """Limit-aware callbacks can preserve overflow in their own queue."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _MAX_INJECTIONS_PER_TURN
+    from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
@@ -1862,8 +2010,11 @@ async def test_drain_injections_passes_limit_to_callback_when_supported():
         return msgs[:limit]
 
     spec = AgentRunSpec(
-        initial_messages=[], tools=tools, model="m",
-        max_iterations=1, max_tool_result_chars=1000,
+        initial_messages=[],
+        tools=tools,
+        model="m",
+        max_iterations=1,
+        max_tool_result_chars=1000,
         injection_callback=cb,
     )
     result = await runner._drain_injections(spec)
@@ -1878,7 +2029,7 @@ async def test_drain_injections_passes_limit_to_callback_when_supported():
 @pytest.mark.asyncio
 async def test_drain_injections_skips_empty_content():
     """Messages with blank content should be filtered out."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
@@ -1896,8 +2047,11 @@ async def test_drain_injections_skips_empty_content():
         return msgs
 
     spec = AgentRunSpec(
-        initial_messages=[], tools=tools, model="m",
-        max_iterations=1, max_tool_result_chars=1000,
+        initial_messages=[],
+        tools=tools,
+        model="m",
+        max_iterations=1,
+        max_tool_result_chars=1000,
         injection_callback=cb,
     )
     result = await runner._drain_injections(spec)
@@ -1907,7 +2061,7 @@ async def test_drain_injections_skips_empty_content():
 @pytest.mark.asyncio
 async def test_drain_injections_handles_callback_exception():
     """If the callback raises, return empty list (error is logged)."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     runner = AgentRunner(provider)
@@ -1918,8 +2072,11 @@ async def test_drain_injections_handles_callback_exception():
         raise RuntimeError("boom")
 
     spec = AgentRunSpec(
-        initial_messages=[], tools=tools, model="m",
-        max_iterations=1, max_tool_result_chars=1000,
+        initial_messages=[],
+        tools=tools,
+        model="m",
+        max_iterations=1,
+        max_tool_result_chars=1000,
         injection_callback=cb,
     )
     result = await runner._drain_injections(spec)
@@ -1929,7 +2086,7 @@ async def test_drain_injections_handles_callback_exception():
 @pytest.mark.asyncio
 async def test_checkpoint1_injects_after_tool_execution():
     """Follow-up messages are injected after tool execution, before next LLM call."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
@@ -1961,29 +2118,35 @@ async def test_checkpoint1_injects_after_tool_execution():
     )
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "hello"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        injection_callback=inject_cb,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "hello"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=5,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            injection_callback=inject_cb,
+        )
+    )
 
     assert result.had_injections is True
     assert result.final_content == "final answer"
     # The second call should have the injected user message
     assert call_count["n"] == 2
     last_messages = captured_messages[-1]
-    injected = [m for m in last_messages if m.get("role") == "user" and m.get("content") == "follow-up question"]
+    injected = [
+        m
+        for m in last_messages
+        if m.get("role") == "user" and m.get("content") == "follow-up question"
+    ]
     assert len(injected) == 1
 
 
 @pytest.mark.asyncio
 async def test_checkpoint2_injects_after_final_response_with_resuming_stream():
     """After final response, if injections exist, stream_end should get resuming=True."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
     from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
@@ -2019,15 +2182,17 @@ async def test_checkpoint2_injects_after_final_response_with_resuming_stream():
     )
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "hello"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        hook=TrackingHook(),
-        injection_callback=inject_cb,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "hello"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=5,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            hook=TrackingHook(),
+            injection_callback=inject_cb,
+        )
+    )
 
     assert result.had_injections is True
     assert result.final_content == "second answer"
@@ -2041,7 +2206,7 @@ async def test_checkpoint2_injects_after_final_response_with_resuming_stream():
 @pytest.mark.asyncio
 async def test_checkpoint2_preserves_final_response_in_history_before_followup():
     """A follow-up injected after a final answer must still see that answer in history."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
@@ -2067,14 +2232,16 @@ async def test_checkpoint2_preserves_final_response_in_history_before_followup()
     )
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "hello"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        injection_callback=inject_cb,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "hello"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=5,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            injection_callback=inject_cb,
+        )
+    )
 
     assert result.final_content == "second answer"
     assert call_count["n"] == 2
@@ -2101,9 +2268,11 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
     from nanobot.bus.queue import MessageBus
 
     image_path = tmp_path / "followup.png"
-    image_path.write_bytes(base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII="
-    ))
+    image_path.write_bytes(
+        base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+yF9kAAAAASUVORK5CYII="
+        )
+    )
 
     bus = MessageBus()
     provider = MagicMock()
@@ -2123,13 +2292,15 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
     loop.tools.get_definitions = MagicMock(return_value=[])
 
     pending_queue = asyncio.Queue()
-    await pending_queue.put(InboundMessage(
-        channel="cli",
-        sender_id="u",
-        chat_id="c",
-        content="",
-        media=[str(image_path)],
-    ))
+    await pending_queue.put(
+        InboundMessage(
+            channel="cli",
+            sender_id="u",
+            chat_id="c",
+            content="",
+            media=[str(image_path)],
+        )
+    )
 
     final_content, _, _, _, had_injections = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
@@ -2142,7 +2313,8 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
     assert had_injections is True
     assert call_count["n"] == 2
     injected_user_messages = [
-        message for message in captured_messages[-1]
+        message
+        for message in captured_messages[-1]
         if message.get("role") == "user" and isinstance(message.get("content"), list)
     ]
     assert injected_user_messages
@@ -2156,7 +2328,7 @@ async def test_loop_injected_followup_preserves_image_media(tmp_path):
 @pytest.mark.asyncio
 async def test_runner_merges_multiple_injected_user_messages_without_losing_media():
     """Multiple injected follow-ups should not create lossy consecutive user messages."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     call_count = {"n": 0}
@@ -2188,14 +2360,16 @@ async def test_runner_merges_multiple_injected_user_messages_without_losing_medi
         return []
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "hello"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        injection_callback=inject_cb,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "hello"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=5,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            injection_callback=inject_cb,
+        )
+    )
 
     assert result.final_content == "second answer"
     assert call_count["n"] == 2
@@ -2205,9 +2379,7 @@ async def test_runner_merges_multiple_injected_user_messages_without_losing_medi
     injected = user_messages[-1]
     assert isinstance(injected["content"], list)
     assert any(
-        block.get("type") == "image_url"
-        for block in injected["content"]
-        if isinstance(block, dict)
+        block.get("type") == "image_url" for block in injected["content"] if isinstance(block, dict)
     )
     assert any(
         block.get("type") == "text" and block.get("text") == "and answer briefly"
@@ -2219,7 +2391,7 @@ async def test_runner_merges_multiple_injected_user_messages_without_losing_medi
 @pytest.mark.asyncio
 async def test_injection_cycles_capped_at_max():
     """Injection cycles should be capped at _MAX_INJECTION_CYCLES."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _MAX_INJECTION_CYCLES
+    from nanobot.agent.runner import _MAX_INJECTION_CYCLES, AgentRunner, AgentRunSpec
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
@@ -2239,18 +2411,24 @@ async def test_injection_cycles_capped_at_max():
         drain_count["n"] += 1
         # Only inject for the first _MAX_INJECTION_CYCLES drains
         if drain_count["n"] <= _MAX_INJECTION_CYCLES:
-            return [InboundMessage(channel="cli", sender_id="u", chat_id="c", content=f"msg-{drain_count['n']}")]
+            return [
+                InboundMessage(
+                    channel="cli", sender_id="u", chat_id="c", content=f"msg-{drain_count['n']}"
+                )
+            ]
         return []
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "start"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=20,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        injection_callback=inject_cb,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "start"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=20,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            injection_callback=inject_cb,
+        )
+    )
 
     assert result.had_injections is True
     # Should be capped: _MAX_INJECTION_CYCLES injection rounds + 1 final round
@@ -2260,7 +2438,7 @@ async def test_injection_cycles_capped_at_max():
 @pytest.mark.asyncio
 async def test_no_injections_flag_is_false_by_default():
     """had_injections should be False when no injection callback or no messages."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 
@@ -2272,13 +2450,15 @@ async def test_no_injections_flag_is_false_by_default():
     tools.get_definitions.return_value = []
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "hi"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=1,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "hi"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=1,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        )
+    )
 
     assert result.had_injections is False
 
@@ -2340,9 +2520,9 @@ async def test_followup_routed_to_pending_queue(tmp_path):
 async def test_pending_queue_preserves_overflow_for_next_injection_cycle(tmp_path):
     """Pending queue should leave overflow messages queued for later drains."""
     from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
-    from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN
 
     bus = MessageBus()
     provider = MagicMock()
@@ -2362,12 +2542,14 @@ async def test_pending_queue_preserves_overflow_for_next_injection_cycle(tmp_pat
     pending_queue = asyncio.Queue()
     total_followups = _MAX_INJECTIONS_PER_TURN + 2
     for idx in range(total_followups):
-        await pending_queue.put(InboundMessage(
-            channel="cli",
-            sender_id="u",
-            chat_id="c",
-            content=f"follow-up-{idx}",
-        ))
+        await pending_queue.put(
+            InboundMessage(
+                channel="cli",
+                sender_id="u",
+                chat_id="c",
+                content=f"follow-up-{idx}",
+            )
+        )
 
     final_content, _, _, _, had_injections = await loop._run_agent_loop(
         [{"role": "user", "content": "hello"}],
@@ -2398,7 +2580,9 @@ async def test_pending_queue_full_falls_back_to_queued_task(tmp_path):
     loop._dispatch = AsyncMock()  # type: ignore[method-assign]
 
     pending = asyncio.Queue(maxsize=1)
-    pending.put_nowait(InboundMessage(channel="cli", sender_id="u", chat_id="c", content="already queued"))
+    pending.put_nowait(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="already queued")
+    )
     loop._pending_queues["cli:c"] = pending
 
     run_task = asyncio.create_task(loop.run())
@@ -2436,8 +2620,12 @@ async def test_dispatch_republishes_leftover_queue_messages(tmp_path):
     pending = asyncio.Queue(maxsize=20)
     session_key = "cli:c"
     loop._pending_queues[session_key] = pending
-    pending.put_nowait(InboundMessage(channel="cli", sender_id="u", chat_id="c", content="leftover-1"))
-    pending.put_nowait(InboundMessage(channel="cli", sender_id="u", chat_id="c", content="leftover-2"))
+    pending.put_nowait(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="leftover-1")
+    )
+    pending.put_nowait(
+        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="leftover-2")
+    )
 
     # Execute the cleanup logic from the finally block
     queue = loop._pending_queues.pop(session_key, None)
@@ -2465,7 +2653,7 @@ async def test_dispatch_republishes_leftover_queue_messages(tmp_path):
 @pytest.mark.asyncio
 async def test_drain_injections_on_fatal_tool_error():
     """Pending injections should be drained even when a fatal tool error occurs."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
@@ -2495,21 +2683,24 @@ async def test_drain_injections_on_fatal_tool_error():
     )
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "hello"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        fail_on_tool_error=True,
-        injection_callback=inject_cb,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "hello"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=5,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            fail_on_tool_error=True,
+            injection_callback=inject_cb,
+        )
+    )
 
     assert result.had_injections is True
     assert result.final_content == "reply to follow-up"
     # The injection should be in the messages history
     injected = [
-        m for m in result.messages
+        m
+        for m in result.messages
         if m.get("role") == "user" and m.get("content") == "follow-up after error"
     ]
     assert len(injected) == 1
@@ -2518,7 +2709,7 @@ async def test_drain_injections_on_fatal_tool_error():
 @pytest.mark.asyncio
 async def test_drain_injections_on_llm_error():
     """Pending injections should be drained when the LLM returns an error finish_reason."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
@@ -2544,27 +2735,32 @@ async def test_drain_injections_on_llm_error():
     inject_cb = _make_injection_callback(injection_queue)
 
     await injection_queue.put(
-        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after LLM error")
+        InboundMessage(
+            channel="cli", sender_id="u", chat_id="c", content="follow-up after LLM error"
+        )
     )
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "previous response"},
-            {"role": "user", "content": "trigger error"},
-        ],
-        tools=tools,
-        model="test-model",
-        max_iterations=5,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        injection_callback=inject_cb,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "previous response"},
+                {"role": "user", "content": "trigger error"},
+            ],
+            tools=tools,
+            model="test-model",
+            max_iterations=5,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            injection_callback=inject_cb,
+        )
+    )
 
     assert result.had_injections is True
     assert result.final_content == "recovered answer"
     injected = [
-        m for m in result.messages
+        m
+        for m in result.messages
         if m.get("role") == "user" and "follow-up after LLM error" in str(m.get("content", ""))
     ]
     assert len(injected) == 1
@@ -2573,7 +2769,7 @@ async def test_drain_injections_on_llm_error():
 @pytest.mark.asyncio
 async def test_drain_injections_on_empty_final_response():
     """Pending injections should be drained when the runner exits due to empty response."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _MAX_EMPTY_RETRIES
+    from nanobot.agent.runner import _MAX_EMPTY_RETRIES, AgentRunner, AgentRunSpec
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
@@ -2598,23 +2794,26 @@ async def test_drain_injections_on_empty_final_response():
     )
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "previous response"},
-            {"role": "user", "content": "trigger empty"},
-        ],
-        tools=tools,
-        model="test-model",
-        max_iterations=10,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        injection_callback=inject_cb,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "previous response"},
+                {"role": "user", "content": "trigger empty"},
+            ],
+            tools=tools,
+            model="test-model",
+            max_iterations=10,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            injection_callback=inject_cb,
+        )
+    )
 
     assert result.had_injections is True
     assert result.final_content == "answer after empty"
     injected = [
-        m for m in result.messages
+        m
+        for m in result.messages
         if m.get("role") == "user" and "follow-up after empty" in str(m.get("content", ""))
     ]
     assert len(injected) == 1
@@ -2628,7 +2827,7 @@ async def test_drain_injections_on_max_iterations():
     injections are appended to messages but not processed by the LLM.
     The key point is they are consumed from the queue to prevent re-publish.
     """
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
@@ -2638,7 +2837,9 @@ async def test_drain_injections_on_max_iterations():
         call_count["n"] += 1
         return LLMResponse(
             content="",
-            tool_calls=[ToolCallRequest(id=f"c{call_count['n']}", name="read_file", arguments={"path": "x"})],
+            tool_calls=[
+                ToolCallRequest(id=f"c{call_count['n']}", name="read_file", arguments={"path": "x"})
+            ],
             usage={},
         )
 
@@ -2651,18 +2852,22 @@ async def test_drain_injections_on_max_iterations():
     inject_cb = _make_injection_callback(injection_queue)
 
     await injection_queue.put(
-        InboundMessage(channel="cli", sender_id="u", chat_id="c", content="follow-up after max iters")
+        InboundMessage(
+            channel="cli", sender_id="u", chat_id="c", content="follow-up after max iters"
+        )
     )
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "hello"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        injection_callback=inject_cb,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "hello"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=2,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            injection_callback=inject_cb,
+        )
+    )
 
     assert result.stop_reason == "max_iterations"
     assert result.had_injections is True
@@ -2670,7 +2875,8 @@ async def test_drain_injections_on_max_iterations():
     assert injection_queue.empty()
     # The injection message is appended to conversation history
     injected = [
-        m for m in result.messages
+        m
+        for m in result.messages
         if m.get("role") == "user" and m.get("content") == "follow-up after max iters"
     ]
     assert len(injected) == 1
@@ -2680,7 +2886,7 @@ async def test_drain_injections_on_max_iterations():
 async def test_drain_injections_set_flag_when_followup_arrives_after_last_iteration():
     """Late follow-ups drained in max_iterations should still flip had_injections."""
     from nanobot.agent.hook import AgentHook
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
@@ -2690,7 +2896,9 @@ async def test_drain_injections_set_flag_when_followup_arrives_after_last_iterat
         call_count["n"] += 1
         return LLMResponse(
             content="",
-            tool_calls=[ToolCallRequest(id=f"c{call_count['n']}", name="read_file", arguments={"path": "x"})],
+            tool_calls=[
+                ToolCallRequest(id=f"c{call_count['n']}", name="read_file", arguments={"path": "x"})
+            ],
             usage={},
         )
 
@@ -2719,21 +2927,24 @@ async def test_drain_injections_set_flag_when_followup_arrives_after_last_iterat
                 )
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "hello"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=2,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        injection_callback=inject_cb,
-        hook=InjectOnLastAfterIterationHook(),
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "hello"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=2,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            injection_callback=inject_cb,
+            hook=InjectOnLastAfterIterationHook(),
+        )
+    )
 
     assert result.stop_reason == "max_iterations"
     assert result.had_injections is True
     assert injection_queue.empty()
     injected = [
-        m for m in result.messages
+        m
+        for m in result.messages
         if m.get("role") == "user" and m.get("content") == "late follow-up after max iters"
     ]
     assert len(injected) == 1
@@ -2742,7 +2953,7 @@ async def test_drain_injections_set_flag_when_followup_arrives_after_last_iterat
 @pytest.mark.asyncio
 async def test_injection_cycle_cap_on_error_path():
     """Injection cycles should be capped even when every iteration hits an LLM error."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _MAX_INJECTION_CYCLES
+    from nanobot.agent.runner import _MAX_INJECTION_CYCLES, AgentRunner, AgentRunSpec
     from nanobot.bus.events import InboundMessage
 
     provider = MagicMock()
@@ -2766,22 +2977,28 @@ async def test_injection_cycle_cap_on_error_path():
     async def inject_cb():
         drain_count["n"] += 1
         if drain_count["n"] <= _MAX_INJECTION_CYCLES:
-            return [InboundMessage(channel="cli", sender_id="u", chat_id="c", content=f"msg-{drain_count['n']}")]
+            return [
+                InboundMessage(
+                    channel="cli", sender_id="u", chat_id="c", content=f"msg-{drain_count['n']}"
+                )
+            ]
         return []
 
     runner = AgentRunner(provider)
-    result = await runner.run(AgentRunSpec(
-        initial_messages=[
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "previous"},
-            {"role": "user", "content": "trigger error"},
-        ],
-        tools=tools,
-        model="test-model",
-        max_iterations=20,
-        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        injection_callback=inject_cb,
-    ))
+    result = await runner.run(
+        AgentRunSpec(
+            initial_messages=[
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "previous"},
+                {"role": "user", "content": "trigger error"},
+            ],
+            tools=tools,
+            model="test-model",
+            max_iterations=20,
+            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+            injection_callback=inject_cb,
+        )
+    )
 
     assert result.had_injections is True
     # Should cap: _MAX_INJECTION_CYCLES drained rounds + 1 final round that breaks

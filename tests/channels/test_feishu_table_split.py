@@ -9,12 +9,14 @@ table, allowing nanobot to send multiple cards instead of failing.
 # Check optional Feishu dependencies before running tests
 try:
     from nanobot.channels import feishu
+
     FEISHU_AVAILABLE = getattr(feishu, "FEISHU_AVAILABLE", False)
 except ImportError:
     FEISHU_AVAILABLE = False
 
 if not FEISHU_AVAILABLE:
     import pytest
+
     pytest.skip("Feishu dependencies not installed (lark-oapi)", allow_module_level=True)
 
 from nanobot.channels.feishu import FeishuChannel
@@ -80,8 +82,7 @@ def test_two_tables_split_into_two_groups() -> None:
 
 def test_three_tables_split_into_three_groups() -> None:
     tables = [
-        {"tag": "table", "columns": [], "rows": [{"c0": f"t{i}"}], "page_size": 1}
-        for i in range(3)
+        {"tag": "table", "columns": [], "rows": [{"c0": f"t{i}"}], "page_size": 1} for i in range(3)
     ]
     els = tables[:]
     result = split(els)

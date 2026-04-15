@@ -8,10 +8,8 @@ import contextvars
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
-
 
 _PROJECTS_PATH = Path.home() / "proyectos"
 

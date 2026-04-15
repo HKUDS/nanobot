@@ -1,5 +1,3 @@
-import pytest
-
 from nanobot.utils.helpers import strip_think
 
 
@@ -48,7 +46,7 @@ class TestStripThinkFalsePositive:
         assert strip_think(text) == text
 
     def test_code_block_think_tag_preserved(self):
-        text = "Example:\n```\ntext = re.sub(r\"<think>[\\s\\S]*\", \"\", text)\n```\nDone."
+        text = 'Example:\n```\ntext = re.sub(r"<think>[\\s\\S]*", "", text)\n```\nDone.'
         assert strip_think(text) == text
 
     def test_backtick_thought_tag_preserved(self):

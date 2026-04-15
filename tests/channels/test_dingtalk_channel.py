@@ -2,7 +2,6 @@ import asyncio
 import zipfile
 from io import BytesIO
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -10,6 +9,7 @@ import pytest
 # Check optional dingtalk dependencies before running tests
 try:
     from nanobot.channels import dingtalk
+
     DINGTALK_AVAILABLE = getattr(dingtalk, "DINGTALK_AVAILABLE", False)
 except ImportError:
     DINGTALK_AVAILABLE = False
@@ -17,10 +17,9 @@ except ImportError:
 if not DINGTALK_AVAILABLE:
     pytest.skip("DingTalk dependencies not installed (dingtalk-stream)", allow_module_level=True)
 
-from nanobot.bus.queue import MessageBus
 import nanobot.channels.dingtalk as dingtalk_module
-from nanobot.channels.dingtalk import DingTalkChannel, NanobotDingTalkHandler
-from nanobot.channels.dingtalk import DingTalkConfig
+from nanobot.bus.queue import MessageBus
+from nanobot.channels.dingtalk import DingTalkChannel, DingTalkConfig, NanobotDingTalkHandler
 
 
 class _FakeResponse:
@@ -217,10 +216,12 @@ async def test_download_dingtalk_file(tmp_path, monkeypatch) -> None:
 
     # Mock HTTP: first POST returns downloadUrl, then GET returns file bytes
     file_content = b"fake file content"
-    channel._http = _FakeHttp(responses=[
-        _FakeResponse(200, {"downloadUrl": "https://example.com/tmpfile"}),
-        _FakeResponse(200),
-    ])
+    channel._http = _FakeHttp(
+        responses=[
+            _FakeResponse(200, {"downloadUrl": "https://example.com/tmpfile"}),
+            _FakeResponse(200),
+        ]
+    )
     channel._http._responses[1].content = file_content
 
     # Redirect media dir to tmp_path

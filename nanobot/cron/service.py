@@ -12,7 +12,14 @@ from typing import Any, Callable, Coroutine, Literal
 from filelock import FileLock
 from loguru import logger
 
-from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronRunRecord, CronSchedule, CronStore
+from nanobot.cron.types import (
+    CronJob,
+    CronJobState,
+    CronPayload,
+    CronRunRecord,
+    CronSchedule,
+    CronStore,
+)
 
 
 def _now_ms() -> int:
@@ -35,6 +42,7 @@ def _compute_next_run(schedule: CronSchedule, now_ms: int) -> int | None:
             from zoneinfo import ZoneInfo
 
             from croniter import croniter
+
             # Use caller-provided reference time for deterministic scheduling
             base_time = now_ms / 1000
             tz = ZoneInfo(schedule.tz) if schedule.tz else datetime.now().astimezone().tzinfo
@@ -92,43 +100,45 @@ class CronService:
                 jobs = []
                 version = data.get("version", 1)
                 for j in data.get("jobs", []):
-                    jobs.append(CronJob(
-                        id=j["id"],
-                        name=j["name"],
-                        enabled=j.get("enabled", True),
-                        schedule=CronSchedule(
-                            kind=j["schedule"]["kind"],
-                            at_ms=j["schedule"].get("atMs"),
-                            every_ms=j["schedule"].get("everyMs"),
-                            expr=j["schedule"].get("expr"),
-                            tz=j["schedule"].get("tz"),
-                        ),
-                        payload=CronPayload(
-                            kind=j["payload"].get("kind", "agent_turn"),
-                            message=j["payload"].get("message", ""),
-                            deliver=j["payload"].get("deliver", False),
-                            channel=j["payload"].get("channel"),
-                            to=j["payload"].get("to"),
-                        ),
-                        state=CronJobState(
-                            next_run_at_ms=j.get("state", {}).get("nextRunAtMs"),
-                            last_run_at_ms=j.get("state", {}).get("lastRunAtMs"),
-                            last_status=j.get("state", {}).get("lastStatus"),
-                            last_error=j.get("state", {}).get("lastError"),
-                            run_history=[
-                                CronRunRecord(
-                                    run_at_ms=r["runAtMs"],
-                                    status=r["status"],
-                                    duration_ms=r.get("durationMs", 0),
-                                    error=r.get("error"),
-                                )
-                                for r in j.get("state", {}).get("runHistory", [])
-                            ],
-                        ),
-                        created_at_ms=j.get("createdAtMs", 0),
-                        updated_at_ms=j.get("updatedAtMs", 0),
-                        delete_after_run=j.get("deleteAfterRun", False),
-                    ))
+                    jobs.append(
+                        CronJob(
+                            id=j["id"],
+                            name=j["name"],
+                            enabled=j.get("enabled", True),
+                            schedule=CronSchedule(
+                                kind=j["schedule"]["kind"],
+                                at_ms=j["schedule"].get("atMs"),
+                                every_ms=j["schedule"].get("everyMs"),
+                                expr=j["schedule"].get("expr"),
+                                tz=j["schedule"].get("tz"),
+                            ),
+                            payload=CronPayload(
+                                kind=j["payload"].get("kind", "agent_turn"),
+                                message=j["payload"].get("message", ""),
+                                deliver=j["payload"].get("deliver", False),
+                                channel=j["payload"].get("channel"),
+                                to=j["payload"].get("to"),
+                            ),
+                            state=CronJobState(
+                                next_run_at_ms=j.get("state", {}).get("nextRunAtMs"),
+                                last_run_at_ms=j.get("state", {}).get("lastRunAtMs"),
+                                last_status=j.get("state", {}).get("lastStatus"),
+                                last_error=j.get("state", {}).get("lastError"),
+                                run_history=[
+                                    CronRunRecord(
+                                        run_at_ms=r["runAtMs"],
+                                        status=r["status"],
+                                        duration_ms=r.get("durationMs", 0),
+                                        error=r.get("error"),
+                                    )
+                                    for r in j.get("state", {}).get("runHistory", [])
+                                ],
+                            ),
+                            created_at_ms=j.get("createdAtMs", 0),
+                            updated_at_ms=j.get("updatedAtMs", 0),
+                            delete_after_run=j.get("deleteAfterRun", False),
+                        )
+                    )
             except Exception as e:
                 logger.warning("Failed to load cron store: {}", e)
         return jobs, version
@@ -138,6 +148,7 @@ class CronService:
             return
 
         jobs_map = {j.id: j for j in self._store.jobs}
+
         def _update(params: dict):
             j = CronJob.from_dict(params)
             jobs_map[j.id] = j
@@ -231,7 +242,7 @@ class CronService:
                     "deleteAfterRun": j.delete_after_run,
                 }
                 for j in self._store.jobs
-            ]
+            ],
         }
 
         self.store_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -243,7 +254,9 @@ class CronService:
         self._recompute_next_runs()
         self._save_store()
         self._arm_timer()
-        logger.info("Cron service started with {} jobs", len(self._store.jobs if self._store else []))
+        logger.info(
+            "Cron service started with {} jobs", len(self._store.jobs if self._store else [])
+        )
 
     def stop(self) -> None:
         """Stop the cron service."""
@@ -265,8 +278,9 @@ class CronService:
         """Get the earliest next run time across all jobs."""
         if not self._store:
             return None
-        times = [j.state.next_run_at_ms for j in self._store.jobs
-                 if j.enabled and j.state.next_run_at_ms]
+        times = [
+            j.state.next_run_at_ms for j in self._store.jobs if j.enabled and j.state.next_run_at_ms
+        ]
         return min(times) if times else None
 
     def _arm_timer(self) -> None:
@@ -302,7 +316,8 @@ class CronService:
         try:
             now = _now_ms()
             due_jobs = [
-                j for j in self._store.jobs
+                j
+                for j in self._store.jobs
                 if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
             ]
 
@@ -336,13 +351,15 @@ class CronService:
         job.state.last_run_at_ms = start_ms
         job.updated_at_ms = end_ms
 
-        job.state.run_history.append(CronRunRecord(
-            run_at_ms=start_ms,
-            status=job.state.last_status,
-            duration_ms=end_ms - start_ms,
-            error=job.state.last_error,
-        ))
-        job.state.run_history = job.state.run_history[-self._MAX_RUN_HISTORY:]
+        job.state.run_history.append(
+            CronRunRecord(
+                run_at_ms=start_ms,
+                status=job.state.last_status,
+                duration_ms=end_ms - start_ms,
+                error=job.state.last_error,
+            )
+        )
+        job.state.run_history = job.state.run_history[-self._MAX_RUN_HISTORY :]
 
         # Handle one-shot jobs
         if job.schedule.kind == "at":
@@ -361,14 +378,13 @@ class CronService:
             with open(self._action_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps({"action": action, "params": params}, ensure_ascii=False) + "\n")
 
-
     # ========== Public API ==========
 
     def list_jobs(self, include_disabled: bool = False) -> list[CronJob]:
         """List all jobs."""
         store = self._load_store()
         jobs = store.jobs if include_disabled else [j for j in store.jobs if j.enabled]
-        return sorted(jobs, key=lambda j: j.state.next_run_at_ms or float('inf'))
+        return sorted(jobs, key=lambda j: j.state.next_run_at_ms or float("inf"))
 
     def add_job(
         self,

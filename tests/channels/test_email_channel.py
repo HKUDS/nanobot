@@ -1,14 +1,13 @@
-from email.message import EmailMessage
-from datetime import date
-from pathlib import Path
 import imaplib
+from datetime import date
+from email.message import EmailMessage
+from pathlib import Path
 
 import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.email import EmailChannel
-from nanobot.channels.email import EmailConfig
+from nanobot.channels.email import EmailChannel, EmailConfig
 
 
 def _make_config(**overrides) -> EmailConfig:
@@ -295,6 +294,7 @@ async def test_send_uses_smtp_and_reply_subject(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
     """When auto_reply_enabled=False, replies should be skipped but proactive sends allowed."""
+
     class FakeSMTP:
         def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
             self.sent_messages: list[EmailMessage] = []
@@ -356,6 +356,7 @@ async def test_send_skips_reply_when_auto_reply_disabled(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_send_proactive_email_when_auto_reply_disabled(monkeypatch) -> None:
     """Proactive emails (not replies) should be sent even when auto_reply_enabled=False."""
+
     class FakeSMTP:
         def __init__(self, _host: str, _port: int, timeout: int = 30) -> None:
             self.sent_messages: list[EmailMessage] = []
@@ -496,8 +497,10 @@ def test_fetch_messages_between_dates_uses_imap_since_before_without_mark_seen(m
 # Security: Anti-spoofing tests for Authentication-Results verification
 # ---------------------------------------------------------------------------
 
+
 def _make_fake_imap(raw: bytes):
     """Return a FakeIMAP class pre-loaded with the given raw email."""
+
     class FakeIMAP:
         def __init__(self) -> None:
             self.store_calls: list[tuple[bytes, str, str]] = []
@@ -604,8 +607,8 @@ def test_email_content_tagged_with_email_context(monkeypatch) -> None:
 
 def test_check_authentication_results_method() -> None:
     """Unit test for the _check_authentication_results static method."""
-    from email.parser import BytesParser
     from email import policy
+    from email.parser import BytesParser
 
     # No Authentication-Results header
     msg_no_auth = EmailMessage()
@@ -693,7 +696,9 @@ def test_extract_attachments_saves_pdf(tmp_path, monkeypatch) -> None:
     fake = _make_fake_imap(raw)
     monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
 
-    cfg = _make_config(allowed_attachment_types=["application/pdf"], verify_dkim=False, verify_spf=False)
+    cfg = _make_config(
+        allowed_attachment_types=["application/pdf"], verify_dkim=False, verify_spf=False
+    )
     channel = EmailChannel(cfg, MessageBus())
     items = channel._fetch_new_messages()
 

@@ -34,6 +34,7 @@ class OnboardResult:
     config: Config
     should_save: bool
 
+
 # --- Field Hints for Select Fields ---
 # Maps field names to (choices, hint_text)
 # To add a new select field with hints, add an entry:
@@ -151,10 +152,12 @@ def _select_with_back(
         event.app.exit()
 
     # Style
-    style = Style.from_dict({
-        "selected": "fg:green bold",
-        "question": "fg:cyan",
-    })
+    style = Style.from_dict(
+        {
+            "selected": "fg:green bold",
+            "question": "fg:cyan",
+        }
+    )
 
     app = Application(layout=layout, key_bindings=bindings, style=style)
     try:
@@ -164,6 +167,7 @@ def _select_with_back(
         return None
 
     return state["result"]
+
 
 # --- Type Introspection ---
 
@@ -191,13 +195,13 @@ def _get_field_type_info(field_info) -> FieldTypeInfo:
             origin = get_origin(annotation)
             args = get_args(annotation)
 
-    _SIMPLE_TYPES: dict[type, str] = {bool: "bool", int: "int", float: "float"}
+    simple_types: dict[type, str] = {bool: "bool", int: "int", float: "float"}
 
     if origin is list or (hasattr(origin, "__name__") and origin.__name__ == "List"):
         return FieldTypeInfo("list", args[0] if args else str)
     if origin is dict or (hasattr(origin, "__name__") and origin.__name__ == "Dict"):
         return FieldTypeInfo("dict", None)
-    for py_type, name in _SIMPLE_TYPES.items():
+    for py_type, name in simple_types.items():
         if annotation is py_type:
             return FieldTypeInfo(name, None)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
@@ -305,9 +309,7 @@ def _show_main_menu_header() -> None:
     # Use Align.CENTER for the single line of text
     from rich.align import Align
 
-    console.print(
-        Align.center(f"{__logo__} [bold cyan]nanobot[{__version__}][/bold cyan]")
-    )
+    console.print(Align.center(f"{__logo__} [bold cyan]nanobot[{__version__}][/bold cyan]"))
     console.print()
 
 
@@ -327,10 +329,14 @@ def _show_section_header(title: str, subtitle: str = "") -> None:
 
 def _input_bool(display_name: str, current: bool | None) -> bool | None:
     """Get boolean input via confirm dialog."""
-    return _get_questionary().confirm(
-        display_name,
-        default=bool(current) if current is not None else False,
-    ).ask()
+    return (
+        _get_questionary()
+        .confirm(
+            display_name,
+            default=bool(current) if current is not None else False,
+        )
+        .ask()
+    )
 
 
 def _input_text(display_name: str, current: Any, field_type: str) -> Any:
@@ -366,18 +372,20 @@ def _input_text(display_name: str, current: Any, field_type: str) -> Any:
     return value
 
 
-def _input_with_existing(
-    display_name: str, current: Any, field_type: str
-) -> Any:
+def _input_with_existing(display_name: str, current: Any, field_type: str) -> Any:
     """Handle input with 'keep existing' option for non-empty values."""
     has_existing = current is not None and current != "" and current != {} and current != []
 
     if has_existing and not isinstance(current, list):
-        choice = _get_questionary().select(
-            display_name,
-            choices=["Enter new value", "Keep existing value"],
-            default="Keep existing value",
-        ).ask()
+        choice = (
+            _get_questionary()
+            .select(
+                display_name,
+                choices=["Enter new value", "Keep existing value"],
+                default="Keep existing value",
+            )
+            .ask()
+        )
         if choice == "Keep existing value" or choice is None:
             return None
 
@@ -394,12 +402,8 @@ def _get_current_provider(model: BaseModel) -> str:
     return "auto"
 
 
-def _input_model_with_autocomplete(
-    display_name: str, current: Any, provider: str
-) -> str | None:
-    """Get model input with autocomplete suggestions.
-
-    """
+def _input_model_with_autocomplete(display_name: str, current: Any, provider: str) -> str | None:
+    """Get model input with autocomplete suggestions."""
     from prompt_toolkit.completion import Completer, Completion
 
     default = str(current) if current else ""
@@ -423,13 +427,17 @@ def _input_model_with_autocomplete(
                     display=model,
                 )
 
-    value = _get_questionary().autocomplete(
-        f"{display_name}:",
-        choices=[""],  # Placeholder, actual completions from completer
-        completer=DynamicModelCompleter(provider),
-        default=default,
-        qmark=">",
-    ).ask()
+    value = (
+        _get_questionary()
+        .autocomplete(
+            f"{display_name}:",
+            choices=[""],  # Placeholder, actual completions from completer
+            completer=DynamicModelCompleter(provider),
+            default=default,
+            qmark=">",
+        )
+        .ask()
+    )
 
     return value if value else None
 
@@ -445,11 +453,15 @@ def _input_context_window_with_recommendation(
         choices.append("Keep existing value")
     choices.append("[?] Get recommended value")
 
-    choice = _get_questionary().select(
-        display_name,
-        choices=choices,
-        default="Enter new value",
-    ).ask()
+    choice = (
+        _get_questionary()
+        .select(
+            display_name,
+            choices=choices,
+            default="Enter new value",
+        )
+        .ask()
+    )
 
     if choice is None:
         return None
@@ -468,17 +480,23 @@ def _input_context_window_with_recommendation(
         context_limit = get_model_context_limit(model_name, provider)
 
         if context_limit:
-            console.print(f"[green]+ Recommended context window: {format_token_count(context_limit)} tokens[/green]")
+            console.print(
+                f"[green]+ Recommended context window: {format_token_count(context_limit)} tokens[/green]"
+            )
             return context_limit
         else:
             console.print("[yellow]! Could not fetch model info, please enter manually[/yellow]")
             # Fall through to manual input
 
     # Manual input
-    value = _get_questionary().text(
-        f"{display_name}:",
-        default=str(current_val) if current_val else "",
-    ).ask()
+    value = (
+        _get_questionary()
+        .text(
+            f"{display_name}:",
+            default=str(current_val) if current_val else "",
+        )
+        .ask()
+    )
 
     if value is None or value == "":
         return None
@@ -643,7 +661,9 @@ def _try_auto_fill_context_window(model: BaseModel, new_model_name: str) -> None
 
     if context_limit:
         setattr(model, "context_window_tokens", context_limit)
-        console.print(f"[green]+ Auto-filled context window: {format_token_count(context_limit)} tokens[/green]")
+        console.print(
+            f"[green]+ Auto-filled context window: {format_token_count(context_limit)} tokens[/green]"
+        )
     else:
         console.print("[dim](i) Could not auto-fill context window (model not in database)[/dim]")
 
@@ -713,7 +733,9 @@ def _configure_providers(config: Config) -> None:
     while True:
         try:
             console.clear()
-            _show_section_header("LLM Providers", "Select a provider to configure API key and endpoint")
+            _show_section_header(
+                "LLM Providers", "Select a provider to configure API key and endpoint"
+            )
             choices = get_provider_choices()
             answer = _select_with_back("Select provider:", choices)
 
@@ -803,7 +825,9 @@ def _configure_channels(config: Config) -> None:
     while True:
         try:
             console.clear()
-            _show_section_header("Chat Channels", "Select a channel to configure connection settings")
+            _show_section_header(
+                "Chat Channels", "Select a channel to configure connection settings"
+            )
             answer = _select_with_back("Select channel:", choices)
 
             if answer is _BACK_PRESSED or answer is None or answer == "<- Back":
@@ -820,9 +844,17 @@ def _configure_channels(config: Config) -> None:
 # --- General Settings ---
 
 _SETTINGS_SECTIONS: dict[str, tuple[str, str, set[str] | None]] = {
-    "Agent Settings": ("Agent Defaults", "Configure default model, temperature, and behavior", None),
+    "Agent Settings": (
+        "Agent Defaults",
+        "Configure default model, temperature, and behavior",
+        None,
+    ),
     "Gateway": ("Gateway Settings", "Configure server host, port, and heartbeat", None),
-    "Tools": ("Tools Settings", "Configure web search, shell exec, and other tools", {"mcp_servers"}),
+    "Tools": (
+        "Tools Settings",
+        "Configure web search, shell exec, and other tools",
+        {"mcp_servers"},
+    ),
 }
 
 _SETTINGS_GETTER = {
@@ -892,7 +924,11 @@ def _show_summary(config: Config) -> None:
     provider_rows = []
     for name, display in _get_provider_names().items():
         provider = getattr(config.providers, name, None)
-        status = "[green]configured[/green]" if (provider and provider.api_key) else "[dim]not configured[/dim]"
+        status = (
+            "[green]configured[/green]"
+            if (provider and provider.api_key)
+            else "[dim]not configured[/dim]"
+        )
         provider_rows.append((display, status))
     _print_summary_panel(provider_rows, "LLM Providers")
 
@@ -935,16 +971,20 @@ def _prompt_main_menu_exit(has_unsaved_changes: bool) -> str:
     if not has_unsaved_changes:
         return "discard"
 
-    answer = _get_questionary().select(
-        "You have unsaved changes. What would you like to do?",
-        choices=[
-            "[S] Save and Exit",
-            "[X] Exit Without Saving",
-            "[R] Resume Editing",
-        ],
-        default="[R] Resume Editing",
-        qmark=">",
-    ).ask()
+    answer = (
+        _get_questionary()
+        .select(
+            "You have unsaved changes. What would you like to do?",
+            choices=[
+                "[S] Save and Exit",
+                "[X] Exit Without Saving",
+                "[R] Resume Editing",
+            ],
+            default="[R] Resume Editing",
+            qmark=">",
+        )
+        .ask()
+    )
 
     if answer == "[S] Save and Exit":
         return "save"
@@ -979,20 +1019,24 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
         _show_main_menu_header()
 
         try:
-            answer = _get_questionary().select(
-                "What would you like to configure?",
-                choices=[
-                    "[P] LLM Provider",
-                    "[C] Chat Channel",
-                    "[A] Agent Settings",
-                    "[G] Gateway",
-                    "[T] Tools",
-                    "[V] View Configuration Summary",
-                    "[S] Save and Exit",
-                    "[X] Exit Without Saving",
-                ],
-                qmark=">",
-            ).ask()
+            answer = (
+                _get_questionary()
+                .select(
+                    "What would you like to configure?",
+                    choices=[
+                        "[P] LLM Provider",
+                        "[C] Chat Channel",
+                        "[A] Agent Settings",
+                        "[G] Gateway",
+                        "[T] Tools",
+                        "[V] View Configuration Summary",
+                        "[S] Save and Exit",
+                        "[X] Exit Without Saving",
+                    ],
+                    qmark=">",
+                )
+                .ask()
+            )
         except KeyboardInterrupt:
             answer = None
 
@@ -1004,7 +1048,7 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
                 return OnboardResult(config=original_config, should_save=False)
             continue
 
-        _MENU_DISPATCH = {
+        menu_dispatch = {
             "[P] LLM Provider": lambda: _configure_providers(config),
             "[C] Chat Channel": lambda: _configure_channels(config),
             "[A] Agent Settings": lambda: _configure_general_settings(config, "Agent Settings"),
@@ -1018,6 +1062,6 @@ def run_onboard(initial_config: Config | None = None) -> OnboardResult:
         if answer == "[X] Exit Without Saving":
             return OnboardResult(config=original_config, should_save=False)
 
-        action_fn = _MENU_DISPATCH.get(answer)
+        action_fn = menu_dispatch.get(answer)
         if action_fn:
             action_fn()

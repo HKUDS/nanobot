@@ -46,4 +46,3 @@ def test_should_show_cli_restart_notice():
 
     non_cli = RestartNotice(channel="feishu", chat_id="oc_1", started_at_raw="100")
     assert should_show_cli_restart_notice(non_cli, "cli:direct") is False
-

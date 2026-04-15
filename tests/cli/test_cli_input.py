@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
@@ -13,8 +12,10 @@ def mock_prompt_session():
     """Mock the global prompt session."""
     mock_session = MagicMock()
     mock_session.prompt_async = AsyncMock()
-    with patch("nanobot.cli.commands._PROMPT_SESSION", mock_session), \
-         patch("nanobot.cli.commands.patch_stdout"):
+    with (
+        patch("nanobot.cli.commands._PROMPT_SESSION", mock_session),
+        patch("nanobot.cli.commands.patch_stdout"),
+    ):
         yield mock_session
 
 
@@ -24,7 +25,7 @@ async def test_read_interactive_input_async_returns_input(mock_prompt_session):
     mock_prompt_session.prompt_async.return_value = "hello world"
 
     result = await commands._read_interactive_input_async()
-    
+
     assert result == "hello world"
     mock_prompt_session.prompt_async.assert_called_once()
     args, _ = mock_prompt_session.prompt_async.call_args
@@ -44,18 +45,19 @@ def test_init_prompt_session_creates_session():
     """Test that _init_prompt_session initializes the global session."""
     # Ensure global is None before test
     commands._PROMPT_SESSION = None
-    
-    with patch("nanobot.cli.commands.PromptSession") as MockSession, \
-         patch("nanobot.cli.commands.FileHistory") as MockHistory, \
-         patch("pathlib.Path.home") as mock_home:
-        
+
+    with (
+        patch("nanobot.cli.commands.PromptSession") as mock_session,
+        patch("nanobot.cli.commands.FileHistory"),
+        patch("pathlib.Path.home") as mock_home,
+    ):
         mock_home.return_value = MagicMock()
-        
+
         commands._init_prompt_session()
-        
+
         assert commands._PROMPT_SESSION is not None
-        MockSession.assert_called_once()
-        _, kwargs = MockSession.call_args
+        mock_session.assert_called_once()
+        _, kwargs = mock_session.call_args
         assert kwargs["multiline"] is False
         assert kwargs["enable_open_in_editor"] is False
 
@@ -88,7 +90,9 @@ def test_print_cli_progress_line_pauses_spinner_before_printing():
     mock_console = MagicMock()
     mock_console.status.return_value = spinner
 
-    with patch.object(commands.console, "print", side_effect=lambda *_args, **_kwargs: order.append("print")):
+    with patch.object(
+        commands.console, "print", side_effect=lambda *_args, **_kwargs: order.append("print")
+    ):
         thinking = stream_mod.ThinkingSpinner(console=mock_console)
         with thinking:
             commands._print_cli_progress_line("tool running", thinking)
@@ -118,11 +122,7 @@ async def test_print_interactive_progress_line_pauses_spinner_before_printing():
 
 
 def test_response_renderable_uses_text_for_explicit_plain_rendering():
-    status = (
-        "🐈 nanobot v0.1.4.post5\n"
-        "🧠 Model: MiniMax-M2.7\n"
-        "📊 Tokens: 20639 in / 29 out"
-    )
+    status = "🐈 nanobot v0.1.4.post5\n🧠 Model: MiniMax-M2.7\n📊 Tokens: 20639 in / 29 out"
 
     renderable = commands._response_renderable(
         status,
@@ -156,13 +156,13 @@ def test_stream_renderer_stop_for_input_stops_spinner():
     # Create renderer with mocked console
     with patch.object(stream_mod, "_make_console", return_value=mock_console):
         renderer = stream_mod.StreamRenderer(show_spinner=True)
-        
+
         # Verify spinner started
         spinner.start.assert_called_once()
-        
+
         # Stop for input
         renderer.stop_for_input()
-        
+
         # Verify spinner stopped
         spinner.stop.assert_called_once()
 

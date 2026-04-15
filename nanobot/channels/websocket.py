@@ -19,7 +19,8 @@ from pydantic import Field, field_validator, model_validator
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
-from websockets.http11 import Request as WsRequest, Response
+from websockets.http11 import Request as WsRequest
+from websockets.http11 import Response
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -251,9 +252,7 @@ class WebSocketChannel(BaseChannel):
         token_value = f"nbwt_{secrets.token_urlsafe(32)}"
         self._issued_tokens[token_value] = time.monotonic() + float(self.config.token_ttl_s)
 
-        return _http_json_response(
-            {"token": token_value, "expires_in": self.config.token_ttl_s}
-        )
+        return _http_json_response({"token": token_value, "expires_in": self.config.token_ttl_s})
 
     def _authorize_websocket_handshake(self, connection: Any, query: dict[str, list[str]]) -> Any:
         supplied = _query_first(query, "token")

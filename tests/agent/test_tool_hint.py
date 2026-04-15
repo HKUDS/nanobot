@@ -1,7 +1,7 @@
 """Tests for tool hint formatting (nanobot.utils.tool_hints)."""
 
-from nanobot.utils.tool_hints import format_tool_hints
 from nanobot.providers.base import ToolCallRequest
+from nanobot.utils.tool_hints import format_tool_hints
 
 
 def _tc(name: str, args) -> ToolCallRequest:
@@ -18,19 +18,30 @@ class TestToolHintKnownTools:
 
     def test_read_file_short_path(self):
         result = _hint([_tc("read_file", {"path": "foo.txt"})])
-        assert result == 'read foo.txt'
+        assert result == "read foo.txt"
 
     def test_read_file_long_path(self):
-        result = _hint([_tc("read_file", {"path": "/home/user/.local/share/uv/tools/nanobot/agent/loop.py"})])
+        result = _hint(
+            [_tc("read_file", {"path": "/home/user/.local/share/uv/tools/nanobot/agent/loop.py"})]
+        )
         assert "loop.py" in result
         assert "read " in result
 
     def test_write_file_shows_path_not_content(self):
-        result = _hint([_tc("write_file", {"path": "docs/api.md", "content": "# API Reference\n\nLong content..."})])
+        result = _hint(
+            [
+                _tc(
+                    "write_file",
+                    {"path": "docs/api.md", "content": "# API Reference\n\nLong content..."},
+                )
+            ]
+        )
         assert result == "write docs/api.md"
 
     def test_edit_shows_path(self):
-        result = _hint([_tc("edit", {"file_path": "src/main.py", "old_string": "x", "new_string": "y"})])
+        result = _hint(
+            [_tc("edit", {"file_path": "src/main.py", "old_string": "x", "new_string": "y"})]
+        )
         assert "main.py" in result
         assert "edit " in result
 
@@ -112,7 +123,14 @@ class TestToolHintMCP:
     """Test MCP tools are abbreviated to server::tool format."""
 
     def test_mcp_standard_format(self):
-        result = _hint([_tc("mcp_4_5v_mcp__analyze_image", {"imageSource": "https://img.jpg", "prompt": "describe"})])
+        result = _hint(
+            [
+                _tc(
+                    "mcp_4_5v_mcp__analyze_image",
+                    {"imageSource": "https://img.jpg", "prompt": "describe"},
+                )
+            ]
+        )
         assert "4_5v" in result
         assert "analyze_image" in result
 

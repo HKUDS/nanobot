@@ -32,17 +32,21 @@ def test_custom_provider_parse_accepts_dict_response() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
-    result = provider._parse({
-        "choices": [{
-            "message": {"content": "hello from dict"},
-            "finish_reason": "stop",
-        }],
-        "usage": {
-            "prompt_tokens": 1,
-            "completion_tokens": 2,
-            "total_tokens": 3,
-        },
-    })
+    result = provider._parse(
+        {
+            "choices": [
+                {
+                    "message": {"content": "hello from dict"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 2,
+                "total_tokens": 3,
+            },
+        }
+    )
 
     assert result.finish_reason == "stop"
     assert result.content == "hello from dict"

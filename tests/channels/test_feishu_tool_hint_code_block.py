@@ -1,7 +1,6 @@
 """Tests for FeishuChannel tool hint formatting."""
 
 import json
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,6 +9,7 @@ from pytest import mark
 # Check optional Feishu dependencies before running tests
 try:
     from nanobot.channels import feishu
+
     FEISHU_AVAILABLE = getattr(feishu, "FEISHU_AVAILABLE", False)
 except ImportError:
     FEISHU_AVAILABLE = False
@@ -51,10 +51,10 @@ async def test_tool_hint_sends_interactive_card(mock_feishu_channel):
         channel="feishu",
         chat_id="oc_123456",
         content='web_search("test query")',
-        metadata={"_tool_hint": True}
+        metadata={"_tool_hint": True},
     )
 
-    with patch.object(mock_feishu_channel, '_send_message_sync') as mock_send:
+    with patch.object(mock_feishu_channel, "_send_message_sync") as mock_send:
         await mock_feishu_channel.send(msg)
 
         assert mock_send.call_count == 1
@@ -72,10 +72,10 @@ async def test_tool_hint_empty_content_does_not_send(mock_feishu_channel):
         channel="feishu",
         chat_id="oc_123456",
         content="   ",  # whitespace only
-        metadata={"_tool_hint": True}
+        metadata={"_tool_hint": True},
     )
 
-    with patch.object(mock_feishu_channel, '_send_message_sync') as mock_send:
+    with patch.object(mock_feishu_channel, "_send_message_sync") as mock_send:
         await mock_feishu_channel.send(msg)
         mock_send.assert_not_called()
 
@@ -84,13 +84,10 @@ async def test_tool_hint_empty_content_does_not_send(mock_feishu_channel):
 async def test_tool_hint_without_metadata_sends_as_normal(mock_feishu_channel):
     """Regular messages without _tool_hint should use normal formatting."""
     msg = OutboundMessage(
-        channel="feishu",
-        chat_id="oc_123456",
-        content="Hello, world!",
-        metadata={}
+        channel="feishu", chat_id="oc_123456", content="Hello, world!", metadata={}
     )
 
-    with patch.object(mock_feishu_channel, '_send_message_sync') as mock_send:
+    with patch.object(mock_feishu_channel, "_send_message_sync") as mock_send:
         await mock_feishu_channel.send(msg)
 
         assert mock_send.call_count == 1
@@ -107,10 +104,10 @@ async def test_tool_hint_multiple_tools_in_one_message(mock_feishu_channel):
         channel="feishu",
         chat_id="oc_123456",
         content='web_search("query"), read_file("/path/to/file")',
-        metadata={"_tool_hint": True}
+        metadata={"_tool_hint": True},
     )
 
-    with patch.object(mock_feishu_channel, '_send_message_sync') as mock_send:
+    with patch.object(mock_feishu_channel, "_send_message_sync") as mock_send:
         await mock_feishu_channel.send(msg)
 
         card = _get_tool_hint_card(mock_send)
@@ -127,10 +124,10 @@ async def test_tool_hint_new_format_basic(mock_feishu_channel):
         channel="feishu",
         chat_id="oc_123456",
         content='read src/main.py, grep "TODO"',
-        metadata={"_tool_hint": True}
+        metadata={"_tool_hint": True},
     )
 
-    with patch.object(mock_feishu_channel, '_send_message_sync') as mock_send:
+    with patch.object(mock_feishu_channel, "_send_message_sync") as mock_send:
         await mock_feishu_channel.send(msg)
 
         card = _get_tool_hint_card(mock_send)
@@ -146,10 +143,10 @@ async def test_tool_hint_new_format_with_comma_in_quotes(mock_feishu_channel):
         channel="feishu",
         chat_id="oc_123456",
         content='grep "hello, world", $ echo test',
-        metadata={"_tool_hint": True}
+        metadata={"_tool_hint": True},
     )
 
-    with patch.object(mock_feishu_channel, '_send_message_sync') as mock_send:
+    with patch.object(mock_feishu_channel, "_send_message_sync") as mock_send:
         await mock_feishu_channel.send(msg)
 
         card = _get_tool_hint_card(mock_send)
@@ -165,10 +162,10 @@ async def test_tool_hint_new_format_with_folding(mock_feishu_channel):
         channel="feishu",
         chat_id="oc_123456",
         content='read path × 3, grep "pattern"',
-        metadata={"_tool_hint": True}
+        metadata={"_tool_hint": True},
     )
 
-    with patch.object(mock_feishu_channel, '_send_message_sync') as mock_send:
+    with patch.object(mock_feishu_channel, "_send_message_sync") as mock_send:
         await mock_feishu_channel.send(msg)
 
         card = _get_tool_hint_card(mock_send)
@@ -184,10 +181,10 @@ async def test_tool_hint_new_format_mcp(mock_feishu_channel):
         channel="feishu",
         chat_id="oc_123456",
         content='4_5v::analyze_image("photo.jpg")',
-        metadata={"_tool_hint": True}
+        metadata={"_tool_hint": True},
     )
 
-    with patch.object(mock_feishu_channel, '_send_message_sync') as mock_send:
+    with patch.object(mock_feishu_channel, "_send_message_sync") as mock_send:
         await mock_feishu_channel.send(msg)
 
         card = _get_tool_hint_card(mock_send)
@@ -202,10 +199,10 @@ async def test_tool_hint_keeps_commas_inside_arguments(mock_feishu_channel):
         channel="feishu",
         chat_id="oc_123456",
         content='web_search("foo, bar"), read_file("/path/to/file")',
-        metadata={"_tool_hint": True}
+        metadata={"_tool_hint": True},
     )
 
-    with patch.object(mock_feishu_channel, '_send_message_sync') as mock_send:
+    with patch.object(mock_feishu_channel, "_send_message_sync") as mock_send:
         await mock_feishu_channel.send(msg)
 
         card = _get_tool_hint_card(mock_send)

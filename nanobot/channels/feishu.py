@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from lark_oapi.api.im.v1.model import MentionEvent, P2ImMessageReceiveV1
+from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
 from loguru import logger
 from pydantic import Field
 
@@ -21,8 +22,6 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
-
-from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
 
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 
@@ -1336,9 +1335,7 @@ class FeishuChannel(BaseChannel):
                     "Streaming card {} final update failed, falling back to regular card",
                     buf.card_id,
                 )
-            for chunk in self._split_elements_by_table_limit(
-                self._build_card_elements(buf.text)
-            ):
+            for chunk in self._split_elements_by_table_limit(self._build_card_elements(buf.text)):
                 card = json.dumps(
                     {"config": {"wide_screen_mode": True}, "elements": chunk},
                     ensure_ascii=False,
@@ -1405,9 +1402,12 @@ class FeishuChannel(BaseChannel):
                 # No active streaming card — send as a regular
                 # interactive card with the same 🔧 prefix style.
                 card = json.dumps(
-                    {"config": {"wide_screen_mode": True}, "elements": [
-                        {"tag": "markdown", "content": self._format_tool_hint_delta(hint)},
-                    ]},
+                    {
+                        "config": {"wide_screen_mode": True},
+                        "elements": [
+                            {"tag": "markdown", "content": self._format_tool_hint_delta(hint)},
+                        ],
+                    },
                     ensure_ascii=False,
                 )
                 await loop.run_in_executor(
@@ -1711,6 +1711,4 @@ class FeishuChannel(BaseChannel):
     def _format_tool_hint_delta(self, tool_hint: str) -> str:
         """Format a tool hint string with the 🔧 prefix for each line."""
         lines = self.__class__._format_tool_hint_lines(tool_hint).split("\n")
-        return "\n".join(
-            f"{self.config.tool_hint_prefix} {ln}" for ln in lines if ln.strip()
-        )
+        return "\n".join(f"{self.config.tool_hint_prefix} {ln}" for ln in lines if ln.strip())

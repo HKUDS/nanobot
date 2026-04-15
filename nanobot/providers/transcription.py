@@ -28,7 +28,10 @@ class OpenAITranscriptionProvider:
                     files = {"file": (path.name, f), "model": (None, "whisper-1")}
                     headers = {"Authorization": f"Bearer {self.api_key}"}
                     response = await client.post(
-                        self.api_url, headers=headers, files=files, timeout=60.0,
+                        self.api_url,
+                        headers=headers,
+                        files=files,
+                        timeout=60.0,
                     )
                     response.raise_for_status()
                     return response.json().get("text", "")
@@ -79,10 +82,7 @@ class GroqTranscriptionProvider:
                     }
 
                     response = await client.post(
-                        self.api_url,
-                        headers=headers,
-                        files=files,
-                        timeout=60.0
+                        self.api_url, headers=headers, files=files, timeout=60.0
                     )
 
                     response.raise_for_status()

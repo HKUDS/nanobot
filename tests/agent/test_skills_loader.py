@@ -23,7 +23,7 @@ def _write_skill(
     lines = ["---"]
     if metadata_json is not None:
         payload = json.dumps({"nanobot": metadata_json}, separators=(",", ":"))
-        lines.append(f'metadata: {payload}')
+        lines.append(f"metadata: {payload}")
     lines.extend(["---", "", body])
     path = skill_dir / "SKILL.md"
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -229,7 +229,9 @@ def test_list_skills_openclaw_metadata_parsed_for_requirements(
     skill_dir = skills_root / "openclaw_skill"
     skill_dir.mkdir(parents=True)
     skill_path = skill_dir / "SKILL.md"
-    oc_payload = json.dumps({"openclaw": {"requires": {"bins": ["nanobot_oc_bin"]}}}, separators=(",", ":"))
+    oc_payload = json.dumps(
+        {"openclaw": {"requires": {"bins": ["nanobot_oc_bin"]}}}, separators=(",", ":")
+    )
     skill_path.write_text(
         "\n".join(["---", f"metadata: {oc_payload}", "---", "", "# OC"]),
         encoding="utf-8",

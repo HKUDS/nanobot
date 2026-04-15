@@ -202,9 +202,7 @@ async def issue_token(
         headers["Authorization"] = f"Bearer {secret}"
 
     loop = asyncio.get_running_loop()
-    resp = await loop.run_in_executor(
-        None, lambda: httpx.get(url, headers=headers, timeout=5.0)
-    )
+    resp = await loop.run_in_executor(None, lambda: httpx.get(url, headers=headers, timeout=5.0))
     try:
         data = resp.json()
     except Exception:

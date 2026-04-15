@@ -3,11 +3,11 @@
 Usage:
     python -m nanobot.kosmos [--host HOST] [--port PORT] [--db-path PATH]
 """
+
 from __future__ import annotations
 
 import argparse
 import asyncio
-import logging
 import sys
 
 from loguru import logger
@@ -59,15 +59,15 @@ def parse_args():
 async def async_main(args):
     """Async main entry point."""
     from pathlib import Path
-    
+
     db_path = Path(args.db_path).expanduser()
-    
+
     server = KosmosServer(
         host=args.host,
         port=args.port,
         db_path=db_path,
     )
-    
+
     logger.info("=" * 50)
     logger.info("Kosmos Server")
     logger.info("=" * 50)
@@ -75,7 +75,7 @@ async def async_main(args):
     logger.info("WebSocket: ws://{}:{}", args.host, args.port + 1)
     logger.info("Database: {}", db_path)
     logger.info("=" * 50)
-    
+
     try:
         await server.start()
     except KeyboardInterrupt:
