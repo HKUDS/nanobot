@@ -6,7 +6,6 @@ import os
 import select
 import signal
 import sys
-from datetime import datetime
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
@@ -776,46 +775,9 @@ def gateway(
     # Create heartbeat service
     def _persist_outbound_messages(session: "Session", task_name: str, since_idx: int = 0) -> None:
         """Persist outbound messages: write to message log and inject into recipient sessions."""
+        from nanobot.heartbeat.message_log import persist_outbound_messages
         log_path = runtime_config.workspace_path / "state" / "message_log.jsonl"
-        log_entries = []
-
-        for msg in session.messages[since_idx:]:
-            for tc in msg.get("tool_calls", []):
-                if tc.get("function", {}).get("name") != "message":
-                    continue
-                try:
-                    args = json.loads(tc["function"].get("arguments", "{}"))
-                except (json.JSONDecodeError, TypeError):
-                    continue
-
-                ts = msg.get("timestamp", datetime.now().isoformat())
-                ch = args.get("channel", "")
-                cid = args.get("chat_id", "")
-                content = args.get("content", "")
-
-                # Append to flat message log
-                log_entries.append(json.dumps({
-                    "timestamp": ts, "task": task_name,
-                    "channel": ch, "chat_id": cid, "content": content,
-                }, ensure_ascii=False))
-
-                # Inject into recipient's session so it appears in their timeline
-                if ch and cid:
-                    recipient_key = f"{ch}:{cid}"
-                    recipient_session = agent.sessions.get_or_create(recipient_key)
-                    recipient_session.messages.append({
-                        "role": "assistant",
-                        "content": content,
-                        "timestamp": ts,
-                        "_source": "heartbeat",
-                        "_task": task_name,
-                    })
-                    agent.sessions.save(recipient_session)
-
-        if log_entries:
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            with log_path.open("a", encoding="utf-8") as f:
-                f.write("\n".join(log_entries) + "\n")
+        persist_outbound_messages(session, task_name, log_path, agent.sessions, since_idx)
 
     def _drop_last_turn(session: "Session") -> None:
         """Remove the most recent user→assistant turn from session history.
