@@ -1,8 +1,4 @@
-"""
-NanoCats Agent Hook
-Sends real-time agent events to the NanoCats WebSocket server.
-Supports both main agent and subagent activity tracking.
-"""
+"""Kosmos activity hooks for main agent and subagents."""
 
 import contextvars
 import json
@@ -10,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.config.loader import load_config
+from nanobot.services.kosmos_tasks import KosmosTasksClient
 
 _PROJECTS_PATH = Path.home() / "proyectos"
 
@@ -33,7 +31,7 @@ def get_nanocats_task_context() -> dict:
 
 
 class NanoCatsAgentHook(AgentHook):
-    """Hook that sends agent events to NanoCats WebSocket server for monitoring."""
+    """Hook that sends agent events to Kosmos for real-time monitoring."""
 
     def __init__(
         self,
@@ -48,8 +46,17 @@ class NanoCatsAgentHook(AgentHook):
         self.task_id = task_id
         self._workspace = workspace
         self._current_project_id: str | None = None
+        self._tasks_client: KosmosTasksClient | None = None
         if workspace:
             self._current_project_id = self._get_project_id_from_workspace(workspace)
+
+    def _get_tasks_client(self) -> KosmosTasksClient:
+        if self._tasks_client is not None:
+            return self._tasks_client
+        cfg = load_config()
+        base_url = str(cfg.gateway.kosmos_api_url or "http://127.0.0.1:18794").strip()
+        self._tasks_client = KosmosTasksClient(base_url=base_url)
+        return self._tasks_client
 
     def _get_task_id(self) -> str | None:
         """Get task_id from context var, falling back to hook state."""
@@ -105,25 +112,55 @@ class NanoCatsAgentHook(AgentHook):
                         return project
         return self._current_project_id
 
-    async def _send_event(self, event: dict):
-        """Send event via WebSocket broadcast."""
-        try:
-            from nanobot.services.nanocats import get_nanocats
+    @staticmethod
+    def _extract_tool_target(arguments: dict) -> str:
+        """Extract a readable file/dir target from tool arguments."""
+        if not isinstance(arguments, dict):
+            return ""
 
-            nanocats = get_nanocats()
-            if nanocats and nanocats._running:
-                await nanocats.send_agent_update(event)
+        for key in [
+            "filePath",
+            "file_path",
+            "path",
+            "target_path",
+            "target",
+            "source",
+            "destination",
+            "workdir",
+            "file",
+        ]:
+            value = arguments.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+    @staticmethod
+    def _short_target(value: str, max_len: int = 120) -> str:
+        text = value.strip()
+        if len(text) <= max_len:
+            return text
+        return f"...{text[-(max_len - 3) :]}"
+
+    async def _send_event(self, event: dict):
+        """Send event via Kosmos API (and broadcast on Kosmos WS)."""
+        try:
+            client = self._get_tasks_client()
+            await client.upsert_agent_identity(
+                agent_id=str(event.get("id") or self.agent_id),
+                agent_name=str(event.get("name") or self.agent_name),
+                project_id=str(event.get("projectId") or ""),
+                status=str(event.get("status") or "working"),
+                mood=str(event.get("mood") or "focused"),
+                current_task=str(event.get("currentTask") or ""),
+            )
         except Exception:
             pass
 
     async def _send_activity(self, activity_data: dict):
         """Send activity event (tool executions, status changes, etc)."""
         try:
-            from nanobot.services.nanocats import get_nanocats
-
-            nanocats = get_nanocats()
-            if nanocats and nanocats._running:
-                await nanocats.send_activity(activity_data)
+            client = self._get_tasks_client()
+            await client.publish_activity(activity_data)
         except Exception:
             pass
 
@@ -155,6 +192,16 @@ class NanoCatsAgentHook(AgentHook):
         for i, tool_call in enumerate(context.tool_calls):
             status = self._get_status_for_tool(tool_call.name)
             args_str = json.dumps(tool_call.arguments, ensure_ascii=False)[:80]
+            target = self._extract_tool_target(tool_call.arguments)
+            target_short = self._short_target(target) if target else ""
+            current_task = (
+                f"{tool_call.name} -> {target_short}" if target_short else f"{tool_call.name}"
+            )
+            message = (
+                f"{tool_call.name} [{status}] target={target_short}"
+                if target_short
+                else f"{tool_call.name}: {args_str}"
+            )
 
             await self._send_activity(
                 {
@@ -164,8 +211,8 @@ class NanoCatsAgentHook(AgentHook):
                     "type": status,
                     "status": status,
                     "mood": "busy",
-                    "currentTask": f"{tool_call.name}",
-                    "message": f"{tool_call.name}: {args_str}",
+                    "currentTask": current_task,
+                    "message": message,
                     "projectId": project_id or "",
                     "taskId": task_id,
                     "timestamp": datetime.now().isoformat(),
@@ -263,10 +310,19 @@ class NanoCatsSubagentHook(AgentHook):
         self.agent_id = f"subagent-{task_id}"
         self.agent_name = task_label or f"Subagent {task_id[:8]}"
         self._workspace = workspace
+        self._tasks_client: KosmosTasksClient | None = None
         # project_id takes precedence over workspace detection
         self._current_project_id = project_id
         if not project_id and workspace:
             self._current_project_id = self._get_project_id_from_workspace(workspace)
+
+    def _get_tasks_client(self) -> KosmosTasksClient:
+        if self._tasks_client is not None:
+            return self._tasks_client
+        cfg = load_config()
+        base_url = str(cfg.gateway.kosmos_api_url or "http://127.0.0.1:18794").strip()
+        self._tasks_client = KosmosTasksClient(base_url=base_url)
+        return self._tasks_client
 
     def set_project_id(self, project_id: str | None) -> None:
         """Update project_id (e.g., after claiming a NanoCats task)."""
@@ -297,11 +353,6 @@ class NanoCatsSubagentHook(AgentHook):
             return "consulting"
         return "executing"
 
-    def _get_task_context_project(self) -> str | None:
-        """Get project_id and task_id from current NanoCats task context."""
-        ctx = get_nanocats_task_context()
-        return ctx.get("project_id"), ctx.get("task_id")
-
     def _detect_project_from_context(self, context: AgentHookContext) -> str | None:
         """Detect project from tool call arguments and current NanoCats task context."""
         # First check context var (set by NanoCatsTaskTool when claiming a task)
@@ -329,25 +380,55 @@ class NanoCatsSubagentHook(AgentHook):
                         return project
         return self._current_project_id
 
-    async def _send_event(self, event: dict):
-        """Send event via WebSocket."""
-        try:
-            from nanobot.services.nanocats import get_nanocats
+    @staticmethod
+    def _extract_tool_target(arguments: dict) -> str:
+        """Extract a readable file/dir target from tool arguments."""
+        if not isinstance(arguments, dict):
+            return ""
 
-            nanocats = get_nanocats()
-            if nanocats and nanocats._running:
-                await nanocats.send_agent_update(event)
+        for key in [
+            "filePath",
+            "file_path",
+            "path",
+            "target_path",
+            "target",
+            "source",
+            "destination",
+            "workdir",
+            "file",
+        ]:
+            value = arguments.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+    @staticmethod
+    def _short_target(value: str, max_len: int = 120) -> str:
+        text = value.strip()
+        if len(text) <= max_len:
+            return text
+        return f"...{text[-(max_len - 3) :]}"
+
+    async def _send_event(self, event: dict):
+        """Send subagent status via Kosmos API."""
+        try:
+            client = self._get_tasks_client()
+            await client.upsert_agent_identity(
+                agent_id=str(event.get("id") or self.agent_id),
+                agent_name=str(event.get("name") or self.agent_name),
+                project_id=str(event.get("projectId") or ""),
+                status=str(event.get("status") or "working"),
+                mood=str(event.get("mood") or "focused"),
+                current_task=str(event.get("currentTask") or ""),
+            )
         except Exception:
             pass
 
     async def _send_activity(self, activity_data: dict):
         """Send subagent activity event."""
         try:
-            from nanobot.services.nanocats import get_nanocats
-
-            nanocats = get_nanocats()
-            if nanocats and nanocats._running:
-                await nanocats.send_activity(activity_data)
+            client = self._get_tasks_client()
+            await client.publish_activity(activity_data)
         except Exception:
             pass
 
@@ -361,6 +442,16 @@ class NanoCatsSubagentHook(AgentHook):
         for i, tool_call in enumerate(context.tool_calls):
             status = self._get_status_for_tool(tool_call.name)
             args_str = json.dumps(tool_call.arguments, ensure_ascii=False)[:80]
+            target = self._extract_tool_target(tool_call.arguments)
+            target_short = self._short_target(target) if target else ""
+            current_task = (
+                f"{tool_call.name} -> {target_short}" if target_short else f"{tool_call.name}"
+            )
+            message = (
+                f"{tool_call.name} [{status}] target={target_short}"
+                if target_short
+                else f"{tool_call.name}: {args_str}"
+            )
 
             await self._send_activity(
                 {
@@ -370,8 +461,8 @@ class NanoCatsSubagentHook(AgentHook):
                     "type": status,
                     "status": status,
                     "mood": "busy",
-                    "currentTask": f"{tool_call.name}",
-                    "message": f"{tool_call.name}: {args_str}",
+                    "currentTask": current_task,
+                    "message": message,
                     "projectId": project_id or "",
                     "taskId": self.task_id,
                     "timestamp": datetime.now().isoformat(),

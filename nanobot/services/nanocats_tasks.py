@@ -1,4 +1,4 @@
-"""NanoCats task API client used by tools and heartbeat automation."""
+"""Kosmos task API client used by tools and heartbeat automation."""
 
 from __future__ import annotations
 
@@ -7,11 +7,21 @@ from typing import Any
 import aiohttp
 
 
-class NanoCatsTasksClient:
-    """Small async client for NanoCats REST endpoints."""
+class KosmosTasksClient:
+    """Small async client for Kosmos REST endpoints."""
 
     def __init__(self, base_url: str = "http://localhost:18794"):
         self.base_url = base_url.rstrip("/")
+
+    @staticmethod
+    def _unwrap_list(data: Any, key: str) -> list[dict[str, Any]]:
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        if isinstance(data, dict):
+            nested = data.get(key)
+            if isinstance(nested, list):
+                return [item for item in nested if isinstance(item, dict)]
+        return []
 
     async def list_tasks(self, project_id: str | None = None) -> list[dict[str, Any]]:
         params = {}
@@ -22,7 +32,7 @@ class NanoCatsTasksClient:
                 if resp.status != 200:
                     return []
                 data = await resp.json()
-                return data if isinstance(data, list) else []
+                return self._unwrap_list(data, "tasks")
 
     async def get_task(self, task_id: str) -> dict[str, Any] | None:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
@@ -143,7 +153,7 @@ class NanoCatsTasksClient:
                 if resp.status != 200:
                     return []
                 data = await resp.json()
-                return data if isinstance(data, list) else []
+                return self._unwrap_list(data, "projects")
 
     async def list_agents(self) -> list[dict[str, Any]]:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
@@ -151,7 +161,7 @@ class NanoCatsTasksClient:
                 if resp.status != 200:
                     return []
                 data = await resp.json()
-                return data if isinstance(data, list) else []
+                return self._unwrap_list(data, "agents")
 
     async def resolve_agent_id_by_name(self, agent_name: str) -> str | None:
         target = (agent_name or "").strip().lower()
@@ -170,7 +180,7 @@ class NanoCatsTasksClient:
                 if resp.status != 200:
                     return []
                 data = await resp.json()
-                return data if isinstance(data, list) else []
+                return self._unwrap_list(data, "comments")
 
     async def create_task_comment(
         self,
@@ -216,3 +226,15 @@ class NanoCatsTasksClient:
                     return None
                 data = await resp.json()
                 return data if isinstance(data, dict) else None
+
+    async def publish_activity(self, activity: dict[str, Any]) -> bool:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.post(
+                f"{self.base_url}/api/events/activity",
+                json=activity,
+            ) as resp:
+                return resp.status in {200, 201, 202}
+
+
+# Backward compatibility alias (legacy NanoCats naming).
+NanoCatsTasksClient = KosmosTasksClient
