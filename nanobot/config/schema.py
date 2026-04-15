@@ -206,6 +206,8 @@ class ToolsConfig(Base):
     restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
+    my_enabled: bool = True  # enable the my tool (agent runtime state inspection)
+    my_set: bool = False  # allow my tool to set state (read-only if False)
 
 
 class Config(BaseSettings):
