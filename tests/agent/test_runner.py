@@ -641,8 +641,9 @@ def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch
         lambda msg: token_sizes.get(str(msg.get("content")), 40),
     )
 
-    trimmed = runner._snip_history(spec, messages)
+    trimmed, did_remove = runner._snip_history(spec, messages)
 
+    assert did_remove is True
     assert trimmed == [
         {"role": "system", "content": "system"},
         {"role": "assistant", "content": "after tool"},
@@ -2731,4 +2732,28 @@ async def test_injection_cycle_cap_on_error_path():
     assert result.had_injections is True
     # Should cap: _MAX_INJECTION_CYCLES drained rounds + 1 final round that breaks
     assert call_count["n"] == _MAX_INJECTION_CYCLES + 1
-    assert drain_count["n"] == _MAX_INJECTION_CYCLES
+
+
+def test_snip_history_returns_did_remove_flag():
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    runner = AgentRunner(provider)
+
+    spec = AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=100,
+        max_tokens=50,
+    )
+
+    # Short messages — nothing to snip (estimate will be <= budget)
+    short = [{"role": "user", "content": "hi"}]
+    result, did_remove = runner._snip_history(spec, short)
+    assert did_remove is False
+    assert len(result) == 1

@@ -254,10 +254,11 @@ class AgentRunner:
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 messages_for_model = self._microcompact(messages_for_model)
                 messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
-                messages_for_model = self._snip_history(spec, messages_for_model)
-                # Snipping may have created new orphans; clean them up.
-                messages_for_model = self._drop_orphan_tool_results(messages_for_model)
-                messages_for_model = self._backfill_missing_tool_results(messages_for_model)
+                messages_for_model, did_snip = self._snip_history(spec, messages_for_model)
+                if did_snip:
+                    # Snipping may have created new orphans; clean them up.
+                    messages_for_model = self._drop_orphan_tool_results(messages_for_model)
+                    messages_for_model = self._backfill_missing_tool_results(messages_for_model)
             except Exception as exc:
                 logger.warning(
                     "Context governance failed on turn {} for {}: {}; applying minimal repair",
@@ -897,9 +898,9 @@ class AgentRunner:
         self,
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], bool]:
         if not messages or not spec.context_window_tokens:
-            return messages
+            return messages, False
 
         provider_max_tokens = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
         max_output = spec.max_tokens if isinstance(spec.max_tokens, int) else (
@@ -909,7 +910,7 @@ class AgentRunner:
             spec.context_window_tokens - max_output - _SNIP_SAFETY_BUFFER
         )
         if budget <= 0:
-            return messages
+            return messages, False
 
         estimate, _ = estimate_prompt_tokens_chain(
             self.provider,
@@ -918,12 +919,12 @@ class AgentRunner:
             spec.tools.get_definitions(),
         )
         if estimate <= budget:
-            return messages
+            return messages, False
 
         system_messages = [dict(msg) for msg in messages if msg.get("role") == "system"]
         non_system = [dict(msg) for msg in messages if msg.get("role") != "system"]
         if not non_system:
-            return messages
+            return messages, False
 
         system_tokens = sum(estimate_message_tokens(msg) for msg in system_messages)
         remaining_budget = max(128, budget - system_tokens)
@@ -950,7 +951,9 @@ class AgentRunner:
             start = find_legal_message_start(kept)
             if start:
                 kept = kept[start:]
-        return system_messages + kept
+        result = system_messages + kept
+        did_remove = len(result) < len(messages)
+        return result, did_remove
 
     def _partition_tool_batches(
         self,
