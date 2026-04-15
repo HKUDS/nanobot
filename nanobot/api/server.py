@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import mimetypes
+import os
 import re
 import time
 import uuid
@@ -150,13 +151,16 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
             raw = await part.read()
             if len(raw) > MAX_FILE_SIZE:
                 raise _FileSizeExceeded(f"File '{part.filename}' exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
-            filename = safe_filename(part.filename or f"{uuid.uuid4().hex[:12]}.bin")
+            filename = safe_filename(os.path.basename(part.filename or f"{uuid.uuid4().hex[:12]}.bin"))
             dest = media_dir / filename
+            # Ensure resolved destination stays within media_dir (path traversal guard)
+            if not str(dest.resolve()).startswith(str(media_dir.resolve())):
+                raise ValueError("Invalid filename")
             dest.write_bytes(raw)
             media_paths.append(str(dest))
 
     if not text:
-        text = "请分析上传的文件"
+        text = "(no text provided — please analyze uploaded files)"
 
     return text, media_paths, session_id
 
@@ -176,12 +180,13 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
     model_name: str = request.app.get("model_name", "nanobot")
 
     try:
-        if content_type.startswith("multipart/"):
+        if content_type.startswith("multipart/form-data"):
             text, media_paths, session_id = await _parse_multipart(request)
         else:
             try:
                 body = await request.json()
-            except Exception:
+            except (ValueError, TypeError) as e:
+                logger.warning("JSON parse error: {}", e)
                 return _error_json(400, "Invalid JSON body")
             if body.get("stream", False):
                 return _error_json(400, "stream=true is not supported yet. Set stream=false or omit it.")
@@ -189,6 +194,9 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                 return _error_json(400, f"Only configured model '{model_name}' is available")
             text, media_paths = _parse_json_content(body)
             session_id = body.get("session_id")
+            if session_id is not None:
+                if not isinstance(session_id, str) or not re.match(r'^[a-zA-Z0-9._-]+$', session_id):
+                    return _error_json(400, "Invalid session_id format")
     except ValueError as e:
         return _error_json(400, str(e))
     except _FileSizeExceeded as e:

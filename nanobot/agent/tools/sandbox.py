@@ -21,9 +21,14 @@ def _bwrap(command: str, workspace: str, cwd: str) -> str:
     ws = Path(workspace).resolve()
     media = get_media_dir().resolve()
 
+    # Sanitize cwd to prevent path-traversal outside the workspace.
+    # Resolve the requested cwd relative to workspace, then verify it
+    # stays within bounds (protects against symlinks and ../ sequences).
     try:
-        sandbox_cwd = str(ws / Path(cwd).resolve().relative_to(ws))
-    except ValueError:
+        requested = (ws / cwd).resolve()
+        requested.relative_to(ws)  # raises ValueError if outside
+        sandbox_cwd = str(requested)
+    except (ValueError, Exception):
         sandbox_cwd = str(ws)
 
     required  = ["/usr"]

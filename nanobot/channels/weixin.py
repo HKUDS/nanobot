@@ -1332,8 +1332,8 @@ def _encrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
     try:
         key = _parse_aes_key(aes_key_b64)
     except Exception as e:
-        logger.warning("Failed to parse AES key for encryption, sending raw: {}", e)
-        return data
+        logger.error("Failed to parse AES key for encryption: {}", e)
+        raise ValueError(f"Invalid AES key: {e}") from e
 
     # PKCS7 padding
     pad_len = 16 - len(data) % 16
@@ -1366,8 +1366,8 @@ def _decrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
     try:
         key = _parse_aes_key(aes_key_b64)
     except Exception as e:
-        logger.warning("Failed to parse AES key, returning raw data: {}", e)
-        return data
+        logger.error("Failed to parse AES key, discarding encrypted data: {}", e)
+        raise ValueError(f"Invalid AES key: {e}") from e
 
     decrypted: bytes | None = None
 

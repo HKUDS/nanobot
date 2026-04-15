@@ -78,7 +78,9 @@ class CompositeHook(AgentHook):
                 continue
 
             try:
-                await getattr(h, method_name)(*args, **kwargs)
+                method = getattr(h, method_name, None)
+                if method is not None and callable(method):
+                    await method(*args, **kwargs)
             except Exception:
                 logger.exception("AgentHook.{} error in {}", method_name, type(h).__name__)
 

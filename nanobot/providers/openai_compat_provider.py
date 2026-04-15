@@ -643,7 +643,10 @@ class OpenAICompatProvider(LLMProvider):
                 fn = self._maybe_mapping(tc_map.get("function")) or {}
                 args = fn.get("arguments", {})
                 if isinstance(args, str):
-                    args = json_repair.loads(args)
+                    try:
+                        args = json_repair.loads(args)
+                    except (ValueError, TypeError, Exception):
+                        args = {}
                 ec, prov, fn_prov = _extract_tc_extras(tc)
                 parsed_tool_calls.append(ToolCallRequest(
                     id=_short_tool_id(),
@@ -686,7 +689,10 @@ class OpenAICompatProvider(LLMProvider):
         for tc in raw_tool_calls:
             args = tc.function.arguments
             if isinstance(args, str):
-                args = json_repair.loads(args)
+                try:
+                    args = json_repair.loads(args)
+                except (ValueError, TypeError, Exception):
+                    args = {}
             ec, prov, fn_prov = _extract_tc_extras(tc)
             tool_calls.append(ToolCallRequest(
                 id=_short_tool_id(),

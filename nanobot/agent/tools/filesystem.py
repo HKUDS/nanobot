@@ -34,7 +34,8 @@ def _resolve_path(
 
 def _is_under(path: Path, directory: Path) -> bool:
     try:
-        path.relative_to(directory.resolve())
+        # Resolve symlinks to prevent symlink-based path escape
+        path.resolve().relative_to(directory.resolve())
         return True
     except ValueError:
         return False

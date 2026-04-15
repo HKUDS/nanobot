@@ -135,10 +135,16 @@ class ExecTool(Tool):
         env = self._build_env()
 
         if self.path_append:
+            # Validate path_append contains only safe path characters to prevent
+            # shell command injection when interpolated into a command string.
+            if not re.match(r'^[a-zA-Z0-9_/:.\- ]+$', self.path_append):
+                return "Error: path_append contains invalid characters"
             if _IS_WINDOWS:
                 env["PATH"] = env.get("PATH", "") + ";" + self.path_append
             else:
-                command = f'export PATH="$PATH:{self.path_append}"; {command}'
+                # Pass via environment variable instead of embedding in command
+                # string to avoid any possibility of shell injection.
+                env["PATH"] = env.get("PATH", os.environ.get("PATH", "")) + ":" + self.path_append
 
         try:
             process = await self._spawn(command, cwd, env)
