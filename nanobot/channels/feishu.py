@@ -1556,8 +1556,9 @@ class FeishuChannel(BaseChannel):
                 logger.debug("Feishu: skipping group message (not mentioned)")
                 return
 
-            # Add reaction
-            reaction_id = await self._add_reaction(message_id, self.config.react_emoji)
+            # Add reaction (non-blocking — fire and forget)
+            reaction_id = None
+            asyncio.create_task(self._add_reaction(message_id, self.config.react_emoji))
 
             # Parse content
             content_parts = []
