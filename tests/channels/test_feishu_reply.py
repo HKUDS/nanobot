@@ -3,7 +3,7 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -26,13 +26,14 @@ from nanobot.channels.feishu import FeishuChannel, FeishuConfig
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_feishu_channel(reply_to_message: bool = False) -> FeishuChannel:
+def _make_feishu_channel(reply_to_message: bool = False, group_policy: str = "mention") -> FeishuChannel:
     config = FeishuConfig(
         enabled=True,
         app_id="cli_test",
         app_secret="secret",
         allow_from=["*"],
         reply_to_message=reply_to_message,
+        group_policy=group_policy,
     )
     channel = FeishuChannel(config, MessageBus())
     channel._client = MagicMock()
@@ -443,3 +444,93 @@ async def test_on_message_no_extra_api_call_when_no_parent_id() -> None:
 
     channel._client.im.v1.message.get.assert_not_called()
     assert len(captured) == 1
+
+
+# ---------------------------------------------------------------------------
+# Session key derivation tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_session_key_group_with_root_id_is_thread_scoped() -> None:
+    """Group message with root_id gets a thread-scoped session key."""
+    channel = _make_feishu_channel(group_policy="open")
+    bus_spy = []
+    original_publish = channel.bus.publish_inbound
+
+    async def capture(msg):
+        bus_spy.append(msg)
+        await original_publish(msg)
+
+    channel.bus.publish_inbound = capture
+    channel._download_and_save_media = AsyncMock(return_value=(None, ""))
+    channel.transcribe_audio = AsyncMock(return_value="")
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    event = _make_feishu_event(
+        chat_type="group",
+        content='{"text": "hello"}',
+        root_id="om_root123",
+        message_id="om_child456",
+    )
+    await channel._on_message(event)
+
+    assert len(bus_spy) == 1
+    assert bus_spy[0].session_key == "feishu:oc_abc:om_root123"
+
+
+@pytest.mark.asyncio
+async def test_session_key_group_no_root_id_uses_default() -> None:
+    """Group message without root_id uses default session key (no override)."""
+    channel = _make_feishu_channel(group_policy="open")
+    bus_spy = []
+    original_publish = channel.bus.publish_inbound
+
+    async def capture(msg):
+        bus_spy.append(msg)
+        await original_publish(msg)
+
+    channel.bus.publish_inbound = capture
+    channel._download_and_save_media = AsyncMock(return_value=(None, ""))
+    channel.transcribe_audio = AsyncMock(return_value="")
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    event = _make_feishu_event(
+        chat_type="group",
+        content='{"text": "hello"}',
+        root_id=None,
+        message_id="om_001",
+    )
+    await channel._on_message(event)
+
+    assert len(bus_spy) == 1
+    assert bus_spy[0].session_key_override is None
+    assert bus_spy[0].session_key == "feishu:oc_abc"
+
+
+@pytest.mark.asyncio
+async def test_session_key_private_chat_no_override() -> None:
+    """Private chat never overrides session key (consistent with Telegram/Slack)."""
+    channel = _make_feishu_channel()
+    bus_spy = []
+    original_publish = channel.bus.publish_inbound
+
+    async def capture(msg):
+        bus_spy.append(msg)
+        await original_publish(msg)
+
+    channel.bus.publish_inbound = capture
+    channel._download_and_save_media = AsyncMock(return_value=(None, ""))
+    channel.transcribe_audio = AsyncMock(return_value="")
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    event = _make_feishu_event(
+        chat_type="p2p",
+        content='{"text": "hello"}',
+        root_id=None,
+        message_id="om_001",
+    )
+    await channel._on_message(event)
+
+    assert len(bus_spy) == 1
+    assert bus_spy[0].session_key_override is None
