@@ -574,7 +574,7 @@ async def test_process_mixed_message() -> None:
         assert msg.sender_id == "user1"
         assert msg.chat_id == "chat1"
         assert msg.content.startswith("hello wecom")
-        assert msg.metadata["msg_type"] == "text"
+        assert msg.metadata["msg_type"] == "mixed"
         assert len(msg.media) == 1
         assert msg.media[0].endswith("photo.png")
         assert "[image:" in msg.content
