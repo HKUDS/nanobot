@@ -634,7 +634,7 @@ class AgentLoop:
             await self.consolidator.maybe_consolidate_by_tokens(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
-            current_role = "assistant" if msg.sender_id == "subagent" else "user"
+            current_role = "user"
 
             messages = self.context.build_messages(
                 history=history,

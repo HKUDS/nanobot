@@ -154,7 +154,6 @@ class SubagentManager:
                 await self._announce_result(
                     task_id,
                     label,
-                    task,
                     self._format_partial_progress(result),
                     origin,
                     "error",
@@ -164,7 +163,6 @@ class SubagentManager:
                 await self._announce_result(
                     task_id,
                     label,
-                    task,
                     result.error or "Error: subagent execution failed.",
                     origin,
                     "error",
@@ -173,18 +171,17 @@ class SubagentManager:
             final_result = result.final_content or "Task completed but no final response was generated."
 
             logger.info("Subagent [{}] completed successfully", task_id)
-            await self._announce_result(task_id, label, task, final_result, origin, "ok")
+            await self._announce_result(task_id, label, final_result, origin, "ok")
 
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
-            await self._announce_result(task_id, label, task, error_msg, origin, "error")
+            await self._announce_result(task_id, label, error_msg, origin, "error")
 
     async def _announce_result(
         self,
         task_id: str,
         label: str,
-        task: str,
         result: str,
         origin: dict[str, str],
         status: str,
@@ -192,11 +189,18 @@ class SubagentManager:
         """Announce the subagent result to the main agent via the message bus."""
         status_text = "completed successfully" if status == "ok" else "failed"
 
+        # Truncate result to keep session history compact by keeping the
+        # head and tail and dropping the middle — sub-agent output often
+        # starts with a preamble and ends with the actual outcome.
+        _MAX_ANNOUNCE_RESULT = 1000
+        if len(result) > _MAX_ANNOUNCE_RESULT:
+            half = _MAX_ANNOUNCE_RESULT // 2
+            result = result[:half] + "\n\n... (truncated) ...\n\n" + result[-half:]
+
         announce_content = render_template(
             "agent/subagent_announce.md",
             label=label,
             status_text=status_text,
-            task=task,
             result=result,
         )
 
