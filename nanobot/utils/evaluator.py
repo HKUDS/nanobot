@@ -39,6 +39,7 @@ _EVALUATE_TOOL = [
     }
 ]
 
+
 async def evaluate_response(
     response: str,
     task_context: str,
@@ -55,12 +56,15 @@ async def evaluate_response(
         llm_response = await provider.chat_with_retry(
             messages=[
                 {"role": "system", "content": render_template("agent/evaluator.md", part="system")},
-                {"role": "user", "content": render_template(
-                    "agent/evaluator.md",
-                    part="user",
-                    task_context=task_context,
-                    response=response,
-                )},
+                {
+                    "role": "user",
+                    "content": render_template(
+                        "agent/evaluator.md",
+                        part="user",
+                        task_context=task_context,
+                        response=response,
+                    ),
+                },
             ],
             tools=_EVALUATE_TOOL,
             model=model,
@@ -68,8 +72,14 @@ async def evaluate_response(
             temperature=0.0,
         )
 
-        if not llm_response.has_tool_calls:
-            logger.warning("evaluate_response: no tool call returned, defaulting to notify")
+        if not llm_response.should_execute_tools:
+            if llm_response.has_tool_calls:
+                logger.warning(
+                    "evaluate_response: ignoring tool calls under finish_reason='%s', defaulting to notify",
+                    llm_response.finish_reason,
+                )
+            else:
+                logger.warning("evaluate_response: no tool call returned, defaulting to notify")
             return True
 
         args = llm_response.tool_calls[0].arguments
