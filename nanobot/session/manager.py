@@ -5,9 +5,12 @@ import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from nanobot.session.transcript import SessionTranscriptWriter
 
 from nanobot.config.paths import get_legacy_sessions_dir
 from nanobot.utils.helpers import ensure_dir, find_legal_message_start, safe_filename
@@ -66,9 +69,16 @@ class Session:
         self.last_consolidated = 0
         self.updated_at = datetime.now()
 
-    def retain_recent_legal_suffix(self, max_messages: int) -> None:
+    def retain_recent_legal_suffix(
+        self,
+        max_messages: int,
+        *,
+        transcript: "SessionTranscriptWriter | None" = None,
+    ) -> None:
         """Keep a legal recent suffix, mirroring get_history boundary rules."""
         if max_messages <= 0:
+            if transcript and transcript.enabled and self.messages:
+                transcript.append_evicted(self.key, "retain_suffix_clear", list(self.messages))
             self.clear()
             return
         if len(self.messages) <= max_messages:
@@ -83,9 +93,17 @@ class Session:
         retained = self.messages[start_idx:]
 
         # Mirror get_history(): avoid persisting orphan tool results at the front.
-        start = find_legal_message_start(retained)
-        if start:
-            retained = retained[start:]
+        orphan_drop = find_legal_message_start(retained) or 0
+        if orphan_drop:
+            retained = retained[orphan_drop:]
+
+        end_evict = start_idx + orphan_drop
+        if transcript and transcript.enabled and end_evict > 0:
+            transcript.append_evicted(
+                self.key,
+                "retain_suffix_evict",
+                list(self.messages[:end_evict]),
+            )
 
         dropped = len(self.messages) - len(retained)
         self.messages = retained

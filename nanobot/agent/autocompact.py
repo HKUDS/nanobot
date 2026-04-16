@@ -11,16 +11,23 @@ from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
     from nanobot.agent.memory import Consolidator
+    from nanobot.session.transcript import SessionTranscriptWriter
 
 
 class AutoCompact:
     _RECENT_SUFFIX_MESSAGES = 8
 
-    def __init__(self, sessions: SessionManager, consolidator: Consolidator,
-                 session_ttl_minutes: int = 0):
+    def __init__(
+        self,
+        sessions: SessionManager,
+        consolidator: Consolidator,
+        session_ttl_minutes: int = 0,
+        transcript: "SessionTranscriptWriter | None" = None,
+    ):
         self.sessions = sessions
         self.consolidator = consolidator
         self._ttl = session_ttl_minutes
+        self._transcript = transcript
         self._archiving: set[str] = set()
         self._summaries: dict[str, tuple[str, datetime]] = {}
 
@@ -83,6 +90,17 @@ class AutoCompact:
                 return
 
             last_active = session.updated_at
+            if (
+                archive_msgs
+                and self._transcript
+                and self._transcript.enabled
+            ):
+                self._transcript.append_evicted(
+                    key,
+                    "auto_compact_evict",
+                    archive_msgs,
+                    metadata={"last_active": last_active.isoformat()},
+                )
             summary = ""
             if archive_msgs:
                 summary = await self.consolidator.archive(archive_msgs) or ""

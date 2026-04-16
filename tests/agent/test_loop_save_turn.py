@@ -15,6 +15,7 @@ def _mk_loop() -> AgentLoop:
     from nanobot.config.schema import AgentDefaults
 
     loop.max_tool_result_chars = AgentDefaults().max_tool_result_chars
+    loop._session_transcript = None
     return loop
 
 

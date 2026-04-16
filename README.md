@@ -1599,6 +1599,8 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 When a user is idle for longer than a configured threshold, nanobot **proactively** compresses the older part of the session context into a summary while keeping a recent legal suffix of live messages. This reduces token cost and first-token latency when the user returns — instead of re-processing a long stale context with an expired KV cache, the model receives a compact summary, the most recent live context, and fresh input.
 
+For a **verbatim** audit trail (including messages removed by auto-compact or heartbeat trimming), enable `persistSessionTranscript` — append-only JSONL files are written under `transcripts/` in the workspace. Optional `transcriptIncludeFullToolResults` stores full tool payloads there while the live session may still truncate them.
+
 ```json
 {
   "agents": {
@@ -1612,6 +1614,8 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.idleCompactAfterMinutes` | `0` (disabled) | Minutes of idle time before auto-compaction starts. Set to `0` to disable. Recommended: `15` — close to a typical LLM KV cache expiry window, so stale sessions get compacted before the user returns. |
+| `agents.defaults.persistSessionTranscript` | `false` | When `true`, append-only per-session transcript logs under workspace `transcripts/` (survives auto-compact and retain-suffix evictions). |
+| `agents.defaults.transcriptIncludeFullToolResults` | `false` | When `true`, transcript lines keep full tool outputs; the live session file may still truncate large tool results. |
 
 `sessionTtlMinutes` remains accepted as a legacy alias for backward compatibility, but `idleCompactAfterMinutes` is the preferred config key going forward.
 

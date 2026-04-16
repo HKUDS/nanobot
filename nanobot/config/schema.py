@@ -84,6 +84,14 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
+    persist_session_transcript: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("persistSessionTranscript"),
+    )  # Append-only verbatim log under workspace/transcripts/
+    transcript_include_full_tool_results: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("transcriptIncludeFullToolResults"),
+    )  # If True, transcript keeps full tool payloads (session may still truncate)
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
 

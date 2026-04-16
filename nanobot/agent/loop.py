@@ -36,6 +36,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.session.transcript import SessionTranscriptWriter
 from nanobot.utils.helpers import image_placeholder_text, truncate_text as truncate_text_fn
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
@@ -159,6 +160,8 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
+        persist_session_transcript: bool = False,
+        transcript_include_full_tool_results: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
 
@@ -235,10 +238,19 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
         )
+        self._session_transcript: SessionTranscriptWriter | None = None
+        if persist_session_transcript:
+            self._session_transcript = SessionTranscriptWriter(
+                workspace,
+                enabled=True,
+                include_full_tool_results=transcript_include_full_tool_results,
+                max_tool_result_chars=self.max_tool_result_chars,
+            )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
+            transcript=self._session_transcript,
         )
         self.dream = Dream(
             store=self.context.memory,
@@ -252,6 +264,11 @@ class AgentLoop:
         self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+
+    @property
+    def session_transcript(self) -> SessionTranscriptWriter | None:
+        """Optional append-only verbatim transcript writer (see persist_session_transcript)."""
+        return getattr(self, "_session_transcript", None)
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -726,6 +743,9 @@ class AgentLoop:
         if isinstance(msg.content, str) and msg.content.strip():
             session.add_message("user", msg.content)
             self._mark_pending_user_turn(session)
+            _tr = getattr(self, "_session_transcript", None)
+            if _tr and _tr.enabled:
+                _tr.append_session_message_snapshot(session.key, session.messages[-1])
             self.sessions.save(session)
             user_persisted_early = True
 
@@ -824,6 +844,9 @@ class AgentLoop:
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
+            _tr = getattr(self, "_session_transcript", None)
+            if _tr and _tr.enabled:
+                _tr.append_raw_turn_message(session.key, m)
             if role == "tool":
                 if isinstance(content, str) and len(content) > self.max_tool_result_chars:
                     entry["content"] = truncate_text_fn(content, self.max_tool_result_chars)

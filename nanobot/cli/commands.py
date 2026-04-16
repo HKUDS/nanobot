@@ -594,6 +594,8 @@ def serve(
         disabled_skills=runtime_config.agents.defaults.disabled_skills,
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
         tools_config=runtime_config.tools,
+        persist_session_transcript=runtime_config.agents.defaults.persist_session_transcript,
+        transcript_include_full_tool_results=runtime_config.agents.defaults.transcript_include_full_tool_results,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -689,6 +691,8 @@ def gateway(
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         tools_config=config.tools,
+        persist_session_transcript=config.agents.defaults.persist_session_transcript,
+        transcript_include_full_tool_results=config.agents.defaults.transcript_include_full_tool_results,
     )
 
     # Set cron callback (needs agent)
@@ -787,7 +791,10 @@ def gateway(
         # Keep a small tail of heartbeat history so the loop stays bounded
         # without losing all short-term context between runs.
         session = agent.sessions.get_or_create("heartbeat")
-        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+        session.retain_recent_legal_suffix(
+            hb_cfg.keep_recent_messages,
+            transcript=agent.session_transcript,
+        )
         agent.sessions.save(session)
 
         return resp.content if resp else ""
@@ -924,6 +931,8 @@ def agent(
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         tools_config=config.tools,
+        persist_session_transcript=config.agents.defaults.persist_session_transcript,
+        transcript_include_full_tool_results=config.agents.defaults.transcript_include_full_tool_results,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
