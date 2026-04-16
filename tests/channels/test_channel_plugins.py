@@ -225,6 +225,81 @@ async def test_manager_propagates_groq_transcription_api_base_to_channels():
     assert channel.transcription_api_base == "http://proxy.local/v1/audio/transcriptions"
 
 
+@pytest.mark.asyncio
+async def test_manager_propagates_openai_transcription_api_base_to_channels():
+    from nanobot.channels.manager import ChannelManager
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig.model_validate({
+            "fakeplugin": {"enabled": True, "allowFrom": ["*"]},
+            "transcriptionProvider": "openai",
+        }),
+        providers=SimpleNamespace(
+            openai=SimpleNamespace(
+                api_key="openai-key",
+                api_base="http://proxy.local/v1/audio/transcriptions",
+            ),
+            groq=SimpleNamespace(api_key="groq-key", api_base=""),
+        ),
+    )
+
+    with patch(
+        "nanobot.channels.registry.discover_all",
+        return_value={"fakeplugin": _FakePlugin},
+    ):
+        mgr = ChannelManager.__new__(ChannelManager)
+        mgr.config = fake_config
+        mgr.bus = MessageBus()
+        mgr.channels = {}
+        mgr._dispatch_task = None
+        mgr._init_channels()
+
+    channel = mgr.channels["fakeplugin"]
+    assert channel.transcription_provider == "openai"
+    assert channel.transcription_api_key == "openai-key"
+    assert channel.transcription_api_base == "http://proxy.local/v1/audio/transcriptions"
+
+
+@pytest.mark.asyncio
+async def test_base_channel_passes_api_base_to_openai_transcription_provider():
+    """BaseChannel.transcribe_audio must forward transcription_api_base to OpenAI."""
+    from nanobot.providers import transcription as transcription_mod
+
+    channel = _FakePlugin({"enabled": True, "allowFrom": ["*"]}, MessageBus())
+    channel.transcription_provider = "openai"
+    channel.transcription_api_key = "k"
+    channel.transcription_api_base = "http://override/v1/audio/transcriptions"
+
+    captured: dict[str, object] = {}
+
+    class _StubOpenAI:
+        def __init__(self, api_key=None, api_base=None):
+            captured["api_key"] = api_key
+            captured["api_base"] = api_base
+
+        async def transcribe(self, file_path):
+            return "ok"
+
+    with patch.object(transcription_mod, "OpenAITranscriptionProvider", _StubOpenAI):
+        result = await channel.transcribe_audio("/tmp/does-not-matter.wav")
+
+    assert result == "ok"
+    assert captured["api_key"] == "k"
+    assert captured["api_base"] == "http://override/v1/audio/transcriptions"
+
+
+def test_openai_transcription_provider_honors_api_base_argument():
+    from nanobot.providers.transcription import OpenAITranscriptionProvider
+
+    default = OpenAITranscriptionProvider(api_key="k")
+    assert default.api_url == "https://api.openai.com/v1/audio/transcriptions"
+
+    custom = OpenAITranscriptionProvider(
+        api_key="k", api_base="http://override/v1/audio/transcriptions"
+    )
+    assert custom.api_url == "http://override/v1/audio/transcriptions"
+
+
 def test_channels_login_uses_discovered_plugin_class(monkeypatch):
     from nanobot.cli.commands import app
     from nanobot.config.schema import Config
