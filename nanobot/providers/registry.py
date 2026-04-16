@@ -243,12 +243,56 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://generativelanguage.googleapis.com/v1beta/openai/",
     ),
-    # Zhipu (智谱): OpenAI-compatible at open.bigmodel.cn
+    # Z.AI General CN (China mainland): OpenAI-compatible at open.bigmodel.cn
+    ProviderSpec(
+        name="zai_cn",
+        keywords=("glm",),
+        env_key="ZAI_API_KEY",
+        display_name="Z.AI (CN)",
+        backend="openai_compat",
+        env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
+        default_api_base="https://open.bigmodel.cn/api/paas/v4",
+    ),
+    # Z.AI General Global: OpenAI-compatible at api.z.ai
+    ProviderSpec(
+        name="zai_gb",
+        keywords=("zai_gb",),
+        env_key="ZAI_API_KEY",
+        display_name="Z.AI (Global)",
+        backend="openai_compat",
+        env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
+        default_api_base="https://api.z.ai/api/paas/v4",
+    ),
+    # Z.AI Coding Plan CN: same key as zai_cn, gateway with prefix stripping
+    ProviderSpec(
+        name="zai_coding_cn",
+        keywords=("zai-coding",),
+        env_key="ZAI_API_KEY",
+        display_name="Z.AI Coding Plan (CN)",
+        backend="openai_compat",
+        is_gateway=True,
+        default_api_base="https://open.bigmodel.cn/api/coding/paas/v4",
+        strip_model_prefix=True,
+        env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
+    ),
+    # Z.AI Coding Plan Global: same key as zai_gb, gateway with prefix stripping
+    ProviderSpec(
+        name="zai_coding_gb",
+        keywords=("zai-coding-plan",),
+        env_key="ZAI_API_KEY",
+        display_name="Z.AI Coding Plan (Global)",
+        backend="openai_compat",
+        is_gateway=True,
+        default_api_base="https://api.z.ai/api/coding/paas/v4",
+        strip_model_prefix=True,
+        env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
+    ),
+    # Zhipu (deprecated -> use zai_cn instead)
     ProviderSpec(
         name="zhipu",
-        keywords=("zhipu", "glm", "zai"),
+        keywords=("zhipu",),
         env_key="ZAI_API_KEY",
-        display_name="Zhipu AI",
+        display_name="Zhipu AI (deprecated - use zai_cn)",
         backend="openai_compat",
         env_extras=(("ZHIPUAI_API_KEY", "{api_key}"),),
         default_api_base="https://open.bigmodel.cn/api/paas/v4",

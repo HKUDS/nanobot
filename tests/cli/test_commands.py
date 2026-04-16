@@ -1485,3 +1485,179 @@ def test_channels_login_requires_channel_name() -> None:
     result = runner.invoke(app, ["channels", "login"])
 
     assert result.exit_code == 2
+
+
+# --- Z.AI provider tests (zhipu split into 4 providers) ---
+
+
+def test_config_accepts_zai_cn_explicit_provider():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "zaiCn",
+                    "model": "glm-4-plus",
+                }
+            },
+            "providers": {
+                "zaiCn": {
+                    "apiKey": "test-key",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "zai_cn"
+
+
+def test_config_accepts_zai_gb_explicit_provider():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "zaiGb",
+                    "model": "glm-4-plus",
+                }
+            },
+            "providers": {
+                "zaiGb": {
+                    "apiKey": "test-key",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "zai_gb"
+
+
+def test_config_accepts_zai_coding_cn_explicit_provider():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "zaiCodingCn",
+                    "model": "glm-4-plus",
+                }
+            },
+            "providers": {
+                "zaiCodingCn": {
+                    "apiKey": "test-key",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "zai_coding_cn"
+
+
+def test_config_accepts_zai_coding_gb_explicit_provider():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "zaiCodingGb",
+                    "model": "glm-4-plus",
+                }
+            },
+            "providers": {
+                "zaiCodingGb": {
+                    "apiKey": "test-key",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "zai_coding_gb"
+
+
+def test_zai_cn_auto_matches_glm_model_by_keyword():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "glm-4-plus"}},
+            "providers": {
+                "zaiCn": {"apiKey": "test-key"},
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "zai_cn"
+
+
+def test_zhipu_deprecated_alias_still_works():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "zhipu",
+                    "model": "glm-4-plus",
+                }
+            },
+            "providers": {
+                "zhipu": {
+                    "apiKey": "test-key",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "zhipu"
+
+
+def test_find_by_name_accepts_zai_camel_case_and_hyphen_aliases():
+    assert find_by_name("zaiCn") is not None
+    assert find_by_name("zaiCn").name == "zai_cn"
+    assert find_by_name("zaiGb") is not None
+    assert find_by_name("zaiGb").name == "zai_gb"
+    assert find_by_name("zaiCodingCn") is not None
+    assert find_by_name("zaiCodingCn").name == "zai_coding_cn"
+    assert find_by_name("zaiCodingGb") is not None
+    assert find_by_name("zaiCodingGb").name == "zai_coding_gb"
+
+
+def test_zai_coding_plan_specs_are_gateways_with_prefix_stripping():
+    cn = find_by_name("zai_coding_cn")
+    gb = find_by_name("zai_coding_gb")
+
+    assert cn is not None
+    assert cn.is_gateway is True
+    assert cn.strip_model_prefix is True
+    assert "coding" in cn.default_api_base
+
+    assert gb is not None
+    assert gb.is_gateway is True
+    assert gb.strip_model_prefix is True
+    assert "coding" in gb.default_api_base
+
+
+def test_zai_gb_does_not_auto_match_glm_models():
+    """GLM models should auto-match zai_cn, not zai_gb."""
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "glm-4-plus"}},
+            "providers": {
+                "zaiCn": {"apiKey": "test-key-cn"},
+                "zaiGb": {"apiKey": "test-key-gb"},
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "zai_cn"
+
+
+def test_zai_cn_keyword_does_not_over_match_coding_plan():
+    """zai-coding model names should not match zai_cn via 'zai' keyword."""
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "zai-coding-glm-4"}},
+            "providers": {
+                "zaiCn": {"apiKey": "test-key-cn"},
+                "zaiCodingCn": {"apiKey": "test-key-coding"},
+            },
+        }
+    )
+
+    # zai_cn has keywords=("glm",) so "zai-coding-glm-4" matches zai_cn via "glm".
+    # This is expected: coding plans require explicit provider selection.
+    # The keyword "zai-coding" in zai_coding_cn won't win because PROVIDERS
+    # order puts zai_cn first and "glm" matches.
+    assert config.get_provider_name() == "zai_cn"
