@@ -17,10 +17,10 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
-from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunSpec, AgentRunner
+from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.notebook import NotebookEditTool
@@ -31,12 +31,13 @@ from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
+from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.helpers import image_placeholder_text, truncate_text as truncate_text_fn
+from nanobot.utils.helpers import image_placeholder_text
+from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
@@ -45,6 +46,10 @@ if TYPE_CHECKING:
 
 
 UNIFIED_SESSION_KEY = "unified:default"
+
+# Channels that receive explicit turn lifecycle markers on the outbound bus
+# (handled in the channel implementation, e.g. WebSocket JSON frames).
+_SESSION_TURN_LIFECYCLE_CHANNELS = frozenset({"websocket"})
 
 
 class _LoopHook(AgentHook):
@@ -56,6 +61,7 @@ class _LoopHook(AgentHook):
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        on_tool_event: Callable[..., Awaitable[None]] | None = None,
         *,
         channel: str = "cli",
         chat_id: str = "direct",
@@ -66,6 +72,7 @@ class _LoopHook(AgentHook):
         self._on_progress = on_progress
         self._on_stream = on_stream
         self._on_stream_end = on_stream_end
+        self._on_tool_event = on_tool_event
         self._channel = channel
         self._chat_id = chat_id
         self._message_id = message_id
@@ -102,12 +109,31 @@ class _LoopHook(AgentHook):
                     await self._on_progress(thought)
             tool_hint = self._loop._strip_think(self._loop._tool_hint(context.tool_calls))
             await self._on_progress(tool_hint, tool_hint=True)
+        if self._on_tool_event:
+            await self._on_tool_event(
+                tool_calls=[tc.to_openai_tool_call() for tc in context.tool_calls],
+            )
         for tc in context.tool_calls:
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
         self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
+        tr, tc = context.tool_results, context.tool_calls
+        if self._on_tool_event and tr and len(tr) == len(tc):
+            tail = context.messages[-len(tr) :]
+            if all(m.get("role") == "tool" for m in tail):
+                trunc = self._loop._truncate_for_tool_payload
+                await self._on_tool_event(
+                    tool_results=[
+                        {
+                            "tool_call_id": m.get("tool_call_id"),
+                            "name": m.get("name"),
+                            "content": trunc(m.get("content")),
+                        }
+                        for m in tail
+                    ]
+                )
         u = context.usage or {}
         logger.debug(
             "LLM usage: prompt={} completion={} cached={}",
@@ -337,6 +363,17 @@ class AgentLoop:
 
         return format_tool_hints(tool_calls)
 
+    def _truncate_for_tool_payload(self, content: Any) -> str:
+        """Bound tool result size for tool_event metadata (string or JSON-serialized)."""
+        max_chars = min(65_536, max(4_096, self.max_tool_result_chars))
+        if isinstance(content, str):
+            return truncate_text_fn(content, max_chars)
+        try:
+            text = json.dumps(content, ensure_ascii=False)
+        except (TypeError, ValueError):
+            text = str(content)
+        return truncate_text_fn(text, max_chars)
+
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
         if self._unified_session and not msg.session_key_override:
@@ -349,6 +386,7 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        on_tool_event: Callable[..., Awaitable[None]] | None = None,
         *,
         session: Session | None = None,
         channel: str = "cli",
@@ -362,6 +400,7 @@ class AgentLoop:
         *on_stream_end(resuming)*: called when a streaming session finishes.
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
+        *on_tool_event*: optional ``tool_calls`` / ``tool_results`` callback (e.g. WebSocket).
 
         Returns (final_content, tools_used, messages, stop_reason, had_injections).
         """
@@ -370,6 +409,7 @@ class AgentLoop:
             on_progress=on_progress,
             on_stream=on_stream,
             on_stream_end=on_stream_end,
+            on_tool_event=on_tool_event,
             channel=channel,
             chat_id=chat_id,
             message_id=message_id,
@@ -506,6 +546,21 @@ class AgentLoop:
                 else None
             )
 
+    async def _publish_session_turn_lifecycle(
+        self, msg: InboundMessage, *, phase: str
+    ) -> None:
+        """Notify channel that an agent turn is starting or finished (wire protocol specific)."""
+        meta = dict(msg.metadata or {})
+        meta["_session_turn_event"] = phase
+        await self.bus.publish_outbound(
+            OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="",
+                metadata=meta,
+            )
+        )
+
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
         session_key = self._effective_session_key(msg)
@@ -521,6 +576,9 @@ class AgentLoop:
 
         try:
             async with lock, gate:
+                turn_lifecycle = msg.channel in _SESSION_TURN_LIFECYCLE_CHANNELS
+                if turn_lifecycle:
+                    await self._publish_session_turn_lifecycle(msg, phase="start")
                 try:
                     on_stream = on_stream_end = None
                     if msg.metadata.get("_wants_stream"):
@@ -574,6 +632,9 @@ class AgentLoop:
                         channel=msg.channel, chat_id=msg.chat_id,
                         content="Sorry, I encountered an error.",
                     ))
+                finally:
+                    if turn_lifecycle:
+                        await self._publish_session_turn_lifecycle(msg, phase="end")
         finally:
             # Drain any messages still in the pending queue and re-publish
             # them to the bus so they are processed as fresh inbound messages
@@ -661,10 +722,17 @@ class AgentLoop:
             self._clear_runtime_checkpoint(session)
             self.sessions.save(session)
             self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
+            turn_reasoning = self._collect_turn_reasoning_from_new_messages(
+                all_msgs[len(messages) :]
+            )
+            meta_sys: dict[str, Any] = {}
+            if turn_reasoning and self._should_attach_reasoning_to_outbound():
+                meta_sys["reasoning_content"] = turn_reasoning
             return OutboundMessage(
                 channel=channel,
                 chat_id=chat_id,
                 content=final_content or "Background task completed.",
+                metadata=meta_sys,
             )
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
@@ -703,16 +771,13 @@ class AgentLoop:
             chat_id=msg.chat_id,
         )
 
-        async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
-            meta = dict(msg.metadata or {})
-            meta["_progress"] = True
-            meta["_tool_hint"] = tool_hint
+        async def _publish(**meta: Any) -> None:
             await self.bus.publish_outbound(
                 OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
-                    content=content,
-                    metadata=meta,
+                    content=meta.pop("content", ""),
+                    metadata={**(msg.metadata or {}), **meta},
                 )
             )
 
@@ -729,11 +794,27 @@ class AgentLoop:
             self.sessions.save(session)
             user_persisted_early = True
 
+        async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
+            await _publish(content=content, _progress=True, _tool_hint=tool_hint)
+
+        async def _bus_tool_event(
+            *,
+            tool_calls: list[dict[str, Any]] | None = None,
+            tool_results: list[dict[str, Any]] | None = None,
+        ) -> None:
+            extra: dict[str, Any] = {"_tool_event": True}
+            if tool_calls is not None:
+                extra["tool_calls"] = tool_calls
+            if tool_results is not None:
+                extra["tool_results"] = tool_results
+            await _publish(**extra)
+
         final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
             on_stream=on_stream,
             on_stream_end=on_stream_end,
+            on_tool_event=_bus_tool_event,
             session=session,
             channel=msg.channel,
             chat_id=msg.chat_id,
@@ -768,12 +849,40 @@ class AgentLoop:
         meta = dict(msg.metadata or {})
         if on_stream is not None and stop_reason != "error":
             meta["_streamed"] = True
+        turn_reasoning = self._collect_turn_reasoning_from_new_messages(
+            all_msgs[len(initial_messages) :]
+        )
+        if turn_reasoning and self._should_attach_reasoning_to_outbound():
+            meta["reasoning_content"] = turn_reasoning
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
             metadata=meta,
         )
+
+    def _should_attach_reasoning_to_outbound(self) -> bool:
+        """Whether to attach reasoning_content when channels.send_reasoning_content is true."""
+        ch = self.channels_config
+        if ch is not None and not getattr(ch, "send_reasoning_content", True):
+            return False
+        return True
+
+    @staticmethod
+    def _collect_turn_reasoning_from_new_messages(
+        new_messages: list[dict[str, Any]],
+    ) -> str | None:
+        """Join non-empty assistant reasoning_content from messages appended this turn."""
+        parts: list[str] = []
+        for m in new_messages:
+            if m.get("role") != "assistant":
+                continue
+            rc = m.get("reasoning_content")
+            if isinstance(rc, str) and rc.strip():
+                parts.append(rc.strip())
+        if not parts:
+            return None
+        return "\n\n".join(parts)
 
     def _sanitize_persisted_blocks(
         self,

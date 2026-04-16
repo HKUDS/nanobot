@@ -170,6 +170,9 @@ class ChannelManager:
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
                         continue
 
+                if msg.metadata.get("_tool_event") and not self.config.channels.send_tool_events:
+                    continue
+
                 # Coalesce consecutive _stream_delta messages for the same (channel, chat_id)
                 # to reduce API calls and improve streaming latency
                 if msg.metadata.get("_stream_delta") and not msg.metadata.get("_stream_end"):
@@ -187,12 +190,28 @@ class ChannelManager:
             except asyncio.CancelledError:
                 break
 
-    @staticmethod
-    async def _send_once(channel: BaseChannel, msg: OutboundMessage) -> None:
+    async def _send_once(self, channel: BaseChannel, msg: OutboundMessage) -> None:
         """Send one outbound message without retry policy."""
         if msg.metadata.get("_stream_delta") or msg.metadata.get("_stream_end"):
             await channel.send_delta(msg.chat_id, msg.content, msg.metadata)
-        elif not msg.metadata.get("_streamed"):
+            return
+        streamed = msg.metadata.get("_streamed")
+        rc = msg.metadata.get("reasoning_content")
+        if streamed and rc and self.config.channels.send_reasoning_content:
+            # Main reply was already delivered via send_delta; attach persisted reasoning only.
+            meta = dict(msg.metadata or {})
+            meta.pop("_streamed", None)
+            meta["_reasoning_only"] = True
+            await channel.send(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="",
+                    metadata=meta,
+                )
+            )
+            return
+        if not streamed:
             await channel.send(msg)
 
     def _coalesce_stream_deltas(

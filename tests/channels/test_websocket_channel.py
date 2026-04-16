@@ -4,6 +4,7 @@ import asyncio
 import functools
 import json
 import time
+import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -23,6 +24,7 @@ from nanobot.channels.websocket import (
     _parse_inbound_payload,
     _parse_query,
     _parse_request_path,
+    _parse_resume_chat_id,
 )
 
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
@@ -78,6 +80,18 @@ def test_parse_query_extracts_token_and_client_id() -> None:
     query = _parse_query("/?token=secret&client_id=u1")
     assert query.get("token") == ["secret"]
     assert query.get("client_id") == ["u1"]
+
+
+def test_parse_resume_chat_id_blank_or_valid_uuid() -> None:
+    assert _parse_resume_chat_id(None) is None
+    assert _parse_resume_chat_id("  ") is None
+    u = uuid.uuid4()
+    assert _parse_resume_chat_id(str(u)) == str(u)
+
+
+def test_parse_resume_chat_id_invalid_raises() -> None:
+    with pytest.raises(ValueError):
+        _parse_resume_chat_id("not-a-uuid")
 
 
 @pytest.mark.parametrize(
@@ -136,6 +150,7 @@ def test_default_config_includes_safe_bind_and_streaming() -> None:
     assert defaults["streaming"] is True
     assert defaults["allowFrom"] == ["*"]
     assert defaults.get("tokenIssuePath", "") == ""
+    assert defaults.get("resumeChatId") is True
 
 
 def test_token_issue_path_must_differ_from_websocket_path() -> None:
@@ -161,6 +176,37 @@ def test_issue_route_secret_matches_empty_secret() -> None:
     # Empty secret always returns True regardless of headers
     assert _issue_route_secret_matches(Headers([]), "") is True
     assert _issue_route_secret_matches(Headers([("Authorization", "Bearer anything")]), "") is True
+
+
+@pytest.mark.asyncio
+async def test_send_session_turn_lifecycle_emits_chat_start_and_chat_end() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._connections["chat-1"] = mock_ws
+
+    await channel.send(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="chat-1",
+            content="",
+            metadata={"_session_turn_event": "start"},
+        )
+    )
+    await channel.send(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="chat-1",
+            content="",
+            metadata={"_session_turn_event": "end"},
+        )
+    )
+
+    assert mock_ws.send.await_count == 2
+    first = json.loads(mock_ws.send.call_args_list[0][0][0])
+    second = json.loads(mock_ws.send.call_args_list[1][0][0])
+    assert first == {"event": "chat_start"}
+    assert second == {"event": "chat_end"}
 
 
 @pytest.mark.asyncio
@@ -220,6 +266,47 @@ async def test_send_delta_removes_connection_on_connection_closed() -> None:
     await channel.send_delta("chat-1", "chunk", {"_stream_delta": True, "_stream_id": "s1"})
 
     assert "chat-1" not in channel._connections
+
+
+@pytest.mark.asyncio
+async def test_send_includes_reasoning_content_on_message_event() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._connections["chat-1"] = mock_ws
+
+    msg = OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="hello",
+        metadata={"reasoning_content": "internal chain"},
+    )
+    await channel.send(msg)
+
+    payload = json.loads(mock_ws.send.call_args[0][0])
+    assert payload["event"] == "message"
+    assert payload["text"] == "hello"
+    assert payload["reasoning_content"] == "internal chain"
+
+
+@pytest.mark.asyncio
+async def test_send_reasoning_only_emits_reasoning_event() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._connections["chat-1"] = mock_ws
+
+    msg = OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={"_reasoning_only": True, "reasoning_content": "after stream"},
+    )
+    await channel.send(msg)
+
+    payload = json.loads(mock_ws.send.call_args[0][0])
+    assert payload["event"] == "reasoning"
+    assert payload["text"] == "after stream"
 
 
 @pytest.mark.asyncio
@@ -593,6 +680,105 @@ async def test_websocket_requires_token_without_issue_path(bus: MagicMock) -> No
             async with websockets.connect(f"ws://127.0.0.1:{port}/ws?client_id=u&token=wrong"):
                 pass
         assert exc_info.value.response.status_code == 401
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_invalid_chat_id_query_returns_400(bus: MagicMock) -> None:
+    port = 29910
+    channel = _ch(bus, port=port)
+
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+
+    try:
+        with pytest.raises(websockets.exceptions.InvalidStatus) as exc_info:
+            async with websockets.connect(
+                f"ws://127.0.0.1:{port}/ws?client_id=u&chat_id=not-a-uuid"
+            ):
+                pass
+        assert exc_info.value.response.status_code == 400
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_resume_chat_id_returns_same_id_and_resumed_flag(bus: MagicMock) -> None:
+    port = 29911
+    channel = _ch(bus, port=port)
+
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+
+    fixed = str(uuid.uuid4())
+    try:
+        async with websockets.connect(
+            f"ws://127.0.0.1:{port}/ws?client_id=u&chat_id={fixed}"
+        ) as client:
+            ready = json.loads(await client.recv())
+            assert ready["event"] == "ready"
+            assert ready["chat_id"] == fixed
+            assert ready["resumed"] is True
+            assert ready["client_id"] == "u"
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_resume_chat_id_disabled_ignores_query(bus: MagicMock) -> None:
+    port = 29912
+    fixed = str(uuid.uuid4())
+    channel = _ch(bus, port=port, resumeChatId=False)
+
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+
+    try:
+        async with websockets.connect(
+            f"ws://127.0.0.1:{port}/ws?client_id=u&chat_id={fixed}"
+        ) as client:
+            ready = json.loads(await client.recv())
+            assert ready["event"] == "ready"
+            assert ready["chat_id"] != fixed
+            assert "resumed" not in ready
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_second_connection_same_chat_id_replaces_first(bus: MagicMock) -> None:
+    port = 29913
+    channel = _ch(bus, port=port, streaming=True)
+
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+
+    try:
+        async with websockets.connect(f"ws://127.0.0.1:{port}/ws?client_id=first") as first:
+            r1 = json.loads(await first.recv())
+            cid = r1["chat_id"]
+
+            async with websockets.connect(
+                f"ws://127.0.0.1:{port}/ws?client_id=second&chat_id={cid}"
+            ) as second:
+                r2 = json.loads(await second.recv())
+                assert r2["chat_id"] == cid
+                assert r2["resumed"] is True
+
+                await asyncio.sleep(0.1)
+                assert first.close_code == 1000
+
+                await channel.send_delta(
+                    cid, "x", {"_stream_delta": True, "_stream_id": "s1"}
+                )
+                delta = json.loads(await second.recv())
+                assert delta["event"] == "delta"
+                assert delta["text"] == "x"
     finally:
         await channel.stop()
         await server_task

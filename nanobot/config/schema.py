@@ -27,6 +27,8 @@ class ChannelsConfig(Base):
 
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
+    send_tool_events: bool = False  # structured tool_calls / tool_results (e.g. WebSocket tool_event frames)
+    send_reasoning_content: bool = True  # push assistant reasoning_content on outbound sends; session history is unchanged
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
     transcription_provider: str = "groq"  # Voice transcription backend: "groq" or "openai"
 

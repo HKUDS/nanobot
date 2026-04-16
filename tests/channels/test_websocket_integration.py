@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -474,5 +475,26 @@ async def test_invalid_json_as_plain_text(bus: MagicMock) -> None:
             await c.send_text("{broken json")
             await asyncio.sleep(0.1)
             assert bus.publish_inbound.call_args[0][0].content == "{broken json"
+    finally:
+        await ch.stop(); await t
+
+
+@pytest.mark.asyncio
+async def test_explicit_chat_id_sets_resumed_and_session_key(bus: MagicMock) -> None:
+    """Client passes chat_id to resume; inbound messages use that id for session routing."""
+    ch = _ch(bus, 29925)
+    t = asyncio.create_task(ch.start())
+    await asyncio.sleep(0.3)
+    fixed = str(uuid.uuid4())
+    try:
+        async with WsTestClient("ws://127.0.0.1:29925/", client_id="resume-u", chat_id=fixed) as c:
+            r = await c.recv_ready()
+            assert r.chat_id == fixed
+            assert r.raw.get("resumed") is True
+            await c.send_content("hello resume")
+            await asyncio.sleep(0.1)
+            inbound = bus.publish_inbound.call_args[0][0]
+            assert inbound.chat_id == fixed
+            assert inbound.session_key == f"websocket:{fixed}"
     finally:
         await ch.stop(); await t

@@ -434,7 +434,106 @@ def build_status_content(
     ]
     if search_usage_text:
         lines.append(search_usage_text)
-    return "\n".join(lines)    
+    return "\n".join(lines)
+
+
+def build_status_dict(
+    *,
+    version: str,
+    model: str,
+    start_time: float,
+    last_usage: dict[str, int],
+    context_window_tokens: int,
+    session_msg_count: int,
+    context_tokens_estimate: int,
+    search_usage: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a JSON-serializable runtime status snapshot (same fields as /status text)."""
+    uptime_s = int(time.time() - start_time)
+    uptime = (
+        f"{uptime_s // 3600}h {(uptime_s % 3600) // 60}m"
+        if uptime_s >= 3600
+        else f"{uptime_s // 60}m {uptime_s % 60}s"
+    )
+    last_in = last_usage.get("prompt_tokens", 0)
+    last_out = last_usage.get("completion_tokens", 0)
+    cached = last_usage.get("cached_tokens", 0)
+    ctx_total = max(context_window_tokens, 0)
+    ctx_pct = int((context_tokens_estimate / ctx_total) * 100) if ctx_total > 0 else 0
+    cached_pct: int | None = None
+    if cached and last_in:
+        cached_pct = cached * 100 // last_in
+    out: dict[str, Any] = {
+        "version": version,
+        "model": model,
+        "uptime": {"seconds": uptime_s, "human": uptime},
+        "tokens": {
+            "last_prompt": last_in,
+            "last_completion": last_out,
+            "last_cached": cached,
+            "cached_percent_of_prompt": cached_pct,
+        },
+        "context": {
+            "tokens_estimate": context_tokens_estimate,
+            "window_total": ctx_total,
+            "percent_used": ctx_pct,
+        },
+        "session": {"message_count": session_msg_count},
+    }
+    if search_usage is not None:
+        out["search"] = search_usage
+    return out
+
+
+def format_session_context_view(history: list[dict[str, Any]]) -> str:
+    """Format ``Session.get_history()`` messages for the ``/context`` command."""
+    if not history:
+        return "No messages in current session context."
+    lines: list[str] = [f"## Context ({len(history)} message(s))", ""]
+    for i, m in enumerate(history, 1):
+        role = m.get("role", "?")
+        lines.append(f"### {i}. `{role}`")
+        lines.append(_format_one_context_message(m))
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def _format_one_context_message(m: dict[str, Any]) -> str:
+    parts: list[str] = []
+    c = m.get("content", "")
+    if c != "":
+        if isinstance(c, str):
+            parts.append(c)
+        else:
+            parts.append(
+                "```json\n"
+                + json.dumps(c, ensure_ascii=False, indent=2, default=str)
+                + "\n```"
+            )
+    else:
+        parts.append("_(empty content)_")
+    for key in ("tool_calls", "tool_call_id", "name", "reasoning_content"):
+        if key not in m:
+            continue
+        val = m[key]
+        if key == "tool_calls" or isinstance(val, (dict, list)):
+            parts.append(
+                f"**{key}**:\n```json\n"
+                + json.dumps(val, ensure_ascii=False, indent=2, default=str)
+                + "\n```"
+            )
+        else:
+            parts.append(f"**{key}**: {val}")
+    return "\n\n".join(parts)
+
+
+def build_context_dict(
+    *,
+    session_key: str,
+    messages: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """JSON-serializable payload for ``/context_json`` (same ``messages`` as ``get_history()``)."""
+    return {"session_key": session_key, "messages": messages}
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:

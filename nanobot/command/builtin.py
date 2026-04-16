@@ -5,11 +5,19 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from dataclasses import asdict
+
+from loguru import logger
 
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
-from nanobot.utils.helpers import build_status_content
+from nanobot.utils.helpers import (
+    build_context_dict,
+    build_status_content,
+    build_status_dict,
+    format_session_context_view,
+)
 from nanobot.utils.restart import set_restart_notice_to_env
 
 
@@ -49,7 +57,7 @@ async def cmd_restart(ctx: CommandContext) -> OutboundMessage:
     )
 
 
-async def cmd_status(ctx: CommandContext) -> OutboundMessage:
+async def cmd_status(ctx: CommandContext, *, as_json: bool = False) -> OutboundMessage:
     """Build an outbound status message for a session."""
     loop = ctx.loop
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
@@ -57,12 +65,13 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     try:
         ctx_est, _ = loop.consolidator.estimate_session_prompt_tokens(session)
     except Exception:
-        pass
+        logger.error("Failed to estimate session prompt tokens", exc_info=True)
     if ctx_est <= 0:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
-    
+
     # Fetch web search provider usage (best-effort, never blocks the response)
     search_usage_text: str | None = None
+    search_usage_obj = None
     try:
         from nanobot.utils.searchusage import fetch_search_usage
         web_cfg = getattr(loop, "web_config", None)
@@ -70,23 +79,58 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         if search_cfg is not None:
             provider = getattr(search_cfg, "provider", "duckduckgo")
             api_key = getattr(search_cfg, "api_key", "") or None
-            usage = await fetch_search_usage(provider=provider, api_key=api_key)
-            search_usage_text = usage.format()
+            search_usage_obj = await fetch_search_usage(provider=provider, api_key=api_key)
+            search_usage_text = search_usage_obj.format()
     except Exception:
-        pass  # Never let usage fetch break /status
+        logger.error("Failed to fetch search usage", exc_info=True)  # Never let usage fetch break /status
+
+
+    common = dict(
+        version=__version__,
+        model=loop.model,
+        start_time=loop._start_time,
+        last_usage=loop._last_usage,
+        context_window_tokens=loop.context_window_tokens,
+        session_msg_count=len(session.get_history(max_messages=0)),
+        context_tokens_estimate=ctx_est,
+    )
+    meta = {**dict(ctx.msg.metadata or {}), "render_as": "text"}
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
-        content=build_status_content(
-            version=__version__, model=loop.model,
-            start_time=loop._start_time, last_usage=loop._last_usage,
-            context_window_tokens=loop.context_window_tokens,
-            session_msg_count=len(session.get_history(max_messages=0)),
-            context_tokens_estimate=ctx_est,
-            search_usage_text=search_usage_text,
+        content="" if as_json else build_status_content(
+            **common, search_usage_text=search_usage_text
         ),
+        data=build_status_dict(
+            **common,
+            search_usage=asdict(search_usage_obj) if search_usage_obj is not None else None,
+        ) if as_json else {},
+        metadata=meta,
+    )
+
+
+async def cmd_status_json(ctx: CommandContext) -> OutboundMessage:
+    """Same as /status but with JSON object body."""
+    return await cmd_status(ctx, as_json=True)
+
+
+async def cmd_context(ctx: CommandContext, *, as_json: bool = False) -> OutboundMessage:
+    """Show unconsolidated session messages that feed the model (same as get_history)."""
+    loop = ctx.loop
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    history = session.get_history(max_messages=0)
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=format_session_context_view(history) if not as_json else "",
+        data=build_context_dict(session_key=ctx.key, messages=history) if as_json else {},
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
+
+
+async def cmd_context_json(ctx: CommandContext) -> OutboundMessage:
+    """Same as /context but JSON object body."""
+    return await cmd_context(ctx, as_json=True)
 
 
 async def cmd_new(ctx: CommandContext) -> OutboundMessage:
@@ -321,6 +365,9 @@ def build_help_text() -> str:
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",
+        "/status_json — Show bot status as JSON",
+        "/context — Show current session LLM context (messages)",
+        "/context_json — Show session context as JSON",
         "/dream — Manually trigger Dream consolidation",
         "/dream-log — Show what the last Dream changed",
         "/dream-restore — Revert memory to a previous state",
@@ -334,8 +381,14 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/stop", cmd_stop)
     router.priority("/restart", cmd_restart)
     router.priority("/status", cmd_status)
+    router.priority("/status_json", cmd_status_json)
+    router.priority("/context", cmd_context)
+    router.priority("/context_json", cmd_context_json)
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
+    router.exact("/status_json", cmd_status_json)
+    router.exact("/context", cmd_context)
+    router.exact("/context_json", cmd_context_json)
     router.exact("/dream", cmd_dream)
     router.exact("/dream-log", cmd_dream_log)
     router.prefix("/dream-log ", cmd_dream_log)

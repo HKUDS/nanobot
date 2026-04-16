@@ -77,6 +77,7 @@ class WsTestClient:
         *,
         client_id: str = "test-client",
         token: str = "",
+        chat_id: str = "",
         extra_headers: dict[str, str] | None = None,
     ) -> None:
         params: list[str] = []
@@ -84,6 +85,8 @@ class WsTestClient:
             params.append(f"client_id={client_id}")
         if token:
             params.append(f"token={token}")
+        if chat_id:
+            params.append(f"chat_id={chat_id}")
         sep = "&" if "?" in uri else "?"
         self._uri = uri + sep + "&".join(params) if params else uri
         self._extra_headers = extra_headers

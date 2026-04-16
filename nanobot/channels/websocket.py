@@ -19,7 +19,8 @@ from pydantic import Field, field_validator, model_validator
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
-from websockets.http11 import Request as WsRequest, Response
+from websockets.http11 import Request as WsRequest
+from websockets.http11 import Response
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -53,8 +54,21 @@ class WebSocketConfig(Base):
       ``X-Nanobot-Auth: <secret>``.
     - ``websocket_requires_token``: If True, the handshake must include a valid token (static or issued and not expired).
     - Each connection has its own session: a unique ``chat_id`` maps to the agent session internally.
+      Clients may pass ``chat_id`` (UUID) on the query string to resume a persisted session; see
+      ``resume_chat_id``.
+    - ``resume_chat_id``: If True (default), optional query ``chat_id=<uuid>`` selects that session;
+      if False, the parameter is ignored and a new UUID is always assigned.
     - ``media`` field in outbound messages contains local filesystem paths; remote clients need a
       shared filesystem or an HTTP file server to access these files.
+    - Tool rounds can emit JSON frames with ``event: "tool_event"`` (``tool_calls`` before execution,
+      ``tool_results`` after). This is gated by global config ``channels.sendToolEvents`` / ``send_tool_events``
+      (default off).
+    - Each agent turn emits ``event: "chat_start"`` before processing and ``event: "chat_end"`` after
+      the turn completes (including after errors), so clients can show typing or progress UI.
+    - Assistant ``reasoning_content`` from the persisted turn is sent as ``event: "reasoning"`` after
+      streaming completes when applicable, or on ``event: "message"`` as field ``reasoning_content``,
+      when global ``channels.sendReasoningContent`` / ``send_reasoning_content`` is true (default).
+      The same global flag controls whether other channels receive reasoning on outbound messages.
     """
 
     enabled: bool = False
@@ -73,6 +87,7 @@ class WebSocketConfig(Base):
     ping_timeout_s: float = Field(default=20.0, ge=5.0, le=300.0)
     ssl_certfile: str = ""
     ssl_keyfile: str = ""
+    resume_chat_id: bool = True
 
     @field_validator("path")
     @classmethod
@@ -134,6 +149,19 @@ def _query_first(query: dict[str, list[str]], key: str) -> str | None:
     """Return the first value for *key*, or None."""
     values = query.get(key)
     return values[0] if values else None
+
+
+def _parse_resume_chat_id(raw: str | None) -> str | None:
+    """Return canonical UUID string for *raw*, or None if absent or blank.
+
+    Raises ValueError if *raw* is non-blank but not a valid UUID.
+    """
+    if raw is None:
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    return str(uuid.UUID(s))
 
 
 def _parse_inbound_payload(raw: str) -> str | None:
@@ -303,6 +331,13 @@ class WebSocketChannel(BaseChannel):
                 client_id = client_id[:128]
             if not self.is_allowed(client_id):
                 return connection.respond(403, "Forbidden")
+            if self.config.resume_chat_id:
+                raw_chat = _query_first(query, "chat_id")
+                if raw_chat is not None and raw_chat.strip():
+                    try:
+                        _parse_resume_chat_id(raw_chat)
+                    except ValueError:
+                        return connection.respond(400, "Bad Request")
             return self._authorize_websocket_handshake(connection, query)
 
         async def handler(connection: ServerConnection) -> None:
@@ -353,21 +388,36 @@ class WebSocketChannel(BaseChannel):
             logger.warning("websocket: client_id too long ({} chars), truncating", len(client_id))
             client_id = client_id[:128]
 
-        chat_id = str(uuid.uuid4())
+        resumed = False
+        old_connection: Any | None = None
+        if self.config.resume_chat_id:
+            maybe_resume = _parse_resume_chat_id(_query_first(query, "chat_id"))
+            if maybe_resume is not None:
+                chat_id = maybe_resume
+                resumed = True
+                old_connection = self._connections.get(chat_id)
+            else:
+                chat_id = str(uuid.uuid4())
+        else:
+            chat_id = str(uuid.uuid4())
+
+        ready_body: dict[str, Any] = {
+            "event": "ready",
+            "chat_id": chat_id,
+            "client_id": client_id,
+        }
+        if resumed:
+            ready_body["resumed"] = True
 
         try:
-            await connection.send(
-                json.dumps(
-                    {
-                        "event": "ready",
-                        "chat_id": chat_id,
-                        "client_id": client_id,
-                    },
-                    ensure_ascii=False,
-                )
-            )
+            await connection.send(json.dumps(ready_body, ensure_ascii=False))
             # Register only after ready is successfully sent to avoid out-of-order sends
             self._connections[chat_id] = connection
+            if old_connection is not None and old_connection is not connection:
+                try:
+                    await old_connection.close(1000, "replaced by new connection")
+                except Exception as e:
+                    logger.debug("websocket: closing replaced connection: {}", e)
 
             async for raw in connection:
                 if isinstance(raw, bytes):
@@ -388,7 +438,8 @@ class WebSocketChannel(BaseChannel):
         except Exception as e:
             logger.debug("websocket connection ended: {}", e)
         finally:
-            self._connections.pop(chat_id, None)
+            if self._connections.get(chat_id) is connection:
+                self._connections.pop(chat_id, None)
 
     async def stop(self) -> None:
         if not self._running:
@@ -424,16 +475,41 @@ class WebSocketChannel(BaseChannel):
         if connection is None:
             logger.warning("websocket: no active connection for chat_id={}", msg.chat_id)
             return
-        payload: dict[str, Any] = {
-            "event": "message",
-            "text": msg.content,
-        }
-        if msg.media:
-            payload["media"] = msg.media
-        if msg.reply_to:
-            payload["reply_to"] = msg.reply_to
-        raw = json.dumps(payload, ensure_ascii=False)
-        await self._safe_send(msg.chat_id, raw, label=" ")
+        metadata = msg.metadata or {}
+        if metadata.get("_reasoning_only"):
+            rc = metadata.get("reasoning_content")
+            if isinstance(rc, str) and rc:
+                payload = {"event": "reasoning", "text": rc}
+                await self._safe_send(
+                    msg.chat_id, json.dumps(payload, ensure_ascii=False), label=" reasoning "
+                )
+            return
+        turn_phase = metadata.get("_session_turn_event")
+        if turn_phase in ("start", "end"):
+            payload = {
+                "event": "chat_start" if turn_phase == "start" else "chat_end",
+            }
+            await self._safe_send(
+                msg.chat_id, json.dumps(payload, ensure_ascii=False), label=" turn "
+            )
+            return
+        if metadata.get("_tool_event"):
+            payload = {"event": "tool_event"}
+            for key in ("tool_calls", "tool_results"):
+                if key in metadata:
+                    payload[key] = metadata[key]
+        else:
+            payload = {"event": "message", "text": msg.content}
+            if msg.media:
+                payload["media"] = msg.media
+            if msg.reply_to:
+                payload["reply_to"] = msg.reply_to
+            if msg.data:
+                payload["data"] = msg.data
+            rc = metadata.get("reasoning_content")
+            if isinstance(rc, str) and rc:
+                payload["reasoning_content"] = rc
+        await self._safe_send(msg.chat_id, json.dumps(payload, ensure_ascii=False), label=" ")
 
     async def send_delta(
         self,

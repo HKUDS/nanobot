@@ -138,6 +138,9 @@ if DISCORD_AVAILABLE:
                 ("stop", "Stop the current task", "/stop"),
                 ("restart", "Restart the bot", "/restart"),
                 ("status", "Show bot status", "/status"),
+                ("status_json", "Show bot status as JSON", "/status_json"),
+                ("context", "Show session context", "/context"),
+                ("context_json", "Show session context as JSON", "/context_json"),
             )
 
             for name, description, command_text in commands:

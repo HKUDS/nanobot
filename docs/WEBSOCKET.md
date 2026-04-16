@@ -7,7 +7,7 @@ Nanobot can act as a WebSocket server, allowing external clients (web apps, CLIs
 - Bidirectional real-time communication over WebSocket
 - Streaming support — receive agent responses token by token
 - Token-based authentication (static tokens and short-lived issued tokens)
-- Per-connection sessions — each connection gets a unique `chat_id`
+- Per-connection sessions — each connection gets a unique `chat_id`; clients can pass `chat_id` on reconnect to resume the same persisted conversation
 - TLS/SSL support (WSS) with enforced TLSv1.2 minimum
 - Client allow-list via `allowFrom`
 - Auto-cleanup of dead connections
@@ -69,13 +69,16 @@ asyncio.run(main())
 ## Connection URL
 
 ```
-ws://{host}:{port}{path}?client_id={id}&token={token}
+ws://{host}:{port}{path}?client_id={id}&token={token}&chat_id={uuid}
 ```
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `client_id` | No | Identifier for `allowFrom` authorization. Auto-generated as `anon-xxxxxxxxxxxx` if omitted. Truncated to 128 chars. |
 | `token` | Conditional | Authentication token. Required when `websocketRequiresToken` is `true` or `token` (static secret) is configured. |
+| `chat_id` | No | Standard UUID string. When `resumeChatId` is `true` (default), pass the `chat_id` from a previous `ready` frame to continue the same agent session. Invalid UUIDs are rejected with HTTP 400 during the handshake. If omitted, the server assigns a new UUID. |
+
+If two connections use the same `chat_id`, the newer connection **replaces** the older one: the server closes the previous WebSocket with code 1000 and reason `replaced by new connection`.
 
 ## Wire Protocol
 
@@ -89,9 +92,12 @@ All frames are JSON text. Each message has an `event` field.
 {
   "event": "ready",
   "chat_id": "uuid-v4",
-  "client_id": "alice"
+  "client_id": "alice",
+  "resumed": true
 }
 ```
+
+`resumed` is present and `true` only when the client supplied a valid `chat_id` query parameter to resume an existing session. Omit it on fresh connections (server-assigned `chat_id`).
 
 **`message`** — full agent response:
 
@@ -170,6 +176,7 @@ All fields go under `channels.websocket` in `config.json`.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `allowFrom` | list of string | `["*"]` | Allowed `client_id` values. `"*"` allows all; `[]` denies all. |
+| `resumeChatId` | bool | `true` | When `true`, clients may pass `?chat_id=<uuid>` to resume a session. When `false`, the query parameter is ignored and a new `chat_id` is always generated. |
 
 ### Streaming
 

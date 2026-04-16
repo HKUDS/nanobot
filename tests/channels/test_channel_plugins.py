@@ -90,6 +90,13 @@ def test_channels_config_builtin_fields_removed():
     assert not hasattr(cfg, "telegram")
     assert cfg.send_progress is True
     assert cfg.send_tool_hints is False
+    assert cfg.send_reasoning_content is True
+
+
+def test_channels_config_send_reasoning_content_alias():
+    """CamelCase JSON key maps to send_reasoning_content."""
+    cfg = ChannelsConfig.model_validate({"sendReasoningContent": False})
+    assert cfg.send_reasoning_content is False
 
 
 # ---------------------------------------------------------------------------
@@ -555,6 +562,144 @@ async def test_send_with_retry_skips_send_when_streamed():
 
     assert send_called is False
     assert send_delta_called is False
+
+
+@pytest.mark.asyncio
+async def test_send_with_retry_sends_reasoning_only_when_streamed():
+    """When _streamed and reasoning_content are set, send a reasoning-only follow-up."""
+    send_calls: list[OutboundMessage] = []
+
+    class _StreamedChannel(BaseChannel):
+        name = "streamed"
+        display_name = "Streamed"
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            send_calls.append(msg)
+
+        async def send_delta(self, chat_id: str, delta: str, metadata: dict | None = None) -> None:
+            pass
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(send_max_retries=3),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {"websocket": _StreamedChannel(fake_config, mgr.bus)}
+    mgr._dispatch_task = None
+
+    msg = OutboundMessage(
+        channel="websocket",
+        chat_id="123",
+        content="full answer text",
+        metadata={"_streamed": True, "reasoning_content": "step-by-step thought"},
+    )
+    await mgr._send_with_retry(mgr.channels["websocket"], msg)
+
+    assert len(send_calls) == 1
+    follow = send_calls[0]
+    assert follow.content == ""
+    assert follow.metadata.get("_reasoning_only") is True
+    assert follow.metadata.get("reasoning_content") == "step-by-step thought"
+    assert follow.metadata.get("_streamed") is None
+
+
+@pytest.mark.asyncio
+async def test_send_with_retry_skips_reasoning_followup_when_send_reasoning_disabled():
+    """When channels.send_reasoning_content is false, do not emit reasoning-only send."""
+    send_calls: list[OutboundMessage] = []
+
+    class _StreamedChannel(BaseChannel):
+        name = "streamed"
+        display_name = "Streamed"
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            send_calls.append(msg)
+
+        async def send_delta(self, chat_id: str, delta: str, metadata: dict | None = None) -> None:
+            pass
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(send_max_retries=3, send_reasoning_content=False),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {"websocket": _StreamedChannel(fake_config, mgr.bus)}
+    mgr._dispatch_task = None
+
+    msg = OutboundMessage(
+        channel="websocket",
+        chat_id="123",
+        content="full answer text",
+        metadata={"_streamed": True, "reasoning_content": "step-by-step thought"},
+    )
+    await mgr._send_with_retry(mgr.channels["websocket"], msg)
+
+    assert send_calls == []
+
+
+@pytest.mark.asyncio
+async def test_send_with_retry_sends_reasoning_followup_for_non_websocket_channel():
+    """When send_reasoning_content is true, reasoning tail after streaming applies to any channel."""
+    send_calls: list[OutboundMessage] = []
+
+    class _OtherChannel(BaseChannel):
+        name = "telegram"
+        display_name = "Telegram"
+
+        async def start(self) -> None:
+            pass
+
+        async def stop(self) -> None:
+            pass
+
+        async def send(self, msg: OutboundMessage) -> None:
+            send_calls.append(msg)
+
+        async def send_delta(self, chat_id: str, delta: str, metadata: dict | None = None) -> None:
+            pass
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(send_max_retries=3, send_reasoning_content=True),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {"telegram": _OtherChannel(fake_config, mgr.bus)}
+    mgr._dispatch_task = None
+
+    msg = OutboundMessage(
+        channel="telegram",
+        chat_id="123",
+        content="full answer text",
+        metadata={"_streamed": True, "reasoning_content": "step-by-step thought"},
+    )
+    await mgr._send_with_retry(mgr.channels["telegram"], msg)
+
+    assert len(send_calls) == 1
+    follow = send_calls[0]
+    assert follow.content == ""
+    assert follow.metadata.get("_reasoning_only") is True
+    assert follow.metadata.get("reasoning_content") == "step-by-step thought"
 
 
 @pytest.mark.asyncio
