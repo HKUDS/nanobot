@@ -853,7 +853,80 @@ class AgentLoop:
                     entry["content"] = filtered
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
+
+        # Persist cross-channel message tool calls into target sessions so
+        # that the target session has context when the user replies there.
+        self._persist_cross_channel_calls(session, messages[skip:])
         session.updated_at = datetime.now()
+
+    def _persist_cross_channel_calls(
+        self, source_session: Session, new_messages: list[dict[str, Any]]
+    ) -> None:
+        """Record cross-channel ``message`` tool calls into the target session.
+
+        When session A (e.g. websocket) uses the *message* tool to send to
+        channel B (e.g. feishu), the outbound message is delivered to the user
+        but is not recorded in session B's history.  This causes session B to
+        lose context when the user replies on channel B.
+
+        This method detects such cross-channel sends and appends a lightweight
+        assistant entry to the target session so it has the necessary context.
+
+        Improvements over the initial implementation:
+        - Use ``sessions.get_or_create()`` instead of accessing ``_cache``
+          directly, so sessions persisted on disk but evicted from memory are
+          still found.
+        - Persist ``media`` file paths alongside ``content`` so the target
+          session retains full context about attachments.
+        - Record ``_source_session`` to make the provenance traceable.
+        """
+        from datetime import datetime
+
+        for m in new_messages:
+            if m.get("role") != "assistant":
+                continue
+            tool_calls = m.get("tool_calls") or []
+            for tc in tool_calls:
+                func = tc.get("function", {})
+                if func.get("name") != "message":
+                    continue
+                try:
+                    args = json.loads(func.get("arguments", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+                target_channel = args.get("channel") or source_session.key.split(":", 1)[0]
+                target_chat_id = args.get("chat_id") or source_session.key.split(":", 1)[-1]
+                target_key = f"{target_channel}:{target_chat_id}"
+
+                if target_key == source_session.key:
+                    continue  # same session, nothing to do
+
+                content = args.get("content", "")
+                media = args.get("media")
+                if not content and not media:
+                    continue
+
+                # Use the public API so disk-persisted sessions are loaded too.
+                target_session = self.sessions.get_or_create(target_key)
+
+                entry: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": content,
+                    "timestamp": datetime.now().isoformat(),
+                    "_cross_channel": True,
+                    "_source_session": source_session.key,
+                }
+                if media:
+                    entry["_media"] = media
+
+                target_session.messages.append(entry)
+                target_session.updated_at = datetime.now()
+                self.sessions.save(target_session)
+                logger.info(
+                    "Cross-channel message persisted: {} -> {}",
+                    source_session.key, target_key,
+                )
 
     def _set_runtime_checkpoint(self, session: Session, payload: dict[str, Any]) -> None:
         """Persist the latest in-flight turn state into session metadata."""
