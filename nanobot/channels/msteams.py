@@ -32,7 +32,10 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_workspace_path
 from nanobot.config.schema import Base
 
-MSTEAMS_AVAILABLE = importlib.util.find_spec("jwt") is not None
+MSTEAMS_AVAILABLE = (
+    importlib.util.find_spec("jwt") is not None
+    and importlib.util.find_spec("cryptography") is not None
+)
 
 if TYPE_CHECKING:
     import jwt
