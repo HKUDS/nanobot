@@ -239,13 +239,21 @@ class MemoryStore:
                 pass
         # Fallback: read last line's cursor from the JSONL file.
         last = self._read_last_entry()
-        if last:
+        if last and last.get("cursor") is not None:
             return last["cursor"] + 1
         return 1
 
     def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
         """Return history entries with cursor > *since_cursor*."""
-        return [e for e in self._read_entries() if e["cursor"] > since_cursor]
+        entries = []
+        for e in self._read_entries():
+            cursor = e.get("cursor")
+            if cursor is None:
+                logger.warning("Skipping history entry without cursor: {}", e.get("timestamp", "unknown"))
+                continue
+            if cursor > since_cursor:
+                entries.append(e)
+        return entries
 
     def compact_history(self) -> None:
         """Drop oldest entries if the file exceeds *max_history_entries*."""
