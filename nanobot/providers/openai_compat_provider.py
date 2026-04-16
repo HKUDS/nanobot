@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 import json_repair
+from loguru import logger
 
 if os.environ.get("LANGFUSE_SECRET_KEY") and importlib.util.find_spec("langfuse"):
     from langfuse.openai import AsyncOpenAI
@@ -448,8 +449,6 @@ class OpenAICompatProvider(LLMProvider):
         self._responses_failures[key] = count
         if count >= _RESPONSES_FAILURE_THRESHOLD:
             self._responses_tripped_at[key] = time.monotonic()
-            from loguru import logger
-
             logger.warning(
                 "Responses API circuit open for {} — falling back to Chat Completions",
                 key,
