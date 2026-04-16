@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import hashlib
+import time
 import importlib.util
 import os
 import secrets
@@ -143,6 +144,10 @@ def _uses_openrouter_attribution(spec: "ProviderSpec | None", api_base: str | No
     return bool(api_base and "openrouter" in api_base.lower())
 
 
+_RESPONSES_FAILURE_THRESHOLD = 3
+_RESPONSES_PROBE_INTERVAL_S = 300  # 5 minutes
+
+
 def _is_direct_openai_base(api_base: str | None) -> bool:
     """Return True for direct OpenAI endpoints, not generic OpenAI-compatible gateways."""
     if not api_base:
@@ -188,6 +193,11 @@ class OpenAICompatProvider(LLMProvider):
             default_headers=default_headers,
             max_retries=0,
         )
+
+        # Responses API circuit breaker: skip after repeated failures,
+        # probe again after _RESPONSES_PROBE_INTERVAL_S seconds.
+        self._responses_failures: dict[str, int] = {}
+        self._responses_tripped_at: dict[str, float] = {}
 
     def _setup_env(self, api_key: str, api_base: str | None) -> None:
         """Set environment variables based on provider spec."""
@@ -414,9 +424,41 @@ class OpenAICompatProvider(LLMProvider):
             return False
 
         model_name = (model or self.default_model).lower()
+        wants = False
         if reasoning_effort and reasoning_effort.lower() != "none":
-            return True
-        return any(token in model_name for token in ("gpt-5", "o1", "o3", "o4"))
+            wants = True
+        elif any(token in model_name for token in ("gpt-5", "o1", "o3", "o4")):
+            wants = True
+        if not wants:
+            return False
+
+        # Circuit breaker: skip after repeated failures, probe periodically.
+        key = f"{model_name}:{reasoning_effort or ''}"
+        failures = self._responses_failures.get(key, 0)
+        if failures >= _RESPONSES_FAILURE_THRESHOLD:
+            tripped = self._responses_tripped_at.get(key, 0.0)
+            if (time.monotonic() - tripped) < _RESPONSES_PROBE_INTERVAL_S:
+                return False
+            # Half-open: allow one probe attempt
+        return True
+
+    def _record_responses_failure(self, model: str | None, reasoning_effort: str | None) -> None:
+        key = f"{(model or self.default_model).lower()}:{reasoning_effort or ''}"
+        count = self._responses_failures.get(key, 0) + 1
+        self._responses_failures[key] = count
+        if count >= _RESPONSES_FAILURE_THRESHOLD:
+            self._responses_tripped_at[key] = time.monotonic()
+            from loguru import logger
+
+            logger.warning(
+                "Responses API circuit open for {} — falling back to Chat Completions",
+                key,
+            )
+
+    def _record_responses_success(self, model: str | None, reasoning_effort: str | None) -> None:
+        key = f"{(model or self.default_model).lower()}:{reasoning_effort or ''}"
+        self._responses_failures.pop(key, None)
+        self._responses_tripped_at.pop(key, None)
 
     @staticmethod
     def _should_fallback_from_responses_error(e: Exception) -> bool:
@@ -915,10 +957,13 @@ class OpenAICompatProvider(LLMProvider):
                         messages, tools, model, max_tokens, temperature,
                         reasoning_effort, tool_choice,
                     )
-                    return parse_response_output(await self._client.responses.create(**body))
+                    result = parse_response_output(await self._client.responses.create(**body))
+                    self._record_responses_success(model, reasoning_effort)
+                    return result
                 except Exception as responses_error:
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise
+                    self._record_responses_failure(model, reasoning_effort)
 
             kwargs = self._build_kwargs(
                 messages, tools, model, max_tokens, temperature,
@@ -965,6 +1010,7 @@ class OpenAICompatProvider(LLMProvider):
                         _timed_stream(),
                         on_content_delta,
                     )
+                    self._record_responses_success(model, reasoning_effort)
                     return LLMResponse(
                         content=content or None,
                         tool_calls=tool_calls,
@@ -975,6 +1021,7 @@ class OpenAICompatProvider(LLMProvider):
                 except Exception as responses_error:
                     if not self._should_fallback_from_responses_error(responses_error):
                         raise
+                    self._record_responses_failure(model, reasoning_effort)
 
             kwargs = self._build_kwargs(
                 messages, tools, model, max_tokens, temperature,
