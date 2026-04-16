@@ -24,6 +24,7 @@ class BaseChannel(ABC):
     display_name: str = "Base"
     transcription_provider: str = "groq"
     transcription_api_key: str = ""
+    transcription_api_base: str = ""
 
     def __init__(self, config: Any, bus: MessageBus):
         """
@@ -47,7 +48,10 @@ class BaseChannel(ABC):
                 provider = OpenAITranscriptionProvider(api_key=self.transcription_api_key)
             else:
                 from nanobot.providers.transcription import GroqTranscriptionProvider
-                provider = GroqTranscriptionProvider(api_key=self.transcription_api_key)
+                provider = GroqTranscriptionProvider(
+                    api_key=self.transcription_api_key,
+                    api_base=self.transcription_api_base or None,
+                )
             return await provider.transcribe(file_path)
         except Exception as e:
             logger.warning("{}: audio transcription failed: {}", self.name, e)
