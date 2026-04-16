@@ -93,6 +93,7 @@ dev = [
     "aiohttp>=3.9.0,<4.0.0",
     "pytest-cov>=6.0.0,<7.0.0",
     "ruff>=0.1.0",
+    "pymupdf>=1.25.0",
 ]
 
 [project.scripts]

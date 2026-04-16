@@ -111,6 +111,13 @@ class MSTeamsChannel(BaseChannel):
             logger.error("MSTeams app_id/app_password not configured")
             return
 
+        if not self.config.validate_inbound_auth:
+            logger.warning(
+                "MSTeams inbound auth validation is DISABLED. "
+                "Anyone who knows the webhook URL can send messages as any user. "
+                "Set validateInboundAuth: true in config for production use."
+            )
+
         self._loop = asyncio.get_running_loop()
         self._http = httpx.AsyncClient(timeout=30.0)
         self._running = True
