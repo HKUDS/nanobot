@@ -1187,6 +1187,70 @@ def gateway(
             )
             return False, f"Kosmos heartbeat: workspace not found for task {task_id}."
 
+        if not (project_path / ".git").exists():
+            await kosmos_tasks.create_task_comment(
+                task_id=task_id,
+                agent_id="Kosmos",
+                comment=(
+                    f"Project workspace is not a git repository. Expected path: {project_path}"
+                ),
+            )
+            await kosmos_tasks.publish_activity(
+                {
+                    "id": f"precheck-not-git-{task_id}",
+                    "agentId": "Kosmos",
+                    "agentName": "Kosmos",
+                    "projectId": project_id,
+                    "taskId": task_id,
+                    "type": "status",
+                    "status": "blocked",
+                    "currentTask": f"Non-git workspace for {task_id}",
+                    "mood": "confused",
+                    "message": f"Not a git repository: {project_path}",
+                }
+            )
+            return False, f"Kosmos heartbeat: not a git repository for task {task_id}."
+
+        code_uname, git_user_name, err_uname = _run_git(
+            ["config", "--local", "user.name"], project_path
+        )
+        code_uemail, git_user_email, err_uemail = _run_git(
+            ["config", "--local", "user.email"], project_path
+        )
+        if code_uname != 0 or not git_user_name:
+            code_uname, git_user_name, err_uname = _run_git(
+                ["config", "--global", "user.name"], project_path
+            )
+        if code_uemail != 0 or not git_user_email:
+            code_uemail, git_user_email, err_uemail = _run_git(
+                ["config", "--global", "user.email"], project_path
+            )
+        if not git_user_name or not git_user_email:
+            await kosmos_tasks.create_task_comment(
+                task_id=task_id,
+                agent_id="Kosmos",
+                comment=(
+                    "Git user not configured for this project. "
+                    f"Please run: git config --local user.name 'Your Name' && git config --local user.email 'your@email.com' "
+                    f"in {project_path}"
+                ),
+            )
+            await kosmos_tasks.publish_activity(
+                {
+                    "id": f"precheck-git-config-{task_id}",
+                    "agentId": "Kosmos",
+                    "agentName": "Kosmos",
+                    "projectId": project_id,
+                    "taskId": task_id,
+                    "type": "status",
+                    "status": "blocked",
+                    "currentTask": f"Git not configured for {task_id}",
+                    "mood": "confused",
+                    "message": f"Git user not configured. Run git config in {project_path}",
+                }
+            )
+            return False, f"Kosmos heartbeat: git user not configured for task {task_id}."
+
         ok_worktree, worktree_meta, worktree_error = _ensure_task_worktree(task)
         if not ok_worktree:
             await kosmos_tasks.create_task_comment(
@@ -1787,6 +1851,57 @@ def gateway(
         subagents.set_on_task_start(_on_subagent_task_start)
     if subagents and hasattr(subagents, "set_on_task_complete"):
         subagents.set_on_task_complete(_on_subagent_task_complete)
+
+    async def _on_task_deleted(kanban_task_id: str) -> None:
+        logger.warning("Kanban task {} was deleted while a subagent was running", kanban_task_id)
+        try:
+            await kosmos_tasks.create_task_comment(
+                task_id=kanban_task_id,
+                agent_id="Kosmos",
+                comment=(
+                    "Task was deleted from the kanban board. "
+                    "The subagent working on this task has been stopped."
+                ),
+            )
+        except Exception:
+            pass
+
+    if subagents and hasattr(subagents, "set_on_task_deleted"):
+        subagents.set_on_task_deleted(_on_task_deleted)
+
+    kosmos_ws_url = kosmos_api_url.replace("http://", "ws://").replace("https://", "wss://")
+    kosmos_ws: Any = None
+
+    async def _listen_kosmos_events() -> None:
+        nonlocal kosmos_ws
+        import aiohttp
+
+        ws_url = f"{kosmos_ws_url.replace('http', 'ws')}:{int(kosmos_api_url.split(':')[-1]) + 1}/ws?client_id=nanobot-main"
+        while True:
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.ws_connect(ws_url) as ws:
+                        kosmos_ws = ws
+                        async for msg in ws:
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                import json
+
+                                try:
+                                    data = json.loads(msg.data)
+                                    if data.get("type") == "task:deleted":
+                                        task_id = data.get("payload", {}).get("id")
+                                        if task_id and subagents:
+                                            await subagents.notify_task_deleted(task_id)
+                                except Exception:
+                                    pass
+                            elif msg.type == aiohttp.WSMsgType.CLOSED:
+                                break
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                await asyncio.sleep(5)
+
+    events_listener = asyncio.create_task(_listen_kosmos_events())
 
     def _running_subagent_count() -> int:
         if not subagents or not hasattr(subagents, "get_running_count"):
@@ -2500,6 +2615,9 @@ def gateway(
             if kosmos_server:
                 with suppress(Exception):
                     await kosmos_server.close_db()
+            events_listener.cancel()
+            with suppress(asyncio.CancelledError):
+                await events_listener
 
     asyncio.run(run())
 

@@ -168,6 +168,7 @@ class SubagentManager:
         self._spawn_lock = asyncio.Lock()
         self._on_task_start = on_task_start
         self._on_task_complete = on_task_complete
+        self._on_task_deleted: Callable[[str], Awaitable[None]] | None = None
         timeout_raw = int(os.environ.get("NANOBOT_SUBAGENT_MAX_SECONDS", "1800"))
         self._max_task_seconds = timeout_raw if timeout_raw > 0 else 0
 
@@ -182,6 +183,35 @@ class SubagentManager:
         callback: Callable[[dict[str, Any]], Awaitable[None]] | None,
     ) -> None:
         self._on_task_complete = callback
+
+    def set_on_task_deleted(
+        self,
+        callback: Callable[[str], Awaitable[None]] | None,
+    ) -> None:
+        self._on_task_deleted = callback
+
+    async def cancel_kanban_task(self, kanban_task_id: str) -> bool:
+        """Cancel running subagent for a kanban task if any."""
+        runtime_task_id = self._running_kanban_tasks.get(kanban_task_id)
+        if not runtime_task_id:
+            return False
+        runtime_task = self._running_tasks.get(runtime_task_id)
+        if runtime_task and not runtime_task.done():
+            runtime_task.cancel()
+            logger.info(
+                "Cancelled subagent {} for deleted kanban task {}", runtime_task_id, kanban_task_id
+            )
+            return True
+        return False
+
+    async def notify_task_deleted(self, kanban_task_id: str) -> None:
+        """Handle kanban task deletion by cancelling running subagent and notifying."""
+        await self.cancel_kanban_task(kanban_task_id)
+        if self._on_task_deleted:
+            try:
+                await self._on_task_deleted(kanban_task_id)
+            except Exception:
+                logger.exception("SubagentManager: on_task_deleted callback failed")
 
     async def spawn(
         self,
