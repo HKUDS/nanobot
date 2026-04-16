@@ -495,7 +495,7 @@ class AgentLoop:
         run_tools = ToolRegistry()
         is_privileged = privileged if privileged is not None else self._is_privileged(channel, sender_id)
         
-        admin_tools = self.CLI_TOOLS
+        admin_tools = frozenset()
         if self.tools_config and self.tools_config.admin_tools is not None:
             admin_tools = frozenset(self.tools_config.admin_tools)
 

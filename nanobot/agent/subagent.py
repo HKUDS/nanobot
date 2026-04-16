@@ -125,7 +125,7 @@ class SubagentManager:
 
         try:
             # Determine admin_tools from config
-            admin_tools = frozenset({"read_file", "write_file", "edit_file", "list_dir", "grep", "glob", "exec", "notebook_edit", "spawn"})
+            admin_tools = frozenset()
             if self.tools_config and self.tools_config.admin_tools is not None:
                 admin_tools = frozenset(self.tools_config.admin_tools)
 
