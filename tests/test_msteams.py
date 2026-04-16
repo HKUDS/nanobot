@@ -52,6 +52,9 @@ class FakeHttpClient:
         self.calls.append((url, kwargs))
         return FakeResponse(self.payload, should_raise=self.should_raise)
 
+    async def aclose(self):
+        pass
+
 
 @pytest.fixture
 def make_channel(tmp_path, monkeypatch):

@@ -276,6 +276,7 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 | **Email** | IMAP/SMTP credentials |
 | **QQ** | App ID + App Secret |
 | **Wecom** | Bot ID + Bot Secret |
+| **Microsoft Teams** | App ID + App Password + public HTTPS endpoint |
 | **Mochat** | Claw token (auto-setup available) |
 
 <details>
@@ -852,6 +853,56 @@ Go to the WeCom admin console → Intelligent Robot → Create Robot → select 
   }
 }
 ```
+
+**4. Run**
+
+```bash
+nanobot gateway
+```
+
+</details>
+
+<details>
+<summary><b>Microsoft Teams</b> (MVP — DM only)</summary>
+
+> Direct-message text in/out, tenant-aware OAuth, conversation reference persistence.
+> Uses a public HTTPS webhook — no WebSocket; you need a tunnel or reverse proxy.
+
+**1. Install the optional dependency**
+
+```bash
+pip install nanobot-ai[msteams]
+```
+
+**2. Create a Teams / Azure bot app registration**
+
+Create or reuse a Microsoft Teams / Azure bot app registration. Set the bot messaging endpoint to a public HTTPS URL ending in `/api/messages`.
+
+**3. Configure**
+
+```json
+{
+  "channels": {
+    "msteams": {
+      "enabled": true,
+      "appId": "YOUR_APP_ID",
+      "appPassword": "YOUR_APP_SECRET",
+      "tenantId": "YOUR_TENANT_ID",
+      "host": "0.0.0.0",
+      "port": 3978,
+      "path": "/api/messages",
+      "allowFrom": ["*"],
+      "replyInThread": true,
+      "mentionOnlyResponse": "Hi — what can I help with?",
+      "validateInboundAuth": true
+    }
+  }
+}
+```
+
+> - `replyInThread: true` replies to the triggering Teams activity when a stored `activity_id` is available.
+> - `mentionOnlyResponse` controls what Nanobot receives when a user sends only a bot mention (`<at>Nanobot</at>`). Set to `""` to ignore mention-only messages.
+> - `validateInboundAuth: true` (recommended for production) enables inbound Bot Framework bearer-token validation (signature, issuer, audience, lifetime, `serviceUrl`). **Default is `false`** — set explicitly to `true` for production deployments.
 
 **4. Run**
 
