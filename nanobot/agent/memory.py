@@ -421,9 +421,16 @@ class Consolidator:
             return end_idx
 
         capped_end = start + self._MAX_CHUNK_MESSAGES
-        for idx in range(capped_end, start, -1):
+        for idx in range(capped_end - 1, start, -1):
             if session.messages[idx].get("role") == "user":
                 return idx
+
+        if capped_end - 1 > start:
+            logger.debug(
+                "Consolidation boundary cap: no user-turn found, using capped_end-1 for {}",
+                session.key,
+            )
+            return capped_end - 1
         return None
 
     def estimate_session_prompt_tokens(self, session: Session) -> tuple[int, str]:
@@ -544,6 +551,8 @@ class Consolidator:
                     len(chunk),
                 )
                 if not await self.archive(chunk):
+                    session.last_consolidated = end_idx
+                    self.sessions.save(session)
                     return
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
@@ -555,6 +564,42 @@ class Consolidator:
                     estimated, source = 0, "error"
                 if estimated <= 0:
                     return
+
+    async def force_consolidate(self, session: Session) -> tuple[int, str]:
+        """Force consolidation of one chunk, ignoring budget check.
+
+        Returns (archived_count, status_message).
+        """
+        if not session.messages or self.context_window_tokens <= 0:
+            return 0, "nothing to consolidate"
+
+        lock = self.get_lock(session.key)
+        async with lock:
+            unconsolidated = len(session.messages) - session.last_consolidated
+            if unconsolidated <= 0:
+                return 0, "nothing new to consolidate"
+
+            boundary = self.pick_consolidation_boundary(session, max(1, unconsolidated))
+            if boundary is None:
+                return 0, "no safe boundary found"
+
+            end_idx = boundary[0]
+            end_idx = self._cap_consolidation_boundary(session, end_idx)
+            if end_idx is None:
+                return 0, "no capped boundary found"
+
+            chunk = session.messages[session.last_consolidated : end_idx]
+            if not chunk:
+                return 0, "empty chunk"
+
+            if not await self.archive(chunk):
+                session.last_consolidated = end_idx
+                self.sessions.save(session)
+                return len(chunk), "archived (raw dump)"
+
+            session.last_consolidated = end_idx
+            self.sessions.save(session)
+            return len(chunk), "archived (summarized)"
 
 
 # ---------------------------------------------------------------------------
