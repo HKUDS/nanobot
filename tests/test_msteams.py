@@ -148,6 +148,40 @@ async def test_handle_activity_ignores_group_messages(make_channel):
 
 
 @pytest.mark.asyncio
+async def test_handle_activity_denied_sender_does_not_store_ref(make_channel, tmp_path):
+    ch = make_channel(allowFrom=["allowed-user"])
+
+    activity = {
+        "type": "message",
+        "id": "activity-denied",
+        "text": "Hello from denied user",
+        "serviceUrl": "https://smba.trafficmanager.net/amer/",
+        "conversation": {
+            "id": "conv-denied",
+            "conversationType": "personal",
+        },
+        "from": {
+            "id": "29:user-id",
+            "aadObjectId": "aad-user-1",
+            "name": "Bob",
+        },
+        "recipient": {
+            "id": "28:bot-id",
+            "name": "nanobot",
+        },
+        "channelData": {
+            "tenant": {"id": "tenant-id"},
+        },
+    }
+
+    await ch._handle_activity(activity)
+
+    assert ch.bus.inbound == []
+    assert ch._conversation_refs == {}
+    assert not (tmp_path / "state" / "msteams_conversations.json").exists()
+
+
+@pytest.mark.asyncio
 async def test_handle_activity_mention_only_uses_default_response(make_channel):
     ch = make_channel()
 
@@ -520,6 +554,7 @@ async def test_start_logs_install_hint_when_pyjwt_missing(make_channel, monkeypa
 def test_msteams_default_config_includes_restart_notify_fields():
     cfg = MSTeamsChannel.default_config()
 
+    assert cfg["validateInboundAuth"] is True
     assert "restartNotifyEnabled" not in cfg
     assert "restartNotifyPreMessage" not in cfg
     assert "restartNotifyPostMessage" not in cfg

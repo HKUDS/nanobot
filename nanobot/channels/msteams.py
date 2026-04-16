@@ -57,7 +57,7 @@ class MSTeamsConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     reply_in_thread: bool = True
     mention_only_response: str = "Hi — what can I help with?"
-    validate_inbound_auth: bool = False
+    validate_inbound_auth: bool = True
 
 
 @dataclass
@@ -116,9 +116,9 @@ class MSTeamsChannel(BaseChannel):
 
         if not self.config.validate_inbound_auth:
             logger.warning(
-                "MSTeams inbound auth validation is DISABLED. "
+                "MSTeams inbound auth validation was explicitly DISABLED in config. "
                 "Anyone who knows the webhook URL can send messages as any user. "
-                "Set validateInboundAuth: true in config for production use."
+                "Only disable this for local development or controlled testing."
             )
 
         self._loop = asyncio.get_running_loop()
@@ -273,6 +273,14 @@ class MSTeamsChannel(BaseChannel):
             if not text:
                 logger.debug("MSTeams ignoring empty message after Teams text sanitization")
                 return
+
+        if not self.is_allowed(sender_id):
+            logger.warning(
+                "Access denied for sender {} on channel {}. "
+                "Add them to allowFrom list in config to grant access.",
+                sender_id, self.name,
+            )
+            return
 
         self._conversation_refs[conversation_id] = ConversationRef(
             service_url=service_url,
