@@ -2411,8 +2411,13 @@ def gateway(
             )
             return kosmos_task, kosmos_server
         except Exception as e:
-            console.print(f"[yellow]Warning: Kosmos failed to start: {e}[/yellow]")
-            return None, None
+            error_msg = f"Kosmos failed to start: {e}"
+            if "No module named" in str(e):
+                error_msg += (
+                    "\n  → Missing dependency. Run: pip install aiosqlite"
+                )
+            console.print(f"[red]✘ ERROR: {error_msg}[/red]")
+            raise SystemExit(1)
 
     # Register Dream system job (always-on, idempotent on restart)
     dream_cfg = config.agents.defaults.dream
