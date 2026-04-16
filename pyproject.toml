@@ -72,6 +72,10 @@ weixin = [
     "qrcode[pil]>=8.0",
     "pycryptodome>=3.20.0",
 ]
+msteams = [
+    "PyJWT>=2.0,<3.0",
+    "cryptography>=41.0",
+]
 
 matrix = [
     "matrix-nio[e2e]>=0.25.2",
