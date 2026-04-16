@@ -725,6 +725,7 @@ def gateway(
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
                 sender_id=job.payload.sender_id or "user",
+                privileged=True,  # Cron jobs are system-initiated; always grant full tool access
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
@@ -784,6 +785,7 @@ def gateway(
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
+            privileged=True,  # Heartbeat is system-initiated; always grant full tool access
         )
 
         # Keep a small tail of heartbeat history so the loop stays bounded
