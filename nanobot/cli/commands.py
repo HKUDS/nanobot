@@ -664,7 +664,7 @@ def serve(
 
 
 @app.command()
-def gateway(
+async def gateway(
     port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
@@ -2528,9 +2528,7 @@ def gateway(
         except Exception as e:
             error_msg = f"Kosmos failed to start: {e}"
             if "No module named" in str(e):
-                error_msg += (
-                    "\n  → Missing dependency. Run: pip install aiosqlite"
-                )
+                error_msg += "\n  → Missing dependency. Run: pip install aiosqlite"
             console.print(f"[red]✘ ERROR: {error_msg}[/red]")
             raise SystemExit(1)
 
