@@ -10,9 +10,13 @@ from loguru import logger
 class OpenAITranscriptionProvider:
     """Voice transcription provider using OpenAI's Whisper API."""
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, api_base: str | None = None):
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
-        self.api_url = "https://api.openai.com/v1/audio/transcriptions"
+        self.api_url = (
+            api_base
+            or os.environ.get("OPENAI_TRANSCRIPTION_BASE_URL")
+            or "https://api.openai.com/v1/audio/transcriptions"
+        )
 
     async def transcribe(self, file_path: str | Path) -> str:
         if not self.api_key:
