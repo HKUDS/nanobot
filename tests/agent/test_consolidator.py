@@ -1,8 +1,8 @@
 """Tests for the lightweight Consolidator — append-only to HISTORY.md."""
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from nanobot.agent.memory import Consolidator, MemoryStore
 
@@ -117,7 +117,15 @@ class TestConsolidatorTokenBudget:
             }
             for i in range(70)
         ]
-        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(1200, "tiktoken"))
+        call_count = [0]
+
+        def mock_estimate(_session):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return (1200, "tiktoken")
+            return (400, "tiktoken")
+
+        consolidator.estimate_session_prompt_tokens = mock_estimate
         consolidator.pick_consolidation_boundary = MagicMock(return_value=(61, 999))
         consolidator.archive = AsyncMock(return_value=True)
 
@@ -127,4 +135,3 @@ class TestConsolidatorTokenBudget:
         archived_chunk = consolidator.archive.await_args.args[0]
         assert len(archived_chunk) == 59
         assert session.last_consolidated == 59
-        assert session.last_consolidated == 0
