@@ -17,6 +17,7 @@ import importlib.util
 import json
 import re
 import threading
+import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any
@@ -423,7 +424,6 @@ class MSTeamsChannel(BaseChannel):
 
     async def _get_botframework_openid_config(self) -> dict[str, Any]:
         """Fetch and cache Bot Framework OpenID configuration."""
-        import time
 
         now = time.time()
         if self._botframework_openid_config and now < self._botframework_openid_config_expires_at:
@@ -440,7 +440,6 @@ class MSTeamsChannel(BaseChannel):
 
     async def _get_botframework_jwks(self) -> dict[str, Any]:
         """Fetch and cache Bot Framework JWKS."""
-        import time
 
         now = time.time()
         if self._botframework_jwks and now < self._botframework_jwks_expires_at:
@@ -494,7 +493,6 @@ class MSTeamsChannel(BaseChannel):
 
     async def _get_access_token(self) -> str:
         """Fetch an access token for Bot Framework / Azure Bot auth."""
-        import time
 
         now = time.time()
         if self._token and now < self._token_expires_at - 60:
