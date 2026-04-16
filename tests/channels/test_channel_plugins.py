@@ -175,7 +175,7 @@ async def test_manager_loads_plugin_from_dict_config():
         channels=ChannelsConfig.model_validate({
             "fakeplugin": {"enabled": True, "allowFrom": ["*"]},
         }),
-        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="", api_base="")),
     )
 
     with patch(
@@ -191,6 +191,38 @@ async def test_manager_loads_plugin_from_dict_config():
 
     assert "fakeplugin" in mgr.channels
     assert isinstance(mgr.channels["fakeplugin"], _FakePlugin)
+
+
+@pytest.mark.asyncio
+async def test_manager_propagates_groq_transcription_api_base_to_channels():
+    from nanobot.channels.manager import ChannelManager
+
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig.model_validate({
+            "fakeplugin": {"enabled": True, "allowFrom": ["*"]},
+        }),
+        transcription_provider="groq",
+        providers=SimpleNamespace(
+            groq=SimpleNamespace(api_key="groq-key", api_base="http://proxy.local/v1/audio/transcriptions"),
+            openai=SimpleNamespace(api_key="openai-key", api_base="https://api.openai.com/v1/audio/transcriptions"),
+        ),
+    )
+
+    with patch(
+        "nanobot.channels.registry.discover_all",
+        return_value={"fakeplugin": _FakePlugin},
+    ):
+        mgr = ChannelManager.__new__(ChannelManager)
+        mgr.config = fake_config
+        mgr.bus = MessageBus()
+        mgr.channels = {}
+        mgr._dispatch_task = None
+        mgr._init_channels()
+
+    channel = mgr.channels["fakeplugin"]
+    assert channel.transcription_provider == "groq"
+    assert channel.transcription_api_key == "groq-key"
+    assert channel.transcription_api_base == "http://proxy.local/v1/audio/transcriptions"
 
 
 def test_channels_login_uses_discovered_plugin_class(monkeypatch):
