@@ -239,7 +239,7 @@ class MemoryStore:
                 pass
         # Fallback: read last line's cursor from the JSONL file.
         last = self._read_last_entry()
-        if last and last.get("cursor") is not None:
+        if last and last.get("cursor"):
             return last["cursor"] + 1
         return 1
 
