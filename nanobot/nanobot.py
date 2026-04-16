@@ -83,6 +83,7 @@ class Nanobot:
             timezone=defaults.timezone,
             unified_session=defaults.unified_session,
             disabled_skills=defaults.disabled_skills,
+            disable_history_injection=defaults.disable_history_injection,
             session_ttl_minutes=defaults.session_ttl_minutes,
             tools_config=config.tools,
         )
