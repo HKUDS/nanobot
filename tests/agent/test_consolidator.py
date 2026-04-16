@@ -104,8 +104,8 @@ class TestConsolidatorTokenBudget:
         assert archived_chunk[-1]["content"] == "m49"
         assert session.last_consolidated == 50
 
-    async def test_chunk_cap_skips_when_no_user_boundary_within_cap(self, consolidator):
-        """If the cap would cut mid-turn, consolidation should skip that round."""
+    async def test_chunk_cap_falls_back_to_capped_end_when_no_user_boundary(self, consolidator):
+        """When no user-turn found within cap, use capped_end-1 to avoid infinite loop."""
         consolidator._SAFETY_BUFFER = 0
         session = MagicMock()
         session.last_consolidated = 0
@@ -123,5 +123,8 @@ class TestConsolidatorTokenBudget:
 
         await consolidator.maybe_consolidate_by_tokens(session)
 
-        consolidator.archive.assert_not_awaited()
+        consolidator.archive.assert_awaited_once()
+        archived_chunk = consolidator.archive.await_args.args[0]
+        assert len(archived_chunk) == 59
+        assert session.last_consolidated == 59
         assert session.last_consolidated == 0

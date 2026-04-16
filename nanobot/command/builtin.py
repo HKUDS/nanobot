@@ -153,6 +153,37 @@ async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_compact(ctx: CommandContext) -> OutboundMessage:
+    """Manually trigger a lightweight consolidation (Stage 1)."""
+    loop = ctx.loop
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    msg = ctx.msg
+
+    async def _run_compact():
+        try:
+            count, status = await loop.consolidator.force_consolidate(session)
+            if count > 0:
+                content = f"Compact: {count} messages {status}."
+            else:
+                content = f"Compact: {status}."
+        except Exception as e:
+            content = f"Compact failed: {e}"
+        await loop.bus.publish_outbound(
+            OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=content,
+            )
+        )
+
+    asyncio.create_task(_run_compact())
+    return OutboundMessage(
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        content="Compacting...",
+    )
+
+
 def _extract_changed_files(diff: str) -> list[str]:
     """Extract changed file paths from a unified diff."""
     files: list[str] = []
@@ -354,6 +385,7 @@ def build_help_text() -> str:
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",
+        "/compact — Force lightweight consolidation",
         "/dream — Manually trigger Dream consolidation",
         "/dream-log — Show what the last Dream changed",
         "/dream-restore — Revert memory to a previous state",
@@ -370,6 +402,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
     router.exact("/dream", cmd_dream)
+    router.exact("/compact", cmd_compact)
     router.exact("/dream-log", cmd_dream_log)
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)
