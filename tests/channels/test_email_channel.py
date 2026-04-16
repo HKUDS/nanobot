@@ -872,3 +872,322 @@ def test_extract_attachments_sanitizes_filename(tmp_path, monkeypatch) -> None:
     saved_path = Path(items[0]["media"][0])
     # File must be inside the media dir, not escaped via path traversal
     assert saved_path.parent == tmp_path
+
+
+# ---------------------------------------------------------------------------
+# OAuth2 authentication tests
+# ---------------------------------------------------------------------------
+
+
+class _FakeOAuth2Creds:
+    """Module-level so pickle can serialize it."""
+    token = "fake-access-token"
+    expired = False
+    refresh_token = "fake-refresh-token"
+
+    def refresh(self, request):
+        self.token = "new-token"
+        self.expired = False
+
+
+class _FakeExpiredOAuth2Creds(_FakeOAuth2Creds):
+    token = "old-token"
+    expired = True
+
+
+def _make_oauth2_config(tmp_path, *, creds_cls=_FakeOAuth2Creds, **overrides):
+    """Create an EmailConfig with OAuth2 auth and a fake credentials file."""
+    import pickle
+    cred_path = tmp_path / "token.pickle"
+    cred_path.write_bytes(pickle.dumps(creds_cls()))
+
+    defaults = dict(
+        enabled=True,
+        consent_granted=True,
+        auth_method="oauth2",
+        oauth2_credentials_file=str(cred_path),
+        imap_host="imap.gmail.com",
+        imap_port=993,
+        imap_username="homer@joybuild.ai",
+        smtp_host="smtp.gmail.com",
+        smtp_port=587,
+        from_address="homer@joybuild.ai",
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    defaults.update(overrides)
+    return EmailConfig(**defaults)
+
+
+def test_oauth2_imap_auth_uses_xoauth2(tmp_path, monkeypatch) -> None:
+    """OAuth2 IMAP auth should call authenticate() with XOAUTH2, not login()."""
+    raw = _make_raw_email(subject="OAuth test", body="via OAuth2")
+    auth_calls = []
+
+    class FakeIMAP:
+        def authenticate(self, mechanism, authobject):
+            auth_calls.append({"mechanism": mechanism, "response": authobject(None)})
+            return "OK", [b"authenticated"]
+
+        def login(self, _user, _pw):
+            raise AssertionError("login() should not be called in OAuth2 mode")
+
+        def select(self, _mailbox):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b"1"]
+
+        def fetch(self, _imap_id, _parts):
+            return "OK", [(b"1 (UID 700 BODY[] {200})", raw), b")"]
+
+        def store(self, *_args):
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: FakeIMAP())
+
+    cfg = _make_oauth2_config(tmp_path)
+    channel = EmailChannel(cfg, MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert len(items) == 1
+    assert len(auth_calls) == 1
+    assert auth_calls[0]["mechanism"] == "XOAUTH2"
+    # imaplib.authenticate auto-base64-encodes, so callback must return raw bytes
+    raw_response = auth_calls[0]["response"]
+    assert isinstance(raw_response, bytes)
+    decoded = raw_response.decode()
+    assert "homer@joybuild.ai" in decoded
+    assert "fake-access-token" in decoded
+
+
+def test_oauth2_smtp_auth_uses_xoauth2(tmp_path, monkeypatch) -> None:
+    """OAuth2 SMTP auth should use AUTH XOAUTH2, not login()."""
+    docmd_calls = []
+
+    class FakeSMTP:
+        def __init__(self, _host, _port, timeout=30):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def starttls(self, context=None):
+            pass
+
+        def ehlo(self):
+            pass
+
+        def login(self, _user, _pw):
+            raise AssertionError("login() should not be called in OAuth2 mode")
+
+        def docmd(self, command, args):
+            docmd_calls.append({"command": command, "args": args})
+            return (235, b"2.7.0 Accepted")
+
+        def send_message(self, msg):
+            pass
+
+    monkeypatch.setattr("nanobot.channels.email.smtplib.SMTP", lambda h, p, timeout=30: FakeSMTP(h, p, timeout=timeout))
+
+    cfg = _make_oauth2_config(tmp_path)
+    channel = EmailChannel(cfg, MessageBus())
+    channel._smtp_send(EmailMessage())
+
+    assert len(docmd_calls) == 1
+    assert docmd_calls[0]["command"] == "AUTH"
+    assert docmd_calls[0]["args"].startswith("XOAUTH2 ")
+
+
+def test_oauth2_refreshes_expired_token(tmp_path, monkeypatch) -> None:
+    """Expired OAuth2 credentials should be refreshed before use."""
+    import types
+    import sys
+
+    # Ensure google.auth.transport.requests is importable (may not be in test venv)
+    google_mod = types.ModuleType("google")
+    google_auth_mod = types.ModuleType("google.auth")
+    google_transport_mod = types.ModuleType("google.auth.transport")
+    google_requests_mod = types.ModuleType("google.auth.transport.requests")
+    google_requests_mod.Request = lambda: "mock-request"
+    google_mod.auth = google_auth_mod
+    google_auth_mod.transport = google_transport_mod
+    google_transport_mod.requests = google_requests_mod
+    monkeypatch.setitem(sys.modules, "google", google_mod)
+    monkeypatch.setitem(sys.modules, "google.auth", google_auth_mod)
+    monkeypatch.setitem(sys.modules, "google.auth.transport", google_transport_mod)
+    monkeypatch.setitem(sys.modules, "google.auth.transport.requests", google_requests_mod)
+
+    cfg = _make_oauth2_config(tmp_path, creds_cls=_FakeExpiredOAuth2Creds)
+    channel = EmailChannel(cfg, MessageBus())
+
+    token = channel._get_oauth2_access_token()
+    assert token == "new-token"
+
+
+def test_oauth2_validate_config_rejects_missing_credentials(tmp_path) -> None:
+    """OAuth2 config should fail validation if credentials file is missing."""
+    cfg = EmailConfig(
+        enabled=True,
+        consent_granted=True,
+        auth_method="oauth2",
+        oauth2_credentials_file="/nonexistent/token.pickle",
+        imap_host="imap.gmail.com",
+        smtp_host="smtp.gmail.com",
+        imap_username="homer@joybuild.ai",
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    assert channel._validate_config() is False
+
+
+def test_password_validate_config_rejects_missing_password() -> None:
+    """Password auth config should fail if password fields are missing."""
+    cfg = EmailConfig(
+        enabled=True,
+        consent_granted=True,
+        auth_method="password",
+        imap_host="imap.example.com",
+        imap_username="bot@example.com",
+        # missing: imap_password, smtp_username, smtp_password
+        smtp_host="smtp.example.com",
+    )
+    channel = EmailChannel(cfg, MessageBus())
+    assert channel._validate_config() is False
+
+
+# ---------------------------------------------------------------------------
+# IMAP IDLE tests
+# ---------------------------------------------------------------------------
+
+
+def test_idle_wait_returns_true_on_exists(tmp_path, monkeypatch) -> None:
+    """_idle_wait should return True when server sends EXISTS notification."""
+    responses = iter([
+        b"+ idling\r\n",
+        b"* 5 EXISTS\r\n",
+        b"A1 OK IDLE terminated\r\n",
+    ])
+
+    class FakeSocket:
+        def settimeout(self, timeout):
+            pass
+
+    class FakeIMAP:
+        sock = FakeSocket()
+        _tag_prefix = b"A"
+        _tagnum = 0
+
+        def _new_tag(self):
+            self._tagnum += 1
+            return f"A{self._tagnum}".encode()
+
+        def authenticate(self, mechanism, authobject):
+            return "OK", [b"authenticated"]
+
+        def select(self, _mailbox):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b""]  # No unseen messages
+
+        def send(self, data):
+            pass
+
+        def readline(self):
+            return next(responses)
+
+        def logout(self):
+            return "BYE", [b""]
+
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: FakeIMAP())
+
+    cfg = _make_oauth2_config(tmp_path, use_idle=True)
+    channel = EmailChannel(cfg, MessageBus())
+    channel._running = True
+    result = channel._idle_wait(timeout_seconds=60)
+    assert result is True
+
+
+def test_idle_wait_returns_false_on_timeout(tmp_path, monkeypatch) -> None:
+    """_idle_wait should return False when IDLE times out."""
+
+    class FakeSocket:
+        def settimeout(self, timeout):
+            pass
+
+    readline_count = {"n": 0}
+
+    class FakeIMAP:
+        sock = FakeSocket()
+        _tagnum = 0
+
+        def _new_tag(self):
+            self._tagnum += 1
+            return f"A{self._tagnum}".encode()
+
+        def authenticate(self, mechanism, authobject):
+            return "OK", [b"authenticated"]
+
+        def select(self, _mailbox):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b""]  # No unseen messages
+
+        def send(self, data):
+            pass
+
+        def readline(self):
+            readline_count["n"] += 1
+            if readline_count["n"] == 1:
+                return b"+ idling\r\n"
+            raise TimeoutError("idle timed out")
+
+        def logout(self):
+            return "BYE", [b""]
+
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: FakeIMAP())
+
+    cfg = _make_oauth2_config(tmp_path, use_idle=True)
+    channel = EmailChannel(cfg, MessageBus())
+    channel._running = True
+    result = channel._idle_wait(timeout_seconds=1)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_start_uses_idle_when_configured(tmp_path, monkeypatch) -> None:
+    """When use_idle=True, start() should call _run_idle_loop."""
+    idle_called = {"called": False}
+
+    async def fake_idle_loop(self):
+        idle_called["called"] = True
+
+    monkeypatch.setattr(EmailChannel, "_run_idle_loop", fake_idle_loop)
+
+    cfg = _make_oauth2_config(tmp_path, use_idle=True)
+    channel = EmailChannel(cfg, MessageBus())
+    await channel.start()
+    assert idle_called["called"] is True
+
+
+@pytest.mark.asyncio
+async def test_start_uses_polling_when_idle_not_configured(monkeypatch) -> None:
+    """When use_idle=False (default), start() should call _run_poll_loop."""
+    poll_called = {"called": False}
+
+    async def fake_poll_loop(self):
+        poll_called["called"] = True
+
+    monkeypatch.setattr(EmailChannel, "_run_poll_loop", fake_poll_loop)
+
+    cfg = _make_config()
+    channel = EmailChannel(cfg, MessageBus())
+    await channel.start()
+    assert poll_called["called"] is True
