@@ -58,9 +58,7 @@ class Nanobot:
 
         config: Config = resolve_config_env_vars(load_config(resolved))
         if workspace is not None:
-            config.agents.defaults.workspace = str(
-                Path(workspace).expanduser().resolve()
-            )
+            config.agents.defaults.workspace = str(Path(workspace).expanduser().resolve())
 
         provider = _make_provider(config)
         bus = MessageBus()
@@ -108,7 +106,8 @@ class Nanobot:
             self._loop._extra_hooks = list(hooks)
         try:
             response = await self._loop.process_direct(
-                message, session_key=session_key,
+                message,
+                session_key=session_key,
             )
         finally:
             self._loop._extra_hooks = prev
@@ -128,11 +127,26 @@ def _make_provider(config: Any) -> Any:
     spec = find_by_name(provider_name) if provider_name else None
     backend = spec.backend if spec else "openai_compat"
 
+    def _pv(p):
+        """Safely extract api_key / api_base / extra_headers (handles ProviderConfig and dict)."""
+        if isinstance(p, dict):
+            return (
+                p.get("apiKey") or p.get("api_key") or "",
+                p.get("apiBase") or p.get("api_base") or "",
+                p.get("extraHeaders") or p.get("extra_headers"),
+            )
+        return (
+            (getattr(p, "api_key", None) or ""),
+            (getattr(p, "api_base", None) or ""),
+            getattr(p, "extra_headers", None),
+        )
+
+    pk, pb, ph = _pv(p)
     if backend == "azure_openai":
-        if not p or not p.api_key or not p.api_base:
+        if not pk or not pb:
             raise ValueError("Azure OpenAI requires api_key and api_base in config.")
     elif backend == "openai_compat" and not model.startswith("bedrock/"):
-        needs_key = not (p and p.api_key)
+        needs_key = not pk
         exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
         if needs_key and not exempt:
             raise ValueError(f"No API key configured for provider '{provider_name}'.")
@@ -148,26 +162,24 @@ def _make_provider(config: Any) -> Any:
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
-        provider = AzureOpenAIProvider(
-            api_key=p.api_key, api_base=p.api_base, default_model=model
-        )
+        provider = AzureOpenAIProvider(api_key=pk, api_base=pb, default_model=model)
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
 
         provider = AnthropicProvider(
-            api_key=p.api_key if p else None,
+            api_key=pk,
             api_base=config.get_api_base(model),
             default_model=model,
-            extra_headers=p.extra_headers if p else None,
+            extra_headers=ph,
         )
     else:
         from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
         provider = OpenAICompatProvider(
-            api_key=p.api_key if p else None,
+            api_key=pk,
             api_base=config.get_api_base(model),
             default_model=model,
-            extra_headers=p.extra_headers if p else None,
+            extra_headers=ph,
             spec=spec,
         )
 
