@@ -92,6 +92,46 @@ def test_fetch_new_messages_parses_unseen_and_marks_seen(monkeypatch) -> None:
     assert items_again == []
 
 
+def test_fetch_new_messages_skips_self_sent_email_and_marks_seen(monkeypatch) -> None:
+    raw = _make_raw_email(from_addr="Nanobot <bot@example.com>", subject="Loop test")
+
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.store_calls: list[tuple[bytes, str, str]] = []
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b"1"]
+
+        def fetch(self, _imap_id: bytes, _parts: str):
+            return "OK", [(b"1 (UID 123 BODY[] {200})", raw), b")"]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(from_address="bot@example.com"), MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert items == []
+    assert fake.store_calls == [(b"1", "+FLAGS", "\\Seen")]
+
+    # Same UID should still be deduped after being ignored.
+    items_again = channel._fetch_new_messages()
+    assert items_again == []
+
+
 def test_fetch_new_messages_retries_once_when_imap_connection_goes_stale(monkeypatch) -> None:
     raw = _make_raw_email(subject="Invoice", body="Please pay")
     fail_once = {"pending": True}
