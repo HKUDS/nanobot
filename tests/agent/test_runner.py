@@ -44,6 +44,47 @@ def _make_loop(tmp_path):
     return loop
 
 
+def test_loop_summarizes_message_logs_without_content(tmp_path):
+    loop = _make_loop(tmp_path)
+    content = "Here are your last 10 emails:\n\n| # | Snippet | Category | Date |"
+
+    summary = loop._summarize_message_for_log(content)
+
+    assert summary == f"chars={len(content)} lines=3"
+    assert "Here are your last 10 emails" not in summary
+    assert "Snippet" not in summary
+
+
+def test_loop_summarizes_tool_calls_without_argument_values(tmp_path):
+    loop = _make_loop(tmp_path)
+
+    summary = loop._summarize_tool_call_for_log(
+        "mcp_agenthifive_execute",
+        {
+            "connectionId": "9e034cfa-2a2c-4b92-a337-df8d602e3b22",
+            "method": "GET",
+            "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/19d917e2a1888cb9",
+            "query": {"format": "metadata", "metadataHeaders": "Subject"},
+            "headers": {"X-Test": "secret"},
+            "body": {"snippet": "private email text"},
+        },
+    )
+
+    assert summary == (
+        "mcp_agenthifive_execute("
+        "method=GET; "
+        "host=gmail.googleapis.com; "
+        "query_keys=format,metadataHeaders; "
+        "header_keys=X-Test; "
+        "body_keys=snippet; "
+        "arg_keys=connectionId)"
+    )
+    assert "9e034cfa-2a2c-4b92-a337-df8d602e3b22" not in summary
+    assert "19d917e2a1888cb9" not in summary
+    assert "private email text" not in summary
+    assert "Subject" not in summary
+
+
 @pytest.mark.asyncio
 async def test_runner_preserves_reasoning_fields_and_tool_results():
     from nanobot.agent.runner import AgentRunSpec, AgentRunner

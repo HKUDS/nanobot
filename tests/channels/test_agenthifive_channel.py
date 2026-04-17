@@ -156,6 +156,64 @@ async def test_agenthifive_channel_sends_telegram_reply():
     assert payload["body"]["text"] == "hi back"
 
 
+def test_agenthifive_channel_formats_attachment_fallback_text():
+    text = AgentHiFiveChannel._render_attachment_fallback_text(
+        "I got the attachment.",
+        ["/home/dev/.nanobot/media/agenthifive/report.pdf"],
+    )
+
+    assert "I got the attachment." in text
+    assert "Attachment upload is not supported yet on the AgentHiFive channel." in text
+    assert "- report.pdf: /home/dev/.nanobot/media/agenthifive/report.pdf" in text
+
+
+@pytest.mark.asyncio
+async def test_agenthifive_channel_falls_back_to_text_when_media_is_present():
+    bus = MessageBus()
+    config = AgentHiFiveConfig.model_validate(
+        {
+            "enabled": True,
+            "providers": {
+                "slack": {
+                    "enabled": True,
+                }
+            },
+        }
+    )
+    sent_payloads: list[dict] = []
+
+    async def _execute(payload):
+        sent_payloads.append(payload)
+        return VaultExecuteResult(
+            status_code=200,
+            headers={},
+            body={"ok": True, "ts": "1712345688.000"},
+            audit_id="audit_slack_send",
+        )
+
+    channel = AgentHiFiveChannel(config, bus)
+    channel._vault = _FakeVaultClient(_execute)
+
+    await channel.send(
+        OutboundMessage(
+            channel="agenthifive",
+            chat_id="slack:C123",
+            content="I downloaded the file for you.",
+            media=["/home/dev/.nanobot/media/agenthifive/invoice.pdf"],
+        )
+    )
+
+    assert len(sent_payloads) == 1
+    payload = sent_payloads[0]
+    assert payload["url"] == "https://slack.com/api/chat.postMessage"
+    assert payload["body"]["text"] == (
+        "I downloaded the file for you.\n"
+        "Attachment upload is not supported yet on the AgentHiFive channel.\n"
+        "The file was downloaded and saved locally:\n"
+        "- invoice.pdf: /home/dev/.nanobot/media/agenthifive/invoice.pdf"
+    )
+
+
 @pytest.mark.asyncio
 async def test_agenthifive_channel_forwards_slack_updates(monkeypatch):
     bus = MessageBus()
@@ -308,6 +366,78 @@ async def test_agenthifive_channel_retries_slack_discovery_without_missing_scope
     assert "private_channel" in list_urls[0]
     assert "private_channel" not in list_urls[1]
     assert msg.content == "hello from slack"
+
+
+@pytest.mark.asyncio
+async def test_agenthifive_channel_caches_slack_discovery(monkeypatch):
+    bus = MessageBus()
+    config = AgentHiFiveConfig.model_validate(
+        {
+            "enabled": True,
+            "providers": {
+                "slack": {
+                    "enabled": True,
+                    "discoveryRefreshS": 300,
+                }
+            },
+        }
+    )
+    channel = AgentHiFiveChannel(config, bus)
+    list_calls = 0
+
+    async def _execute(payload):
+        nonlocal list_calls
+        if "conversations.list" in payload["url"]:
+            list_calls += 1
+            return VaultExecuteResult(
+                status_code=200,
+                headers={},
+                body={
+                    "ok": True,
+                    "channels": [
+                        {
+                            "id": "C123",
+                            "is_channel": True,
+                            "is_member": True,
+                        }
+                    ],
+                },
+                audit_id="audit_slack_list",
+            )
+        raise AssertionError("Unexpected Slack execute payload")
+
+    current_time = 1000.0
+    monkeypatch.setattr("nanobot.channels.agenthifive.time.monotonic", lambda: current_time)
+    channel._vault = _FakeVaultClient(_execute)
+
+    first = await channel._slack_get_channels()
+    current_time += 60.0
+    second = await channel._slack_get_channels()
+    current_time += 301.0
+    third = await channel._slack_get_channels()
+
+    assert first == second == third
+    assert list_calls == 2
+
+
+def test_agenthifive_channel_scales_slack_sleep_by_channel_count():
+    bus = MessageBus()
+    config = AgentHiFiveConfig.model_validate(
+        {
+            "enabled": True,
+            "providers": {
+                "slack": {
+                    "enabled": True,
+                    "targetRequestsPerHour": 180,
+                }
+            },
+        }
+    )
+    channel = AgentHiFiveChannel(config, bus)
+
+    assert channel._slack_cycle_sleep_s(0) == 15.0
+    assert channel._slack_cycle_sleep_s(1) == 20.0
+    assert channel._slack_cycle_sleep_s(3) == 60.0
 
 
 @pytest.mark.asyncio

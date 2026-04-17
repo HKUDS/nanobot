@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -33,6 +34,8 @@ class AgentHiFiveSlackConfig(Base):
     enabled: bool = False
     allow_from: list[str] = Field(default_factory=list)
     reply_in_thread: bool = True
+    discovery_refresh_s: int = 300
+    target_requests_per_hour: int = 180
     channel_types: list[str] = Field(
         default_factory=lambda: ["im", "public_channel", "private_channel", "mpim"]
     )
@@ -90,6 +93,8 @@ class AgentHiFiveChannel(BaseChannel):
         self._tasks: list[asyncio.Task] = []
         self._stop_event = asyncio.Event()
         self._slack_channel_types_override: list[str] | None = None
+        self._slack_cached_channels: list[dict[str, Any]] | None = None
+        self._slack_channels_fetched_at = 0.0
 
     async def start(self) -> None:
         """Start enabled AgentHiFive channel pollers."""
@@ -138,9 +143,14 @@ class AgentHiFiveChannel(BaseChannel):
         """Send a message back through the vault-managed provider."""
         if not self._vault:
             raise RuntimeError("AgentHiFive channel is not running")
+
         if msg.media:
-            raise RuntimeError(
-                "AgentHiFive channel does not yet support sending local file attachments"
+            msg = OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=self._render_attachment_fallback_text(msg.content, msg.media),
+                reply_to=msg.reply_to,
+                metadata=dict(msg.metadata or {}),
             )
 
         provider, target = self._parse_target(msg.chat_id)
@@ -151,6 +161,20 @@ class AgentHiFiveChannel(BaseChannel):
             await self._send_slack(msg, target)
             return
         raise RuntimeError(f"Unsupported AgentHiFive provider target: {provider}")
+
+    @staticmethod
+    def _render_attachment_fallback_text(content: str, media: list[str]) -> str:
+        """Explain that attachments were saved locally when this channel cannot upload them."""
+        lines: list[str] = []
+        if content and content != "[empty message]":
+            lines.append(content)
+
+        lines.append("Attachment upload is not supported yet on the AgentHiFive channel.")
+        lines.append("The file was downloaded and saved locally:")
+        for media_path in media:
+            path = Path(media_path)
+            lines.append(f"- {path.name}: {media_path}")
+        return "\n".join(lines)
 
     async def _send_telegram(self, msg: OutboundMessage, target: str) -> None:
         """Send a vault-managed Telegram reply."""
@@ -333,7 +357,7 @@ class AgentHiFiveChannel(BaseChannel):
 
         while self._running:
             try:
-                channels = await self._slack_discover_channels()
+                channels = await self._slack_get_channels()
                 if channels is None:
                     await asyncio.sleep(backoff_ms / 1000.0)
                     backoff_ms = min(backoff_ms * 2, self.config.backoff_max_ms)
@@ -361,7 +385,7 @@ class AgentHiFiveChannel(BaseChannel):
                             state.setdefault("channels", {})[channel_id] = {"oldest": latest_ts}
                 self._save_json_state("slack-watermarks", state)
                 backoff_ms = self.config.backoff_initial_ms
-                await asyncio.sleep(15.0)
+                await asyncio.sleep(self._slack_cycle_sleep_s(len(channels)))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -370,6 +394,32 @@ class AgentHiFiveChannel(BaseChannel):
                 logger.warning("AgentHiFive Slack poll failed: {}", exc)
                 await asyncio.sleep(backoff_ms / 1000.0)
                 backoff_ms = min(backoff_ms * 2, self.config.backoff_max_ms)
+
+    async def _slack_get_channels(self) -> list[dict[str, Any]] | None:
+        """Return cached Slack channels when fresh enough to avoid unnecessary discovery calls."""
+        refresh_s = max(float(self.config.providers.slack.discovery_refresh_s), 0.0)
+        now = time.monotonic()
+        if (
+            self._slack_cached_channels is not None
+            and refresh_s > 0.0
+            and now - self._slack_channels_fetched_at < refresh_s
+        ):
+            return self._slack_cached_channels
+
+        channels = await self._slack_discover_channels()
+        if channels is not None:
+            self._slack_cached_channels = channels
+            self._slack_channels_fetched_at = now
+        return channels
+
+    def _slack_cycle_sleep_s(self, channel_count: int) -> float:
+        """Keep Slack polling under the expected Vault hourly budget for this connection."""
+        if channel_count <= 0:
+            return 15.0
+
+        target_requests = max(self.config.providers.slack.target_requests_per_hour, 1)
+        per_cycle_s = (3600.0 * float(channel_count)) / float(target_requests)
+        return max(15.0, per_cycle_s)
 
     async def _slack_discover_channels(self) -> list[dict[str, Any]] | None:
         """List Slack conversations the vault-managed bot can access."""

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import json
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
+from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -125,8 +125,10 @@ class _LoopHook(AgentHook):
                 tool_events=tool_events,
             )
         for tc in context.tool_calls:
-            args_str = json.dumps(tc.arguments, ensure_ascii=False)
-            logger.info("Tool call: {}({})", tc.name, args_str[:200])
+            logger.info(
+                "Tool call: {}",
+                self._loop._summarize_tool_call_for_log(tc.name, tc.arguments),
+            )
         self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
@@ -412,6 +414,54 @@ class AgentLoop:
                 pass
         sub_cancelled = await self.subagents.cancel_by_session(key)
         return cancelled + sub_cancelled
+
+    @staticmethod
+    def _summarize_message_for_log(content: str | None) -> str:
+        """Return a content-free summary safe for logs."""
+        if not content:
+            return "chars=0 lines=0"
+        return f"chars={len(content)} lines={content.count(chr(10)) + 1}"
+
+    @staticmethod
+    def _summarize_tool_call_for_log(name: str, arguments: Any) -> str:
+        """Return a privacy-safe tool-call summary without argument values."""
+        if not isinstance(arguments, dict) or not arguments:
+            return name
+
+        details: list[str] = []
+
+        method = arguments.get("method")
+        if isinstance(method, str) and method.strip():
+            details.append(f"method={method.strip().upper()[:16]}")
+
+        url = arguments.get("url")
+        if isinstance(url, str) and url.strip():
+            host = urlparse(url).netloc
+            if host:
+                details.append(f"host={host}")
+
+        service = arguments.get("service")
+        if isinstance(service, str) and service.strip():
+            details.append(f"service={service.strip()}")
+
+        query = arguments.get("query")
+        if isinstance(query, dict) and query:
+            details.append(f"query_keys={','.join(sorted(str(key) for key in query))}")
+
+        headers = arguments.get("headers")
+        if isinstance(headers, dict) and headers:
+            details.append(f"header_keys={','.join(sorted(str(key) for key in headers))}")
+
+        body = arguments.get("body")
+        if isinstance(body, dict) and body:
+            details.append(f"body_keys={','.join(sorted(str(key) for key in body))}")
+
+        covered = {"method", "url", "service", "query", "headers", "body"}
+        other_keys = sorted(str(key) for key in arguments if key not in covered)
+        if other_keys:
+            details.append(f"arg_keys={','.join(other_keys)}")
+
+        return f"{name}({'; '.join(details)})" if details else name
 
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
@@ -864,8 +914,12 @@ class AgentLoop:
             new_content, image_only = extract_documents(msg.content, msg.media)
             msg = dataclasses.replace(msg, content=new_content, media=image_only)
 
-        preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
-        logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
+        logger.info(
+            "Processing message from {}:{} ({})",
+            msg.channel,
+            msg.sender_id,
+            self._summarize_message_for_log(msg.content),
+        )
 
         # Notify AgentHiFive adapter of current session context (if installed)
         for hook in self._extra_hooks:
@@ -1004,8 +1058,12 @@ class AgentLoop:
             if not had_injections or stop_reason == "empty_final_response":
                 return None
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        logger.info(
+            "Response to {}:{} ({})",
+            msg.channel,
+            msg.sender_id,
+            self._summarize_message_for_log(final_content),
+        )
 
         meta = dict(msg.metadata or {})
         final_content, buttons = ask_user_outbound(
