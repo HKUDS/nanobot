@@ -275,11 +275,14 @@ class SubagentManager:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.context import ContextBuilder
         from nanobot.agent.skills import SkillsLoader
+        from nanobot.agent.tools.shell import get_default_exec_env_keys
 
         time_ctx = ContextBuilder._build_runtime_context(None, None)
+        exec_env_keys = get_default_exec_env_keys() | set(self.exec_config.allowed_env_keys)
         skills_summary = SkillsLoader(
             self.workspace,
             disabled_skills=self.disabled_skills,
+            exec_env_keys=exec_env_keys,
         ).build_skills_summary()
         return render_template(
             "agent/subagent_system.md",

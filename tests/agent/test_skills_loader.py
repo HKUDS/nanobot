@@ -220,6 +220,92 @@ def test_list_skills_filter_unavailable_excludes_unmet_env_requirement(
     assert loader.list_skills(filter_unavailable=True) == []
 
 
+def test_skill_unavailable_when_env_var_not_in_exec_env_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skill requires MY_VAR which is set in os.environ but not in exec_env_keys."""
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    skills_root.mkdir(parents=True)
+    _write_skill(
+        skills_root,
+        "needs_env",
+        metadata_json={"requires": {"env": ["MY_VAR"]}},
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    monkeypatch.setenv("MY_VAR", "present")
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin, exec_env_keys={"HOME", "LANG"})
+    assert loader.list_skills(filter_unavailable=True) == []
+
+
+def test_skill_available_when_env_var_in_exec_env_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skill requires MY_VAR which is set and included in exec_env_keys."""
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    skills_root.mkdir(parents=True)
+    skill_path = _write_skill(
+        skills_root,
+        "needs_env",
+        metadata_json={"requires": {"env": ["MY_VAR"]}},
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    monkeypatch.setenv("MY_VAR", "present")
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin, exec_env_keys={"HOME", "MY_VAR"})
+    entries = loader.list_skills(filter_unavailable=True)
+    assert entries == [{"name": "needs_env", "path": str(skill_path), "source": "workspace"}]
+
+
+def test_skill_unavailable_when_env_var_in_exec_env_keys_but_not_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skill requires MY_VAR which is in exec_env_keys but not set in os.environ."""
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    skills_root.mkdir(parents=True)
+    _write_skill(
+        skills_root,
+        "needs_env",
+        metadata_json={"requires": {"env": ["MY_VAR"]}},
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    monkeypatch.delenv("MY_VAR", raising=False)
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin, exec_env_keys={"HOME", "MY_VAR"})
+    assert loader.list_skills(filter_unavailable=True) == []
+
+
+def test_exec_env_keys_none_falls_back_to_os_environ(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When exec_env_keys is None, env check uses os.environ only (backward compat)."""
+    workspace = tmp_path / "ws"
+    skills_root = workspace / "skills"
+    skills_root.mkdir(parents=True)
+    skill_path = _write_skill(
+        skills_root,
+        "needs_env",
+        metadata_json={"requires": {"env": ["MY_VAR"]}},
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    monkeypatch.setenv("MY_VAR", "present")
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin, exec_env_keys=None)
+    entries = loader.list_skills(filter_unavailable=True)
+    assert entries == [{"name": "needs_env", "path": str(skill_path), "source": "workspace"}]
+
+
 def test_list_skills_openclaw_metadata_parsed_for_requirements(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -74,3 +74,15 @@ async def test_exec_allowed_env_keys_missing_var_ignored(monkeypatch):
     tool = ExecTool(allowed_env_keys=["NONEXISTENT_VAR_12345"])
     result = await tool.execute(command="printenv NONEXISTENT_VAR_12345")
     assert "Exit code: 1" in result
+
+
+def test_get_default_exec_env_keys_returns_expected_keys():
+    """get_default_exec_env_keys should return the platform-appropriate default keys."""
+    from nanobot.agent.tools.shell import get_default_exec_env_keys
+
+    keys = get_default_exec_env_keys()
+    if sys.platform == "win32":
+        assert "SYSTEMROOT" in keys
+        assert "PATH" in keys
+    else:
+        assert keys == {"HOME", "LANG", "TERM"}
