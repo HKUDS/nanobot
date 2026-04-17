@@ -1,6 +1,6 @@
 """Tests for LLMProvider._enforce_role_alternation."""
 
-from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider, _SYNTHETIC_USER_CONTENT
 
 
 class TestEnforceRoleAlternation:
@@ -208,7 +208,7 @@ class TestEnforceRoleAlternation:
         result = LLMProvider._enforce_role_alternation(msgs)
         non_system = [m for m in result if m["role"] != "system"]
         assert non_system[0]["role"] == "user"
-        assert non_system[0]["content"] == "(conversation continued)"
+        assert non_system[0]["content"] == _SYNTHETIC_USER_CONTENT
         # The original assistant should follow.
         assert non_system[1]["role"] == "assistant"
 

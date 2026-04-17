@@ -77,6 +77,9 @@ class GenerationSettings:
     reasoning_effort: str | None = None
 
 
+_SYNTHETIC_USER_CONTENT = "(conversation continued)"
+
+
 class LLMProvider(ABC):
     """Base class for LLM providers."""
 
@@ -417,7 +420,7 @@ class LLMProvider(ABC):
         for i, msg in enumerate(merged):
             if msg.get("role") != "system":
                 if msg.get("role") == "assistant" and not msg.get("tool_calls"):
-                    merged.insert(i, {"role": "user", "content": "(conversation continued)"})
+                    merged.insert(i, {"role": "user", "content": _SYNTHETIC_USER_CONTENT})
                 break
 
         return merged

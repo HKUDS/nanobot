@@ -2909,3 +2909,12 @@ def test_snip_history_no_user_at_all_falls_back_gracefully(monkeypatch):
     assert isinstance(trimmed, list)
     # Must have at least system.
     assert any(m.get("role") == "system" for m in trimmed)
+    # The _enforce_role_alternation safety net must be able to fix whatever
+    # _snip_history returns here — verify it produces a valid sequence.
+    from nanobot.providers.base import LLMProvider
+    fixed = LLMProvider._enforce_role_alternation(trimmed)
+    non_system = [m for m in fixed if m["role"] != "system"]
+    if non_system:
+        assert non_system[0]["role"] in ("user", "tool"), (
+            f"Safety net should ensure first non-system is user/tool, got {non_system[0]['role']}"
+        )
