@@ -27,7 +27,6 @@ from nanobot.agent.tools.notebook import NotebookEditTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -42,7 +41,7 @@ from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, ToolsConfig, WebToolsConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
     from nanobot.cron.service import CronService
 
 
@@ -90,9 +89,6 @@ class _LoopHook(AgentHook):
         if self._on_stream_end:
             await self._on_stream_end(resuming=resuming)
         self._stream_buf = ""
-
-    async def before_iteration(self, context: AgentHookContext) -> None:
-        self._loop._current_iteration = context.iteration
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if self._on_progress:
@@ -160,11 +156,9 @@ class AgentLoop:
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
-        tools_config: ToolsConfig | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
+        from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 
-        _tc = tools_config or ToolsConfig()
         defaults = AgentDefaults()
         self.bus = bus
         self.channels_config = channels_config
@@ -222,6 +216,8 @@ class AgentLoop:
         # When a session has an active task, new messages for that session
         # are routed here instead of creating a new task.
         self._pending_queues: dict[str, asyncio.Queue] = {}
+        self._pending_queues_lock = asyncio.Lock()  # Protect concurrent access to _pending_queues
+        self._active_tasks_lock = asyncio.Lock()  # Protect concurrent access to _active_tasks
         # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
         self._concurrency_gate: asyncio.Semaphore | None = (
@@ -248,12 +244,110 @@ class AgentLoop:
             model=self.model,
         )
         self._register_default_tools()
-        if _tc.my.enable:
-            self.tools.register(MyTool(loop=self, modify_allowed=_tc.my.allow_set))
-        self._runtime_vars: dict[str, Any] = {}
-        self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+
+    async def _get_or_create_pending_queue(self, session_key: str) -> asyncio.Queue:
+        """Thread-safely get or create a pending queue for the session.
+        
+        Args:
+            session_key: The session key.
+            
+        Returns:
+            The pending queue for this session. Creates a new one if it doesn't exist.
+        """
+        async with self._pending_queues_lock:
+            if session_key not in self._pending_queues:
+                self._pending_queues[session_key] = asyncio.Queue(maxsize=20)
+            return self._pending_queues[session_key]
+
+    async def _try_route_to_pending_queue(self, session_key: str, msg: InboundMessage) -> bool:
+        """Try to route a message to a pending queue.
+        
+        If the session has an active task, the message is routed to the pending queue
+        to support mid-turn injection. Otherwise, returns False and the caller should
+        create a new task.
+        
+        Args:
+            session_key: The session key.
+            msg: The message to route.
+            
+        Returns:
+            True if message was successfully routed, False if session has no active task.
+        """
+        async with self._pending_queues_lock:
+            if session_key not in self._pending_queues:
+                return False
+            
+            queue = self._pending_queues[session_key]
+            try:
+                queue.put_nowait(msg)
+                logger.info(
+                    "Routed follow-up message to pending queue for session {}",
+                    session_key,
+                )
+                return True
+            except asyncio.QueueFull:
+                logger.warning(
+                    "Pending queue full for session {}, falling back to queued task",
+                    session_key,
+                )
+                return False
+
+    async def _remove_and_drain_pending_queue(self, session_key: str) -> int:
+        """Remove a session's pending queue and drain its messages.
+        
+        Re-publishes remaining messages in the queue to the bus so they are
+        processed as new inbound messages.
+        
+        Args:
+            session_key: The session key.
+            
+        Returns:
+            The count of messages that were re-published.
+        """
+        async with self._pending_queues_lock:
+            queue = self._pending_queues.pop(session_key, None)
+        
+        if queue is None:
+            return 0
+        
+        leftover = 0
+        while True:
+            try:
+                item = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            await self.bus.publish_inbound(item)
+            leftover += 1
+        
+        if leftover:
+            logger.info(
+                "Re-published {} leftover message(s) to bus for session {}",
+                leftover, session_key,
+            )
+        
+        return leftover
+
+    def _add_task_to_active(self, session_key: str, task: asyncio.Task) -> None:
+        """Add a task to _active_tasks (called from main loop).
+        
+        Args:
+            session_key: The session key.
+            task: The task to add.
+        """
+        self._active_tasks.setdefault(session_key, []).append(task)
+
+    def _remove_task_from_active(self, task: asyncio.Task, session_key: str) -> None:
+        """Remove a completed task from _active_tasks (called from done callback).
+        
+        Args:
+            task: The completed task.
+            session_key: The session key.
+        """
+        tasks = self._active_tasks.get(session_key)
+        if tasks and task in tasks:
+            tasks.remove(task)
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -318,7 +412,7 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron", "my"):
+        for name in ("message", "spawn", "cron"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
@@ -436,11 +530,6 @@ class AgentLoop:
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
-            # Push final content through stream so streaming channels (e.g. Feishu)
-            # update the card instead of leaving it empty.
-            if on_stream and on_stream_end:
-                await on_stream(result.final_content or "")
-                await on_stream_end(resuming=False)
         elif result.stop_reason == "error":
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
         return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections
@@ -455,9 +544,11 @@ class AgentLoop:
             try:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
             except asyncio.TimeoutError:
+                async with self._pending_queues_lock:
+                    active_keys = list(self._pending_queues.keys())
                 self.auto_compact.check_expired(
                     self._schedule_background,
-                    active_session_keys=self._pending_queues.keys(),
+                    active_session_keys=active_keys,
                 )
                 continue
             except asyncio.CancelledError:
@@ -481,35 +572,21 @@ class AgentLoop:
             # If this session already has an active pending queue (i.e. a task
             # is processing this session), route the message there for mid-turn
             # injection instead of creating a competing task.
-            if effective_key in self._pending_queues:
-                pending_msg = msg
-                if effective_key != msg.session_key:
-                    pending_msg = dataclasses.replace(
-                        msg,
-                        session_key_override=effective_key,
-                    )
-                try:
-                    self._pending_queues[effective_key].put_nowait(pending_msg)
-                except asyncio.QueueFull:
-                    logger.warning(
-                        "Pending queue full for session {}, falling back to queued task",
-                        effective_key,
-                    )
-                else:
-                    logger.info(
-                        "Routed follow-up message to pending queue for session {}",
-                        effective_key,
-                    )
-                    continue
+            pending_msg = msg
+            if effective_key != msg.session_key:
+                pending_msg = dataclasses.replace(
+                    msg,
+                    session_key_override=effective_key,
+                )
+            # Thread-safely route message to pending queue
+            if await self._try_route_to_pending_queue(effective_key, pending_msg):
+                continue
             # Compute the effective session key before dispatching
             # This ensures /stop command can find tasks correctly when unified session is enabled
             task = asyncio.create_task(self._dispatch(msg))
-            self._active_tasks.setdefault(effective_key, []).append(task)
+            self._add_task_to_active(effective_key, task)
             task.add_done_callback(
-                lambda t, k=effective_key: self._active_tasks.get(k, [])
-                and self._active_tasks[k].remove(t)
-                if t in self._active_tasks.get(k, [])
-                else None
+                lambda t, k=effective_key: self._remove_task_from_active(t, k)
             )
 
     async def _dispatch(self, msg: InboundMessage) -> None:
@@ -522,8 +599,8 @@ class AgentLoop:
 
         # Register a pending queue so follow-up messages for this session are
         # routed here (mid-turn injection) instead of spawning a new task.
-        pending = asyncio.Queue(maxsize=20)
-        self._pending_queues[session_key] = pending
+        # Thread-safely get or create queue
+        pending = await self._get_or_create_pending_queue(session_key)
 
         try:
             async with lock, gate:
@@ -584,21 +661,8 @@ class AgentLoop:
             # Drain any messages still in the pending queue and re-publish
             # them to the bus so they are processed as fresh inbound messages
             # rather than silently lost.
-            queue = self._pending_queues.pop(session_key, None)
-            if queue is not None:
-                leftover = 0
-                while True:
-                    try:
-                        item = queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-                    await self.bus.publish_inbound(item)
-                    leftover += 1
-                if leftover:
-                    logger.info(
-                        "Re-published {} leftover message(s) to bus for session {}",
-                        leftover, session_key,
-                    )
+            # Thread-safely remove and drain queue
+            await self._remove_and_drain_pending_queue(session_key)
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
