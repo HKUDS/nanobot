@@ -273,7 +273,7 @@ class AgentRunner:
             context.tool_calls = list(response.tool_calls)
             self._accumulate_usage(usage, raw_usage)
 
-            if response.has_tool_calls:
+            if response.finish_reason == "tool_calls" and response.has_tool_calls:
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
 
@@ -298,6 +298,11 @@ class AgentRunner:
                 )
 
                 await hook.before_execute_tools(context)
+            elif response.has_tool_calls:
+                logger.warning(
+                    "Ignoring unexpected tool calls under finish_reason='%s' (API gateway may have injected them)",
+                    response.finish_reason,
+                )
 
                 results, new_events, fatal_error = await self._execute_tools(
                     spec,
