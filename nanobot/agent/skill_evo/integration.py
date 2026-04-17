@@ -207,7 +207,6 @@ def build_dream_skill_tools(workspace: Path) -> ToolRegistry:
 
     catalog = SkillsLoader(workspace, builtin_skills_dir=BUILTIN_SKILLS_DIR)
     tools.register(SkillsListTool(catalog=catalog))
-    tools.register(SkillViewTool(catalog=catalog))
 
     skills_config = SkillsConfig()
     store = SkillStore(
@@ -216,6 +215,7 @@ def build_dream_skill_tools(workspace: Path) -> ToolRegistry:
         guard=SkillGuard() if skills_config.guard_enabled else None,
         session_key="dream",
     )
+    tools.register(SkillViewTool(catalog=catalog, store=store))
     tools.register(SkillManageTool(store=store, catalog=catalog, config=skills_config))
     return tools
 

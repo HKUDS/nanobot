@@ -14,10 +14,12 @@ A "Conversation Metadata" section appears before the transcript. Use it to asses
   - The user corrected the agent's approach or expected a different method
   - A specific technique, workaround, or non-obvious command sequence was discovered through experimentation
   - The approach changed course midway due to experiential findings (e.g., API returned unexpected format, tool behaved differently than expected)
+  - **Test-driven error scenarios**: The user intentionally created an error scenario for testing/demonstration (e.g., "set timeout to 2s, expect it to fail"), and the subsequent recovery demonstrates a reusable pattern (e.g., retry logic, exponential backoff, error handling)
 3. **Reusable pattern**: the workflow solves a class of problems, not a one-off personal request (e.g., "check my schedule" is one-off; "scrape structured data from news sites" is a pattern)
 4. **Not already covered**: no existing skill covers the same approach (check with `skills_list`)
 
 **EXCEPTION: Complex multi-step pipelines** — Even if no explicit trial-and-error occurred, CREATE if ALL of these apply:
+
 - The conversation had **>=5 tool calls** AND **>=3 conversation turns** (check metadata)
 - The workflow forms a complete **data pipeline** with clear stages (e.g., fetch → transform → validate → store)
 - The pipeline demonstrates **domain expertise or non-trivial orchestration** (e.g., API integration with retries, data aggregation with multiple sources, multi-step validation logic)
