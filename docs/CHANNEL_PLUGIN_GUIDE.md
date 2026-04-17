@@ -135,7 +135,7 @@ class WebhookChannel(BaseChannel):
 [project]
 name = "nanobot-channel-webhook"
 version = "0.1.0"
-dependencies = ["nanobot", "aiohttp"]
+dependencies = ["nanobot-ai", "aiohttp"]
 
 [project.entry-points."nanobot.channels"]
 webhook = "nanobot_channel_webhook:WebhookChannel"
