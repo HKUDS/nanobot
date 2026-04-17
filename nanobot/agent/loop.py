@@ -33,6 +33,13 @@ from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
+from nanobot.config.instances import (
+    RuntimeInstance,
+    discover_runtime_instances,
+    find_runtime_instance,
+    instance_name_from_path,
+)
+from nanobot.config.loader import get_config_path
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
@@ -208,6 +215,11 @@ class AgentLoop:
             disabled_skills=disabled_skills,
         )
         self._unified_session = unified_session
+        self._session_ttl_minutes = session_ttl_minutes
+        self._disabled_skills = list(disabled_skills or [])
+        self._tools_config = _tc
+        self.active_config_path = get_config_path().expanduser().resolve(strict=False)
+        self.active_instance_name = instance_name_from_path(self.active_config_path)
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
@@ -252,6 +264,166 @@ class AgentLoop:
         self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+
+    def list_runtime_instances(self) -> list[RuntimeInstance]:
+        """Return discovered runtime instances, sorted with the active one first."""
+        active_path = self.active_config_path.expanduser().resolve(strict=False)
+        instances = discover_runtime_instances()
+        return sorted(
+            instances,
+            key=lambda item: (
+                item.config_path != active_path,
+                item.name.lower(),
+                str(item.config_path),
+            ),
+        )
+
+    def _has_active_work(self) -> bool:
+        """Return whether the loop currently has running tasks or subagents."""
+        current = asyncio.current_task()
+        if any(
+            (task is not current) and (not task.done())
+            for tasks in self._active_tasks.values()
+            for task in tasks
+        ):
+            return True
+        try:
+            return self.subagents.get_running_count() > 0
+        except Exception:
+            return False
+
+    async def _reset_mcp_connections(self) -> None:
+        """Close all MCP connections and reset connection state."""
+        for name, stack in self._mcp_stacks.items():
+            try:
+                await stack.aclose()
+            except (RuntimeError, BaseExceptionGroup):
+                logger.debug("MCP server '{}' cleanup error during reset (can be ignored)", name)
+        self._mcp_stacks.clear()
+        self._mcp_connected = False
+        self._mcp_connecting = False
+
+    def _rebuild_runtime(
+        self,
+        loaded,
+        provider: LLMProvider,
+        *,
+        config_path: Path,
+        instance_name: str,
+    ) -> None:
+        """Apply a newly loaded config to the active runtime."""
+        self.provider = provider
+        self.active_config_path = config_path
+        self.active_instance_name = instance_name
+        self.workspace = loaded.workspace_path
+        self.model = loaded.agents.defaults.model or provider.get_default_model()
+        self.max_iterations = loaded.agents.defaults.max_tool_iterations
+        self.context_window_tokens = loaded.agents.defaults.context_window_tokens
+        self.context_block_limit = loaded.agents.defaults.context_block_limit
+        self.max_tool_result_chars = loaded.agents.defaults.max_tool_result_chars
+        self.provider_retry_mode = loaded.agents.defaults.provider_retry_mode
+        self.web_config = loaded.tools.web
+        self.exec_config = loaded.tools.exec
+        self.restrict_to_workspace = loaded.tools.restrict_to_workspace
+        self._mcp_servers = loaded.tools.mcp_servers
+        self._unified_session = loaded.agents.defaults.unified_session
+        self._session_ttl_minutes = loaded.agents.defaults.session_ttl_minutes
+        self._disabled_skills = list(loaded.agents.defaults.disabled_skills)
+        self._tools_config = loaded.tools
+
+        self.context = ContextBuilder(
+            self.workspace,
+            timezone=loaded.agents.defaults.timezone,
+            disabled_skills=self._disabled_skills,
+        )
+        self.sessions = SessionManager(self.workspace)
+        self.tools = ToolRegistry()
+        self.runner = AgentRunner(provider)
+        self.subagents = SubagentManager(
+            provider=provider,
+            workspace=self.workspace,
+            bus=self.bus,
+            model=self.model,
+            web_config=self.web_config,
+            max_tool_result_chars=self.max_tool_result_chars,
+            exec_config=self.exec_config,
+            restrict_to_workspace=self.restrict_to_workspace,
+            disabled_skills=self._disabled_skills,
+        )
+        self.consolidator = Consolidator(
+            store=self.context.memory,
+            provider=provider,
+            model=self.model,
+            sessions=self.sessions,
+            context_window_tokens=self.context_window_tokens,
+            build_messages=self.context.build_messages,
+            get_tool_definitions=self.tools.get_definitions,
+            max_completion_tokens=provider.generation.max_tokens,
+        )
+        self.auto_compact = AutoCompact(
+            sessions=self.sessions,
+            consolidator=self.consolidator,
+            session_ttl_minutes=self._session_ttl_minutes,
+        )
+        self.dream = Dream(
+            store=self.context.memory,
+            provider=provider,
+            model=self.model,
+        )
+        self._register_default_tools()
+        if self._tools_config.my_enabled:
+            self.tools.register(MyTool(loop=self, modify_allowed=self._tools_config.my_set))
+        self._last_usage = {}
+
+    async def switch_runtime_instance(self, name: str) -> tuple[bool, str]:
+        """Hot-switch the active runtime to another discovered instance config."""
+        if self._has_active_work():
+            return (
+                False,
+                "Can't switch right now because another task is still running. "
+                "Please wait for it to finish or use `/stop` first.",
+            )
+
+        target = find_runtime_instance(name)
+        if target is None:
+            available = ", ".join(instance.name for instance in self.list_runtime_instances()) or "(none)"
+            return False, f"Unknown instance `{name}`. Available: {available}"
+
+        target_path = target.config_path.expanduser().resolve(strict=False)
+        if target_path == self.active_config_path.expanduser().resolve(strict=False):
+            return True, f"Already using `{target.name}`."
+
+        from nanobot.cli.commands import _make_provider
+        from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
+
+        try:
+            loaded = resolve_config_env_vars(load_config(target_path))
+        except Exception as e:
+            return False, f"Failed to load `{target.name}` from `{target_path}`: {e}"
+
+        try:
+            provider = _make_provider(loaded)
+        except Exception as e:
+            return False, f"Failed to initialize `{target.name}`: {e}"
+
+        logger.info(
+            "Switching runtime instance from '{}' to '{}'",
+            self.active_instance_name,
+            target.name,
+        )
+        await self._reset_mcp_connections()
+        set_config_path(target_path)
+        logger.info("Rebuilding runtime for instance '{}' using config {}", target.name, target_path)
+        self._rebuild_runtime(loaded, provider, config_path=target_path, instance_name=target.name)
+        logger.info("Reconnecting MCP for instance '{}'", target.name)
+        await self._connect_mcp()
+
+        return True, (
+            f"Switched to `{target.name}`.\n"
+            f"- Config: `{target_path}`\n"
+            f"- Workspace: `{self.workspace}`\n"
+            f"- Model: `{self.model}`"
+        )
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -599,12 +771,7 @@ class AgentLoop:
         if self._background_tasks:
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             self._background_tasks.clear()
-        for name, stack in self._mcp_stacks.items():
-            try:
-                await stack.aclose()
-            except (RuntimeError, BaseExceptionGroup):
-                logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
-        self._mcp_stacks.clear()
+        await self._reset_mcp_connections()
 
     def _schedule_background(self, coro) -> None:
         """Schedule a coroutine as a tracked background task (drained on shutdown)."""
@@ -643,6 +810,7 @@ class AgentLoop:
             session, pending = self.auto_compact.prepare_session(session, key)
 
             await self.consolidator.maybe_consolidate_by_tokens(session)
+            await self._connect_mcp()
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=0)
             current_role = "assistant" if msg.sender_id == "subagent" else "user"
@@ -687,6 +855,7 @@ class AgentLoop:
 
         await self.consolidator.maybe_consolidate_by_tokens(session)
 
+        await self._connect_mcp()
         self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):

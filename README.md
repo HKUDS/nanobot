@@ -1726,6 +1726,16 @@ nanobot gateway --config ~/.nanobot-discord/config.json
 nanobot gateway --config ~/.nanobot-feishu/config.json --port 18792
 ```
 
+If you start a gateway against one instance, you can also switch the active runtime instance from chat without restarting the process:
+
+```text
+/instance
+/instance local
+/instance research
+```
+
+`/instance` lists discovered configs such as `~/.nanobot/config.json` and `~/.nanobot-*/config.json`, then switches the active agent runtime to the selected instance.
+
 ### Path Resolution
 
 When using `--config`, nanobot derives its runtime data directory from the config file location. The workspace still comes from `agents.defaults.workspace` unless you override it with `--workspace`.
@@ -1855,6 +1865,7 @@ These commands work inside chat channels and interactive agent sessions:
 | `/stop` | Stop the current task |
 | `/restart` | Restart the bot |
 | `/status` | Show bot status |
+| `/instance` | List discovered runtime instances or switch to `/instance <name>` |
 | `/dream` | Run Dream memory consolidation now |
 | `/dream-log` | Show the latest Dream memory change |
 | `/dream-log <sha>` | Show a specific Dream memory change |

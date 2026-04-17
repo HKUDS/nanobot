@@ -321,137 +321,153 @@ async def connect_mcp_servers(
         await server_stack.__aenter__()
 
         try:
-            transport_type = cfg.type
-            if not transport_type:
-                if cfg.command:
-                    transport_type = "stdio"
-                elif cfg.url:
-                    transport_type = (
-                        "sse" if cfg.url.rstrip("/").endswith("/sse") else "streamableHttp"
+            connect_timeout = max(5, int(cfg.tool_timeout or 30))
+
+            async def _connect_and_register() -> tuple[str, AsyncExitStack | None]:
+                transport_type = cfg.type
+                if not transport_type:
+                    if cfg.command:
+                        transport_type = "stdio"
+                    elif cfg.url:
+                        transport_type = (
+                            "sse" if cfg.url.rstrip("/").endswith("/sse") else "streamableHttp"
+                        )
+                    else:
+                        logger.warning("MCP server '{}': no command or url configured, skipping", name)
+                        await server_stack.aclose()
+                        return name, None
+
+                if transport_type == "stdio":
+                    params = StdioServerParameters(
+                        command=cfg.command, args=cfg.args, env=cfg.env or None
+                    )
+                    read, write = await server_stack.enter_async_context(stdio_client(params))
+                elif transport_type == "sse":
+
+                    def httpx_client_factory(
+                        headers: dict[str, str] | None = None,
+                        timeout: httpx.Timeout | None = None,
+                        auth: httpx.Auth | None = None,
+                    ) -> httpx.AsyncClient:
+                        merged_headers = {
+                            "Accept": "application/json, text/event-stream",
+                            **(cfg.headers or {}),
+                            **(headers or {}),
+                        }
+                        return httpx.AsyncClient(
+                            headers=merged_headers or None,
+                            follow_redirects=True,
+                            timeout=timeout,
+                            auth=auth,
+                        )
+
+                    read, write = await server_stack.enter_async_context(
+                        sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
+                    )
+                elif transport_type == "streamableHttp":
+                    http_client = await server_stack.enter_async_context(
+                        httpx.AsyncClient(
+                            headers=cfg.headers or None,
+                            follow_redirects=True,
+                            timeout=None,
+                        )
+                    )
+                    read, write, _ = await server_stack.enter_async_context(
+                        streamable_http_client(cfg.url, http_client=http_client)
                     )
                 else:
-                    logger.warning("MCP server '{}': no command or url configured, skipping", name)
+                    logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
                     await server_stack.aclose()
                     return name, None
 
-            if transport_type == "stdio":
-                params = StdioServerParameters(
-                    command=cfg.command, args=cfg.args, env=cfg.env or None
-                )
-                read, write = await server_stack.enter_async_context(stdio_client(params))
-            elif transport_type == "sse":
+                session = await server_stack.enter_async_context(ClientSession(read, write))
+                await session.initialize()
 
-                def httpx_client_factory(
-                    headers: dict[str, str] | None = None,
-                    timeout: httpx.Timeout | None = None,
-                    auth: httpx.Auth | None = None,
-                ) -> httpx.AsyncClient:
-                    merged_headers = {
-                        "Accept": "application/json, text/event-stream",
-                        **(cfg.headers or {}),
-                        **(headers or {}),
-                    }
-                    return httpx.AsyncClient(
-                        headers=merged_headers or None,
-                        follow_redirects=True,
-                        timeout=timeout,
-                        auth=auth,
-                    )
-
-                read, write = await server_stack.enter_async_context(
-                    sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
-                )
-            elif transport_type == "streamableHttp":
-                http_client = await server_stack.enter_async_context(
-                    httpx.AsyncClient(
-                        headers=cfg.headers or None,
-                        follow_redirects=True,
-                        timeout=None,
-                    )
-                )
-                read, write, _ = await server_stack.enter_async_context(
-                    streamable_http_client(cfg.url, http_client=http_client)
-                )
-            else:
-                logger.warning("MCP server '{}': unknown transport type '{}'", name, transport_type)
-                await server_stack.aclose()
-                return name, None
-
-            session = await server_stack.enter_async_context(ClientSession(read, write))
-            await session.initialize()
-
-            tools = await session.list_tools()
-            enabled_tools = set(cfg.enabled_tools)
-            allow_all_tools = "*" in enabled_tools
-            registered_count = 0
-            matched_enabled_tools: set[str] = set()
-            available_raw_names = [tool_def.name for tool_def in tools.tools]
-            available_wrapped_names = [f"mcp_{name}_{tool_def.name}" for tool_def in tools.tools]
-            for tool_def in tools.tools:
-                wrapped_name = f"mcp_{name}_{tool_def.name}"
-                if (
-                    not allow_all_tools
-                    and tool_def.name not in enabled_tools
-                    and wrapped_name not in enabled_tools
-                ):
-                    logger.debug(
-                        "MCP: skipping tool '{}' from server '{}' (not in enabledTools)",
-                        wrapped_name,
-                        name,
-                    )
-                    continue
-                wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
-                registry.register(wrapper)
-                logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
-                registered_count += 1
-                if enabled_tools:
-                    if tool_def.name in enabled_tools:
-                        matched_enabled_tools.add(tool_def.name)
-                    if wrapped_name in enabled_tools:
-                        matched_enabled_tools.add(wrapped_name)
-
-            if enabled_tools and not allow_all_tools:
-                unmatched_enabled_tools = sorted(enabled_tools - matched_enabled_tools)
-                if unmatched_enabled_tools:
-                    logger.warning(
-                        "MCP server '{}': enabledTools entries not found: {}. Available raw names: {}. "
-                        "Available wrapped names: {}",
-                        name,
-                        ", ".join(unmatched_enabled_tools),
-                        ", ".join(available_raw_names) or "(none)",
-                        ", ".join(available_wrapped_names) or "(none)",
-                    )
-
-            try:
-                resources_result = await session.list_resources()
-                for resource in resources_result.resources:
-                    wrapper = MCPResourceWrapper(
-                        session, name, resource, resource_timeout=cfg.tool_timeout
-                    )
+                tools = await session.list_tools()
+                enabled_tools = set(cfg.enabled_tools)
+                allow_all_tools = "*" in enabled_tools
+                registered_count = 0
+                matched_enabled_tools: set[str] = set()
+                available_raw_names = [tool_def.name for tool_def in tools.tools]
+                available_wrapped_names = [f"mcp_{name}_{tool_def.name}" for tool_def in tools.tools]
+                for tool_def in tools.tools:
+                    wrapped_name = f"mcp_{name}_{tool_def.name}"
+                    if (
+                        not allow_all_tools
+                        and tool_def.name not in enabled_tools
+                        and wrapped_name not in enabled_tools
+                    ):
+                        logger.debug(
+                            "MCP: skipping tool '{}' from server '{}' (not in enabledTools)",
+                            wrapped_name,
+                            name,
+                        )
+                        continue
+                    wrapper = MCPToolWrapper(session, name, tool_def, tool_timeout=cfg.tool_timeout)
                     registry.register(wrapper)
+                    logger.debug("MCP: registered tool '{}' from server '{}'", wrapper.name, name)
                     registered_count += 1
-                    logger.debug(
-                        "MCP: registered resource '{}' from server '{}'", wrapper.name, name
-                    )
-            except Exception as e:
-                logger.debug("MCP server '{}': resources not supported or failed: {}", name, e)
+                    if enabled_tools:
+                        if tool_def.name in enabled_tools:
+                            matched_enabled_tools.add(tool_def.name)
+                        if wrapped_name in enabled_tools:
+                            matched_enabled_tools.add(wrapped_name)
 
-            try:
-                prompts_result = await session.list_prompts()
-                for prompt in prompts_result.prompts:
-                    wrapper = MCPPromptWrapper(
-                        session, name, prompt, prompt_timeout=cfg.tool_timeout
-                    )
-                    registry.register(wrapper)
-                    registered_count += 1
-                    logger.debug("MCP: registered prompt '{}' from server '{}'", wrapper.name, name)
-            except Exception as e:
-                logger.debug("MCP server '{}': prompts not supported or failed: {}", name, e)
+                if enabled_tools and not allow_all_tools:
+                    unmatched_enabled_tools = sorted(enabled_tools - matched_enabled_tools)
+                    if unmatched_enabled_tools:
+                        logger.warning(
+                            "MCP server '{}': enabledTools entries not found: {}. Available raw names: {}. "
+                            "Available wrapped names: {}",
+                            name,
+                            ", ".join(unmatched_enabled_tools),
+                            ", ".join(available_raw_names) or "(none)",
+                            ", ".join(available_wrapped_names) or "(none)",
+                        )
 
-            logger.info(
-                "MCP server '{}': connected, {} capabilities registered", name, registered_count
+                try:
+                    resources_result = await session.list_resources()
+                    for resource in resources_result.resources:
+                        wrapper = MCPResourceWrapper(
+                            session, name, resource, resource_timeout=cfg.tool_timeout
+                        )
+                        registry.register(wrapper)
+                        registered_count += 1
+                        logger.debug(
+                            "MCP: registered resource '{}' from server '{}'", wrapper.name, name
+                        )
+                except Exception as e:
+                    logger.debug("MCP server '{}': resources not supported or failed: {}", name, e)
+
+                try:
+                    prompts_result = await session.list_prompts()
+                    for prompt in prompts_result.prompts:
+                        wrapper = MCPPromptWrapper(
+                            session, name, prompt, prompt_timeout=cfg.tool_timeout
+                        )
+                        registry.register(wrapper)
+                        registered_count += 1
+                        logger.debug("MCP: registered prompt '{}' from server '{}'", wrapper.name, name)
+                except Exception as e:
+                    logger.debug("MCP server '{}': prompts not supported or failed: {}", name, e)
+
+                logger.info(
+                    "MCP server '{}': connected, {} capabilities registered", name, registered_count
+                )
+                return name, server_stack
+
+            return await asyncio.wait_for(_connect_and_register(), timeout=connect_timeout)
+        except asyncio.TimeoutError:
+            logger.error(
+                "MCP server '{}': connect/list_tools timed out after {}s",
+                name,
+                max(5, int(cfg.tool_timeout or 30)),
             )
-            return name, server_stack
+            try:
+                await server_stack.aclose()
+            except Exception:
+                pass
+            return name, None
 
         except Exception as e:
             hint = ""
