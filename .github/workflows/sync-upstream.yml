@@ -1,0 +1,63 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream
+        run: |
+          git remote add upstream https://github.com/HKUDS/nanobot.git
+          git fetch upstream
+
+      - name: Check for new commits
+        id: check
+        run: |
+          UPSTREAM_SHA=$(git rev-parse upstream/main)
+          CURRENT_SHA=$(cat .upstream-sha 2>/dev/null || echo "none")
+          echo "upstream=$UPSTREAM_SHA" >> $GITHUB_OUTPUT
+          echo "current=$CURRENT_SHA" >> $GITHUB_OUTPUT
+
+      - name: Merge or open PR
+        if: steps.check.outputs.upstream != steps.check.outputs.current
+        run: |
+          SHA="${{ steps.check.outputs.upstream }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git merge upstream/main --no-edit -m "chore: sync upstream"; then
+            echo "$SHA" > .upstream-sha
+            git add .upstream-sha
+            git commit --amend --no-edit
+            git push origin main
+          else
+            git merge --abort
+            BRANCH="upstream-sync/$(date +%Y%m%d)"
+            git checkout -b $BRANCH
+            git merge upstream/main --no-commit || true
+            echo "$SHA" > .upstream-sha
+            git add -A
+            git commit -m "chore: upstream sync $(date +%Y-%m-%d) — needs conflict resolution"
+            git push origin $BRANCH
+          fi
+
+      - name: Open PR on conflict
+        if: failure()
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: upstream-sync/${{ steps.check.outputs.upstream }}
+          title: "⚠️ Upstream sync — Konflikt"
+          body: "Automatischer Merge fehlgeschlagen. Bitte manuell auflösen."
