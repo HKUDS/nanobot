@@ -53,6 +53,7 @@ class DiscordConfig(Base):
     enabled: bool = False
     token: str = ""
     allow_from: list[str] = Field(default_factory=list)
+    allow_channels: list[str] = Field(default_factory=list)  # Allowed channel IDs (empty = all)
     intents: int = 37377
     group_policy: Literal["mention", "open"] = "mention"
     read_receipt_emoji: str = "👀"
@@ -366,6 +367,7 @@ class DiscordChannel(BaseChannel):
             await client.send_outbound(msg)
         except Exception as e:
             logger.error("Error sending Discord message: {}", e)
+            raise
         finally:
             if not is_progress:
                 await self._stop_typing(msg.chat_id)
@@ -449,7 +451,6 @@ class DiscordChannel(BaseChannel):
         await self._start_typing(message.channel)
 
         # Add read receipt reaction immediately, working emoji after delay
-        channel_id = self._channel_key(message.channel)
         try:
             await message.add_reaction(self.config.read_receipt_emoji)
             self._pending_reactions[channel_id] = message
@@ -533,6 +534,12 @@ class DiscordChannel(BaseChannel):
         """Check if inbound Discord message should be processed."""
         if not self.is_allowed(sender_id):
             return False
+        # Channel-based filtering: only respond in allowed channels
+        allow_channels = self.config.allow_channels
+        if allow_channels:
+            channel_id = self._channel_key(message.channel)
+            if channel_id not in allow_channels:
+                return False
         if message.guild is not None and not self._should_respond_in_group(message, content):
             return False
         return True

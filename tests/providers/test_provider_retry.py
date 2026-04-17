@@ -1,4 +1,5 @@
 import asyncio
+import copy
 
 import pytest
 
@@ -87,6 +88,33 @@ async def test_chat_with_retry_returns_final_error_after_retries(monkeypatch) ->
 
 
 @pytest.mark.asyncio
+async def test_chat_with_retry_emits_terminal_progress_when_standard_retries_exhaust(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        LLMResponse(content="429 rate limit a", finish_reason="error"),
+        LLMResponse(content="429 rate limit b", finish_reason="error"),
+        LLMResponse(content="429 rate limit c", finish_reason="error"),
+        LLMResponse(content="503 final server error", finish_reason="error"),
+    ])
+    progress: list[str] = []
+
+    async def _fake_sleep(delay: int) -> None:
+        return None
+
+    async def _progress(msg: str) -> None:
+        progress.append(msg)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_retry_wait=_progress,
+    )
+
+    assert response.content == "503 final server error"
+    assert progress[-1] == "Model request failed after 4 retries, giving up."
+
+
+@pytest.mark.asyncio
 async def test_chat_with_retry_preserves_cancelled_error() -> None:
     provider = ScriptedProvider([asyncio.CancelledError()])
 
@@ -152,7 +180,7 @@ async def test_non_transient_error_with_images_retries_without_images() -> None:
         LLMResponse(content="ok, no image"),
     ])
 
-    response = await provider.chat_with_retry(messages=_IMAGE_MSG)
+    response = await provider.chat_with_retry(messages=copy.deepcopy(_IMAGE_MSG))
 
     assert response.content == "ok, no image"
     assert provider.calls == 2
@@ -162,6 +190,24 @@ async def test_non_transient_error_with_images_retries_without_images() -> None:
         if isinstance(content, list):
             assert all(b.get("type") != "image_url" for b in content)
             assert any("[image: /media/test.png]" in (b.get("text") or "") for b in content)
+
+
+@pytest.mark.asyncio
+async def test_successful_image_retry_mutates_original_messages_in_place() -> None:
+    """Successful no-image retry should update the caller's message history."""
+    provider = ScriptedProvider([
+        LLMResponse(content="model does not support images", finish_reason="error"),
+        LLMResponse(content="ok, no image"),
+    ])
+    messages = copy.deepcopy(_IMAGE_MSG)
+
+    response = await provider.chat_with_retry(messages=messages)
+
+    assert response.content == "ok, no image"
+    content = messages[0]["content"]
+    assert isinstance(content, list)
+    assert all(block.get("type") != "image_url" for block in content)
+    assert any("[image: /media/test.png]" in (block.get("text") or "") for block in content)
 
 
 @pytest.mark.asyncio
@@ -187,7 +233,7 @@ async def test_image_fallback_returns_error_on_second_failure() -> None:
         LLMResponse(content="still failing", finish_reason="error"),
     ])
 
-    response = await provider.chat_with_retry(messages=_IMAGE_MSG)
+    response = await provider.chat_with_retry(messages=copy.deepcopy(_IMAGE_MSG))
 
     assert provider.calls == 2
     assert response.content == "still failing"
@@ -202,7 +248,7 @@ async def test_image_fallback_without_meta_uses_default_placeholder() -> None:
         LLMResponse(content="ok"),
     ])
 
-    response = await provider.chat_with_retry(messages=_IMAGE_MSG_NO_META)
+    response = await provider.chat_with_retry(messages=copy.deepcopy(_IMAGE_MSG_NO_META))
 
     assert response.content == "ok"
     assert provider.calls == 2
@@ -450,3 +496,67 @@ async def test_persistent_retry_aborts_after_ten_identical_transient_errors(monk
     assert response.content == "429 rate limit"
     assert provider.calls == 10
     assert delays == [1, 2, 4, 4, 4, 4, 4, 4, 4]
+
+
+@pytest.mark.asyncio
+async def test_persistent_retry_emits_terminal_progress_on_identical_error_limit(monkeypatch) -> None:
+    provider = ScriptedProvider([
+        *[LLMResponse(content="429 rate limit", finish_reason="error") for _ in range(10)],
+    ])
+    progress: list[str] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        return None
+
+    async def _progress(msg: str) -> None:
+        progress.append(msg)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        retry_mode="persistent",
+        on_retry_wait=_progress,
+    )
+
+    assert response.finish_reason == "error"
+    assert progress[-1] == "Persistent retry stopped after 10 identical errors."
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_normalizes_explicit_none_max_tokens() -> None:
+    """Explicit max_tokens=None must fall back to generation defaults.
+
+    Regression for #3102: callers that construct AgentRunSpec with
+    max_tokens=None propagate None into chat_with_retry, which used to
+    reach ``_build_kwargs`` and crash on ``max(1, None)``.
+    """
+    provider = ScriptedProvider([LLMResponse(content="ok")])
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=None,
+        temperature=None,
+    )
+
+    assert response.content == "ok"
+    # Generation settings default to 4096 / 0.7; explicit None should
+    # have been replaced before reaching chat().
+    assert provider.last_kwargs["max_tokens"] == 4096
+    assert provider.last_kwargs["temperature"] == 0.7
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_with_retry_normalizes_explicit_none_max_tokens() -> None:
+    """chat_stream_with_retry must apply the same None-guard as chat_with_retry."""
+    provider = ScriptedProvider([LLMResponse(content="ok")])
+
+    response = await provider.chat_stream_with_retry(
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=None,
+        temperature=None,
+    )
+
+    assert response.content == "ok"
+    assert provider.last_kwargs["max_tokens"] == 4096
+    assert provider.last_kwargs["temperature"] == 0.7

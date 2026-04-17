@@ -79,6 +79,29 @@ class TestHistoryWithCursor:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 2
 
+    def test_read_unprocessed_skips_entries_without_cursor(self, store):
+        """Regression: entries missing the cursor key should be silently skipped."""
+        store.history_file.write_text(
+            '{"timestamp": "2026-04-01 10:00", "content": "no cursor"}\n'
+            '{"cursor": 2, "timestamp": "2026-04-01 10:01", "content": "valid"}\n'
+            '{"cursor": 3, "timestamp": "2026-04-01 10:02", "content": "also valid"}\n',
+            encoding="utf-8",
+        )
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert [e["cursor"] for e in entries] == [2, 3]
+
+    def test_next_cursor_falls_back_when_last_entry_has_no_cursor(self, store):
+        """Regression: _next_cursor should not KeyError on entries without cursor."""
+        store.history_file.write_text(
+            '{"timestamp": "2026-04-01 10:01", "content": "no cursor"}\n',
+            encoding="utf-8",
+        )
+        # Delete .cursor file so _next_cursor falls back to reading JSONL
+        store._cursor_file.unlink(missing_ok=True)
+        # Last entry has no cursor — should safely return 1, not KeyError
+        cursor = store.append_history("new event")
+        assert cursor == 1
+
     def test_compact_history_drops_oldest(self, tmp_path):
         store = MemoryStore(tmp_path, max_history_entries=2)
         store.append_history("event 1")
