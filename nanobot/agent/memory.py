@@ -552,6 +552,13 @@ class Consolidator:
 # ---------------------------------------------------------------------------
 
 
+# Single source of truth for the staleness threshold used in _annotate_with_ages
+# *and* in the Phase 1 prompt template (passed as `stale_threshold_days`).
+# Keep code and prompt aligned — if you bump this, the LLM's instruction string
+# updates automatically.
+_STALE_THRESHOLD_DAYS = 14
+
+
 class Dream:
     """Two-phase memory processor: analyze history.jsonl, then edit files via AgentRunner.
 
@@ -568,6 +575,7 @@ class Dream:
         max_batch_size: int = 20,
         max_iterations: int = 10,
         max_tool_result_chars: int = 16_000,
+        annotate_line_ages: bool = True,
     ):
         self.store = store
         self.provider = provider
@@ -575,6 +583,10 @@ class Dream:
         self.max_batch_size = max_batch_size
         self.max_iterations = max_iterations
         self.max_tool_result_chars = max_tool_result_chars
+        # Kill switch for the git-blame-based per-line age annotation in Phase 1.
+        # Default True keeps the #3212 behavior; set False to feed MEMORY.md raw
+        # (e.g. if a specific LLM reacts poorly to the `← Nd` suffix).
+        self.annotate_line_ages = annotate_line_ages
         self._runner = AgentRunner(provider)
         self._tools = self._build_tools()
 
@@ -635,9 +647,12 @@ class Dream:
     def _annotate_with_ages(self, content: str) -> str:
         """Append per-line age suffixes to MEMORY.md content.
 
-        Each non-blank line gets a suffix like ``← 30d`` indicating how
-        many days since it was last modified.  Lines ≤14 days old get no
-        suffix.  Returns the original content unchanged if git is unavailable.
+        Each non-blank line whose age exceeds ``_STALE_THRESHOLD_DAYS`` gets a
+        suffix like ``← 30d`` indicating days since last modification.
+        Returns the original content unchanged if git is unavailable,
+        annotate fails, or the line count doesn't match the age count
+        (which can happen with an uncommitted working-tree edit — better to
+        skip annotation than to tag the wrong line).
         SOUL.md and USER.md are never annotated.
         """
         file_path = "memory/MEMORY.md"
@@ -651,14 +666,23 @@ class Dream:
 
         had_trailing = content.endswith("\n")
         lines = content.splitlines()
+        # If HEAD-blob line count disagrees with the working-tree content we
+        # received, ages would be assigned to the wrong lines — skip entirely
+        # and feed the LLM un-annotated content rather than misleading data.
+        if len(lines) != len(ages):
+            logger.debug(
+                "line_ages length mismatch for {} (lines={}, ages={}); skipping annotation",
+                file_path, len(lines), len(ages),
+            )
+            return content
+
         annotated: list[str] = []
-        for i, line in enumerate(lines):
-            if not line.strip() or i >= len(ages):
+        for line, age in zip(lines, ages):
+            if not line.strip():
                 annotated.append(line)
                 continue
-            d = ages[i].age_days
-            if d > 14:
-                annotated.append(f"{line}  \u2190 {d}d")
+            if age.age_days > _STALE_THRESHOLD_DAYS:
+                annotated.append(f"{line}  \u2190 {age.age_days}d")
             else:
                 annotated.append(line)
         result = "\n".join(annotated)
@@ -686,10 +710,14 @@ class Dream:
             f"[{e['timestamp']}] {e['content']}" for e in batch
         )
 
-        # Current file contents + per-line age annotations
+        # Current file contents + per-line age annotations (MEMORY.md only)
         current_date = datetime.now().strftime("%Y-%m-%d")
         raw_memory = self.store.read_memory() or "(empty)"
-        current_memory = self._annotate_with_ages(raw_memory)
+        current_memory = (
+            self._annotate_with_ages(raw_memory)
+            if self.annotate_line_ages
+            else raw_memory
+        )
         current_soul = self.store.read_soul() or "(empty)"
         current_user = self.store.read_user() or "(empty)"
 
@@ -711,7 +739,11 @@ class Dream:
                 messages=[
                     {
                         "role": "system",
-                        "content": render_template("agent/dream_phase1.md", strip=True),
+                        "content": render_template(
+                            "agent/dream_phase1.md",
+                            strip=True,
+                            stale_threshold_days=_STALE_THRESHOLD_DAYS,
+                        ),
                     },
                     {"role": "user", "content": phase1_prompt},
                 ],

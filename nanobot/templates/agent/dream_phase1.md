@@ -26,7 +26,7 @@ Staleness — MEMORY.md lines may have a ``← Nd`` suffix showing days since la
 - Age only indicates when content was last touched, not whether it should be removed
 - Use content judgment: user habits/preferences/personality traits are permanent regardless of age
 - Only prune content that is objectively outdated: passed events, resolved tracking, superseded approaches
-- Lines with ``← Nd`` (N>14) deserve closer review but are NOT automatically removable
+- Lines with ``← Nd`` (N>{{ stale_threshold_days }}) deserve closer review but are NOT automatically removable
 - When removing: prefer deleting individual items over entire sections
 
 Skill discovery — flag [SKILL] when ALL of these are true:
