@@ -43,7 +43,7 @@ class DreamConfig(Base):
         validation_alias=AliasChoices("modelOverride", "model", "model_override"),
     )  # Optional Dream-specific model override
     max_batch_size: int = Field(default=20, ge=1)  # Max history entries per run
-    max_iterations: int = Field(default=10, ge=1)  # Max tool calls per Phase 2
+    max_iterations: int = Field(default=15, ge=1)  # Max tool calls per Phase 2
 
     def build_schedule(self, timezone: str) -> CronSchedule:
         """Build the runtime schedule, preferring the legacy cron override if present."""

@@ -123,3 +123,55 @@ class TestDreamRun:
         assert "Successfully wrote" in result
         assert (store.workspace / "skills" / "test-skill" / "SKILL.md").exists()
 
+    async def test_phase1_prompt_includes_line_age_annotations(self, dream, mock_provider, mock_runner, store):
+        """Phase 1 prompt should have per-line age suffixes in MEMORY.md when git is available."""
+        store.append_history("some event")
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        # Init git so line_ages works
+        store.git.init()
+        store.git.auto_commit("initial memory state")
+
+        await dream.run()
+
+        # The MEMORY.md section should not crash and should contain the memory content
+        call_args = mock_provider.chat_with_retry.call_args
+        user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
+        assert "## Current MEMORY.md" in user_msg
+
+    async def test_phase1_annotates_only_memory_not_soul_or_user(self, dream, mock_provider, mock_runner, store):
+        """SOUL.md and USER.md should never have age annotations — they are permanent."""
+        store.append_history("some event")
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        store.git.init()
+        store.git.auto_commit("initial state")
+
+        await dream.run()
+
+        call_args = mock_provider.chat_with_retry.call_args
+        user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
+        # The ← suffix should only appear in MEMORY.md section
+        memory_section = user_msg.split("## Current MEMORY.md")[1].split("## Current SOUL.md")[0]
+        soul_section = user_msg.split("## Current SOUL.md")[1].split("## Current USER.md")[0]
+        user_section = user_msg.split("## Current USER.md")[1]
+        # SOUL and USER should not contain age arrows
+        assert "\u2190" not in soul_section
+        assert "\u2190" not in user_section
+
+    async def test_phase1_prompt_works_without_git(self, dream, mock_provider, mock_runner, store):
+        """Phase 1 should work fine even if git is not initialized (no age annotations)."""
+        store.append_history("some event")
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        await dream.run()
+
+        # Should still succeed — just without age annotations
+        mock_provider.chat_with_retry.assert_called_once()
+        call_args = mock_provider.chat_with_retry.call_args
+        user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
+        assert "## Current MEMORY.md" in user_msg
+

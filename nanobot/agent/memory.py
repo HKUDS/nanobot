@@ -632,6 +632,40 @@ class Dream:
 
     # -- main entry ----------------------------------------------------------
 
+    def _annotate_with_ages(self, content: str) -> str:
+        """Append per-line age suffixes to MEMORY.md content.
+
+        Each non-blank line gets a suffix like ``← 30d`` indicating how
+        many days since it was last modified.  Lines ≤14 days old get no
+        suffix.  Returns the original content unchanged if git is unavailable.
+        SOUL.md and USER.md are never annotated.
+        """
+        file_path = "memory/MEMORY.md"
+        try:
+            ages = self.store.git.line_ages(file_path)
+        except Exception:
+            logger.debug("line_ages failed for {}", file_path)
+            return content
+        if not ages:
+            return content
+
+        had_trailing = content.endswith("\n")
+        lines = content.splitlines()
+        annotated: list[str] = []
+        for i, line in enumerate(lines):
+            if not line.strip() or i >= len(ages):
+                annotated.append(line)
+                continue
+            d = ages[i].age_days
+            if d > 14:
+                annotated.append(f"{line}  \u2190 {d}d")
+            else:
+                annotated.append(line)
+        result = "\n".join(annotated)
+        if had_trailing:
+            result += "\n"
+        return result
+
     async def run(self) -> bool:
         """Process unprocessed history entries. Returns True if work was done."""
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
@@ -652,9 +686,10 @@ class Dream:
             f"[{e['timestamp']}] {e['content']}" for e in batch
         )
 
-        # Current file contents
+        # Current file contents + per-line age annotations
         current_date = datetime.now().strftime("%Y-%m-%d")
-        current_memory = self.store.read_memory() or "(empty)"
+        raw_memory = self.store.read_memory() or "(empty)"
+        current_memory = self._annotate_with_ages(raw_memory)
         current_soul = self.store.read_soul() or "(empty)"
         current_user = self.store.read_user() or "(empty)"
 
@@ -759,7 +794,9 @@ class Dream:
         # Git auto-commit (only when there are actual changes)
         if changelog and self.store.git.is_initialized():
             ts = batch[-1]["timestamp"]
-            sha = self.store.git.auto_commit(f"dream: {ts}, {len(changelog)} change(s)")
+            summary = f"dream: {ts}, {len(changelog)} change(s)"
+            commit_msg = f"{summary}\n\n{analysis.strip()}"
+            sha = self.store.git.auto_commit(commit_msg)
             if sha:
                 logger.info("Dream commit: {}", sha)
 
