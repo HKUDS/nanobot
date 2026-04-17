@@ -142,7 +142,7 @@ export class WhatsAppClient {
       if (type !== 'notify') return;
 
       for (const msg of messages) {
-        if (msg.key.fromMe) continue;
+        // if (msg.key.fromMe) continue; — allow self-messages for linked device use
         if (msg.key.remoteJid === 'status@broadcast') continue;
 
         const unwrapped = baileysExtractMessageContent(msg.message);
