@@ -17,6 +17,7 @@ from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_
 
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.security.protected_paths import harden, writable
 from nanobot.utils.gitstore import GitStore
 
 if TYPE_CHECKING:
@@ -53,6 +54,11 @@ class MemoryStore:
             "SOUL.md", "USER.md", "memory/MEMORY.md",
         ])
         self._maybe_migrate_legacy_history()
+        # Filesystem-level defense-in-depth for the shell-guard bypass class:
+        # history.jsonl and .dream_cursor are 0o444 so direct shell writes
+        # fail with EACCES even when the guard regex misses the expansion.
+        harden(self.history_file)
+        harden(self._dream_cursor_file)
 
     @property
     def git(self) -> GitStore:
@@ -95,7 +101,8 @@ class MemoryStore:
                 self._cursor_file.write_text(str(last_cursor), encoding="utf-8")
                 # Default to "already processed" so upgrades do not replay the
                 # user's entire historical archive into Dream on first start.
-                self._dream_cursor_file.write_text(str(last_cursor), encoding="utf-8")
+                with writable(self._dream_cursor_file):
+                    self._dream_cursor_file.write_text(str(last_cursor), encoding="utf-8")
 
             backup_path = self._next_legacy_backup_path()
             self.legacy_history_file.replace(backup_path)
@@ -241,8 +248,9 @@ class MemoryStore:
                 cursor,
             )
         record = {"cursor": cursor, "timestamp": ts, "content": content}
-        with open(self.history_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        with writable(self.history_file):
+            with open(self.history_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
         self._cursor_file.write_text(str(cursor), encoding="utf-8")
         return cursor
 
@@ -311,9 +319,10 @@ class MemoryStore:
 
     def _write_entries(self, entries: list[dict[str, Any]]) -> None:
         """Overwrite history.jsonl with the given entries."""
-        with open(self.history_file, "w", encoding="utf-8") as f:
-            for entry in entries:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        with writable(self.history_file):
+            with open(self.history_file, "w", encoding="utf-8") as f:
+                for entry in entries:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # -- dream cursor --------------------------------------------------------
 
@@ -326,7 +335,8 @@ class MemoryStore:
         return 0
 
     def set_last_dream_cursor(self, cursor: int) -> None:
-        self._dream_cursor_file.write_text(str(cursor), encoding="utf-8")
+        with writable(self._dream_cursor_file):
+            self._dream_cursor_file.write_text(str(cursor), encoding="utf-8")
 
     # -- message formatting utility ------------------------------------------
 
