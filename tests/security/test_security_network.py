@@ -102,6 +102,41 @@ def test_no_urls_returns_false():
 
 
 # ---------------------------------------------------------------------------
+# contains_internal_url — non-http schemes (file://, gopher://, ftp://, dict://)
+# curl and wget support many schemes beyond http(s); several have been used as
+# real-world SSRF vectors (gopher:// for Redis, dict:// for service probes,
+# file:// for local-file read). The scanner should catch these too.
+# ---------------------------------------------------------------------------
+
+def test_blocks_file_scheme_local_read():
+    """file:/// references the local filesystem — always treated as internal."""
+    assert contains_internal_url("curl file:///etc/passwd")
+
+
+def test_blocks_gopher_to_private_ip_literal():
+    """gopher:// with a private IP literal is the classic Redis SSRF vector."""
+    assert contains_internal_url("curl gopher://127.0.0.1:6379/_SET%20foo%20bar")
+
+
+def test_blocks_ftp_to_private_ip_literal():
+    assert contains_internal_url("curl ftp://10.0.0.1/secret")
+
+
+def test_blocks_dict_to_metadata_ip():
+    """dict:// is another curl-supported scheme used for service probing."""
+    assert contains_internal_url("curl dict://169.254.169.254/info")
+
+
+def test_allows_non_http_scheme_to_public_host():
+    """ssh:// / git:// clones against public hosts must not be blocked."""
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo",
+        _fake_resolve("github.com", ["140.82.121.3"]),
+    ):
+        assert not contains_internal_url("git clone ssh://git@github.com/HKUDS/nanobot.git")
+
+
+# ---------------------------------------------------------------------------
 # SSRF whitelist — allow specific CIDR ranges (#2669)
 # ---------------------------------------------------------------------------
 
