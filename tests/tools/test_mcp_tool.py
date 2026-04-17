@@ -357,6 +357,33 @@ async def test_connect_mcp_servers_enabled_tools_warns_on_unknown_entries(
 
 
 @pytest.mark.asyncio
+async def test_connect_mcp_servers_logs_stdio_pollution_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages: list[str] = []
+
+    def _error(message: str, *args: object) -> None:
+        messages.append(message.format(*args))
+
+    @asynccontextmanager
+    async def _broken_stdio_client(_params: object):
+        raise RuntimeError("Parse error: Unexpected token 'INFO' before JSON-RPC headers")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _broken_stdio_client)
+    monkeypatch.setattr("nanobot.agent.tools.mcp.logger.error", _error)
+
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers({"gh": MCPServerConfig(command="github-mcp")}, registry)
+
+    assert stacks == {}
+    assert messages
+    assert "stdio protocol pollution" in messages[-1]
+    assert "stdout" in messages[-1]
+    assert "stderr" in messages[-1]
+
+
+@pytest.mark.asyncio
 async def test_connect_mcp_servers_one_failure_does_not_block_others(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

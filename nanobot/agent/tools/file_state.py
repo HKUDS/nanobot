@@ -80,11 +80,14 @@ def check_read(path: str | Path) -> str | None:
             entry.mtime = current_mtime
             return None
         return "Warning: file has been modified since last read. Re-read to verify content before editing."
+    # mtime unchanged - still check content hash to detect quick modifications
+    if entry.content_hash and _hash_file(p) != entry.content_hash:
+        return "Warning: file has been modified since last read. Re-read to verify content before editing."
     return None
 
 
 def is_unchanged(path: str | Path, offset: int = 1, limit: int | None = None) -> bool:
-    """Return True if file was previously read with same params and mtime is unchanged."""
+    """Return True if file was previously read with same params and content is unchanged."""
     p = str(Path(path).resolve())
     entry = _state.get(p)
     if entry is None:
@@ -97,7 +100,18 @@ def is_unchanged(path: str | Path, offset: int = 1, limit: int | None = None) ->
         current_mtime = os.path.getmtime(p)
     except OSError:
         return False
-    return current_mtime == entry.mtime
+    if current_mtime != entry.mtime:
+        # mtime changed - check if content also changed
+        current_hash = _hash_file(p)
+        if current_hash != entry.content_hash:
+            # Content actually changed - don't dedup
+            entry.can_dedup = False
+            return False
+        # Content identical despite mtime change (e.g. touch) - mark as not dedupable to force full read next time
+        entry.can_dedup = False
+        return True
+    # mtime unchanged - content must be identical
+    return True
 
 
 def clear() -> None:

@@ -140,6 +140,7 @@ class TestRestartCommand:
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(20500, "tiktoken")
         )
+        loop.subagents.get_running_count_by_session.return_value = 0
 
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
 
@@ -148,10 +149,35 @@ class TestRestartCommand:
         assert response is not None
         assert "Model: test-model" in response.content
         assert "Tokens: 0 in / 0 out" in response.content
-        assert "Context: 20k/65k (31%)" in response.content
+        assert "Context: 20k/65k (31% of input budget)" in response.content
         assert "Session: 3 messages" in response.content
         assert "Uptime: 2m 5s" in response.content
+        assert "Tasks: 0 active" in response.content
         assert response.metadata == {"render_as": "text"}
+
+    @pytest.mark.asyncio
+    async def test_status_counts_running_dispatch_and_subagent_tasks(self):
+        loop, _bus = _make_loop()
+        session = MagicMock()
+        session.get_history.return_value = [{"role": "user"}]
+        loop.sessions.get_or_create.return_value = session
+        loop.consolidator.estimate_session_prompt_tokens = MagicMock(
+            return_value=(1000, "tiktoken")
+        )
+
+        running_task = MagicMock()
+        running_task.done.return_value = False
+        finished_task = MagicMock()
+        finished_task.done.return_value = True
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
+        loop._active_tasks[msg.session_key] = [running_task, finished_task]
+        loop.subagents.get_running_count_by_session.return_value = 2
+
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "Tasks: 3 active" in response.content
 
     @pytest.mark.asyncio
     async def test_run_agent_loop_resets_usage_when_provider_omits_it(self):
@@ -179,6 +205,7 @@ class TestRestartCommand:
         loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(0, "none")
         )
+        loop.subagents.get_running_count_by_session.return_value = 0
 
         response = await loop._process_message(
             InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
@@ -186,7 +213,8 @@ class TestRestartCommand:
 
         assert response is not None
         assert "Tokens: 1200 in / 34 out" in response.content
-        assert "Context: 1k/65k (1%)" in response.content
+        assert "Context: 1k/65k (1% of input budget)" in response.content
+        assert "Tasks: 0 active" in response.content
 
     @pytest.mark.asyncio
     async def test_process_direct_preserves_render_metadata(self):
@@ -195,6 +223,7 @@ class TestRestartCommand:
         session.get_history.return_value = []
         loop.sessions.get_or_create.return_value = session
         loop.subagents.get_running_count.return_value = 0
+        loop.subagents.get_running_count_by_session.return_value = 0
 
         response = await loop.process_direct("/status", session_key="cli:test")
 

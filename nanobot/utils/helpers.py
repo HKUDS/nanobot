@@ -400,6 +400,8 @@ def build_status_content(
     session_msg_count: int,
     context_tokens_estimate: int,
     search_usage_text: str | None = None,
+    active_task_count: int = 0,
+    max_completion_tokens: int = 8192,
 ) -> str:
     """Build a human-readable runtime status snapshot.
     
@@ -418,7 +420,9 @@ def build_status_content(
     last_out = last_usage.get("completion_tokens", 0)
     cached = last_usage.get("cached_tokens", 0)
     ctx_total = max(context_window_tokens, 0)
-    ctx_pct = int((context_tokens_estimate / ctx_total) * 100) if ctx_total > 0 else 0
+    # Budget mirrors Consolidator formula: ctx_window - max_completion - _SAFETY_BUFFER
+    ctx_budget = max(ctx_total - int(max_completion_tokens) - 1024, 1)
+    ctx_pct = min(int((context_tokens_estimate / ctx_budget) * 100), 999) if ctx_budget > 0 else 0
     ctx_used_str = f"{context_tokens_estimate // 1000}k" if context_tokens_estimate >= 1000 else str(context_tokens_estimate)
     ctx_total_str = f"{ctx_total // 1000}k" if ctx_total > 0 else "n/a"
     token_line = f"\U0001f4ca Tokens: {last_in} in / {last_out} out"
@@ -428,9 +432,10 @@ def build_status_content(
         f"\U0001f408 nanobot v{version}",
         f"\U0001f9e0 Model: {model}",
         token_line,
-        f"\U0001f4da Context: {ctx_used_str}/{ctx_total_str} ({ctx_pct}%)",
+        f"\U0001f4da Context: {ctx_used_str}/{ctx_total_str} ({ctx_pct}% of input budget)",
         f"\U0001f4ac Session: {session_msg_count} messages",
         f"\u23f1 Uptime: {uptime}",
+        f"\u26a1 Tasks: {active_task_count} active",
     ]
     if search_usage_text:
         lines.append(search_usage_text)

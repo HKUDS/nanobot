@@ -10,8 +10,7 @@ except ImportError:
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.slack import SlackChannel
-from nanobot.channels.slack import SlackConfig
+from nanobot.channels.slack import SlackChannel, SlackConfig
 
 
 class _FakeAsyncWebClient:
@@ -20,6 +19,12 @@ class _FakeAsyncWebClient:
         self.file_upload_calls: list[dict[str, object | None]] = []
         self.reactions_add_calls: list[dict[str, object | None]] = []
         self.reactions_remove_calls: list[dict[str, object | None]] = []
+        self.conversations_list_calls: list[dict[str, object | None]] = []
+        self.users_list_calls: list[dict[str, object | None]] = []
+        self.conversations_open_calls: list[dict[str, object | None]] = []
+        self._conversations_pages: list[dict[str, object]] = []
+        self._users_pages: list[dict[str, object]] = []
+        self._open_dm_response: dict[str, object] = {"channel": {"id": "D_OPENED"}}
 
     async def chat_postMessage(
         self,
@@ -80,6 +85,22 @@ class _FakeAsyncWebClient:
                 "timestamp": timestamp,
             }
         )
+
+    async def conversations_list(self, **kwargs):
+        self.conversations_list_calls.append(kwargs)
+        if self._conversations_pages:
+            return self._conversations_pages.pop(0)
+        return {"channels": [], "response_metadata": {"next_cursor": ""}}
+
+    async def users_list(self, **kwargs):
+        self.users_list_calls.append(kwargs)
+        if self._users_pages:
+            return self._users_pages.pop(0)
+        return {"members": [], "response_metadata": {"next_cursor": ""}}
+
+    async def conversations_open(self, **kwargs):
+        self.conversations_open_calls.append(kwargs)
+        return self._open_dm_response
 
 
 @pytest.mark.asyncio
@@ -151,3 +172,147 @@ async def test_send_updates_reaction_when_final_response_sent() -> None:
     assert fake_web.reactions_add_calls == [
         {"channel": "C123", "name": "white_check_mark", "timestamp": "1700000000.000100"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_send_resolves_channel_name_to_channel_id() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    fake_web._conversations_pages = [
+        {
+            "channels": [{"id": "C999", "name": "channel_x"}],
+            "response_metadata": {"next_cursor": ""},
+        }
+    ]
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="#channel_x",
+            content="hello",
+        )
+    )
+
+    assert fake_web.chat_post_calls == [
+        {"channel": "C999", "text": "hello\n", "thread_ts": None}
+    ]
+    assert len(fake_web.conversations_list_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_send_resolves_user_handle_to_dm_channel() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    fake_web._users_pages = [
+        {
+            "members": [
+                {
+                    "id": "U234",
+                    "name": "alice",
+                    "profile": {"display_name": "Alice"},
+                }
+            ],
+            "response_metadata": {"next_cursor": ""},
+        }
+    ]
+    fake_web._open_dm_response = {"channel": {"id": "D234"}}
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="@alice",
+            content="hello",
+        )
+    )
+
+    assert fake_web.conversations_open_calls == [{"users": "U234"}]
+    assert fake_web.chat_post_calls == [
+        {"channel": "D234", "text": "hello\n", "thread_ts": None}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_updates_reaction_on_origin_channel_for_cross_channel_send() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True, react_emoji="eyes"), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    fake_web._conversations_pages = [
+        {
+            "channels": [{"id": "C999", "name": "channel_x"}],
+            "response_metadata": {"next_cursor": ""},
+        }
+    ]
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="channel_x",
+            content="done",
+            metadata={
+                "slack": {
+                    "event": {"ts": "1700000000.000100", "channel": "D_ORIGIN"},
+                    "channel_type": "im",
+                },
+            },
+        )
+    )
+
+    assert fake_web.chat_post_calls == [
+        {"channel": "C999", "text": "done\n", "thread_ts": None}
+    ]
+    assert fake_web.reactions_remove_calls == [
+        {"channel": "D_ORIGIN", "name": "eyes", "timestamp": "1700000000.000100"}
+    ]
+    assert fake_web.reactions_add_calls == [
+        {"channel": "D_ORIGIN", "name": "white_check_mark", "timestamp": "1700000000.000100"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_does_not_reuse_origin_thread_ts_for_cross_channel_send() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    fake_web._conversations_pages = [
+        {
+            "channels": [{"id": "C999", "name": "channel_x"}],
+            "response_metadata": {"next_cursor": ""},
+        }
+    ]
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="channel_x",
+            content="done",
+            metadata={
+                "slack": {
+                    "event": {"ts": "1700000000.000100", "channel": "C_ORIGIN"},
+                    "thread_ts": "1700000000.000200",
+                    "channel_type": "channel",
+                },
+            },
+        )
+    )
+
+    assert fake_web.chat_post_calls == [
+        {"channel": "C999", "text": "done\n", "thread_ts": None}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_raises_when_named_target_cannot_be_resolved() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    with pytest.raises(ValueError, match="was not found"):
+        await channel.send(
+            OutboundMessage(
+                channel="slack",
+                chat_id="#missing-channel",
+                content="hello",
+            )
+        )

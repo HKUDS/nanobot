@@ -520,7 +520,10 @@ class TelegramChannel(BaseChannel):
                 reply_parameters=reply_params,
                 **(thread_kwargs or {}),
             )
-        except Exception as e:
+        except BadRequest as e:
+            # Only fall back to plain text on actual HTML parse/format errors.
+            # Network errors (TimedOut, NetworkError) should propagate immediately
+            # to avoid doubling connection demand during pool exhaustion.
             logger.warning("HTML parse failed, falling back to plain text: {}", e)
             try:
                 await self._call_with_retry(
@@ -567,7 +570,10 @@ class TelegramChannel(BaseChannel):
                     chat_id=int_chat_id, message_id=buf.message_id,
                     text=html, parse_mode="HTML",
                 )
-            except Exception as e:
+            except BadRequest as e:
+                # Only fall back to plain text on actual HTML parse/format errors.
+                # Network errors (TimedOut, NetworkError) should propagate immediately
+                # to avoid doubling connection demand during pool exhaustion.
                 if self._is_not_modified_error(e):
                     logger.debug("Final stream edit already applied for {}", chat_id)
                     self._stream_bufs.pop(chat_id, None)
