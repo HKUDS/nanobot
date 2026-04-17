@@ -67,6 +67,13 @@ class MyTool(Tool):
         "private_key", "access_token", "refresh_token", "auth",
     })
 
+    @classmethod
+    def _is_sensitive_field_name(cls, name: str) -> bool:
+        lowered = name.lower()
+        return lowered in cls._SENSITIVE_NAMES or any(
+            part in cls._SENSITIVE_NAMES for part in lowered.split("_")
+        )
+
     RESTRICTED: dict[str, dict[str, Any]] = {
         "max_iterations":        {"type": int, "min": 1,   "max": 100},
         "context_window_tokens": {"type": int, "min": 4096, "max": 1_000_000},
@@ -248,13 +255,16 @@ class MyTool(Tool):
             return f"{key}: {r}" if key else r
         # Complex object — small Pydantic models: show values; others: show field names for navigation
         cls_name = type(val).__name__
-        if hasattr(val, "model_fields"):
-            fields = list(val.model_fields.keys())
+        model_fields = getattr(type(val), "model_fields", None)
+        if model_fields:
+            fields = list(model_fields.keys())
             if len(fields) <= 8:
                 # Small config objects: show field=value pairs
                 pairs = []
                 for f in fields:
                     fv = getattr(val, f, "?")
+                    if MyTool._is_sensitive_field_name(f):
+                        continue
                     if isinstance(fv, (str, int, float, bool, type(None))):
                         pairs.append(f"{f}={fv!r}")
                     else:
