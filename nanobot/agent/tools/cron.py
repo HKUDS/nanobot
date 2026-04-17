@@ -18,8 +18,9 @@ from nanobot.cron.types import CronJob, CronJobState, CronSchedule
             "(e.g., 'weather-monitor', 'daily-standup'). Defaults to first 30 chars of message."
         ),
         message=StringSchema(
-            "Instruction for the agent to execute when the job triggers "
-            "(e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report')"
+            "REQUIRED when action='add'. Instruction for the agent to execute when the job triggers "
+            "(e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report'). "
+            "Not used for action='list' or action='remove'."
         ),
         every_seconds=IntegerSchema(0, description="Interval in seconds (for recurring tasks)"),
         cron_expr=StringSchema("Cron expression like '0 9 * * *' (for scheduled tasks)"),
@@ -35,8 +36,8 @@ from nanobot.cron.types import CronJob, CronJobState, CronSchedule
             description="Whether to deliver the execution result to the user channel (default true)",
             default=True,
         ),
-        job_id=StringSchema("Job ID (for remove)"),
-        required=["action", "message"],
+        job_id=StringSchema("REQUIRED when action='remove'. Job ID to remove (obtain via action='list')."),
+        required=["action"],
     )
 )
 class CronTool(Tool):
