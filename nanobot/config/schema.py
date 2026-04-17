@@ -43,7 +43,12 @@ class DreamConfig(Base):
         validation_alias=AliasChoices("modelOverride", "model", "model_override"),
     )  # Optional Dream-specific model override
     max_batch_size: int = Field(default=20, ge=1)  # Max history entries per run
-    max_iterations: int = Field(default=10, ge=1)  # Max tool calls per Phase 2
+    # Bumped from 10 to 15 in #3212 (exp002: +30% dedup, no accuracy loss; >15 plateaus).
+    max_iterations: int = Field(default=15, ge=1)  # Max tool calls per Phase 2
+    # Per-line git-blame age annotation in Phase 1 prompt (see #3212). Default
+    # on — set to False to feed MEMORY.md raw if a specific LLM reacts poorly
+    # to the `← Nd` suffix or you want deterministic, git-independent prompts.
+    annotate_line_ages: bool = True
 
     def build_schedule(self, timezone: str) -> CronSchedule:
         """Build the runtime schedule, preferring the legacy cron override if present."""
@@ -200,11 +205,19 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
+class MyToolConfig(Base):
+    """Self-inspection tool configuration."""
+
+    enable: bool = True  # register the `my` tool (agent runtime state inspection)
+    allow_set: bool = False  # let `my` modify loop state (read-only if False)
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    my: MyToolConfig = Field(default_factory=MyToolConfig)
     restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)

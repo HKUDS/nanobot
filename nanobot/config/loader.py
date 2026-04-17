@@ -117,4 +117,19 @@ def _migrate_config(data: dict) -> dict:
     exec_cfg = tools.get("exec", {})
     if "restrictToWorkspace" in exec_cfg and "restrictToWorkspace" not in tools:
         tools["restrictToWorkspace"] = exec_cfg.pop("restrictToWorkspace")
+
+    # Move tools.myEnabled / tools.mySet → tools.my.{enable, allowSet}.
+    # The old flat keys shipped in the initial MyTool landing; wrapping them in a
+    # sub-config keeps `web` / `exec` / `my` symmetric and gives room to grow.
+    if "myEnabled" in tools or "mySet" in tools:
+        my_cfg = tools.setdefault("my", {})
+        if "myEnabled" in tools and "enable" not in my_cfg:
+            my_cfg["enable"] = tools.pop("myEnabled")
+        else:
+            tools.pop("myEnabled", None)
+        if "mySet" in tools and "allowSet" not in my_cfg:
+            my_cfg["allowSet"] = tools.pop("mySet")
+        else:
+            tools.pop("mySet", None)
+
     return data
