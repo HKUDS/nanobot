@@ -418,7 +418,8 @@ class AnthropicProvider(LLMProvider):
         new_tools = tools
         if tools:
             new_tools = list(tools)
-            new_tools[-1] = {**new_tools[-1], "cache_control": marker}
+            for idx in LLMProvider._tool_cache_marker_indices(new_tools):
+                new_tools[idx] = {**new_tools[idx], "cache_control": marker}
 
         return system, new_msgs, new_tools
 
@@ -450,7 +451,7 @@ class AnthropicProvider(LLMProvider):
 
         # Opus 4.6 / Sonnet 4.6+ use adaptive thinking — auto-enable if caller
         # didn't specify reasoning_effort.
-        _ADAPTIVE_PATTERN = re.compile(r"claude-(opus|sonnet)-4[-.]6", re.IGNORECASE)
+        _ADAPTIVE_PATTERN = re.compile(r"claude-(opus|sonnet)-4[-.]\d+", re.IGNORECASE)
         _adaptive = bool(_ADAPTIVE_PATTERN.search(model_name))
         if not reasoning_effort and _adaptive:
             reasoning_effort = "medium"
@@ -478,10 +479,10 @@ class AnthropicProvider(LLMProvider):
         if thinking_enabled:
             effort = (reasoning_effort or "medium").lower()
             if _adaptive:
-                # Opus 4.6 / Sonnet 4.6: adaptive thinking — Claude decides when/how much to think.
-                # effort "max" is only valid on Opus 4.6.
-                _OPUS_PATTERN = re.compile(r"claude-opus-4[-.]6", re.IGNORECASE)
-                if effort == "high" and not _OPUS_PATTERN.search(model_name):
+                # Opus 4.6+ / Sonnet 4.6+: adaptive thinking — Claude decides when/how much to think.
+                # effort "max" / "xhigh" is only valid on Opus 4.6+.
+                _OPUS_PATTERN = re.compile(r"claude-opus-4[-.]\d+", re.IGNORECASE)
+                if effort == "max" and not _OPUS_PATTERN.search(model_name):
                     effort = "high"  # sonnet caps at high, not max
                 kwargs["thinking"] = {"type": "adaptive"}
                 kwargs["output_config"] = {"effort": effort}
@@ -545,11 +546,17 @@ class AnthropicProvider(LLMProvider):
         usage: dict[str, int] = {}
         if response.usage:
             # Map Anthropic field names to standard names, then capture everything else
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
             usage = {
-                "prompt_tokens": response.usage.input_tokens,
-                "completion_tokens": response.usage.output_tokens,
-                "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+                "prompt_tokens": input_tokens + cache_read + cache_creation,
+                "completion_tokens": output_tokens,
+                "total_tokens": input_tokens + cache_read + cache_creation + output_tokens,
             }
+            if cache_read:
+                usage["cached_tokens"] = int(cache_read)
             _mapped = {"input_tokens", "output_tokens"}
             for attr in dir(response.usage):
                 if attr.startswith("_") or attr in _mapped:

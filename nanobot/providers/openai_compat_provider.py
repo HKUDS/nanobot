@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 import json_repair
+from loguru import logger
 from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -206,7 +207,8 @@ class OpenAICompatProvider(LLMProvider):
         new_tools = tools
         if tools:
             new_tools = list(tools)
-            new_tools[-1] = {**new_tools[-1], "cache_control": cache_marker}
+            for idx in LLMProvider._tool_cache_marker_indices(new_tools):
+                new_tools[idx] = {**new_tools[idx], "cache_control": cache_marker}
         return new_messages, new_tools
 
     @staticmethod
@@ -341,6 +343,7 @@ class OpenAICompatProvider(LLMProvider):
         usage_map = cls._maybe_mapping(usage_obj)
         if usage_map is not None:
             out: dict[str, int] = {}
+            cached_tokens: int | None = None
             for k, v in usage_map.items():
                 if isinstance(v, (int, float)):
                     out[k] = int(v)
@@ -349,16 +352,41 @@ class OpenAICompatProvider(LLMProvider):
                     for sk, sv in v.items():
                         if isinstance(sv, (int, float)):
                             out[f"{k}.{sk}"] = int(sv)
+                    # OpenAI-style nested cached_tokens
+                    if k == "prompt_tokens_details":
+                        ct = v.get("cached_tokens")
+                        if isinstance(ct, (int, float)) and ct:
+                            cached_tokens = int(ct)
+            # DeepSeek-style top-level alias (only if no nested value found)
+            if cached_tokens is None:
+                hit = usage_map.get("prompt_cache_hit_tokens")
+                if isinstance(hit, (int, float)) and hit:
+                    cached_tokens = int(hit)
+            if cached_tokens is not None:
+                out["cached_tokens"] = cached_tokens
             return out
 
         if usage_obj:
             out = {}
+            cached_tokens: int | None = None
             for attr in dir(usage_obj):
                 if attr.startswith("_"):
                     continue
                 v = getattr(usage_obj, attr, None)
                 if isinstance(v, (int, float)):
                     out[attr] = int(v)
+                elif attr == "prompt_tokens_details" and v is not None:
+                    ct = getattr(v, "cached_tokens", None)
+                    if isinstance(ct, (int, float)) and ct:
+                        cached_tokens = int(ct)
+                        out[f"{attr}.cached_tokens"] = int(ct)
+            # DeepSeek-style top-level alias on object (only if no nested value found)
+            if cached_tokens is None:
+                hit = getattr(usage_obj, "prompt_cache_hit_tokens", None)
+                if isinstance(hit, (int, float)) and hit:
+                    cached_tokens = int(hit)
+            if cached_tokens is not None:
+                out["cached_tokens"] = cached_tokens
             return out
         return {}
 
@@ -556,21 +584,6 @@ class OpenAICompatProvider(LLMProvider):
             finish_reason=finish_reason,
             usage=usage,
         )
-
-    @staticmethod
-    def _handle_error(e: Exception, **request_info: Any) -> LLMResponse:
-        body = getattr(e, "doc", None) or getattr(getattr(e, "response", None), "text", None)
-        msg = f"Error: {body.strip()[:500]}" if body and body.strip() else f"Error calling LLM: {e}"
-        logger.error(
-            "OpenAI-compatible API error: {}. Request: model={}, max_tokens={}, tools_count={}, messages_count={}",
-            e,
-            request_info.get("model"),
-            request_info.get("max_tokens"),
-            len(request_info.get("tools", [])),
-            len(request_info.get("messages", [])),
-        )
-        logger.debug("OpenAI-compatible API error full request: {}", request_info)
-        return LLMResponse(content=msg, finish_reason="error")
 
     # ------------------------------------------------------------------
     # Public API

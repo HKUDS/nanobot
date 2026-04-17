@@ -340,6 +340,62 @@ class LLMProvider(ABC):
         return cls._normalize_error_token(type_value), cls._normalize_error_token(code_value)
 
     @classmethod
+    def _handle_error(cls, e: Exception, **request_info: Any) -> LLMResponse:
+        from loguru import logger
+
+        body = getattr(e, "doc", None) or getattr(e, "body", None) or getattr(getattr(e, "response", None), "text", None)
+        body_text = body.strip()[:500] if isinstance(body, str) and body.strip() else None
+        msg = f"Error: {body_text}" if body_text else f"Error calling LLM: {e}"
+
+        status_code = getattr(e, "status_code", None)
+
+        response_obj = getattr(e, "response", None)
+        headers = getattr(response_obj, "headers", None) or {}
+        if not isinstance(headers, dict):
+            if hasattr(headers, "items"):
+                headers = dict(headers)
+            else:
+                headers = {}
+
+        retry_after_s = cls._extract_retry_after_from_headers(headers)
+
+        should_retry = None
+        x_should_retry = headers.get("x-should-retry")
+        if x_should_retry is not None:
+            should_retry = str(x_should_retry).lower() == "true"
+
+        type_token, code_token = cls._extract_error_type_code(body)
+
+        error_kind = None
+        e_name = e.__class__.__name__.lower()
+        if "timeout" in e_name:
+            error_kind = "timeout"
+        elif "connection" in e_name:
+            error_kind = "connection"
+
+        logger.error(
+            "{} API error: {}. Request: model={}, max_tokens={}, tools_count={}, messages_count={}",
+            cls.__name__,
+            e,
+            request_info.get("model"),
+            request_info.get("max_tokens"),
+            len(request_info.get("tools", [])),
+            len(request_info.get("messages", [])),
+        )
+        logger.debug("{} API error full request: {}", cls.__name__, request_info)
+
+        return LLMResponse(
+            content=msg,
+            finish_reason="error",
+            error_status_code=int(status_code) if status_code is not None else None,
+            error_kind=error_kind,
+            error_type=type_token,
+            error_code=code_token,
+            error_retry_after_s=retry_after_s,
+            error_should_retry=should_retry,
+        )
+
+    @classmethod
     def _is_retryable_429_response(cls, response: LLMResponse) -> bool:
         type_token = cls._normalize_error_token(response.error_type)
         code_token = cls._normalize_error_token(response.error_code)
