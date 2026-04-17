@@ -2,6 +2,7 @@
 
 import difflib
 import mimetypes
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -178,7 +179,6 @@ class ReadFileTool(_FsTool):
 
             # Read dedup: same path + offset + limit + unchanged mtime → stub
             # Always check for external modifications before dedup
-            import os
             entry = file_state._state.get(str(fp.resolve()))
             try:
                 current_mtime = os.path.getmtime(fp)
@@ -218,6 +218,10 @@ class ReadFileTool(_FsTool):
                     return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
                 return f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). Only UTF-8 text and images are supported."
 
+            # Normalize CRLF -> LF before line-splitting. Primarily a Windows
+            # concern (git checkouts with autocrlf, editors saving CRLF) but
+            # applied on all platforms so downstream StrReplace/Grep behavior
+            # is consistent regardless of where the file was written.
             text_content = text_content.replace("\r\n", "\n")
 
             all_lines = text_content.splitlines()

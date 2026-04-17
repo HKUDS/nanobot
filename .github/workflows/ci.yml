@@ -36,4 +36,4 @@ jobs:
       run: uv run ruff check nanobot --select F401,F841
 
     - name: Run tests
-      run: uv run pytest tests/ --ignore=tests/channels/test_matrix_channel.py
+      run: uv run pytest tests/
