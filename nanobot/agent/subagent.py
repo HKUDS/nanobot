@@ -245,6 +245,10 @@ class SubagentManager:
             sender_id="subagent",
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
+            metadata={
+                "injected_event": "subagent_result",
+                "subagent_task_id": task_id,
+            },
         )
 
         await self.bus.publish_inbound(msg)
