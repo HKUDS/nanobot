@@ -1,5 +1,7 @@
 """Tests for ReadFileTool enhancements: description fix, read dedup, PDF support, device blacklist."""
 
+import sys
+
 import pytest
 
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
@@ -143,6 +145,7 @@ class TestReadPdf:
 # Device path blacklist
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(sys.platform == "win32", reason="/dev directory doesn't exist on Windows")
 class TestReadDeviceBlacklist:
 
     @pytest.fixture()
