@@ -542,6 +542,50 @@ async def test_process_voice_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_process_mixed_message() -> None:
+    """Mixed message: contains picture and text message types."""
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["user1"]), MessageBus())
+    client = _FakeWeComClient()
+
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        f.write(b"\x89PNG\r\n")
+        saved = f.name
+
+    client.download_file.return_value = (b"\x89PNG\r\n", "photo.png")
+    channel._client = client
+
+    try:
+        with patch("nanobot.channels.wecom.get_media_dir", return_value=Path(os.path.dirname(saved))):
+            frame = _FakeFrame(body={
+                "msgid": "msg_mixed_1",
+                "chatid": "chat1",
+                "msgtype": "mixed",
+                "from": {"userid": "user1"},
+                "mixed": {
+                    "msg_item": [
+                        {"msgtype": "text", "text": {"content": "hello wecom"}},
+                        {"msgtype": "image", "image": {"url": "https://example.com/img.png", "aeskey": "key123"}}
+                    ]
+                }
+            })
+            await channel._process_message(frame, "mixed")
+
+        msg = await channel.bus.consume_inbound()
+        assert msg.sender_id == "user1"
+        assert msg.chat_id == "chat1"
+        assert msg.content.startswith("hello wecom")
+        assert msg.metadata["msg_type"] == "mixed"
+        assert len(msg.media) == 1
+        assert msg.media[0].endswith("photo.png")
+        assert "[image:" in msg.content
+    finally:
+        # Clean up any photo.png in tempdir
+        p = os.path.join(os.path.dirname(saved), "photo.png")
+        if os.path.exists(p):
+            os.unlink(p)
+
+
+@pytest.mark.asyncio
 async def test_process_message_deduplication() -> None:
     """Same msg_id is not processed twice."""
     channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["user1"]), MessageBus())

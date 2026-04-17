@@ -3,15 +3,14 @@
 import base64
 import mimetypes
 import platform
+from importlib.resources import files as pkg_files
 from pathlib import Path
 from typing import Any
 
-from nanobot.utils.helpers import current_time_str
-
 from nanobot.agent.memory import MemoryStore
-from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.skills import SkillsLoader
-from nanobot.utils.helpers import build_assistant_message, detect_image_mime
+from nanobot.utils.helpers import build_assistant_message, current_time_str, detect_image_mime
+from nanobot.utils.prompt_templates import render_template
 
 
 class ContextBuilder:
@@ -41,7 +40,7 @@ class ContextBuilder:
             parts.append(bootstrap)
 
         memory = self.memory.get_memory_context()
-        if memory:
+        if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
             parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
@@ -50,7 +49,7 @@ class ContextBuilder:
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
 
-        skills_summary = self.skills.build_skills_summary()
+        skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
@@ -116,6 +115,17 @@ class ContextBuilder:
 
         return "\n\n".join(parts) if parts else ""
 
+    @staticmethod
+    def _is_template_content(content: str, template_path: str) -> bool:
+        """Check if *content* is identical to the bundled template (user hasn't customized it)."""
+        try:
+            tpl = pkg_files("nanobot") / "templates" / template_path
+            if tpl.is_file():
+                return content.strip() == tpl.read_text(encoding="utf-8").strip()
+        except Exception:
+            pass
+        return False
+
     def build_messages(
         self,
         history: list[dict[str, Any]],
@@ -160,7 +170,6 @@ class ContextBuilder:
             if not p.is_file():
                 continue
             raw = p.read_bytes()
-            # Detect real MIME type from magic bytes; fallback to filename guess
             mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
             if not mime or not mime.startswith("image/"):
                 continue
