@@ -318,6 +318,7 @@ class CronService:
         """Execute a single job."""
         start_ms = _now_ms()
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
+        self._claim_job(job, start_ms)
 
         try:
             if self.on_job:
@@ -333,7 +334,6 @@ class CronService:
             logger.error("Cron: job '{}' failed: {}", job.name, e)
 
         end_ms = _now_ms()
-        job.state.last_run_at_ms = start_ms
         job.updated_at_ms = end_ms
 
         job.state.run_history.append(CronRunRecord(
@@ -351,9 +351,20 @@ class CronService:
             else:
                 job.enabled = False
                 job.state.next_run_at_ms = None
+        elif job.state.next_run_at_ms is None:
+            job.state.next_run_at_ms = _compute_next_run(job.schedule, start_ms)
+
+    def _claim_job(self, job: CronJob, start_ms: int) -> None:
+        """Persist a running claim before awaiting the job callback."""
+        job.state.last_status = "running"
+        job.state.last_error = None
+        job.state.last_run_at_ms = start_ms
+        job.updated_at_ms = start_ms
+        if job.schedule.kind == "at":
+            job.state.next_run_at_ms = None
         else:
-            # Compute next run
-            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+            job.state.next_run_at_ms = _compute_next_run(job.schedule, start_ms)
+        self._save_store()
 
     def _append_action(self, action: Literal["add", "del", "update"], params: dict):
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
