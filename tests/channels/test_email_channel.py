@@ -206,6 +206,44 @@ def test_fetch_new_messages_skips_missing_mailbox(monkeypatch) -> None:
     assert channel._fetch_new_messages() == []
 
 
+def test_fetch_new_messages_skips_self_to_prevent_reply_loop(monkeypatch) -> None:
+    """Mail from the bot's own address must be skipped to avoid self-reply loops."""
+    raw = _make_raw_email(from_addr="bot@example.com", subject="Self", body="Loop bait")
+
+    class FakeIMAP:
+        def __init__(self) -> None:
+            self.store_calls: list[tuple[bytes, str, str]] = []
+
+        def login(self, _user: str, _pw: str):
+            return "OK", [b"logged in"]
+
+        def select(self, _mailbox: str):
+            return "OK", [b"1"]
+
+        def search(self, *_args):
+            return "OK", [b"1"]
+
+        def fetch(self, _imap_id: bytes, _parts: str):
+            return "OK", [(b"1 (UID 777 BODY[] {200})", raw), b")"]
+
+        def store(self, imap_id: bytes, op: str, flags: str):
+            self.store_calls.append((imap_id, op, flags))
+            return "OK", [b""]
+
+        def logout(self):
+            return "BYE", [b""]
+
+    fake = FakeIMAP()
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    channel = EmailChannel(_make_config(from_address="bot@example.com"), MessageBus())
+    items = channel._fetch_new_messages()
+
+    assert items == []
+    # Still flagged Seen so the same message is not re-fetched on the next poll.
+    assert fake.store_calls == [(b"1", "+FLAGS", "\\Seen")]
+
+
 def test_extract_text_body_falls_back_to_html() -> None:
     msg = EmailMessage()
     msg["From"] = "alice@example.com"

@@ -222,6 +222,15 @@ class EmailChannel(BaseChannel):
             logger.error("Error sending email to {}: {}", to_addr, e)
             raise
 
+    def _own_addresses(self) -> set[str]:
+        """Return the bot's own email addresses (lowercased) for self-loop detection."""
+        candidates = (
+            self.config.from_address,
+            self.config.smtp_username,
+            self.config.imap_username,
+        )
+        return {addr.strip().lower() for addr in candidates if addr and "@" in addr}
+
     def _validate_config(self) -> bool:
         missing = []
         if not self.config.imap_host:
@@ -378,6 +387,22 @@ class EmailChannel(BaseChannel):
                 parsed = BytesParser(policy=policy.default).parsebytes(raw_bytes)
                 sender = parseaddr(parsed.get("From", ""))[1].strip().lower()
                 if not sender:
+                    continue
+
+                # Skip mail authored by ourselves to prevent self-reply loops
+                # (e.g. user emails the bot from the bot's own address, or the
+                # outbound reply lands back in the same INBOX via aliasing).
+                if sender in self._own_addresses():
+                    if mark_seen:
+                        client.store(imap_id, "+FLAGS", "\\Seen")
+                    if uid:
+                        cycle_uids.add(uid)
+                    if dedupe and uid:
+                        self._processed_uids.add(uid)
+                    logger.info(
+                        "Email from {} skipped: matches bot's own address (self-loop guard)",
+                        sender,
+                    )
                     continue
 
                 # --- Anti-spoofing: verify Authentication-Results ---
