@@ -81,7 +81,11 @@ class LLMResponse:
         """
         if not self.has_tool_calls:
             return False
-        return self.finish_reason == "tool_calls"
+        if self.finish_reason == "tool_calls":
+            return True
+        if self.finish_reason == "stop":
+            return True
+        return False
 
 
 @dataclass(frozen=True)
