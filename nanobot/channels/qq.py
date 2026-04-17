@@ -280,6 +280,9 @@ class QQChannel(BaseChannel):
                     msg_id=msg_id,
                     content=msg.content.strip(),
                 )
+        except (aiohttp.ClientError, OSError):
+            # Network / transport errors — propagate so ChannelManager can retry
+            raise
         except Exception:
             logger.exception("Error sending QQ message to chat_id={}", msg.chat_id)
 
@@ -362,7 +365,12 @@ class QQChannel(BaseChannel):
 
             logger.info("QQ media sent: {}", filename)
             return True
+        except (aiohttp.ClientError, OSError) as e:
+            # Network / transport errors — propagate for retry by caller
+            logger.warning("QQ send media network error filename={} err={}", filename, e)
+            raise
         except Exception as e:
+            # API-level or other non-network errors — return False so send() can fallback
             logger.error("QQ send media failed filename={} err={}", filename, e)
             return False
 

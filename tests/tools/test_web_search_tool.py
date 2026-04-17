@@ -1,7 +1,5 @@
 """Tests for multi-provider web search."""
 
-import asyncio
-
 import httpx
 import pytest
 
@@ -18,6 +16,25 @@ def _response(status: int = 200, json: dict | None = None) -> httpx.Response:
     r = httpx.Response(status, json=json)
     r._request = httpx.Request("GET", "https://mock")
     return r
+
+
+def test_duckduckgo_search_is_exclusive():
+    tool = _tool(provider="duckduckgo")
+    assert tool.exclusive is True
+    assert tool.concurrency_safe is False
+
+
+def test_brave_with_api_key_remains_concurrency_safe():
+    tool = _tool(provider="brave", api_key="brave-key")
+    assert tool.exclusive is False
+    assert tool.concurrency_safe is True
+
+
+def test_brave_without_api_key_is_treated_as_duckduckgo_for_concurrency(monkeypatch):
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+    tool = _tool(provider="brave", api_key="")
+    assert tool.exclusive is True
+    assert tool.concurrency_safe is False
 
 
 @pytest.mark.asyncio
@@ -79,7 +96,6 @@ async def test_duckduckgo_search(monkeypatch):
     import nanobot.agent.tools.web as web_mod
     monkeypatch.setattr(web_mod, "DDGS", MockDDGS, raising=False)
 
-    from ddgs import DDGS
     monkeypatch.setattr("ddgs.DDGS", MockDDGS)
 
     tool = _tool(provider="duckduckgo")
@@ -265,5 +281,3 @@ async def test_duckduckgo_timeout_returns_error(monkeypatch):
     result = await tool.execute(query="test")
     gate.set()
     assert "Error" in result
-
-

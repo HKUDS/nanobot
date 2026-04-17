@@ -454,7 +454,23 @@ async def connect_mcp_servers(
             return name, server_stack
 
         except Exception as e:
-            logger.error("MCP server '{}': failed to connect: {}", name, e)
+            hint = ""
+            text = str(e).lower()
+            if any(
+                marker in text
+                for marker in (
+                    "parse error",
+                    "invalid json",
+                    "unexpected token",
+                    "jsonrpc",
+                    "content-length",
+                )
+            ):
+                hint = (
+                    " Hint: this looks like stdio protocol pollution. Make sure the MCP server writes "
+                    "only JSON-RPC to stdout and sends logs/debug output to stderr instead."
+                )
+            logger.error("MCP server '{}': failed to connect: {}{}", name, e, hint)
             try:
                 await server_stack.aclose()
             except Exception:

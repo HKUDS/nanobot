@@ -17,29 +17,32 @@ from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
-from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunSpec, AgentRunner
+from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.notebook import NotebookEditTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
-from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.bus.queue import MessageBus
+from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.helpers import image_placeholder_text, truncate_text as truncate_text_fn
+from nanobot.utils.document import extract_documents
+from nanobot.utils.helpers import image_placeholder_text
+from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebToolsConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, ToolsConfig, WebToolsConfig
     from nanobot.cron.service import CronService
 
 
@@ -88,6 +91,9 @@ class _LoopHook(AgentHook):
             await self._on_stream_end(resuming=resuming)
         self._stream_buf = ""
 
+    async def before_iteration(self, context: AgentHookContext) -> None:
+        self._loop._current_iteration = context.iteration
+
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if self._on_progress:
             if not self._on_stream:
@@ -129,6 +135,7 @@ class AgentLoop:
     """
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
+    _PENDING_USER_TURN_KEY = "pending_user_turn"
 
     def __init__(
         self,
@@ -153,9 +160,11 @@ class AgentLoop:
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
+        tools_config: ToolsConfig | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, WebToolsConfig
+        from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
 
+        _tc = tools_config or ToolsConfig()
         defaults = AgentDefaults()
         self.bus = bus
         self.channels_config = channels_config
@@ -223,7 +232,7 @@ class AgentLoop:
             provider=provider,
             model=self.model,
             sessions=self.sessions,
-            context_window_tokens=context_window_tokens,
+            context_window_tokens=self.context_window_tokens,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
@@ -239,6 +248,10 @@ class AgentLoop:
             model=self.model,
         )
         self._register_default_tools()
+        if _tc.my.enable:
+            self.tools.register(MyTool(loop=self, modify_allowed=_tc.my.allow_set))
+        self._runtime_vars: dict[str, Any] = {}
+        self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
@@ -305,7 +318,7 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "spawn", "cron", "my"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
@@ -382,10 +395,12 @@ class AgentLoop:
                     pending_msg = pending_queue.get_nowait()
                 except asyncio.QueueEmpty:
                     break
-                user_content = self.context._build_user_content(
-                    pending_msg.content,
-                    pending_msg.media if pending_msg.media else None,
-                )
+                content = pending_msg.content
+                media = pending_msg.media if pending_msg.media else None
+                if media:
+                    content, media = extract_documents(content, media)
+                    media = media or None
+                user_content = self.context._build_user_content(content, media)
                 runtime_ctx = self.context._build_runtime_context(
                     pending_msg.channel,
                     pending_msg.chat_id,
@@ -419,6 +434,11 @@ class AgentLoop:
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
+            # Push final content through stream so streaming channels (e.g. Feishu)
+            # update the card instead of leaving it empty.
+            if on_stream and on_stream_end:
+                await on_stream(result.final_content or "")
+                await on_stream_end(resuming=False)
         elif result.stop_reason == "error":
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
         return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections
@@ -621,6 +641,8 @@ class AgentLoop:
             session = self.sessions.get_or_create(key)
             if self._restore_runtime_checkpoint(session):
                 self.sessions.save(session)
+            if self._restore_pending_user_turn(session):
+                self.sessions.save(session)
 
             session, pending = self.auto_compact.prepare_session(session, key)
 
@@ -649,12 +671,20 @@ class AgentLoop:
                 content=final_content or "Background task completed.",
             )
 
+        # Extract document text from media at the processing boundary so all
+        # channels benefit without format-specific logic in ContextBuilder.
+        if msg.media:
+            new_content, image_only = extract_documents(msg.content, msg.media)
+            msg = dataclasses.replace(msg, content=new_content, media=image_only)
+
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
         if self._restore_runtime_checkpoint(session):
+            self.sessions.save(session)
+        if self._restore_pending_user_turn(session):
             self.sessions.save(session)
 
         session, pending = self.auto_compact.prepare_session(session, key)
@@ -696,6 +726,19 @@ class AgentLoop:
                 )
             )
 
+        # Persist the triggering user message immediately, before running the
+        # agent loop. If the process is killed mid-turn (OOM, SIGKILL, self-
+        # restart, etc.), the existing runtime_checkpoint preserves the
+        # in-flight assistant/tool state but NOT the user message itself, so
+        # the user's prompt is silently lost on recovery. Saving it up front
+        # makes recovery possible from the session log alone.
+        user_persisted_early = False
+        if isinstance(msg.content, str) and msg.content.strip():
+            session.add_message("user", msg.content)
+            self._mark_pending_user_turn(session)
+            self.sessions.save(session)
+            user_persisted_early = True
+
         final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
@@ -711,7 +754,10 @@ class AgentLoop:
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
-        self._save_turn(session, all_msgs, 1 + len(history))
+        # Skip the already-persisted user message when saving the turn
+        save_skip = 1 + len(history) + (1 if user_persisted_early else 0)
+        self._save_turn(session, all_msgs, save_skip)
+        self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
         self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
@@ -829,6 +875,12 @@ class AgentLoop:
         session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
         self.sessions.save(session)
 
+    def _mark_pending_user_turn(self, session: Session) -> None:
+        session.metadata[self._PENDING_USER_TURN_KEY] = True
+
+    def _clear_pending_user_turn(self, session: Session) -> None:
+        session.metadata.pop(self._PENDING_USER_TURN_KEY, None)
+
     def _clear_runtime_checkpoint(self, session: Session) -> None:
         if self._RUNTIME_CHECKPOINT_KEY in session.metadata:
             session.metadata.pop(self._RUNTIME_CHECKPOINT_KEY, None)
@@ -895,7 +947,28 @@ class AgentLoop:
                 break
         session.messages.extend(restored_messages[overlap:])
 
+        self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
+        return True
+
+    def _restore_pending_user_turn(self, session: Session) -> bool:
+        """Close a turn that only persisted the user message before crashing."""
+        from datetime import datetime
+
+        if not session.metadata.get(self._PENDING_USER_TURN_KEY):
+            return False
+
+        if session.messages and session.messages[-1].get("role") == "user":
+            session.messages.append(
+                {
+                    "role": "assistant",
+                    "content": "Error: Task interrupted before a response was generated.",
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+            session.updated_at = datetime.now()
+
+        self._clear_pending_user_turn(session)
         return True
 
     async def process_direct(
@@ -904,13 +977,17 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        media: list[str] | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a message directly and return the outbound payload."""
         await self._connect_mcp()
-        msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
+        msg = InboundMessage(
+            channel=channel, sender_id="user", chat_id=chat_id,
+            content=content, media=media or [],
+        )
         return await self._process_message(
             msg,
             session_key=session_key,

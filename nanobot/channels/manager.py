@@ -41,6 +41,7 @@ class ChannelManager:
 
         transcription_provider = self.config.channels.transcription_provider
         transcription_key = self._resolve_transcription_key(transcription_provider)
+        transcription_base = self._resolve_transcription_base(transcription_provider)
 
         for name, cls in discover_all().items():
             section = getattr(self.config.channels, name, None)
@@ -57,6 +58,7 @@ class ChannelManager:
                 channel = cls(section, self.bus)
                 channel.transcription_provider = transcription_provider
                 channel.transcription_api_key = transcription_key
+                channel.transcription_api_base = transcription_base
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
@@ -73,9 +75,26 @@ class ChannelManager:
         except AttributeError:
             return ""
 
+    def _resolve_transcription_base(self, provider: str) -> str:
+        """Pick the API base URL for the configured transcription provider."""
+        try:
+            if provider == "openai":
+                return self.config.providers.openai.api_base or ""
+            return self.config.providers.groq.api_base or ""
+        except AttributeError:
+            return ""
+
     def _validate_allow_from(self) -> None:
         for name, ch in self.channels.items():
-            if getattr(ch.config, "allow_from", None) == []:
+            cfg = ch.config
+            if isinstance(cfg, dict):
+                if "allow_from" in cfg:
+                    allow = cfg.get("allow_from")
+                else:
+                    allow = cfg.get("allowFrom")
+            else:
+                allow = getattr(cfg, "allow_from", None)
+            if allow == []:
                 raise SystemExit(
                     f'Error: "{name}" has empty allowFrom (denies all). '
                     f'Set ["*"] to allow everyone, or add specific user IDs.'

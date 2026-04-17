@@ -302,13 +302,22 @@ class WecomChannel(BaseChannel):
 
             elif msg_type == "mixed":
                 # Mixed content contains multiple message items
-                msg_items = body.get("mixed", {}).get("item", [])
+                msg_items = body.get("mixed", {}).get("msg_item", [])
                 for item in msg_items:
-                    item_type = item.get("type", "")
+                    item_type = item.get("msgtype", "")
                     if item_type == "text":
                         text = item.get("text", {}).get("content", "")
                         if text:
                             content_parts.append(text)
+                    elif item_type == "image":
+                        file_url = item.get("image", {}).get("url", "")
+                        aes_key = item.get("image", {}).get("aeskey", "")
+                        if file_url and aes_key:
+                            file_path = await self._download_and_save_media(file_url, aes_key, "image")
+                            if file_path:
+                                filename = os.path.basename(file_path)
+                                content_parts.append(f"[image: {filename}]")
+                                media_paths.append(file_path)
                     else:
                         content_parts.append(MSG_TYPE_MAP.get(item_type, f"[{item_type}]"))
 
