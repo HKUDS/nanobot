@@ -47,6 +47,7 @@ _COMPACTABLE_TOOLS = frozenset({
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 
 
+
 @dataclass(slots=True)
 class AgentRunSpec:
     """Configuration for a single agent execution."""
@@ -119,7 +120,11 @@ class AgentRunner:
     ) -> None:
         """Append injected user messages while preserving role alternation."""
         for injection in injections:
-            if messages and injection.get("role") == "user" and messages[-1].get("role") == "user":
+            if (
+                messages
+                and injection.get("role") == "user"
+                and messages[-1].get("role") == "user"
+            ):
                 merged = dict(messages[-1])
                 merged["content"] = cls._merge_message_content(
                     merged.get("content"),
@@ -169,10 +174,7 @@ class AgentRunner:
         self._append_injected_messages(messages, injections)
         logger.info(
             "Injected {} follow-up message(s) {} ({}/{})",
-            len(injections),
-            phase,
-            injection_cycles,
-            _MAX_INJECTION_CYCLES,
+            len(injections), phase, injection_cycles, _MAX_INJECTION_CYCLES,
         )
         return True, injection_cycles
 
@@ -188,9 +190,12 @@ class AgentRunner:
             return []
         try:
             signature = inspect.signature(spec.injection_callback)
-            accepts_limit = "limit" in signature.parameters or any(
-                parameter.kind is inspect.Parameter.VAR_KEYWORD
-                for parameter in signature.parameters.values()
+            accepts_limit = (
+                "limit" in signature.parameters
+                or any(
+                    parameter.kind is inspect.Parameter.VAR_KEYWORD
+                    for parameter in signature.parameters.values()
+                )
             )
             if accepts_limit:
                 items = await spec.injection_callback(limit=_MAX_INJECTIONS_PER_TURN)
@@ -213,9 +218,7 @@ class AgentRunner:
             dropped = len(injected_messages) - _MAX_INJECTIONS_PER_TURN
             logger.warning(
                 "Injection callback returned {} messages, capping to {} ({} dropped)",
-                len(injected_messages),
-                _MAX_INJECTIONS_PER_TURN,
-                dropped,
+                len(injected_messages), _MAX_INJECTIONS_PER_TURN, dropped,
             )
             injected_messages = injected_messages[:_MAX_INJECTIONS_PER_TURN]
         return injected_messages
@@ -290,9 +293,7 @@ class AgentRunner:
                         "model": spec.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
-                        "pending_tool_calls": [
-                            tc.to_openai_tool_call() for tc in response.tool_calls
-                        ],
+                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
                     },
                 )
 
@@ -331,10 +332,7 @@ class AgentRunner:
                     context.stop_reason = stop_reason
                     await hook.after_iteration(context)
                     should_continue, injection_cycles = await self._try_drain_injections(
-                        spec,
-                        messages,
-                        None,
-                        injection_cycles,
+                        spec, messages, None, injection_cycles,
                         phase="after tool error",
                     )
                     if should_continue:
@@ -356,10 +354,7 @@ class AgentRunner:
                 length_recovery_count = 0
                 # Checkpoint 1: drain injections after tools, before next LLM call
                 _drained, injection_cycles = await self._try_drain_injections(
-                    spec,
-                    messages,
-                    None,
-                    injection_cycles,
+                    spec, messages, None, injection_cycles,
                     phase="after tool execution",
                 )
                 if _drained:
@@ -367,9 +362,9 @@ class AgentRunner:
                 await hook.after_iteration(context)
                 continue
 
-            elif response.has_tool_calls:
+            if response.has_tool_calls:
                 logger.warning(
-                    "Ignoring tool calls under finish_reason='%s' for %s",
+                    "Ignoring tool calls under finish_reason='{}' for {}",
                     response.finish_reason,
                     spec.session_key or "default",
                 )
@@ -418,13 +413,11 @@ class AgentRunner:
                     )
                     if hook.wants_streaming():
                         await hook.on_stream_end(context, resuming=True)
-                    messages.append(
-                        build_assistant_message(
-                            clean,
-                            reasoning_content=response.reasoning_content,
-                            thinking_blocks=response.thinking_blocks,
-                        )
-                    )
+                    messages.append(build_assistant_message(
+                        clean,
+                        reasoning_content=response.reasoning_content,
+                        thinking_blocks=response.thinking_blocks,
+                    ))
                     messages.append(build_length_recovery_message())
                     await hook.after_iteration(context)
                     continue
@@ -441,10 +434,7 @@ class AgentRunner:
             # If injections are found we keep the stream alive (resuming=True)
             # so streaming channels don't prematurely finalize the card.
             should_continue, injection_cycles = await self._try_drain_injections(
-                spec,
-                messages,
-                assistant_message,
-                injection_cycles,
+                spec, messages, assistant_message, injection_cycles,
                 phase="after final response",
                 iteration=iteration,
             )
@@ -468,10 +458,7 @@ class AgentRunner:
                 context.stop_reason = stop_reason
                 await hook.after_iteration(context)
                 should_continue, injection_cycles = await self._try_drain_injections(
-                    spec,
-                    messages,
-                    None,
-                    injection_cycles,
+                    spec, messages, None, injection_cycles,
                     phase="after LLM error",
                 )
                 if should_continue:
@@ -488,10 +475,7 @@ class AgentRunner:
                 context.stop_reason = stop_reason
                 await hook.after_iteration(context)
                 should_continue, injection_cycles = await self._try_drain_injections(
-                    spec,
-                    messages,
-                    None,
-                    injection_cycles,
+                    spec, messages, None, injection_cycles,
                     phase="after empty response",
                 )
                 if should_continue:
@@ -499,14 +483,11 @@ class AgentRunner:
                     continue
                 break
 
-            messages.append(
-                assistant_message
-                or build_assistant_message(
-                    clean,
-                    reasoning_content=response.reasoning_content,
-                    thinking_blocks=response.thinking_blocks,
-                )
-            )
+            messages.append(assistant_message or build_assistant_message(
+                clean,
+                reasoning_content=response.reasoning_content,
+                thinking_blocks=response.thinking_blocks,
+            ))
             await self._emit_checkpoint(
                 spec,
                 {
@@ -542,10 +523,7 @@ class AgentRunner:
             # We ignore should_continue here because the for-loop has already
             # exhausted all iterations.
             drained_after_max_iterations, injection_cycles = await self._try_drain_injections(
-                spec,
-                messages,
-                None,
-                injection_cycles,
+                spec, messages, None, injection_cycles,
                 phase="after max_iterations",
             )
             if drained_after_max_iterations:
@@ -597,7 +575,6 @@ class AgentRunner:
             tools=spec.tools.get_definitions(),
         )
         if hook.wants_streaming():
-
             async def _stream(delta: str) -> None:
                 await hook.on_stream(context, delta)
 
@@ -651,19 +628,13 @@ class AgentRunner:
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
         for batch in batches:
             if spec.concurrent_tools and len(batch) > 1:
-                tool_results.extend(
-                    await asyncio.gather(
-                        *(
-                            self._run_tool(spec, tool_call, external_lookup_counts)
-                            for tool_call in batch
-                        )
-                    )
-                )
+                tool_results.extend(await asyncio.gather(*(
+                    self._run_tool(spec, tool_call, external_lookup_counts)
+                    for tool_call in batch
+                )))
             else:
                 for tool_call in batch:
-                    tool_results.append(
-                        await self._run_tool(spec, tool_call, external_lookup_counts)
-                    )
+                    tool_results.append(await self._run_tool(spec, tool_call, external_lookup_counts))
 
         results: list[Any] = []
         events: list[dict[str, str]] = []
@@ -711,11 +682,7 @@ class AgentRunner:
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
-            return (
-                prep_error + _HINT,
-                event,
-                RuntimeError(prep_error) if spec.fail_on_tool_error else None,
-            )
+            return prep_error + _HINT, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -777,11 +744,7 @@ class AgentRunner:
 
     @staticmethod
     def _append_model_error_placeholder(messages: list[dict[str, Any]]) -> None:
-        if (
-            messages
-            and messages[-1].get("role") == "assistant"
-            and not messages[-1].get("tool_calls")
-        ):
+        if messages and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
             return
         messages.append(build_assistant_message(_PERSISTED_MODEL_ERROR_PLACEHOLDER))
 
@@ -871,15 +834,12 @@ class AgentRunner:
             insert_at = assistant_idx + 1 + offset
             while insert_at < len(updated) and updated[insert_at].get("role") == "tool":
                 insert_at += 1
-            updated.insert(
-                insert_at,
-                {
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "name": name,
-                    "content": _BACKFILL_CONTENT,
-                },
-            )
+            updated.insert(insert_at, {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "name": name,
+                "content": _BACKFILL_CONTENT,
+            })
             offset += 1
         return updated
 
@@ -938,13 +898,9 @@ class AgentRunner:
         if not messages or not spec.context_window_tokens:
             return messages
 
-        provider_max_tokens = getattr(
-            getattr(self.provider, "generation", None), "max_tokens", 4096
-        )
-        max_output = (
-            spec.max_tokens
-            if isinstance(spec.max_tokens, int)
-            else (provider_max_tokens if isinstance(provider_max_tokens, int) else 4096)
+        provider_max_tokens = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
+        max_output = spec.max_tokens if isinstance(spec.max_tokens, int) else (
+            provider_max_tokens if isinstance(provider_max_tokens, int) else 4096
         )
         budget = spec.context_block_limit or (
             spec.context_window_tokens - max_output - _SNIP_SAFETY_BUFFER
@@ -1027,3 +983,4 @@ class AgentRunner:
         if current:
             batches.append(current)
         return batches
+
