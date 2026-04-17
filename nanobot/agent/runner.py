@@ -932,6 +932,15 @@ class AgentRunner:
                 if message.get("role") == "user":
                     kept = kept[i:]
                     break
+            else:
+                # No user message in the kept window — walk backwards through
+                # non_system to find the nearest user message and keep it plus
+                # everything after it.  Providers like GLM reject requests
+                # where the first non-system message is not ``user`` (error 1214).
+                for idx in range(len(non_system) - 1, -1, -1):
+                    if non_system[idx].get("role") == "user":
+                        kept = non_system[idx:]
+                        break
             start = find_legal_message_start(kept)
             if start:
                 kept = kept[start:]
