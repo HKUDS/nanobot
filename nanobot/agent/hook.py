@@ -109,7 +109,9 @@ class TraceHook(AgentHook):
         if self._start_time is not None:
             elapsed_ms = int((time.monotonic() - self._start_time) * 1000)
 
-        # Build complete log entry
+        # Build complete log entry. thinking_blocks (Anthropic extended thinking
+        # and its encrypted signature) are stripped: they are verbose, opaque,
+        # and useless for debugging — the reasoning_content summary is kept.
         log_entry = {
             "timestamp": datetime.now().isoformat(),
             "session_key": self._session_key,
@@ -121,7 +123,6 @@ class TraceHook(AgentHook):
             "response": {
                 "content": context.final_content,
                 "reasoning_content": context.response.reasoning_content if context.response else None,
-                "thinking_blocks": context.response.thinking_blocks if context.response else None,
             } if context.response else {"content": context.final_content},
             "tool_calls": [
                 {"id": tc.id, "name": tc.name, "arguments": tc.arguments}
@@ -144,10 +145,16 @@ class TraceHook(AgentHook):
             logger.debug("TraceHook failed to write to {}: {}", self._log_path, e)
 
     def _sanitize_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Replace base64 image payloads with placeholders for cleaner logs."""
+        """Replace base64 image payloads with placeholders and drop thinking_blocks.
+
+        thinking_blocks carry Anthropic extended-thinking payloads (including
+        12KB+ encrypted signatures). They are volume noise in llm_logs and
+        useless for debugging, so they are removed entirely before writing.
+        """
         out: list[dict[str, Any]] = []
         for msg in messages:
-            content = msg.get("content")
+            cleaned = {k: v for k, v in msg.items() if k != "thinking_blocks"}
+            content = cleaned.get("content")
             if isinstance(content, list):
                 sanitized: list[dict[str, Any]] = []
                 for block in content:
@@ -161,9 +168,8 @@ class TraceHook(AgentHook):
                         sanitized.append({"type": "text", "text": f"[image: {path}]" if path else "[image]"})
                     else:
                         sanitized.append(block)
-                out.append({**msg, "content": sanitized})
-            else:
-                out.append(msg)
+                cleaned["content"] = sanitized
+            out.append(cleaned)
         return out
 
 

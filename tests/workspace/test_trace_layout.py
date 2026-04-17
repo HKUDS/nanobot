@@ -95,3 +95,57 @@ def test_trace_no_truncation(tmp_path: Path):
     entry = json.loads(log_file.read_text().strip())
     assert entry["request"][0]["content"] == long_content
     assert "[truncated]" not in entry["request"][0]["content"]
+
+
+def test_trace_strips_thinking_blocks_from_request(tmp_path: Path):
+    """Assistant messages' thinking_blocks (with signature) must be dropped from llm_logs."""
+    log_file = tmp_path / "test.jsonl"
+    hook = TraceHook(log_path=log_file)
+    hook.session_key = "test:123"
+
+    messages = [
+        {"role": "user", "content": "hi"},
+        {
+            "role": "assistant",
+            "content": "reply",
+            "thinking_blocks": [
+                {"type": "thinking", "thinking": "long secret reasoning", "signature": "A" * 12000}
+            ],
+        },
+    ]
+    ctx = FakeContext(messages=messages)
+    asyncio.run(hook.before_iteration(ctx))
+    asyncio.run(hook.after_iteration(ctx))
+
+    entry = json.loads(log_file.read_text().strip())
+    assistant_msg = entry["request"][1]
+    assert "thinking_blocks" not in assistant_msg
+    assert assistant_msg["content"] == "reply"
+    # Raw file must not contain signature or thinking text
+    raw = log_file.read_text()
+    assert "signature" not in raw
+    assert "long secret reasoning" not in raw
+
+
+def test_trace_strips_thinking_blocks_from_response(tmp_path: Path):
+    """Response's thinking_blocks must be dropped from llm_logs."""
+    log_file = tmp_path / "test.jsonl"
+    hook = TraceHook(log_path=log_file)
+    hook.session_key = "test:123"
+
+    resp = FakeResponse(
+        content="world",
+        thinking_blocks=[
+            {"type": "thinking", "thinking": "response reasoning", "signature": "B" * 12000}
+        ],
+    )
+    ctx = FakeContext(response=resp)
+    asyncio.run(hook.before_iteration(ctx))
+    asyncio.run(hook.after_iteration(ctx))
+
+    entry = json.loads(log_file.read_text().strip())
+    assert "thinking_blocks" not in entry["response"]
+    assert entry["response"]["content"] == "world"
+    raw = log_file.read_text()
+    assert "signature" not in raw
+    assert "response reasoning" not in raw
