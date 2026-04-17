@@ -194,7 +194,13 @@ class BedrockProviderConfig(ProviderConfig):
 
 
 class ProvidersConfig(Base):
-    """Configuration for LLM providers."""
+    """Configuration for LLM providers.
+
+    Supports custom providers via extra fields — any additional field
+    becomes an OpenAI-compatible custom provider.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
@@ -243,6 +249,15 @@ class ProvidersConfig(Base):
             provider = getattr(self, name, None)
             if isinstance(provider, ProviderConfig) and provider.api_type != "auto":
                 raise ValueError("providers.<name>.api_type is only supported for providers.openai")
+        return self
+
+    @model_validator(mode="after")
+    def convert_extra_providers(self):
+        """Convert extra fields (custom providers) to ProviderConfig objects."""
+        if self.model_extra:
+            for key, value in self.model_extra.items():
+                if isinstance(value, dict):
+                    self.model_extra[key] = ProviderConfig.model_validate(value)
         return self
 
 
@@ -381,7 +396,10 @@ class Config(BaseSettings):
         preset: ModelPresetConfig | None = None,
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
-        from nanobot.providers.registry import PROVIDERS, find_by_name
+        from nanobot.providers.registry import (
+            PROVIDERS,
+            find_by_name,
+        )
 
         resolved = preset or self.resolve_preset()
         forced = resolved.provider
@@ -390,6 +408,11 @@ class Config(BaseSettings):
             if spec:
                 p = getattr(self.providers, spec.name, None)
                 return (p, spec.name) if p else (None, None)
+            # Check for custom provider by name (try both original and normalized)
+            for name_to_try in (forced, forced.replace("-", "_")):
+                p = getattr(self.providers, name_to_try, None)
+                if p and isinstance(p, ProviderConfig):
+                    return p, name_to_try
             return None, None
 
         model_lower = (model or resolved.model).lower()
@@ -409,6 +432,14 @@ class Config(BaseSettings):
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
                     return p, spec.name
+
+        # Check for custom provider by prefix (e.g., "myprovider/gpt-4")
+        # Try both original prefix and normalized (snake_case) prefix
+        if model_prefix:
+            for prefix_to_try in (model_prefix, normalized_prefix):
+                p = getattr(self.providers, prefix_to_try, None)
+                if p and isinstance(p, ProviderConfig) and p.api_base:
+                    return p, prefix_to_try
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
@@ -445,6 +476,15 @@ class Config(BaseSettings):
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
                 return p, spec.name
+
+        # Final fallback: check for any configured custom provider
+        for attr_name in dir(self.providers):
+            if attr_name.startswith("_"):
+                continue
+            p = getattr(self.providers, attr_name, None)
+            if isinstance(p, ProviderConfig) and p.api_base:
+                return p, attr_name
+
         return None, None
 
     def get_provider(
