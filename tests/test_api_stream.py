@@ -251,3 +251,30 @@ async def test_stream_with_session_id(aiohttp_client) -> None:
     )
     assert resp.status == 200
     assert captured_key == "api:my-session"
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_streaming_backend_failure_does_not_emit_success_terminator(aiohttp_client) -> None:
+    """Backend exceptions should not surface as a normal stop+[DONE] stream."""
+    agent = MagicMock()
+
+    async def boom(**kwargs):
+        raise RuntimeError("backend blew up")
+
+    agent.process_direct = boom
+    agent._connect_mcp = AsyncMock()
+    agent.close_mcp = AsyncMock()
+
+    app = create_app(agent, model_name="m")
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hi"}], "stream": True},
+    )
+
+    assert resp.status == 200
+    body = await resp.text()
+    assert '"finish_reason": "stop"' not in body
+    assert "[DONE]" not in body
