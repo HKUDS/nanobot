@@ -603,12 +603,9 @@ class Dream:
 
     def _build_tools(self) -> ToolRegistry:
         """Build a minimal tool registry for the Dream agent."""
-        from nanobot.agent.skill_guard import SkillGuard
-        from nanobot.agent.skill_store import SkillStore
-        from nanobot.agent.skills import BUILTIN_SKILLS_DIR, SkillsLoader
+        from nanobot.agent.skill_evo.integration import build_dream_skill_tools
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
         from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool
-        from nanobot.agent.tools.skills import SkillManageTool, SkillsListTool, SkillViewTool
-        from nanobot.config.schema import SkillsConfig
 
         tools = ToolRegistry()
         workspace = self.store.workspace
@@ -620,18 +617,11 @@ class Dream:
         ))
         tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace))
 
-        catalog = SkillsLoader(workspace, builtin_skills_dir=BUILTIN_SKILLS_DIR)
-        tools.register(SkillsListTool(catalog=catalog))
-        tools.register(SkillViewTool(catalog=catalog))
-
-        skills_config = SkillsConfig()
-        store = SkillStore(
-            workspace=workspace,
-            builtin_skills_dir=BUILTIN_SKILLS_DIR,
-            guard=SkillGuard() if skills_config.guard_enabled else None,
-            session_key="dream",
-        )
-        tools.register(SkillManageTool(store=store, catalog=catalog, config=skills_config))
+        skill_tools = build_dream_skill_tools(workspace)
+        for name in skill_tools.tool_names:
+            tool = skill_tools.get(name)
+            if tool is not None:
+                tools.register(tool)
         return tools
 
     # -- skill listing --------------------------------------------------------

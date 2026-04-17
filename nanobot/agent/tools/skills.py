@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from nanobot.agent.tools.base import Tool, tool_parameters
 
 if TYPE_CHECKING:
-    from nanobot.agent.skill_store import SkillStore
+    from nanobot.agent.skill_evo.skill_store import SkillStore
     from nanobot.agent.skills import SkillsLoader
     from nanobot.config.schema import SkillsConfig
 
@@ -104,8 +104,9 @@ class SkillsListTool(Tool):
 class SkillViewTool(Tool):
     """View a skill's full content or a specific supporting file."""
 
-    def __init__(self, catalog: SkillsLoader) -> None:
+    def __init__(self, catalog: SkillsLoader, store: Any = None) -> None:
         self._catalog = catalog
+        self._store = store
 
     @property
     def name(self) -> str:
@@ -162,6 +163,12 @@ class SkillViewTool(Tool):
         content = self._catalog.load_skill(skill_name)
         if content is None:
             return json.dumps({"success": False, "error": f"Failed to read skill '{skill_name}'."}, ensure_ascii=False)
+
+        if self._store is not None:
+            try:
+                self._store.record_usage(skill_name)
+            except Exception:
+                pass
 
         metadata = self._catalog.get_skill_metadata(skill_name) or {}
         supporting = self._catalog.list_supporting_files(skill_name)

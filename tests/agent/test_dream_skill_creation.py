@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.skill_store import SkillStore
-from nanobot.agent.skill_guard import SkillGuard
+from nanobot.agent.skill_evo.skill_store import SkillStore
+from nanobot.agent.skill_evo.skill_guard import SkillGuard
 
 
 _VALID_CONTENT = "---\nname: dream-skill\ndescription: Created by Dream\n---\n\n# Dream Skill\n\nSteps here.\n"

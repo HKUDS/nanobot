@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.skill_guard import SkillGuard
+from nanobot.agent.skill_evo.skill_guard import SkillGuard
 
 
 def _make_skill(tmp_path: Path, name: str = "test-skill", content: str = "# Clean skill\n") -> Path:

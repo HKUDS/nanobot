@@ -5,9 +5,19 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 
 from loguru import logger
+
+
+class TrustLevel(str, Enum):
+    """Origin-based trust tier for skills."""
+
+    BUILTIN = "builtin"
+    HUMAN_CURATED = "human_curated"
+    AGENT_CREATED = "agent_created"
+    UPLOAD = "upload"
 
 _MAX_FILES = 50
 _MAX_TOTAL_SIZE = 1_048_576  # 1 MB
@@ -83,6 +93,14 @@ class ScanResult:
     findings: list[Finding] = field(default_factory=list)
 
 
+_INSTALL_POLICY: dict[TrustLevel, dict[str, bool]] = {
+    TrustLevel.BUILTIN: {"safe": True, "caution": True, "dangerous": True},
+    TrustLevel.HUMAN_CURATED: {"safe": True, "caution": True, "dangerous": False},
+    TrustLevel.AGENT_CREATED: {"safe": True, "caution": True, "dangerous": False},
+    TrustLevel.UPLOAD: {"safe": True, "caution": True, "dangerous": False},
+}
+
+
 class SkillGuard:
     """Scan a skill directory for security threats."""
 
@@ -106,10 +124,27 @@ class SkillGuard:
             result.verdict = "caution"
         return result
 
-    def should_allow(self, result: ScanResult) -> tuple[bool, str]:
-        if result.verdict == "dangerous":
+    def should_allow(
+        self,
+        result: ScanResult,
+        trust: TrustLevel = TrustLevel.AGENT_CREATED,
+    ) -> tuple[bool, str]:
+        """Apply the trust-level policy matrix to a scan result."""
+        if trust == TrustLevel.BUILTIN:
+            return True, ""
+        policy = _INSTALL_POLICY.get(trust, _INSTALL_POLICY[TrustLevel.AGENT_CREATED])
+        allowed = policy.get(result.verdict, False)
+        if not allowed:
             messages = [f.message for f in result.findings if f.severity == "danger"]
-            return False, "; ".join(messages[:3])
+            reason = "; ".join(messages[:3]) or f"Verdict '{result.verdict}' blocked for trust level '{trust.value}'"
+            return False, reason
+        if result.verdict == "caution" and trust == TrustLevel.AGENT_CREATED:
+            warnings = [f.message for f in result.findings if f.severity == "warning"]
+            if warnings:
+                logger.warning(
+                    "Agent-created skill has caution findings: {}",
+                    "; ".join(warnings[:3]),
+                )
         return True, ""
 
     def _check_structure(self, skill_dir: Path, result: ScanResult) -> None:

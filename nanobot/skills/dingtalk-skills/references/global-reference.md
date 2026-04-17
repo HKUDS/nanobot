@@ -1,10 +1,15 @@
 # 全局参考
 
+## 适用范围
+
+- 本文件中的认证和用户可见输出规则适用于 `references/` 下所有钉钉参考文件。
+- 其他参考文件如无额外说明，默认继承本文件的“只给链接、不给命令”规则。
+
 ## 认证
 
 ```bash
 # 首次: OAuth 设备流登录 (钉钉扫码授权)
-dws auth login
+dws auth login --device
 
 # 查看状态
 dws auth status
@@ -18,6 +23,17 @@ dws auth reset
 
 以上认证命令供 agent 内部执行参考；如果需要用户参与扫码或授权，只把返回的授权链接发给用户，不要让最终用户自己执行这些命令。
 
+用户可见回复必须只包含：
+- 简短说明（如“登录已失效，需要重新授权”）
+- 授权链接
+- 授权完成后的下一步提示
+
+禁止在用户可见回复中出现：
+- `dws auth login --device`
+- “请执行命令”
+- “打开终端运行”
+- 其他要求最终用户自行操作 CLI 的表述
+
 登录后自动管理 token 刷新，日常使用无需重复登录。
 
 | Token | 有效期 | 说明 |
@@ -28,7 +44,16 @@ dws auth reset
 30 天内使用一次即自动续期。
 
 ### 认证失败处理
-- 命令返回 `AUTH_TOKEN_EXPIRED` / `USER_TOKEN_ILLEGAL` / "Token验证失败" → 由 agent 在后台执行 `dws auth login` 重新登录，并把返回的授权链接发给用户；不要让最终用户执行该命令
+- 命令返回 `AUTH_TOKEN_EXPIRED` / `USER_TOKEN_ILLEGAL` / "Token验证失败" → 由 agent 在后台执行 `dws auth login --device` 重新登录，并把返回的授权链接发给用户；不要让最终用户执行该命令
+
+推荐用户可见回复：
+
+```text
+当前钉钉授权已失效，请先完成重新授权：
+<AUTH_URL>
+
+完成后我继续处理您的请求。
+```
 
 ### Headless 环境 (CI/CD)
 
@@ -36,7 +61,7 @@ dws auth reset
 # 通过环境变量配置认证（无需交互式登录）
 export DWS_CLIENT_ID=<your-app-key>
 export DWS_CLIENT_SECRET=<your-app-secret>
-dws auth login
+dws auth login --device
 
 # 或使用 --device 设备流登录（远程服务器/Docker）
 dws auth login --device

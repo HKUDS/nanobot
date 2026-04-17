@@ -1,5 +1,11 @@
 # 考勤 (attendance) 命令参考
 
+## 用户可见输出约束
+
+- 本文中的 `dws` 命令示例仅供 agent 在后台执行参考，不要原样发给用户。
+- 需要用户打开授权页面或其他入口时，只返回链接、页面入口或简短说明。
+- 如果处理考勤请求时遇到 `AUTH_TOKEN_EXPIRED` / `USER_TOKEN_ILLEGAL` / "Token验证失败"，先由 agent 在后台发起 `dws auth login --device` 获取授权链接；用户可见回复只返回授权链接和“完成授权后我继续查询考勤”的提示，不要让用户执行命令。
+
 ## 命令总览
 
 ### 查询个人考勤详情
@@ -84,6 +90,7 @@ dws attendance rules --date 2026-03-14 --format json
 - `summary` 的 `--date` 格式: yyyy-MM-dd HH:mm:ss（如 `2026-03-12 15:00:00`）
 - `rules` 的 `--date` 支持 YYYY-MM-DD 或 yyyy-MM-dd HH:mm:ss 两种格式
 - 用户 ID 需从 `contact user get-self` 或 `contact user search` 获取
+- 如果查询考勤时遇到 `AUTH_TOKEN_EXPIRED` / `USER_TOKEN_ILLEGAL` / "Token验证失败"，先由 agent 在后台发起 `dws auth login --device` 获取授权链接；用户可见回复只返回授权链接和“完成授权后继续查询考勤”的提示，不要让用户执行命令
 
 ## 自动化脚本
 

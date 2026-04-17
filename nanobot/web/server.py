@@ -577,11 +577,14 @@ def _register_routes(app: FastAPI) -> None:
             headers={"Content-Disposition": f'attachment; filename="{name}.zip"'},
         )
 
-    _UPLOAD_MAX_ZIP_SIZE = 10 * 1024 * 1024  # 10 MB
-
     @app.post("/api/skills/upload")
     async def upload_skill(file: UploadFile = File(...)):
         """Upload a skill as a zip file with security hardening."""
+        from nanobot.agent.skill_evo.integration import (
+            check_zip_path_traversal,
+            validate_upload_zip,
+            validate_uploaded_skill,
+        )
         from nanobot.agent.skills import SkillsLoader
 
         config: Config = app.state.config
@@ -592,11 +595,8 @@ def _register_routes(app: FastAPI) -> None:
 
         import tempfile
         content = await file.read()
-        if len(content) > _UPLOAD_MAX_ZIP_SIZE:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Zip file exceeds {_UPLOAD_MAX_ZIP_SIZE // (1024 * 1024)}MB limit",
-            )
+        if err := validate_upload_zip(content):
+            raise HTTPException(status_code=400, detail=err)
 
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
             tmp.write(content)
@@ -618,18 +618,11 @@ def _register_routes(app: FastAPI) -> None:
 
                 target_dir = loader.workspace_skills / skill_name
                 target_dir.mkdir(parents=True, exist_ok=True)
-                resolved_target = target_dir.resolve()
 
                 if len(parts) == 1:
                     for member in names:
-                        dest = (target_dir / member).resolve()
-                        try:
-                            dest.relative_to(resolved_target)
-                        except ValueError:
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"Zip contains path traversal entry: {member}",
-                            )
+                        if err := check_zip_path_traversal(member, target_dir):
+                            raise HTTPException(status_code=400, detail=err)
                     zf.extractall(target_dir)
                 else:
                     prefix = skill_name + "/"
@@ -639,14 +632,9 @@ def _register_routes(app: FastAPI) -> None:
                         rel = member[len(prefix):]
                         if not rel:
                             continue
-                        dest = (target_dir / rel).resolve()
-                        try:
-                            dest.relative_to(resolved_target)
-                        except ValueError:
-                            raise HTTPException(
-                                status_code=400,
-                                detail=f"Zip contains path traversal entry: {member}",
-                            )
+                        if err := check_zip_path_traversal(rel, target_dir):
+                            raise HTTPException(status_code=400, detail=err)
+                        dest = target_dir / rel
                         if member.endswith("/"):
                             dest.mkdir(parents=True, exist_ok=True)
                         else:
@@ -654,33 +642,10 @@ def _register_routes(app: FastAPI) -> None:
                             with zf.open(member) as src, open(dest, "wb") as dst:
                                 dst.write(src.read())
 
-                # Validate SKILL.md frontmatter
-                skill_file = target_dir / "SKILL.md"
-                if skill_file.exists():
-                    from nanobot.agent.skill_store import _parse_frontmatter
-                    fm = _parse_frontmatter(skill_file.read_text(encoding="utf-8"))
-                    if not fm.get("name") and not fm.get("description"):
-                        import shutil
-                        shutil.rmtree(str(target_dir), ignore_errors=True)
-                        raise HTTPException(
-                            status_code=400,
-                            detail="SKILL.md must have frontmatter with 'name' or 'description'",
-                        )
-
-                # Run security guard scan
-                try:
-                    from nanobot.agent.skill_guard import SkillGuard
-                    guard = SkillGuard()
-                    scan_result = guard.scan_skill(target_dir)
-                    allowed, reason = guard.should_allow(scan_result)
-                    if not allowed:
-                        import shutil
-                        shutil.rmtree(str(target_dir), ignore_errors=True)
-                        raise HTTPException(status_code=400, detail=f"Security scan blocked: {reason}")
-                except HTTPException:
-                    raise
-                except Exception:
-                    pass  # guard failure is non-fatal for uploads
+                if err := validate_uploaded_skill(target_dir):
+                    import shutil
+                    shutil.rmtree(str(target_dir), ignore_errors=True)
+                    raise HTTPException(status_code=400, detail=err)
         finally:
             tmp_path.unlink(missing_ok=True)
 

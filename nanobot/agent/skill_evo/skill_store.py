@@ -166,12 +166,39 @@ class SkillStore:
                     "source": "workspace",
                     "created_by": self._session_key or "unknown",
                     "created_at": now,
+                    "usage_count": 0,
+                    "last_used": None,
                 }
             entry["updated_at"] = now
             if origin:
                 entry["origin_skill"] = origin
             manifest[name] = entry
         self._save_manifest(manifest)
+
+    def record_usage(self, name: str) -> None:
+        """Increment usage counter when a skill is loaded or viewed."""
+        manifest = self._load_manifest()
+        entry = manifest.get(name)
+        if entry is None:
+            return
+        entry["usage_count"] = entry.get("usage_count", 0) + 1
+        entry["last_used"] = datetime.now(timezone.utc).isoformat()
+        self._save_manifest(manifest)
+
+    def get_usage_summary(self) -> list[dict[str, Any]]:
+        """Return skill usage stats for the review agent."""
+        manifest = self._load_manifest()
+        stats: list[dict[str, Any]] = []
+        for name, entry in manifest.items():
+            stats.append({
+                "name": name,
+                "created_by": entry.get("created_by", "unknown"),
+                "usage_count": entry.get("usage_count", 0),
+                "last_used": entry.get("last_used"),
+                "created_at": entry.get("created_at"),
+                "updated_at": entry.get("updated_at"),
+            })
+        return stats
 
     def _log_event(self, action: str, name: str, reason: str, result: str) -> None:
         event = {
@@ -191,13 +218,15 @@ class SkillStore:
     # Guard integration
     # ------------------------------------------------------------------
 
-    def _run_guard(self, skill_dir: Path) -> dict[str, Any] | None:
-        """Run security guard scan. Returns error dict on dangerous, None on safe."""
+    def _run_guard(self, skill_dir: Path, *, trust: str = "agent_created") -> dict[str, Any] | None:
+        """Run security guard scan. Returns error dict on blocked, None on allowed."""
         if self._guard is None:
             return None
         try:
+            from nanobot.agent.skill_evo.skill_guard import TrustLevel
+            trust_level = TrustLevel(trust)
             scan_result = self._guard.scan_skill(skill_dir)
-            allowed, reason = self._guard.should_allow(scan_result)
+            allowed, reason = self._guard.should_allow(scan_result, trust=trust_level)
             if not allowed:
                 return {"success": False, "error": f"Security scan blocked: {reason}"}
         except Exception as e:
@@ -227,6 +256,15 @@ class SkillStore:
     # Public API
     # ------------------------------------------------------------------
 
+    def _infer_trust(self) -> str:
+        """Infer trust level from the current session key."""
+        sk = self._session_key
+        if sk.startswith("review:") or sk == "dream":
+            return "agent_created"
+        if sk.startswith("upload:"):
+            return "upload"
+        return "human_curated"
+
     def create_skill(self, name: str, content: str) -> dict[str, Any]:
         if err := _validate_name(name):
             return {"success": False, "error": err}
@@ -241,7 +279,7 @@ class SkillStore:
         target = skill_dir / "SKILL.md"
         _atomic_write(target, content)
 
-        if guard_err := self._run_guard(skill_dir):
+        if guard_err := self._run_guard(skill_dir, trust=self._infer_trust()):
             shutil.rmtree(str(skill_dir), ignore_errors=True)
             self._log_event("create", name, "guard_blocked", guard_err["error"])
             return guard_err
@@ -263,7 +301,7 @@ class SkillStore:
         target = ws_dir / "SKILL.md"
         _atomic_write(target, content)
 
-        if guard_err := self._run_guard(ws_dir):
+        if guard_err := self._run_guard(ws_dir, trust=self._infer_trust()):
             self._log_event("edit", name, "guard_blocked", guard_err["error"])
             return guard_err
 
@@ -314,7 +352,7 @@ class SkillStore:
         updated = current.replace(old_string, new_string) if replace_all else current.replace(old_string, new_string, 1)
         _atomic_write(target, updated)
 
-        if guard_err := self._run_guard(ws_dir):
+        if guard_err := self._run_guard(ws_dir, trust=self._infer_trust()):
             _atomic_write(target, current)
             self._log_event("patch", name, "guard_blocked", guard_err["error"])
             return guard_err
@@ -360,7 +398,7 @@ class SkillStore:
 
         _atomic_write(target, file_content)
 
-        if guard_err := self._run_guard(ws_dir):
+        if guard_err := self._run_guard(ws_dir, trust=self._infer_trust()):
             target.unlink(missing_ok=True)
             self._log_event("write_file", name, "guard_blocked", guard_err["error"])
             return guard_err

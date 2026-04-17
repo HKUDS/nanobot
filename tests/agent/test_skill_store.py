@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from nanobot.agent.skill_store import SkillStore
+from nanobot.agent.skill_evo.skill_store import SkillStore
 
 
 _VALID_CONTENT = "---\nname: test-skill\ndescription: A test skill\n---\n\n# Test\n\nDo the thing.\n"

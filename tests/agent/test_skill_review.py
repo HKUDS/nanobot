@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.agent.skill_review import SkillReviewService
-from nanobot.agent.skill_store import SkillStore
+from nanobot.agent.skill_evo.skill_review import SkillReviewService
+from nanobot.agent.skill_evo.skill_store import SkillStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.config.schema import SkillsConfig
 
@@ -47,10 +47,10 @@ def test_summarize_conversation_extracts_text() -> None:
         {"role": "tool", "content": "file contents"},
     ]
     result = SkillReviewService._summarize_conversation(messages)
-    assert "[user] Hello" in result
-    assert "[assistant] Hi there" in result
+    assert "--- USER ---\nHello" in result
+    assert "--- ASSISTANT ---\nHi there" in result
     assert "read_file" in result
-    assert "[tool] file contents" in result
+    assert "--- TOOL_RESULT ---\nfile contents" in result
 
 
 def test_summarize_conversation_handles_multimodal_content() -> None:

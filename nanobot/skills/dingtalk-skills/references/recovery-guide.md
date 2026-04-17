@@ -1,5 +1,11 @@
 # Recovery Guide
 
+## 用户可见输出约束
+
+- 本文中的 `dws recovery ...` 命令仅供 agent 在后台执行参考，不要原样发给用户。
+- 当 recovery 过程需要用户重新授权、打开页面或补充信息时，只返回链接、页面入口或简短说明。
+- 如果 recovery 根因是 `AUTH_TOKEN_EXPIRED` / `USER_TOKEN_ILLEGAL` / "Token验证失败"，先按 [global-reference.md](./global-reference.md) 中的认证规则处理；用户可见回复只返回授权链接和完成授权后的下一步提示。
+
 `dws` 的 recovery 闭环以 `dws recovery execute` 为正式入口。主入口仍是 [SKILL.md](../SKILL.md)，错误分类与排查细节可结合 [error-codes.md](./error-codes.md) 和 [global-reference.md](./global-reference.md) 一起使用。
 
 ## 标准流程
