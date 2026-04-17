@@ -75,17 +75,18 @@ class LLMResponse:
     def should_execute_tools(self) -> bool:
         """Check if tool calls should be executed (guards against gateway injection).
 
-        Only execute when finish_reason explicitly signals tool intent.
-        Tool calls under any other finish_reason (refusal, content_filter, error, etc.)
-        are treated as anomalous and should not be executed.
+        Executes only when ``has_tool_calls`` is true and ``finish_reason`` is one of
+        the known-good signals: ``"tool_calls"`` (explicit intent) or ``"stop"`` (some
+        compliant providers emit ``stop`` for legitimate tool calls; existing paths in
+        ``openai_compat_provider`` already treat both as the tool-call terminal state).
+
+        Tool calls under any other ``finish_reason`` (e.g. ``refusal``, ``content_filter``,
+        ``error``) are treated as anomalous — typically injected by non-compliant API
+        gateways — and are skipped.
         """
         if not self.has_tool_calls:
             return False
-        if self.finish_reason == "tool_calls":
-            return True
-        if self.finish_reason == "stop":
-            return True
-        return False
+        return self.finish_reason in ("tool_calls", "stop")
 
 
 @dataclass(frozen=True)
