@@ -91,6 +91,9 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             context_tokens_estimate=ctx_est,
             search_usage_text=search_usage_text,
             active_task_count=task_count,
+            max_completion_tokens=getattr(
+                getattr(loop.provider, "generation", None), "max_tokens", 8192
+            ),
         ),
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )

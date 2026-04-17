@@ -65,6 +65,46 @@ class TestConsolidatorSummarize:
         assert result is None
 
 
+class TestConsolidatorArchiveErrorHandling:
+    """archive() must fall back to raw_archive when the LLM returns an error
+    response (finish_reason == 'error'), e.g. overloaded / quota exceeded.
+    See https://github.com/HKUDS/nanobot/issues/3244
+    """
+
+    async def test_archive_falls_back_on_error_finish_reason(self, consolidator, mock_provider, store):
+        """LLM returning finish_reason='error' should trigger raw_archive, not write error text."""
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Error: {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'overloaded_error (529)'}}",
+            finish_reason="error",
+        )
+        messages = [
+            {"role": "user", "content": "fix the auth bug"},
+            {"role": "assistant", "content": "Done, fixed the race condition."},
+        ]
+        result = await consolidator.archive(messages)
+        assert result is None
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 1
+        assert "[RAW]" in entries[0]["content"]
+        assert "Error:" not in entries[0]["content"]
+
+    async def test_archive_preserves_summary_on_success(self, consolidator, mock_provider, store):
+        """Normal LLM response should still produce a proper summary entry."""
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="User fixed a bug in the auth module.",
+            finish_reason="stop",
+        )
+        messages = [
+            {"role": "user", "content": "fix the auth bug"},
+            {"role": "assistant", "content": "Done."},
+        ]
+        result = await consolidator.archive(messages)
+        assert result == "User fixed a bug in the auth module."
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 1
+        assert "[RAW]" not in entries[0]["content"]
+
+
 class TestConsolidatorTokenBudget:
     async def test_prompt_below_threshold_does_not_consolidate(self, consolidator):
         """No consolidation when tokens are within budget."""
