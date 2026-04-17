@@ -118,6 +118,7 @@ class EmailChannel(BaseChannel):
             config = EmailConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: EmailConfig = config
+        self._self_addresses = self._collect_self_addresses()
         self._last_subject_by_chat: dict[str, str] = {}
         self._last_message_id_by_chat: dict[str, str] = {}
         self._processed_uids: set[str] = set()  # Capped to prevent unbounded growth
@@ -379,6 +380,12 @@ class EmailChannel(BaseChannel):
                 sender = parseaddr(parsed.get("From", ""))[1].strip().lower()
                 if not sender:
                     continue
+                if self._is_self_address(sender):
+                    logger.info("Email from {} ignored: matches bot-owned address", sender)
+                    self._remember_processed_uid(uid, dedupe, cycle_uids)
+                    if mark_seen:
+                        client.store(imap_id, "+FLAGS", "\\Seen")
+                    continue
 
                 # --- Anti-spoofing: verify Authentication-Results ---
                 spf_pass, dkim_pass = self._check_authentication_results(parsed)
@@ -446,14 +453,7 @@ class EmailChannel(BaseChannel):
                     }
                 )
 
-                if uid:
-                    cycle_uids.add(uid)
-                if dedupe and uid:
-                    self._processed_uids.add(uid)
-                    # mark_seen is the primary dedup; this set is a safety net
-                    if len(self._processed_uids) > self._MAX_PROCESSED_UIDS:
-                        # Evict a random half to cap memory; mark_seen is the primary dedup
-                        self._processed_uids = set(list(self._processed_uids)[len(self._processed_uids) // 2:])
+                self._remember_processed_uid(uid, dedupe, cycle_uids)
 
                 if mark_seen:
                     client.store(imap_id, "+FLAGS", "\\Seen")
@@ -462,6 +462,50 @@ class EmailChannel(BaseChannel):
                 client.logout()
             except Exception:
                 pass
+
+    def _collect_self_addresses(self) -> set[str]:
+        """Return normalized email addresses owned by this channel instance."""
+        candidates = (
+            self.config.from_address,
+            self.config.smtp_username,
+            self.config.imap_username,
+        )
+        normalized = {
+            addr
+            for candidate in candidates
+            if (addr := self._normalize_address(candidate))
+        }
+        return normalized
+
+    @staticmethod
+    def _normalize_address(value: str) -> str:
+        """Normalize an address or mailbox-like identifier for comparisons."""
+        raw = (value or "").strip()
+        if not raw:
+            return ""
+        parsed = parseaddr(raw)[1].strip().lower()
+        if parsed:
+            return parsed
+        if "@" in raw:
+            return raw.lower()
+        return ""
+
+    def _is_self_address(self, sender: str) -> bool:
+        """Return True when an inbound sender belongs to the bot itself."""
+        normalized_sender = self._normalize_address(sender)
+        return bool(normalized_sender) and normalized_sender in self._self_addresses
+
+    def _remember_processed_uid(self, uid: str, dedupe: bool, cycle_uids: set[str]) -> None:
+        """Track a fetched UID so skipped messages are not reprocessed forever."""
+        if not uid:
+            return
+        cycle_uids.add(uid)
+        if dedupe:
+            self._processed_uids.add(uid)
+            # mark_seen is the primary dedup; this set is a safety net
+            if len(self._processed_uids) > self._MAX_PROCESSED_UIDS:
+                # Evict a random half to cap memory; mark_seen is the primary dedup
+                self._processed_uids = set(list(self._processed_uids)[len(self._processed_uids) // 2:])
 
     @classmethod
     def _is_stale_imap_error(cls, exc: Exception) -> bool:

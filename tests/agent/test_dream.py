@@ -2,11 +2,12 @@
 
 import pytest
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from nanobot.agent.memory import Dream, MemoryStore
 from nanobot.agent.runner import AgentRunResult
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+from nanobot.utils.gitstore import LineAge
 
 
 @pytest.fixture
@@ -122,4 +123,136 @@ class TestDreamRun:
 
         assert "Successfully wrote" in result
         assert (store.workspace / "skills" / "test-skill" / "SKILL.md").exists()
+
+    async def test_phase1_prompt_includes_line_age_annotations(self, dream, mock_provider, mock_runner, store):
+        """Phase 1 prompt should have per-line age suffixes in MEMORY.md when git is available."""
+        store.append_history("some event")
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        # Init git so line_ages works
+        store.git.init()
+        store.git.auto_commit("initial memory state")
+
+        await dream.run()
+
+        # The MEMORY.md section should not crash and should contain the memory content
+        call_args = mock_provider.chat_with_retry.call_args
+        user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
+        assert "## Current MEMORY.md" in user_msg
+
+    async def test_phase1_annotates_only_memory_not_soul_or_user(self, dream, mock_provider, mock_runner, store):
+        """SOUL.md and USER.md should never have age annotations — they are permanent."""
+        store.append_history("some event")
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        store.git.init()
+        store.git.auto_commit("initial state")
+
+        await dream.run()
+
+        call_args = mock_provider.chat_with_retry.call_args
+        user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
+        # The ← suffix should only appear in MEMORY.md section
+        memory_section = user_msg.split("## Current MEMORY.md")[1].split("## Current SOUL.md")[0]
+        soul_section = user_msg.split("## Current SOUL.md")[1].split("## Current USER.md")[0]
+        user_section = user_msg.split("## Current USER.md")[1]
+        # SOUL and USER should not contain age arrows
+        assert "\u2190" not in soul_section
+        assert "\u2190" not in user_section
+
+    async def test_phase1_prompt_works_without_git(self, dream, mock_provider, mock_runner, store):
+        """Phase 1 should work fine even if git is not initialized (no age annotations)."""
+        store.append_history("some event")
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        await dream.run()
+
+        # Should still succeed — just without age annotations
+        mock_provider.chat_with_retry.assert_called_once()
+        call_args = mock_provider.chat_with_retry.call_args
+        user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
+        assert "## Current MEMORY.md" in user_msg
+
+    async def test_phase1_prompt_carries_age_suffix_for_stale_lines(
+        self, dream, mock_provider, mock_runner, store,
+    ):
+        """End-to-end: ages >14d must appear verbatim in the LLM prompt, ages ≤14d must not."""
+        # MEMORY.md fixture has 2 non-blank lines ("# Memory" and "- Project X active").
+        # Inject four ages to cover threshold boundaries: >14 suffix, ==14 no suffix, <14 no suffix.
+        store.write_memory("# Memory\n- Project X active\n- fresh item\n- edge case line")
+        store.append_history("some event")
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        fake_ages = [
+            LineAge(age_days=30),   # "# Memory"        → should get ← 30d
+            LineAge(age_days=20),   # "- Project X..."  → should get ← 20d
+            LineAge(age_days=14),   # "- fresh item"    → ==14, threshold is strictly >14, no suffix
+            LineAge(age_days=5),    # "- edge case..."  → no suffix
+        ]
+        with patch.object(store.git, "line_ages", return_value=fake_ages):
+            await dream.run()
+
+        call_args = mock_provider.chat_with_retry.call_args
+        user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
+        memory_section = user_msg.split("## Current MEMORY.md")[1].split("## Current SOUL.md")[0]
+        assert "\u2190 30d" in memory_section
+        assert "\u2190 20d" in memory_section
+        assert "\u2190 14d" not in memory_section
+        assert "\u2190 5d" not in memory_section
+
+    async def test_phase1_skips_annotation_when_disabled(
+        self, dream, mock_provider, mock_runner, store,
+    ):
+        """`annotate_line_ages=False` must bypass the git lookup entirely and keep MEMORY.md raw."""
+        store.append_history("some event")
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        dream.annotate_line_ages = False
+        # line_ages must be bypassed entirely — verify with a spy rather than a
+        # raising side_effect, because _annotate_with_ages catches Exception
+        # (which swallows AssertionError) and would hide an accidental call.
+        with patch.object(store.git, "line_ages") as mock_line_ages:
+            await dream.run()
+            mock_line_ages.assert_not_called()
+
+        call_args = mock_provider.chat_with_retry.call_args
+        user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
+        assert "\u2190" not in user_msg
+
+    async def test_phase1_skips_annotation_on_line_ages_length_mismatch(
+        self, dream, mock_provider, mock_runner, store,
+    ):
+        """If ages length != lines length (dirty working tree), skip annotation instead of mis-tagging."""
+        # MEMORY.md has 2 non-blank lines but we hand back only 1 age → mismatch.
+        store.append_history("some event")
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        with patch.object(store.git, "line_ages", return_value=[LineAge(age_days=999)]):
+            await dream.run()
+
+        call_args = mock_provider.chat_with_retry.call_args
+        user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
+        memory_section = user_msg.split("## Current MEMORY.md")[1].split("## Current SOUL.md")[0]
+        # No age arrow at all — we refused to annotate rather than tag the wrong line.
+        assert "\u2190" not in memory_section
+
+    async def test_phase1_prompt_uses_threshold_from_template_var(
+        self, dream, mock_provider, mock_runner, store,
+    ):
+        """System prompt should reference the stale-threshold constant, not a hardcoded 14."""
+        store.append_history("some event")
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        await dream.run()
+
+        system_msg = mock_provider.chat_with_retry.call_args.kwargs["messages"][0]["content"]
+        # The template renders with stale_threshold_days=14 → LLM must see "N>14"
+        assert "N>14" in system_msg
 

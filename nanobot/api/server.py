@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json as _json
 import mimetypes
 import re
 import time
@@ -29,6 +30,7 @@ _DATA_URL_RE = re.compile(r"^data:([^;]+);base64,(.+)$", re.DOTALL)
 class _FileSizeExceeded(Exception):
     """Raised when an uploaded file exceeds the size limit."""
 
+
 API_SESSION_KEY = "api:default"
 API_CHAT_ID = "default"
 
@@ -36,6 +38,7 @@ API_CHAT_ID = "default"
 # ---------------------------------------------------------------------------
 # Response helpers
 # ---------------------------------------------------------------------------
+
 
 def _error_json(status: int, message: str, err_type: str = "invalid_request_error") -> web.Response:
     return web.json_response(
@@ -69,10 +72,35 @@ def _response_text(value: Any) -> str:
         return str(getattr(value, "content") or "")
     return str(value)
 
+# ---------------------------------------------------------------------------
+# SSE helpers
+# ---------------------------------------------------------------------------
+
+
+def _sse_chunk(delta: str, model: str, chunk_id: str, finish_reason: str | None = None) -> bytes:
+    """Format a single OpenAI-compatible SSE chunk."""
+    payload = {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"content": delta} if delta else {},
+                "finish_reason": finish_reason,
+            }
+        ],
+    }
+    return f"data: {_json.dumps(payload)}\n\n".encode()
+
+
+_SSE_DONE = b"data: [DONE]\n\n"
 
 # ---------------------------------------------------------------------------
 # Upload helpers
 # ---------------------------------------------------------------------------
+
 
 def _save_base64_data_url(data_url: str, media_dir: Path) -> str | None:
     """Decode a data:...;base64,... URL and save to disk."""
@@ -85,9 +113,7 @@ def _save_base64_data_url(data_url: str, media_dir: Path) -> str | None:
     except Exception:
         return None
     if len(raw) > MAX_FILE_SIZE:
-        raise _FileSizeExceeded(
-            f"File exceeds {MAX_FILE_SIZE // (1024 * 1024)}MB limit"
-        )
+        raise _FileSizeExceeded(f"File exceeds {MAX_FILE_SIZE // (1024 * 1024)}MB limit")
     ext = mimetypes.guess_extension(mime_type) or ".bin"
     filename = f"{uuid.uuid4().hex[:12]}{ext}"
     dest = media_dir / safe_filename(filename)
@@ -121,6 +147,11 @@ def _parse_json_content(body: dict) -> tuple[str, list[str]]:
                     saved = _save_base64_data_url(url, media_dir)
                     if saved:
                         media_paths.append(saved)
+                elif url:
+                    raise ValueError(
+                        "Remote image URLs are not supported. "
+                        "Use base64 data URLs or upload files via multipart/form-data."
+                    )
         text = " ".join(text_parts)
     elif isinstance(user_content, str):
         text = user_content
@@ -130,12 +161,13 @@ def _parse_json_content(body: dict) -> tuple[str, list[str]]:
     return text, media_paths
 
 
-async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | None]:
-    """Parse multipart/form-data. Returns (text, media_paths, session_id)."""
+async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | None, str | None]:
+    """Parse multipart/form-data. Returns (text, media_paths, session_id, model)."""
     media_dir = get_media_dir("api")
     reader = await request.multipart()
     text = ""
     session_id = None
+    model = None
     media_paths: list[str] = []
 
     while True:
@@ -146,11 +178,16 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
             text = (await part.read()).decode("utf-8")
         elif part.name == "session_id":
             session_id = (await part.read()).decode("utf-8").strip()
+        elif part.name == "model":
+            model = (await part.read()).decode("utf-8").strip()
         elif part.name == "files":
             raw = await part.read()
             if len(raw) > MAX_FILE_SIZE:
-                raise _FileSizeExceeded(f"File '{part.filename}' exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
-            filename = safe_filename(part.filename or f"{uuid.uuid4().hex[:12]}.bin")
+                raise _FileSizeExceeded(
+                    f"File '{part.filename}' exceeds {MAX_FILE_SIZE // (1024 * 1024)}MB limit"
+                )
+            base = safe_filename(part.filename or "upload.bin")
+            filename = f"{uuid.uuid4().hex[:12]}_{base}"
             dest = media_dir / filename
             dest.write_bytes(raw)
             media_paths.append(str(dest))
@@ -158,12 +195,13 @@ async def _parse_multipart(request: web.Request) -> tuple[str, list[str], str | 
     if not text:
         text = "请分析上传的文件"
 
-    return text, media_paths, session_id
+    return text, media_paths, session_id, model
 
 
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
+
 
 async def handle_chat_completions(request: web.Request) -> web.Response:
     """POST /v1/chat/completions — supports JSON and multipart/form-data."""
@@ -175,18 +213,17 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
     timeout_s: float = request.app.get("request_timeout", 120.0)
     model_name: str = request.app.get("model_name", "nanobot")
 
+    stream = False
     try:
         if content_type.startswith("multipart/"):
-            text, media_paths, session_id = await _parse_multipart(request)
+            text, media_paths, session_id, requested_model = await _parse_multipart(request)
         else:
             try:
                 body = await request.json()
             except Exception:
                 return _error_json(400, "Invalid JSON body")
-            if body.get("stream", False):
-                return _error_json(400, "stream=true is not supported yet. Set stream=false or omit it.")
-            if (requested_model := body.get("model")) and requested_model != model_name:
-                return _error_json(400, f"Only configured model '{model_name}' is available")
+            stream = body.get("stream", False)
+            requested_model = body.get("model")
             text, media_paths = _parse_json_content(body)
             session_id = body.get("session_id")
     except ValueError as e:
@@ -197,12 +234,69 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         logger.exception("Error parsing upload")
         return _error_json(413, "File too large or invalid upload")
 
+    if requested_model and requested_model != model_name:
+        return _error_json(400, f"Only configured model '{model_name}' is available")
+
     session_key = f"api:{session_id}" if session_id else API_SESSION_KEY
     session_locks: dict[str, asyncio.Lock] = request.app["session_locks"]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
-    logger.info("API request session_key={} media={} text={}", session_key, len(media_paths), text[:80])
+    logger.info(
+        "API request session_key={} media={} text={} stream={}",
+        session_key, len(media_paths), text[:80], stream,
+    )
+    # -- streaming path --
+    if stream:
+        resp = web.StreamResponse()
+        resp.content_type = "text/event-stream"
+        resp.headers["Cache-Control"] = "no-cache"
+        resp.headers["Connection"] = "keep-alive"
+        resp.enable_compression()
+        await resp.prepare(request)
 
+        chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+        async def _on_stream(token: str) -> None:
+            await queue.put(token)
+
+        async def _on_stream_end(*_a: Any, **_kw: Any) -> None:
+            await queue.put(None)
+
+        async def _run() -> None:
+            try:
+                async with session_lock:
+                    await asyncio.wait_for(
+                        agent_loop.process_direct(
+                            content=text,
+                            media=media_paths if media_paths else None,
+                            session_key=session_key,
+                            channel="api",
+                            chat_id=API_CHAT_ID,
+                            on_stream=_on_stream,
+                            on_stream_end=_on_stream_end,
+                        ),
+                        timeout=timeout_s,
+                    )
+            except Exception:
+                logger.exception("Streaming error for session {}", session_key)
+                await queue.put(None)
+
+        task = asyncio.create_task(_run())
+        try:
+            while True:
+                token = await queue.get()
+                if token is None:
+                    break
+                await resp.write(_sse_chunk(token, model_name, chunk_id))
+        finally:
+            task.cancel()
+
+        await resp.write(_sse_chunk("", model_name, chunk_id, finish_reason="stop"))
+        await resp.write(_SSE_DONE)
+        return resp
+
+    # -- non-streaming path (original logic) --
     _FALLBACK = EMPTY_FINAL_RESPONSE_MESSAGE
 
     try:
@@ -252,17 +346,19 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
 async def handle_models(request: web.Request) -> web.Response:
     """GET /v1/models"""
     model_name = request.app.get("model_name", "nanobot")
-    return web.json_response({
-        "object": "list",
-        "data": [
-            {
-                "id": model_name,
-                "object": "model",
-                "created": 0,
-                "owned_by": "nanobot",
-            }
-        ],
-    })
+    return web.json_response(
+        {
+            "object": "list",
+            "data": [
+                {
+                    "id": model_name,
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": "nanobot",
+                }
+            ],
+        }
+    )
 
 
 async def handle_health(request: web.Request) -> web.Response:
@@ -274,7 +370,10 @@ async def handle_health(request: web.Request) -> web.Response:
 # App factory
 # ---------------------------------------------------------------------------
 
-def create_app(agent_loop, model_name: str = "nanobot", request_timeout: float = 120.0) -> web.Application:
+
+def create_app(
+    agent_loop, model_name: str = "nanobot", request_timeout: float = 120.0
+) -> web.Application:
     """Create the aiohttp application.
 
     Args:

@@ -6,6 +6,8 @@ import re
 import shutil
 from pathlib import Path
 
+import yaml
+
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
@@ -14,10 +16,6 @@ _STRIP_SKILL_FRONTMATTER = re.compile(
     r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?",
     re.DOTALL,
 )
-
-
-def _escape_xml(text: str) -> str:
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 class SkillsLoader:
@@ -110,39 +108,37 @@ class SkillsLoader:
         ]
         return "\n\n---\n\n".join(parts)
 
-    def build_skills_summary(self) -> str:
+    def build_skills_summary(self, exclude: set[str] | None = None) -> str:
         """
         Build a summary of all skills (name, description, path, availability).
 
         This is used for progressive loading - the agent can read the full
         skill content using read_file when needed.
 
+        Args:
+            exclude: Set of skill names to omit from the summary.
+
         Returns:
-            XML-formatted skills summary.
+            Markdown-formatted skills summary.
         """
         all_skills = self.list_skills(filter_unavailable=False)
         if not all_skills:
             return ""
 
-        lines: list[str] = ["<skills>"]
+        lines: list[str] = []
         for entry in all_skills:
             skill_name = entry["name"]
+            if exclude and skill_name in exclude:
+                continue
             meta = self._get_skill_meta(skill_name)
             available = self._check_requirements(meta)
-            lines.extend(
-                [
-                    f'  <skill available="{str(available).lower()}">',
-                    f"    <name>{_escape_xml(skill_name)}</name>",
-                    f"    <description>{_escape_xml(self._get_skill_description(skill_name))}</description>",
-                    f"    <location>{entry['path']}</location>",
-                ]
-            )
-            if not available:
+            desc = self._get_skill_description(skill_name)
+            if available:
+                lines.append(f"- **{skill_name}** — {desc}  `{entry['path']}`")
+            else:
                 missing = self._get_missing_requirements(meta)
-                if missing:
-                    lines.append(f"    <requires>{_escape_xml(missing)}</requires>")
-            lines.append("  </skill>")
-        lines.append("</skills>")
+                suffix = f" (unavailable: {missing})" if missing else " (unavailable)"
+                lines.append(f"- **{skill_name}** — {desc}{suffix}  `{entry['path']}`")
         return "\n".join(lines)
 
     def _get_missing_requirements(self, skill_meta: dict) -> str:
@@ -171,11 +167,19 @@ class SkillsLoader:
             return content[match.end():].strip()
         return content
 
-    def _parse_nanobot_metadata(self, raw: str) -> dict:
-        """Parse skill metadata JSON from frontmatter (supports nanobot and openclaw keys)."""
-        try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
+    def _parse_nanobot_metadata(self, raw: object) -> dict:
+        """Extract nanobot/openclaw metadata from a frontmatter field.
+
+        ``raw`` may be a dict (already parsed by yaml.safe_load) or a JSON str.
+        """
+        if isinstance(raw, dict):
+            data = raw
+        elif isinstance(raw, str):
+            try:
+                data = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        else:
             return {}
         if not isinstance(data, dict):
             return {}
@@ -193,8 +197,8 @@ class SkillsLoader:
 
     def _get_skill_meta(self, name: str) -> dict:
         """Get nanobot metadata for a skill (cached in frontmatter)."""
-        meta = self.get_skill_metadata(name) or {}
-        return self._parse_nanobot_metadata(meta.get("metadata", ""))
+        raw_meta = self.get_skill_metadata(name) or {}
+        return self._parse_nanobot_metadata(raw_meta.get("metadata"))
 
     def get_always_skills(self) -> list[str]:
         """Get skills marked as always=true that meet requirements."""
@@ -203,7 +207,7 @@ class SkillsLoader:
             for entry in self.list_skills(filter_unavailable=True)
             if (meta := self.get_skill_metadata(entry["name"]) or {})
             and (
-                self._parse_nanobot_metadata(meta.get("metadata", "")).get("always")
+                self._parse_nanobot_metadata(meta.get("metadata")).get("always")
                 or meta.get("always")
             )
         ]
@@ -224,10 +228,15 @@ class SkillsLoader:
         match = _STRIP_SKILL_FRONTMATTER.match(content)
         if not match:
             return None
-        metadata: dict[str, str] = {}
-        for line in match.group(1).splitlines():
-            if ":" not in line:
-                continue
-            key, value = line.split(":", 1)
-            metadata[key.strip()] = value.strip().strip('"\'')
+        try:
+            parsed = yaml.safe_load(match.group(1))
+        except yaml.YAMLError:
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        # yaml.safe_load returns native types (int, bool, list, etc.);
+        # keep values as-is so downstream consumers get correct types.
+        metadata: dict[str, object] = {}
+        for key, value in parsed.items():
+            metadata[str(key)] = value
         return metadata
