@@ -714,7 +714,7 @@ class OpenAICompatProvider(LLMProvider):
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         tc_bufs: dict[int, dict[str, Any]] = {}
-        finish_reason = str | None = None
+        finish_reason: str | None = None
         usage: dict[str, int] = {}
 
         def _accum_tc(tc: Any, idx_hint: int) -> None:
