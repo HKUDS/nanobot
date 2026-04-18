@@ -2918,3 +2918,45 @@ def test_snip_history_no_user_at_all_falls_back_gracefully(monkeypatch):
         assert non_system[0]["role"] in ("user", "tool"), (
             f"Safety net should ensure first non-system is user/tool, got {non_system[0]['role']}"
         )
+
+
+@pytest.mark.asyncio
+async def test_runner_binds_on_retry_wait_to_retry_callback_not_progress():
+    """Regression: provider retry heartbeats must route through
+    ``retry_wait_callback``, not ``progress_callback``. Binding them to
+    the progress callback (as an earlier runtime refactor did) caused
+    internal retry diagnostics like "Model request failed, retry in 1s"
+    to leak to end-user channels as normal progress updates.
+    """
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    captured: dict = {}
+
+    async def chat_with_retry(**kwargs):
+        captured.update(kwargs)
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider = MagicMock()
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    progress_cb = AsyncMock()
+    retry_wait_cb = AsyncMock()
+
+    runner = AgentRunner(provider)
+    await runner.run(AgentRunSpec(
+        initial_messages=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "hi"},
+        ],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        progress_callback=progress_cb,
+        retry_wait_callback=retry_wait_cb,
+    ))
+
+    assert captured["on_retry_wait"] is retry_wait_cb
+    assert captured["on_retry_wait"] is not progress_cb
