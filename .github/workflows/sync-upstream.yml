@@ -39,11 +39,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          git pull --rebase origin main
+
           if git merge upstream/main --no-edit -m "chore: sync upstream"; then
             echo "$SHA" > .upstream-sha
             git add .upstream-sha
             git commit --amend --no-edit
-            git pull --rebase origin main
             git push origin main
             echo "conflict=false" >> $GITHUB_OUTPUT
           else
@@ -64,4 +65,4 @@ jobs:
         with:
           branch: upstream-sync/${{ steps.check.outputs.upstream }}
           title: "⚠️ Upstream sync — Konflikt"
-          body: "Automatischer Merge fehlgeschlagen. Bitte manuell auflösen."
+          body: "Automatischer Merge
