@@ -113,6 +113,35 @@ class VaultClient:
         if self._token_manager:
             await self._token_manager.get_token()
 
+    @staticmethod
+    def _protocol_summary(resp: httpx.Response, *, detail: str) -> str:
+        content_type = resp.headers.get("content-type") or "unknown"
+        body_bytes = len(resp.content or b"")
+        return (
+            f"{detail}; status={resp.status_code}; "
+            f"content_type={content_type}; bytes={body_bytes}"
+        )
+
+    def _decode_json_object(
+        self,
+        resp: httpx.Response,
+        *,
+        operation: str,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        try:
+            data = resp.json()
+        except ValueError:
+            summary = self._protocol_summary(resp, detail="invalid_json")
+            logger.warning("AgentHiFive %s returned invalid JSON (%s)", operation, summary)
+            return None, summary
+
+        if isinstance(data, dict):
+            return data, None
+
+        summary = self._protocol_summary(resp, detail=f"json_type={type(data).__name__}")
+        logger.warning("AgentHiFive %s returned non-object JSON (%s)", operation, summary)
+        return None, summary
+
     async def _headers(self, *, force_refresh: bool = False) -> dict[str, str]:
         if self._token_manager:
             token = await self._token_manager.get_token(force_refresh=force_refresh)
@@ -205,10 +234,19 @@ class VaultClient:
                 ),
             )
 
-        try:
-            result = resp.json()
-        except ValueError:
-            result = {}
+        result, protocol_issue = self._decode_json_object(resp, operation="vault execute")
+        if result is None:
+            return VaultExecuteResult(
+                status_code=resp.status_code,
+                headers=dict(resp.headers),
+                body=None,
+                audit_id="",
+                blocked=VaultBlockedResult(
+                    reason="Vault returned an invalid JSON response.",
+                    policy="vault-protocol",
+                    hint=protocol_issue,
+                ),
+            )
 
         blocked = result.get("blocked")
         if blocked:
@@ -323,4 +361,15 @@ class VaultClient:
                 body.setdefault("status", resp.status_code)
             return ReplayResult(status_code=resp.status_code, body=body)
 
-        return ReplayResult(status_code=resp.status_code, body=resp.json())
+        body, protocol_issue = self._decode_json_object(resp, operation="vault replay")
+        if body is None:
+            return ReplayResult(
+                status_code=resp.status_code,
+                body={
+                    "status": resp.status_code,
+                    "error": "Vault returned an invalid JSON response.",
+                    "hint": protocol_issue,
+                },
+            )
+
+        return ReplayResult(status_code=resp.status_code, body=body)

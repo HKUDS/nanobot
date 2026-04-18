@@ -16,6 +16,7 @@ Usage from nanobot gateway integration:
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from typing import Any
 
@@ -28,6 +29,10 @@ from .types import PendingApproval
 from .vault_client import VaultClient
 
 logger = logging.getLogger(__name__)
+_session_context_var: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "agenthifive_session_context",
+    default=None,
+)
 
 
 class AgentHiFiveAdapter:
@@ -54,10 +59,6 @@ class AgentHiFiveAdapter:
             poll_interval=poll_interval,
         )
         self.hook = AgentHiFiveHook(adapter=self)
-
-        # Session context — set before each message is processed,
-        # read by the hook when it detects a 202 approval response.
-        self.current_session_context: dict[str, Any] = {}
 
     @classmethod
     def from_mcp_server_config(
@@ -91,12 +92,24 @@ class AgentHiFiveAdapter:
 
         Called by the gateway integration before each message is processed.
         """
-        self.current_session_context = {
-            "channel": channel,
-            "chat_id": chat_id,
-            "sender_id": sender_id,
-            "session_key": session_key,
-        }
+        _session_context_var.set(
+            {
+                "channel": channel,
+                "chat_id": chat_id,
+                "sender_id": sender_id,
+                "session_key": session_key,
+            }
+        )
+
+    def get_session_context(self) -> dict[str, Any]:
+        """Return the task-local session context for approval routing."""
+        ctx = _session_context_var.get()
+        return dict(ctx) if isinstance(ctx, dict) else {}
+
+    @property
+    def current_session_context(self) -> dict[str, Any]:
+        """Compatibility accessor for the current task-local session context."""
+        return self.get_session_context()
 
     async def start(self) -> None:
         """Start the approval poller."""
