@@ -180,11 +180,14 @@ class GitStore:
         """Check if self._workspace is already inside a git repository.
 
         Walks up from self._workspace to the filesystem root, returning True
-        if any parent directory contains a .git directory.
+        if any parent directory contains a .git entry.
+
+        Git worktrees and submodules can use a ``.git`` file instead of a
+        directory, so we must treat either form as "already inside a repo".
         """
         current = self._workspace.resolve()
         while current != current.parent:
-            if (current / ".git").is_dir():
+            if (current / ".git").exists():
                 return True
             current = current.parent
         return False

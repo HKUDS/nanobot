@@ -1,5 +1,6 @@
 """Tests for GitStore — line_ages() and core git operations."""
 
+import subprocess
 import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
@@ -172,3 +173,44 @@ class TestNestedRepoProtection:
 
         assert result is True
         assert (workspace / ".git").is_dir()
+
+    def test_init_refuses_inside_git_worktree(self, tmp_path):
+        """init() should refuse when the parent checkout is a git worktree."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        (repo / "README.md").write_text("x\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-q",
+                "-m",
+                "init",
+            ],
+            check=True,
+        )
+        subprocess.run(["git", "-C", str(repo), "branch", "wt-branch"], check=True)
+
+        worktree = tmp_path / "worktree"
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", "-q", str(worktree), "wt-branch"],
+            check=True,
+        )
+        assert (worktree / ".git").is_file()
+
+        workspace = worktree / "workspace"
+        workspace.mkdir()
+
+        g = GitStore(workspace, tracked_files=["MEMORY.md"])
+        result = g.init()
+
+        assert result is False
+        assert not (workspace / ".git").exists()
