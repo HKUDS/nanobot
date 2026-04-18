@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / Support
+    url: https://github.com/HKUDS/nanobot/discussions
+    about: Ask questions and get help from the community in Discussions.
