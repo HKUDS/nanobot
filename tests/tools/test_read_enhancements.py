@@ -1,5 +1,8 @@
 """Tests for ReadFileTool enhancements: description fix, read dedup, PDF support, device blacklist."""
 
+import os
+import sys
+
 import pytest
 
 from nanobot.agent.tools.filesystem import ReadFileTool, WriteFileTool
@@ -143,6 +146,7 @@ class TestReadPdf:
 # Device path blacklist
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(sys.platform == "win32", reason="/dev directory doesn't exist on Windows")
 class TestReadDeviceBlacklist:
 
     @pytest.fixture()
@@ -178,3 +182,67 @@ class TestReadDeviceBlacklist:
         result = await tool.execute(path=str(link))
         assert "Error" in result
         assert "blocked" in result.lower() or "device" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# file_state: mtime-unchanged / content-changed fallback
+# ---------------------------------------------------------------------------
+# On filesystems with coarse mtime resolution (NTFS ~100ms, FAT 2s) a fast
+# write-after-read can leave mtime unchanged. The content-hash fallback is
+# what protects against stale-read warnings being false-negative on those
+# platforms. Lock that behavior down here so nobody reverts it silently.
+
+class TestFileStateHashFallback:
+
+    def test_check_read_warns_when_content_changed_but_mtime_same(self, tmp_path):
+        f = tmp_path / "data.txt"
+        f.write_text("original", encoding="utf-8")
+        file_state.record_read(f)
+        original_mtime = os.path.getmtime(f)
+
+        f.write_text("modified", encoding="utf-8")
+        os.utime(f, (original_mtime, original_mtime))
+        assert os.path.getmtime(f) == original_mtime
+
+        warning = file_state.check_read(f)
+        assert warning is not None
+        assert "modified" in warning.lower()
+
+    def test_check_read_passes_when_content_and_mtime_unchanged(self, tmp_path):
+        f = tmp_path / "data.txt"
+        f.write_text("stable", encoding="utf-8")
+        file_state.record_read(f)
+
+        assert file_state.check_read(f) is None
+
+
+# ---------------------------------------------------------------------------
+# Line-ending normalization
+# ---------------------------------------------------------------------------
+# ReadFileTool normalizes CRLF -> LF before line-splitting. This primarily
+# helps Windows users whose checkouts carry CRLF line endings and whose
+# subsequent StrReplace edits would otherwise miss on `\r` boundaries. The
+# normalization applies on all platforms; these tests lock that in so the
+# behavior is intentional and discoverable, not accidental.
+
+class TestReadFileLineEndingNormalization:
+
+    @pytest.fixture()
+    def tool(self, tmp_path):
+        return ReadFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_crlf_is_normalized_to_lf(self, tool, tmp_path):
+        f = tmp_path / "crlf.txt"
+        f.write_bytes(b"alpha\r\nbeta\r\ngamma\r\n")
+        result = await tool.execute(path=str(f))
+        assert "\r" not in result
+        assert "alpha" in result and "beta" in result and "gamma" in result
+
+    @pytest.mark.asyncio
+    async def test_lf_only_is_preserved(self, tool, tmp_path):
+        f = tmp_path / "lf.txt"
+        f.write_bytes(b"alpha\nbeta\ngamma\n")
+        result = await tool.execute(path=str(f))
+        assert "\r" not in result
+        assert "alpha" in result and "beta" in result and "gamma" in result

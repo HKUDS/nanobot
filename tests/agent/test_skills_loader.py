@@ -310,3 +310,90 @@ def test_disabled_skills_excluded_from_get_always_skills(tmp_path: Path) -> None
     always = loader.get_always_skills()
     assert "alpha" not in always
     assert "beta" in always
+
+
+# -- multiline description tests (YAML folded > and literal |) -----------------
+
+
+def test_build_skills_summary_folded_description(tmp_path: Path) -> None:
+    """description: > (YAML folded scalar) should be parsed correctly."""
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    skill_dir = ws_skills / "pdf"
+    skill_dir.mkdir(parents=True)
+    skill_path = skill_dir / "SKILL.md"
+    skill_path.write_text(
+        "---\n"
+        "name: pdf\n"
+        "description: >\n"
+        "  Use this skill when visual quality and design identity matter for a PDF.\n"
+        "  CREATE (generate from scratch): \"make a PDF\".\n"
+        "---\n\n# PDF Skill\n",
+        encoding="utf-8",
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    summary = loader.build_skills_summary()
+    assert "pdf" in summary
+    assert "visual quality" in summary
+
+
+def test_build_skills_summary_literal_description(tmp_path: Path) -> None:
+    """description: | (YAML literal scalar) should be parsed correctly."""
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    skill_dir = ws_skills / "multi"
+    skill_dir.mkdir(parents=True)
+    skill_path = skill_dir / "SKILL.md"
+    skill_path.write_text(
+        "---\n"
+        "name: multi\n"
+        "description: |\n"
+        "  Line one of description.\n"
+        "  Line two of description.\n"
+        "---\n\n# Multi\n",
+        encoding="utf-8",
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    meta = loader.get_skill_metadata("multi")
+    assert meta is not None
+    desc = meta.get("description")
+    assert isinstance(desc, str)
+    assert "Line one" in desc
+    assert "Line two" in desc
+
+
+def test_get_skill_metadata_handles_yaml_types(tmp_path: Path) -> None:
+    """yaml.safe_load returns native types; always should be True, not 'true'."""
+    workspace = tmp_path / "ws"
+    ws_skills = workspace / "skills"
+    ws_skills.mkdir(parents=True)
+    skill_dir = ws_skills / "typed"
+    skill_dir.mkdir(parents=True)
+    payload = json.dumps({"nanobot": {"requires": {"bins": ["gh"]}, "always": True}}, separators=(",", ":"))
+    skill_path = skill_dir / "SKILL.md"
+    skill_path.write_text(
+        "---\n"
+        "name: typed\n"
+        f"metadata: {payload}\n"
+        "always: true\n"
+        "---\n\n# Typed\n",
+        encoding="utf-8",
+    )
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    meta = loader.get_skill_metadata("typed")
+    assert meta is not None
+    # YAML parsed 'true' to Python True
+    assert meta.get("always") is True
+    # metadata is a parsed dict, not a JSON string
+    assert isinstance(meta.get("metadata"), dict)

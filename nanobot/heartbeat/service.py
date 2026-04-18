@@ -104,7 +104,12 @@ class HeartbeatService:
             model=self.model,
         )
 
-        if not response.has_tool_calls:
+        if not response.should_execute_tools:
+            if response.has_tool_calls:
+                logger.warning(
+                    "Ignoring heartbeat tool calls under finish_reason='{}'",
+                    response.finish_reason,
+                )
             return "skip", ""
 
         args = response.tool_calls[0].arguments

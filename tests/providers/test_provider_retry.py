@@ -521,3 +521,42 @@ async def test_persistent_retry_emits_terminal_progress_on_identical_error_limit
 
     assert response.finish_reason == "error"
     assert progress[-1] == "Persistent retry stopped after 10 identical errors."
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_normalizes_explicit_none_max_tokens() -> None:
+    """Explicit max_tokens=None must fall back to generation defaults.
+
+    Regression for #3102: callers that construct AgentRunSpec with
+    max_tokens=None propagate None into chat_with_retry, which used to
+    reach ``_build_kwargs`` and crash on ``max(1, None)``.
+    """
+    provider = ScriptedProvider([LLMResponse(content="ok")])
+
+    response = await provider.chat_with_retry(
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=None,
+        temperature=None,
+    )
+
+    assert response.content == "ok"
+    # Generation settings default to 4096 / 0.7; explicit None should
+    # have been replaced before reaching chat().
+    assert provider.last_kwargs["max_tokens"] == 4096
+    assert provider.last_kwargs["temperature"] == 0.7
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_with_retry_normalizes_explicit_none_max_tokens() -> None:
+    """chat_stream_with_retry must apply the same None-guard as chat_with_retry."""
+    provider = ScriptedProvider([LLMResponse(content="ok")])
+
+    response = await provider.chat_stream_with_retry(
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=None,
+        temperature=None,
+    )
+
+    assert response.content == "ok"
+    assert provider.last_kwargs["max_tokens"] == 4096
+    assert provider.last_kwargs["temperature"] == 0.7

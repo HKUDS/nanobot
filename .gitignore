@@ -5,6 +5,7 @@
 .docs
 .env
 .web
+.orion
 
 # Python bytecode & caches
 *.pyc
