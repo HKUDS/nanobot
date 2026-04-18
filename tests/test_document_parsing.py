@@ -209,6 +209,49 @@ class TestExtractText:
         # Text content may vary depending on PowerPoint layout defaults
         assert len(result) > 0
 
+    def test_extract_text_pptx_table(self, tmp_path: Path):
+        """Table cells should be extracted, not silently dropped."""
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        pptx_file = tmp_path / "table.pptx"
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        table = slide.shapes.add_table(
+            2, 2, Inches(1), Inches(1), Inches(4), Inches(1)
+        ).table
+        table.cell(0, 0).text = "Header A"
+        table.cell(0, 1).text = "Header B"
+        table.cell(1, 0).text = "Alice"
+        table.cell(1, 1).text = "Bob"
+        prs.save(pptx_file)
+
+        result = extract_text(pptx_file)
+        assert result is not None
+        assert "Header A" in result
+        assert "Header B" in result
+        assert "Alice" in result
+        assert "Bob" in result
+
+    def test_extract_text_pptx_grouped_shapes(self, tmp_path: Path):
+        """Text inside grouped shapes must be extracted recursively."""
+        from pptx import Presentation
+        from pptx.util import Inches
+
+        pptx_file = tmp_path / "grouped.pptx"
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        group = slide.shapes.add_group_shape()
+        inner = group.shapes.add_textbox(
+            Inches(1), Inches(1), Inches(3), Inches(1)
+        )
+        inner.text_frame.text = "Inside group"
+        prs.save(pptx_file)
+
+        result = extract_text(pptx_file)
+        assert result is not None
+        assert "Inside group" in result
+
     def test_extract_text_pdf_not_found(self, tmp_path: Path):
         """Test that missing PDF files return error string."""
         missing_pdf = tmp_path / "nonexistent.pdf"

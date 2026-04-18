@@ -159,14 +159,38 @@ def _extract_pptx(path: Path) -> str:
         for i, slide in enumerate(prs.slides, 1):
             slide_text: list[str] = []
             for shape in slide.shapes:
-                if hasattr(shape, "text") and shape.text:
-                    slide_text.append(shape.text)
+                _collect_pptx_shape_text(shape, slide_text)
             if slide_text:
                 slides.append(f"--- Slide {i} ---\n" + "\n".join(slide_text))
         return _truncate("\n\n".join(slides), _MAX_TEXT_LENGTH)
     except Exception as e:
         logger.error("Failed to extract PPTX {}: {}", path, e)
         return f"[error: failed to extract PPTX: {e!s}]"
+
+
+def _collect_pptx_shape_text(shape, out: list[str]) -> None:
+    """Collect text from a PPTX shape, recursing into groups and tables.
+
+    Groups have ``has_text_frame=False`` and must be walked via ``.shapes``;
+    tables are GraphicFrame objects whose cell text lives under ``.table``.
+    """
+    sub_shapes = getattr(shape, "shapes", None)
+    if sub_shapes is not None:
+        for sub in sub_shapes:
+            _collect_pptx_shape_text(sub, out)
+        return
+
+    if getattr(shape, "has_table", False):
+        for row in shape.table.rows:
+            cells = [cell.text.strip() for cell in row.cells]
+            line = "\t".join(cell for cell in cells if cell)
+            if line:
+                out.append(line)
+        return
+
+    text = getattr(shape, "text", "")
+    if text:
+        out.append(text)
 
 
 def _extract_text_file(path: Path) -> str:

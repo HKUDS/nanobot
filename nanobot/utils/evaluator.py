@@ -68,8 +68,14 @@ async def evaluate_response(
             temperature=0.0,
         )
 
-        if not llm_response.has_tool_calls:
-            logger.warning("evaluate_response: no tool call returned, defaulting to notify")
+        if not llm_response.should_execute_tools:
+            if llm_response.has_tool_calls:
+                logger.warning(
+                    "evaluate_response: ignoring tool calls under finish_reason='{}', defaulting to notify",
+                    llm_response.finish_reason,
+                )
+            else:
+                logger.warning("evaluate_response: no tool call returned, defaulting to notify")
             return True
 
         args = llm_response.tool_calls[0].arguments

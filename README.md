@@ -442,6 +442,13 @@ Install Matrix dependencies first:
 pip install nanobot-ai[matrix]
 ```
 
+> [!NOTE]
+> Matrix is not supported on Windows. `matrix-nio[e2e]` depends on
+> `python-olm`, which has no pre-built Windows wheel and is skipped by the
+> `matrix` extra on `sys_platform == 'win32'`. The command above will still
+> succeed on Windows but without `matrix-nio` installed, so enabling the
+> Matrix channel will fail at startup. Use macOS, Linux, or WSL2.
+
 **1. Create/choose a Matrix account**
 
 - Create or reuse a Matrix account on your homeserver (for example `matrix.org`).

@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import BaseModel
 
 from nanobot.agent.tools.self import MyTool
 
@@ -167,6 +168,25 @@ class TestInspectPathNavigation:
         tool = _make_tool()
         result = await tool.execute(action="check", key="tools")
         assert "not accessible" in result
+
+    @pytest.mark.asyncio
+    async def test_inspect_nested_config_redacts_sensitive_scalar_fields(self):
+        class SearchConfig(BaseModel):
+            provider: str = "tavily"
+            api_key: str = "sk-test-secret"
+            base_url: str = ""
+            max_results: int = 5
+
+        loop = _make_mock_loop()
+        loop.web_config = MagicMock()
+        loop.web_config.search = SearchConfig()
+        tool = _make_tool(loop)
+
+        result = await tool.execute(action="check", key="web_config.search")
+
+        assert "provider='tavily'" in result
+        assert "sk-test-secret" not in result
+        assert "api_key" not in result.lower()
 
 
 

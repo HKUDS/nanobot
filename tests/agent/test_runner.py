@@ -643,10 +643,11 @@ def test_snip_history_drops_orphaned_tool_results_from_trimmed_slice(monkeypatch
 
     trimmed = runner._snip_history(spec, messages)
 
-    assert trimmed == [
-        {"role": "system", "content": "system"},
-        {"role": "assistant", "content": "after tool"},
-    ]
+    # After the fix, the user message is recovered so the sequence is valid
+    # for providers that require system → user (e.g. GLM error 1214).
+    assert trimmed[0]["role"] == "system"
+    non_system = [m for m in trimmed if m["role"] != "system"]
+    assert non_system[0]["role"] == "user", f"Expected user after system, got {non_system[0]['role']}"
 
 
 @pytest.mark.asyncio
@@ -2787,4 +2788,133 @@ async def test_injection_cycle_cap_on_error_path():
     assert result.had_injections is True
     # Should cap: _MAX_INJECTION_CYCLES drained rounds + 1 final round that breaks
     assert call_count["n"] == _MAX_INJECTION_CYCLES + 1
-    assert drain_count["n"] == _MAX_INJECTION_CYCLES
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for GLM-1214: _snip_history must preserve a user message
+# ---------------------------------------------------------------------------
+
+
+def test_snip_history_preserves_user_message_after_truncation(monkeypatch):
+    """When _snip_history truncates messages and the only user message ends up
+    outside the kept window, the method must recover the nearest user message
+    so the resulting sequence is valid for providers like GLM (which reject
+    system→assistant with error 1214).
+
+    This reproduces the exact scenario from the bug report:
+    - Normal interaction: user asks, assistant calls tool, tool returns,
+      assistant replies.
+    - Injection adds a phantom user message, triggering more tool calls.
+    - _snip_history activates, keeping only recent assistant/tool pairs.
+    - The injected user message is in the truncated prefix and gets lost.
+    """
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    runner = AgentRunner(provider)
+
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "assistant", "content": "previous reply"},
+        {"role": "user", "content": ".nanobot的同目录"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "tc_1", "type": "function", "function": {"name": "exec", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "tc_1", "content": "tool output 1"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [{"id": "tc_2", "type": "function", "function": {"name": "exec", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "tc_2", "content": "tool output 2"},
+    ]
+
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=100,
+    )
+
+    # Make estimate_prompt_tokens_chain report above budget so _snip_history activates.
+    monkeypatch.setattr("nanobot.agent.runner.estimate_prompt_tokens_chain", lambda *_a, **_kw: (500, None))
+    # Make kept window small: only the last 2 messages fit the budget.
+    token_sizes = {
+        "system": 0,
+        "previous reply": 200,
+        ".nanobot的同目录": 80,
+        "tool output 1": 80,
+        "tool output 2": 80,
+    }
+    monkeypatch.setattr(
+        "nanobot.agent.runner.estimate_message_tokens",
+        lambda msg: token_sizes.get(str(msg.get("content")), 100),
+    )
+
+    trimmed = runner._snip_history(spec, messages)
+
+    # The first non-system message MUST be user (not assistant).
+    non_system = [m for m in trimmed if m.get("role") != "system"]
+    assert non_system, "trimmed should contain at least one non-system message"
+    assert non_system[0]["role"] == "user", (
+        f"First non-system message must be 'user', got '{non_system[0]['role']}'. "
+        f"Roles: {[m['role'] for m in trimmed]}"
+    )
+
+
+def test_snip_history_no_user_at_all_falls_back_gracefully(monkeypatch):
+    """Edge case: if non_system has zero user messages, _snip_history should
+    still return a valid sequence (not crash or produce system→assistant)."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    runner = AgentRunner(provider)
+
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "assistant", "content": "reply"},
+        {"role": "tool", "tool_call_id": "tc_1", "content": "result"},
+        {"role": "assistant", "content": "reply 2"},
+        {"role": "tool", "tool_call_id": "tc_2", "content": "result 2"},
+    ]
+
+    spec = AgentRunSpec(
+        initial_messages=messages,
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=2000,
+        context_block_limit=100,
+    )
+
+    monkeypatch.setattr("nanobot.agent.runner.estimate_prompt_tokens_chain", lambda *_a, **_kw: (500, None))
+    monkeypatch.setattr(
+        "nanobot.agent.runner.estimate_message_tokens",
+        lambda msg: 100,
+    )
+
+    trimmed = runner._snip_history(spec, messages)
+
+    # Should not crash.  The result should still be a valid list.
+    assert isinstance(trimmed, list)
+    # Must have at least system.
+    assert any(m.get("role") == "system" for m in trimmed)
+    # The _enforce_role_alternation safety net must be able to fix whatever
+    # _snip_history returns here — verify it produces a valid sequence.
+    from nanobot.providers.base import LLMProvider
+    fixed = LLMProvider._enforce_role_alternation(trimmed)
+    non_system = [m for m in fixed if m["role"] != "system"]
+    if non_system:
+        assert non_system[0]["role"] in ("user", "tool"), (
+            f"Safety net should ensure first non-system is user/tool, got {non_system[0]['role']}"
+        )

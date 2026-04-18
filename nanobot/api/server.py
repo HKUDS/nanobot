@@ -256,6 +256,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
 
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
         queue: asyncio.Queue[str | None] = asyncio.Queue()
+        stream_failed = False
 
         async def _on_stream(token: str) -> None:
             await queue.put(token)
@@ -264,6 +265,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
             await queue.put(None)
 
         async def _run() -> None:
+            nonlocal stream_failed
             try:
                 async with session_lock:
                     await asyncio.wait_for(
@@ -279,6 +281,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                         timeout=timeout_s,
                     )
             except Exception:
+                stream_failed = True
                 logger.exception("Streaming error for session {}", session_key)
                 await queue.put(None)
 
@@ -292,8 +295,9 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         finally:
             task.cancel()
 
-        await resp.write(_sse_chunk("", model_name, chunk_id, finish_reason="stop"))
-        await resp.write(_SSE_DONE)
+        if not stream_failed:
+            await resp.write(_sse_chunk("", model_name, chunk_id, finish_reason="stop"))
+            await resp.write(_SSE_DONE)
         return resp
 
     # -- non-streaming path (original logic) --

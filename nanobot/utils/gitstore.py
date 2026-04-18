@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -22,6 +23,23 @@ class CommitInfo:
         if diff:
             return f"{header}\n```diff\n{diff}\n```"
         return f"{header}\n(no file changes)"
+
+
+@dataclass
+class LineAge:
+    """Age of a single line based on git blame."""
+
+    age_days: int  # days since last modification
+
+
+def _compute_line_ages(annotated) -> list[LineAge]:
+    """Convert annotate results to per-line ages."""
+    now = datetime.now(tz=timezone.utc).date()
+    ages: list[LineAge] = []
+    for (commit, _tree_entry), _line_bytes in annotated:
+        dt = datetime.fromtimestamp(commit.commit_time, tz=timezone.utc).date()
+        ages.append(LineAge(age_days=(now - dt).days))
+    return ages
 
 
 class GitStore:
@@ -190,6 +208,34 @@ class GitStore:
         except Exception:
             logger.warning("Git log failed")
             return []
+
+    def line_ages(self, file_path: str) -> list[LineAge]:
+        """Compute the age of each line in a tracked file via git blame.
+
+        Returns one LineAge per line, in order.
+        Returns an empty list if the repo is not initialized, the file is
+        empty, or annotation fails.
+        """
+
+        if not self.is_initialized():
+            return []
+
+        target = self._workspace / file_path
+        if not target.exists() or target.stat().st_size == 0:
+            return []
+
+        try:
+            from dulwich import porcelain
+
+            annotated = porcelain.annotate(str(self._workspace), file_path)
+        except Exception:
+            logger.warning("Git line_ages annotate failed for {}", file_path)
+            return []
+
+        if not annotated:
+            return []
+
+        return _compute_line_ages(annotated)
 
     def diff_commits(self, sha1: str, sha2: str) -> str:
         """Show diff between two commits."""
