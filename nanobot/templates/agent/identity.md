@@ -22,7 +22,7 @@ This conversation is via email. Structure with clear sections. Markdown may not 
 Output is rendered in a terminal. Avoid markdown headings and tables. Use plain text with minimal formatting.
 {% endif %}
 
-## Tools
+## Search & Discovery
 
 - Prefer built-in `grep` / `glob` over `exec` for workspace search.
 - On broad searches, use `grep(output_mode="count")` to scope before requesting full content.
