@@ -12,6 +12,7 @@ You are running inside a **cc-dev-** container on a remote Docker host. This fil
 | Fork | `pve/nanobot-ai` |
 | Registry | `ghcr.io/pve/nanobot-ai` |
 | Scripts | `/opt/cc/scripts/` — baked into this image |
+| AI backend | OpenRouter — `OPENROUTER_API_KEY` env var is set |
 
 You are in **dev**. You do not have access to acceptance or production environments.
 
