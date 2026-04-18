@@ -7,6 +7,7 @@ import email.utils
 import hmac
 import http
 import json
+import re
 import secrets
 import ssl
 import time
@@ -19,7 +20,8 @@ from pydantic import Field, field_validator, model_validator
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
-from websockets.http11 import Request as WsRequest, Response
+from websockets.http11 import Request as WsRequest
+from websockets.http11 import Response
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -156,6 +158,37 @@ def _parse_inbound_payload(raw: str) -> str | None:
     return text
 
 
+# Accept UUIDs and short scoped keys like "unified:default". Keeps the capability
+# namespace small enough to rule out path traversal / quote injection tricks.
+_CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
+
+
+def _is_valid_chat_id(value: Any) -> bool:
+    return isinstance(value, str) and _CHAT_ID_RE.match(value) is not None
+
+
+def _parse_envelope(raw: str) -> dict[str, Any] | None:
+    """Return a typed envelope dict if the frame is a new-style JSON envelope, else None.
+
+    A frame qualifies when it parses as a JSON object with a string ``type`` field.
+    Legacy frames (plain text, or ``{"content": ...}`` without ``type``) return None;
+    callers should fall back to :func:`_parse_inbound_payload` for those.
+    """
+    text = raw.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    t = data.get("type")
+    if not isinstance(t, str):
+        return None
+    return data
+
+
 def _issue_route_secret_matches(headers: Any, configured_secret: str) -> bool:
     """Return True if the token-issue HTTP request carries credentials matching ``token_issue_secret``."""
     if not configured_secret:
@@ -181,10 +214,46 @@ class WebSocketChannel(BaseChannel):
             config = WebSocketConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: WebSocketConfig = config
-        self._connections: dict[str, Any] = {}
+        # chat_id -> connections subscribed to it (fan-out target).
+        self._subs: dict[str, set[Any]] = {}
+        # connection -> chat_ids it is subscribed to (O(1) cleanup on disconnect).
+        self._conn_chats: dict[Any, set[str]] = {}
+        # connection -> default chat_id for legacy frames that omit routing.
+        self._conn_default: dict[Any, str] = {}
         self._issued_tokens: dict[str, float] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
+
+    # -- Subscription bookkeeping -------------------------------------------
+
+    def _attach(self, connection: Any, chat_id: str) -> None:
+        """Idempotently subscribe *connection* to *chat_id*."""
+        self._subs.setdefault(chat_id, set()).add(connection)
+        self._conn_chats.setdefault(connection, set()).add(chat_id)
+
+    def _cleanup_connection(self, connection: Any) -> None:
+        """Remove *connection* from every subscription set; safe to call multiple times."""
+        chat_ids = self._conn_chats.pop(connection, set())
+        for cid in chat_ids:
+            subs = self._subs.get(cid)
+            if subs is None:
+                continue
+            subs.discard(connection)
+            if not subs:
+                self._subs.pop(cid, None)
+        self._conn_default.pop(connection, None)
+
+    async def _send_event(self, connection: Any, event: str, **fields: Any) -> None:
+        """Send a control event (attached, error, ...) to a single connection."""
+        payload: dict[str, Any] = {"event": event}
+        payload.update(fields)
+        raw = json.dumps(payload, ensure_ascii=False)
+        try:
+            await connection.send(raw)
+        except ConnectionClosed:
+            self._cleanup_connection(connection)
+        except Exception as e:
+            logger.warning("websocket: failed to send {} event: {}", event, e)
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -353,21 +422,22 @@ class WebSocketChannel(BaseChannel):
             logger.warning("websocket: client_id too long ({} chars), truncating", len(client_id))
             client_id = client_id[:128]
 
-        chat_id = str(uuid.uuid4())
+        default_chat_id = str(uuid.uuid4())
 
         try:
             await connection.send(
                 json.dumps(
                     {
                         "event": "ready",
-                        "chat_id": chat_id,
+                        "chat_id": default_chat_id,
                         "client_id": client_id,
                     },
                     ensure_ascii=False,
                 )
             )
             # Register only after ready is successfully sent to avoid out-of-order sends
-            self._connections[chat_id] = connection
+            self._conn_default[connection] = default_chat_id
+            self._attach(connection, default_chat_id)
 
             async for raw in connection:
                 if isinstance(raw, bytes):
@@ -376,19 +446,66 @@ class WebSocketChannel(BaseChannel):
                     except UnicodeDecodeError:
                         logger.warning("websocket: ignoring non-utf8 binary frame")
                         continue
+
+                envelope = _parse_envelope(raw)
+                if envelope is not None:
+                    await self._dispatch_envelope(connection, client_id, envelope)
+                    continue
+
                 content = _parse_inbound_payload(raw)
                 if content is None:
                     continue
                 await self._handle_message(
                     sender_id=client_id,
-                    chat_id=chat_id,
+                    chat_id=default_chat_id,
                     content=content,
                     metadata={"remote": getattr(connection, "remote_address", None)},
                 )
         except Exception as e:
             logger.debug("websocket connection ended: {}", e)
         finally:
-            self._connections.pop(chat_id, None)
+            self._cleanup_connection(connection)
+
+    async def _dispatch_envelope(
+        self,
+        connection: Any,
+        client_id: str,
+        envelope: dict[str, Any],
+    ) -> None:
+        """Route one typed inbound envelope (``new_chat`` / ``attach`` / ``message``)."""
+        t = envelope.get("type")
+        if t == "new_chat":
+            new_id = str(uuid.uuid4())
+            self._attach(connection, new_id)
+            await self._send_event(connection, "attached", chat_id=new_id)
+            return
+        if t == "attach":
+            cid = envelope.get("chat_id")
+            if not _is_valid_chat_id(cid):
+                await self._send_event(connection, "error", detail="invalid chat_id")
+                return
+            self._attach(connection, cid)
+            await self._send_event(connection, "attached", chat_id=cid)
+            return
+        if t == "message":
+            cid = envelope.get("chat_id")
+            content = envelope.get("content")
+            if not _is_valid_chat_id(cid):
+                await self._send_event(connection, "error", detail="invalid chat_id")
+                return
+            if not isinstance(content, str) or not content.strip():
+                await self._send_event(connection, "error", detail="missing content")
+                return
+            # Auto-attach on first use so clients can one-shot without a separate attach.
+            self._attach(connection, cid)
+            await self._handle_message(
+                sender_id=client_id,
+                chat_id=cid,
+                content=content,
+                metadata={"remote": getattr(connection, "remote_address", None)},
+            )
+            return
+        await self._send_event(connection, "error", detail=f"unknown type: {t!r}")
 
     async def stop(self) -> None:
         if not self._running:
@@ -402,30 +519,31 @@ class WebSocketChannel(BaseChannel):
             except Exception as e:
                 logger.warning("websocket: server task error during shutdown: {}", e)
             self._server_task = None
-        self._connections.clear()
+        self._subs.clear()
+        self._conn_chats.clear()
+        self._conn_default.clear()
         self._issued_tokens.clear()
 
-    async def _safe_send(self, chat_id: str, raw: str, *, label: str = "") -> None:
-        """Send a raw frame, cleaning up dead connections on ConnectionClosed."""
-        connection = self._connections.get(chat_id)
-        if connection is None:
-            return
+    async def _safe_send_to(self, connection: Any, raw: str, *, label: str = "") -> None:
+        """Send a raw frame to one connection, cleaning up on ConnectionClosed."""
         try:
             await connection.send(raw)
         except ConnectionClosed:
-            self._connections.pop(chat_id, None)
-            logger.warning("websocket{}connection gone for chat_id={}", label, chat_id)
+            self._cleanup_connection(connection)
+            logger.warning("websocket{}connection gone", label)
         except Exception as e:
             logger.error("websocket{}send failed: {}", label, e)
             raise
 
     async def send(self, msg: OutboundMessage) -> None:
-        connection = self._connections.get(msg.chat_id)
-        if connection is None:
-            logger.warning("websocket: no active connection for chat_id={}", msg.chat_id)
+        # Snapshot the subscriber set so ConnectionClosed cleanups mid-iteration are safe.
+        conns = list(self._subs.get(msg.chat_id, ()))
+        if not conns:
+            logger.warning("websocket: no active subscribers for chat_id={}", msg.chat_id)
             return
         payload: dict[str, Any] = {
             "event": "message",
+            "chat_id": msg.chat_id,
             "text": msg.content,
         }
         if msg.media:
@@ -433,7 +551,8 @@ class WebSocketChannel(BaseChannel):
         if msg.reply_to:
             payload["reply_to"] = msg.reply_to
         raw = json.dumps(payload, ensure_ascii=False)
-        await self._safe_send(msg.chat_id, raw, label=" ")
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" ")
 
     async def send_delta(
         self,
@@ -441,17 +560,20 @@ class WebSocketChannel(BaseChannel):
         delta: str,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        if self._connections.get(chat_id) is None:
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
             return
         meta = metadata or {}
         if meta.get("_stream_end"):
-            body: dict[str, Any] = {"event": "stream_end"}
+            body: dict[str, Any] = {"event": "stream_end", "chat_id": chat_id}
         else:
             body = {
                 "event": "delta",
+                "chat_id": chat_id,
                 "text": delta,
             }
         if meta.get("_stream_id") is not None:
             body["stream_id"] = meta["_stream_id"]
         raw = json.dumps(body, ensure_ascii=False)
-        await self._safe_send(chat_id, raw, label=" stream ")
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" stream ")

@@ -41,6 +41,7 @@ class ChannelManager:
 
         transcription_provider = self.config.channels.transcription_provider
         transcription_key = self._resolve_transcription_key(transcription_provider)
+        transcription_base = self._resolve_transcription_base(transcription_provider)
 
         for name, cls in discover_all().items():
             section = getattr(self.config.channels, name, None)
@@ -57,6 +58,7 @@ class ChannelManager:
                 channel = cls(section, self.bus)
                 channel.transcription_provider = transcription_provider
                 channel.transcription_api_key = transcription_key
+                channel.transcription_api_base = transcription_base
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
@@ -70,6 +72,15 @@ class ChannelManager:
             if provider == "openai":
                 return self.config.providers.openai.api_key
             return self.config.providers.groq.api_key
+        except AttributeError:
+            return ""
+
+    def _resolve_transcription_base(self, provider: str) -> str:
+        """Pick the API base URL for the configured transcription provider."""
+        try:
+            if provider == "openai":
+                return self.config.providers.openai.api_base or ""
+            return self.config.providers.groq.api_base or ""
         except AttributeError:
             return ""
 
@@ -177,6 +188,9 @@ class ChannelManager:
                         continue
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
                         continue
+
+                if msg.metadata.get("_retry_wait"):
+                    continue
 
                 # Coalesce consecutive _stream_delta messages for the same (channel, chat_id)
                 # to reduce API calls and improve streaming latency

@@ -597,6 +597,7 @@ def serve(
         disabled_skills=runtime_config.agents.defaults.disabled_skills,
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
+        tools_config=runtime_config.tools,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -692,6 +693,7 @@ def gateway(
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
+        tools_config=config.tools,
     )
 
     # Set cron callback (needs agent)
@@ -888,6 +890,7 @@ def gateway(
         agent.dream.model = dream_cfg.model_override
     agent.dream.max_batch_size = dream_cfg.max_batch_size
     agent.dream.max_iterations = dream_cfg.max_iterations
+    agent.dream.annotate_line_ages = dream_cfg.annotate_line_ages
     from nanobot.cron.types import CronJob, CronPayload
 
     cron.register_system_job(
@@ -991,6 +994,7 @@ def agent(
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
+        tools_config=config.tools,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):

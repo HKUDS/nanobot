@@ -314,6 +314,45 @@ async def test_on_message_accepts_allowlisted_dm() -> None:
 
 
 @pytest.mark.asyncio
+async def test_on_message_accepts_when_channel_in_allow_channels() -> None:
+    # When allow_channels is set, messages from listed channels should be forwarded.
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], allow_channels=["456"]),
+        MessageBus(),
+    )
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+
+    await channel._on_message(_make_message(author_id=123, channel_id=456))
+
+    assert len(handled) == 1
+    assert handled[0]["chat_id"] == "456"
+
+
+@pytest.mark.asyncio
+async def test_on_message_drops_when_channel_not_in_allow_channels() -> None:
+    # When allow_channels is set and incoming channel is not listed, drop silently.
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], allow_channels=["999"]),
+        MessageBus(),
+    )
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+
+    await channel._on_message(_make_message(author_id=123, channel_id=456))
+
+    assert handled == []
+
+
+@pytest.mark.asyncio
 async def test_on_message_ignores_unmentioned_guild_message() -> None:
     # With mention-only group policy, guild messages without a bot mention are dropped.
     channel = DiscordChannel(
