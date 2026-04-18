@@ -68,7 +68,7 @@ class WsTestClient:
         async with WsTestClient("ws://127.0.0.1:8765/", client_id="tester") as client:
             ready = await client.recv_ready()
             await client.send_text("hello")
-            msg = await client.recv_message(timeout=5.0)
+            msg = await client.recv_message()
     """
 
     def __init__(
@@ -77,6 +77,7 @@ class WsTestClient:
         *,
         client_id: str = "test-client",
         token: str = "",
+        chat_id: str = "",
         extra_headers: dict[str, str] | None = None,
     ) -> None:
         params: list[str] = []
@@ -84,6 +85,8 @@ class WsTestClient:
             params.append(f"client_id={client_id}")
         if token:
             params.append(f"token={token}")
+        if chat_id:
+            params.append(f"chat_id={chat_id}")
         sep = "&" if "?" in uri else "?"
         self._uri = uri + sep + "&".join(params) if params else uri
         self._extra_headers = extra_headers
@@ -114,12 +117,12 @@ class WsTestClient:
 
     # -- Receiving --------------------------------------------------------
 
-    async def recv_raw(self, timeout: float = 10.0) -> dict[str, Any]:
+    async def recv_raw(self, timeout: float = 5.0) -> dict[str, Any]:
         """Receive and parse one raw JSON message with timeout."""
         raw = await asyncio.wait_for(self.ws.recv(), timeout=timeout)
         return json.loads(raw)
 
-    async def recv(self, timeout: float = 10.0) -> WsMessage:
+    async def recv(self, timeout: float = 5.0) -> WsMessage:
         """Receive one message, returning a WsMessage wrapper."""
         data = await self.recv_raw(timeout)
         return WsMessage(event=data.get("event", ""), raw=data)
@@ -130,25 +133,25 @@ class WsTestClient:
         assert msg.event == "ready", f"Expected 'ready' event, got '{msg.event}'"
         return msg
 
-    async def recv_message(self, timeout: float = 10.0) -> WsMessage:
+    async def recv_message(self, timeout: float = 5.0) -> WsMessage:
         """Receive and validate a 'message' event."""
         msg = await self.recv(timeout)
         assert msg.event == "message", f"Expected 'message' event, got '{msg.event}'"
         return msg
 
-    async def recv_delta(self, timeout: float = 10.0) -> WsMessage:
+    async def recv_delta(self, timeout: float = 5.0) -> WsMessage:
         """Receive and validate a 'delta' event."""
         msg = await self.recv(timeout)
         assert msg.event == "delta", f"Expected 'delta' event, got '{msg.event}'"
         return msg
 
-    async def recv_stream_end(self, timeout: float = 10.0) -> WsMessage:
+    async def recv_stream_end(self, timeout: float = 5.0) -> WsMessage:
         """Receive and validate a 'stream_end' event."""
         msg = await self.recv(timeout)
         assert msg.event == "stream_end", f"Expected 'stream_end' event, got '{msg.event}'"
         return msg
 
-    async def collect_stream(self, timeout: float = 10.0) -> list[WsMessage]:
+    async def collect_stream(self, timeout: float = 5.0) -> list[WsMessage]:
         """Collect all deltas and the final stream_end into a list."""
         messages: list[WsMessage] = []
         while True:
@@ -158,7 +161,7 @@ class WsTestClient:
                 break
         return messages
 
-    async def recv_n(self, n: int, timeout: float = 10.0) -> list[WsMessage]:
+    async def recv_n(self, n: int, timeout: float = 5.0) -> list[WsMessage]:
         """Receive exactly *n* messages."""
         return [await self.recv(timeout) for _ in range(n)]
 

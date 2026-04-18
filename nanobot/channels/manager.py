@@ -192,8 +192,11 @@ class ChannelManager:
                 if msg.metadata.get("_retry_wait"):
                     continue
 
-                # Coalesce consecutive _stream_delta messages for the same (channel, chat_id)
-                # to reduce API calls and improve streaming latency
+                if msg.metadata.get("_tool_event") and not self.config.channels.send_tool_events:
+                    continue
+
+                # Coalesce consecutive _stream_delta messages for the same stream
+                # (channel, chat_id, _stream_id) to reduce API calls and latency
                 if msg.metadata.get("_stream_delta") and not msg.metadata.get("_stream_end"):
                     msg, extra_pending = self._coalesce_stream_deltas(msg)
                     pending.extend(extra_pending)
@@ -209,26 +212,50 @@ class ChannelManager:
             except asyncio.CancelledError:
                 break
 
-    @staticmethod
-    async def _send_once(channel: BaseChannel, msg: OutboundMessage) -> None:
+    async def _send_once(self, channel: BaseChannel, msg: OutboundMessage) -> None:
         """Send one outbound message without retry policy."""
         if msg.metadata.get("_stream_delta") or msg.metadata.get("_stream_end"):
             await channel.send_delta(msg.chat_id, msg.content, msg.metadata)
-        elif not msg.metadata.get("_streamed"):
+            return
+        streamed = msg.metadata.get("_streamed")
+        rc = msg.metadata.get("reasoning_content")
+        if streamed and rc and self.config.channels.send_reasoning_content:
+            # Main reply was already delivered via send_delta; attach persisted reasoning only.
+            meta = dict(msg.metadata or {})
+            meta.pop("_streamed", None)
+            meta["_reasoning_only"] = True
+            await channel.send(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="",
+                    metadata=meta,
+                )
+            )
+            return
+        if not streamed:
             await channel.send(msg)
+
+    @staticmethod
+    def _stream_coalesce_key(msg: OutboundMessage) -> tuple[str, str, object]:
+        """Identity for coalescing: channel, chat_id, and optional _stream_id."""
+        sid = (msg.metadata or {}).get("_stream_id")
+        return (msg.channel, msg.chat_id, sid)
 
     def _coalesce_stream_deltas(
         self, first_msg: OutboundMessage
     ) -> tuple[OutboundMessage, list[OutboundMessage]]:
-        """Merge consecutive _stream_delta messages for the same (channel, chat_id).
+        """Merge consecutive stream deltas for the same (channel, chat_id, _stream_id).
 
         This reduces the number of API calls when the queue has accumulated multiple
         deltas, which happens when LLM generates faster than the channel can process.
+        Deltas with different ``_stream_id`` values are never merged, so interleaved
+        streams on the same chat stay separated.
 
         Returns:
             tuple of (merged_message, list_of_non_matching_messages)
         """
-        target_key = (first_msg.channel, first_msg.chat_id)
+        target_key = self._stream_coalesce_key(first_msg)
         combined_content = first_msg.content
         final_metadata = dict(first_msg.metadata or {})
         non_matching: list[OutboundMessage] = []
@@ -241,18 +268,15 @@ class ChannelManager:
             except asyncio.QueueEmpty:
                 break
 
-            # Check if this message belongs to the same stream
-            same_target = (next_msg.channel, next_msg.chat_id) == target_key
-            is_delta = next_msg.metadata and next_msg.metadata.get("_stream_delta")
-            is_end = next_msg.metadata and next_msg.metadata.get("_stream_end")
+            same_stream = self._stream_coalesce_key(next_msg) == target_key
+            meta = next_msg.metadata or {}
+            is_delta = bool(meta.get("_stream_delta"))
+            is_end = bool(meta.get("_stream_end"))
 
-            if same_target and is_delta and not final_metadata.get("_stream_end"):
-                # Accumulate content
+            if same_stream and not final_metadata.get("_stream_end") and (is_delta or is_end):
                 combined_content += next_msg.content
-                # If we see _stream_end, remember it and stop coalescing this stream
                 if is_end:
                     final_metadata["_stream_end"] = True
-                    # Stream ended - stop coalescing this stream
                     break
             else:
                 # First non-matching message defines the coalescing boundary.

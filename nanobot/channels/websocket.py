@@ -55,8 +55,23 @@ class WebSocketConfig(Base):
       ``X-Nanobot-Auth: <secret>``.
     - ``websocket_requires_token``: If True, the handshake must include a valid token (static or issued and not expired).
     - Each connection has its own session: a unique ``chat_id`` maps to the agent session internally.
+      Clients may pass ``chat_id`` (UUID) on the query string to resume a persisted session; see
+      ``resume_chat_id``.
+    - ``resume_chat_id``: If True (default), optional query ``chat_id=<uuid>`` selects that session;
+      if False, the parameter is ignored and a new UUID is always assigned.
     - ``media`` field in outbound messages contains local filesystem paths; remote clients need a
       shared filesystem or an HTTP file server to access these files.
+    - Tool rounds can emit JSON frames with ``event: "tool_event"`` (``tool_calls`` before execution,
+      ``tool_results`` after). This is gated by global config ``channels.sendToolEvents`` / ``send_tool_events``
+      (default off).
+    - Each agent turn emits ``event: "chat_start"`` before processing and ``event: "chat_end"`` after
+      the turn completes (including after errors), so clients can show typing or progress UI.
+    - Assistant ``reasoning_content`` from the persisted turn is sent as ``event: "reasoning"`` after
+      streaming completes when applicable, or on ``event: "message"`` as field ``reasoning_content``,
+      when global ``channels.sendReasoningContent`` / ``send_reasoning_content`` is true (default).
+      The same global flag controls whether other channels receive reasoning on outbound messages.
+    - ``max_delta_buffer_chars``: When ``delta_chunk_chars`` > 0, caps buffered stream text per stream;
+      overflow is flushed as extra delta frames before ``stream_end``. ``0`` means no cap.
     """
 
     enabled: bool = False
@@ -70,11 +85,18 @@ class WebSocketConfig(Base):
     websocket_requires_token: bool = True
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
     streaming: bool = True
+    # When > 0, coalesce outgoing stream text into delta frames of at most this many Unicode scalars
+    # per frame (remainder is flushed on stream_end). When 0, pass through provider chunks unchanged.
+    delta_chunk_chars: int = Field(default=5, ge=0, le=1_048_576)
+    # When > 0 and delta_chunk_chars > 0, flush buffered stream text early if buffer exceeds this size
+    # (Unicode scalars) to cap memory before stream_end. When 0, no limit.
+    max_delta_buffer_chars: int = Field(default=2_097_152, ge=0, le=16_777_216)
     max_message_bytes: int = Field(default=1_048_576, ge=1024, le=16_777_216)
     ping_interval_s: float = Field(default=20.0, ge=5.0, le=300.0)
     ping_timeout_s: float = Field(default=20.0, ge=5.0, le=300.0)
     ssl_certfile: str = ""
     ssl_keyfile: str = ""
+    resume_chat_id: bool = True
 
     @field_validator("path")
     @classmethod
@@ -138,12 +160,25 @@ def _query_first(query: dict[str, list[str]], key: str) -> str | None:
     return values[0] if values else None
 
 
+def _parse_resume_chat_id(raw: str | None) -> str | None:
+    """Return canonical UUID string for *raw*, or None if absent or blank.
+
+    Raises ValueError if *raw* is non-blank but not a valid UUID.
+    """
+    if raw is None:
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    return str(uuid.UUID(s))
+
+
 def _parse_inbound_payload(raw: str) -> str | None:
     """Parse a client frame into text; return None for empty or unrecognized content."""
     text = raw.strip()
     if not text:
         return None
-    if text.startswith("{"):
+    if text.startswith("{") or text.startswith("["):
         try:
             data = json.loads(text)
         except json.JSONDecodeError:
@@ -153,6 +188,11 @@ def _parse_inbound_payload(raw: str) -> str | None:
                 value = data.get(key)
                 if isinstance(value, str) and value.strip():
                     return value
+            return None
+        if isinstance(data, list):
+            logger.debug(
+                "websocket: ignoring JSON array inbound frame (expected object with content/text/message)"
+            )
             return None
         return None
     return text
@@ -220,6 +260,7 @@ class WebSocketChannel(BaseChannel):
         self._conn_chats: dict[Any, set[str]] = {}
         # connection -> default chat_id for legacy frames that omit routing.
         self._conn_default: dict[Any, str] = {}
+        self._delta_buffers: dict[tuple[str, Any], str] = {}
         self._issued_tokens: dict[str, float] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
@@ -241,7 +282,17 @@ class WebSocketChannel(BaseChannel):
             subs.discard(connection)
             if not subs:
                 self._subs.pop(cid, None)
+                self._clear_delta_buffers_for_chat(cid)
         self._conn_default.pop(connection, None)
+
+    @staticmethod
+    def _delta_buffer_key(chat_id: str, metadata: dict[str, Any]) -> tuple[str, Any]:
+        return (chat_id, metadata.get("_stream_id"))
+
+    def _clear_delta_buffers_for_chat(self, chat_id: str) -> None:
+        for key in list(self._delta_buffers):
+            if key[0] == chat_id:
+                self._delta_buffers.pop(key, None)
 
     async def _send_event(self, connection: Any, event: str, **fields: Any) -> None:
         """Send a control event (attached, error, ...) to a single connection."""
@@ -340,11 +391,17 @@ class WebSocketChannel(BaseChannel):
                 return None
             return connection.respond(401, "Unauthorized")
 
-        if supplied:
-            self._take_issued_token_if_valid(supplied)
+        # Optional auth: do not consume issued tokens — clients may omit token or pass one without
+        # invalidating single-use tickets when the socket does not require them.
         return None
 
     async def start(self) -> None:
+        """Bind and run the WebSocket server until :meth:`stop` is called.
+
+        This coroutine **blocks** until shutdown (it awaits the server task). Start it with
+        ``asyncio.create_task(channel.start())`` (or equivalent) so it does not stall the
+        event loop, then await :meth:`stop` when tearing down.
+        """
         self._running = True
         self._stop_event = asyncio.Event()
 
@@ -372,6 +429,13 @@ class WebSocketChannel(BaseChannel):
                 client_id = client_id[:128]
             if not self.is_allowed(client_id):
                 return connection.respond(403, "Forbidden")
+            if self.config.resume_chat_id:
+                raw_chat = _query_first(query, "chat_id")
+                if raw_chat is not None and raw_chat.strip():
+                    try:
+                        _parse_resume_chat_id(raw_chat)
+                    except ValueError:
+                        return connection.respond(400, "Bad Request")
             return self._authorize_websocket_handshake(connection, query)
 
         async def handler(connection: ServerConnection) -> None:
@@ -422,20 +486,35 @@ class WebSocketChannel(BaseChannel):
             logger.warning("websocket: client_id too long ({} chars), truncating", len(client_id))
             client_id = client_id[:128]
 
-        default_chat_id = str(uuid.uuid4())
+        resumed = False
+        if self.config.resume_chat_id:
+            maybe_resume = _parse_resume_chat_id(_query_first(query, "chat_id"))
+            if maybe_resume is not None:
+                default_chat_id = maybe_resume
+                resumed = True
+                for old in list(self._subs.get(default_chat_id, ())):
+                    if old is connection:
+                        continue
+                    try:
+                        await old.close(1000, "replaced by new connection")
+                    except Exception as e:
+                        logger.debug("websocket: closing replaced connection: {}", e)
+                    self._cleanup_connection(old)
+            else:
+                default_chat_id = str(uuid.uuid4())
+        else:
+            default_chat_id = str(uuid.uuid4())
+
+        ready_body: dict[str, Any] = {
+            "event": "ready",
+            "chat_id": default_chat_id,
+            "client_id": client_id,
+        }
+        if resumed:
+            ready_body["resumed"] = True
 
         try:
-            await connection.send(
-                json.dumps(
-                    {
-                        "event": "ready",
-                        "chat_id": default_chat_id,
-                        "client_id": client_id,
-                    },
-                    ensure_ascii=False,
-                )
-            )
-            # Register only after ready is successfully sent to avoid out-of-order sends
+            await connection.send(json.dumps(ready_body, ensure_ascii=False))
             self._conn_default[connection] = default_chat_id
             self._attach(connection, default_chat_id)
 
@@ -522,6 +601,7 @@ class WebSocketChannel(BaseChannel):
         self._subs.clear()
         self._conn_chats.clear()
         self._conn_default.clear()
+        self._delta_buffers.clear()
         self._issued_tokens.clear()
 
     async def _safe_send_to(self, connection: Any, raw: str, *, label: str = "") -> None:
@@ -541,18 +621,59 @@ class WebSocketChannel(BaseChannel):
         if not conns:
             logger.warning("websocket: no active subscribers for chat_id={}", msg.chat_id)
             return
-        payload: dict[str, Any] = {
-            "event": "message",
-            "chat_id": msg.chat_id,
-            "text": msg.content,
-        }
-        if msg.media:
-            payload["media"] = msg.media
-        if msg.reply_to:
-            payload["reply_to"] = msg.reply_to
+        metadata = msg.metadata or {}
+        if metadata.get("_reasoning_only"):
+            rc = metadata.get("reasoning_content")
+            if isinstance(rc, str) and rc:
+                payload = {"event": "reasoning", "chat_id": msg.chat_id, "text": rc}
+                raw = json.dumps(payload, ensure_ascii=False)
+                for connection in conns:
+                    await self._safe_send_to(connection, raw, label=" reasoning ")
+            return
+        turn_phase = metadata.get("_session_turn_event")
+        if turn_phase in ("start", "end"):
+            payload = {
+                "event": "chat_start" if turn_phase == "start" else "chat_end",
+                "chat_id": msg.chat_id,
+            }
+            raw = json.dumps(payload, ensure_ascii=False)
+            for connection in conns:
+                await self._safe_send_to(connection, raw, label=" turn ")
+            return
+        if metadata.get("_tool_event"):
+            payload: dict[str, Any] = {"event": "tool_event", "chat_id": msg.chat_id}
+            for key in ("tool_calls", "tool_results"):
+                if key in metadata:
+                    payload[key] = metadata[key]
+        else:
+            payload = {
+                "event": "message",
+                "chat_id": msg.chat_id,
+                "text": msg.content,
+            }
+            if msg.media:
+                payload["media"] = msg.media
+            if msg.reply_to:
+                payload["reply_to"] = msg.reply_to
+            rc = metadata.get("reasoning_content")
+            if isinstance(rc, str) and rc:
+                payload["reasoning_content"] = rc
         raw = json.dumps(payload, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" ")
+
+    async def _send_delta_frame(
+        self,
+        chat_id: str,
+        text: str,
+        meta: dict[str, Any],
+    ) -> None:
+        body: dict[str, Any] = {"event": "delta", "chat_id": chat_id, "text": text}
+        if meta.get("_stream_id") is not None:
+            body["stream_id"] = meta["_stream_id"]
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in list(self._subs.get(chat_id, ())):
+            await self._safe_send_to(connection, raw, label=" stream ")
 
     async def send_delta(
         self,
@@ -564,16 +685,44 @@ class WebSocketChannel(BaseChannel):
         if not conns:
             return
         meta = metadata or {}
+        chunk = self.config.delta_chunk_chars
+
         if meta.get("_stream_end"):
-            body: dict[str, Any] = {"event": "stream_end", "chat_id": chat_id}
-        else:
-            body = {
-                "event": "delta",
-                "chat_id": chat_id,
-                "text": delta,
-            }
-        if meta.get("_stream_id") is not None:
-            body["stream_id"] = meta["_stream_id"]
-        raw = json.dumps(body, ensure_ascii=False)
-        for connection in conns:
-            await self._safe_send_to(connection, raw, label=" stream ")
+            if chunk > 0:
+                key = self._delta_buffer_key(chat_id, meta)
+                remainder = self._delta_buffers.pop(key, "") + delta
+                while len(remainder) >= chunk:
+                    await self._send_delta_frame(chat_id, remainder[:chunk], meta)
+                    remainder = remainder[chunk:]
+                if remainder:
+                    await self._send_delta_frame(chat_id, remainder, meta)
+            else:
+                key = self._delta_buffer_key(chat_id, meta)
+                self._delta_buffers.pop(key, None)
+            body_end: dict[str, Any] = {"event": "stream_end", "chat_id": chat_id}
+            if meta.get("_stream_id") is not None:
+                body_end["stream_id"] = meta["_stream_id"]
+            raw = json.dumps(body_end, ensure_ascii=False)
+            for connection in list(self._subs.get(chat_id, ())):
+                await self._safe_send_to(connection, raw, label=" stream ")
+            return
+
+        if chunk <= 0:
+            await self._send_delta_frame(chat_id, delta, meta)
+            return
+
+        key = self._delta_buffer_key(chat_id, meta)
+        buf = self._delta_buffers.get(key, "") + delta
+        cap = self.config.max_delta_buffer_chars
+        if cap > 0:
+            while len(buf) > cap:
+                if len(buf) >= chunk:
+                    await self._send_delta_frame(chat_id, buf[:chunk], meta)
+                    buf = buf[chunk:]
+                else:
+                    await self._send_delta_frame(chat_id, buf, meta)
+                    buf = ""
+        while len(buf) >= chunk:
+            await self._send_delta_frame(chat_id, buf[:chunk], meta)
+            buf = buf[chunk:]
+        self._delta_buffers[key] = buf
