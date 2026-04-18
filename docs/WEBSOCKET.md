@@ -7,7 +7,7 @@ Nanobot can act as a WebSocket server, allowing external clients (web apps, CLIs
 - Bidirectional real-time communication over WebSocket
 - Streaming support — receive agent responses token by token
 - Token-based authentication (static tokens and short-lived issued tokens)
-- Per-connection sessions — each connection gets a unique `chat_id`
+- Multi-chat multiplexing — one connection can run many concurrent `chat_id`s
 - TLS/SSL support (WSS) with enforced TLSv1.2 minimum
 - Client allow-list via `allowFrom`
 - Auto-cleanup of dead connections
@@ -98,6 +98,7 @@ All frames are JSON text. Each message has an `event` field.
 ```json
 {
   "event": "message",
+  "chat_id": "uuid-v4",
   "text": "Hello! How can I help?",
   "media": ["/tmp/image.png"],
   "reply_to": "msg-id"
@@ -111,6 +112,7 @@ All frames are JSON text. Each message has an `event` field.
 ```json
 {
   "event": "delta",
+  "chat_id": "uuid-v4",
   "text": "Hello",
   "stream_id": "s1"
 }
@@ -121,25 +123,46 @@ All frames are JSON text. Each message has an `event` field.
 ```json
 {
   "event": "stream_end",
+  "chat_id": "uuid-v4",
   "stream_id": "s1"
 }
 ```
 
+**`attached`** — confirmation for `new_chat` / `attach` inbound envelopes (see [Multi-chat multiplexing](#multi-chat-multiplexing)):
+
+```json
+{"event": "attached", "chat_id": "uuid-v4"}
+```
+
+**`error`** — soft error for malformed inbound envelopes. The connection stays open:
+
+```json
+{"event": "error", "detail": "invalid chat_id"}
+```
+
 ### Client → Server
 
-Send plain text:
+**Legacy (default chat):** send a plain string, or a JSON object with a recognized text field:
 
 ```json
 "Hello nanobot!"
 ```
 
-Or send a JSON object with a recognized text field:
-
 ```json
 {"content": "Hello nanobot!"}
 ```
 
-Recognized fields: `content`, `text`, `message` (checked in that order). Invalid JSON is treated as plain text.
+Recognized fields: `content`, `text`, `message` (checked in that order). Invalid JSON is treated as plain text. These frames route to the connection's default `chat_id` (the one announced in `ready`).
+
+**Typed envelopes (multi-chat):** any JSON object with a string `type` field is a typed envelope:
+
+| `type` | Fields | Effect |
+|--------|--------|--------|
+| `new_chat` | — | Server mints a new `chat_id`, subscribes this connection, replies with `attached`. |
+| `attach` | `chat_id` | Subscribe to an existing `chat_id` (e.g. after a page reload). Replies with `attached`. |
+| `message` | `chat_id`, `content` | Send `content` on `chat_id`. First use auto-attaches; no explicit `attach` needed. |
+
+See [Multi-chat multiplexing](#multi-chat-multiplexing) for the full flow.
 
 ## Configuration Reference
 
@@ -243,11 +266,53 @@ websocat "ws://127.0.0.1:8765/ws?client_id=alice&token=nbwt_aBcDeFg..."
 - Outstanding tokens are capped at 10,000. Requests beyond this return HTTP 429.
 - Expired tokens are purged lazily on each issue or validation request.
 
+## Multi-chat multiplexing
+
+A single WebSocket can carry many concurrent chats. The server tracks `chat_id -> {connections}` as a fan-out set, so the same chat can also be mirrored across multiple connections (e.g. two browser tabs).
+
+### Typical flow (web UI with a sidebar)
+
+```text
+client                                server
+  | --- connect -------------------->  |
+  | <-- {"event":"ready",              |
+  |      "chat_id":"d3..."}   (default)|
+  |                                     |
+  | --- {"type":"new_chat"} --------->  |
+  | <-- {"event":"attached",            |
+  |      "chat_id":"a1..."}             |
+  |                                     |
+  | --- {"type":"message",              |
+  |      "chat_id":"a1...",             |
+  |      "content":"hi"} ------------>  |
+  | <-- {"event":"delta", ...}          |
+  | <-- {"event":"stream_end", ...}     |
+  |                                     |
+  | --- {"type":"attach",               |  # after page reload
+  |      "chat_id":"a1..."} --------->  |
+  | <-- {"event":"attached", ...}       |
+```
+
+### Rules
+
+- Every outbound event carries `chat_id`. Clients must dispatch by that field.
+- `chat_id` format: `^[A-Za-z0-9_:-]{1,64}$`. Non-matching values return `error`.
+- `message` auto-attaches on first use — no separate `attach` is required for chats the server minted (`new_chat`) on the same connection.
+- Errors (invalid envelope, unknown `type`, bad `chat_id`) are soft: the server replies with `{"event":"error","detail":"..."}` and keeps the connection open.
+
+### Backward compatibility
+
+Legacy clients that only send plain text or `{"content": ...}` keep working unchanged: those frames route to the connection's default `chat_id` (the one from `ready`). No config flag is needed.
+
+### Security boundary
+
+`chat_id` is a *capability*: anyone holding a valid WebSocket auth credential and the chat_id can attach to that conversation and see its output. This is safe for nanobot's local, single-user model. Multi-tenant deployments should namespace chat_ids per user (or introduce a per-tenant auth gate) — nanobot does not do this today.
+
 ## Security Notes
 
 - **Timing-safe comparison**: Static token validation uses `hmac.compare_digest` to prevent timing attacks.
 - **Defense in depth**: `allowFrom` is checked at both the HTTP handshake level and the message level.
-- **Token isolation**: Each WebSocket connection gets a unique `chat_id`. Clients cannot access other sessions.
+- **chat_id as capability**: see [Multi-chat multiplexing](#multi-chat-multiplexing). Auth on the WebSocket handshake is the single line of defense; callers who pass it can attach to any chat_id they know.
 - **TLS enforcement**: When SSL is enabled, TLSv1.2 is the minimum allowed version.
 - **Default-secure**: `websocketRequiresToken` defaults to `true`. Explicitly set it to `false` only on trusted networks.
 
