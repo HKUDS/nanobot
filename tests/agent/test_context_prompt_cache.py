@@ -149,14 +149,37 @@ def test_partial_dream_processing_shows_only_remainder(tmp_path) -> None:
 
 
 def test_execution_rules_in_system_prompt(tmp_path) -> None:
-    """New execution rules should appear in the system prompt."""
+    """Execution rules should appear in the system prompt via default SOUL.md."""
+    from nanobot.utils.helpers import sync_workspace_templates
+
     workspace = _make_workspace(tmp_path)
+    sync_workspace_templates(workspace, silent=True)
     builder = ContextBuilder(workspace)
 
     prompt = builder.build_system_prompt()
-    assert "Act, don't narrate" in prompt
+    assert "single-step tasks" in prompt
+    assert "multi-step tasks" in prompt
     assert "Read before you write" in prompt
     assert "verify the result" in prompt
+
+
+def test_identity_has_no_behavioral_instructions(tmp_path) -> None:
+    """Identity template should not contain behavioral rules or hardcoded name."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    identity = builder._get_identity(channel=None)
+    assert "You are nanobot" not in identity
+    assert "Act, don't narrate" not in identity
+    assert "Execution Rules" not in identity
+
+
+def test_default_soul_template_contains_execution_rules() -> None:
+    """Default SOUL.md template must contain execution rules with act/plan layering."""
+    soul = (pkg_files("nanobot") / "templates" / "SOUL.md").read_text(encoding="utf-8")
+    assert "## Execution Rules" in soul
+    assert "single-step tasks" in soul
+    assert "multi-step tasks" in soul
 
 
 def test_channel_format_hint_telegram(tmp_path) -> None:
