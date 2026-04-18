@@ -50,6 +50,9 @@ conversations: dict = {}
 branches: dict = {}
 container_ports: dict = {}
 
+# KM容器管理
+km_container_id: Optional[str] = None  # KM容器的conversation_id
+
 # 再初始化依赖字典的组件
 token_wallet = TokenWallet()
 bounty_hub = BountyHub(token_wallet)
@@ -137,9 +140,13 @@ def get_container_url(conversation_id: str) -> str:
     return f"http://localhost:{port}"
 
 
+_km_lock = asyncio.Lock()
+
+
 class ConversationCreate(BaseModel):
     title: str
     model: str = "deepseek-chat"
+    agent_type: str = "km"  # km=KnowledgeManager, collab=协作者
 
 
 class ConversationResponse(BaseModel):
@@ -147,6 +154,8 @@ class ConversationResponse(BaseModel):
     title: str
     model: str
     status: str
+    agent_type: str = "km"
+    container_port: Optional[int] = None
 
 
 class MessageSend(BaseModel):
@@ -202,6 +211,7 @@ async def create_conversation(req: ConversationCreate):
         task=req.title,
         model=req.model,
         api_key=api_key,
+        agent_type=req.agent_type,
     )
 
     # 使用锁保护全局字典写入
@@ -214,6 +224,7 @@ async def create_conversation(req: ConversationCreate):
             "title": req.title,
             "model": req.model,
             "status": "active",
+            "agent_type": req.agent_type,
             "container_info": container_info,
             "created_at": datetime.now(TZ_UTC8).isoformat(),
             # Power机制相关字段
@@ -221,8 +232,8 @@ async def create_conversation(req: ConversationCreate):
             "power_history": [],                # Power历史记录
             "file_stats": {},                  # 文件统计信息
             "last_file_check": None,           # 最后文件检查时间
-            "annotations": [],                # 标注记录
-            "total_annotations": 0,           # 累计标注次数
+            "annotations": [],                 # 标注记录
+            "total_annotations": 0,            # 累计标注次数
         }
 
     async with branches_lock:
@@ -240,7 +251,36 @@ async def create_conversation(req: ConversationCreate):
         title=req.title,
         model=req.model,
         status="active",
+        agent_type=req.agent_type,
+        container_port=container_ports.get(conversation_id),
     )
+
+
+async def get_km_container_url() -> str:
+    """获取KM容器的URL，若不存在则自动创建"""
+    global km_container_id
+    async with _km_lock:
+        if km_container_id and km_container_id not in container_ports:
+            port = orchestrator.container_ports.get(km_container_id)
+            if port:
+                container_ports[km_container_id] = port
+                print(f"[BFF] KM容器端口从orchestrator恢复: {km_container_id}, 端口: {port}")
+        
+        if km_container_id is None or km_container_id not in container_ports:
+            print(f"[BFF] KM容器不存在，创建中...")
+            conv = await create_conversation(ConversationCreate(
+                title="KnowledgeManager",
+                model="deepseek-chat",
+                agent_type="km"
+            ))
+            km_container_id = conv.conversation_id
+            print(f"[BFF] KM容器已创建: {km_container_id}, 端口: {container_ports.get(km_container_id)}")
+        return get_container_url(km_container_id)
+
+
+async def ensure_km_container() -> str:
+    """确保KM容器已创建，返回conversation_id"""
+    return await get_km_container_url()
 
 
 @app.get("/conversations")
@@ -327,10 +367,10 @@ async def fork_conversation(conversation_id: str, req: ForkRequest):
                 "title": container_info.get("branch_name", f"{conversations[conversation_id]['title']} (fork)"),
                 "model": conversations[conversation_id]["model"],
                 "status": "active",
+                "agent_type": "collab",  # fork出来的都是协作者
                 "parent_id": conversation_id,
                 "container_info": container_info,
                 "created_at": datetime.now(TZ_UTC8).isoformat(),
-                # 添加 Power 机制字段
                 "power": 50.0,
                 "power_history": [],
                 "file_stats": {},
@@ -857,6 +897,72 @@ async def get_conversation_files(conversation_id: str):
         }
 
 
+import json
+from pathlib import Path
+
+async def _retrieve_skills_from_pm(query: str, top_k: int = 3) -> dict:
+    """从PublicMemory直接读取文件检索Skill"""
+    pm_host_path = os.environ.get("PUBLIC_MEMORY_HOST_PATH")
+    print(f"[BFF] PUBLIC_MEMORY_HOST_PATH env: {pm_host_path}")
+    if pm_host_path:
+        pm_path = Path(pm_host_path) / "public_memory.jsonl"
+    else:
+        pm_path = Path(__file__).parent.parent / "data" / "public_memory" / "public_memory.jsonl"
+    print(f"[BFF] 读取PublicMemory路径: {pm_path}, exists={pm_path.exists()}")
+    if not pm_path.exists():
+        return {"entries": [], "count": 0}
+
+    entries = []
+    try:
+        with open(pm_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        entries.append(json.loads(line))
+                    except:
+                        continue
+    except Exception as e:
+        print(f"[BFF] 读取PublicMemory失败: {e}")
+        return {"entries": [], "count": 0}
+
+    if not query:
+        return {"entries": entries[:top_k], "count": min(len(entries), top_k), "query": None}
+
+    import re
+    keywords = re.findall(r'[\u4e00-\u9fa5]{2,}', query)
+    if not keywords:
+        keywords = query.replace("，", " ").replace(",", " ").split()
+    keywords = [k.strip() for k in keywords if k.strip()]
+    if not keywords:
+        return {"entries": entries[:top_k], "count": min(len(entries), top_k), "query": None}
+
+    scored = []
+    for e in entries:
+        content = e.get("content", "").lower()
+        score = sum(1 for kw in keywords if kw.lower() in content)
+        if score > 0:
+            scored.append((score, e))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    results = [e for _, e in scored[:top_k]]
+    return {"entries": results, "count": len(results)}
+
+
+def _extract_query_keywords(content: str) -> str:
+    """从prompt中提取检索关键词"""
+    keywords = []
+    content_lower = content.lower()
+
+    important_terms = ["栈段", "堆段", "数据段", "skill", "page", "memory", "publicmemory",
+                       "栈", "堆", "数据", "segment", "public", "knowledge"]
+    for term in important_terms:
+        if term in content_lower:
+            keywords.append(term)
+
+    return " ".join(keywords) if keywords else ""
+
+
 @app.get("/conversations/{conversation_id}/file-changes")
 async def get_file_changes(conversation_id: str, limit: int = 20):
     """获取文件变化历史"""
@@ -906,10 +1012,36 @@ async def send_message(conversation_id: str, req: MessageSend):
     #         trajectory=[{"action": "reflex_match", "confidence": reflex.get("confidence", 0)}]
     #     )
 
+    # 协作者类型自动检索Skill
+    enriched_content = req.content
+    agent_type = conv.get("agent_type", "km")
+
+    if agent_type == "collab":
+        query_keywords = _extract_query_keywords(req.content)
+        if query_keywords:
+            try:
+                skills_result = await _retrieve_skills_from_pm(query_keywords, top_k=3)
+                if skills_result.get("entries"):
+                    skill_context = "\n\n".join([
+                        f"### {e.get('metadata', {}).get('page_id', 'unknown')}\n{e.get('content', '')[:300]}"
+                        for e in skills_result["entries"]
+                    ])
+                    enriched_content = f"""[系统提示：以下是从PublicMemory检索到的相关Skill，请结合这些内容回答]
+
+{skill_context}
+
+---
+
+[用户原始请求]
+{req.content}"""
+                    print(f"[BFF] 协作者检索到 {len(skills_result['entries'])} 条Skill")
+            except Exception as e:
+                print(f"[BFF] Skill检索失败: {e}")
+
     url = f"{get_container_url(conversation_id)}/chat"
     async with httpx.AsyncClient(timeout=300.0) as client:
         try:
-            resp = await client.post(url, json={"content": req.content, "model": req.model})
+            resp = await client.post(url, json={"content": enriched_content, "model": req.model})
             resp.raise_for_status()
             result = resp.json()
 
@@ -981,10 +1113,14 @@ async def api_create_bounty(req: BountyCreate):
         raise HTTPException(status_code=500, detail=f"Failed to create bounty: {str(e)}")
 
 @app.get("/bounties")
-async def api_list_bounties():
+async def api_list_bounties(issuer_id: str = None, status: str = None):
     try:
-        bounties = await bounty_hub.list_open_bounties()
-        logger.info(f"[bounties] 返回 {len(bounties)} 个开放悬赏")
+        if issuer_id:
+            bounties = await bounty_hub.list_bounties_by_issuer(issuer_id, status)
+            logger.info(f"[bounties] 返回 {len(bounties)} 个悬赏 (issuer={issuer_id}, status={status})")
+        else:
+            bounties = await bounty_hub.list_open_bounties()
+            logger.info(f"[bounties] 返回 {len(bounties)} 个开放悬赏")
         return {"bounties": bounties}
     except Exception as e:
         logger.error(f"[bounties] 列出悬赏失败: {e}")
@@ -1001,6 +1137,27 @@ async def api_get_bounty(bounty_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get bounty: {str(e)}")
+
+@app.get("/bounties/{bounty_id}/discussion-status")
+async def api_get_discussion_status(bounty_id: str):
+    """
+    获取多轮研讨状态
+    返回：
+    - is_multi_round: 是否多轮研讨
+    - current_round: 当前轮次
+    - max_rounds: 最大轮次
+    - progress: 显示文本（如"第2轮"）
+    - chain_rounds: 所有轮次的悬赏列表
+    """
+    try:
+        status = await bounty_hub.get_discussion_status(bounty_id)
+        if not status:
+            raise HTTPException(status_code=404, detail="Bounty not found")
+        return status
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get discussion status: {str(e)}")
 
 @app.post("/bounties/{bounty_id}/submit")
 async def api_submit_solution(bounty_id: str, req: SubmissionCreate):
@@ -1470,6 +1627,214 @@ async def api_get_friends_with_trust(agent_id: str):
 async def api_update_trust(agent_a: str, agent_b: str, delta: float):
     await social_graph.update_trust(agent_a, agent_b, delta)
     return {"status": "ok"}
+
+
+class PageSubmitRequest(BaseModel):
+    agent_id: str
+    page_content: str
+    page_title: str
+    round_num: Optional[int] = None
+
+
+class Skill0Request(BaseModel):
+    content: str
+    skill_version: str = "1.0"
+
+
+@app.post("/knowledge-manager/preset-skill-0")
+async def api_preset_skill_0(req: Skill0Request):
+    """预置0号Skill到PublicMemory - 转发到KM容器"""
+    print(f"[KM] 预置0号Skill，转发到KM容器")
+    try:
+        km_url = await get_km_container_url()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{km_url}/preset-skill-0",
+                json={"content": req.content, "skill_version": req.skill_version}
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        print(f"[BFF] 转发 preset-skill-0 失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge-manager/km-url")
+async def api_get_km_url():
+    """返回KM容器的URL，供协作者直接调用"""
+    try:
+        km_url = await get_km_container_url()
+        return {"km_url": km_url}
+    except Exception as e:
+        print(f"[BFF] 获取KM URL失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/knowledge-manager/submit-page")
+async def api_submit_page(req: PageSubmitRequest):
+    """接收协作者提交的page_content - 转发到KM容器"""
+    try:
+        km_url = await get_km_container_url()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{km_url}/submit-page",
+                json={
+                    "page_content": req.page_content,
+                    "page_title": req.page_title,
+                    "round_num": req.round_num
+                },
+                headers={"X-Agent-Id": req.agent_id}
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        print(f"[BFF] 转发 submit-page 失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge-manager/task")
+async def api_get_km_task(agent_id: str):
+    """获取KM Agent的Task - 转发到KM容器"""
+    try:
+        km_url = await get_km_container_url()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(
+                f"{km_url}/task",
+                params={"agent_id": agent_id}
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        print(f"[BFF] 转发 task 失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge-manager/public-memory")
+async def api_get_public_memory(
+    query: str = None,
+    top_k: int = 3,
+    agent_id: str = None,
+    page_id: str = None
+):
+    """获取PublicMemory内容，支持关键词检索 - BFF直接读取文件"""
+    try:
+        pm_host_path = os.environ.get("PUBLIC_MEMORY_HOST_PATH")
+        if pm_host_path:
+            pm_path = Path(pm_host_path) / "public_memory.jsonl"
+        else:
+            pm_path = Path(__file__).parent.parent / "data" / "public_memory" / "public_memory.jsonl"
+        if not pm_path.exists():
+            return {"entries": [], "count": 0, "query": query}
+
+        entries = []
+        with open(pm_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        entries.append(json.loads(line))
+                    except:
+                        continue
+
+        if not query:
+            return {"entries": entries[:top_k], "count": min(len(entries), top_k), "query": None}
+
+        import re
+        keywords = re.findall(r'[\u4e00-\u9fa5]{2,}', query)
+        if not keywords:
+            keywords = query.replace("，", " ").replace(",", " ").split()
+        keywords = [k.strip() for k in keywords if k.strip()]
+        if not keywords:
+            return {"entries": entries[:top_k], "count": min(len(entries), top_k), "query": None}
+
+        scored = []
+        for e in entries:
+            content = e.get("content", "").lower()
+            score = sum(1 for kw in keywords if kw.lower() in content)
+            if agent_id and e.get("agent_id") == agent_id:
+                score += 0.5
+            if page_id and e.get("metadata", {}).get("page_id") == page_id:
+                score += 0.5
+            if score > 0:
+                scored.append((score, e))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        results = [e for _, e in scored[:top_k]]
+
+        return {"entries": results, "count": len(results), "query": query, "top_k": top_k}
+    except Exception as e:
+        print(f"[BFF] 读取PublicMemory失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge-manager/skill-0")
+async def api_get_skill_0():
+    """获取0号Skill"""
+    try:
+        pm_host_path = os.environ.get("PUBLIC_MEMORY_HOST_PATH")
+        if pm_host_path:
+            pm_path = Path(pm_host_path) / "public_memory.jsonl"
+        else:
+            pm_path = Path(__file__).parent.parent / "data" / "public_memory" / "public_memory.jsonl"
+        if not pm_path.exists():
+            raise HTTPException(status_code=404, detail="PublicMemory not found")
+
+        with open(pm_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        entry = json.loads(line)
+                        if entry.get("metadata", {}).get("page_id") == "page_0_skill":
+                            return entry
+                    except:
+                        continue
+        raise HTTPException(status_code=404, detail="Skill 0 not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[BFF] 获取Skill 0失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge-manager/search")
+async def api_km_search(q: str, top_k: int = 3):
+    """搜索PublicMemory内容"""
+    try:
+        result = await _retrieve_skills_from_pm(q, top_k)
+        return {"results": result["entries"], "count": result["count"]}
+    except Exception as e:
+        print(f"[BFF] 搜索失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge-manager/stats")
+async def api_km_stats():
+    """获取KM统计信息 - 转发到KM容器"""
+    try:
+        km_url = await get_km_container_url()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{km_url}/stats")
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        print(f"[BFF] 转发 stats 失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/knowledge-manager/force-merge")
+async def api_force_merge():
+    """强制立即合并 - 转发到KM容器"""
+    try:
+        km_url = await get_km_container_url()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(f"{km_url}/force-merge")
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        print(f"[BFF] 转发 force-merge 失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn

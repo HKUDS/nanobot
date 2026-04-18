@@ -33,6 +33,9 @@ def init_db():
                 status TEXT DEFAULT 'open',
                 created_at TIMESTAMP,
                 winner_ids TEXT,
+                round INTEGER DEFAULT 1,
+                parent_bounty_id TEXT,
+                max_rounds INTEGER DEFAULT 20,
                 FOREIGN KEY (issuer_id) REFERENCES wallets(conversation_id)
             )
         """)
@@ -62,6 +65,19 @@ def init_db():
             pass
         try:
             conn.execute("ALTER TABLE submissions ADD COLUMN score_reason TEXT")
+        except:
+            pass
+
+        try:
+            conn.execute("ALTER TABLE bounties ADD COLUMN round INTEGER DEFAULT 1")
+        except:
+            pass
+        try:
+            conn.execute("ALTER TABLE bounties ADD COLUMN parent_bounty_id TEXT")
+        except:
+            pass
+        try:
+            conn.execute("ALTER TABLE bounties ADD COLUMN max_rounds INTEGER DEFAULT 20")
         except:
             pass
 

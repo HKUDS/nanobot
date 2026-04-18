@@ -1,39 +1,108 @@
 import uuid
 import json
-import numpy as np
-import aiohttp
+import re
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from bff.db import get_db
-from bff.deepseek_embedding import DeepSeekEmbedding
 
 
 class PublicSpace:
     def __init__(self):
-        self.embedder = DeepSeekEmbedding()
+        self.embedder = None
+        self._init_embedder()
 
-    def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
-        v1 = np.array(vec1)
-        v2 = np.array(vec2)
-        return np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    def _init_embedder(self):
+        try:
+            from bff.deepseek_embedding import DeepSeekEmbedding
+            self.embedder = DeepSeekEmbedding()
+        except Exception as e:
+            print(f"[PublicSpace] DeepSeekEmbedding 初始化失败，使用关键词检索: {e}")
+            self.embedder = None
+
+    def _keyword_score(self, query: str, doc: dict) -> float:
+        """基于关键词匹配的评分"""
+        query_lower = query.lower()
+        query_words = set(re.findall(r'[\w]+', query_lower))
+
+        if not query_words:
+            return 0.0
+
+        title = (doc.get("title") or "").lower()
+        content = (doc.get("content") or "").lower()
+        tags = doc.get("tags", [])
+        if isinstance(tags, str):
+            tags = json.loads(tags)
+        tags_text = " ".join(tags).lower()
+
+        text = f"{title} {content} {tags_text}"
+        text_words = set(re.findall(r'[\w]+', text))
+
+        if not text_words:
+            return 0.0
+
+        matches = query_words & text_words
+        if not matches:
+            return 0.0
+
+        base_score = len(matches) / len(query_words)
+
+        title_matches = query_words & set(re.findall(r'[\w]+', title))
+        if title_matches:
+            base_score += 0.5 * (len(title_matches) / len(query_words))
+
+        content_matches = query_words & set(re.findall(r'[\w]+', content[:500]))
+        if content_matches:
+            base_score += 0.3 * (len(content_matches) / len(query_words))
+
+        return min(base_score, 1.0)
 
     async def search(self, query: str, top_k: int = 5) -> List[dict]:
-        query_vec = await self.embedder.embed_text(query)
+        use_embedding = self.embedder is not None
+        query_vec = None
+
+        if use_embedding:
+            try:
+                query_vec = await self.embedder.embed_text(query)
+            except Exception as e:
+                print(f"[PublicSpace] Query embedding 失败，使用关键词检索: {e}")
+                use_embedding = False
+
         with get_db() as conn:
             rows = conn.execute("SELECT * FROM public_knowledge").fetchall()
+
         scored = []
         for row in rows:
             row_dict = dict(row)
-            if row_dict.get("embedding"):
-                emb = json.loads(row_dict["embedding"])
-                sim = self._cosine_similarity(query_vec, emb)
-                row_dict["similarity"] = float(sim)
-                scored.append((sim, row_dict))
+
+            if use_embedding and row_dict.get("embedding"):
+                try:
+                    emb = json.loads(row_dict["embedding"])
+                    if emb and len(emb) > 0:
+                        v1 = query_vec
+                        v2 = emb
+                        sim = sum(a * b for a, b in zip(v1, v2))
+                        norm1 = sum(a * a for a in v1) ** 0.5
+                        norm2 = sum(b * b for b in v2) ** 0.5
+                        if norm1 > 0 and norm2 > 0:
+                            sim = sim / (norm1 * norm2)
+                        row_dict["similarity"] = float(sim)
+                        scored.append((sim, row_dict))
+                        continue
+                except Exception as e:
+                    print(f"[PublicSpace] 向量相似度计算失败: {e}")
+
+            kw_score = self._keyword_score(query, row_dict)
+            row_dict["similarity"] = kw_score
+            row_dict["_keyword_matched"] = True
+            scored.append((kw_score, row_dict))
+
         scored.sort(key=lambda x: x[0], reverse=True)
         results = []
         for _, doc in scored[:top_k]:
             if isinstance(doc.get("tags"), str):
                 doc["tags"] = json.loads(doc["tags"])
+            if "_keyword_matched" in doc:
+                del doc["_keyword_matched"]
             results.append(doc)
         return results
 
@@ -41,8 +110,15 @@ class PublicSpace:
         doc_id = str(uuid.uuid4())
         tags_json = json.dumps(tags)
         text_to_embed = f"{title}\n{content}\n{skill_code if skill_code else ''}"
-        embedding = await self.embedder.embed_text(text_to_embed)
-        embedding_json = json.dumps(embedding)
+
+        embedding_json = "[]"
+        if self.embedder:
+            try:
+                embedding = await self.embedder.embed_text(text_to_embed)
+                embedding_json = json.dumps(embedding)
+            except Exception as e:
+                print(f"[PublicSpace] 嵌入生成失败，使用空嵌入: {e}")
+
         with get_db() as conn:
             conn.execute("""
                 INSERT INTO public_knowledge (id, type, title, content, skill_code, usage, tags, embedding, author_id, created_at)
@@ -181,13 +257,14 @@ description: {description_clean}
         doc_id = str(uuid.uuid4())
         tags_json = json.dumps(tags or [])
         text_to_embed = f"{title or ''}\n{content or ''}\n{skill_code or ''}"
-        
-        try:
-            embedding = await self.embedder.embed_text(text_to_embed)
-            embedding_json = json.dumps(embedding)
-        except Exception as e:
-            print(f"[PublicSpace] 嵌入生成失败，使用空嵌入: {e}")
-            embedding_json = "[]"
+
+        embedding_json = "[]"
+        if self.embedder:
+            try:
+                embedding = await self.embedder.embed_text(text_to_embed)
+                embedding_json = json.dumps(embedding)
+            except Exception as e:
+                print(f"[PublicSpace] 嵌入生成失败，使用空嵌入: {e}")
         
         try:
             with get_db() as conn:

@@ -11,13 +11,14 @@ import json
 import os
 import asyncio
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 import aiohttp
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from uvicorn.config import LOGGING_CONFIG
@@ -43,28 +44,26 @@ def extract_json_block(text: str) -> Optional[str]:
 
 
 def _validate_json_structure(summary: dict) -> bool:
-    """验证JSON结构是否包含必需字段"""
+    """验证JSON结构是否包含必需字段（兼容轨迹JSON和学习任务JSON）"""
+    if all(k in summary for k in ["stack_content", "heap_content", "page_content", "page_title"]):
+        return True
+
     required_fields = ["state", "action", "observation", "reward"]
-    
-    # 检查顶级字段
     for field in required_fields:
         if field not in summary:
             print(f"[DEBUG] JSON缺少必需字段: {field}")
             return False
-    
-    # 检查reward字段中的prm_score
+
     reward_data = summary.get("reward", {})
     if "prm_score" not in reward_data:
         print(f"[DEBUG] JSON缺少prm_score字段")
         return False
-    
-    # 检查prm_score中的value
+
     prm_score = reward_data.get("prm_score", {})
     if "value" not in prm_score:
         print(f"[DEBUG] JSON缺少prm_score.value字段")
         return False
-    
-    # 验证value是数值类型
+
     try:
         value = float(prm_score.get("value", 0))
         if not (0 <= value <= 1):
@@ -73,7 +72,7 @@ def _validate_json_structure(summary: dict) -> bool:
     except (ValueError, TypeError):
         print(f"[DEBUG] prm_score.value不是有效数值")
         return False
-    
+
     return True
 
 LOGGING_CONFIG["formatters"]["default"]["fmt"] = "%(asctime)s [%(levelname)s] %(message)s"
@@ -160,19 +159,131 @@ async def check_notifications():
     return []
 
 
-async def process_bounty_task(bounty_id: str, notification_id: str = None):
+async def check_issuer_pending_bounties():
+    """获取当前容器发布的待结算悬赏"""
+    bff_url = os.environ.get("BFF_URL", "http://host.docker.internal:8000")
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+        try:
+            async with session.get(f"{bff_url}/bounties?issuer_id={CONVERSATION_ID}&status=open") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if isinstance(data, dict):
+                        return data.get("bounties", [])
+                    elif isinstance(data, list):
+                        return data
+                    else:
+                        return []
+                else:
+                    print(f"[IssuerBounty] Failed to get pending bounties: {resp.status}")
+                    return []
+        except Exception as e:
+            print(f"[IssuerBounty] Error checking pending bounties: {e}")
+    return []
+
+
+async def get_submissions_count(bounty_id: str) -> int:
+    """获取悬赏的提交数量"""
+    bff_url = os.environ.get("BFF_URL", "http://host.docker.internal:8000")
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+        try:
+            async with session.get(f"{bff_url}/bounties/{bounty_id}/submissions") as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return len(data.get("submissions", []))
+                else:
+                    print(f"[IssuerBounty] Failed to get submissions count: {resp.status}")
+                    return 0
+        except Exception as e:
+            print(f"[IssuerBounty] Error getting submissions count: {e}")
+            return 0
+
+
+def is_deadline_reached(bounty: dict) -> bool:
+    """检查悬赏是否已到截止时间"""
+    deadline_str = bounty.get("deadline")
+    if not deadline_str:
+        return False
+    try:
+        deadline = datetime.fromisoformat(deadline_str.replace("Z", "+00:00"))
+        return datetime.now() >= deadline
+    except Exception as e:
+        print(f"[IssuerBounty] Error parsing deadline: {e}")
+        return False
+
+
+async def auto_close_bounty(bounty_id: str):
+    """自动结算悬赏"""
+    bff_url = os.environ.get("BFF_URL", "http://host.docker.internal:8000")
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+        try:
+            async with session.post(f"{bff_url}/bounties/{bounty_id}/close", json={
+                "issuer_id": CONVERSATION_ID
+            }) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    print(f"[IssuerBounty] Auto-closed bounty: {bounty_id}, result: {result}")
+                    return result
+                else:
+                    error_text = await resp.text()
+                    print(f"[IssuerBounty] Failed to auto-close bounty: {resp.status}, error: {error_text}")
+                    return None
+        except Exception as e:
+            print(f"[IssuerBounty] Error auto-closing bounty: {e}")
+            return None
+
+
+async def check_and_process_tasks():
     """处理悬赏任务"""
+    notifications = await check_notifications()
+    
+    for notification in notifications:
+        if notification.get("type") == "bounty" and notification.get("status") == "pending":
+            bounty_id = notification.get("bounty_id")
+            notification_id = notification.get("id")
+            
+            if not bounty_id or not notification_id:
+                continue
+            
+            await process_single_bounty(bounty_id, notification_id)
+
+
+async def submit_to_km(page_content: str, page_title: str):
+    """提交内容到KM（通过BFF转发）"""
+    bff_url = os.environ.get("BFF_URL", "http://host.docker.internal:8000")
+
+    submit_data = {
+        "agent_id": CONVERSATION_ID,
+        "page_content": page_content,
+        "page_title": page_title
+    }
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+            async with session.post(f"{bff_url}/knowledge-manager/submit-page", json=submit_data) as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    print(f"[KM] 提交成功: page_id={result.get('page_id')}")
+                    return result
+                else:
+                    print(f"[KM] 提交失败: {resp.status}")
+                    return None
+    except Exception as e:
+        print(f"[KM] 提交异常: {e}")
+        return None
+
+
+async def process_single_bounty(bounty_id: str, notification_id: str):
+    """处理单个悬赏任务"""
     bff_url = os.environ.get("BFF_URL", "http://host.docker.internal:8000")
 
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as http_session:
         try:
-            if notification_id:
-                async with http_session.post(f"{bff_url}/notifications/{notification_id}/process") as update_resp:
-                    if update_resp.status == 200:
-                        print(f"[Bounty] 通知状态已更新为 processing: notification_id={notification_id}")
-                    else:
-                        print(f"[Bounty] 更新通知状态失败: {update_resp.status}")
-                        return
+            async with http_session.post(f"{bff_url}/notifications/{notification_id}/process") as update_resp:
+                if update_resp.status == 200:
+                    print(f"[Bounty] 通知状态已更新为 processing: notification_id={notification_id}")
+                else:
+                    print(f"[Bounty] 更新通知状态失败: {update_resp.status}")
+                    return
 
             async with http_session.get(f"{bff_url}/bounties/{bounty_id}") as resp:
                 if resp.status == 200:
@@ -202,16 +313,11 @@ async def process_bounty_task(bounty_id: str, notification_id: str = None):
                             metadata={"bounty_id": bounty_id}
                         )
 
-                        # 获取处理前的消息数
-                        session_key = f"container:{CONVERSATION_ID}"
-                        conv_session = agent_loop.sessions.get_or_create(session_key)
-                        messages_before = len(list(conv_session.messages)) if hasattr(conv_session, 'messages') else 0
-
                         response = await agent_loop._process_message(inbound_msg)
                         print(f"[Bounty] Task processed: {bounty_id}")
 
-                        # 从 conv_session 消息历史中获取最后一条 assistant 的回复作为 solution
                         solution_content = ""
+                        session_key = f"container:{CONVERSATION_ID}"
                         conv_session = agent_loop.sessions.get_or_create(session_key)
                         if hasattr(conv_session, 'messages'):
                             messages = list(conv_session.messages)
@@ -229,7 +335,6 @@ async def process_bounty_task(bounty_id: str, notification_id: str = None):
                                     break
 
                         if not solution_content:
-                            # 尝试从 response 对象提取
                             if hasattr(response, 'content') and response.content:
                                 solution_content = response.content.strip()
                                 print(f"[Bounty] 从 response.content 提取 solution，长度: {len(solution_content)}")
@@ -249,12 +354,12 @@ async def process_bounty_task(bounty_id: str, notification_id: str = None):
                     }) as submit_resp:
                         if submit_resp.status == 200:
                             print(f"[Bounty] Solution submitted successfully: {bounty_id}")
-                            if notification_id:
-                                async with http_session.post(f"{bff_url}/notifications/{notification_id}/complete") as complete_resp:
-                                    if complete_resp.status == 200:
-                                        print(f"[Bounty] 通知状态已更新为 completed: notification_id={notification_id}")
-                                    else:
-                                        print(f"[Bounty] 更新通知状态为 completed 失败: {complete_resp.status}")
+                            async with http_session.post(f"{bff_url}/notifications/{notification_id}/complete") as complete_resp:
+                                if complete_resp.status == 200:
+                                    print(f"[Bounty] 通知状态已更新为 completed: notification_id={notification_id}")
+                                else:
+                                    print(f"[Bounty] 更新通知状态为 completed 失败: {complete_resp.status}")
+                            await submit_to_km(solution_content, bounty.get('title', 'bounty_solution'))
                         else:
                             error_text = await submit_resp.text()
                             print(f"[Bounty] Failed to submit solution: {submit_resp.status}, details: {error_text}")
@@ -264,22 +369,61 @@ async def process_bounty_task(bounty_id: str, notification_id: str = None):
             print(f"[Bounty] Error processing task: {e}")
 
 
-async def check_and_process_tasks():
-    """检查并处理新任务"""
-    notifications = await check_notifications()
-    for notification in notifications:
-        if notification.get("type") == "bounty" and notification.get("status") == "pending":
-            bounty_id = notification.get("bounty_id")
-            notification_id = notification.get("id")
-            if bounty_id and notification_id:
-                await process_bounty_task(bounty_id, notification_id)
-
-
 async def task_checker():
     """后台任务检查器"""
     while True:
         await check_and_process_tasks()
+        await check_and_auto_close_bounties()
         await asyncio.sleep(5)
+
+
+waiting_bounties = {}
+
+
+async def check_and_auto_close_bounties():
+    """检查发布者的悬赏并自动结算"""
+    try:
+        pending_bounties = await check_issuer_pending_bounties()
+        for bounty in pending_bounties:
+            bounty_id = bounty.get("id")
+            if not bounty_id:
+                continue
+
+            submissions_count = await get_submissions_count(bounty_id)
+            deadline_reached = is_deadline_reached(bounty)
+
+            if deadline_reached:
+                if bounty_id in waiting_bounties:
+                    del waiting_bounties[bounty_id]
+                print(f"[IssuerBounty] 截止时间已到，直接结算: bounty={bounty_id}")
+                await auto_close_bounty(bounty_id)
+                continue
+
+            if submissions_count >= 2:
+                if bounty_id not in waiting_bounties:
+                    waiting_bounties[bounty_id] = {
+                        "initial_count": submissions_count,
+                        "first_seen_at": asyncio.get_event_loop().time()
+                    }
+                    print(f"[IssuerBounty] 检测到{submissions_count}个提交，开始30秒等待窗口: bounty={bounty_id}")
+                else:
+                    wait_info = waiting_bounties[bounty_id]
+                    elapsed = asyncio.get_event_loop().time() - wait_info["first_seen_at"]
+                    current_count = await get_submissions_count(bounty_id)
+
+                    if current_count > wait_info["initial_count"]:
+                        wait_info["initial_count"] = current_count
+                        wait_info["first_seen_at"] = asyncio.get_event_loop().time()
+                        print(f"[IssuerBounty] 检测到新提交({current_count}个)，重置等待计时器: bounty={bounty_id}")
+                    elif elapsed >= 30:
+                        del waiting_bounties[bounty_id]
+                        print(f"[IssuerBounty] 30秒等待窗口结束，结算悬赏: bounty={bounty_id}, 最终提交数={current_count}")
+                        await auto_close_bounty(bounty_id)
+            else:
+                if bounty_id in waiting_bounties:
+                    del waiting_bounties[bounty_id]
+    except Exception as e:
+        print(f"[IssuerBounty] 检查自动结算时出错: {e}")
 
 
 async def fix_consolidator(loop_instance):
@@ -727,6 +871,248 @@ async def evaluate_batch(req: BatchEvaluateRequest):
     
     print(f"[EvaluateBatch] 全部完成，总计 {len(results)} 个结果（包括综合Skill）")
     return BatchEvaluateResponse(results=results)
+
+
+class EdgeWeightAdjustRequest(BaseModel):
+    issuer_id: str
+    participants: list
+
+
+class EdgeWeightAdjustResponse(BaseModel):
+    adjustments: list
+
+
+@app.post("/adjust_edge_weights", response_model=EdgeWeightAdjustResponse)
+async def adjust_edge_weights(req: EdgeWeightAdjustRequest):
+    """根据评估结果，使用 LLM 决定边权调整策略"""
+    global agent_loop
+
+    if agent_loop is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+
+    prompt = f"""你是一个边权调整专家。请根据以下评估数据，输出边权调整建议。
+
+评估数据：
+{json.dumps(req.participants, ensure_ascii=False, indent=2)}
+
+预设规则（快速收敛策略）：
+1. 边权范围：0.0 - 10.0
+2. 评分 >= 88：增加边权 0.3~0.5（新任务更可能分配）
+3. 评分 80-88：不变（维持现状）
+4. 评分 < 80：降低边权 0.3~0.5（减少新任务分配）
+5. 边权代表信任度和任务分配意愿
+
+请输出 JSON（不要有其他内容）：
+{{
+    "adjustments": [
+        {{
+            "agent_id": "xxx",
+            "adjustment": 0.5,
+            "new_weight": 1.5,
+            "reason": "原因"
+        }}
+    ]
+}}"""
+
+    try:
+        from nanobot.bus.events import InboundMessage
+
+        inbound_msg = InboundMessage(
+            channel="container",
+            chat_id=CONVERSATION_ID,
+            sender_id="system",
+            content=prompt,
+            metadata={"type": "edge_weight_adjustment", "silent": True}
+        )
+
+        response = await agent_loop._process_message(inbound_msg)
+        content = response.content if response and hasattr(response, 'content') else ""
+
+        start = content.find('{')
+        end = content.rfind('}') + 1
+        if start != -1 and end > 0:
+            json_str = content[start:end]
+            result = json.loads(json_str)
+            adjustments = result.get("adjustments", [])
+            for adj in adjustments:
+                adj["new_weight"] = max(0.0, min(10.0, adj.get("new_weight", 1.0)))
+            return EdgeWeightAdjustResponse(adjustments=adjustments)
+
+        return EdgeWeightAdjustResponse(adjustments=[])
+
+    except Exception as e:
+        print(f"[EdgeWeightAdjust] 边权调整失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return EdgeWeightAdjustResponse(adjustments=[])
+
+
+class AggregateDiscussionRequest(BaseModel):
+    bounty_id: str
+    bounty_description: str
+    submissions: list
+    round: int
+
+
+class AggregateDiscussionResponse(BaseModel):
+    consensus: str
+    controversies: list
+    next_topic: str
+    converged: bool
+
+
+@app.post("/aggregate_discussion", response_model=AggregateDiscussionResponse)
+async def aggregate_discussion(req: AggregateDiscussionRequest):
+    """聚合一轮多Agent讨论，生成共识、争议点和下一轮议题"""
+    global agent_loop
+
+    if agent_loop is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+
+    prompt = f"""你是一个讨论聚合专家。以下是一轮多Agent讨论的提交内容，请进行分析并生成下一轮议题。
+
+原始主题：{req.bounty_description}
+当前轮次：第{req.round}轮
+
+各Agent发言：
+{json.dumps(req.submissions, ensure_ascii=False, indent=2)}
+
+请分析以上讨论内容，输出JSON格式的结果：
+- consensus: 本轮达成的共识摘要（若无则写"未形成共识"）
+- controversies: 存在的争议焦点列表（没有则为空列表）
+- next_topic: 下一轮应深入讨论的具体议题（若已充分收敛则写"CONVERGED"）
+- converged: 是否已充分收敛（若观点高度一致且无新议题则填true，否则false）
+
+请输出JSON（不要有其他内容）：
+{{
+    "consensus": "...",
+    "controversies": ["...", "..."],
+    "next_topic": "...",
+    "converged": true/false
+}}"""
+
+    try:
+        from nanobot.bus.events import InboundMessage
+
+        inbound_msg = InboundMessage(
+            channel="container",
+            chat_id=CONVERSATION_ID,
+            sender_id="system",
+            content=prompt,
+            metadata={"type": "aggregate_discussion", "silent": True}
+        )
+
+        response = await agent_loop._process_message(inbound_msg)
+        content = response.content if response and hasattr(response, 'content') else ""
+
+        start = content.find('{')
+        end = content.rfind('}') + 1
+        if start != -1 and end > 0:
+            json_str = content[start:end]
+            result = json.loads(json_str)
+            return AggregateDiscussionResponse(
+                consensus=result.get("consensus", "未形成共识"),
+                controversies=result.get("controversies", []),
+                next_topic=result.get("next_topic", "CONVERGED"),
+                converged=result.get("converged", False)
+            )
+
+        return AggregateDiscussionResponse(
+            consensus="未形成共识",
+            controversies=[],
+            next_topic="CONVERGED",
+            converged=False
+        )
+
+    except Exception as e:
+        print(f"[AggregateDiscussion] 聚合失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return AggregateDiscussionResponse(
+            consensus="未形成共识",
+            controversies=[],
+            next_topic="CONVERGED",
+            converged=False
+        )
+
+
+class FinalSummaryRequest(BaseModel):
+    original_question: str
+    original_title: str
+    all_submissions: str
+    rounds_count: int
+    submissions_count: int
+
+
+class FinalSummaryResponse(BaseModel):
+    summary: str
+
+
+@app.post("/generate_final_summary", response_model=FinalSummaryResponse)
+async def generate_final_summary(req: FinalSummaryRequest):
+    """生成多轮研讨的最终总结，直接回答最初的问题"""
+    global agent_loop
+
+    if agent_loop is None:
+        raise HTTPException(status_code=503, detail="Agent not initialized")
+
+    prompt = f"""你是一个知识整合专家。请基于以下多轮研讨的所有提交内容，生成一个直接回答最初问题的最终总结。
+
+最初的问题/任务标题：{req.original_title}
+最初的问题/任务描述：{req.original_question}
+
+多轮研讨概况：
+- 总轮次：{req.rounds_count}
+- 总提交数：{req.submissions_count}
+
+所有提交内容：
+{req.all_submissions[:12000]}
+
+请生成一个结构清晰、全面的最终总结，要求：
+1. **直接回答最初的问题** - 针对原始问题提供明确的答案
+2. **整合所有提交中的关键观点** - 提取各轮讨论的核心贡献
+3. **突出共识和分歧点** - 说明哪些观点达成一致，哪些存在争议
+4. **提供明确的结论和建议** - 给出可操作的结论和后续建议
+5. **保持专业、简洁的风格** - 避免冗余，突出重点
+
+请输出完整的总结报告，不要包含额外的解释或标记。直接开始总结内容："""
+
+    try:
+        from nanobot.bus.events import InboundMessage
+
+        inbound_msg = InboundMessage(
+            channel="container",
+            chat_id=CONVERSATION_ID,
+            sender_id="system",
+            content=prompt,
+            metadata={"type": "generate_final_summary", "silent": True}
+        )
+
+        response = await agent_loop._process_message(inbound_msg)
+        response_text = response.text if hasattr(response, 'text') else str(response)
+        
+        # 清理响应，移除可能的JSON包装
+        summary = response_text.strip()
+        if summary.startswith('{') and summary.endswith('}'):
+            try:
+                import json
+                data = json.loads(summary)
+                if "summary" in data:
+                    summary = data["summary"]
+                elif "content" in data:
+                    summary = data["content"]
+            except:
+                pass
+        
+        return FinalSummaryResponse(summary=summary)
+        
+    except Exception as e:
+        print(f"[GenerateFinalSummary] 生成最终总结失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return FinalSummaryResponse(
+            summary=f"基于{req.rounds_count}轮研讨、{req.submissions_count}个提交的最终总结生成失败: {str(e)}"
+        )
 
 
 async def _generate_skill_summary(bounty_description: str, submission_content: str) -> dict:
@@ -1580,6 +1966,245 @@ async def get_memory():
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading memory: {str(e)}")
+
+
+class KnowledgeManagerKM:
+    """KM Agent专用的KnowledgeManager简化实现"""
+    
+    def __init__(self, public_memory_path: Path):
+        self.public_memory_path = Path(public_memory_path)
+        self.public_memory_path.parent.mkdir(parents=True, exist_ok=True)
+        self._page_counter = 0
+        self._merged_count = 0
+        self._queue = []
+        self._queue_lock = asyncio.Lock()
+        
+        if not self.public_memory_path.exists():
+            self.public_memory_path.write_text("", encoding="utf-8")
+    
+    async def preset_skill_0(self, content: str, skill_version: str = "1.0") -> str:
+        """预置0号Skill"""
+        entry = {
+            "id": f"mem_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}",
+            "agent_id": "system",
+            "timestamp": datetime.now().isoformat(),
+            "type": "data",
+            "content": content,
+            "metadata": {"page_id": "page_0_skill", "skill_version": skill_version}
+        }
+        async with self._queue_lock:
+            with open(self.public_memory_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        return "page_0_skill"
+    
+    async def submit_page(self, agent_id: str, page_content: str, page_title: str, round_num: int = None) -> str:
+        """接收协作者提交的page_content（立即返回，不阻塞）"""
+        page_id = f"page_{agent_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{self._page_counter}"
+        self._page_counter += 1
+        
+        submission = {
+            "page_id": page_id,
+            "agent_id": agent_id,
+            "content": page_content,
+            "page_title": page_title,
+            "round_num": round_num,
+            "submitted_at": datetime.now().isoformat()
+        }
+        
+        async with self._queue_lock:
+            self._queue.append(submission)
+        
+        asyncio.create_task(self._async_merge())
+        return page_id
+    
+    async def _async_merge(self):
+        """异步合并"""
+        await asyncio.sleep(0.5)
+        async with self._queue_lock:
+            if not self._queue:
+                return
+            pages = list(self._queue)
+            self._queue.clear()
+        
+        for page in pages:
+            entry = {
+                "id": f"mem_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}",
+                "agent_id": page["agent_id"],
+                "timestamp": datetime.now().isoformat(),
+                "type": "data",
+                "content": page["content"],
+                "metadata": {
+                    "page_id": page["page_id"],
+                    "page_title": page["page_title"],
+                    "submitted_at": page["submitted_at"],
+                    "round": page.get("round_num")
+                }
+            }
+            with open(self.public_memory_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            self._merged_count += 1
+    
+    async def get_public_memory(self) -> list:
+        """获取PublicMemory所有内容"""
+        if not self.public_memory_path.exists():
+            return []
+        with open(self.public_memory_path, "r", encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+    
+    async def get_stats(self) -> dict:
+        """获取统计"""
+        entries = await self.get_public_memory()
+        async with self._queue_lock:
+            return {
+                "total_entries": len(entries),
+                "queue_size": len(self._queue),
+                "merged_count": self._merged_count,
+                "has_skill_0": any(e.get("metadata", {}).get("page_id") == "page_0_skill" for e in entries)
+            }
+
+
+km_agent_knowledge_manager: KnowledgeManagerKM = None
+
+def get_km_agent_km() -> KnowledgeManagerKM:
+    global km_agent_knowledge_manager
+    if km_agent_knowledge_manager is None:
+        pm_path = os.environ.get("KM_PUBLIC_MEMORY_PATH", "/app/workspace/public_memory.jsonl")
+        km_agent_knowledge_manager = KnowledgeManagerKM(Path(pm_path))
+    return km_agent_knowledge_manager
+
+
+PROMPTS = [
+    {
+        "round": 1,
+        "title": "栈段语义",
+        "prompt": """请检索0号Skill，并结合其内容解释SAYG-Mem系统中栈段的语义、存储内容、写入方式和生命周期。
+
+将推理过程写入栈段，最终答案写入堆段，并将核心定义提炼为Page提交给KnowledgeManager。
+
+请严格以JSON格式返回：
+{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "栈段语义"}"""
+    },
+    {
+        "round": 2,
+        "title": "堆段语义",
+        "prompt": """请解释SAYG-Mem系统中堆段的语义、与栈段的区别、以及它如何支持多Agent并发写入。
+
+推理→栈段，结论→堆段，核心定义→提交KnowledgeManager。
+
+JSON格式：{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "堆段语义"}"""
+    },
+    {
+        "round": 3,
+        "title": "数据段语义",
+        "prompt": """请解释SAYG-Mem系统中数据段的语义、写入权限和设计意图。
+
+推理→栈段，结论→堆段，核心定义→提交KnowledgeManager。
+
+JSON格式：{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "数据段语义"}"""
+    },
+    {
+        "round": 4,
+        "title": "三段内存对比",
+        "prompt": """请综合前三轮学习，用对比表格总结栈段、堆段、数据段在归属、内容、写入方式、生命周期上的区别。
+
+推理→栈段，表格→堆段，表格精简版→提交KnowledgeManager。
+
+JSON格式：{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "三段内存对比"}"""
+    },
+    {
+        "round": 5,
+        "title": "设计价值总结",
+        "prompt": """请用一句话概括SAYG-Mem设计三种段的核心价值，并阐述其对多Agent协作的意义。
+
+推理→栈段，结论→堆段，核心阐述→提交KnowledgeManager。
+
+JSON格式：{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "设计价值总结"}"""
+    }
+]
+
+agent_round_map: dict = {}
+
+
+class PresetSkill0Request(BaseModel):
+    content: str
+
+
+class PageSubmitRequest(BaseModel):
+    page_content: str
+    page_title: str = ""
+
+
+@app.post("/preset-skill-0")
+async def preset_skill_0(req: PresetSkill0Request):
+    """KM Agent：预置0号Skill到PublicMemory"""
+    km = get_km_agent_km()
+    page_id = await km.preset_skill_0(req.content, "1.0")
+    return {"status": "ok", "page_id": page_id}
+
+
+@app.post("/submit-page")
+async def submit_page(req: PageSubmitRequest, request: Request):
+    """KM Agent：接收协作者提交的page_content（CWW机制：立即返回）"""
+    agent_id = request.headers.get("X-Agent-Id", "unknown")
+    km = get_km_agent_km()
+    page_id = await km.submit_page(
+        agent_id=agent_id,
+        page_content=req.page_content,
+        page_title=req.page_title,
+        round_num=agent_round_map.get(agent_id, 0)
+    )
+    return {"status": "ok", "page_id": page_id}
+
+
+@app.get("/stats")
+async def get_stats():
+    """KM Agent：获取统计信息"""
+    km = get_km_agent_km()
+    return await km.get_stats()
+
+
+@app.post("/force-merge")
+async def force_merge():
+    """KM Agent：强制立即合并"""
+    km = get_km_agent_km()
+    await km._async_merge()
+    entries = await km.get_public_memory()
+    return {"status": "ok", "total_entries": len(entries), "merged_count": km._merged_count}
+
+
+@app.post("/replace")
+async def replace_public_memory(entries: List[dict]):
+    """KM Agent：替换整个PublicMemory内容"""
+    km = get_km_agent_km()
+    with open(km.public_memory_path, "w", encoding="utf-8") as f:
+        for entry in entries:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return {"status": "ok", "count": len(entries)}
+
+
+@app.get("/task")
+async def get_task(agent_id: str):
+    """KM Agent：返回下一轮Prompt给协作者"""
+    global agent_round_map
+
+    if agent_id not in agent_round_map:
+        agent_round_map[agent_id] = 0
+
+    current_round = agent_round_map[agent_id]
+
+    if current_round >= 5:
+        return {"prompt": None, "completed": True}
+
+    current_round += 1
+    agent_round_map[agent_id] = current_round
+
+    task = PROMPTS[current_round - 1]
+    return {
+        "prompt": task["prompt"],
+        "round": current_round,
+        "title": task["title"],
+        "page_id": f"page_{agent_id}_r{current_round}"
+    }
 
 
 if __name__ == "__main__":

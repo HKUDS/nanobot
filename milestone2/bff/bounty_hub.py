@@ -4,7 +4,7 @@ import json
 import shutil
 import tempfile
 import aiohttp
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 from pathlib import Path
 from bff.db import get_db
@@ -98,17 +98,23 @@ class BountyHub:
             return None
         return f"http://localhost:{port}"
 
-    async def create_bounty(self, issuer_id: str, title: str, description: str, reward_pool: int, deadline: datetime, docker_reward: int = 0) -> str:
-        print(f"[BountyHub] 创建悬赏: issuer={issuer_id}, title={title}, reward={reward_pool}")
-        await self.wallet.transfer(issuer_id, "system", reward_pool, "bounty_lock")
+    async def create_bounty(self, issuer_id: str, title: str, description: str, reward_pool: int, deadline: datetime,
+                            docker_reward: int = 0, round_num: int = 1, parent_bounty_id: str = None, max_rounds: int = 20) -> str:
+        print(f"[BountyHub] 创建悬赏: issuer={issuer_id}, title={title}, reward={reward_pool}, round={round_num}")
         bounty_id = str(uuid.uuid4())
+
+        if round_num == 1 and reward_pool > 0:
+            try:
+                await self.wallet.transfer(issuer_id, "system", reward_pool, "bounty_lock", bounty_id)
+            except Exception as e:
+                print(f"[BountyHub] 奖励池锁定失败: {e}")
+
         with get_db() as conn:
             conn.execute("""
-                INSERT INTO bounties (id, issuer_id, title, description, reward_pool, docker_reward, deadline, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)
-            """, (bounty_id, issuer_id, title, description, reward_pool, docker_reward, deadline, datetime.now()))
+                INSERT INTO bounties (id, issuer_id, title, description, reward_pool, docker_reward, deadline, status, created_at, round, parent_bounty_id, max_rounds)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?)
+            """, (bounty_id, issuer_id, title, description, reward_pool, docker_reward, deadline, datetime.now(), round_num, parent_bounty_id, max_rounds))
 
-        # 自动分发给邻居节点
         try:
             await self.notify_neighbors(issuer_id, bounty_id)
         except Exception as e:
@@ -150,6 +156,12 @@ class BountyHub:
                 print(f"[BountyHub] 该节点已提交过，跳过: bounty_id={bounty_id}, agent_id={agent_id}")
                 return existing["id"]
 
+        # 检查提交者是否为发布者（发布者不能参与自己发起的研讨）
+        bounty = await self.get_bounty(bounty_id)
+        if bounty and bounty.get("issuer_id") == agent_id:
+            print(f"[BountyHub] 发布者不能参与自己发起的研讨: bounty_id={bounty_id}, issuer={bounty.get('issuer_id')}, agent={agent_id}")
+            raise ValueError("发布者不能参与自己发起的研讨")
+
         if cost_tokens > 0:
             await self.wallet.transfer(agent_id, "system", cost_tokens, "bounty_participation", bounty_id)
         sub_id = str(uuid.uuid4())
@@ -189,12 +201,81 @@ class BountyHub:
             rows = conn.execute("SELECT * FROM bounties WHERE status = 'open' AND deadline > ?", (datetime.now(),)).fetchall()
             return [dict(row) for row in rows]
 
+    async def list_bounties_by_issuer(self, issuer_id: str, status: str = None) -> List[dict]:
+        """获取指定发布者的悬赏列表"""
+        with get_db() as conn:
+            if status:
+                rows = conn.execute(
+                    "SELECT * FROM bounties WHERE issuer_id = ? AND status = ? ORDER BY created_at DESC",
+                    (issuer_id, status)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM bounties WHERE issuer_id = ? ORDER BY created_at DESC",
+                    (issuer_id,)
+                ).fetchall()
+            return [dict(row) for row in rows]
+
     async def get_bounty(self, bounty_id: str) -> Optional[dict]:
         with get_db() as conn:
             row = conn.execute("SELECT * FROM bounties WHERE id = ?", (bounty_id,)).fetchone()
             if row:
                 return dict(row)
             return None
+
+    async def get_discussion_status(self, bounty_id: str) -> dict:
+        """
+        获取多轮研讨状态信息
+        返回：
+        - is_multi_round: 是否多轮研讨
+        - is_first_round: 是否首轮
+        - current_round: 当前轮次
+        - max_rounds: 最大轮次
+        - root_bounty_id: 首轮悬赏ID
+        - parent_bounty_id: 父悬赏ID
+        - status: 当前悬赏状态
+        - chain_rounds: 所有轮次的悬赏列表（从第1轮到当前轮）
+        """
+        bounty = await self.get_bounty(bounty_id)
+        if not bounty:
+            return None
+
+        is_first_round = bounty.get("parent_bounty_id") is None
+        is_multi_round = (not is_first_round or
+                          bounty.get("round", 1) > 1 or
+                          bounty.get("max_rounds", 1) > 1)
+        current_round = bounty.get("round", 1)
+        max_rounds = bounty.get("max_rounds", 20)
+
+        chain_rounds = []
+        bounty_chain_id = bounty_id
+
+        while bounty_chain_id:
+            b = await self.get_bounty(bounty_chain_id)
+            if not b:
+                break
+            chain_rounds.append({
+                "bounty_id": bounty_chain_id,
+                "round": b.get("round", 1),
+                "status": b.get("status", "unknown"),
+                "title": b.get("title", "")
+            })
+            bounty_chain_id = b.get("parent_bounty_id")
+
+        chain_rounds.reverse()
+        root_bounty_id = chain_rounds[0]["bounty_id"] if chain_rounds else bounty_id
+
+        return {
+            "is_multi_round": is_multi_round,
+            "is_first_round": is_first_round,
+            "current_round": current_round,
+            "max_rounds": max_rounds,
+            "root_bounty_id": root_bounty_id,
+            "parent_bounty_id": bounty.get("parent_bounty_id"),
+            "status": bounty.get("status", "unknown"),
+            "chain_rounds": chain_rounds,
+            "progress": f"第{current_round}轮" if is_multi_round else "单轮"
+        }
 
     async def get_submissions(self, bounty_id: str) -> List[dict]:
         with get_db() as conn:
@@ -299,9 +380,9 @@ class BountyHub:
                 else:
                     print(f"[BountyHub] [Step 5b] 跳过综合报告Skill生成")
 
-            # 6. 更新边权
+            # 6. 更新边权（根据评分动态调整）
             print(f"[BountyHub] [Step 6] 开始更新边权...")
-            await self.update_edge_weights_after_bounty(issuer_id, bounty_id)
+            await self.update_edge_weights_after_bounty(issuer_id, evaluation_results)
             print(f"[BountyHub] [Step 6] 边权更新完成")
 
             # 7. 更新任务状态
@@ -316,6 +397,59 @@ class BountyHub:
                 print(f"[BountyHub] [Step 8] 结算报告已生成: {report_path}")
             else:
                 print(f"[BountyHub] [Step 8] 跳过结算报告生成")
+
+            # ========== Step 9：多轮研讨续接 ==========
+            print(f"[BountyHub] [Step 9] 检查是否需要多轮研讨续接...")
+            bounty = await self.get_bounty(bounty_id)
+            current_round = bounty.get("round", 1)
+            max_rounds = bounty.get("max_rounds", 20)
+            parent_bounty_id = bounty.get("parent_bounty_id")
+
+            aggregation = await self._aggregate_discussion_and_get_next_topic(bounty_id, issuer_id)
+            converged = aggregation.get("converged", False) if aggregation else False
+
+            should_continue = False
+            if converged:
+                print(f"[BountyHub] [Step 9] 讨论已收敛，不再创建下一轮")
+            elif current_round < max_rounds:
+                consensus = aggregation.get("consensus", "") if aggregation else ""
+                next_topic = aggregation.get("next_topic", "") if aggregation else ""
+                if next_topic and next_topic != "CONVERGED":
+                    enhanced_description = f"[上轮共识]\n{consensus}\n\n[待深入讨论]\n{next_topic}"
+                    next_bounty_id = await self.create_bounty(
+                        issuer_id=issuer_id,
+                        title=f"{bounty['title']} (第{current_round+1}轮)",
+                        description=enhanced_description,
+                        reward_pool=0,
+                        deadline=datetime.now() + timedelta(hours=24),
+                        round_num=current_round + 1,
+                        parent_bounty_id=parent_bounty_id or bounty_id,
+                        max_rounds=max_rounds
+                    )
+                    result["next_bounty_id"] = next_bounty_id
+                    should_continue = True
+                    print(f"[BountyHub] [Step 9] 已创建下一轮研讨任务: {next_bounty_id}")
+
+            # ========== Step 10：最终轮奖励分配 ==========
+            if not should_continue:
+                print(f"[BountyHub] [Step 10] 最终轮结算，分配累计奖励...")
+                root_bounty_id = parent_bounty_id or bounty_id
+                reward_result = await self._distribute_accumulated_rewards(root_bounty_id, issuer_id)
+                result["accumulated_reward_results"] = reward_result
+                skill_path = await self._curate_final_discussion_skill(bounty_id, issuer_id)
+                if skill_path:
+                    result["final_skill_path"] = skill_path
+                
+                # 生成最终总结，回答最初的悬赏描述问题
+                print(f"[BountyHub] [Step 10.1] 生成多轮研讨最终总结...")
+                final_summary = await self._generate_final_summary(bounty_id, issuer_id)
+                if final_summary:
+                    result["final_summary"] = final_summary
+                    print(f"[BountyHub] [Step 10.1] 最终总结生成成功，长度: {len(final_summary)}")
+                else:
+                    print(f"[BountyHub] [Step 10.1] 最终总结生成失败或跳过")
+                
+                print(f"[BountyHub] [Step 10] 最终轮结算完成")
 
             print(f"[BountyHub] ===== 悬赏任务关闭完成 =====")
             print(f"[BountyHub] 最终结果: {result}")
@@ -499,6 +633,7 @@ class BountyHub:
                         data = await resp.json()
                         results = data.get("results", [])
                         print(f"[BountyHub] [_evaluate_files] 批量评审成功: {len(results)} 个结果")
+                        self._persist_evaluation_results(results)
                         return results
                     else:
                         error_text = await resp.text()
@@ -509,6 +644,20 @@ class BountyHub:
         # 降级到 JSON 评审，使用原始提交数据
         print(f"[BountyHub] [_evaluate_files] 降级到 JSON 评审")
         return await self._auto_evaluate_submissions(bounty_id, original_submissions or review_submissions, container_url)
+
+    def _persist_evaluation_results(self, results: list):
+        """将评分结果持久化到数据库（公共方法）"""
+        for r in results:
+            sub_id = r.get("submission_id")
+            score = r.get("score")
+            reason = r.get("reason") or ""
+            if sub_id and score is not None:
+                with get_db() as conn:
+                    conn.execute(
+                        "UPDATE submissions SET score = ?, score_reason = ? WHERE id = ?",
+                        (score, reason, sub_id)
+                    )
+                print(f"[BountyHub] 评分已更新: {sub_id} -> score={score}")
 
     async def _auto_evaluate_submissions(self, bounty_id: str, submissions: List[dict], evaluator_container_url: str = None) -> List[dict]:
         """
@@ -547,13 +696,6 @@ class BountyHub:
             # 使用容器或规则评分（同时获取 Skill 总结）
             score, reason, skill_summary = await evaluator.evaluate_with_skill_summary(bounty, sub, container_url)
 
-            # 更新数据库（只更新评分和理由）
-            with get_db() as conn:
-                conn.execute(
-                    "UPDATE submissions SET score = ?, score_reason = ? WHERE id = ?",
-                    (score, reason, sub_id)
-                )
-
             result = {
                 "submission_id": sub_id,
                 "agent_id": sub["agent_id"],
@@ -569,6 +711,9 @@ class BountyHub:
                 print(f"[BountyHub] [_auto_evaluate]   - 评分: {score}, 已生成 Skill: {skill_name}")
             else:
                 print(f"[BountyHub] [_auto_evaluate]   - 评分: {score}, 理由: {reason}")
+
+        # 持久化评分结果到数据库
+        self._persist_evaluation_results(evaluation_results)
 
         # 按分数排序
         evaluation_results.sort(key=lambda x: x["score"], reverse=True)
@@ -690,38 +835,437 @@ class BountyHub:
                 "error": str(e)
             }
 
-    async def update_edge_weights_after_bounty(self, issuer_id: str, bounty_id: str):
-        """任务结束后，增加发起者与参与者之间的边权"""
+    async def update_edge_weights_after_bounty(self, issuer_id: str, evaluation_results: list):
+        """根据评估结果，动态调整发布者与参与者之间的边权"""
         try:
-            # 获取所有参与该任务的节点
-            with get_db() as conn:
-                rows = conn.execute("""
-                    SELECT DISTINCT agent_id FROM submissions WHERE bounty_id = ?
-                """, (bounty_id,)).fetchall()
+            if not evaluation_results:
+                print(f"[BountyHub] 没有评估结果，跳过边权更新")
+                return
 
-            participants = [row["agent_id"] for row in rows]
-            print(f"[BountyHub] 任务参与者: {participants}")
+            participants_data = []
+            for r in evaluation_results:
+                participants_data.append({
+                    "agent_id": r.get("agent_id"),
+                    "score": r.get("score", 0),
+                    "reason": r.get("reason", "")[:100]
+                })
 
-            # 增加与每个参与者的边权
-            for participant_id in participants:
+            print(f"[BountyHub] 需要更新边权的参与者: {participants_data}")
+
+            current_weights = {}
+            for p in participants_data:
+                existing = await self.relation_manager.get_relation(issuer_id, p["agent_id"])
+                current_weights[p["agent_id"]] = existing["weight"] if existing else 1.0
+
+            container_url = self.get_container_url(issuer_id)
+            if not container_url:
+                print(f"[BountyHub] 找不到发布者 {issuer_id} 的容器URL，使用默认规则")
+                adjustments = self._default_edge_adjustments(issuer_id, participants_data, current_weights)
+            else:
+                adjustments = await self._call_container_adjust_edge_weights(container_url, issuer_id, participants_data)
+                if not adjustments:
+                    print(f"[BountyHub] 容器边权调整失败，使用默认规则")
+                    adjustments = self._default_edge_adjustments(issuer_id, participants_data, current_weights)
+
+            for adj in adjustments:
+                participant_id = adj["agent_id"]
+                new_weight = adj["new_weight"]
+
                 if participant_id == issuer_id:
-                    continue  # 跳过自己
+                    continue
 
-                # 查找现有边权
                 existing = await self.relation_manager.get_relation(issuer_id, participant_id)
+                current_weight = existing["weight"] if existing else 0.0
+
                 if existing:
-                    # 增加边权
-                    new_weight = existing["weight"] + 1
                     await self.relation_manager.update_weight(issuer_id, participant_id, new_weight)
-                    print(f"[BountyHub] 更新边权: {issuer_id} <-> {participant_id}: {existing['weight']} -> {new_weight}")
                 else:
-                    # 创建新边权，初始值为 1
-                    await self.relation_manager.add_relation(issuer_id, participant_id, 1)
-                    print(f"[BountyHub] 创建边权: {issuer_id} <-> {participant_id}: 1")
+                    await self.relation_manager.add_relation(issuer_id, participant_id, new_weight)
+
+                print(f"[BountyHub] 边权调整: {issuer_id} -> {participant_id}: {current_weight:.2f} -> {new_weight:.2f} | 原因: {adj.get('reason', '')}")
 
             print(f"[BountyHub] 边权更新完成")
+
         except Exception as e:
             print(f"[BountyHub] 更新边权失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    async def _call_container_adjust_edge_weights(self, container_url: str, issuer_id: str, participants: list) -> list:
+        """调用容器端 API 获取边权调整建议"""
+        try:
+            import aiohttp
+
+            url = f"{container_url}/adjust_edge_weights"
+            payload = {
+                "issuer_id": issuer_id,
+                "participants": participants
+            }
+
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status != 200:
+                        print(f"[BountyHub] 容器 API 返回错误: {resp.status}")
+                        return None
+                    data = await resp.json()
+                    return data.get("adjustments", [])
+        except Exception as e:
+            print(f"[BountyHub] 调用容器边权调整 API 失败: {e}")
+            return None
+
+    def _default_edge_adjustments(self, issuer_id: str, participants_data: list, current_weights: dict) -> list:
+        """默认边权调整规则（当 LLM 调用失败时使用）- 快速收敛策略"""
+        adjustments = []
+        for p in participants_data:
+            score = p.get("score", 0)
+            current = current_weights.get(p["agent_id"], 1.0)
+
+            if score >= 88:
+                adj = 0.4
+            elif score >= 80:
+                adj = 0.0
+            else:
+                adj = -0.4
+            new_weight = max(0.0, min(10.0, current + adj))
+            adjustments.append({
+                "agent_id": p["agent_id"],
+                "current_weight": current,
+                "adjustment": adj,
+                "new_weight": new_weight,
+                "reason": f"默认规则: 评分{score}"
+            })
+        return adjustments
+
+    async def _aggregate_discussion_and_get_next_topic(self, bounty_id: str, issuer_id: str) -> dict:
+        """调用发布者容器聚合讨论，生成下一轮议题"""
+        container_url = self.get_container_url(issuer_id)
+        if not container_url:
+            print(f"[BountyHub] [_aggregate] 找不到发布者 {issuer_id} 的容器URL，跳过聚合")
+            return None
+
+        bounty = await self.get_bounty(bounty_id)
+        submissions = await self.get_submissions(bounty_id)
+        contents = [s["content"] for s in submissions if s.get("content")]
+
+        payload = {
+            "bounty_id": bounty_id,
+            "bounty_description": bounty.get("description", ""),
+            "submissions": contents,
+            "round": bounty.get("round", 1)
+        }
+
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+                async with session.post(f"{container_url}/aggregate_discussion", json=payload) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        print(f"[BountyHub] [_aggregate] 聚合成功: converged={data.get('converged')}")
+                        return data
+                    else:
+                        print(f"[BountyHub] [_aggregate] 容器返回错误: {resp.status}")
+        except Exception as e:
+            print(f"[BountyHub] [_aggregate] 聚合失败: {e}")
+        return None
+
+    async def _distribute_accumulated_rewards(self, root_bounty_id: str, issuer_id: str):
+        """最终轮按累计贡献分配奖励"""
+        DECAY_FACTOR = 0.9
+
+        all_submissions = []
+        max_round = 0
+
+        bounty_id = root_bounty_id
+        while bounty_id:
+            bounty = await self.get_bounty(bounty_id)
+            if not bounty:
+                break
+            round_num = bounty.get("round", 1)
+            max_round = max(max_round, round_num)
+
+            submissions = await self.get_submissions(bounty_id)
+            for s in submissions:
+                s["round"] = round_num
+                all_submissions.append(s)
+
+            bounty_id = bounty.get("parent_bounty_id")
+
+        if not all_submissions:
+            print(f"[BountyHub] [_accumulate_reward] 没有任何提交记录")
+            return None
+
+        agent_scores = {}
+        for s in all_submissions:
+            agent_id = s.get("agent_id")
+            score = s.get("score", 0)
+            if agent_id not in agent_scores:
+                agent_scores[agent_id] = []
+            agent_scores[agent_id].append((s["round"], score))
+
+        weighted_scores = {}
+        for agent_id, scores in agent_scores.items():
+            total_weighted = 0
+            for round_num, score in scores:
+                weight = DECAY_FACTOR ** (max_round - round_num)
+                total_weighted += score * weight
+            weighted_scores[agent_id] = total_weighted
+
+        with get_db() as conn:
+            row = conn.execute("SELECT reward_pool FROM bounties WHERE id = ?", (root_bounty_id,)).fetchone()
+            reward_pool = row[0] if row else 0
+
+        total_score = sum(weighted_scores.values())
+        if total_score == 0 or reward_pool == 0:
+            print(f"[BountyHub] [_accumulate_reward] 无可分配奖励: pool={reward_pool}, total_score={total_score}")
+            return None
+
+        reward_results = []
+        for agent_id, weighted_score in weighted_scores.items():
+            ratio = weighted_score / total_score
+            amount = int(reward_pool * ratio)
+            try:
+                await self.wallet.transfer("system", agent_id, amount, "bounty_reward", root_bounty_id)
+                reward_results.append({"agent_id": agent_id, "reward_amount": amount, "status": "success"})
+                print(f"[BountyHub] [_accumulate_reward] 发放奖励: {agent_id} -> {amount} tokens")
+            except Exception as e:
+                reward_results.append({"agent_id": agent_id, "reward_amount": 0, "status": "failed", "error": str(e)})
+
+        print(f"[BountyHub] [_accumulate_reward] 累计奖励分配完成: {reward_results}")
+        return reward_results
+
+    async def _curate_final_discussion_skill(self, final_bounty_id: str, issuer_id: str) -> str:
+        """沉淀多轮研讨的综合Skill"""
+        bounty = await self.get_bounty(final_bounty_id)
+
+        all_contents = []
+        bounty_id = final_bounty_id
+        rounds_data = []
+
+        while bounty_id:
+            bounty = await self.get_bounty(bounty_id)
+            if not bounty:
+                break
+            submissions = await self.get_submissions(bounty_id)
+            for s in submissions:
+                if s.get("content"):
+                    all_contents.append(s["content"])
+                    rounds_data.append({
+                        "round": bounty.get("round", 1),
+                        "content": s["content"],
+                        "agent_id": s.get("agent_id"),
+                        "score": s.get("score", 0)
+                    })
+            bounty_id = bounty.get("parent_bounty_id")
+
+        if not all_contents:
+            print(f"[BountyHub] [_final_skill] 没有内容可沉淀")
+            return None
+
+        try:
+            combined_content = "\n".join([f"=== 第{r['round']}轮 ===\n{r['content']}" for r in rounds_data])
+
+            from bff.public_space import PublicSpace
+            public_space = PublicSpace()
+
+            avg_score = sum(r.get("score", 0) for r in rounds_data) / len(rounds_data) if rounds_data else 0
+
+            prompt = AGGREGATED_REPORT_PROMPT.format(
+                bounty_description=bounty.get("description", "")[:500],
+                submission_count=len(rounds_data),
+                avg_score=avg_score,
+                submissions_summary=combined_content[:8000]
+            )
+
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300)) as session:
+                async with session.post(
+                    "https://api.deepseek.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
+                    json={
+                        "model": "deepseek-chat",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.3,
+                        "max_tokens": 1500
+                    }
+                ) as resp:
+                    response_data = await resp.json()
+                    content = response_data["choices"][0]["message"]["content"]
+                    skill_data = json.loads(extract_json(content))
+
+            skill_name = f"multi-round-skill-{final_bounty_id[:8]}"
+            full_content = f"""# {skill_name}
+
+## 多轮研讨综合报告
+
+基于 {len(rounds_data)} 轮研讨的综合Skill。
+
+## 概述
+{skill_data.get('description', '多轮研讨综合成果')}
+
+## 最佳实践
+{skill_data.get('instructions', skill_data.get('usage', ''))}
+
+## 报告详情
+轮次数: {len(set(r['round'] for r in rounds_data))}
+参与Agent数: {len(set(r['agent_id'] for r in rounds_data if r['agent_id']))}
+"""
+
+            doc_id = await public_space.add_knowledge(
+                knowledge_type="skill",
+                title=skill_name,
+                content=full_content,
+                skill_code="",
+                usage=skill_data.get('usage', ''),
+                tags=["multi-round", "discussion", f"rounds:{len(rounds_data)}"],
+                author_id=issuer_id
+            )
+
+            from shared.config import SKILL_EXPORT_DIR
+            try:
+                export_path = await public_space.export_skill_as_markdown(doc_id, SKILL_EXPORT_DIR)
+                print(f"[BountyHub] [_final_skill] 综合Skill已沉淀: {export_path}")
+                return export_path
+            except Exception as e:
+                print(f"[BountyHub] [_final_skill] 导出失败: {e}")
+                return str(doc_id)
+
+        except Exception as e:
+            print(f"[BountyHub] [_final_skill] 综合Skill沉淀失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    async def _generate_final_summary(self, final_bounty_id: str, issuer_id: str) -> str:
+        """
+        生成多轮研讨的最终总结，直接回答最初的悬赏描述问题
+        返回总结文本
+        """
+        print(f"[BountyHub] [_final_summary] 开始生成多轮研讨最终总结...")
+        
+        # 获取根悬赏（第1轮）的描述
+        root_bounty_id = final_bounty_id
+        while True:
+            bounty = await self.get_bounty(root_bounty_id)
+            if not bounty:
+                break
+            parent_id = bounty.get("parent_bounty_id")
+            if not parent_id:
+                break
+            root_bounty_id = parent_id
+        
+        root_bounty = await self.get_bounty(root_bounty_id)
+        if not root_bounty:
+            print(f"[BountyHub] [_final_summary] 找不到根悬赏，跳过总结生成")
+            return None
+        
+        original_question = root_bounty.get("description", "")
+        original_title = root_bounty.get("title", "")
+        print(f"[BountyHub] [_final_summary] 原始问题: {original_title}")
+        print(f"[BountyHub] [_final_summary] 原始描述: {original_question[:200]}...")
+        
+        # 收集所有轮次的所有提交内容
+        all_contents = []
+        rounds_data = []
+        bounty_id = final_bounty_id
+        
+        while bounty_id:
+            bounty = await self.get_bounty(bounty_id)
+            if not bounty:
+                break
+            submissions = await self.get_submissions(bounty_id)
+            for s in submissions:
+                if s.get("content"):
+                    all_contents.append(s["content"])
+                    rounds_data.append({
+                        "round": bounty.get("round", 1),
+                        "content": s["content"],
+                        "agent_id": s.get("agent_id"),
+                        "score": s.get("score", 0)
+                    })
+            bounty_id = bounty.get("parent_bounty_id")
+        
+        if not all_contents:
+            print(f"[BountyHub] [_final_summary] 没有内容可总结")
+            return None
+        
+        print(f"[BountyHub] [_final_summary] 收集到 {len(all_contents)} 个提交，来自 {len(set(r['round'] for r in rounds_data))} 轮")
+        
+        try:
+            # 组合所有提交内容
+            combined_content = "\n\n".join([f"【第{rounds_data[i]['round']}轮 - 提交{i+1}】\n{content}" 
+                                          for i, content in enumerate(all_contents)])
+            
+            # 使用发布者容器生成总结
+            container_url = self.get_container_url(issuer_id)
+            if not container_url:
+                print(f"[BountyHub] [_final_summary] 找不到发布者容器URL，使用LLM直接生成")
+                # 如果没有容器，直接使用DeepSeek API
+                return await self._generate_summary_with_llm(original_question, combined_content, issuer_id)
+            
+            # 准备调用容器端总结端点
+            payload = {
+                "original_question": original_question,
+                "original_title": original_title,
+                "all_submissions": combined_content[:15000],  # 限制长度
+                "rounds_count": len(set(r['round'] for r in rounds_data)),
+                "submissions_count": len(all_contents)
+            }
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=180)) as session:
+                async with session.post(f"{container_url}/generate_final_summary", json=payload) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        summary = data.get("summary", "")
+                        print(f"[BountyHub] [_final_summary] 容器生成总结成功，长度: {len(summary)}")
+                        return summary
+                    else:
+                        error_text = await resp.text()
+                        print(f"[BountyHub] [_final_summary] 容器返回错误: {resp.status}, {error_text}")
+                        # 降级到LLM生成
+                        return await self._generate_summary_with_llm(original_question, combined_content, issuer_id)
+        
+        except Exception as e:
+            print(f"[BountyHub] [_final_summary] 生成总结失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    async def _generate_summary_with_llm(self, original_question: str, combined_content: str, issuer_id: str) -> str:
+        """使用LLM直接生成总结"""
+        try:
+            prompt = f"""你是一个知识整合专家。请基于以下多轮研讨的所有提交内容，生成一个直接回答最初问题的最终总结。
+
+最初的问题/任务：
+{original_question}
+
+多轮研讨的所有提交内容（共 {combined_content.count('【第')} 个提交）：
+{combined_content[:12000]}
+
+请生成一个结构清晰、全面的最终总结，要求：
+1. 直接回答最初的问题
+2. 整合所有提交中的关键观点和最佳实践
+3. 突出共识和分歧点
+4. 提供明确的结论和建议
+5. 保持专业、简洁的风格
+
+请输出完整的总结报告，不要包含额外的解释或标记。"""
+            
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300)) as session:
+                async with session.post(
+                    "https://api.deepseek.com/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
+                    json={
+                        "model": "deepseek-chat",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.3,
+                        "max_tokens": 2000
+                    }
+                ) as resp:
+                    response_data = await resp.json()
+                    summary = response_data["choices"][0]["message"]["content"]
+                    print(f"[BountyHub] [_generate_summary_with_llm] LLM生成总结成功，长度: {len(summary)}")
+                    return summary
+        except Exception as e:
+            print(f"[BountyHub] [_generate_summary_with_llm] LLM生成总结失败: {e}")
+            return f"基于多轮研讨的综合总结生成失败: {str(e)}"
 
     async def curate_skill_to_public(self, bounty_id: str, submission_id: str, issuer_id: str, tags: list = None, skill_summary: dict = None) -> str:
         """将优秀的 skill 整理到公共知识库，优先使用已有的 Skill 总结，否则使用 LLM 总结"""
@@ -1028,7 +1572,7 @@ class BountyHub:
                 ])
                 for rw in reward_results:
                     agent = rw.get("agent_id", "N/A")[:16]
-                    amount = rw.get("amount", 0)
+                    amount = rw.get("reward_amount", 0)
                     status = rw.get("status", "unknown")
                     report_lines.append(f"- **{agent}...**: {amount} tokens - {status}")
 

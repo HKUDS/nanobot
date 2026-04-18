@@ -1,0 +1,3 @@
+[2026-04-15 12:41:46] [benchmark_benchmark] [INFO] Waiting for BFF at http://localhost:8000...
+[2026-04-15 12:41:50] [benchmark_benchmark] [WARNING] Retry 1/30: [WinError 10061] 由于目标计算机积极拒绝，无法连接。
+[2026-04-15 12:41:56] [benchmark_benchmark] [WARNING] Retry 2/30: [WinError 10061] 由于目标计算机积极拒绝，无法连接。

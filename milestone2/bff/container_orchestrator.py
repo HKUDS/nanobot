@@ -222,6 +222,7 @@ class ContainerOrchestrator:
         task: str = "",
         model: str = "deepseek-chat",
         api_key: str = "",
+        agent_type: str = "collab",
     ) -> dict:
         """Create and start a new container for a conversation."""
         container_name = self._get_container_name(conversation_id)
@@ -258,10 +259,27 @@ class ContainerOrchestrator:
             environment["NO_PROXY"] = self.no_proxy
             environment["no_proxy"] = self.no_proxy
 
+        volumes = {volume_name: {"bind": "/app/workspace", "mode": "rw"}}
+
+        if agent_type == "km":
+            public_memory_host_path = os.environ.get("PUBLIC_MEMORY_HOST_PATH")
+            print(f"[Orchestrator] PUBLIC_MEMORY_HOST_PATH from env: {public_memory_host_path}")
+            if not public_memory_host_path:
+                public_memory_host_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "public_memory"))
+                print(f"[Orchestrator] Using fallback path: {public_memory_host_path}")
+            else:
+                print(f"[Orchestrator] Using env path: {public_memory_host_path}")
+            public_memory_dir = os.path.dirname(public_memory_host_path)
+            os.makedirs(public_memory_dir, exist_ok=True)
+            os.makedirs(public_memory_host_path, exist_ok=True)
+            volumes[public_memory_host_path] = {"bind": "/app/public_memory", "mode": "rw"}
+            environment["KM_PUBLIC_MEMORY_PATH"] = "/app/public_memory/public_memory.jsonl"
+            print(f"[Orchestrator] KM容器挂载PublicMemory: {public_memory_host_path} -> /app/public_memory")
+
         container = self.docker_client.containers.run(
             image=self.image_name,
             name=container_name,
-            volumes={volume_name: {"bind": "/app/workspace", "mode": "rw"}},
+            volumes=volumes,
             environment=environment,
             mem_limit=self.memory_limit,
             cpu_period=100000,

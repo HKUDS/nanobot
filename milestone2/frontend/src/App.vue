@@ -703,7 +703,8 @@ async function handleCreateConv() {
   try {
     const res = await createConversation({
       title: `对话-${new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute:'2-digit'})}`,
-      model: 'deepseek-chat'
+      model: 'deepseek-chat',
+      agent_type: 'km'
     })
     const conv = res.data
     conv.parent_id = null
@@ -920,7 +921,8 @@ async function handleFork() {
       title: branchName,
       parent_id: currentConvId.value,
       status: 'active',
-      model: currentConv?.model || 'deepseek-chat'
+      model: currentConv?.model || 'deepseek-chat',
+      agent_type: 'collab'
     }
     store.addConv(newConv)
     store.setActiveCount(convList.value.length)
@@ -1082,7 +1084,8 @@ function drawGraph() {
       id: conv.conversation_id,
       title: conv.title,
       parent_id: conv.parent_id || null,
-      balance: conv.balance || 0
+      balance: conv.balance || 0,
+      agent_type: conv.agent_type || 'km'
     })
   })
   
@@ -1105,7 +1108,8 @@ function drawGraph() {
     g.setNode(id, {
       label: node.title,
       width: nodeWidth,
-      height: 50
+      height: 50,
+      agentType: node.agent_type
     })
   })
   
@@ -1185,9 +1189,30 @@ function drawGraph() {
   
   nodeGroups.append('circle')
     .attr('r', 8)
-    .attr('fill', d => d === currentConvId.value ? '#007acc' : '#4caf50')
+    .attr('fill', d => {
+      const nodeData = g.node(d)
+      const agentType = nodeData ? nodeData.agentType : 'km'
+      if (d === currentConvId.value) return '#007acc'  // 当前选中：蓝色
+      return agentType === 'km' ? '#9c27b0' : '#ff9800'  // KM：紫色，协作者：橙色
+    })
     .attr('stroke', '#fff')
     .attr('stroke-width', 2)
+
+  // 添加Agent类型标签
+  nodeGroups.append('text')
+    .attr('x', 15)
+    .attr('y', -12)
+    .text(d => {
+      const nodeData = g.node(d)
+      const agentType = nodeData ? nodeData.agentType : 'km'
+      return agentType === 'km' ? '[KM]' : '[Collab]'
+    })
+    .attr('font-size', '10px')
+    .attr('fill', d => {
+      const nodeData = g.node(d)
+      const agentType = nodeData ? nodeData.agentType : 'km'
+      return agentType === 'km' ? '#9c27b0' : '#ff9800'
+    })
   
   nodeGroups.append('text')
     .attr('x', 15)

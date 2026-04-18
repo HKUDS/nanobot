@@ -1,17 +1,29 @@
+# syntax=docker/dockerfile:1
 FROM python:3.12-slim
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir \
-    docker \
-    httpx \
-    fastapi \
-    uvicorn \
-    pydantic
+ENV PYTHONUNBUFFERED=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# 可选：使用国内镜像加速（根据需要）
+RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
+
+# 先复制依赖文件（利用缓存：只要 requirements.txt 不变，此层及后续安装层都不会重建）
+COPY shared/requirements.txt /app/requirements.txt
+
+# 安装依赖，使用 BuildKit 缓存挂载避免重复下载
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --default-timeout=100 -r requirements.txt
+
+# 再复制代码（代码变化不影响依赖层）
 COPY bff/ /app/bff/
 COPY shared/ /app/shared/
 
-ENV PYTHONUNBUFFERED=1
+# 可选：添加健康检查（根据你的服务接口调整）
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+
+EXPOSE 8000
 
 CMD ["python3", "-m", "bff.bff_service"]
