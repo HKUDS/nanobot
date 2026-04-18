@@ -210,6 +210,24 @@ class TestGetFieldTypeInfo:
         assert type_name == "str"
         assert inner is None
 
+    def test_literal_type_returns_literal_with_choices(self):
+        """Literal["a", "b"] should return ("literal", ["a", "b"])."""
+        from typing import Literal
+
+        class Model(BaseModel):
+            mode: Literal["standard", "persistent"] = "standard"
+
+        type_name, inner = _get_field_type_info(Model.model_fields["mode"])
+        assert type_name == "literal"
+        assert inner == ["standard", "persistent"]
+
+    def test_real_provider_retry_mode_field(self):
+        """Validate against actual AgentDefaults.provider_retry_mode field."""
+        from nanobot.config.schema import AgentDefaults
+
+        type_name, inner = _get_field_type_info(AgentDefaults.model_fields["provider_retry_mode"])
+        assert type_name == "literal"
+        assert inner == ["standard", "persistent"]
 
 
 class TestGetFieldDisplayName:

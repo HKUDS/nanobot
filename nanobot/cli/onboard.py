@@ -4,7 +4,7 @@ import json
 import types
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, NamedTuple, get_args, get_origin
+from typing import Any, Literal, NamedTuple, get_args, get_origin
 
 try:
     import questionary
@@ -202,6 +202,8 @@ def _get_field_type_info(field_info) -> FieldTypeInfo:
             return FieldTypeInfo(name, None)
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         return FieldTypeInfo("model", annotation)
+    if origin is Literal:
+        return FieldTypeInfo("literal", list(args))
     return FieldTypeInfo("str", None)
 
 
@@ -681,6 +683,15 @@ def _configure_pydantic_model(
             continue
 
         # Generic field input
+        if ftype.type_name == "literal" and ftype.inner_type:
+            select_choices = [str(v) for v in ftype.inner_type]
+            default_choice = str(current_value) if current_value in ftype.inner_type else select_choices[0]
+            new_value = _select_with_back(field_display, select_choices, default=default_choice)
+            if new_value is _BACK_PRESSED:
+                continue
+            if new_value is not None:
+                setattr(working_model, field_name, new_value)
+            continue
         if ftype.type_name == "bool":
             new_value = _input_bool(field_display, current_value)
         else:
