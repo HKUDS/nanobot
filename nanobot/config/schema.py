@@ -162,6 +162,8 @@ class GatewayConfig(Base):
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    on_start: str | None = None  # Message sent via the most recent user channel once the gateway is up
+    on_stop: str | None = None  # Message sent via the most recent user channel before shutdown
 
 
 class WebSearchConfig(Base):

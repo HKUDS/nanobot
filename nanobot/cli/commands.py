@@ -628,6 +628,25 @@ def serve(
 # ============================================================================
 
 
+async def _notify_gateway_lifecycle(
+    bus,
+    pick_target,
+    content: str,
+) -> None:
+    """Publish a gateway lifecycle notification via the user's most-recent channel.
+
+    Routed through the outbound bus so the dispatcher's retry loop (see
+    ``ChannelManager._send_with_retry``) absorbs any transient race with a
+    channel that is still finishing its handshake. No-op for cli-only setups.
+    """
+    from nanobot.bus.events import OutboundMessage
+
+    channel, chat_id = pick_target()
+    if channel == "cli":
+        return
+    await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=content))
+
+
 @app.command()
 def gateway(
     port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
@@ -885,6 +904,16 @@ def gateway(
         try:
             await cron.start()
             await heartbeat.start()
+            # Schedule the on_start lifecycle notification.
+            # Fixed 2s delay so the message posts after channel startup logs settle;
+            # a dedicated "channels ready" signal would require touching ChannelManager
+            # and is out of scope here. The dispatcher's retry loop covers residual
+            # races where a channel handshake is still in flight.
+            if config.gateway.on_start:
+                async def _send_on_start():
+                    await asyncio.sleep(2.0)
+                    await _notify_gateway_lifecycle(bus, _pick_heartbeat_target, config.gateway.on_start)
+                asyncio.create_task(_send_on_start())
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
@@ -898,6 +927,13 @@ def gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
+            # Send on_stop before tearing channels down so the dispatcher can still flush it.
+            if config.gateway.on_stop:
+                try:
+                    await _notify_gateway_lifecycle(bus, _pick_heartbeat_target, config.gateway.on_stop)
+                    await asyncio.sleep(0.5)
+                except Exception:
+                    logger.exception("Gateway on_stop notification failed")
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
