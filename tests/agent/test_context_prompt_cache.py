@@ -205,6 +205,38 @@ def test_build_messages_passes_channel_to_system_prompt(tmp_path) -> None:
     assert "messaging app" in system
 
 
+def test_session_file_path_rendered_with_channel_and_chat_id(tmp_path) -> None:
+    """Identity should include exact session file path using channel and chat_id."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt = builder.build_system_prompt(channel="telegram", chat_id="123456")
+    assert "sessions/telegram_123456.jsonl" in prompt
+    assert "grep" in prompt
+
+
+def test_session_file_path_with_none_channel_and_chat_id(tmp_path) -> None:
+    """When channel/chat_id are None, session path should render with empty values."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt = builder.build_system_prompt()
+    assert "sessions/_.jsonl" in prompt
+
+
+def test_build_messages_passes_chat_id_to_system_prompt(tmp_path) -> None:
+    """build_messages should pass chat_id through to build_system_prompt."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[], current_message="hi",
+        channel="telegram", chat_id="999888",
+    )
+    system = messages[0]["content"]
+    assert "sessions/telegram_999888.jsonl" in system
+
+
 def test_subagent_result_does_not_create_consecutive_assistant_messages(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
