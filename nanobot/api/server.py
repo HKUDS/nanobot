@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json as _json
 import mimetypes
 import re
 import time
@@ -71,6 +72,30 @@ def _response_text(value: Any) -> str:
         return str(getattr(value, "content") or "")
     return str(value)
 
+# ---------------------------------------------------------------------------
+# SSE helpers
+# ---------------------------------------------------------------------------
+
+
+def _sse_chunk(delta: str, model: str, chunk_id: str, finish_reason: str | None = None) -> bytes:
+    """Format a single OpenAI-compatible SSE chunk."""
+    payload = {
+        "id": chunk_id,
+        "object": "chat.completion.chunk",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": {"content": delta} if delta else {},
+                "finish_reason": finish_reason,
+            }
+        ],
+    }
+    return f"data: {_json.dumps(payload)}\n\n".encode()
+
+
+_SSE_DONE = b"data: [DONE]\n\n"
 
 # ---------------------------------------------------------------------------
 # Upload helpers
@@ -188,6 +213,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
     timeout_s: float = request.app.get("request_timeout", 120.0)
     model_name: str = request.app.get("model_name", "nanobot")
 
+    stream = False
     try:
         if content_type.startswith("multipart/"):
             text, media_paths, session_id, requested_model = await _parse_multipart(request)
@@ -196,10 +222,7 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                 body = await request.json()
             except Exception:
                 return _error_json(400, "Invalid JSON body")
-            if body.get("stream", False):
-                return _error_json(
-                    400, "stream=true is not supported yet. Set stream=false or omit it."
-                )
+            stream = body.get("stream", False)
             requested_model = body.get("model")
             text, media_paths = _parse_json_content(body)
             session_id = body.get("session_id")
@@ -219,9 +242,61 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
     logger.info(
-        "API request session_key={} media={} text={}", session_key, len(media_paths), text[:80]
+        "API request session_key={} media={} text={} stream={}",
+        session_key, len(media_paths), text[:80], stream,
     )
+    # -- streaming path --
+    if stream:
+        resp = web.StreamResponse()
+        resp.content_type = "text/event-stream"
+        resp.headers["Cache-Control"] = "no-cache"
+        resp.headers["Connection"] = "keep-alive"
+        resp.enable_compression()
+        await resp.prepare(request)
 
+        chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+        queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+        async def _on_stream(token: str) -> None:
+            await queue.put(token)
+
+        async def _on_stream_end(*_a: Any, **_kw: Any) -> None:
+            await queue.put(None)
+
+        async def _run() -> None:
+            try:
+                async with session_lock:
+                    await asyncio.wait_for(
+                        agent_loop.process_direct(
+                            content=text,
+                            media=media_paths if media_paths else None,
+                            session_key=session_key,
+                            channel="api",
+                            chat_id=API_CHAT_ID,
+                            on_stream=_on_stream,
+                            on_stream_end=_on_stream_end,
+                        ),
+                        timeout=timeout_s,
+                    )
+            except Exception:
+                logger.exception("Streaming error for session {}", session_key)
+                await queue.put(None)
+
+        task = asyncio.create_task(_run())
+        try:
+            while True:
+                token = await queue.get()
+                if token is None:
+                    break
+                await resp.write(_sse_chunk(token, model_name, chunk_id))
+        finally:
+            task.cancel()
+
+        await resp.write(_sse_chunk("", model_name, chunk_id, finish_reason="stop"))
+        await resp.write(_SSE_DONE)
+        return resp
+
+    # -- non-streaming path (original logic) --
     _FALLBACK = EMPTY_FINAL_RESPONSE_MESSAGE
 
     try:

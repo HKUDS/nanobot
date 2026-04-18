@@ -120,26 +120,57 @@
 
 ## Table of Contents
 
-- [News](#-news)
-- [Key Features](#key-features-of-nanobot)
-- [Architecture](#️-architecture)
-- [Features](#-features)
-- [Install](#-install)
-- [Quick Start](#-quick-start)
-- [Chat Apps](#-chat-apps)
-- [Agent Social Network](#-agent-social-network)
-- [Configuration](#️-configuration)
-- [Multiple Instances](#-multiple-instances)
-- [Memory](#-memory)
-- [CLI Reference](#-cli-reference)
-- [In-Chat Commands](#-in-chat-commands)
-- [Python SDK](#-python-sdk)
-- [OpenAI-Compatible API](#-openai-compatible-api)
-- [Docker](#-docker)
-- [Linux Service](#-linux-service)
-- [Project Structure](#-project-structure)
-- [Contribute & Roadmap](#-contribute--roadmap)
-- [Star History](#-star-history)
+- [📢 News](#-news)
+- [Key Features of nanobot:](#key-features-of-nanobot)
+- [🏗️ Architecture](#️-architecture)
+- [Table of Contents](#table-of-contents)
+- [✨ Features](#-features)
+- [📦 Install](#-install)
+  - [Update to latest version](#update-to-latest-version)
+- [🚀 Quick Start](#-quick-start)
+- [💬 Chat Apps](#-chat-apps)
+- [🌐 Agent Social Network](#-agent-social-network)
+- [⚙️ Configuration](#️-configuration)
+  - [Environment Variables for Secrets](#environment-variables-for-secrets)
+  - [Providers](#providers)
+  - [Channel Settings](#channel-settings)
+    - [Retry Behavior](#retry-behavior)
+  - [Web Search](#web-search)
+    - [`tools.web.search`](#toolswebsearch)
+  - [MCP (Model Context Protocol)](#mcp-model-context-protocol)
+  - [Security](#security)
+  - [Auto Compact](#auto-compact)
+  - [Timezone](#timezone)
+  - [Unified Session](#unified-session)
+  - [Disabled Skills](#disabled-skills)
+- [🧩 Multiple Instances](#-multiple-instances)
+  - [Quick Start](#quick-start)
+  - [Path Resolution](#path-resolution)
+  - [How It Works](#how-it-works)
+  - [Minimal Setup](#minimal-setup)
+  - [Common Use Cases](#common-use-cases)
+  - [Notes](#notes)
+- [🧠 Memory](#-memory)
+- [💻 CLI Reference](#-cli-reference)
+- [💬 In-Chat Commands](#-in-chat-commands)
+- [🐍 Python SDK](#-python-sdk)
+- [🔌 OpenAI-Compatible API](#-openai-compatible-api)
+  - [Behavior](#behavior)
+  - [Endpoints](#endpoints)
+  - [curl](#curl)
+  - [File Upload (JSON base64)](#file-upload-json-base64)
+  - [File Upload (multipart/form-data)](#file-upload-multipartform-data)
+  - [Python (`requests`)](#python-requests)
+  - [Python (`openai`)](#python-openai)
+- [🐳 Docker](#-docker)
+  - [Docker Compose](#docker-compose)
+  - [Docker](#docker)
+- [🐧 Linux Service](#-linux-service)
+- [📁 Project Structure](#-project-structure)
+- [🤝 Contribute \& Roadmap](#-contribute--roadmap)
+  - [Branching Strategy](#branching-strategy)
+  - [Contributors](#contributors)
+- [⭐ Star History](#-star-history)
 
 ## ✨ Features
 
@@ -403,6 +434,7 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
       "allowFrom": ["YOUR_USER_ID"],
+      "allowChannels": [],
       "groupPolicy": "mention",
       "streaming": true
     }
@@ -415,6 +447,7 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 > - `"open"` — Respond to all messages
 > DMs always respond when the sender is in `allowFrom`.
 > - If you set group policy to open create new threads as private threads and then @ the bot into it. Otherwise the thread itself and the channel in which you spawned it will spawn a bot session.
+> `allowChannels` restricts the bot to specific Discord channel IDs. Empty (default) means respond in every channel the bot can see. Example: `["1234567890", "0987654321"]`. The filter applies after `allowFrom`, so both must pass.
 > `streaming` defaults to `true`. Disable it only if you explicitly want non-streaming replies.
 
 **5. Invite the bot**
@@ -1666,8 +1699,12 @@ How it works:
 3. **Summary injection**: When the user returns, the summary is injected as runtime context (one-shot, not persisted) alongside the retained recent suffix.
 4. **Restart-safe resume**: The summary is also mirrored into session metadata so it can still be recovered after a process restart.
 
-> [!TIP]
-> Think of auto compact as "summarize older context, keep the freshest live turns." It is not a hard session reset.
+> [!NOTE]
+> Mental model: "summarize older context, keep the freshest live turns, **and overwrite the session file with the compact form.**" It is not a full `session.clear()`, but it is a write — not a soft cursor move.
+>
+> Concretely, auto compact rewrites `sessions/<key>.jsonl` in place: older messages (including their structured `tool_calls` / `tool_call_id` / `reasoning_content`) are replaced by just the retained recent suffix (currently 8 messages), while the archived prefix is preserved only as a plain-text summary appended to `memory/history.jsonl` (or a `[RAW] ...` flattened dump if LLM summarization fails). The original structured JSON of those turns is no longer recoverable from the session file.
+>
+> This differs from the **token-driven soft consolidation** that fires when a prompt exceeds the context budget: that path only advances an internal `last_consolidated` cursor and leaves the session file untouched, so the raw tool-call trail stays on disk and can still be replayed or audited. If you rely on that trail for debugging or auditing, leave `idleCompactAfterMinutes` at the default `0` and let only the token-driven path run.
 
 ### Timezone
 
@@ -1986,7 +2023,7 @@ By default, the API binds to `127.0.0.1:8900`. You can change this in `config.js
 - Session isolation: pass `"session_id"` in the request body to isolate conversations; omit for a shared default session (`api:default`)
 - Single-message input: each request must contain exactly one `user` message
 - Fixed model: omit `model`, or pass the same model shown by `/v1/models`
-- No streaming: `stream=true` is not supported
+- Streaming: set `stream=true` to receive Server-Sent Events (`text/event-stream`) with OpenAI-compatible delta chunks, terminated by `data: [DONE]`; omit or set `stream=false` for a single JSON response
 - **File uploads**: supports images, PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx) via JSON base64 or `multipart/form-data` (max 10MB per file)
 - API requests run in the synthetic `api` channel, so the `message` tool does **not** automatically deliver to Telegram/Discord/etc. To proactively send to another chat, call `message` with an explicit `channel` and `chat_id` for an enabled channel.
 

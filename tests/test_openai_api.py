@@ -101,15 +101,14 @@ async def test_no_user_message_returns_400(aiohttp_client, app) -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
-async def test_stream_true_returns_400(aiohttp_client, app) -> None:
+async def test_stream_true_returns_sse(aiohttp_client, app) -> None:
     client = await aiohttp_client(app)
     resp = await client.post(
         "/v1/chat/completions",
         json={"messages": [{"role": "user", "content": "hello"}], "stream": True},
     )
-    assert resp.status == 400
-    body = await resp.json()
-    assert "stream" in body["error"]["message"].lower()
+    assert resp.status == 200
+    assert resp.content_type == "text/event-stream"
 
 
 @pytest.mark.asyncio
