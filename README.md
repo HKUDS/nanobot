@@ -191,6 +191,34 @@ uv tool install nanobot-ai
 pip install nanobot-ai
 ```
 
+**Install with installer script** (Linux/macOS, for systems without Python)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | bash
+```
+
+Use `--tuna` for China mirror:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/scripts/install.sh | bash -s -- --tuna
+```
+
+> This script automatically installs Python 3.14 in a virtual environment. If you already have Python 3.11+, use `pip install nanobot-ai` instead.
+
+**Install with installer script** (Windows, for systems without Python)
+
+```cmd
+scripts\install.bat
+```
+
+Use `--tuna` for China mirror:
+
+```cmd
+scripts\install.bat --tuna
+```
+
+> This script automatically installs Python 3.14 in a virtual environment. If you already have Python 3.11+, use `pip install nanobot-ai` instead.
+
 ### Update to latest version
 
 **PyPI / pip**
