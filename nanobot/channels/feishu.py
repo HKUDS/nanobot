@@ -1728,11 +1728,11 @@ class FeishuChannel(BaseChannel):
                 return
 
             # Build topic-scoped session key for conversation isolation.
-            # Group chat: thread replies (root_id != message_id) get a scoped
-            # session so each Feishu thread has its own conversation context.
+            # Group chat: each topic gets its own session via root_id (replies
+            # inside a topic) or message_id (top-level messages start a new topic).
             # Private chat: no override — same behavior as Telegram/Slack.
-            if chat_type == "group" and root_id and root_id != message_id:
-                session_key = f"feishu:{chat_id}:{root_id}"
+            if chat_type == "group":
+                session_key = f"feishu:{chat_id}:{root_id or message_id}"
             else:
                 session_key = None
 
