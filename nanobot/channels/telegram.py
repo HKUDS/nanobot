@@ -561,6 +561,9 @@ class TelegramChannel(BaseChannel):
                     await self._remove_reaction(chat_id, int(reply_to_message_id))
                 except ValueError:
                     pass
+            thread_kwargs = {}
+            if message_thread_id := meta.get("message_thread_id"):
+                thread_kwargs["message_thread_id"] = message_thread_id
             html = _markdown_to_telegram_html(buf.text)
             if len(html) <= 4096:
                 primary_html = html
@@ -580,8 +583,19 @@ class TelegramChannel(BaseChannel):
                     logger.debug("Final stream edit already applied for {}", chat_id)
                     self._stream_bufs.pop(chat_id, None)
                     return
-                logger.warning("Final stream edit failed: {}", e)
-                raise
+                logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.edit_message_text,
+                        chat_id=int_chat_id, message_id=buf.message_id,
+                        text=primary_html,
+                    )
+                except Exception as e2:
+                    if self._is_not_modified_error(e2):
+                        logger.debug("Final stream plain edit already applied for {}", chat_id)
+                    else:
+                        logger.warning("Final stream edit failed: {}", e2)
+                        raise  # Let ChannelManager handle retry
             for extra_html_chunk in extra_html_chunks:
                 await self._call_with_retry(
                     self._app.bot.send_message,

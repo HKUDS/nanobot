@@ -467,8 +467,45 @@ async def test_send_delta_stream_end_falls_back_on_bad_request() -> None:
 
 @pytest.mark.asyncio
 async def test_send_delta_stream_end_splits_oversized_reply() -> None:
-    """Final streamed reply exceeding Telegram limit is split into chunks."""
-    from nanobot.channels.telegram import TELEGRAM_MAX_MESSAGE_LEN
+    """Final streamed reply exceeding Telegram limit is split into chunks.
+
+    The fix converts markdown to HTML first, then splits by 4096 (actual Telegram
+    limit), ensuring the edited message always fits within Telegram's constraint.
+    Previously, the code split by 4000 (TELEGRAM_MAX_MESSAGE_LEN) before HTML
+    conversion, which could still overflow when HTML tags were added.
+    """
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock()
+    channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
+
+    oversized = "x" * (4000 + 500)
+    channel._stream_bufs["123"] = _StreamBuf(text=oversized, message_id=7, last_edit=0.0)
+
+    await channel.send_delta("123", "", {"_stream_end": True})
+
+    channel._app.bot.edit_message_text.assert_called_once()
+    edit_text = channel._app.bot.edit_message_text.call_args.kwargs.get("text", "")
+    assert len(edit_text) <= 4096, f"edit_text length {len(edit_text)} exceeds Telegram's 4096 limit"
+
+    channel._app.bot.send_message.assert_called_once()
+    send_text = channel._app.bot.send_message.call_args.kwargs.get("text", "")
+    assert len(send_text) <= 4096
+    assert "123" not in channel._stream_bufs
+
+
+async def test_send_delta_stream_end_html_expansion_does_not_overflow() -> None:
+    """Markdown that expands when converted to HTML is still split correctly.
+
+    This is the actual bug from issue #3315: markdown like **bold** expands to
+    <b>bold</b>, adding ~33% characters. A 3600-char message with heavy markdown
+    could become 4800+ chars after HTML conversion, exceeding 4096 limit.
+    The fix converts to HTML first, THEN splits by 4096.
+    """
+    from nanobot.channels.telegram import _markdown_to_telegram_html
 
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
@@ -478,14 +515,21 @@ async def test_send_delta_stream_end_splits_oversized_reply() -> None:
     channel._app.bot.edit_message_text = AsyncMock()
     channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
 
-    oversized = "x" * (TELEGRAM_MAX_MESSAGE_LEN + 500)
-    channel._stream_bufs["123"] = _StreamBuf(text=oversized, message_id=7, last_edit=0.0)
+    markdown_text = "**bold** " * 400  # 3600 chars raw, expands ~33% to 4800 HTML
+    raw_len = len(markdown_text)
+    html_len = len(_markdown_to_telegram_html(markdown_text))
+    assert html_len > 4096, f"Test precondition failed: HTML should exceed 4096 (was {html_len})"
+
+    channel._stream_bufs["123"] = _StreamBuf(text=markdown_text, message_id=7, last_edit=0.0)
 
     await channel.send_delta("123", "", {"_stream_end": True})
 
     channel._app.bot.edit_message_text.assert_called_once()
     edit_text = channel._app.bot.edit_message_text.call_args.kwargs.get("text", "")
-    assert len(edit_text) <= TELEGRAM_MAX_MESSAGE_LEN
+    assert len(edit_text) <= 4096, (
+        f"HTML text length {len(edit_text)} exceeds Telegram's 4096 limit. "
+        f"Raw was {raw_len}, HTML was {html_len}."
+    )
 
     channel._app.bot.send_message.assert_called_once()
     assert "123" not in channel._stream_bufs
