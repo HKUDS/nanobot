@@ -1,23 +1,25 @@
+![cover-v5-optimized](./images/GitHub_README.png)
+
 <div align="center">
-  <img src="nanobot_logo.png" alt="nanobot" width="500">
-  <h1>nanobot: Ultra-Lightweight Personal AI Agent</h1>
   <p>
     <a href="https://pypi.org/project/nanobot-ai/"><img src="https://img.shields.io/pypi/v/nanobot-ai" alt="PyPI"></a>
     <a href="https://pepy.tech/project/nanobot-ai"><img src="https://static.pepy.tech/badge/nanobot-ai" alt="Downloads"></a>
     <img src="https://img.shields.io/badge/python-≥3.11-blue" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
-    <a href="https://nanobot.wiki/docs/0.1.5/getting-started/nanobot-overview"><img src="https://img.shields.io/badge/Docs-nanobot.wiki-blue?style=flat&logo=readthedocs&logoColor=white" alt="Docs"></a>
+    <a href="https://github.com/HKUDS/nanobot/graphs/commit-activity" target="_blank">
+        <img alt="Commits last month" src="https://img.shields.io/github/commit-activity/m/HKUDS/nanobot?labelColor=%20%2332b583&color=%20%2312b76a"></a>
+    <a href="https://github.com/HKUDS/nanobot/issues?q=is%3Aissue%20is%3Aclosed" target="_blank">
+        <img alt="Issues closed" src="https://img.shields.io/github/issues-search?query=repo%3AHKUDS%2Fnanobot%20is%3Aissue%20is%3Aclosed&label=issues%20closed&labelColor=%20%237d89b0&color=%20%235d6b98"></a>
+    <a href="https://twitter.com/intent/follow?screen_name=nanobot_project" target="_blank">
+        <img src="https://img.shields.io/twitter/follow/nanobot_project?logo=X&color=%20%23f5f5f5" alt="follow on X(Twitter)"></a>
+    <a href="https://nanobot.wiki/docs/latest/getting-started/nanobot-overview"><img src="https://img.shields.io/badge/Docs-nanobot.wiki-blue?style=flat&logo=readthedocs&logoColor=white" alt="Docs"></a>
     <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/Feishu-Group-E9DBFC?style=flat&logo=feishu&logoColor=white" alt="Feishu"></a>
     <a href="./COMMUNICATION.md"><img src="https://img.shields.io/badge/WeChat-Group-C5EAB4?style=flat&logo=wechat&logoColor=white" alt="WeChat"></a>
     <a href="https://discord.gg/MnCvHqpUGB"><img src="https://img.shields.io/badge/Discord-Community-5865F2?style=flat&logo=discord&logoColor=white" alt="Discord"></a>
   </p>
 </div>
 
-🐈 **nanobot** is an **ultra-lightweight** personal AI agent inspired by [OpenClaw](https://github.com/openclaw/openclaw).
-
-⚡️ Delivers core agent functionality with **99% fewer lines of code**.
-
-📏 Real-time line count: run `bash core_agent_lines.sh` to verify anytime.
+🐈 **nanobot** is an open-source and ultra-lightweight AI agent in the spirit of [OpenClaw](https://github.com/openclaw/openclaw), [Claude Code](https://www.anthropic.com/claude-code), and [Codex](https://www.openai.com/codex/). It keeps the core agent loop small and readable while still supporting chat channels, memory, MCP and practical deployment paths, so you can go from local setup to a long-running personal agent with minimal overhead.
 
 ## 📢 News
 
@@ -100,17 +102,6 @@
 
 </details>
 
-> 🐈 nanobot is for educational, research, and technical exchange purposes only. It is unrelated to crypto and does not involve any official token or coin.
-
-## Key Features of nanobot:
-
-🪶 **Ultra-Lightweight**: A lightweight implementation built for stable, long-running AI agents.
-
-🔬 **Research-Ready**: Clean, readable code that's easy to understand, modify, and extend for research.
-
-⚡️ **Lightning Fast**: Minimal footprint means faster startup, lower resource usage, and quicker iterations.
-
-💎 **Easy-to-Use**: One-click to deploy and you're ready to go.
 
 ## 🏗️ Architecture
 
@@ -175,6 +166,120 @@
 - [⭐ Star History](#-star-history)
 
 ## ✨ Features
+## 💡 Key Features of nanobot
+
+- **Ultra-lightweight**: stable long-running agent behavior with a small, readable core.
+- **Research-ready**: the codebase is intentionally simple enough to study, modify, and extend.
+- **Practical**: chat channels, API, memory, MCP, and deployment paths are already built in.
+- **Hackable**: you can start fast, then go deeper through repo docs instead of a monolithic landing page.
+
+## 📦 Install
+
+> [!IMPORTANT]
+> If you want the newest features and experiments, install from source. 
+> 
+> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
+
+**Install from source**
+
+```bash
+git clone https://github.com/HKUDS/nanobot.git
+cd nanobot
+pip install -e .
+```
+
+**Install with `uv`**
+
+```bash
+uv tool install nanobot-ai
+```
+
+**Install from PyPI**
+
+```bash
+pip install nanobot-ai
+```
+
+## 🚀 Quick Start
+
+**1. Initialize**
+
+```bash
+nanobot onboard
+```
+
+**2. Configure** (`~/.nanobot/config.json`)
+
+Configure these **two parts** in your config (other options have defaults). Add or merge the following blocks into your existing config instead of replacing the whole file.
+
+*Set your API key* (e.g. [OpenRouter](https://openrouter.ai/keys), recommended for global users):
+
+```json
+{
+  "providers": {
+    "openrouter": {
+      "apiKey": "sk-or-v1-xxx"
+    }
+  }
+}
+```
+
+*Set your model* (optionally pin a provider — defaults to auto-detection):
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "provider": "openrouter",
+      "model": "anthropic/claude-opus-4-6"
+    }
+  }
+}
+```
+
+**3. Chat**
+
+```bash
+nanobot agent
+```
+
+
+- Want different LLM providers, web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
+- Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [Chat Apps](./docs/chat-apps.md)
+- Want Docker or Linux service deployment? See [Deployment](./docs/deployment.md)
+
+## 🧪 WebUI (Development)
+
+> [!NOTE]
+> The WebUI development workflow currently requires a source checkout and is not yet shipped together with the official packaged release. See [WebUI Document](./webui/README.md) for full WebUI development docs and build steps.
+
+<p align="center">
+  <img src="images/nanobot_webui.png" alt="nanobot webui preview" width="900">
+</p>
+
+**1. Start the gateway**
+
+```bash
+nanobot gateway
+```
+
+**2. Start the webui dev server**
+
+```bash
+cd webui
+bun install
+bun run dev
+```
+
+## 🏗️ Architecture
+
+<p align="center">
+  <img src="images/nanobot_arch.png" alt="nanobot architecture" width="800">
+</p>
+
+🐈 nanobot stays lightweight by centering everything around a small agent loop: messages come in from chat apps, the LLM decides when tools are needed, and memory or skills are pulled in only as context instead of becoming a heavy orchestration layer. That keeps the core path readable and easy to extend, while still letting you add channels, tools, memory, and deployment options without turning the system into a monolith.
+
+## ✨ Features
 
 <table align="center">
   <tr align="center">
@@ -197,501 +302,44 @@
   </tr>
 </table>
 
-## 📦 Install
+## 📚 Docs
 
-> [!IMPORTANT]
-> This README may describe features that are available first in the latest source code.
-> If you want the newest features and experiments, install from source.
-> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
+Browse the [repo docs](./docs/README.md) for the latest features and GitHub development version, or visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview) for the stable release documentation.
 
-**Install from source** (latest features, experimental changes may land here first; recommended for development)
+- Talk to your nanobot with familiar chat apps: [Chat Apps](./docs/chat-apps.md)
+- Configure providers, web search, MCP, and runtime behavior: [Configuration](./docs/configuration.md)
+- Integrate nanobot with local tools and automations: [OpenAI-Compatible API](./docs/openai-api.md) · [Python SDK](./docs/python-sdk.md)
+- Run nanobot with Docker or as a Linux service: [Deployment](./docs/deployment.md)
 
-```bash
-git clone https://github.com/HKUDS/nanobot.git
-cd nanobot
-pip install -e .
-```
+## 🤝 Contribute & Roadmap
 
-**Install with [uv](https://github.com/astral-sh/uv)** (stable release, fast)
+PRs welcome! The codebase is intentionally small and readable. 🤗
 
-```bash
-uv tool install nanobot-ai
-```
+### Branching Strategy
 
-**Install from PyPI** (stable release)
+| Branch | Purpose |
+|--------|---------|
+| `main` | Stable releases — bug fixes and minor improvements |
+| `nightly` | Experimental features — new features and breaking changes |
 
-```bash
-pip install nanobot-ai
-```
+**Unsure which branch to target?** See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
 
-### Update to latest version
+**Roadmap** — Pick an item and [open a PR](https://github.com/HKUDS/nanobot/pulls)!
 
-**PyPI / pip**
+- **Multi-modal** — See and hear (images, voice, video)
+- **Long-term memory** — Never forget important context
+- **Better reasoning** — Multi-step planning and reflection
+- **More integrations** — Calendar and more
+- **Self-improvement** — Learn from feedback and mistakes
 
-```bash
-pip install -U nanobot-ai
-nanobot --version
-```
+### Contributors
 
-**uv**
+<a href="https://github.com/HKUDS/nanobot/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=HKUDS/nanobot&max=100&columns=12&updated=20260210" alt="Contributors" />
+</a>
 
-```bash
-uv tool upgrade nanobot-ai
-nanobot --version
-```
 
-**Using WhatsApp?** Rebuild the local bridge after upgrading:
-
-```bash
-rm -rf ~/.nanobot/bridge
-nanobot channels login whatsapp
-```
-
-## 🚀 Quick Start
-
-> [!TIP]
-> Set your API key in `~/.nanobot/config.json`.
-> Get API keys: [OpenRouter](https://openrouter.ai/keys) (Global)
->
-> For other LLM providers, please see the [Providers](#providers) section.
->
-> For web search capability setup, please see [Web Search](#web-search).
-
-**1. Initialize**
-
-```bash
-nanobot onboard
-```
-
-Use `nanobot onboard --wizard` if you want the interactive setup wizard.
-
-**2. Configure** (`~/.nanobot/config.json`)
-
-Configure these **two parts** in your config (other options have defaults).
-
-*Set your API key* (e.g. OpenRouter, recommended for global users):
-```json
-{
-  "providers": {
-    "openrouter": {
-      "apiKey": "sk-or-v1-xxx"
-    }
-  }
-}
-```
-
-*Set your model* (optionally pin a provider — defaults to auto-detection):
-```json
-{
-  "agents": {
-    "defaults": {
-      "model": "anthropic/claude-opus-4-5",
-      "provider": "openrouter"
-    }
-  }
-}
-```
-
-**3. Chat**
-
-```bash
-nanobot agent
-```
-
-That's it! You have a working AI agent in 2 minutes.
-
-## 💬 Chat Apps
-
-Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./docs/CHANNEL_PLUGIN_GUIDE.md).
-
-| Channel | What you need |
-|---------|---------------|
-| **Telegram** | Bot token from @BotFather |
-| **Discord** | Bot token + Message Content intent |
-| **WhatsApp** | QR code scan (`nanobot channels login whatsapp`) |
-| **WeChat (Weixin)** | QR code scan (`nanobot channels login weixin`) |
-| **Feishu** | App ID + App Secret |
-| **DingTalk** | App Key + App Secret |
-| **Slack** | Bot token + App-Level token |
-| **Matrix** | Homeserver URL + Access token |
-| **Email** | IMAP/SMTP credentials |
-| **QQ** | App ID + App Secret |
-| **Wecom** | Bot ID + Bot Secret |
-| **Microsoft Teams** | App ID + App Password + public HTTPS endpoint |
-| **Mochat** | Claw token (auto-setup available) |
-
-<details>
-<summary><b>Telegram</b> (Recommended)</summary>
-
-**1. Create a bot**
-- Open Telegram, search `@BotFather`
-- Send `/newbot`, follow prompts
-- Copy the token
-
-**2. Configure**
-
-```json
-{
-  "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
-    }
-  }
-}
-```
-
-> You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`.
-> Copy this value **without the `@` symbol** and paste it into the config file.
-
-
-**3. Run**
-
-```bash
-nanobot gateway
-```
-
-</details>
-
-<details>
-<summary><b>Mochat (Claw IM)</b></summary>
-
-Uses **Socket.IO WebSocket** by default, with HTTP polling fallback.
-
-**1. Ask nanobot to set up Mochat for you**
-
-Simply send this message to nanobot (replace `xxx@xxx` with your real email):
-
-```
-Read https://raw.githubusercontent.com/HKUDS/MoChat/refs/heads/main/skills/nanobot/skill.md and register on MoChat. My Email account is xxx@xxx Bind me as your owner and DM me on MoChat.
-```
-
-nanobot will automatically register, configure `~/.nanobot/config.json`, and connect to Mochat.
-
-**2. Restart gateway**
-
-```bash
-nanobot gateway
-```
-
-That's it — nanobot handles the rest!
-
-<br>
-
-<details>
-<summary>Manual configuration (advanced)</summary>
-
-If you prefer to configure manually, add the following to `~/.nanobot/config.json`:
-
-> Keep `claw_token` private. It should only be sent in `X-Claw-Token` header to your Mochat API endpoint.
-
-```json
-{
-  "channels": {
-    "mochat": {
-      "enabled": true,
-      "base_url": "https://mochat.io",
-      "socket_url": "https://mochat.io",
-      "socket_path": "/socket.io",
-      "claw_token": "claw_xxx",
-      "agent_user_id": "6982abcdef",
-      "sessions": ["*"],
-      "panels": ["*"],
-      "reply_delay_mode": "non-mention",
-      "reply_delay_ms": 120000
-    }
-  }
-}
-```
-
-
-
-</details>
-
-</details>
-
-<details>
-<summary><b>Discord</b></summary>
-
-**1. Create a bot**
-- Go to https://discord.com/developers/applications
-- Create an application → Bot → Add Bot
-- Copy the bot token
-
-**2. Enable intents**
-- In the Bot settings, enable **MESSAGE CONTENT INTENT**
-- (Optional) Enable **SERVER MEMBERS INTENT** if you plan to use allow lists based on member data
-
-**3. Get your User ID**
-- Discord Settings → Advanced → enable **Developer Mode**
-- Right-click your avatar → **Copy User ID**
-
-**4. Configure**
-
-```json
-{
-  "channels": {
-    "discord": {
-      "enabled": true,
-      "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"],
-      "allowChannels": [],
-      "groupPolicy": "mention",
-      "streaming": true
-    }
-  }
-}
-```
-
-> `groupPolicy` controls how the bot responds in group channels:
-> - `"mention"` (default) — Only respond when @mentioned
-> - `"open"` — Respond to all messages
-> DMs always respond when the sender is in `allowFrom`.
-> - If you set group policy to open create new threads as private threads and then @ the bot into it. Otherwise the thread itself and the channel in which you spawned it will spawn a bot session.
-> `allowChannels` restricts the bot to specific Discord channel IDs. Empty (default) means respond in every channel the bot can see. Example: `["1234567890", "0987654321"]`. The filter applies after `allowFrom`, so both must pass.
-> `streaming` defaults to `true`. Disable it only if you explicitly want non-streaming replies.
-
-**5. Invite the bot**
-- OAuth2 → URL Generator
-- Scopes: `bot`
-- Bot Permissions: `Send Messages`, `Read Message History`
-- Open the generated invite URL and add the bot to your server
-
-**6. Run**
-
-```bash
-nanobot gateway
-```
-
-</details>
-
-<details>
-<summary><b>Matrix (Element)</b></summary>
-
-Install Matrix dependencies first:
-
-```bash
-pip install nanobot-ai[matrix]
-```
-
-**1. Create/choose a Matrix account**
-
-- Create or reuse a Matrix account on your homeserver (for example `matrix.org`).
-- Confirm you can log in with Element.
-
-**2. Get credentials**
-
-- You need:
-  - `userId` (example: `@nanobot:matrix.org`)
-  - `password`
-
-(Note: `accessToken` and `deviceId` are still supported for legacy reasons, but
-for reliable encryption, password login is recommended instead. If the
-`password` is provided, `accessToken` and `deviceId` will be ignored.)
-
-**3. Configure**
-
-```json
-{
-  "channels": {
-    "matrix": {
-      "enabled": true,
-      "homeserver": "https://matrix.org",
-      "userId": "@nanobot:matrix.org",
-      "password": "mypasswordhere",
-      "e2eeEnabled": true,
-      "allowFrom": ["@your_user:matrix.org"],
-      "groupPolicy": "open",
-      "groupAllowFrom": [],
-      "allowRoomMentions": false,
-      "maxMediaBytes": 20971520
-    }
-  }
-}
-```
-
-> Keep a persistent `matrix-store` — encrypted session state is lost if these change across restarts.
-
-| Option | Description |
-|--------|-------------|
-| `allowFrom` | User IDs allowed to interact. Empty denies all; use `["*"]` to allow everyone. |
-| `groupPolicy` | `open` (default), `mention`, or `allowlist`. |
-| `groupAllowFrom` | Room allowlist (used when policy is `allowlist`). |
-| `allowRoomMentions` | Accept `@room` mentions in mention mode. |
-| `e2eeEnabled` | E2EE support (default `true`). Set `false` for plaintext-only. |
-| `maxMediaBytes` | Max attachment size (default `20MB`). Set `0` to block all media. |
-
-
-
-
-**4. Run**
-
-```bash
-nanobot gateway
-```
-
-</details>
-
-<details>
-<summary><b>WhatsApp</b></summary>
-
-Requires **Node.js ≥18**.
-
-**1. Link device**
-
-```bash
-nanobot channels login whatsapp
-# Scan QR with WhatsApp → Settings → Linked Devices
-```
-
-**2. Configure**
-
-```json
-{
-  "channels": {
-    "whatsapp": {
-      "enabled": true,
-      "allowFrom": ["+1234567890"]
-    }
-  }
-}
-```
-
-**3. Run** (two terminals)
-
-```bash
-# Terminal 1
-nanobot channels login whatsapp
-
-# Terminal 2
-nanobot gateway
-```
-
-> WhatsApp bridge updates are not applied automatically for existing installations.
-> After upgrading nanobot, rebuild the local bridge with:
-> `rm -rf ~/.nanobot/bridge && nanobot channels login whatsapp`
-
-</details>
-
-<details>
-<summary><b>Feishu</b></summary>
-
-Uses **WebSocket** long connection — no public IP required.
-
-**1. Create a Feishu bot**
-- Visit [Feishu Open Platform](https://open.feishu.cn/app)
-- Create a new app → Enable **Bot** capability
-- **Permissions**:
-  - `im:message` (send messages) and `im:message.p2p_msg:readonly` (receive messages)
-  - **Streaming replies** (default in nanobot): add **`cardkit:card:write`** (often labeled **Create and update cards** in the Feishu developer console). Required for CardKit entities and streamed assistant text. Older apps may not have it yet — open **Permission management**, enable the scope, then **publish** a new app version if the console requires it.
-  - If you **cannot** add `cardkit:card:write`, set `"streaming": false` under `channels.feishu` (see below). The bot still works; replies use normal interactive cards without token-by-token streaming.
-- **Events**: Add `im.message.receive_v1` (receive messages)
-  - Select **Long Connection** mode (requires running nanobot first to establish connection)
-- Get **App ID** and **App Secret** from "Credentials & Basic Info"
-- Publish the app
-
-**2. Configure**
-
-```json
-{
-  "channels": {
-    "feishu": {
-      "enabled": true,
-      "appId": "cli_xxx",
-      "appSecret": "xxx",
-      "encryptKey": "",
-      "verificationToken": "",
-      "allowFrom": ["ou_YOUR_OPEN_ID"],
-      "groupPolicy": "mention",
-      "reactEmoji": "OnIt",
-      "doneEmoji": "DONE",
-      "toolHintPrefix": "🔧",
-      "streaming": true,
-      "domain": "feishu"
-    }
-  }
-}
-```
-
-> `streaming` defaults to `true`. Use `false` if your app does not have **`cardkit:card:write`** (see permissions above).
-> `encryptKey` and `verificationToken` are optional for Long Connection mode.
-> `allowFrom`: Add your open_id (find it in nanobot logs when you message the bot). Use `["*"]` to allow all users.
-> `groupPolicy`: `"mention"` (default — respond only when @mentioned), `"open"` (respond to all group messages). Private chats always respond.
-> `reactEmoji`: Emoji for "processing" status (default: `OnIt`). See [available emojis](https://open.larkoffice.com/document/server-docs/im-v1/message-reaction/emojis-introduce).
-> `doneEmoji`: Optional emoji for "completed" status (e.g., `DONE`, `OK`, `HEART`). When set, bot adds this reaction after removing `reactEmoji`.
-> `toolHintPrefix`: Prefix for inline tool hints in streaming cards (default: `🔧`).
-> `domain`: `"feishu"` (default) for China (open.feishu.cn), `"lark"` for international Lark (open.larksuite.com).
-
-**3. Run**
-
-```bash
-nanobot gateway
-```
-
-> [!TIP]
-> Feishu uses WebSocket to receive messages — no webhook or public IP needed!
-
-</details>
-
-<details>
-<summary><b>QQ (QQ单聊)</b></summary>
-
-Uses **botpy SDK** with WebSocket — no public IP required. Currently supports **private messages only**.
-
-**1. Register & create bot**
-- Visit [QQ Open Platform](https://q.qq.com) → Register as a developer (personal or enterprise)
-- Create a new bot application
-- Go to **开发设置 (Developer Settings)** → copy **AppID** and **AppSecret**
-
-**2. Set up sandbox for testing**
-- In the bot management console, find **沙箱配置 (Sandbox Config)**
-- Under **在消息列表配置**, click **添加成员** and add your own QQ number
-- Once added, scan the bot's QR code with mobile QQ → open the bot profile → tap "发消息" to start chatting
-
-**3. Configure**
-
-> - `allowFrom`: Add your openid (find it in nanobot logs when you message the bot). Use `["*"]` for public access.
-> - `msgFormat`: Optional. Use `"plain"` (default) for maximum compatibility with legacy QQ clients, or `"markdown"` for richer formatting on newer clients.
-> - For production: submit a review in the bot console and publish. See [QQ Bot Docs](https://bot.q.qq.com/wiki/) for the full publishing flow.
-
-```json
-{
-  "channels": {
-    "qq": {
-      "enabled": true,
-      "appId": "YOUR_APP_ID",
-      "secret": "YOUR_APP_SECRET",
-      "allowFrom": ["YOUR_OPENID"],
-      "msgFormat": "plain"
-    }
-  }
-}
-```
-
-**4. Run**
-
-```bash
-nanobot gateway
-```
-
-Now send a message to the bot from QQ — it should respond!
-
-</details>
-
-<details>
-<summary><b>DingTalk (钉钉)</b></summary>
-
-Uses **Stream Mode** — no public IP required.
-
-**1. Create a DingTalk bot**
-- Visit [DingTalk Open Platform](https://open-dev.dingtalk.com/)
-- Create a new app -> Add **Robot** capability
-- **Configuration**:
-  - Toggle **Stream Mode** ON
-- **Permissions**: Add necessary permissions for sending messages
-- Get **AppKey** (Client ID) and **AppSecret** (Client Secret) from "Credentials"
-- Publish the app
+## ⭐ Star History
 
 **2. Configure**
 
@@ -2356,9 +2004,4 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 <p align="center">
   <em> Thanks for visiting ✨ nanobot!</em><br><br>
   <img src="https://visitor-badge.laobi.icu/badge?page_id=HKUDS.nanobot&style=for-the-badge&color=00d4ff" alt="Views">
-</p>
-
-
-<p align="center">
-  <sub>nanobot is for educational, research, and technical exchange purposes only</sub>
 </p>

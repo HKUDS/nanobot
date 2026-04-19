@@ -1,0 +1,83 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "Connecting to nanobot…",
+      "boot": "Loading nanobot…"
+    },
+    "error": {
+      "title": "Couldn't reach nanobot",
+      "gatewayHint": "Make sure the gateway is running (`nanobot web`) and that this page is open on the same machine."
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "nanobot web UI — chat with your nanobot workspace."
+    }
+  },
+  "sidebar": {
+    "collapse": "Collapse sidebar",
+    "toggleTheme": "Toggle theme",
+    "newChat": "New chat",
+    "recent": "Recent",
+    "refreshSessions": "Refresh sessions",
+    "language": {
+      "label": "Language",
+      "ariaLabel": "Change language"
+    }
+  },
+  "chat": {
+    "fallbackTitle": "Chat {{id}}",
+    "loading": "Loading…",
+    "noSessions": "No sessions yet.",
+    "actions": "Chat actions for {{title}}",
+    "delete": "Delete",
+    "newChat": "New chat"
+  },
+  "deleteConfirm": {
+    "title": "Delete “{{title}}”?",
+    "description": "The session file will be removed from disk. This cannot be undone.",
+    "cancel": "Cancel",
+    "confirm": "Delete"
+  },
+  "connection": {
+    "idle": "Idle",
+    "connecting": "Connecting…",
+    "open": "Connected",
+    "reconnecting": "Reconnecting…",
+    "closed": "Disconnected",
+    "error": "Connection error"
+  },
+  "thread": {
+    "loadingConversation": "Loading conversation…",
+    "empty": {
+      "description": "Ask questions, continue local work, or start a new thread."
+    },
+    "header": {
+      "toggleSidebar": "Toggle sidebar"
+    },
+    "composer": {
+      "placeholderThread": "Type your message…",
+      "placeholderHero": "What's on your mind?",
+      "placeholderOpening": "Opening a new chat…",
+      "inputAria": "Message input",
+      "sendHint": "Enter to send · Shift+Enter for newline",
+      "send": "Send message"
+    },
+    "scrollToBottom": "Scroll to bottom"
+  },
+  "message": {
+    "streaming": "streaming",
+    "assistantTyping": "Assistant is typing",
+    "toolSingle": "Using a tool",
+    "toolMany": "Used {{count}} tools"
+  },
+  "code": {
+    "fallbackLanguage": "code",
+    "copyAria": "Copy code",
+    "copy": "Copy",
+    "copied": "Copied"
+  }
+}

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -12,6 +13,19 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Config
 from nanobot.utils.restart import consume_restart_notice_from_env, format_restart_completed_message
+
+if TYPE_CHECKING:
+    from nanobot.session.manager import SessionManager
+
+
+def _default_webui_dist() -> Path | None:
+    """Return the absolute path to the bundled webui dist directory if it exists."""
+    try:
+        import nanobot.web as web_pkg  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    candidate = Path(web_pkg.__file__).resolve().parent / "dist"
+    return candidate if candidate.is_dir() else None
 
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
@@ -27,9 +41,16 @@ class ChannelManager:
     - Route outbound messages
     """
 
-    def __init__(self, config: Config, bus: MessageBus):
+    def __init__(
+        self,
+        config: Config,
+        bus: MessageBus,
+        *,
+        session_manager: "SessionManager | None" = None,
+    ):
         self.config = config
         self.bus = bus
+        self._session_manager = session_manager
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
 
@@ -55,7 +76,15 @@ class ChannelManager:
             if not enabled:
                 continue
             try:
-                channel = cls(section, self.bus)
+                kwargs: dict[str, Any] = {}
+                # Only the WebSocket channel currently hosts the embedded webui
+                # surface; other channels stay oblivious to these knobs.
+                if cls.name == "websocket" and self._session_manager is not None:
+                    kwargs["session_manager"] = self._session_manager
+                    static_path = _default_webui_dist()
+                    if static_path is not None:
+                        kwargs["static_dist_path"] = static_path
+                channel = cls(section, self.bus, **kwargs)
                 channel.transcription_provider = transcription_provider
                 channel.transcription_api_key = transcription_key
                 channel.transcription_api_base = transcription_base
@@ -188,6 +217,9 @@ class ChannelManager:
                         continue
                     if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
                         continue
+
+                if msg.metadata.get("_retry_wait"):
+                    continue
 
                 # Coalesce consecutive _stream_delta messages for the same (channel, chat_id)
                 # to reduce API calls and improve streaming latency

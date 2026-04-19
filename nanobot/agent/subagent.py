@@ -170,6 +170,7 @@ class SubagentManager:
                     restrict_to_workspace=self.restrict_to_workspace,
                     sandbox=self.exec_config.sandbox,
                     path_append=self.exec_config.path_append,
+                    allowed_env_keys=self.exec_config.allowed_env_keys,
                 ))
             if self.web_config.enable:
                 tools.register(WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy))
@@ -245,6 +246,10 @@ class SubagentManager:
             sender_id="subagent",
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
+            metadata={
+                "injected_event": "subagent_result",
+                "subagent_task_id": task_id,
+            },
         )
 
         await self.bus.publish_inbound(msg)

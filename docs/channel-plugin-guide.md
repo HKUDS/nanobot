@@ -19,7 +19,7 @@ We'll build a minimal webhook channel that receives messages via HTTP POST and s
 
 ### Project Structure
 
-```
+```text
 nanobot-channel-webhook/
 ├── nanobot_channel_webhook/
 │   ├── __init__.py          # re-export WebhookChannel
@@ -135,14 +135,17 @@ class WebhookChannel(BaseChannel):
 [project]
 name = "nanobot-channel-webhook"
 version = "0.1.0"
-dependencies = ["nanobot", "aiohttp"]
+dependencies = ["nanobot-ai", "aiohttp"]
 
 [project.entry-points."nanobot.channels"]
 webhook = "nanobot_channel_webhook:WebhookChannel"
 
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.backends._legacy:_Backend"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["nanobot_channel_webhook"]
 ```
 
 The key (`webhook`) becomes the config section name. The value points to your `BaseChannel` subclass.

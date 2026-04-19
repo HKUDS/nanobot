@@ -106,15 +106,18 @@ class SessionManager:
         self.legacy_sessions_dir = get_legacy_sessions_dir()
         self._cache: dict[str, Session] = {}
 
+    @staticmethod
+    def safe_key(key: str) -> str:
+        """Public helper used by HTTP handlers to map an arbitrary key to a stable filename stem."""
+        return safe_filename(key.replace(":", "_"))
+
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
-        safe_key = safe_filename(key.replace(":", "_"))
-        return self.sessions_dir / f"{safe_key}.jsonl"
+        return self.sessions_dir / f"{self.safe_key(key)}.jsonl"
 
     def _get_legacy_session_path(self, key: str) -> Path:
         """Legacy global session path (~/.nanobot/sessions/)."""
-        safe_key = safe_filename(key.replace(":", "_"))
-        return self.legacy_sessions_dir / f"{safe_key}.jsonl"
+        return self.legacy_sessions_dir / f"{self.safe_key(key)}.jsonl"
 
     def get_or_create(self, key: str) -> Session:
         """
@@ -208,6 +211,61 @@ class SessionManager:
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""
         self._cache.pop(key, None)
+
+    def delete_session(self, key: str) -> bool:
+        """Remove a session from disk and the in-memory cache.
+
+        Returns True if a JSONL file was found and unlinked.
+        """
+        path = self._get_session_path(key)
+        self.invalidate(key)
+        if not path.exists():
+            return False
+        try:
+            path.unlink()
+            return True
+        except OSError as e:
+            logger.warning("Failed to delete session file {}: {}", path, e)
+            return False
+
+    def read_session_file(self, key: str) -> dict[str, Any] | None:
+        """Load a session from disk without caching; intended for read-only HTTP endpoints.
+
+        Returns ``{"key", "created_at", "updated_at", "metadata", "messages"}`` or
+        ``None`` when the session file does not exist or fails to parse.
+        """
+        path = self._get_session_path(key)
+        if not path.exists():
+            return None
+        try:
+            messages: list[dict[str, Any]] = []
+            metadata: dict[str, Any] = {}
+            created_at: str | None = None
+            updated_at: str | None = None
+            stored_key: str | None = None
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    if data.get("_type") == "metadata":
+                        metadata = data.get("metadata", {})
+                        created_at = data.get("created_at")
+                        updated_at = data.get("updated_at")
+                        stored_key = data.get("key")
+                    else:
+                        messages.append(data)
+            return {
+                "key": stored_key or key,
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "metadata": metadata,
+                "messages": messages,
+            }
+        except Exception as e:
+            logger.warning("Failed to read session {}: {}", key, e)
+            return None
 
     def list_sessions(self) -> list[dict[str, Any]]:
         """

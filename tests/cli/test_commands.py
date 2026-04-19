@@ -286,6 +286,39 @@ def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
     assert find_by_name("github-copilot").name == "github_copilot"
 
 
+def test_config_explicit_xiaomi_mimo_provider_uses_default_api_base():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "xiaomi_mimo",
+                    "model": "MiniMax-M1-80k",
+                }
+            },
+            "providers": {
+                "xiaomiMimo": {
+                    "apiKey": "test-key",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "xiaomi_mimo"
+    assert config.get_api_base() == "https://api.xiaomimimo.com/v1"
+
+
+def test_config_auto_detects_xiaomi_mimo_from_model_keyword():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "mimo/MiniMax-M1-80k"}},
+            "providers": {"xiaomiMimo": {"apiKey": "test-key"}},
+        }
+    )
+
+    assert config.get_provider_name() == "xiaomi_mimo"
+    assert config.get_api_base() == "https://api.xiaomimimo.com/v1"
+
+
 def test_config_auto_detects_ollama_from_local_api_base():
     config = Config.model_validate(
         {
@@ -1179,7 +1212,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
             return None
 
     class _FakeChannelManager:
-        def __init__(self, _config, _bus) -> None:
+        def __init__(self, _config, _bus, **_kwargs) -> None:
             self.enabled_channels = ["telegram", "discord"]
 
         async def start_all(self) -> None:

@@ -1,7 +1,8 @@
 """Tests for GitStore — line_ages() and core git operations."""
 
+import subprocess
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -89,3 +90,127 @@ class TestLineAges:
         # "- new" line and "- keep" line both age=0 (same day), but
         # the key point is we get per-line results
         assert len(ages) == 7
+
+
+class TestNestedRepoProtection:
+    """Regression tests for GitHub issue #2980: nested repo protection."""
+
+    def test_init_refuses_inside_git_repo(self, tmp_path):
+        """init() should detect it's inside an existing git repo and refuse."""
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / ".git").mkdir()
+
+        workspace = project / "workspace"
+        workspace.mkdir()
+
+        g = GitStore(workspace, tracked_files=["MEMORY.md"])
+        result = g.init()
+
+        assert result is False
+        assert not (workspace / ".git").is_dir()
+
+    def test_init_preserves_existing_gitignore(self, tmp_path):
+        """init() should preserve existing .gitignore entries and append new ones."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        existing = "*.pyc\n__pycache__/\n"
+        (workspace / ".gitignore").write_text(existing, encoding="utf-8")
+
+        g = GitStore(workspace, tracked_files=["MEMORY.md"])
+        result = g.init()
+
+        assert result is True
+        gitignore = (workspace / ".gitignore").read_text(encoding="utf-8")
+        assert "*.pyc" in gitignore
+        assert "__pycache__/" in gitignore
+        assert "!MEMORY.md" in gitignore
+        assert "!.gitignore" in gitignore
+
+    def test_init_no_gitignore_creates_new(self, tmp_path):
+        """init() should create .gitignore with Dream content when none exists."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        g = GitStore(workspace, tracked_files=["MEMORY.md"])
+        result = g.init()
+
+        assert result is True
+        gitignore = (workspace / ".gitignore").read_text(encoding="utf-8")
+        expected = g._build_gitignore()
+        assert gitignore == expected
+
+    def test_init_gitignore_merge_idempotent(self, tmp_path):
+        """init() should not duplicate Dream entries already in .gitignore."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        # Pre-existing .gitignore that already has some Dream entries
+        existing = "*.pyc\n/*\n!MEMORY.md\n"
+        (workspace / ".gitignore").write_text(existing, encoding="utf-8")
+
+        g = GitStore(workspace, tracked_files=["MEMORY.md"])
+        result = g.init()
+
+        assert result is True
+        gitignore = (workspace / ".gitignore").read_text(encoding="utf-8")
+        # No duplicate lines
+        lines = gitignore.splitlines()
+        assert lines.count("/*") == 1
+        assert lines.count("!MEMORY.md") == 1
+        # Existing entry preserved, new Dream entries appended
+        assert "*.pyc" in gitignore
+        assert "!.gitignore" in gitignore
+
+    def test_init_outside_git_repo_works_normally(self, tmp_path):
+        """init() should succeed and create .git when not inside a git repo."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+
+        g = GitStore(workspace, tracked_files=["MEMORY.md"])
+        result = g.init()
+
+        assert result is True
+        assert (workspace / ".git").is_dir()
+
+    def test_init_refuses_inside_git_worktree(self, tmp_path):
+        """init() should refuse when the parent checkout is a git worktree."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        (repo / "README.md").write_text("x\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-q",
+                "-m",
+                "init",
+            ],
+            check=True,
+        )
+        subprocess.run(["git", "-C", str(repo), "branch", "wt-branch"], check=True)
+
+        worktree = tmp_path / "worktree"
+        subprocess.run(
+            ["git", "-C", str(repo), "worktree", "add", "-q", str(worktree), "wt-branch"],
+            check=True,
+        )
+        assert (worktree / ".git").is_file()
+
+        workspace = worktree / "workspace"
+        workspace.mkdir()
+
+        g = GitStore(workspace, tracked_files=["MEMORY.md"])
+        result = g.init()
+
+        assert result is False
+        assert not (workspace / ".git").exists()

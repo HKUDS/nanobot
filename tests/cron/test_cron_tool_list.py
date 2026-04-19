@@ -7,7 +7,6 @@ import pytest
 from nanobot.agent.tools.cron import CronTool
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
-from tests.test_openai_api import pytest_plugins
 
 
 def _make_tool(tmp_path) -> CronTool:
@@ -344,6 +343,43 @@ def test_add_job_can_disable_delivery(tmp_path) -> None:
     assert result.startswith("Created job")
     job = tool._cron.list_jobs()[0]
     assert job.payload.deliver is False
+
+
+def test_cron_schema_advertises_action_specific_requirements(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+
+    # Only ``action`` is required at the schema root — per-action requirements
+    # are enforced at runtime via ``validate_params`` and surfaced to the LLM
+    # through field descriptions. We intentionally do NOT set top-level
+    # ``oneOf``/``anyOf``/``allOf``/``enum``/``not``: OpenAI Codex/Responses
+    # reject those at the root of function parameters (#3265 regression).
+    assert tool.parameters["required"] == ["action"]
+    for disallowed in ("oneOf", "anyOf", "allOf", "not"):
+        assert disallowed not in tool.parameters, (
+            f"Top-level '{disallowed}' is rejected by OpenAI Codex/Responses tool schemas"
+        )
+    message_desc = tool.parameters["properties"]["message"]["description"]
+    assert "REQUIRED" in message_desc and "action='add'" in message_desc
+    job_id_desc = tool.parameters["properties"]["job_id"]["description"]
+    assert "REQUIRED" in job_id_desc and "action='remove'" in job_id_desc
+
+
+def test_validate_params_requires_message_only_for_add(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+
+    assert "message is required when action='add'" in tool.validate_params({"action": "add"})
+    assert tool.validate_params({"action": "list"}) == []
+    assert "job_id is required when action='remove'" in tool.validate_params({"action": "remove"})
+
+
+def test_add_job_empty_message_returns_actionable_error(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool.set_context("telegram", "chat-1")
+
+    result = tool._add_job(None, "", 60, None, None, None)
+
+    assert "action='add' requires a non-empty 'message'" in result
+    assert "Retry including message=" in result
 
 
 def test_list_excludes_disabled_jobs(tmp_path) -> None:

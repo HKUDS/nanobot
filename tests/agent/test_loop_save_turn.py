@@ -417,3 +417,162 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
     ]
     assert AgentLoop._PENDING_USER_TURN_KEY not in session.metadata
     assert AgentLoop._RUNTIME_CHECKPOINT_KEY not in session.metadata
+
+
+@pytest.mark.asyncio
+async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("cli:test")
+    session.add_message("user", "question")
+    session.add_message("assistant", "working")
+    loop.sessions.save(session)
+
+    seen: dict[str, list[dict]] = {}
+
+    async def fake_run_agent_loop(initial_messages, **_kwargs):
+        seen["initial_messages"] = initial_messages
+        return (
+            "done",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "done"}],
+            "stop",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+
+    await loop._process_message(
+        InboundMessage(
+            channel="system",
+            sender_id="subagent",
+            chat_id="cli:test",
+            content="subagent result",
+            metadata={"subagent_task_id": "sub-1"},
+        )
+    )
+
+    non_system = [m for m in seen["initial_messages"] if m.get("role") != "system"]
+    assert [m["content"] for m in non_system[:2]] == ["question", "working"]
+    assert non_system[2]["content"].count("subagent result") == 1
+    assert "Current Time:" in non_system[2]["content"]
+
+    loop.sessions.invalidate("cli:test")
+    persisted = loop.sessions.get_or_create("cli:test")
+    assert [
+        {k: v for k, v in m.items() if k in {"role", "content", "injected_event", "subagent_task_id"}}
+        for m in persisted.messages
+    ] == [
+        {"role": "user", "content": "question"},
+        {"role": "assistant", "content": "working"},
+        {
+            "role": "assistant",
+            "content": "subagent result",
+            "injected_event": "subagent_result",
+            "subagent_task_id": "sub-1",
+        },
+        {"role": "assistant", "content": "done"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_multiple_subagent_followups_all_persist_as_standalone_history(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    async def fake_run_agent_loop(initial_messages, **_kwargs):
+        return (
+            "ack",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "ack"}],
+            "stop",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+
+    for idx in range(3):
+        await loop._process_message(
+            InboundMessage(
+                channel="system",
+                sender_id="subagent",
+                chat_id="cli:multi",
+                content=f"subagent result {idx}",
+                metadata={"subagent_task_id": f"sub-{idx}"},
+            )
+        )
+
+    loop.sessions.invalidate("cli:multi")
+    persisted = loop.sessions.get_or_create("cli:multi")
+    followups = [m for m in persisted.messages if m.get("injected_event") == "subagent_result"]
+    assert [m["content"] for m in followups] == [
+        "subagent result 0",
+        "subagent result 1",
+        "subagent result 2",
+    ]
+
+
+def test_prompt_merge_does_not_replace_standalone_subagent_history_entry(tmp_path: Path) -> None:
+    loop = _mk_loop()
+    session = Session(key="cli:merge")
+    session.add_message("assistant", "previous assistant")
+
+    inserted = loop._persist_subagent_followup(
+        session,
+        InboundMessage(
+            channel="system",
+            sender_id="subagent",
+            chat_id="cli:merge",
+            content="subagent result",
+            metadata={"subagent_task_id": "sub-1"},
+        ),
+    )
+
+    assert inserted is True
+
+    builder = ContextBuilder(tmp_path)
+    projected = builder.build_messages(
+        history=session.get_history(max_messages=0),
+        current_message="",
+        current_role="assistant",
+        channel="cli",
+        chat_id="merge",
+    )
+
+    non_system = [m for m in projected if m.get("role") != "system"]
+    assert len(non_system) == 2
+    assert "subagent result" in non_system[-1]["content"]
+    assert session.messages[-1]["content"] == "subagent result"
+    assert session.messages[-1]["injected_event"] == "subagent_result"
+
+
+def test_subagent_followup_dedupes_by_task_id() -> None:
+    loop = _mk_loop()
+    session = Session(key="cli:dedupe")
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="cli:dedupe",
+        content="subagent result",
+        metadata={"subagent_task_id": "sub-1"},
+    )
+
+    assert loop._persist_subagent_followup(session, msg) is True
+    assert loop._persist_subagent_followup(session, msg) is False
+    assert len(session.messages) == 1
+
+
+def test_subagent_followup_skips_empty_content() -> None:
+    loop = _mk_loop()
+    session = Session(key="cli:empty")
+    msg = InboundMessage(
+        channel="system",
+        sender_id="subagent",
+        chat_id="cli:empty",
+        content="",
+        metadata={"subagent_task_id": "sub-empty"},
+    )
+
+    assert loop._persist_subagent_followup(session, msg) is False
+    assert session.messages == []

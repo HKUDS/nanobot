@@ -7,24 +7,31 @@ import email.utils
 import hmac
 import http
 import json
+import mimetypes
+import re
 import secrets
 import ssl
 import time
 import uuid
-from typing import Any, Self
-from urllib.parse import parse_qs, urlparse
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Self
+from urllib.parse import parse_qs, unquote, urlparse
 
 from loguru import logger
 from pydantic import Field, field_validator, model_validator
 from websockets.asyncio.server import ServerConnection, serve
 from websockets.datastructures import Headers
 from websockets.exceptions import ConnectionClosed
-from websockets.http11 import Request as WsRequest, Response
+from websockets.http11 import Request as WsRequest
+from websockets.http11 import Response
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
+
+if TYPE_CHECKING:
+    from nanobot.session.manager import SessionManager
 
 
 def _strip_trailing_slash(path: str) -> str:
@@ -114,6 +121,18 @@ def _http_json_response(data: dict[str, Any], *, status: int = 200) -> Response:
     return Response(status, reason, headers, body)
 
 
+def _read_webui_model_name() -> str | None:
+    """Return the configured default model for readonly webui display."""
+    try:
+        from nanobot.config.loader import load_config
+
+        model = load_config().agents.defaults.model.strip()
+        return model or None
+    except Exception as e:
+        logger.debug("webui bootstrap could not load model name: {}", e)
+        return None
+
+
 def _parse_request_path(path_with_query: str) -> tuple[str, dict[str, list[str]]]:
     """Parse normalized path and query parameters in one pass."""
     parsed = urlparse("ws://x" + path_with_query)
@@ -156,6 +175,109 @@ def _parse_inbound_payload(raw: str) -> str | None:
     return text
 
 
+# Accept UUIDs and short scoped keys like "unified:default". Keeps the capability
+# namespace small enough to rule out path traversal / quote injection tricks.
+_CHAT_ID_RE = re.compile(r"^[A-Za-z0-9_:-]{1,64}$")
+
+
+def _is_valid_chat_id(value: Any) -> bool:
+    return isinstance(value, str) and _CHAT_ID_RE.match(value) is not None
+
+
+def _parse_envelope(raw: str) -> dict[str, Any] | None:
+    """Return a typed envelope dict if the frame is a new-style JSON envelope, else None.
+
+    A frame qualifies when it parses as a JSON object with a string ``type`` field.
+    Legacy frames (plain text, or ``{"content": ...}`` without ``type``) return None;
+    callers should fall back to :func:`_parse_inbound_payload` for those.
+    """
+    text = raw.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    t = data.get("type")
+    if not isinstance(t, str):
+        return None
+    return data
+
+
+_LOCALHOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+
+# Matches the legacy chat-id pattern but allows file-system-safe stems too,
+# so the API can address sessions whose keys came from non-WebSocket channels.
+_API_KEY_RE = re.compile(r"^[A-Za-z0-9_:.-]{1,128}$")
+
+
+def _decode_api_key(raw_key: str) -> str | None:
+    """Decode a percent-encoded API path segment, then validate the result."""
+    key = unquote(raw_key)
+    if _API_KEY_RE.match(key) is None:
+        return None
+    return key
+
+
+def _is_localhost(connection: Any) -> bool:
+    """Return True if *connection* originated from the loopback interface."""
+    addr = getattr(connection, "remote_address", None)
+    if not addr:
+        return False
+    host = addr[0] if isinstance(addr, tuple) else addr
+    if not isinstance(host, str):
+        return False
+    # ``::ffff:127.0.0.1`` is loopback in IPv6-mapped form.
+    if host.startswith("::ffff:"):
+        host = host[7:]
+    return host in _LOCALHOSTS
+
+
+def _http_response(
+    body: bytes,
+    *,
+    status: int = 200,
+    content_type: str = "text/plain; charset=utf-8",
+    extra_headers: list[tuple[str, str]] | None = None,
+) -> Response:
+    headers = [
+        ("Date", email.utils.formatdate(usegmt=True)),
+        ("Connection", "close"),
+        ("Content-Length", str(len(body))),
+        ("Content-Type", content_type),
+    ]
+    if extra_headers:
+        headers.extend(extra_headers)
+    reason = http.HTTPStatus(status).phrase
+    return Response(status, reason, Headers(headers), body)
+
+
+def _http_error(status: int, message: str | None = None) -> Response:
+    body = (message or http.HTTPStatus(status).phrase).encode("utf-8")
+    return _http_response(body, status=status)
+
+
+def _bearer_token(headers: Any) -> str | None:
+    """Pull a Bearer token out of standard or query-style headers."""
+    auth = headers.get("Authorization") or headers.get("authorization")
+    if auth and auth.lower().startswith("bearer "):
+        return auth[7:].strip() or None
+    return None
+
+
+def _is_websocket_upgrade(request: WsRequest) -> bool:
+    """Detect an actual WS upgrade; plain HTTP GETs to the same path should fall through."""
+    upgrade = request.headers.get("Upgrade") or request.headers.get("upgrade")
+    connection = request.headers.get("Connection") or request.headers.get("connection")
+    if not upgrade or "websocket" not in upgrade.lower():
+        return False
+    if not connection or "upgrade" not in connection.lower():
+        return False
+    return True
+
+
 def _issue_route_secret_matches(headers: Any, configured_secret: str) -> bool:
     """Return True if the token-issue HTTP request carries credentials matching ``token_issue_secret``."""
     if not configured_secret:
@@ -176,15 +298,65 @@ class WebSocketChannel(BaseChannel):
     name = "websocket"
     display_name = "WebSocket"
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self,
+        config: Any,
+        bus: MessageBus,
+        *,
+        session_manager: "SessionManager | None" = None,
+        static_dist_path: Path | None = None,
+    ):
         if isinstance(config, dict):
             config = WebSocketConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: WebSocketConfig = config
-        self._connections: dict[str, Any] = {}
+        # chat_id -> connections subscribed to it (fan-out target).
+        self._subs: dict[str, set[Any]] = {}
+        # connection -> chat_ids it is subscribed to (O(1) cleanup on disconnect).
+        self._conn_chats: dict[Any, set[str]] = {}
+        # connection -> default chat_id for legacy frames that omit routing.
+        self._conn_default: dict[Any, str] = {}
+        # Single-use tokens consumed at WebSocket handshake.
         self._issued_tokens: dict[str, float] = {}
+        # Multi-use tokens for the embedded webui's REST surface; checked but not consumed.
+        self._api_tokens: dict[str, float] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
+        self._session_manager = session_manager
+        self._static_dist_path: Path | None = (
+            static_dist_path.resolve() if static_dist_path is not None else None
+        )
+
+    # -- Subscription bookkeeping -------------------------------------------
+
+    def _attach(self, connection: Any, chat_id: str) -> None:
+        """Idempotently subscribe *connection* to *chat_id*."""
+        self._subs.setdefault(chat_id, set()).add(connection)
+        self._conn_chats.setdefault(connection, set()).add(chat_id)
+
+    def _cleanup_connection(self, connection: Any) -> None:
+        """Remove *connection* from every subscription set; safe to call multiple times."""
+        chat_ids = self._conn_chats.pop(connection, set())
+        for cid in chat_ids:
+            subs = self._subs.get(cid)
+            if subs is None:
+                continue
+            subs.discard(connection)
+            if not subs:
+                self._subs.pop(cid, None)
+        self._conn_default.pop(connection, None)
+
+    async def _send_event(self, connection: Any, event: str, **fields: Any) -> None:
+        """Send a control event (attached, error, ...) to a single connection."""
+        payload: dict[str, Any] = {"event": event}
+        payload.update(fields)
+        raw = json.dumps(payload, ensure_ascii=False)
+        try:
+            await connection.send(raw)
+        except ConnectionClosed:
+            self._cleanup_connection(connection)
+        except Exception as e:
+            logger.warning("websocket: failed to send {} event: {}", event, e)
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -255,6 +427,209 @@ class WebSocketChannel(BaseChannel):
             {"token": token_value, "expires_in": self.config.token_ttl_s}
         )
 
+    # -- HTTP dispatch ------------------------------------------------------
+
+    async def _dispatch_http(self, connection: Any, request: WsRequest) -> Any:
+        """Route an inbound HTTP request to a handler or to the WS upgrade path."""
+        got, query = _parse_request_path(request.path)
+
+        # 1. Token issue endpoint (legacy, optional, gated by configured secret).
+        if self.config.token_issue_path:
+            issue_expected = _normalize_config_path(self.config.token_issue_path)
+            if got == issue_expected:
+                return self._handle_token_issue_http(connection, request)
+
+        # 2. WebUI bootstrap: localhost-only, mints tokens for the embedded UI.
+        if got == "/webui/bootstrap":
+            return self._handle_webui_bootstrap(connection)
+
+        # 3. REST surface for the embedded UI.
+        if got == "/api/sessions":
+            return self._handle_sessions_list(request)
+
+        m = re.match(r"^/api/sessions/([^/]+)/messages$", got)
+        if m:
+            return self._handle_session_messages(request, m.group(1))
+
+        # NOTE: websockets' HTTP parser only accepts GET, so we cannot expose a
+        # true ``DELETE`` verb. The action is folded into the path instead.
+        m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
+        if m:
+            return self._handle_session_delete(request, m.group(1))
+
+        # 4. WebSocket upgrade (the channel's primary purpose). Only run the
+        # handshake gate on requests that actually ask to upgrade; otherwise
+        # a bare ``GET /`` from the browser would be rejected as an
+        # unauthorized WS handshake instead of serving the SPA's index.html.
+        expected_ws = self._expected_path()
+        if got == expected_ws and _is_websocket_upgrade(request):
+            client_id = _query_first(query, "client_id") or ""
+            if len(client_id) > 128:
+                client_id = client_id[:128]
+            if not self.is_allowed(client_id):
+                return connection.respond(403, "Forbidden")
+            return self._authorize_websocket_handshake(connection, query)
+
+        # 5. Static SPA serving (only if a build directory was wired in).
+        if self._static_dist_path is not None:
+            response = self._serve_static(got)
+            if response is not None:
+                return response
+
+        return connection.respond(404, "Not Found")
+
+    # -- HTTP route handlers ------------------------------------------------
+
+    def _check_api_token(self, request: WsRequest) -> bool:
+        """Validate a request against the API token pool (multi-use, TTL-bound)."""
+        self._purge_expired_api_tokens()
+        token = _bearer_token(request.headers) or _query_first(
+            _parse_query(request.path), "token"
+        )
+        if not token:
+            return False
+        expiry = self._api_tokens.get(token)
+        if expiry is None or time.monotonic() > expiry:
+            self._api_tokens.pop(token, None)
+            return False
+        return True
+
+    def _purge_expired_api_tokens(self) -> None:
+        now = time.monotonic()
+        for token_key, expiry in list(self._api_tokens.items()):
+            if now > expiry:
+                self._api_tokens.pop(token_key, None)
+
+    def _handle_webui_bootstrap(self, connection: Any) -> Response:
+        if not _is_localhost(connection):
+            return _http_error(403, "webui bootstrap is localhost-only")
+        # Cap outstanding tokens to avoid runaway growth from a misbehaving client.
+        self._purge_expired_issued_tokens()
+        self._purge_expired_api_tokens()
+        if (
+            len(self._issued_tokens) >= self._MAX_ISSUED_TOKENS
+            or len(self._api_tokens) >= self._MAX_ISSUED_TOKENS
+        ):
+            return _http_response(
+                json.dumps({"error": "too many outstanding tokens"}).encode("utf-8"),
+                status=429,
+                content_type="application/json; charset=utf-8",
+            )
+        token = f"nbwt_{secrets.token_urlsafe(32)}"
+        expiry = time.monotonic() + float(self.config.token_ttl_s)
+        # Same string registered in both pools: the WS handshake consumes one copy
+        # while the REST surface keeps validating the other until TTL expiry.
+        self._issued_tokens[token] = expiry
+        self._api_tokens[token] = expiry
+        return _http_json_response(
+            {
+                "token": token,
+                "ws_path": self._expected_path(),
+                "expires_in": self.config.token_ttl_s,
+                "model_name": _read_webui_model_name(),
+            }
+        )
+
+    def _handle_sessions_list(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        sessions = self._session_manager.list_sessions()
+        # The webui is only meaningful for websocket-channel chats — CLI /
+        # Slack / Lark / Discord sessions can't be resumed from the browser,
+        # so leaking them into the sidebar is just noise. Filter to the
+        # ``websocket:`` prefix and strip absolute paths on the way out.
+        cleaned = [
+            {k: v for k, v in s.items() if k != "path"}
+            for s in sessions
+            if isinstance(s.get("key"), str) and s["key"].startswith("websocket:")
+        ]
+        return _http_json_response({"sessions": cleaned})
+
+    @staticmethod
+    def _is_webui_session_key(key: str) -> bool:
+        """Return True when *key* belongs to the webui's websocket-only surface."""
+        return key.startswith("websocket:")
+
+    def _handle_session_messages(self, request: WsRequest, key: str) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        # The embedded webui only understands websocket-channel sessions. Keep
+        # its read surface aligned with ``/api/sessions`` instead of letting a
+        # caller probe arbitrary CLI / Slack / Lark history by handcrafted URL.
+        if not self._is_webui_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        data = self._session_manager.read_session_file(decoded_key)
+        if data is None:
+            return _http_error(404, "session not found")
+        return _http_json_response(data)
+
+    def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._session_manager is None:
+            return _http_error(503, "session manager unavailable")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        # Same boundary as ``_handle_session_messages``: the webui may only
+        # mutate websocket sessions, and deletion really does unlink the local
+        # JSONL, so keep the blast radius narrow and explicit.
+        if not self._is_webui_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        deleted = self._session_manager.delete_session(decoded_key)
+        return _http_json_response({"deleted": bool(deleted)})
+
+    def _serve_static(self, request_path: str) -> Response | None:
+        """Resolve *request_path* against the built SPA directory; SPA fallback to index.html."""
+        assert self._static_dist_path is not None
+        rel = request_path.lstrip("/")
+        if not rel:
+            rel = "index.html"
+        # Reject path-traversal attempts and absolute targets.
+        if ".." in rel.split("/") or rel.startswith("/"):
+            return _http_error(403, "Forbidden")
+        candidate = (self._static_dist_path / rel).resolve()
+        try:
+            candidate.relative_to(self._static_dist_path)
+        except ValueError:
+            return _http_error(403, "Forbidden")
+        if not candidate.is_file():
+            # SPA history-mode fallback: unknown routes serve index.html so the
+            # client-side router can render them.
+            index = self._static_dist_path / "index.html"
+            if index.is_file():
+                candidate = index
+            else:
+                return None
+        try:
+            body = candidate.read_bytes()
+        except OSError as e:
+            logger.warning("websocket static: failed to read {}: {}", candidate, e)
+            return _http_error(500, "Internal Server Error")
+        ctype, _ = mimetypes.guess_type(candidate.name)
+        if ctype is None:
+            ctype = "application/octet-stream"
+        if ctype.startswith("text/") or ctype in {"application/javascript", "application/json"}:
+            ctype = f"{ctype}; charset=utf-8"
+        # Hash-named build assets are cache-friendly; index.html must stay fresh.
+        if candidate.name == "index.html":
+            cache = "no-cache"
+        else:
+            cache = "public, max-age=31536000, immutable"
+        return _http_response(
+            body,
+            status=200,
+            content_type=ctype,
+            extra_headers=[("Cache-Control", cache)],
+        )
+
     def _authorize_websocket_handshake(self, connection: Any, query: dict[str, list[str]]) -> Any:
         supplied = _query_first(query, "token")
         static_token = self.config.token.strip()
@@ -286,24 +661,7 @@ class WebSocketChannel(BaseChannel):
             connection: ServerConnection,
             request: WsRequest,
         ) -> Any:
-            got, _ = _parse_request_path(request.path)
-            if self.config.token_issue_path:
-                issue_expected = _normalize_config_path(self.config.token_issue_path)
-                if got == issue_expected:
-                    return self._handle_token_issue_http(connection, request)
-
-            expected_ws = self._expected_path()
-            if got != expected_ws:
-                return connection.respond(404, "Not Found")
-            # Early reject before WebSocket upgrade to avoid unnecessary overhead;
-            # _handle_message() performs a second check as defense-in-depth.
-            query = _parse_query(request.path)
-            client_id = _query_first(query, "client_id") or ""
-            if len(client_id) > 128:
-                client_id = client_id[:128]
-            if not self.is_allowed(client_id):
-                return connection.respond(403, "Forbidden")
-            return self._authorize_websocket_handshake(connection, query)
+            return await self._dispatch_http(connection, request)
 
         async def handler(connection: ServerConnection) -> None:
             await self._connection_loop(connection)
@@ -353,21 +711,22 @@ class WebSocketChannel(BaseChannel):
             logger.warning("websocket: client_id too long ({} chars), truncating", len(client_id))
             client_id = client_id[:128]
 
-        chat_id = str(uuid.uuid4())
+        default_chat_id = str(uuid.uuid4())
 
         try:
             await connection.send(
                 json.dumps(
                     {
                         "event": "ready",
-                        "chat_id": chat_id,
+                        "chat_id": default_chat_id,
                         "client_id": client_id,
                     },
                     ensure_ascii=False,
                 )
             )
             # Register only after ready is successfully sent to avoid out-of-order sends
-            self._connections[chat_id] = connection
+            self._conn_default[connection] = default_chat_id
+            self._attach(connection, default_chat_id)
 
             async for raw in connection:
                 if isinstance(raw, bytes):
@@ -376,19 +735,66 @@ class WebSocketChannel(BaseChannel):
                     except UnicodeDecodeError:
                         logger.warning("websocket: ignoring non-utf8 binary frame")
                         continue
+
+                envelope = _parse_envelope(raw)
+                if envelope is not None:
+                    await self._dispatch_envelope(connection, client_id, envelope)
+                    continue
+
                 content = _parse_inbound_payload(raw)
                 if content is None:
                     continue
                 await self._handle_message(
                     sender_id=client_id,
-                    chat_id=chat_id,
+                    chat_id=default_chat_id,
                     content=content,
                     metadata={"remote": getattr(connection, "remote_address", None)},
                 )
         except Exception as e:
             logger.debug("websocket connection ended: {}", e)
         finally:
-            self._connections.pop(chat_id, None)
+            self._cleanup_connection(connection)
+
+    async def _dispatch_envelope(
+        self,
+        connection: Any,
+        client_id: str,
+        envelope: dict[str, Any],
+    ) -> None:
+        """Route one typed inbound envelope (``new_chat`` / ``attach`` / ``message``)."""
+        t = envelope.get("type")
+        if t == "new_chat":
+            new_id = str(uuid.uuid4())
+            self._attach(connection, new_id)
+            await self._send_event(connection, "attached", chat_id=new_id)
+            return
+        if t == "attach":
+            cid = envelope.get("chat_id")
+            if not _is_valid_chat_id(cid):
+                await self._send_event(connection, "error", detail="invalid chat_id")
+                return
+            self._attach(connection, cid)
+            await self._send_event(connection, "attached", chat_id=cid)
+            return
+        if t == "message":
+            cid = envelope.get("chat_id")
+            content = envelope.get("content")
+            if not _is_valid_chat_id(cid):
+                await self._send_event(connection, "error", detail="invalid chat_id")
+                return
+            if not isinstance(content, str) or not content.strip():
+                await self._send_event(connection, "error", detail="missing content")
+                return
+            # Auto-attach on first use so clients can one-shot without a separate attach.
+            self._attach(connection, cid)
+            await self._handle_message(
+                sender_id=client_id,
+                chat_id=cid,
+                content=content,
+                metadata={"remote": getattr(connection, "remote_address", None)},
+            )
+            return
+        await self._send_event(connection, "error", detail=f"unknown type: {t!r}")
 
     async def stop(self) -> None:
         if not self._running:
@@ -402,38 +808,48 @@ class WebSocketChannel(BaseChannel):
             except Exception as e:
                 logger.warning("websocket: server task error during shutdown: {}", e)
             self._server_task = None
-        self._connections.clear()
+        self._subs.clear()
+        self._conn_chats.clear()
+        self._conn_default.clear()
         self._issued_tokens.clear()
+        self._api_tokens.clear()
 
-    async def _safe_send(self, chat_id: str, raw: str, *, label: str = "") -> None:
-        """Send a raw frame, cleaning up dead connections on ConnectionClosed."""
-        connection = self._connections.get(chat_id)
-        if connection is None:
-            return
+    async def _safe_send_to(self, connection: Any, raw: str, *, label: str = "") -> None:
+        """Send a raw frame to one connection, cleaning up on ConnectionClosed."""
         try:
             await connection.send(raw)
         except ConnectionClosed:
-            self._connections.pop(chat_id, None)
-            logger.warning("websocket{}connection gone for chat_id={}", label, chat_id)
+            self._cleanup_connection(connection)
+            logger.warning("websocket{}connection gone", label)
         except Exception as e:
             logger.error("websocket{}send failed: {}", label, e)
             raise
 
     async def send(self, msg: OutboundMessage) -> None:
-        connection = self._connections.get(msg.chat_id)
-        if connection is None:
-            logger.warning("websocket: no active connection for chat_id={}", msg.chat_id)
+        # Snapshot the subscriber set so ConnectionClosed cleanups mid-iteration are safe.
+        conns = list(self._subs.get(msg.chat_id, ()))
+        if not conns:
+            logger.warning("websocket: no active subscribers for chat_id={}", msg.chat_id)
             return
         payload: dict[str, Any] = {
             "event": "message",
+            "chat_id": msg.chat_id,
             "text": msg.content,
         }
         if msg.media:
             payload["media"] = msg.media
         if msg.reply_to:
             payload["reply_to"] = msg.reply_to
+        # Mark intermediate agent breadcrumbs (tool-call hints, generic
+        # progress strings) so WS clients can render them as subordinate
+        # trace rows rather than conversational replies.
+        if msg.metadata.get("_tool_hint"):
+            payload["kind"] = "tool_hint"
+        elif msg.metadata.get("_progress"):
+            payload["kind"] = "progress"
         raw = json.dumps(payload, ensure_ascii=False)
-        await self._safe_send(msg.chat_id, raw, label=" ")
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" ")
 
     async def send_delta(
         self,
@@ -441,17 +857,20 @@ class WebSocketChannel(BaseChannel):
         delta: str,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        if self._connections.get(chat_id) is None:
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
             return
         meta = metadata or {}
         if meta.get("_stream_end"):
-            body: dict[str, Any] = {"event": "stream_end"}
+            body: dict[str, Any] = {"event": "stream_end", "chat_id": chat_id}
         else:
             body = {
                 "event": "delta",
+                "chat_id": chat_id,
                 "text": delta,
             }
         if meta.get("_stream_id") is not None:
             body["stream_id"] = meta["_stream_id"]
         raw = json.dumps(body, ensure_ascii=False)
-        await self._safe_send(chat_id, raw, label=" stream ")
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" stream ")
