@@ -185,6 +185,29 @@ nanobot agent
 - Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [Chat Apps](./docs/chat-apps.md)
 - Want Docker or Linux service deployment? See [Deployment](./docs/deployment.md)
 
+## 🧪 WebUI (Development)
+
+> [!NOTE]
+> The WebUI development workflow currently requires a source checkout and is not yet shipped together with the official packaged release. See [WebUI Document](./webui/README.md) for full WebUI development docs and build steps.
+
+<p align="center">
+  <img src="images/nanobot_webui.png" alt="nanobot webui preview" width="900">
+</p>
+
+**1. Start the gateway**
+
+```bash
+nanobot gateway
+```
+
+**2. Start the webui dev server**
+
+```bash
+cd webui
+bun install
+bun run dev
+```
+
 ## 🏗️ Architecture
 
 <p align="center">
