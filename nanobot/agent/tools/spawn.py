@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     tool_parameters_schema(
         task=StringSchema("The task for the subagent to complete"),
         label=StringSchema("Optional short label for the task (for display)"),
+        max_iterations=StringSchema("Optional maximum model iterations for the subagent (default 15)"),
+        timeout_seconds=StringSchema("Optional maximum wall-clock time in seconds before the subagent is cancelled (default 300)"),
         required=["task"],
     )
 )
@@ -46,12 +48,21 @@ class SpawnTool(Tool):
             "and use a dedicated subdirectory when helpful."
         )
 
-    async def execute(self, task: str, label: str | None = None, **kwargs: Any) -> str:
+    async def execute(self, task: str, label: str | None = None,
+                      max_iterations: int | None = None, timeout_seconds: int | None = None,
+                      **kwargs: Any) -> str:
         """Spawn a subagent to execute the given task."""
+        # tool_parameters wraps everything as StringSchema — coerce to int
+        if max_iterations is not None:
+            max_iterations = int(max_iterations)
+        if timeout_seconds is not None:
+            timeout_seconds = int(timeout_seconds)
         return await self._manager.spawn(
             task=task,
             label=label,
             origin_channel=self._origin_channel.get(),
             origin_chat_id=self._origin_chat_id.get(),
             session_key=self._session_key.get(),
+            max_iterations=max_iterations,
+            timeout_seconds=timeout_seconds, (fix(spawn): coerce max_iterations and timeout_seconds from string to int)
         )
