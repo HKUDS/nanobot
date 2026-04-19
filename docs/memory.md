@@ -65,7 +65,7 @@ This is why nanobot's memory is not just archival. It is interpretive.
 
 ## The Files
 
-```
+```text
 workspace/
 ├── SOUL.md              # The bot's long-term voice and communication style
 ├── USER.md              # Stable knowledge about the user
