@@ -262,6 +262,10 @@ class FeishuConfig(Base):
 
 _STREAM_ELEMENT_ID = "streaming_md"
 
+# LaTeX formula patterns
+_LATEX_DISPLAY_RE = re.compile(r"\$\$(.+?)\$\$", re.DOTALL)  # $$...$$ display formula
+_LATEX_INLINE_RE = re.compile(r"(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)", re.DOTALL)  # $...$ inline formula
+
 
 @dataclass
 class _FeishuStreamBuf:
@@ -271,6 +275,7 @@ class _FeishuStreamBuf:
     card_id: str | None = None
     sequence: int = 0
     last_edit: float = 0.0
+    latex_pending: str = ""  # Buffer for incomplete LaTeX formulas during streaming
 
 
 class FeishuChannel(BaseChannel):
@@ -626,6 +631,146 @@ class FeishuChannel(BaseChannel):
         # Remove strikethrough markers
         text = cls._MD_STRIKE_RE.sub(r"\1", text)
         return text
+
+    @staticmethod
+    def _render_latex_to_image(formula: str, display: bool = False) -> str | None:
+        """Render LaTeX formula to PNG image using matplotlib mathtext.
+
+        Args:
+            formula: LaTeX formula string
+            display: If True, render as display formula (larger)
+
+        Returns:
+            Path to the generated PNG file, or None if rendering failed.
+        """
+        import uuid
+        from pathlib import Path
+
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+
+            # Calculate figure size based on formula length
+            formula_len = len(formula)
+            width = min(14, max(5, formula_len * 0.09 + 2))
+            height = 2.0 if display else 1.3
+
+            fig, ax = plt.subplots(figsize=(width, height))
+            ax.set_xlim(0, 1)
+            ax.set_ylim(0, 1)
+            ax.axis('off')
+            fig.patch.set_facecolor('white')
+            ax.set_facecolor('white')
+
+            # Render formula
+            font_size = 18 if display else 14
+            ax.text(0.5, 0.55, f"${formula.strip()}$",
+                   fontsize=font_size, ha='center', va='center',
+                   transform=ax.transAxes, color='#1a1a1a',
+                   fontfamily='serif')
+
+            # Subtle border
+            for spine in ax.spines.values():
+                spine.set_visible(True)
+                spine.set_edgecolor('#d0d0d0')
+                spine.set_linewidth(0.8)
+
+            plt.tight_layout(pad=0.5)
+
+            # Save to temp file
+            temp_dir = Path(get_media_dir("feishu"))
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            png_file = temp_dir / f"latex_{uuid.uuid4().hex[:8]}.png"
+
+            plt.savefig(png_file, dpi=150, bbox_inches='tight',
+                       facecolor='white', edgecolor='none', format='png')
+            plt.close(fig)
+
+            if png_file.exists() and png_file.stat().st_size > 100:
+                return str(png_file)
+
+        except Exception as e:
+            logger.debug(f"LaTeX render failed: {e}")
+
+        return None
+
+    @classmethod
+    def _process_latex_in_content(cls, content: str) -> tuple[str, list[str]]:
+        """Extract and render LaTeX formulas in content to images.
+
+        Args:
+            content: Text content that may contain LaTeX formulas
+
+        Returns:
+            Tuple of (processed text with placeholders, list of image paths)
+        """
+        images = []
+
+        # Process display formulas $$...$$ first
+        for match in list(_LATEX_DISPLAY_RE.finditer(content)):
+            formula = match.group(1)
+            img_path = cls._render_latex_to_image(formula, display=True)
+            if img_path:
+                images.append(img_path)
+                content = content.replace(match.group(0), "\n\n[公式图片]\n\n")
+
+        # Process inline formulas $...$
+        for match in list(_LATEX_INLINE_RE.finditer(content)):
+            formula = match.group(1)
+            img_path = cls._render_latex_to_image(formula, display=False)
+            if img_path:
+                images.append(img_path)
+                content = content.replace(match.group(0), "[公式]")
+
+        return content, images
+
+    @classmethod
+    def _process_streaming_latex(cls, text: str, pending: str) -> tuple[str, str, list[str]]:
+        """Process LaTeX formulas in streaming text, handling incomplete formulas.
+
+        Args:
+            text: Incoming text delta
+            pending: Previously buffered incomplete formula text
+
+        Returns:
+            Tuple of (processed text with placeholders, new pending text, list of image paths)
+        """
+        images = []
+        combined = pending + text
+
+        # Try to find and render complete formulas
+        processed = combined
+
+        # Process display formulas $$...$$
+        for match in list(_LATEX_DISPLAY_RE.finditer(processed)):
+            formula = match.group(1)
+            img_path = cls._render_latex_to_image(formula, display=True)
+            if img_path:
+                images.append(img_path)
+                processed = processed.replace(match.group(0), "\n\n[公式图片]\n\n")
+
+        # Process inline formulas $...$
+        for match in list(_LATEX_INLINE_RE.finditer(processed)):
+            formula = match.group(1)
+            img_path = cls._render_latex_to_image(formula, display=False)
+            if img_path:
+                images.append(img_path)
+                processed = processed.replace(match.group(0), "[公式]")
+
+        # Determine new pending state
+        new_pending = ""
+        if not images:
+            # Check if text ends with potential incomplete formula
+            processed_stripped = processed.rstrip()
+            dollar_count = processed_stripped.count('$') - processed_stripped.count('$$') * 2
+            if dollar_count % 2 == 1:  # Odd number of unclosed $
+                last_single_dollar = processed_stripped.rfind('$')
+                if last_single_dollar >= 0:
+                    new_pending = processed_stripped[last_single_dollar:]
+                    processed = processed_stripped[:last_single_dollar]
+
+        return processed, new_pending, images
 
     @classmethod
     def _parse_md_table(cls, table_text: str) -> dict | None:
@@ -1353,7 +1498,26 @@ class FeishuChannel(BaseChannel):
         if buf is None:
             buf = _FeishuStreamBuf()
             self._stream_bufs[chat_id] = buf
-        buf.text += delta
+
+        # Process LaTeX in streaming text
+        processed_delta, new_pending, latex_images = self._process_streaming_latex(delta, buf.latex_pending)
+        buf.latex_pending = new_pending
+
+        # Send LaTeX images immediately when formulas are complete
+        for img_path in latex_images:
+            if os.path.isfile(img_path):
+                key = await loop.run_in_executor(None, self._upload_image_sync, img_path)
+                if key:
+                    await loop.run_in_executor(
+                        None,
+                        self._send_message_sync,
+                        rid_type,
+                        chat_id,
+                        "image",
+                        json.dumps({"image_key": key}, ensure_ascii=False),
+                    )
+
+        buf.text += processed_delta
         if not buf.text.strip():
             return
 
@@ -1474,21 +1638,39 @@ class FeishuChannel(BaseChannel):
                         )
 
             if msg.content and msg.content.strip():
-                fmt = self._detect_msg_format(msg.content)
+                # Process LaTeX formulas: render to images and send them first
+                content, latex_images = self._process_latex_in_content(msg.content)
+
+                # Send LaTeX images first
+                for img_path in latex_images:
+                    if os.path.isfile(img_path):
+                        key = await loop.run_in_executor(None, self._upload_image_sync, img_path)
+                        if key:
+                            await loop.run_in_executor(
+                                None,
+                                _do_send,
+                                "image",
+                                json.dumps({"image_key": key}, ensure_ascii=False),
+                            )
+
+                if not content.strip():
+                    return
+
+                fmt = self._detect_msg_format(content)
 
                 if fmt == "text":
                     # Short plain text – send as simple text message
-                    text_body = json.dumps({"text": msg.content.strip()}, ensure_ascii=False)
+                    text_body = json.dumps({"text": content.strip()}, ensure_ascii=False)
                     await loop.run_in_executor(None, _do_send, "text", text_body)
 
                 elif fmt == "post":
                     # Medium content with links – send as rich-text post
-                    post_body = self._markdown_to_post(msg.content)
+                    post_body = self._markdown_to_post(content)
                     await loop.run_in_executor(None, _do_send, "post", post_body)
 
                 else:
                     # Complex / long content – send as interactive card
-                    elements = self._build_card_elements(msg.content)
+                    elements = self._build_card_elements(content)
                     for chunk in self._split_elements_by_table_limit(elements):
                         card = {"config": {"wide_screen_mode": True}, "elements": chunk}
                         await loop.run_in_executor(
