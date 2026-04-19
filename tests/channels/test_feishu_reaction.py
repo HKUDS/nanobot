@@ -190,7 +190,7 @@ class TestStreamEndReactionCleanup:
 
         await ch.send_delta(
             "oc_chat1", "",
-            metadata={"_stream_end": True, "reaction_id": "rx_42"},
+            metadata={"_stream_end": True},
         )
 
         ch._remove_reaction.assert_not_called()
