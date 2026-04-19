@@ -9,6 +9,8 @@ from loguru import logger
 from nanobot.utils.helpers import stringify_text_blocks
 
 _MAX_REPEAT_EXTERNAL_LOOKUPS = 2
+_MAX_REPEAT_SAME_DOMAIN = 3
+_MAX_REPEAT_SAME_DOMAIN = 3
 
 EMPTY_FINAL_RESPONSE_MESSAGE = (
     "I completed the tool steps but couldn't produce a final answer. "
@@ -73,25 +75,58 @@ def external_lookup_signature(tool_name: str, arguments: dict[str, Any]) -> str 
     return None
 
 
+def external_lookup_domain(tool_name: str, arguments: dict[str, Any]) -> str | None:
+    """Extract domain from web_fetch URLs for same-domain repeat detection."""
+    if tool_name == "web_fetch":
+        url = str(arguments.get("url") or "").strip()
+        if url:
+            try:
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc.lower()
+                if domain and domain not in ("localhost", "127.0.0.1"):
+                    return f"domain:{domain}"
+            except Exception:
+                pass
+    return None
+
+
 def repeated_external_lookup_error(
     tool_name: str,
     arguments: dict[str, Any],
     seen_counts: dict[str, int],
 ) -> str | None:
     """Block repeated external lookups after a small retry budget."""
+    # Check exact URL/query match first
     signature = external_lookup_signature(tool_name, arguments)
-    if signature is None:
-        return None
-    count = seen_counts.get(signature, 0) + 1
-    seen_counts[signature] = count
-    if count <= _MAX_REPEAT_EXTERNAL_LOOKUPS:
-        return None
-    logger.warning(
-        "Blocking repeated external lookup {} on attempt {}",
-        signature[:160],
-        count,
-    )
-    return (
-        "Error: repeated external lookup blocked. "
-        "Use the results you already have to answer, or try a meaningfully different source."
-    )
+    if signature is not None:
+        count = seen_counts.get(signature, 0) + 1
+        seen_counts[signature] = count
+        if count <= _MAX_REPEAT_EXTERNAL_LOOKUPS:
+            pass  # continue to domain check below
+        else:
+            logger.warning(
+                "Blocking repeated external lookup {} on attempt {}",
+                signature[:160],
+                count,
+            )
+            return (
+                "Error: repeated external lookup blocked. "
+                "Use the results you already have to answer, or try a meaningfully different source."
+            )
+
+    # Check same-domain repeats (catches different URLs from same site)
+    domain_sig = external_lookup_domain(tool_name, arguments)
+    if domain_sig is not None:
+        domain_count = seen_counts.get(domain_sig, 0) + 1
+        seen_counts[domain_sig] = domain_count
+        if domain_count > _MAX_REPEAT_SAME_DOMAIN:
+            logger.warning(
+                "Blocking repeated domain lookup {} on attempt {}",
+                domain_sig[:80],
+                domain_count,
+            )
+            return (
+                "Error: you have already fetched from this domain multiple times. "
+                "Use the results you already have to answer, or try a different source."
+            )
+    return None
