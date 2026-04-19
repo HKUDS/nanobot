@@ -297,6 +297,7 @@ class FeishuChannel(BaseChannel):
     def __init__(self, config: Any, bus: MessageBus):
         import lark_oapi as lark
 
+        self._raw_config = config  # Keep reference for dynamic config updates
         if isinstance(config, dict):
             config = FeishuConfig.model_validate(config)
         super().__init__(config, bus)
@@ -308,6 +309,16 @@ class FeishuChannel(BaseChannel):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stream_bufs: dict[str, _FeishuStreamBuf] = {}
         self._bot_open_id: str | None = None
+
+    def _get_react_emoji(self) -> str:
+        """Dynamically get react_emoji from raw config (allows runtime updates via my tool)."""
+        if isinstance(self._raw_config, dict):
+            return (
+                self._raw_config.get("reactEmoji")
+                or self._raw_config.get("react_emoji")
+                or self.config.react_emoji
+            )
+        return self.config.react_emoji
 
     @staticmethod
     def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
@@ -1544,7 +1555,7 @@ class FeishuChannel(BaseChannel):
                 return
 
             # Add reaction
-            reaction_id = await self._add_reaction(message_id, self.config.react_emoji)
+            reaction_id = await self._add_reaction(message_id, self._get_react_emoji())
 
             # Parse content
             content_parts = []

@@ -1028,6 +1028,26 @@ class TestSecurityAttributeProtection:
         result = await tool.execute(action="set", key="channels_config", value={})
         assert "protected" in result
 
+        result = await tool.execute(action="set", key="channels_config.feishu", value={})
+        assert "protected" in result
+
+        result = await tool.execute(action="set", key="channels_config.slack", value={})
+        assert "protected" in result
+
+    @pytest.mark.asyncio
+    async def test_modify_channels_config_feishu_reactEmoji_allowed(self):
+        """whitelisted channels_config.feishu.reactEmoji should be allowed."""
+        tool = _make_tool()
+        result = await tool.execute(action="set", key="channels_config.feishu.reactEmoji", value="OnIt")
+        assert "Error" not in result
+
+    @pytest.mark.asyncio
+    async def test_inspect_channels_config_blocked(self):
+        """channels_config is BLOCKED — cannot be inspected."""
+        tool = _make_tool()
+        result = await tool.execute(action="check", key="channels_config")
+        assert "not accessible" in result
+
     @pytest.mark.asyncio
     async def test_inspect_restrict_to_workspace_blocked(self):
         """restrict_to_workspace is BLOCKED — cannot be inspected."""
