@@ -88,6 +88,7 @@ class ChannelManager:
                 channel.transcription_provider = transcription_provider
                 channel.transcription_api_key = transcription_key
                 channel.transcription_api_base = transcription_base
+                channel.transcription_language = getattr(self.config.channels, "transcription_language", "")
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
