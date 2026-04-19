@@ -1,7 +1,6 @@
 """Shell execution tool."""
 
 import asyncio
-import logging
 import os
 import re
 import shutil
@@ -17,8 +16,6 @@ from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_paramet
 from nanobot.config.paths import get_media_dir
 
 _IS_WINDOWS = sys.platform == "win32"
-
-logger = logging.getLogger(__name__)
 
 
 @tool_parameters(
@@ -363,6 +360,6 @@ class ExecTool(Tool):
         if result["action"] == "warn":
             warnings = [f.get("title", "") for f in result.get("findings", [])]
             msg = "; ".join(filter(None, warnings)) or result.get("summary", "security warning")
-            logger.warning("Tirith: %s", msg)
+            logger.warning("Tirith: {}", msg)
 
         return None

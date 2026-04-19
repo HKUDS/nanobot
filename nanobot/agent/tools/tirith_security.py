@@ -198,19 +198,18 @@ def _install_tirith(*, log_failures: bool = True) -> tuple[str | None, str]:
 def _resolve_tirith_path(configured: str = "tirith") -> str:
     global _resolved_path, _install_failure_reason
 
-    if _resolved_path is not None and _resolved_path is not _INSTALL_FAILED:
-        return _resolved_path
-
     explicit = configured != "tirith"
     expanded = os.path.expanduser(configured)
 
+    # Explicit overrides bypass the process-wide cache so per-instance
+    # tirith_bin settings on ExecTool take effect in long-lived processes
+    # (otherwise the first resolution would stick for every later caller).
     if explicit:
         found = shutil.which(expanded) if not os.path.isfile(expanded) else expanded
-        if found:
-            _resolved_path = found
-            return found
-        _resolved_path = _INSTALL_FAILED
-        return expanded
+        return found if found else expanded
+
+    if _resolved_path is not None and _resolved_path is not _INSTALL_FAILED:
+        return _resolved_path
 
     # Default: PATH → ~/.nanobot/bin → auto-install
     found = shutil.which("tirith")
