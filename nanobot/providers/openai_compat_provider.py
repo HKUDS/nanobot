@@ -157,6 +157,16 @@ def _is_direct_openai_base(api_base: str | None) -> bool:
     return "api.openai.com" in normalized and "openrouter" not in normalized
 
 
+def _responses_circuit_key(
+    model: str | None,
+    default_model: str,
+    reasoning_effort: str | None,
+) -> str:
+    model_name = (model or default_model).lower()
+    effort = reasoning_effort.lower() if isinstance(reasoning_effort, str) else ""
+    return f"{model_name}:{effort}"
+
+
 class OpenAICompatProvider(LLMProvider):
     """Unified provider for all OpenAI-compatible APIs.
 
@@ -434,7 +444,7 @@ class OpenAICompatProvider(LLMProvider):
             return False
 
         # Circuit breaker: skip after repeated failures, probe periodically.
-        key = f"{model_name}:{reasoning_effort or ''}"
+        key = _responses_circuit_key(model, self.default_model, reasoning_effort)
         failures = self._responses_failures.get(key, 0)
         if failures >= _RESPONSES_FAILURE_THRESHOLD:
             tripped = self._responses_tripped_at.get(key, 0.0)
@@ -444,7 +454,7 @@ class OpenAICompatProvider(LLMProvider):
         return True
 
     def _record_responses_failure(self, model: str | None, reasoning_effort: str | None) -> None:
-        key = f"{(model or self.default_model).lower()}:{reasoning_effort or ''}"
+        key = _responses_circuit_key(model, self.default_model, reasoning_effort)
         count = self._responses_failures.get(key, 0) + 1
         self._responses_failures[key] = count
         if count >= _RESPONSES_FAILURE_THRESHOLD:
@@ -455,7 +465,7 @@ class OpenAICompatProvider(LLMProvider):
             )
 
     def _record_responses_success(self, model: str | None, reasoning_effort: str | None) -> None:
-        key = f"{(model or self.default_model).lower()}:{reasoning_effort or ''}"
+        key = _responses_circuit_key(model, self.default_model, reasoning_effort)
         self._responses_failures.pop(key, None)
         self._responses_tripped_at.pop(key, None)
 
