@@ -36,6 +36,7 @@ from nanobot.command import CommandContext, CommandRouter, register_builtin_comm
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils import metrics as turn_metrics
 from nanobot.utils.document import extract_documents
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
@@ -79,6 +80,7 @@ class _LoopHook(AgentHook):
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         from nanobot.utils.helpers import strip_think
 
+        turn_metrics.mark_first_token()
         prev_clean = strip_think(self._stream_buf)
         self._stream_buf += delta
         new_clean = strip_think(self._stream_buf)
@@ -161,6 +163,7 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
+        metrics_enabled: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
 
@@ -193,6 +196,7 @@ class AgentLoop:
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
+        self._metrics_enabled = metrics_enabled
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
@@ -414,25 +418,26 @@ class AgentLoop:
                 items.append({"role": "user", "content": merged})
             return items
 
-        result = await self.runner.run(AgentRunSpec(
-            initial_messages=initial_messages,
-            tools=self.tools,
-            model=self.model,
-            max_iterations=self.max_iterations,
-            max_tool_result_chars=self.max_tool_result_chars,
-            hook=hook,
-            error_message="Sorry, I encountered an error calling the AI model.",
-            concurrent_tools=True,
-            workspace=self.workspace,
-            session_key=session.key if session else None,
-            context_window_tokens=self.context_window_tokens,
-            context_block_limit=self.context_block_limit,
-            provider_retry_mode=self.provider_retry_mode,
-            progress_callback=on_progress,
-            retry_wait_callback=on_retry_wait,
-            checkpoint_callback=_checkpoint,
-            injection_callback=_drain_pending,
-        ))
+        with turn_metrics.llm_timer():
+            result = await self.runner.run(AgentRunSpec(
+                initial_messages=initial_messages,
+                tools=self.tools,
+                model=self.model,
+                max_iterations=self.max_iterations,
+                max_tool_result_chars=self.max_tool_result_chars,
+                hook=hook,
+                error_message="Sorry, I encountered an error calling the AI model.",
+                concurrent_tools=True,
+                workspace=self.workspace,
+                session_key=session.key if session else None,
+                context_window_tokens=self.context_window_tokens,
+                context_block_limit=self.context_block_limit,
+                provider_retry_mode=self.provider_retry_mode,
+                progress_callback=on_progress,
+                retry_wait_callback=on_retry_wait,
+                checkpoint_callback=_checkpoint,
+                injection_callback=_drain_pending,
+            ))
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
@@ -525,6 +530,10 @@ class AgentLoop:
         pending = asyncio.Queue(maxsize=20)
         self._pending_queues[session_key] = pending
 
+        metrics, metrics_token = turn_metrics.activate(
+            channel=msg.channel, enabled=self._metrics_enabled,
+        )
+
         try:
             async with lock, gate:
                 try:
@@ -581,6 +590,8 @@ class AgentLoop:
                         content="Sorry, I encountered an error.",
                     ))
         finally:
+            metrics.flush()
+            turn_metrics.deactivate(metrics_token)
             # Drain any messages still in the pending queue and re-publish
             # them to the bus so they are processed as fresh inbound messages
             # rather than silently lost.
@@ -663,14 +674,15 @@ class AgentLoop:
 
             # Subagent content is already in `history` above; passing it again
             # as current_message would double-project it into the prompt.
-            messages = self.context.build_messages(
-                history=history,
-                current_message="" if is_subagent else msg.content,
-                channel=channel,
-                chat_id=chat_id,
-                session_summary=pending,
-                current_role=current_role,
-            )
+            with turn_metrics.stage_timer("context_build"):
+                messages = self.context.build_messages(
+                    history=history,
+                    current_message="" if is_subagent else msg.content,
+                    channel=channel,
+                    chat_id=chat_id,
+                    session_summary=pending,
+                    current_role=current_role,
+                )
             final_content, _, all_msgs, _, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
@@ -718,14 +730,15 @@ class AgentLoop:
 
         history = session.get_history(max_messages=0)
 
-        initial_messages = self.context.build_messages(
-            history=history,
-            current_message=msg.content,
-            session_summary=pending,
-            media=msg.media if msg.media else None,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-        )
+        with turn_metrics.stage_timer("context_build"):
+            initial_messages = self.context.build_messages(
+                history=history,
+                current_message=msg.content,
+                session_summary=pending,
+                media=msg.media if msg.media else None,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+            )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})

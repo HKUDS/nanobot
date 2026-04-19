@@ -162,6 +162,7 @@ class GatewayConfig(Base):
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    metrics_enabled: bool = False  # Emit per-turn latency metrics as structured log lines (#3257)
 
 
 class WebSearchConfig(Base):
