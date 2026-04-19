@@ -606,3 +606,127 @@ async def test_reply_keeps_fallback_when_reply_fails() -> None:
 
     channel._client.im.v1.message.reply.assert_called()
     channel._client.im.v1.message.create.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_reply_no_reply_in_thread_for_p2p_chat() -> None:
+    """reply_in_thread should NOT be set for p2p chats (identified by chat_type)."""
+    channel = _make_feishu_channel(reply_to_message=True)
+
+    reply_resp = MagicMock()
+    reply_resp.success.return_value = True
+    channel._client.im.v1.message.reply.return_value = reply_resp
+
+    await channel.send(OutboundMessage(
+        channel="feishu",
+        chat_id="oc_abc",  # p2p chats also use oc_ prefix
+        content="hello",
+        metadata={"message_id": "om_001", "chat_type": "p2p"},
+    ))
+
+    channel._client.im.v1.message.reply.assert_called_once()
+    call_args = channel._client.im.v1.message.reply.call_args
+    request = call_args[0][0]
+    assert request.request_body.reply_in_thread is not True
+
+
+@pytest.mark.asyncio
+async def test_reply_uses_reply_in_thread_for_group_chat() -> None:
+    """reply_in_thread should be True for group chats (identified by chat_type)."""
+    channel = _make_feishu_channel(reply_to_message=True)
+
+    reply_resp = MagicMock()
+    reply_resp.success.return_value = True
+    channel._client.im.v1.message.reply.return_value = reply_resp
+
+    await channel.send(OutboundMessage(
+        channel="feishu",
+        chat_id="oc_abc",
+        content="hello",
+        metadata={"message_id": "om_001", "chat_type": "group"},
+    ))
+
+    channel._client.im.v1.message.reply.assert_called_once()
+    call_args = channel._client.im.v1.message.reply.call_args
+    request = call_args[0][0]
+    assert request.request_body.reply_in_thread is True
+
+
+@pytest.mark.asyncio
+async def test_reply_targets_message_id_when_in_topic() -> None:
+    """When inbound message is inside a topic (root_id != message_id),
+    the reply should target the inbound message_id (not root_id).
+    The Feishu Reply API keeps the response in the same topic
+    automatically when the target message is already inside a topic."""
+    channel = _make_feishu_channel(reply_to_message=True)
+
+    reply_resp = MagicMock()
+    reply_resp.success.return_value = True
+    channel._client.im.v1.message.reply.return_value = reply_resp
+
+    await channel.send(OutboundMessage(
+        channel="feishu",
+        chat_id="oc_abc",
+        content="hello",
+        metadata={
+            "message_id": "om_child456",
+            "chat_type": "group",
+            "root_id": "om_root123",
+        },
+    ))
+
+    channel._client.im.v1.message.reply.assert_called_once()
+    call_args = channel._client.im.v1.message.reply.call_args
+    request = call_args[0][0]
+    # Should reply to the inbound message_id, not the root
+    assert request.message_id == "om_child456"
+    assert request.request_body.reply_in_thread is True
+
+
+def test_on_reaction_added_stores_reaction_id() -> None:
+    """_on_reaction_added stores the returned reaction_id in _reaction_ids."""
+    channel = _make_feishu_channel()
+    loop = asyncio.new_event_loop()
+    try:
+        task = loop.create_task(asyncio.sleep(0, result="reaction_abc"))
+        loop.run_until_complete(task)
+        channel._on_reaction_added("om_001", task)
+    finally:
+        loop.close()
+
+    assert channel._reaction_ids["om_001"] == "reaction_abc"
+
+
+def test_on_reaction_added_skips_none_result() -> None:
+    """_on_reaction_added does not store None results."""
+    channel = _make_feishu_channel()
+    loop = asyncio.new_event_loop()
+    try:
+        task = loop.create_task(asyncio.sleep(0, result=None))
+        loop.run_until_complete(task)
+        channel._on_reaction_added("om_001", task)
+    finally:
+        loop.close()
+
+    assert "om_001" not in channel._reaction_ids
+
+
+def test_on_background_task_done_removes_from_set() -> None:
+    """_on_background_task_done removes task from tracking set."""
+    channel = _make_feishu_channel()
+    loop = asyncio.new_event_loop()
+    try:
+        async def _fail():
+            raise RuntimeError("test failure")
+
+        task = loop.create_task(_fail())
+        channel._background_tasks.add(task)
+        try:
+            loop.run_until_complete(task)
+        except RuntimeError:
+            pass  # expected
+        channel._on_background_task_done(task)
+    finally:
+        loop.close()
+
+    assert task not in channel._background_tasks
