@@ -109,7 +109,9 @@
 ## 📦 Install
 
 > [!IMPORTANT]
-> If you want the newest features and experiments, install from source. If you want the most stable day-to-day experience, install from PyPI or with `uv`.
+> If you want the newest features and experiments, install from source. 
+> 
+> If you want the most stable day-to-day experience, install from PyPI or with `uv`.
 
 **Install from source**
 
