@@ -247,7 +247,12 @@ class AnthropicProvider(LLMProvider):
 
     @staticmethod
     def _merge_consecutive(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Anthropic requires alternating user/assistant roles."""
+        """Anthropic requires alternating user/assistant roles.
+
+        Also strips trailing assistant messages since Anthropic does not
+        support assistant-message prefill and will reject the request with
+        a 400 error if the conversation ends with an assistant turn.
+        """
         merged: list[dict[str, Any]] = []
         for msg in msgs:
             if merged and merged[-1]["role"] == msg["role"]:
@@ -262,6 +267,12 @@ class AnthropicProvider(LLMProvider):
                 merged[-1]["content"] = prev_c
             else:
                 merged.append(msg)
+
+        # Drop trailing assistant messages to avoid Anthropic's
+        # "does not support assistant message prefill" 400 error.
+        while merged and merged[-1].get("role") == "assistant":
+            merged.pop()
+
         return merged
 
     # ------------------------------------------------------------------
