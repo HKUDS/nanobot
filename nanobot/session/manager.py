@@ -1,6 +1,7 @@
 """Session management for conversation history."""
 
 import json
+import os
 import shutil
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -184,24 +185,93 @@ class SessionManager:
             )
         except Exception as e:
             logger.warning("Failed to load session {}: {}", key, e)
+            repaired = self._repair(key)
+            if repaired is not None:
+                logger.info("Recovered session {} from corrupt file ({} messages)", key, len(repaired.messages))
+            return repaired
+
+    def _repair(self, key: str) -> Session | None:
+        """Attempt to recover a session from a corrupt JSONL file."""
+        path = self._get_session_path(key)
+        if not path.exists():
+            return None
+
+        try:
+            messages: list[dict[str, Any]] = []
+            metadata: dict[str, Any] = {}
+            created_at: datetime | None = None
+            updated_at: datetime | None = None
+            last_consolidated = 0
+            skipped = 0
+
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        skipped += 1
+                        continue
+
+                    if data.get("_type") == "metadata":
+                        metadata = data.get("metadata", {})
+                        if data.get("created_at"):
+                            try:
+                                created_at = datetime.fromisoformat(data["created_at"])
+                            except (ValueError, TypeError):
+                                pass
+                        if data.get("updated_at"):
+                            try:
+                                updated_at = datetime.fromisoformat(data["updated_at"])
+                            except (ValueError, TypeError):
+                                pass
+                        last_consolidated = data.get("last_consolidated", 0)
+                    else:
+                        messages.append(data)
+
+            if skipped:
+                logger.warning("Skipped {} corrupt lines in session {}", skipped, key)
+
+            if not messages and not metadata:
+                return None
+
+            return Session(
+                key=key,
+                messages=messages,
+                created_at=created_at or datetime.now(),
+                updated_at=updated_at or datetime.now(),
+                metadata=metadata,
+                last_consolidated=last_consolidated
+            )
+        except Exception as e:
+            logger.warning("Repair failed for session {}: {}", key, e)
             return None
 
     def save(self, session: Session) -> None:
-        """Save a session to disk."""
+        """Save a session to disk atomically."""
         path = self._get_session_path(session.key)
+        tmp_path = path.with_suffix(".jsonl.tmp")
 
-        with open(path, "w", encoding="utf-8") as f:
-            metadata_line = {
-                "_type": "metadata",
-                "key": session.key,
-                "created_at": session.created_at.isoformat(),
-                "updated_at": session.updated_at.isoformat(),
-                "metadata": session.metadata,
-                "last_consolidated": session.last_consolidated
-            }
-            f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
-            for msg in session.messages:
-                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                metadata_line = {
+                    "_type": "metadata",
+                    "key": session.key,
+                    "created_at": session.created_at.isoformat(),
+                    "updated_at": session.updated_at.isoformat(),
+                    "metadata": session.metadata,
+                    "last_consolidated": session.last_consolidated
+                }
+                f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
+                for msg in session.messages:
+                    f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+
+            os.replace(tmp_path, path)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
         self._cache[session.key] = session
 
