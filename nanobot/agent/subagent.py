@@ -103,6 +103,8 @@ class SubagentManager:
         origin_channel: str = "cli",
         origin_chat_id: str = "direct",
         session_key: str | None = None,
+        max_iterations: int | None = None,
+        timeout_seconds: int | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
@@ -118,7 +120,9 @@ class SubagentManager:
         self._task_statuses[task_id] = status
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, status)
+            self._run_subagent(task_id, task, display_label, origin, status,
+                               max_iterations=max_iterations,
+                               timeout_seconds=timeout_seconds)
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -144,6 +148,8 @@ class SubagentManager:
         label: str,
         origin: dict[str, str],
         status: SubagentStatus,
+        max_iterations: int | None = None,
+        timeout_seconds: int | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
@@ -181,18 +187,24 @@ class SubagentManager:
                 {"role": "user", "content": task},
             ]
 
-            result = await self.runner.run(AgentRunSpec(
-                initial_messages=messages,
-                tools=tools,
-                model=self.model,
-                max_iterations=15,
-                max_tool_result_chars=self.max_tool_result_chars,
-                hook=_SubagentHook(task_id, status),
-                max_iterations_message="Task completed but no final response was generated.",
-                error_message=None,
-                fail_on_tool_error=True,
-                checkpoint_callback=_on_checkpoint,
-            ))
+            max_iter = max_iterations or 15
+            timeout = timeout_seconds or 300
+
+            result = await asyncio.wait_for(
+                self.runner.run(AgentRunSpec(
+                    initial_messages=messages,
+                    tools=tools,
+                    model=self.model,
+                    max_iterations=max_iter,
+                    max_tool_result_chars=self.max_tool_result_chars,
+                    hook=_SubagentHook(task_id, status),
+                    max_iterations_message="Task completed but no final response was generated.",
+                    error_message=None,
+                    fail_on_tool_error=True,
+                    checkpoint_callback=_on_checkpoint,
+                )),
+                timeout=timeout,
+            )
             status.phase = "done"
             status.stop_reason = result.stop_reason
 
@@ -308,6 +320,41 @@ class SubagentManager:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         return len(tasks)
+
+    async def cancel_by_id(self, task_id: str) -> int:
+        """Cancel a specific subagent by task ID. Returns count cancelled."""
+        task = self._running_tasks.get(task_id)
+        if task and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            return 1
+        return 0
+
+    def get_task_status(self, task_id: str) -> str:
+        """Return status info for a specific subagent."""
+        status = self._task_statuses.get(task_id)
+        if status is None:
+            return f"No subagent found with ID {task_id}."
+        return self._format_status(status)
+
+    def get_all_status(self) -> str:
+        """Return status of all tracked subagents (running and recent)."""
+        if not self._task_statuses and not self._running_tasks:
+            return "No subagent tasks tracked."
+        lines = []
+        for tid, status in self._task_statuses.items():
+            lines.append(self._format_status(status))
+        return "\n".join(lines) if lines else "No subagent tasks tracked."
+
+    def _format_status(self, status: SubagentStatus) -> str:
+        """Format a SubagentStatus into a human-readable string."""
+        elapsed = time.monotonic() - status.started_at
+        mins, secs = divmod(int(elapsed), 60)
+        running = "running" if status.phase not in ("done", "error") else status.phase
+        return (
+            f"Task ID: {status.task_id} | Label: {status.label} | "
+            f"Elapsed: {mins}m {secs}s | Status: {running}"
+        )
 
     def get_running_count(self) -> int:
         """Return the number of currently running subagents."""
