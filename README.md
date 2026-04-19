@@ -175,9 +175,9 @@ nanobot agent
 ```
 
 
-- Want different LLM providers, web search, MCP, security settings, or more config options? See [`Configuration`](./docs/configuration.md)
-- Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [`Chat Apps`](./docs/chat-apps.md)
-- Want Docker or Linux service deployment? See [`Deployment`](./docs/deployment.md)
+- Want different LLM providers, web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
+- Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [Chat Apps](./docs/chat-apps.md)
+- Want Docker or Linux service deployment? See [Deployment](./docs/deployment.md)
 
 ## 🏗️ Architecture
 
@@ -214,10 +214,10 @@ nanobot agent
 
 Browse the [repo docs](./docs/README.md) for the latest features and GitHub development version, or visit [nanobot.wiki](https://nanobot.wiki/docs/latest/getting-started/nanobot-overview) for the stable release documentation.
 
-- Talk to your nanobot with familiar chat apps: [`Chat Apps`](./docs/chat-apps.md)
-- Configure providers, web search, MCP, and runtime behavior: [`Configuration`](./docs/configuration.md)
-- Integrate nanobot with local tools and automations: [`OpenAI-Compatible API`](./docs/openai-api.md) · [`Python SDK`](./docs/python-sdk.md)
-- Run nanobot with Docker or as a Linux service: [`Deployment`](./docs/deployment.md)
+- Talk to your nanobot with familiar chat apps: [Chat Apps](./docs/chat-apps.md)
+- Configure providers, web search, MCP, and runtime behavior: [Configuration](./docs/configuration.md)
+- Integrate nanobot with local tools and automations: [OpenAI-Compatible API](./docs/openai-api.md) · [Python SDK](./docs/python-sdk.md)
+- Run nanobot with Docker or as a Linux service: [Deployment](./docs/deployment.md)
 
 ## 🤝 Contribute & Roadmap
 
