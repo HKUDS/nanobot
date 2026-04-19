@@ -252,6 +252,16 @@ class SessionManager:
             logger.warning("Repair failed for session {}: {}", key, e)
             return None
 
+    @staticmethod
+    def _session_payload(session: Session) -> dict[str, Any]:
+        return {
+            "key": session.key,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "metadata": session.metadata,
+            "messages": session.messages,
+        }
+
     def save(self, session: Session) -> None:
         """Save a session to disk atomically."""
         path = self._get_session_path(session.key)
@@ -335,6 +345,10 @@ class SessionManager:
             }
         except Exception as e:
             logger.warning("Failed to read session {}: {}", key, e)
+            repaired = self._repair(key)
+            if repaired is not None:
+                logger.info("Recovered read-only session view {} from corrupt file", key)
+                return self._session_payload(repaired)
             return None
 
     def list_sessions(self) -> list[dict[str, Any]]:
@@ -347,6 +361,7 @@ class SessionManager:
         sessions = []
 
         for path in self.sessions_dir.glob("*.jsonl"):
+            fallback_key = path.stem.replace("_", ":", 1)
             try:
                 # Read just the metadata line
                 with open(path, encoding="utf-8") as f:
@@ -362,6 +377,14 @@ class SessionManager:
                                 "path": str(path)
                             })
             except Exception:
+                repaired = self._repair(fallback_key)
+                if repaired is not None:
+                    sessions.append({
+                        "key": repaired.key,
+                        "created_at": repaired.created_at.isoformat(),
+                        "updated_at": repaired.updated_at.isoformat(),
+                        "path": str(path)
+                    })
                 continue
 
         return sorted(sessions, key=lambda x: x.get("updated_at", ""), reverse=True)

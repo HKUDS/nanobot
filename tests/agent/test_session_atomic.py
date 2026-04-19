@@ -208,6 +208,49 @@ class TestRepairCorruptFile:
         assert session.last_consolidated == 5
         assert isinstance(session.created_at, datetime)
 
+    def test_read_session_file_repairs_corrupt_jsonl(self, tmp_path: Path):
+        mgr = SessionManager(tmp_path)
+        path = mgr._get_session_path("test:read-repair")
+
+        self._write_corrupt_jsonl(path, [
+            json.dumps({
+                "_type": "metadata",
+                "key": "test:read-repair",
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "metadata": {"source": "repair"},
+                "last_consolidated": 0,
+            }),
+            json.dumps({"role": "user", "content": "survived"}),
+            '{"role": "assistant", "content": "partial...',
+        ])
+
+        payload = mgr.read_session_file("test:read-repair")
+        assert payload is not None
+        assert payload["key"] == "test:read-repair"
+        assert payload["metadata"] == {"source": "repair"}
+        assert payload["messages"] == [{"role": "user", "content": "survived"}]
+
+    def test_list_sessions_keeps_repaired_corrupt_file(self, tmp_path: Path):
+        mgr = SessionManager(tmp_path)
+        path = mgr._get_session_path("test:list-repair")
+
+        self._write_corrupt_jsonl(path, [
+            "NOT VALID JSON",
+            json.dumps({
+                "_type": "metadata",
+                "key": "test:list-repair",
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "metadata": {},
+                "last_consolidated": 0,
+            }),
+            json.dumps({"role": "user", "content": "hello"}),
+        ])
+
+        sessions = mgr.list_sessions()
+        assert any(s["key"] == "test:list-repair" for s in sessions)
+
     def test_get_or_create_returns_new_session_for_corrupt_file(self, tmp_path: Path):
         mgr = SessionManager(tmp_path)
         path = mgr._get_session_path("test:fallback")
