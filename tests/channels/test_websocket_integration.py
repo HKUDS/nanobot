@@ -290,10 +290,11 @@ async def test_disconnected_client_cleanup(bus: MagicMock) -> None:
         async with WsTestClient("ws://127.0.0.1:29914/", client_id="tmp") as c:
             chat_id = (await c.recv_ready()).chat_id
         # disconnected
+        await asyncio.sleep(0.1)
         await ch.send(OutboundMessage(
             channel="websocket", chat_id=chat_id, content="orphan",
         ))
-        assert chat_id not in ch._connections
+        assert chat_id not in ch._subs
     finally:
         await ch.stop(); await t
 
