@@ -36,7 +36,7 @@ All modifications are held in memory only — restart restores defaults.
 
 Without parameters, returns a key config overview:
 
-```
+```text
 my(action="check")
 # → max_iterations: 40
 #   context_window_tokens: 65536
@@ -51,7 +51,7 @@ my(action="check")
 
 With a key parameter, drill into a specific config:
 
-```
+```text
 my(action="check", key="_last_usage.prompt_tokens")
 # → How many prompt tokens I've used so far
 
@@ -79,7 +79,7 @@ my(action="check", key="web_config.enable")
 
 Changes take effect immediately, no restart required.
 
-```
+```text
 my(action="set", key="max_iterations", value=80)
 # → Bump iteration limit from 40 to 80
 
@@ -92,7 +92,7 @@ my(action="set", key="context_window_tokens", value=131072)
 
 You can also store custom state in your scratchpad:
 
-```
+```text
 my(action="set", key="current_project", value="nanobot")
 my(action="set", key="user_style_preference", value="concise")
 my(action="set", key="task_complexity", value="high")
@@ -117,21 +117,21 @@ Other parameters (e.g. `workspace`, `provider_retry_mode`, `max_tool_result_char
 
 ### "This task is complex, I need more room"
 
-```
+```text
 Agent: This codebase is large, let me expand my context window to handle it.
 → my(action="set", key="context_window_tokens", value=131072)
 ```
 
 ### "Simple question, don't waste compute"
 
-```
+```text
 Agent: This is a straightforward question, let me switch to a faster model.
 → my(action="set", key="model", value="fast-model")
 ```
 
 ### "Remember user preferences across turns"
 
-```
+```text
 Turn 1: my(action="set", key="user_prefers_concise", value=True)
 Turn 2: my(action="check", key="user_prefers_concise")
 # → True (still remembers the user likes concise replies)
@@ -139,7 +139,7 @@ Turn 2: my(action="check", key="user_prefers_concise")
 
 ### "Self-diagnosis"
 
-```
+```text
 User: "Why aren't you searching the web?"
 Agent: Let me check my web config.
 → my(action="check", key="web_config.enable")
@@ -149,7 +149,7 @@ Agent: Web search is disabled — please set web.enable: true in your config.
 
 ### "Token budget management"
 
-```
+```text
 Agent: Let me check how much budget I have left.
 → my(action="check", key="_last_usage")
 # → {"prompt_tokens": 45000, "completion_tokens": 8000}
@@ -158,7 +158,7 @@ Agent: I've used ~53k tokens total so far. I'll keep my remaining replies concis
 
 ### "Subagent monitoring"
 
-```
+```text
 Agent: Let me check on the background tasks.
 → my(action="check", key="subagents")
 # → 2 subagent(s):
