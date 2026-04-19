@@ -5,7 +5,7 @@ from typing import Any, Awaitable, Callable
 from pydantic import BaseModel, ValidationError, field_validator
 
 from nanobot.agent.tools.base import Tool
-from nanobot.bus.events import OutboundMessage, PollData
+from nanobot.bus.events import OutboundMessage
 
 
 class InlineButton(BaseModel):
@@ -18,17 +18,6 @@ class InlineButton(BaseModel):
         if not v or not v.strip():
             raise ValueError('Button label cannot be empty')
         return v.strip()
-
-
-class ButtonRow(BaseModel):
-    """A row of inline buttons."""
-    root: list[InlineButton]
-
-    def __iter__(self):
-        return iter(self.root)
-
-    def __len__(self):
-        return len(self.root)
 
 
 class MessageTool(Tool):
@@ -93,7 +82,7 @@ class MessageTool(Tool):
                 },
                 "buttons": {
                     "type": "array",
-                    "description": "Optional: inline keyboard buttons for Telegram. List of rows, each row is list of button labels (strings).",
+                    "description": "Optional: inline keyboard buttons for Telegram. List of rows, each row is list of button labels.",
                     "items": {
                         "type": "array",
                         "items": {
@@ -101,15 +90,6 @@ class MessageTool(Tool):
                             "description": "Button label text"
                         }
                     }
-                },
-                "poll_question": {
-                    "type": "string",
-                    "description": "Optional: poll question (creates a poll instead of text message)"
-                },
-                "poll_options": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Optional: poll options (required if poll_question is set)"
                 }
             },
             "required": ["content"]
@@ -123,8 +103,6 @@ class MessageTool(Tool):
         message_id: str | None = None,
         media: list[str] | None = None,
         buttons: list[list[str]] | None = None,
-        poll_question: str | None = None,
-        poll_options: list[str] | None = None,
         **kwargs: Any
     ) -> str:
         channel = channel or self._default_channel
@@ -137,27 +115,19 @@ class MessageTool(Tool):
         if not self._send_callback:
             return "Error: Message sending not configured"
 
-        # Validate poll parameters
-        poll_data: PollData | None = None
-        if poll_question:
-            if not poll_options or len(poll_options) < 2:
-                return "Error: Poll requires at least 2 options"
-            poll_data = PollData(question=poll_question, options=poll_options)
-
-        # Validate buttons - now just strings (labels)
-        buttons_tuples: list[list[tuple[str, str]]] = []
+        # Validate buttons
+        validated_buttons: list[list[str]] = []
         if buttons:
             try:
                 for row_idx, row in enumerate(buttons):
-                    validated_row = []
+                    validated_row: list[str] = []
                     for btn_idx, label in enumerate(row):
                         try:
                             validated_btn = InlineButton(label=label)
-                            # callback_data = label (semantic content)
-                            validated_row.append((validated_btn.label, validated_btn.label))
+                            validated_row.append(validated_btn.label)
                         except ValidationError as e:
                             return f"Button validation error (row {row_idx}, button {btn_idx}): {e}"
-                    buttons_tuples.append(validated_row)
+                    validated_buttons.append(validated_row)
             except Exception as e:
                 return f"Button structure error: {str(e)}"
 
@@ -169,8 +139,7 @@ class MessageTool(Tool):
             metadata={
                 "message_id": message_id,
             },
-            buttons=buttons_tuples,
-            poll=poll_data,
+            buttons=validated_buttons,
         )
 
         try:
@@ -178,8 +147,7 @@ class MessageTool(Tool):
             if channel == self._default_channel and chat_id == self._default_chat_id:
                 self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
-            buttons_info = f" with {sum(len(r) for r in buttons_tuples)} buttons" if buttons_tuples else ""
-            poll_info = f" with poll" if poll_data else ""
-            return f"Message sent to {channel}:{chat_id}{media_info}{buttons_info}{poll_info}"
+            buttons_info = f" with {sum(len(r) for r in validated_buttons)} buttons" if validated_buttons else ""
+            return f"Message sent to {channel}:{chat_id}{media_info}{buttons_info}"
         except Exception as e:
             return f"Error sending message: {str(e)}"
