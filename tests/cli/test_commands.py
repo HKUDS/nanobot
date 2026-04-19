@@ -1604,14 +1604,19 @@ def test_zhipu_deprecated_alias_still_works():
 
 
 def test_find_by_name_accepts_zai_camel_case_and_hyphen_aliases():
-    assert find_by_name("zaiCn") is not None
-    assert find_by_name("zaiCn").name == "zai_cn"
-    assert find_by_name("zaiGb") is not None
-    assert find_by_name("zaiGb").name == "zai_gb"
-    assert find_by_name("zaiCodingCn") is not None
-    assert find_by_name("zaiCodingCn").name == "zai_coding_cn"
-    assert find_by_name("zaiCodingGb") is not None
-    assert find_by_name("zaiCodingGb").name == "zai_coding_gb"
+    zai_cn = find_by_name("zaiCn")
+    zai_gb = find_by_name("zaiGb")
+    zai_coding_cn = find_by_name("zaiCodingCn")
+    zai_coding_gb = find_by_name("zaiCodingGb")
+
+    assert zai_cn is not None
+    assert zai_cn.name == "zai_cn"
+    assert zai_gb is not None
+    assert zai_gb.name == "zai_gb"
+    assert zai_coding_cn is not None
+    assert zai_coding_cn.name == "zai_coding_cn"
+    assert zai_coding_gb is not None
+    assert zai_coding_gb.name == "zai_coding_gb"
 
 
 def test_zai_coding_plan_specs_are_gateways_with_prefix_stripping():
