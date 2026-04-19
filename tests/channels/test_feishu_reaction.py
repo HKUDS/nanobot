@@ -166,13 +166,14 @@ class TestStreamEndReactionCleanup:
         ch._stream_bufs["oc_chat1"] = _FeishuStreamBuf(
             text="Done", card_id="card_1", sequence=3, last_edit=0.0,
         )
+        ch._reaction_ids["om_001"] = "rx_42"
         ch._client.cardkit.v1.card_element.content.return_value = MagicMock(success=MagicMock(return_value=True))
         ch._client.cardkit.v1.card.settings.return_value = MagicMock(success=MagicMock(return_value=True))
         ch._remove_reaction = AsyncMock()
 
         await ch.send_delta(
             "oc_chat1", "",
-            metadata={"_stream_end": True, "message_id": "om_001", "reaction_id": "rx_42"},
+            metadata={"_stream_end": True, "message_id": "om_001"},
         )
 
         ch._remove_reaction.assert_called_once_with("om_001", "rx_42")
