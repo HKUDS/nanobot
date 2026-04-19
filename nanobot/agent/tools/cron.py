@@ -15,15 +15,15 @@ from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronJobState, CronSchedule
 
 _CRON_PARAMETERS = tool_parameters_schema(
-    action=StringSchema("Action to perform", enum=["add", "list", "remove"]),
+    action=StringSchema("Action to perform", enum=["add", "list", "remove", "edit"]),
     name=StringSchema(
         "Optional short human-readable label for the job "
         "(e.g., 'weather-monitor', 'daily-standup'). Defaults to first 30 chars of message."
     ),
     message=StringSchema(
-        "REQUIRED when action='add'. Instruction for the agent to execute when the job triggers "
+        "Instruction for the agent to execute when the job triggers "
         "(e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report'). "
-        "Not used for action='list' or action='remove'."
+        "Required for add, optional for edit."
     ),
     every_seconds=IntegerSchema(0, description="Interval in seconds (for recurring tasks)"),
     cron_expr=StringSchema("Cron expression like '0 9 * * *' (for scheduled tasks)"),
@@ -39,7 +39,7 @@ _CRON_PARAMETERS = tool_parameters_schema(
         description="Whether to deliver the execution result to the user channel (default true)",
         default=True,
     ),
-    job_id=StringSchema("REQUIRED when action='remove'. Job ID to remove (obtain via action='list')."),
+    job_id=StringSchema("Job ID (for remove/edit). Obtain via action='list'."),
     required=["action"],
     description=(
         "Action-specific parameters: add requires a non-empty message plus one schedule "
@@ -103,7 +103,7 @@ class CronTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Schedule reminders and recurring tasks. Actions: add, list, remove. "
+            "Schedule reminders and recurring tasks. Actions: add, list, remove, edit. "
             f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}."
         )
 
@@ -114,6 +114,8 @@ class CronTool(Tool):
             errors.append("message is required when action='add'")
         if action == "remove" and not str(params.get("job_id") or "").strip():
             errors.append("job_id is required when action='remove'")
+        if action == "edit" and not str(params.get("job_id") or "").strip():
+            errors.append("job_id is required when action='edit'")
         return errors
 
     async def execute(
@@ -137,6 +139,10 @@ class CronTool(Tool):
             return self._list_jobs()
         elif action == "remove":
             return self._remove_job(job_id)
+        elif action == "edit":
+            if self._in_cron_context.get():
+                return "Error: cannot edit jobs from within a cron job execution"
+            return self._edit_job(job_id, message, every_seconds, cron_expr, tz, at)
         return f"Unknown action: {action}"
 
     def _add_job(
@@ -200,6 +206,71 @@ class CronTool(Tool):
         )
         return f"Created job '{job.name}' (id: {job.id})"
 
+    def _edit_job(
+        self,
+        job_id: str | None,
+        message: str,
+        every_seconds: int | None,
+        cron_expr: str | None,
+        tz: str | None,
+        at: str | None,
+    ) -> str:
+        if not job_id:
+            return "Error: job_id is required for edit"
+
+        jobs = self._cron.list_jobs()
+        job = next((j for j in jobs if j.id == job_id), None)
+        if not job:
+            return f"Error: Job {job_id} not found"
+
+        if not message and not every_seconds and not cron_expr and not at:
+            return "Error: provide at least one field to edit (message, every_seconds, cron_expr, at)"
+
+        if tz and not cron_expr:
+            return "Error: tz can only be used with cron_expr"
+        if tz:
+            if err := self._validate_timezone(tz):
+                return err
+
+        new_message = message if message else job.payload.message
+        new_schedule = job.schedule
+        delete_after = job.delete_after_run
+
+        if every_seconds or cron_expr or at:
+            if every_seconds:
+                new_schedule = CronSchedule(kind="every", every_ms=every_seconds * 1000)
+                delete_after = False
+            elif cron_expr:
+                effective_tz = tz or self._default_timezone
+                new_schedule = CronSchedule(kind="cron", expr=cron_expr, tz=effective_tz)
+                delete_after = False
+            elif at:
+                from zoneinfo import ZoneInfo
+
+                try:
+                    dt = datetime.fromisoformat(at)
+                except ValueError:
+                    return f"Error: invalid ISO datetime format '{at}'. Expected format: YYYY-MM-DDTHH:MM:SS"
+                if dt.tzinfo is None:
+                    if err := self._validate_timezone(self._default_timezone):
+                        return err
+                    dt = dt.replace(tzinfo=ZoneInfo(self._default_timezone))
+                at_ms = int(dt.timestamp() * 1000)
+                new_schedule = CronSchedule(kind="at", at_ms=at_ms)
+                delete_after = True
+
+        self._cron.remove_job(job_id)
+        new_job = self._cron.add_job(
+            name=new_message[:30],
+            schedule=new_schedule,
+            message=new_message,
+            deliver=job.payload.deliver,
+            channel=job.payload.channel,
+            to=job.payload.to,
+            delete_after_run=delete_after,
+        )
+        return f"Edited job '{new_job.name}' (new id: {new_job.id})"
+
     def _format_timing(self, schedule: CronSchedule) -> str:
         """Format schedule as a human-readable timing string."""
         if schedule.kind == "cron":
@@ -251,6 +322,9 @@ class CronTool(Tool):
             if j.payload.kind == "system_event":
                 parts.append(f"  Purpose: {self._system_job_purpose(j)}")
                 parts.append("  Protected: visible for inspection, but cannot be removed.")
+            else:
+                if j.payload and j.payload.message:
+                    parts.append(f"  Message: {j.payload.message}")
             parts.extend(self._format_state(j.state, j.schedule))
             lines.append("\n".join(parts))
         return "Scheduled jobs:\n" + "\n".join(lines)
