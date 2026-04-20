@@ -240,12 +240,16 @@ class SubagentManager:
             result=result,
         )
 
-        # Inject as system message to trigger main agent
+        # Inject as system message to trigger main agent.
+        # Use session_key_override to align with the main agent's session key
+        # so the result is routed to the pending queue (mid-turn injection)
+        # instead of being dispatched as a competing independent task.
         msg = InboundMessage(
             channel="system",
             sender_id="subagent",
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
+            session_key_override=f"{origin['channel']}:{origin['chat_id']}",
             metadata={
                 "injected_event": "subagent_result",
                 "subagent_task_id": task_id,
