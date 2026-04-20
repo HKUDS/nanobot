@@ -715,6 +715,40 @@ class TelegramChannel(BaseChannel):
                     text=preview,
                 )
                 buf.last_edit = now
+            except BadRequest as e:
+                if self._is_not_modified_error(e):
+                    buf.last_edit = now
+                    return
+                # If the accumulated stream text exceeded Telegram's 4096-char
+                # limit, finalize the current message with a truncated or chunked
+                # edit and spin up a new stream buffer for the overflow.
+                if "message is too long" in str(e).lower():
+                    logger.info(
+                        "Stream buffer exceeded Telegram limit for {}, splitting",
+                        chat_id,
+                    )
+                    chunks = split_message(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
+                    # Edit the existing message down to the first chunk
+                    if chunks:
+                        try:
+                            await self._call_with_retry(
+                                self._app.bot.edit_message_text,
+                                chat_id=int_chat_id,
+                                message_id=buf.message_id,
+                                text=chunks[0],
+                            )
+                        except Exception:
+                            pass  # best-effort truncation
+                        # Send overflow chunks as new messages
+                        for extra in chunks[1:]:
+                            await self._send_text(int_chat_id, extra)
+                    # Reset buffer for continued streaming into a fresh message
+                    buf.text = ""
+                    buf.message_id = None
+                    buf.last_edit = now
+                    return
+                logger.warning("Stream edit failed: {}", e)
+                raise  # Let ChannelManager handle retry
             except Exception as e:
                 if self._is_not_modified_error(e):
                     buf.last_edit = now
