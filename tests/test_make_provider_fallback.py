@@ -62,3 +62,19 @@ def test_cooldown_propagated():
     ))
     assert isinstance(provider, FallbackProvider)
     assert provider._cooldown_s == 120
+
+
+def test_make_single_provider_for_subagent_model():
+    """_make_single_provider 可独立构造任意 model provider，无需 fallback_models 上下文。
+
+    这是 subagent 模型分层（Task 3）依赖的底层能力：用同一套构造路径
+    给 subagent 造一个独立 provider，不走 FallbackProvider 包装。
+    """
+    from nanobot.nanobot import _make_single_provider
+    from nanobot.providers.anthropic_provider import AnthropicProvider
+
+    config = _make_config()  # 无 fallback_models
+    provider = _make_single_provider(config, "anthropic/claude-haiku-4-5")
+
+    assert isinstance(provider, AnthropicProvider)
+    assert provider.default_model == "anthropic/claude-haiku-4-5"
