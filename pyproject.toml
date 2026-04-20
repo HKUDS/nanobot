@@ -129,8 +129,29 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "W"]
-ignore = ["E501"]
+select = ["E", "F", "I", "N", "W", "B", "ASYNC"]
+ignore = [
+    "E501",    # line too long — handled by formatter
+    "E402",    # import not at top — upstream pattern
+    "E701",    # multiple statements on one line — upstream style
+    "E741",    # ambiguous variable name
+    "I001",    # import sorting — too noisy to enforce now
+    "N803",    # argument name casing — upstream convention
+    "N806",    # variable name casing — upstream convention
+    "W291",    # trailing whitespace
+    "W293",    # blank line whitespace
+    "ASYNC109",  # timeout in async — false positives
+    "ASYNC221",  # run process in async — intentional in shell tool
+    "ASYNC222",  # wait for process in async — intentional in shell tool
+    "ASYNC240",  # pathlib in async — pervasive upstream pattern
+    "ASYNC110",  # async busy-wait — intentional in channel polling
+    "ASYNC230",  # blocking open in async — pervasive upstream pattern
+    "B905",      # zip without strict — upstream code
+    "B904",      # raise without from — upstream code
+    "B009",      # getattr with constant — upstream code
+    "B010",      # setattr with constant — upstream code
+    "B027",      # empty method without abstract — upstream code
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

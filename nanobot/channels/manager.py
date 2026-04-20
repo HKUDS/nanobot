@@ -148,7 +148,7 @@ class ChannelManager:
                 pass
 
         # Stop per-channel workers
-        for name, task in self._channel_workers.items():
+        for _name, task in self._channel_workers.items():
             task.cancel()
             try:
                 await task
@@ -360,7 +360,6 @@ class ChannelManager:
         Note: CancelledError is re-raised to allow graceful shutdown.
         """
         max_attempts = max(self.config.channels.send_max_retries, 1)
-        last_error: Exception | None = None
 
         for attempt in range(max_attempts):
             try:
@@ -371,7 +370,7 @@ class ChannelManager:
             except asyncio.CancelledError:
                 raise  # Propagate cancellation for graceful shutdown
             except Exception as e:
-                last_error = e
+                _ = e
                 if attempt == max_attempts - 1:
                     logger.error(
                         "Failed to send to {} after {} attempts: {} - {}",

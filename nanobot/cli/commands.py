@@ -382,7 +382,6 @@ def _merge_missing_defaults(existing: Any, defaults: Any) -> Any:
 
 def _onboard_plugins(config_path: Path) -> None:
     """Inject default config for all discovered channels (built-in + plugins)."""
-    import json
 
     from nanobot.channels.registry import discover_all
 
@@ -504,7 +503,6 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
 
 def _warn_deprecated_config_keys(config_path: Path | None) -> None:
     """Hint users to remove obsolete keys from their config file."""
-    import json
 
     from nanobot.config.loader import get_config_path
 
@@ -642,7 +640,7 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService, filter_heartbeat_response
-    from nanobot.session.manager import SessionManager
+    from nanobot.session.manager import Session, SessionManager
 
     if verbose:
         import logging
@@ -776,7 +774,7 @@ def gateway(
     def _persist_outbound_messages(session: "Session", task_name: str, since_idx: int = 0) -> None:
         """Persist outbound messages: write to message log and inject into recipient sessions."""
         from nanobot.heartbeat.message_log import persist_outbound_messages
-        log_path = runtime_config.workspace_path / "state" / "message_log.jsonl"
+        log_path = config.workspace_path / "state" / "message_log.jsonl"
         persist_outbound_messages(session, task_name, log_path, agent.sessions, since_idx)
 
     def _drop_last_turn(session: "Session") -> None:

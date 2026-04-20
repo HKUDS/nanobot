@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import time
 import unicodedata
@@ -23,7 +22,6 @@ from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
-from nanobot.providers.transcription import TranscriptionProvider
 from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import split_message
 

@@ -18,7 +18,6 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
-from nanobot.providers.transcription import TranscriptionProvider
 
 
 class WhatsAppConfig(Base):
