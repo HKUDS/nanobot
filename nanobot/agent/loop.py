@@ -318,10 +318,16 @@ class AgentLoop:
 
     def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Update context for all tools that need routing info."""
+        # Compute the effective session key (accounts for unified sessions)
+        # so that subagent results route to the correct pending queue.
+        effective_key = UNIFIED_SESSION_KEY if self._unified_session else f"{channel}:{chat_id}"
         for name in ("message", "spawn", "cron", "my"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                    if name == "spawn":
+                        tool.set_context(channel, chat_id, effective_key=effective_key)
+                    else:
+                        tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
