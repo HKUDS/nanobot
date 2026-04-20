@@ -442,6 +442,35 @@ async def test_direct_openai_responses_404_falls_back_to_chat_completions() -> N
 
 
 @pytest.mark.asyncio
+async def test_direct_openai_open_circuit_skips_responses_api() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_response("from chat"))
+    mock_responses = AsyncMock(return_value=_fake_responses_response("from responses"))
+    spec = find_by_name("openai")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_chat
+        client_instance.responses.create = mock_responses
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-5-chat",
+            spec=spec,
+        )
+        for _ in range(3):
+            provider._record_responses_failure("gpt-5-chat", None)
+
+        result = await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="gpt-5-chat",
+        )
+
+    assert result.content == "from chat"
+    mock_responses.assert_not_awaited()
+    mock_chat.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_direct_openai_stream_responses_unsupported_param_falls_back() -> None:
     mock_chat = AsyncMock(return_value=_fake_chat_stream("fallback stream"))
     mock_responses = AsyncMock(

@@ -433,8 +433,15 @@ class DiscordChannel(BaseChannel):
             raise
 
     async def _handle_discord_message(self, message: discord.Message) -> None:
-        """Handle incoming Discord messages from discord.py."""
-        if message.author.bot:
+        """Handle incoming Discord messages from discord.py.
+
+        Self-loop guard: only drop messages from this bot's own account. Messages
+        from other bots are allowed through so multi-agent setups (one bot asking
+        another for help, a bot mentioning another by @name, etc.) can work.
+        Bot-from-bot loops are still prevented per-instance because each bot
+        still ignores its own outbound messages. (#3217)
+        """
+        if self._bot_user_id is not None and str(message.author.id) == self._bot_user_id:
             return
 
         sender_id = str(message.author.id)

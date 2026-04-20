@@ -15,12 +15,48 @@ from loguru import logger
 
 
 def strip_think(text: str) -> str:
-    """Remove thinking blocks and any unclosed trailing tag."""
+    """Remove thinking blocks, unclosed trailing tags, and tokenizer-level
+    template leaks occasionally emitted by some models (notably Gemma 4's
+    Ollama renderer).
+
+    Covers:
+      1. Well-formed `<think>...</think>` and `<thought>...</thought>` blocks.
+      2. Streaming prefixes where the block is never closed.
+      3. *Malformed* opening tags missing the `>` — e.g. `<think广场…`. The
+         model sometimes emits the tag name directly followed by user-facing
+         content with no delimiter; without this step the literal `<think`
+         leaks into the rendered message.
+      4. Harmony-style channel markers like `<channel|>` / `<|channel|>`
+         **at the start of the text** — conservative to avoid eating
+         explanatory prose that mentions these tokens.
+      5. Orphan closing tags `</think>` / `</thought>` **at the very start
+         or end of the text** only, for the same reason.
+
+    Since this is also applied before persisting to history (memory.py),
+    the edge-only stripping of (4) and (5) is deliberate: stripping those
+    tokens mid-text would silently rewrite any message where a user or the
+    assistant discusses the tokens themselves.
+    """
+    # Well-formed blocks first.
     text = re.sub(r"<think>[\s\S]*?</think>", "", text)
     text = re.sub(r"^\s*<think>[\s\S]*$", "", text)
-    # Gemma 4 and similar models use <thought>...</thought> blocks
     text = re.sub(r"<thought>[\s\S]*?</thought>", "", text)
     text = re.sub(r"^\s*<thought>[\s\S]*$", "", text)
+    # Malformed opening tags: `<think` / `<thought` where the next char is
+    # NOT one that could continue a valid tag / identifier name. Explicitly
+    # listing ASCII tag-name chars (letters, digits, `_`, `-`, `:`) plus
+    # `>` / `/` — we can't use `\w` here because in Python's default
+    # Unicode regex mode it matches CJK characters too, which would defeat
+    # the primary fix for `<think广场…` leaks.
+    text = re.sub(r"<think(?![A-Za-z0-9_\-:>/])", "", text)
+    text = re.sub(r"<thought(?![A-Za-z0-9_\-:>/])", "", text)
+    # Edge-only orphan closing tags (start or end of text).
+    text = re.sub(r"^\s*</think>\s*", "", text)
+    text = re.sub(r"\s*</think>\s*$", "", text)
+    text = re.sub(r"^\s*</thought>\s*", "", text)
+    text = re.sub(r"\s*</thought>\s*$", "", text)
+    # Edge-only channel markers (harmony / Gemma 4 variant leaks).
+    text = re.sub(r"^\s*<\|?channel\|?>\s*", "", text)
     return text.strip()
 
 
@@ -37,7 +73,9 @@ def detect_image_mime(data: bytes) -> str | None:
     return None
 
 
-def build_image_content_blocks(raw: bytes, mime: str, path: str, label: str) -> list[dict[str, Any]]:
+def build_image_content_blocks(
+    raw: bytes, mime: str, path: str, label: str
+) -> list[dict[str, Any]]:
     """Build native image blocks plus a short text label."""
     b64 = base64.b64encode(raw).decode()
     return [
@@ -82,6 +120,7 @@ _TOOL_RESULT_PREVIEW_CHARS = 1200
 _TOOL_RESULTS_DIR = ".nanobot/tool-results"
 _TOOL_RESULT_RETENTION_SECS = 7 * 24 * 60 * 60
 _TOOL_RESULT_MAX_BUCKETS = 32
+
 
 def safe_filename(name: str) -> str:
     """Replace unsafe path characters with underscores."""
@@ -258,9 +297,9 @@ def split_message(content: str, max_len: int = 2000) -> list[str]:
             break
         cut = content[:max_len]
         # Try to break at newline first, then space, then hard break
-        pos = cut.rfind('\n')
+        pos = cut.rfind("\n")
         if pos <= 0:
-            pos = cut.rfind(' ')
+            pos = cut.rfind(" ")
         if pos <= 0:
             pos = max_len
         chunks.append(content[:pos])
@@ -404,7 +443,7 @@ def build_status_content(
     max_completion_tokens: int = 8192,
 ) -> str:
     """Build a human-readable runtime status snapshot.
-    
+
     Args:
         search_usage_text: Optional pre-formatted web search usage string
                            (produced by SearchUsageInfo.format()). When provided
@@ -423,7 +462,11 @@ def build_status_content(
     # Budget mirrors Consolidator formula: ctx_window - max_completion - _SAFETY_BUFFER
     ctx_budget = max(ctx_total - int(max_completion_tokens) - 1024, 1)
     ctx_pct = min(int((context_tokens_estimate / ctx_budget) * 100), 999) if ctx_budget > 0 else 0
-    ctx_used_str = f"{context_tokens_estimate // 1000}k" if context_tokens_estimate >= 1000 else str(context_tokens_estimate)
+    ctx_used_str = (
+        f"{context_tokens_estimate // 1000}k"
+        if context_tokens_estimate >= 1000
+        else str(context_tokens_estimate)
+    )
     ctx_total_str = f"{ctx_total // 1000}k" if ctx_total > 0 else "n/a"
     token_line = f"\U0001f4ca Tokens: {last_in} in / {last_out} out"
     if cached and last_in:
@@ -439,12 +482,13 @@ def build_status_content(
     ]
     if search_usage_text:
         lines.append(search_usage_text)
-    return "\n".join(lines)    
+    return "\n".join(lines)
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:
     """Sync bundled templates to workspace. Only creates missing files."""
     from importlib.resources import files as pkg_files
+
     try:
         tpl = pkg_files("nanobot") / "templates"
     except Exception:
@@ -470,15 +514,22 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
 
     if added and not silent:
         from rich.console import Console
+
         for name in added:
             Console().print(f"  [dim]Created {name}[/dim]")
 
     # Initialize git for memory version control
     try:
         from nanobot.utils.gitstore import GitStore
-        gs = GitStore(workspace, tracked_files=[
-            "SOUL.md", "USER.md", "memory/MEMORY.md",
-        ])
+
+        gs = GitStore(
+            workspace,
+            tracked_files=[
+                "SOUL.md",
+                "USER.md",
+                "memory/MEMORY.md",
+            ],
+        )
         gs.init()
     except Exception:
         logger.warning("Failed to initialize git store for {}", workspace)

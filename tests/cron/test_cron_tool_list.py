@@ -348,24 +348,20 @@ def test_add_job_can_disable_delivery(tmp_path) -> None:
 def test_cron_schema_advertises_action_specific_requirements(tmp_path) -> None:
     tool = _make_tool(tmp_path)
 
+    # Only ``action`` is required at the schema root — per-action requirements
+    # are enforced at runtime via ``validate_params`` and surfaced to the LLM
+    # through field descriptions. We intentionally do NOT set top-level
+    # ``oneOf``/``anyOf``/``allOf``/``enum``/``not``: OpenAI Codex/Responses
+    # reject those at the root of function parameters (#3265 regression).
     assert tool.parameters["required"] == ["action"]
-    assert tool.parameters["oneOf"] == [
-        {
-            "properties": {
-                "action": {"enum": ["add"]},
-                "message": {"type": "string", "minLength": 1},
-            },
-            "required": ["action", "message"],
-        },
-        {
-            "properties": {"action": {"enum": ["list"]}},
-            "required": ["action"],
-        },
-        {
-            "properties": {"action": {"enum": ["remove"]}},
-            "required": ["action", "job_id"],
-        },
-    ]
+    for disallowed in ("oneOf", "anyOf", "allOf", "not"):
+        assert disallowed not in tool.parameters, (
+            f"Top-level '{disallowed}' is rejected by OpenAI Codex/Responses tool schemas"
+        )
+    message_desc = tool.parameters["properties"]["message"]["description"]
+    assert "REQUIRED" in message_desc and "action='add'" in message_desc
+    job_id_desc = tool.parameters["properties"]["job_id"]["description"]
+    assert "REQUIRED" in job_id_desc and "action='remove'" in job_id_desc
 
 
 def test_validate_params_requires_message_only_for_add(tmp_path) -> None:

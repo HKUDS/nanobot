@@ -1,0 +1,83 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "正在連線到 nanobot…",
+      "boot": "正在載入 nanobot…"
+    },
+    "error": {
+      "title": "無法連線到 nanobot",
+      "gatewayHint": "請確認 gateway 已啟動（`nanobot web`），並且目前頁面與 gateway 在同一台機器上開啟。"
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "nanobot Web UI —— 與你的 nanobot 工作區對話。"
+    }
+  },
+  "sidebar": {
+    "collapse": "收合側邊欄",
+    "toggleTheme": "切換主題",
+    "newChat": "新增對話",
+    "recent": "最近對話",
+    "refreshSessions": "重新整理會話",
+    "language": {
+      "label": "語言",
+      "ariaLabel": "切換語言"
+    }
+  },
+  "chat": {
+    "fallbackTitle": "對話 {{id}}",
+    "loading": "載入中…",
+    "noSessions": "目前還沒有會話。",
+    "actions": "「{{title}}」的會話操作",
+    "delete": "刪除",
+    "newChat": "新增對話"
+  },
+  "deleteConfirm": {
+    "title": "刪除「{{title}}」？",
+    "description": "這個會話檔案會從磁碟中移除，而且無法復原。",
+    "cancel": "取消",
+    "confirm": "刪除"
+  },
+  "connection": {
+    "idle": "閒置",
+    "connecting": "連線中…",
+    "open": "已連線",
+    "reconnecting": "重新連線中…",
+    "closed": "已中斷",
+    "error": "連線錯誤"
+  },
+  "thread": {
+    "loadingConversation": "正在載入對話…",
+    "empty": {
+      "description": "你可以提問、延續本地工作，或是開始新的執行緒。"
+    },
+    "header": {
+      "toggleSidebar": "切換側邊欄"
+    },
+    "composer": {
+      "placeholderThread": "輸入訊息…",
+      "placeholderHero": "你在想什麼？",
+      "placeholderOpening": "正在開啟新對話…",
+      "inputAria": "訊息輸入框",
+      "sendHint": "Enter 送出 · Shift+Enter 換行",
+      "send": "送出訊息"
+    },
+    "scrollToBottom": "捲動到底部"
+  },
+  "message": {
+    "streaming": "串流輸出中",
+    "assistantTyping": "助理正在輸入",
+    "toolSingle": "正在使用工具",
+    "toolMany": "已使用 {{count}} 個工具"
+  },
+  "code": {
+    "fallbackLanguage": "程式碼",
+    "copyAria": "複製程式碼",
+    "copy": "複製",
+    "copied": "已複製"
+  }
+}

@@ -42,7 +42,7 @@ nanobot gateway
 
 You should see:
 
-```
+```text
 WebSocket server listening on ws://127.0.0.1:8765/
 ```
 
@@ -68,7 +68,7 @@ asyncio.run(main())
 
 ## Connection URL
 
-```
+```text
 ws://{host}:{port}{path}?client_id={id}&token={token}
 ```
 

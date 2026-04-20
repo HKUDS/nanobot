@@ -16,6 +16,10 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
+license-files = [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+]
 
 dependencies = [
     "typer>=0.20.0,<1.0.0",
@@ -114,6 +118,13 @@ include = [
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
 ]
+# Build-time generated assets that live under .gitignore'd paths but must ship
+# in the wheel/sdist. `artifacts` bypasses the VCS filter (unlike `include`).
+# The webui is compiled via `bun run build` into nanobot/web/dist/ right before
+# `python -m build` runs.
+artifacts = [
+    "nanobot/web/dist/**/*",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["nanobot"]
@@ -130,6 +141,8 @@ include = [
     "bridge/",
     "README.md",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "pyproject.toml",
 ]
 
 [tool.ruff]
