@@ -702,9 +702,71 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `tools.exec.sandbox` | `""` | Sandbox backend for shell commands. Set to `"bwrap"` to wrap exec calls in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox — the process can only see the workspace (read-write) and media directory (read-only); config files and API keys are hidden. Automatically enables `restrictToWorkspace` for file tools. **Linux only** — requires `bwrap` installed (`apt install bubblewrap`; pre-installed in the Docker image). Not available on macOS or Windows (bwrap depends on Linux kernel namespaces). |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
+| `tools.exec.tirith.enabled` | `false` | When `true`, pre-scan every `exec` command with Tirith. Requires the `tirith` binary on `PATH` (or configured via `tools.exec.tirith.bin`). Disabled by default; see the **Tirith security gate** section below. |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
 
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
+
+
+## Tirith security gate
+
+[Tirith](https://github.com/sheeki03/tirith) is a content-level security scanner — it inspects each exec command for homograph / punycode URLs, pipe-to-shell, terminal injection, zero-width characters, typosquatted packages, and insecure transport. Nanobot calls it before the sandbox wrapper and maps its exit code to an action: `0` allow, `1` block, `2` warn (logged, not blocked). **Disabled by default.**
+
+### Install
+
+Pick any of:
+
+- `brew install sheeki03/tap/tirith` (macOS / Linuxbrew)
+- `cargo install tirith` (any platform with a Rust toolchain)
+- Prebuilt release: <https://github.com/sheeki03/tirith/releases> — download the archive for your target triple, extract, and place the `tirith` binary on your `PATH`
+
+Verify the install with `tirith --version`.
+
+### Platform coverage
+
+Prebuilt binaries are published for:
+
+| OS | Arch | Target triple |
+|---|---|---|
+| macOS | x86_64 | `x86_64-apple-darwin` |
+| macOS | arm64 | `aarch64-apple-darwin` |
+| Linux | x86_64 | `x86_64-unknown-linux-gnu` |
+| Linux | arm64 | `aarch64-unknown-linux-gnu` |
+| Windows | x86_64 | `x86_64-pc-windows-msvc` |
+
+Linux armv7 and Windows arm64 are not prebuilt. On those platforms either install via `cargo install tirith`, or leave `tools.exec.tirith.failOpen` set to `true` (the default) — exec proceeds unscanned when `tirith` is absent.
+
+### Config keys
+
+```json
+{
+  "tools": {
+    "exec": {
+      "tirith": {
+        "enabled": false,
+        "bin": "tirith",
+        "timeout": 5,
+        "failOpen": true
+      }
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `tools.exec.tirith.enabled` | `false` | Opt-in master switch. |
+| `tools.exec.tirith.bin` | `tirith` | Bare name (PATH-resolved), `~`-prefixed, or absolute/relative path to the `tirith` binary. |
+| `tools.exec.tirith.timeout` | `5` | Per-scan timeout in seconds. |
+| `tools.exec.tirith.failOpen` | `true` | When `true`, allow exec on scanner errors or when the binary is missing. Set `false` for fail-closed. |
+
+### Behavior summary
+
+| State | Outcome |
+|---|---|
+| `enabled: false` (default) | No scan, no subprocess, always allow. |
+| `enabled: true` + `tirith` present | Exit 0 → allow, 1 → block, 2 → warn. |
+| `enabled: true` + `tirith` missing / crash | `failOpen: true` → allow; `false` → block. |
 
 
 ## Auto Compact

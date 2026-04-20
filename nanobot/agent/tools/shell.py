@@ -47,7 +47,7 @@ class ExecTool(Tool):
         sandbox: str = "",
         path_append: str = "",
         allowed_env_keys: list[str] | None = None,
-        tirith_enabled: bool = True,
+        tirith_enabled: bool = False,
         tirith_bin: str = "tirith",
         tirith_timeout: int = 5,
         tirith_fail_open: bool = True,
@@ -312,8 +312,8 @@ class ExecTool(Tool):
                     continue
 
                 media_path = get_media_dir().resolve()
-                if (p.is_absolute() 
-                    and cwd_path not in p.parents 
+                if (p.is_absolute()
+                    and cwd_path not in p.parents
                     and p != cwd_path
                     and media_path not in p.parents
                     and p != media_path
@@ -339,6 +339,9 @@ class ExecTool(Tool):
         Fail-open if tirith is not installed. Uses instance config fields
         passed via __init__ (wired from exec_config.tirith at construction).
         """
+        if not self.tirith_enabled:
+            return None
+
         try:
             from nanobot.agent.tools.tirith_security import check_security
         except ImportError:

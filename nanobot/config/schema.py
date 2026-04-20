@@ -185,9 +185,9 @@ class WebToolsConfig(Base):
 
 
 class TirithConfig(Base):
-    """Tirith security scanning configuration."""
+    """Opt-in Tirith pre-exec content gate. Requires tirith on PATH."""
 
-    enabled: bool = True
+    enabled: bool = False
     bin: str = "tirith"
     timeout: int = 5
     fail_open: bool = True

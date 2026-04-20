@@ -248,6 +248,16 @@ Browse the [repo docs](./docs/README.md) for the latest features and GitHub deve
 - Integrate nanobot with local tools and automations: [OpenAI-Compatible API](./docs/openai-api.md) · [Python SDK](./docs/python-sdk.md)
 - Run nanobot with Docker or as a Linux service: [Deployment](./docs/deployment.md)
 
+### Optional: command safety with Tirith
+
+Nanobot can pre-scan `exec` commands via [Tirith](https://github.com/sheeki03/tirith), a local Rust binary that detects homograph URLs, pipe-to-shell, terminal injection, and similar content-level threats. **Disabled by default.**
+
+To enable:
+1. Install tirith — `brew install sheeki03/tap/tirith`, `cargo install tirith`, or download a release from <https://github.com/sheeki03/tirith/releases>.
+2. Set `"tools": { "exec": { "tirith": { "enabled": true } } }` in your nanobot config (`~/.nanobot/config.json`).
+
+See [docs/configuration.md](./docs/configuration.md#tirith-security-gate) for config keys and platform coverage.
+
 ## 🤝 Contribute & Roadmap
 
 PRs welcome! The codebase is intentionally small and readable. 🤗
