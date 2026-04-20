@@ -1,4 +1,16 @@
-"""Subagent manager for background task execution."""
+"""子代理管理器，用于后台任务执行。
+
+功能说明：
+1. SubagentStatus - 实时跟踪子代理运行状态
+2. SubagentManager - 管理后台子代理任务的创建和执行
+3. 支持文件系统工具、Web搜索工具、Shell执行工具等
+4. 任务完成后通过消息总线通知主代理
+
+使用场景：
+- 用户请求需要长时间执行的任务时，spawn后台子代理
+- 子代理在独立上下文中执行任务，不阻塞主对话
+- 任务完成后自动将结果注入到主对话中
+"""
 
 import asyncio
 import json
@@ -27,16 +39,29 @@ from nanobot.providers.base import LLMProvider
 
 @dataclass(slots=True)
 class SubagentStatus:
-    """Real-time status of a running subagent."""
+    """子代理运行状态的实时跟踪。
+    
+    属性说明：
+    - task_id: 任务唯一标识符
+    - label: 任务显示标签（简短描述）
+    - task_description: 任务完整描述
+    - started_at: 开始时间（time.monotonic()）
+    - phase: 当前阶段 (initializing/awaiting_tools/tools_completed/final_response/done/error)
+    - iteration: 当前迭代次数
+    - tool_events: 工具调用事件列表
+    - usage: token使用量统计
+    - stop_reason: 停止原因
+    - error: 错误信息（如有）
+    """
 
     task_id: str
     label: str
     task_description: str
-    started_at: float          # time.monotonic()
-    phase: str = "initializing"  # initializing | awaiting_tools | tools_completed | final_response | done | error
+    started_at: float
+    phase: str = "initializing"
     iteration: int = 0
-    tool_events: list = field(default_factory=list)   # [{name, status, detail}, ...]
-    usage: dict = field(default_factory=dict)          # token usage
+    tool_events: list = field(default_factory=list)
+    usage: dict = field(default_factory=dict)
     stop_reason: str | None = None
     error: str | None = None
 
@@ -68,7 +93,23 @@ class _SubagentHook(AgentHook):
 
 
 class SubagentManager:
-    """Manages background subagent execution."""
+    """后台子代理执行管理器。
+    
+    功能：
+    - 创建和调度子代理任务
+    - 管理工具注册（文件系统、web、shell等）
+    - 跟踪任务状态和进度
+    - 任务完成后通过消息总线通知主代理
+    
+    属性：
+    - provider: LLM提供商
+    - workspace: 工作目录
+    - bus: 消息总线
+    - model: 使用的模型
+    - _running_tasks: 正在运行的任务
+    - _task_statuses: 任务状态映射
+    - _session_tasks: 会话到任务的映射
+    """
 
     def __init__(
         self,
@@ -104,7 +145,18 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
     ) -> str:
-        """Spawn a subagent to execute a task in the background."""
+        """创建并启动一个后台子代理执行任务。
+        
+        Args:
+            task: 任务描述
+            label: 可选的显示标签
+            origin_channel: 来源渠道（cli/telegram/etc）
+            origin_chat_id: 来源聊天ID
+            session_key: 可选的会话键（用于关联子代理到主会话）
+            
+        Returns:
+            确认消息文本
+        """
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin = {"channel": origin_channel, "chat_id": origin_chat_id, "session_key": session_key}
@@ -145,7 +197,21 @@ class SubagentManager:
         origin: dict[str, str],
         status: SubagentStatus,
     ) -> None:
-        """Execute the subagent task and announce the result."""
+        """执行子代理任务并宣布结果。
+        
+        具体步骤：
+        1. 构建子代理工具集（文件系统/web/exec工具）
+        2. 构建系统提示词
+        3. 使用AgentRunner执行任务
+        4. 处理结果并调用_announce_result通知主代理
+        
+        Args:
+            task_id: 任务ID
+            task: 任务描述
+            label: 任务标签
+            origin: 来源信息
+            status: 状态对象
+        """
         logger.info("Subagent [{}] starting task: {}", task_id, label)
 
         async def _on_checkpoint(payload: dict) -> None:
@@ -229,7 +295,19 @@ class SubagentManager:
         origin: dict[str, str],
         status: str,
     ) -> None:
-        """Announce the subagent result to the main agent via the message bus."""
+        """通过消息总线向主代理宣布子代理结果。
+        
+        将结果作为系统消息注入到主会话的待处理队列中，
+        确保结果被路由到正确的会话。
+        
+        Args:
+            task_id: 任务ID
+            label: 任务标签
+            task: 原始任务描述
+            result: 任务执行结果
+            origin: 来源信息（channel, chat_id, session_key）
+            status: 状态（ok/error）
+        """
         status_text = "completed successfully" if status == "ok" else "failed"
 
         announce_content = render_template(
@@ -283,7 +361,13 @@ class SubagentManager:
         return "\n".join(lines) or (result.error or "Error: subagent execution failed.")
 
     def _build_subagent_prompt(self) -> str:
-        """Build a focused system prompt for the subagent."""
+        """为子代理构建专注的系统提示词。
+        
+        包含运行时上下文、技能摘要等信息。
+        
+        Returns:
+            系统提示词文本
+        """
         from nanobot.agent.context import ContextBuilder
         from nanobot.agent.skills import SkillsLoader
 

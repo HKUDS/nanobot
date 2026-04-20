@@ -1,4 +1,10 @@
-"""Memory system: pure file I/O store, lightweight Consolidator, and Dream processor."""
+"""记忆系统：纯文件I/O存储，轻量级Consolidator和Dream处理器。
+
+这个模块实现了NanoBot的持久化记忆系统，包括：
+1. MemoryStore - 基于文件I/O的记忆存储层
+2. Consolidator - 基于token预算的会话消息压缩器
+3. Dream - 定时运行的记忆整合与技能创建处理器
+"""
 
 from __future__ import annotations
 
@@ -25,11 +31,18 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
-# MemoryStore — pure file I/O layer
+# MemoryStore — 纯文件I/O存储层
 # ---------------------------------------------------------------------------
 
 class MemoryStore:
-    """Pure file I/O for memory files: MEMORY.md, history.jsonl, SOUL.md, USER.md."""
+    """纯文件I/O记忆存储：管理MEMORY.md、history.jsonl、SOUL.md、USER.md等文件。
+    
+    文件说明：
+    - MEMORY.md: 长期记忆，存储重要的事实和信息
+    - history.jsonl: 追加式的JSONL格式会话历史
+    - SOUL.md: AI的灵魂/身份定义
+    - USER.md: 用户信息
+    """
 
     _DEFAULT_MAX_HISTORY = 1000
     _LEGACY_ENTRY_START_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2}[^\]]*)\]\s*")
@@ -68,10 +81,10 @@ class MemoryStore:
             return ""
 
     def _maybe_migrate_legacy_history(self) -> None:
-        """One-time upgrade from legacy HISTORY.md to history.jsonl.
-
-        The migration is best-effort and prioritizes preserving as much content
-        as possible over perfect parsing.
+        """一次性迁移：从旧版HISTORY.md迁移到history.jsonl。
+        
+        迁移是尽力而为的，优先保留尽可能多的内容而不是完美解析。
+        旧版本的HISTORY.md会被备份为HISTORY.md.bak。
         """
         if not self.legacy_history_file.exists():
             return
@@ -221,14 +234,18 @@ class MemoryStore:
     # -- history.jsonl — append-only, JSONL format ---------------------------
 
     def append_history(self, entry: str) -> int:
-        """Append *entry* to history.jsonl and return its auto-incrementing cursor.
-
-        Entries are passed through `strip_think` to drop template-level leaks
-        (e.g. unclosed `<think` prefixes, `<channel|>` markers) before being
-        persisted. If the cleaned content is empty but the raw entry wasn't,
-        the record is persisted with an empty string rather than falling back
-        to the raw leak — otherwise `strip_think`'s guarantees would be
-        undone by history replay / consolidation downstream.
+        """追加条目到history.jsonl并返回自增的光标cursor。
+        
+        条目会通过strip_think处理，移除模板级别的泄漏内容
+        (如未闭合的<think前缀、<channel|>标记等)。
+        如果清理后内容为空但原始条目不为空，则记录空字符串，
+        以避免历史回放/压缩时再次污染上下文。
+        
+        Args:
+            entry: 要追加的会话内容
+            
+        Returns:
+            光标值，用于跟踪历史记录位置
         """
         cursor = self._next_cursor()
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -355,12 +372,19 @@ class MemoryStore:
 
 
 # ---------------------------------------------------------------------------
-# Consolidator — lightweight token-budget triggered consolidation
+# Consolidator — 基于token预算的轻量级压缩器
 # ---------------------------------------------------------------------------
 
 
 class Consolidator:
-    """Lightweight consolidation: summarizes evicted messages into history.jsonl."""
+    """轻量级会话压缩器：当会话消息超过token预算时，将旧消息压缩摘要到history.jsonl。
+    
+    工作原理：
+    1. 监控会话的token使用量
+    2. 当接近上下文窗口限制时，自动压缩旧消息
+    3. 使用LLM生成摘要，保留关键信息
+    4. 释放上下文空间给新对话使用
+    """
 
     _MAX_CONSOLIDATION_ROUNDS = 5
     _MAX_CHUNK_MESSAGES = 60  # hard cap per consolidation round
@@ -495,10 +519,14 @@ class Consolidator:
         *,
         session_summary: str | None = None,
     ) -> None:
-        """Loop: archive old messages until prompt fits within safe budget.
-
-        The budget reserves space for completion tokens and a safety buffer
-        so the LLM request never exceeds the context window.
+        """循环压缩旧消息直到提示词适合安全预算。
+        
+        预算会保留completion tokens和安全缓冲区的空间，
+        确保LLM请求不会超出上下文窗口限制。
+        
+        Args:
+            session: 会话对象
+            session_summary: 可选的会话摘要
         """
         if not session.messages or self.context_window_tokens <= 0:
             return
@@ -597,7 +625,7 @@ class Consolidator:
 
 
 # ---------------------------------------------------------------------------
-# Dream — heavyweight cron-scheduled memory consolidation
+# Dream — 定时运行的重型记忆整合处理器
 # ---------------------------------------------------------------------------
 
 
@@ -609,11 +637,18 @@ _STALE_THRESHOLD_DAYS = 14
 
 
 class Dream:
-    """Two-phase memory processor: analyze history.jsonl, then edit files via AgentRunner.
-
-    Phase 1 produces an analysis summary (plain LLM call).
-    Phase 2 delegates to AgentRunner with read_file / edit_file tools so the
-    LLM can make targeted, incremental edits instead of replacing entire files.
+    """两阶段记忆处理器：分析history.jsonl，然后通过AgentRunner编辑文件。
+    
+    Phase 1（分析阶段）：调用LLM分析历史对话，生成分析摘要
+    Phase 2（执行阶段）：使用AgentRunner和read_file/edit_file工具，
+    让LLM能够有针对性地增量编辑文件，而不是替换整个文件。
+    
+    主要功能：
+    - 分析未处理的会话历史
+    - 更新MEMORY.md（长期记忆）
+    - 更新SOUL.md（AI身份）
+    - 更新USER.md（用户信息）
+    - 创建新技能（Skills）
     """
 
     def __init__(
@@ -740,7 +775,15 @@ class Dream:
         return result
 
     async def run(self) -> bool:
-        """Process unprocessed history entries. Returns True if work was done."""
+        """处理未处理的history.jsonl条目。
+        
+        这是Dream的主入口方法，执行两阶段处理：
+        1. Phase 1 - 分析历史，生成分析摘要
+        2. Phase 2 - 通过AgentRunner执行具体操作
+        
+        Returns:
+            bool: 如果完成了工作返回True，否则返回False
+        """
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 
         last_cursor = self.store.get_last_dream_cursor()

@@ -1,4 +1,10 @@
-"""Agent loop: the core processing engine."""
+"""智能体循环 - 核心处理引擎"""
+# 核心处理流程：
+# 1. 从消息总线接收消息
+# 2. 构建上下文（历史、记忆、技能）
+# 3. 调用 LLM
+# 4. 执行工具调用
+# 5. 发送响应回消息总线
 
 from __future__ import annotations
 
@@ -50,7 +56,14 @@ UNIFIED_SESSION_KEY = "unified:default"
 
 
 class _LoopHook(AgentHook):
-    """Core hook for the main loop."""
+    """
+    循环钩子 - 用于处理流式输出和进度回调
+    
+    主要功能：
+    - 流式输出：实时推送 LLM 生成的内容
+    - 进度回调：显示思考过程和工具调用进度
+    - 使用统计：记录 LLM token 使用情况
+    """
 
     def __init__(
         self,
@@ -64,52 +77,71 @@ class _LoopHook(AgentHook):
         message_id: str | None = None,
     ) -> None:
         super().__init__(reraise=True)
-        self._loop = agent_loop
-        self._on_progress = on_progress
-        self._on_stream = on_stream
-        self._on_stream_end = on_stream_end
-        self._channel = channel
-        self._chat_id = chat_id
-        self._message_id = message_id
-        self._stream_buf = ""
+        self._loop = agent_loop  # 引用主循环实例
+        self._on_progress = on_progress  # 进度回调函数
+        self._on_stream = on_stream  # 流式输出回调
+        self._on_stream_end = on_stream_end  # 流结束回调
+        self._channel = channel  # 消息通道
+        self._chat_id = chat_id  # 聊天 ID
+        self._message_id = message_id  # 消息 ID
+        self._stream_buf = ""  # 流式缓冲区
 
     def wants_streaming(self) -> bool:
+        """是否需要流式输出"""
         return self._on_stream is not None
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+        """
+        流式输出回调 - 增量推送 LLM 生成的文本
+        """
         from nanobot.utils.helpers import strip_think
 
+        # 剥除思考内容，获取纯净文本
         prev_clean = strip_think(self._stream_buf)
         self._stream_buf += delta
         new_clean = strip_think(self._stream_buf)
+        # 计算增量内容
         incremental = new_clean[len(prev_clean) :]
         if incremental and self._on_stream:
             await self._on_stream(incremental)
 
     async def on_stream_end(self, context: AgentHookContext, *, resuming: bool) -> None:
+        """
+        流结束回调
+        resuming: 是否恢复（工具调用后继续流式输出）
+        """
         if self._on_stream_end:
             await self._on_stream_end(resuming=resuming)
         self._stream_buf = ""
 
     async def before_iteration(self, context: AgentHookContext) -> None:
+        """每次 LLM 调用前更新迭代计数"""
         self._loop._current_iteration = context.iteration
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
+        """
+        执行工具前回调 - 显示思考进度和工具调用信息
+        """
         if self._on_progress:
             if not self._on_stream:
+                # 显示 LLM 的思考内容
                 thought = self._loop._strip_think(
                     context.response.content if context.response else None
                 )
                 if thought:
                     await self._on_progress(thought)
+            # 显示工具调用提示
             tool_hint = self._loop._strip_think(self._loop._tool_hint(context.tool_calls))
             await self._on_progress(tool_hint, tool_hint=True)
+        # 记录工具调用日志
         for tc in context.tool_calls:
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
+        # 设置工具上下文（用于消息路由）
         self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
+        """每次 LLM 调用后记录 token 使用统计"""
         u = context.usage or {}
         logger.debug(
             "LLM usage: prompt={} completion={} cached={}",
@@ -119,85 +151,93 @@ class _LoopHook(AgentHook):
         )
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
+        """最终内容处理 - 剥除思考块"""
         return self._loop._strip_think(content)
 
 
 class AgentLoop:
     """
-    The agent loop is the core processing engine.
-
-    It:
-    1. Receives messages from the bus
-    2. Builds context with history, memory, skills
-    3. Calls the LLM
-    4. Executes tool calls
-    5. Sends responses back
+    智能体循环 - 核心处理引擎
+    
+    工作流程：
+    1. 从消息总线接收消息
+    2. 构建上下文（历史、记忆、技能）
+    3. 调用 LLM 生成响应
+    4. 执行工具调用
+    5. 将响应发送回消息总线
     """
 
+    # 运行时检查点键 - 用于保存/恢复中断的会话状态
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
+    # 待处理用户轮次键 - 标记用户消息是否已保存
     _PENDING_USER_TURN_KEY = "pending_user_turn"
 
     def __init__(
         self,
-        bus: MessageBus,
-        provider: LLMProvider,
-        workspace: Path,
-        model: str | None = None,
-        max_iterations: int | None = None,
-        context_window_tokens: int | None = None,
-        context_block_limit: int | None = None,
-        max_tool_result_chars: int | None = None,
-        provider_retry_mode: str = "standard",
-        web_config: WebToolsConfig | None = None,
-        exec_config: ExecToolConfig | None = None,
-        cron_service: CronService | None = None,
-        restrict_to_workspace: bool = False,
-        session_manager: SessionManager | None = None,
-        mcp_servers: dict | None = None,
-        channels_config: ChannelsConfig | None = None,
-        timezone: str | None = None,
-        session_ttl_minutes: int = 0,
-        hooks: list[AgentHook] | None = None,
-        unified_session: bool = False,
-        disabled_skills: list[str] | None = None,
-        tools_config: ToolsConfig | None = None,
+        bus: MessageBus,  # 消息总线
+        provider: LLMProvider,  # LLM 提供商
+        workspace: Path,  # 工作目录
+        model: str | None = None,  # 模型名称
+        max_iterations: int | None = None,  # 最大迭代次数
+        context_window_tokens: int | None = None,  # 上下文窗口 token 数
+        context_block_limit: int | None = None,  # 上下文块限制
+        max_tool_result_chars: int | None = None,  # 工具结果最大字符数
+        provider_retry_mode: str = "standard",  # 重试模式
+        web_config: WebToolsConfig | None = None,  # Web 工具配置
+        exec_config: ExecToolConfig | None = None,  # 执行工具配置
+        cron_service: CronService | None = None,  # 定时任务服务
+        restrict_to_workspace: bool = False,  # 是否限制在工作目录
+        session_manager: SessionManager | None = None,  # 会话管理器
+        mcp_servers: dict | None = None,  # MCP 服务器配置
+        channels_config: ChannelsConfig | None = None,  # 通道配置
+        timezone: str | None = None,  # 时区
+        session_ttl_minutes: int = 0,  # 会话过期时间（分钟）
+        hooks: list[AgentHook] | None = None,  # 自定义钩子
+        unified_session: bool = False,  # 是否统一会话
+        disabled_skills: list[str] | None = None,  # 禁用的技能
+        tools_config: ToolsConfig | None = None,  # 工具配置
     ):
         from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
 
         _tc = tools_config or ToolsConfig()
         defaults = AgentDefaults()
-        self.bus = bus
-        self.channels_config = channels_config
-        self.provider = provider
-        self.workspace = workspace
-        self.model = model or provider.get_default_model()
-        self.max_iterations = (
+        self.bus = bus  # 消息总线
+        self.channels_config = channels_config  # 通道配置
+        self.provider = provider  # LLM 提供商
+        self.workspace = workspace  # 工作目录
+        self.model = model or provider.get_default_model()  # 模型名称
+        self.max_iterations = (  # 最大迭代次数
             max_iterations if max_iterations is not None else defaults.max_tool_iterations
         )
-        self.context_window_tokens = (
+        self.context_window_tokens = (  # 上下文窗口 token 数
             context_window_tokens
             if context_window_tokens is not None
             else defaults.context_window_tokens
         )
-        self.context_block_limit = context_block_limit
-        self.max_tool_result_chars = (
+        self.context_block_limit = context_block_limit  # 上下文块限制
+        self.max_tool_result_chars = (  # 工具结果最大字符数
             max_tool_result_chars
             if max_tool_result_chars is not None
             else defaults.max_tool_result_chars
         )
-        self.provider_retry_mode = provider_retry_mode
-        self.web_config = web_config or WebToolsConfig()
-        self.exec_config = exec_config or ExecToolConfig()
-        self.cron_service = cron_service
-        self.restrict_to_workspace = restrict_to_workspace
-        self._start_time = time.time()
-        self._last_usage: dict[str, int] = {}
-        self._extra_hooks: list[AgentHook] = hooks or []
+        self.provider_retry_mode = provider_retry_mode  # 重试模式
+        self.web_config = web_config or WebToolsConfig()  # Web 工具配置
+        self.exec_config = exec_config or ExecToolConfig()  # 执行工具配置
+        self.cron_service = cron_service  # 定时任务服务
+        self.restrict_to_workspace = restrict_to_workspace  # 限制工作目录
+        self._start_time = time.time()  # 启动时间
+        self._last_usage: dict[str, int] = {}  # 上次使用统计
+        self._extra_hooks: list[AgentHook] = hooks or []  # 自定义钩子
 
+        # 上下文构建器 - 构建 LLM 提示词
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        # 会话管理器 - 管理对话历史
         self.sessions = session_manager or SessionManager(workspace)
+        # 工具注册表 - 管理所有可用工具
         self.tools = ToolRegistry()
+        # 运行器 - 执行 LLM 调用和工具
         self.runner = AgentRunner(provider)
+        # 子代理管理器 - 管理子代理
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -209,24 +249,27 @@ class AgentLoop:
             restrict_to_workspace=restrict_to_workspace,
             disabled_skills=disabled_skills,
         )
-        self._unified_session = unified_session
-        self._running = False
-        self._mcp_servers = mcp_servers or {}
-        self._mcp_stacks: dict[str, AsyncExitStack] = {}
-        self._mcp_connected = False
-        self._mcp_connecting = False
-        self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
+        self._unified_session = unified_session  # 统一会话标志
+        self._running = False  # 运行状态标志
+        self._mcp_servers = mcp_servers or {}  # MCP 服务器配置
+        self._mcp_stacks: dict[str, AsyncExitStack] = {}  # MCP 服务器连接栈
+        self._mcp_connected = False  # MCP 连接状态
+        self._mcp_connecting = False  # MCP 连接中状态
+        # 活跃任务字典 - session_key -> 任务列表
+        self._active_tasks: dict[str, list[asyncio.Task]] = {}
+        # 后台任务列表
         self._background_tasks: list[asyncio.Task] = []
+        # 会话锁字典 - 保证同一会话串行处理
         self._session_locks: dict[str, asyncio.Lock] = {}
-        # Per-session pending queues for mid-turn message injection.
-        # When a session has an active task, new messages for that session
-        # are routed here instead of creating a new task.
+        # 待处理队列字典 - 用于轮次内消息注入
+        # 当会话有活跃任务时，新消息路由到此处而不是创建新任务
         self._pending_queues: dict[str, asyncio.Queue] = {}
-        # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
+        # 并发限制 - 控制最大并发请求数
         _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
         )
+        # 记忆整合器 - 管理和整合会话历史
         self.consolidator = Consolidator(
             store=self.context.memory,
             provider=provider,
@@ -237,23 +280,26 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
         )
+        # 自动压缩器 - 自动压缩会话历史
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
         )
+        # 梦想模块 - 后台记忆处理
         self.dream = Dream(
             store=self.context.memory,
             provider=provider,
             model=self.model,
         )
+        # 注册默认工具
         self._register_default_tools()
         if _tc.my.enable:
             self.tools.register(MyTool(loop=self, modify_allowed=_tc.my.allow_set))
-        self._runtime_vars: dict[str, Any] = {}
-        self._current_iteration: int = 0
-        self.commands = CommandRouter()
-        register_builtin_commands(self.commands)
+        self._runtime_vars: dict[str, Any] = {}  # 运行时变量
+        self._current_iteration: int = 0  # 当前迭代计数
+        self.commands = CommandRouter()  # 命令路由器
+        register_builtin_commands(self.commands)  # 注册内置命令
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""

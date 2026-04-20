@@ -31,73 +31,146 @@ from nanobot.utils.runtime import (
     repeated_external_lookup_error,
 )
 
+# 默认错误消息 - 当LLM调用失败时返回给用户
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
+# 模型错误占位符 - 当模型返回错误时用于持久化存储
 _PERSISTED_MODEL_ERROR_PLACEHOLDER = "[Assistant reply unavailable due to model error.]"
+# 最大空响应重试次数
 _MAX_EMPTY_RETRIES = 2
+# 最大长度恢复尝试次数
 _MAX_LENGTH_RECOVERIES = 3
+# 每轮最大注入消息数
 _MAX_INJECTIONS_PER_TURN = 3
+# 最大注入循环次数
 _MAX_INJECTION_CYCLES = 5
+# 截断历史的安全缓冲区（token数）
 _SNIP_SAFETY_BUFFER = 1024
+# 微压缩保留的最近消息数
 _MICROCOMPACT_KEEP_RECENT = 10
+# 微压缩的最小字符数阈值
 _MICROCOMPACT_MIN_CHARS = 500
+# 可压缩的工具列表（这些工具的结果可以被简化）
 _COMPACTABLE_TOOLS = frozenset({
     "read_file", "exec", "grep", "glob",
     "web_search", "web_fetch", "list_dir",
 })
+# 缺失工具结果的后备内容
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
 
 
 
+# ============================================================================
+# AgentRunSpec — 代理运行配置
+# ============================================================================
+
 @dataclass(slots=True)
 class AgentRunSpec:
-    """Configuration for a single agent execution."""
+    """单次代理运行的配置参数
+    
+    这个数据类包含了运行一个代理所需的所有配置项：
+    - 消息和工具定义
+    - 模型参数
+    - 迭代限制
+    - 回调函数
+    - 错误处理策略
+    """
 
-    initial_messages: list[dict[str, Any]]
-    tools: ToolRegistry
-    model: str
-    max_iterations: int
-    max_tool_result_chars: int
-    temperature: float | None = None
-    max_tokens: int | None = None
-    reasoning_effort: str | None = None
-    hook: AgentHook | None = None
-    error_message: str | None = _DEFAULT_ERROR_MESSAGE
-    max_iterations_message: str | None = None
-    concurrent_tools: bool = False
-    fail_on_tool_error: bool = False
-    workspace: Path | None = None
-    session_key: str | None = None
-    context_window_tokens: int | None = None
-    context_block_limit: int | None = None
-    provider_retry_mode: str = "standard"
-    progress_callback: Any | None = None
-    retry_wait_callback: Any | None = None
-    checkpoint_callback: Any | None = None
-    injection_callback: Any | None = None
+    initial_messages: list[dict[str, Any]]  # 初始消息列表（系统提示+历史）
+    tools: ToolRegistry  # 工具注册表
+    model: str  # 模型名称
+    max_iterations: int  # 最大迭代次数
+    max_tool_result_chars: int  # 工具结果最大字符数
+    temperature: float | None = None  # 温度参数
+    max_tokens: int | None = None  # 最大生成token数
+    reasoning_effort: str | None = None  # 推理 effort (用于推理模型)
+    hook: AgentHook | None = None  # 生命周期钩子
+    error_message: str | None = _DEFAULT_ERROR_MESSAGE  # 自定义错误消息
+    max_iterations_message: str | None = None  # 达到最大迭代时的消息
+    concurrent_tools: bool = False  # 是否允许并发执行工具
+    fail_on_tool_error: bool = False  # 工具错误是否终止运行
+    workspace: Path | None = None  # 工作目录
+    session_key: str | None = None  # 会话key
+    context_window_tokens: int | None = None  # 上下文窗口大小
+    context_block_limit: int | None = None  # 上下文块限制
+    provider_retry_mode: str = "standard"  # 重试模式
+    progress_callback: Any | None = None  # 进度回调
+    retry_wait_callback: Any | None = None  # 重试等待回调
+    checkpoint_callback: Any | None = None  # 检查点回调
+    injection_callback: Any | None = None  # 消息注入回调
 
+
+# ============================================================================
+# AgentRunResult — 代理运行结果
+# ============================================================================
 
 @dataclass(slots=True)
 class AgentRunResult:
-    """Outcome of a shared agent execution."""
+    """共享代理运行的结果
+    
+    包含代理执行完成后的所有输出信息：
+    - 最终响应内容
+    - 完整的消息历史
+    - 使用的工具列表
+    - token使用统计
+    - 停止原因
+    - 错误信息
+    - 工具事件日志
+    """
 
-    final_content: str | None
-    messages: list[dict[str, Any]]
-    tools_used: list[str] = field(default_factory=list)
-    usage: dict[str, int] = field(default_factory=dict)
-    stop_reason: str = "completed"
-    error: str | None = None
-    tool_events: list[dict[str, str]] = field(default_factory=list)
-    had_injections: bool = False
+    final_content: str | None  # 最终响应文本
+    messages: list[dict[str, Any]]  # 完整消息列表
+    tools_used: list[str] = field(default_factory=list)  # 使用过的工具列表
+    usage: dict[str, int] = field(default_factory=dict)  # token使用统计
+    stop_reason: str = "completed"  # 停止原因
+    error: str | None = None  # 错误信息
+    tool_events: list[dict[str, str]] = field(default_factory=list)  # 工具事件列表
+    had_injections: bool = False  # 是否有注入消息
 
+
+# ============================================================================
+# AgentRunner — 代理运行器核心
+# ============================================================================
 
 class AgentRunner:
-    """Run a tool-capable LLM loop without product-layer concerns."""
+    """工具型LLM代理的执行循环（不含产品层逻辑）
+    
+    这是nanobot的核心执行引擎，负责：
+    1. 与LLM provider交互
+    2. 执行工具调用
+    3. 管理消息上下文
+    4. 处理各种异常情况（空响应、长度限制、工具错误等）
+    5. 支持生命周期钩子
+    
+    核心循环流程：
+    1. 准备消息（上下文治理：压缩、截断等）
+    2. 调用LLM获取响应
+    3. 如果有工具调用，执行工具
+    4. 检查是否需要继续（注入、空响应恢复等）
+    5. 返回最终结果
+    """
 
     def __init__(self, provider: LLMProvider):
+        """初始化运行器
+        
+        Args:
+            provider: LLM provider实例
+        """
         self.provider = provider
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
+        """合并两条消息内容
+        
+        用于合并连续的角色相同的消息。
+        如果两边都是字符串，直接拼接；否则转换为消息块后合并。
+        
+        Args:
+            left: 左侧消息内容
+            right: 右侧消息内容
+            
+        Returns:
+            合并后的消息内容
+        """
         if isinstance(left, str) and isinstance(right, str):
             return f"{left}\n\n{right}" if left else right
 
@@ -119,7 +192,15 @@ class AgentRunner:
         messages: list[dict[str, Any]],
         injections: list[dict[str, Any]],
     ) -> None:
-        """Append injected user messages while preserving role alternation."""
+        """追加注入的用户消息，同时保持角色交替
+        
+        如果最后一条消息和注入消息都是user角色，合并内容；
+        否则作为新消息追加。
+        
+        Args:
+            messages: 消息列表
+            injections: 要注入的消息列表
+        """
         for injection in injections:
             if (
                 messages
@@ -145,12 +226,21 @@ class AgentRunner:
         phase: str = "after error",
         iteration: int | None = None,
     ) -> tuple[bool, int]:
-        """Drain pending injections. Returns (should_continue, updated_cycles).
-
-        If injections are found and we haven't exceeded _MAX_INJECTION_CYCLES,
-        append them to *messages* (and emit a checkpoint if *assistant_message*
-        and *iteration* are both provided) and return (True, cycles+1) so the
-        caller continues the iteration loop.  Otherwise return (False, cycles).
+        """处理待注入的消息
+        
+        如果有待注入的消息且未超过最大循环次数，
+        将其追加到消息列表并返回继续标志。
+        
+        Args:
+            spec: 运行配置
+            messages: 消息列表
+            assistant_message: 助手消息（可选）
+            injection_cycles: 当前注入循环次数
+            phase: 当前阶段名称（用于日志）
+            iteration: 当前迭代次数
+            
+        Returns:
+            (是否继续, 更新后的循环次数)
         """
         if injection_cycles >= _MAX_INJECTION_CYCLES:
             return False, injection_cycles
@@ -180,12 +270,16 @@ class AgentRunner:
         return True, injection_cycles
 
     async def _drain_injections(self, spec: AgentRunSpec) -> list[dict[str, Any]]:
-        """Drain pending user messages via the injection callback.
-
-        Returns normalized user messages (capped by
-        ``_MAX_INJECTIONS_PER_TURN``), or an empty list when there is
-        nothing to inject. Messages beyond the cap are logged so they
-        are not silently lost.
+        """通过注入回调获取待处理的用户消息
+        
+        从injection_callback获取待注入的消息，
+        规范化后返回（最多_MAX_INJECTIONS_PER_TURN条）。
+        
+        Args:
+            spec: 运行配置
+            
+        Returns:
+            规范化的用户消息列表
         """
         if spec.injection_callback is None:
             return []
@@ -225,6 +319,22 @@ class AgentRunner:
         return injected_messages
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
+        """运行代理主循环
+        
+        这是核心执行方法，包含完整的代理循环逻辑：
+        1. 迭代准备：上下文治理（清理、压缩、截断）
+        2. LLM请求：调用模型获取响应
+        3. 工具执行：如果有工具调用则执行
+        4. 错误处理：空响应恢复、长度恢复、工具错误处理
+        5. 注入处理：处理待注入的消息
+        6. 钩子调用：在各个阶段调用生命周期钩子
+        
+        Args:
+            spec: 运行配置
+            
+        Returns:
+            代理运行结果
+        """
         hook = spec.hook or AgentHook()
         messages = list(spec.initial_messages)
         final_content: str | None = None
@@ -241,16 +351,14 @@ class AgentRunner:
 
         for iteration in range(spec.max_iterations):
             try:
-                # Keep the persisted conversation untouched. Context governance
-                # may repair or compact historical messages for the model, but
-                # those synthetic edits must not shift the append boundary used
-                # later when the caller saves only the new turn.
+                # 保持持久化对话不变。上下文治理可能修复或压缩历史消息，
+                # 但这些合成编辑不能改变追加边界（调用者保存新回合时使用）
                 messages_for_model = self._drop_orphan_tool_results(messages)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 messages_for_model = self._microcompact(messages_for_model)
                 messages_for_model = self._apply_tool_result_budget(spec, messages_for_model)
                 messages_for_model = self._snip_history(spec, messages_for_model)
-                # Snipping may have created new orphans; clean them up.
+                # 截断可能产生新的孤立结果，清理它们
                 messages_for_model = self._drop_orphan_tool_results(messages_for_model)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
             except Exception as exc:
@@ -265,8 +373,12 @@ class AgentRunner:
                     messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 except Exception:
                     messages_for_model = messages
+            
+            # 创建钩子上下文并调用 before_iteration
             context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
+            
+            # 调用LLM获取响应
             response = await self._request_model(spec, messages_for_model, hook, context)
             raw_usage = self._usage_dict(response.usage)
             context.response = response
@@ -274,10 +386,12 @@ class AgentRunner:
             context.tool_calls = list(response.tool_calls)
             self._accumulate_usage(usage, raw_usage)
 
+            # 如果需要执行工具
             if response.should_execute_tools:
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
 
+                # 构建助手消息（包含工具调用）
                 assistant_message = build_assistant_message(
                     response.content or "",
                     tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
@@ -300,6 +414,7 @@ class AgentRunner:
 
                 await hook.before_execute_tools(context)
 
+                # 执行工具
                 results, new_events, fatal_error = await self._execute_tools(
                     spec,
                     response.tool_calls,
@@ -323,6 +438,8 @@ class AgentRunner:
                     }
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
+                
+                # 处理工具执行错误
                 if fatal_error is not None:
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     final_content = error
@@ -340,6 +457,7 @@ class AgentRunner:
                         had_injections = True
                         continue
                     break
+
                 await self._emit_checkpoint(
                     spec,
                     {
@@ -353,7 +471,7 @@ class AgentRunner:
                 )
                 empty_content_retries = 0
                 length_recovery_count = 0
-                # Checkpoint 1: drain injections after tools, before next LLM call
+                # 检查点1：工具执行后、下一轮LLM调用前排出注入
                 _drained, injection_cycles = await self._try_drain_injections(
                     spec, messages, None, injection_cycles,
                     phase="after tool execution",
@@ -363,6 +481,7 @@ class AgentRunner:
                 await hook.after_iteration(context)
                 continue
 
+            # 如果有工具调用但finish_reason不允许执行
             if response.has_tool_calls:
                 logger.warning(
                     "Ignoring tool calls under finish_reason='{}' for {}",
@@ -370,7 +489,10 @@ class AgentRunner:
                     spec.session_key or "default",
                 )
 
+            # 最终内容处理（钩子）
             clean = hook.finalize_content(context, response.content)
+            
+            # 处理空响应
             if response.finish_reason != "error" and is_blank_text(clean):
                 empty_content_retries += 1
                 if empty_content_retries < _MAX_EMPTY_RETRIES:
@@ -393,6 +515,7 @@ class AgentRunner:
                 )
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
+                # 请求最终化重试
                 response = await self._request_finalization_retry(spec, messages_for_model)
                 retry_usage = self._usage_dict(response.usage)
                 self._accumulate_usage(usage, retry_usage)
@@ -402,6 +525,7 @@ class AgentRunner:
                 context.tool_calls = list(response.tool_calls)
                 clean = hook.finalize_content(context, response.content)
 
+            # 处理输出截断（长度限制）
             if response.finish_reason == "length" and not is_blank_text(clean):
                 length_recovery_count += 1
                 if length_recovery_count <= _MAX_LENGTH_RECOVERIES:
@@ -419,10 +543,12 @@ class AgentRunner:
                         reasoning_content=response.reasoning_content,
                         thinking_blocks=response.thinking_blocks,
                     ))
+                    # 添加长度恢复消息让模型继续
                     messages.append(build_length_recovery_message())
                     await hook.after_iteration(context)
                     continue
 
+            # 构建助手消息
             assistant_message: dict[str, Any] | None = None
             if response.finish_reason != "error" and not is_blank_text(clean):
                 assistant_message = build_assistant_message(
@@ -431,9 +557,7 @@ class AgentRunner:
                     thinking_blocks=response.thinking_blocks,
                 )
 
-            # Check for mid-turn injections BEFORE signaling stream end.
-            # If injections are found we keep the stream alive (resuming=True)
-            # so streaming channels don't prematurely finalize the card.
+            # 检查注入（在流结束前）
             should_continue, injection_cycles = await self._try_drain_injections(
                 spec, messages, assistant_message, injection_cycles,
                 phase="after final response",
@@ -449,6 +573,7 @@ class AgentRunner:
                 await hook.after_iteration(context)
                 continue
 
+            # 处理LLM错误
             if response.finish_reason == "error":
                 final_content = clean or spec.error_message or _DEFAULT_ERROR_MESSAGE
                 stop_reason = "error"
@@ -466,6 +591,8 @@ class AgentRunner:
                     had_injections = True
                     continue
                 break
+            
+            # 处理空最终响应
             if is_blank_text(clean):
                 final_content = EMPTY_FINAL_RESPONSE_MESSAGE
                 stop_reason = "empty_final_response"
@@ -484,6 +611,7 @@ class AgentRunner:
                     continue
                 break
 
+            # 正常完成，添加助手消息
             messages.append(assistant_message or build_assistant_message(
                 clean,
                 reasoning_content=response.reasoning_content,
@@ -506,6 +634,7 @@ class AgentRunner:
             await hook.after_iteration(context)
             break
         else:
+            # 达到最大迭代次数
             stop_reason = "max_iterations"
             if spec.max_iterations_message:
                 final_content = spec.max_iterations_message.format(
@@ -518,11 +647,7 @@ class AgentRunner:
                     max_iterations=spec.max_iterations,
                 )
             self._append_final_message(messages, final_content)
-            # Drain any remaining injections so they are appended to the
-            # conversation history instead of being re-published as
-            # independent inbound messages by _dispatch's finally block.
-            # We ignore should_continue here because the for-loop has already
-            # exhausted all iterations.
+            # 排出剩余注入
             drained_after_max_iterations, injection_cycles = await self._try_drain_injections(
                 spec, messages, None, injection_cycles,
                 phase="after max_iterations",
@@ -548,6 +673,18 @@ class AgentRunner:
         *,
         tools: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
+        """构建LLM请求参数
+        
+        根据spec配置构建完整的请求参数字典。
+        
+        Args:
+            spec: 运行配置
+            messages: 消息列表
+            tools: 工具定义列表
+            
+        Returns:
+            请求参数字典
+        """
         kwargs: dict[str, Any] = {
             "messages": messages,
             "tools": tools,
@@ -570,6 +707,19 @@ class AgentRunner:
         hook: AgentHook,
         context: AgentHookContext,
     ):
+        """请求LLM获取响应
+        
+        根据hook是否需要流式输出，选择流式或非流式调用。
+        
+        Args:
+            spec: 运行配置
+            messages: 消息列表
+            hook: 钩子实例
+            context: 钩子上下文
+            
+        Returns:
+            LLM响应对象
+        """
         kwargs = self._build_request_kwargs(
             spec,
             messages,
@@ -590,6 +740,17 @@ class AgentRunner:
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
     ):
+        """请求最终化重试（用于空响应恢复）
+        
+        当LLM返回空响应时，添加特殊消息请求模型生成最终响应。
+        
+        Args:
+            spec: 运行配置
+            messages: 消息列表
+            
+        Returns:
+            LLM响应对象
+        """
         retry_messages = list(messages)
         retry_messages.append(build_finalization_retry_message())
         kwargs = self._build_request_kwargs(spec, retry_messages, tools=None)
@@ -597,6 +758,14 @@ class AgentRunner:
 
     @staticmethod
     def _usage_dict(usage: dict[str, Any] | None) -> dict[str, int]:
+        """转换usage为整数字典
+        
+        Args:
+            usage: 原始usage字典
+            
+        Returns:
+            整数类型的usage字典
+        """
         if not usage:
             return {}
         result: dict[str, int] = {}
@@ -609,11 +778,26 @@ class AgentRunner:
 
     @staticmethod
     def _accumulate_usage(target: dict[str, int], addition: dict[str, int]) -> None:
+        """累加usage到目标字典
+        
+        Args:
+            target: 目标字典
+            addition: 要累加的字典
+        """
         for key, value in addition.items():
             target[key] = target.get(key, 0) + value
 
     @staticmethod
     def _merge_usage(left: dict[str, int], right: dict[str, int]) -> dict[str, int]:
+        """合并两个usage字典
+        
+        Args:
+            left: 左侧字典
+            right: 右侧字典
+            
+        Returns:
+            合并后的字典
+        """
         merged = dict(left)
         for key, value in right.items():
             merged[key] = merged.get(key, 0) + value
@@ -625,6 +809,18 @@ class AgentRunner:
         tool_calls: list[ToolCallRequest],
         external_lookup_counts: dict[str, int],
     ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
+        """执行工具调用
+        
+        将工具调用分成批次执行（如果允许并发）。
+        
+        Args:
+            spec: 运行配置
+            tool_calls: 工具调用请求列表
+            external_lookup_counts: 外部查找计数（用于防止重复请求）
+            
+        Returns:
+            (结果列表, 事件列表, 致命错误)
+        """
         batches = self._partition_tool_batches(spec, tool_calls)
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
         for batch in batches:
@@ -653,7 +849,20 @@ class AgentRunner:
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None]:
+        """运行单个工具
+        
+        执行工具调用，处理各种错误情况。
+        
+        Args:
+            spec: 运行配置
+            tool_call: 工具调用请求
+            external_lookup_counts: 外部查找计数
+            
+        Returns:
+            (结果, 事件, 错误)
+        """
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
+        # 检查重复的外部查找
         lookup_error = repeated_external_lookup_error(
             tool_call.name,
             tool_call.arguments,
@@ -668,6 +877,8 @@ class AgentRunner:
             if spec.fail_on_tool_error:
                 return lookup_error + _HINT, event, RuntimeError(lookup_error)
             return lookup_error + _HINT, event, None
+        
+        # 准备工具调用
         prepare_call = getattr(spec.tools, "prepare_call", None)
         tool, params, prep_error = None, tool_call.arguments, None
         if callable(prepare_call):
@@ -684,6 +895,8 @@ class AgentRunner:
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
             return prep_error + _HINT, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
+        
+        # 执行工具
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -701,6 +914,7 @@ class AgentRunner:
                 return f"Error: {type(exc).__name__}: {exc}", event, exc
             return f"Error: {type(exc).__name__}: {exc}", event, None
 
+        # 处理错误结果
         if isinstance(result, str) and result.startswith("Error"):
             event = {
                 "name": tool_call.name,
@@ -711,6 +925,7 @@ class AgentRunner:
                 return result + _HINT, event, RuntimeError(result)
             return result + _HINT, event, None
 
+        # 构建成功事件
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()
         if not detail:
@@ -724,12 +939,29 @@ class AgentRunner:
         spec: AgentRunSpec,
         payload: dict[str, Any],
     ) -> None:
+        """发出检查点事件
+        
+        如果配置了checkpoint_callback，调用它。
+        
+        Args:
+            spec: 运行配置
+            payload: 检查点数据
+        """
         callback = spec.checkpoint_callback
         if callback is not None:
             await callback(payload)
 
     @staticmethod
     def _append_final_message(messages: list[dict[str, Any]], content: str | None) -> None:
+        """追加最终消息到列表
+        
+        如果最后一条是assistant消息且没有tool_calls，替换内容；
+        否则追加新消息。
+        
+        Args:
+            messages: 消息列表
+            content: 消息内容
+        """
         if not content:
             return
         if (
@@ -745,6 +977,11 @@ class AgentRunner:
 
     @staticmethod
     def _append_model_error_placeholder(messages: list[dict[str, Any]]) -> None:
+        """追加模型错误占位符
+        
+        Args:
+            messages: 消息列表
+        """
         if messages and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
             return
         messages.append(build_assistant_message(_PERSISTED_MODEL_ERROR_PLACEHOLDER))
@@ -756,6 +993,19 @@ class AgentRunner:
         tool_name: str,
         result: Any,
     ) -> Any:
+        """规范化工具结果
+        
+        确保结果非空，可能持久化到文件，并截断过长结果。
+        
+        Args:
+            spec: 运行配置
+            tool_call_id: 工具调用ID
+            tool_name: 工具名称
+            result: 原始结果
+            
+        Returns:
+            规范化后的结果
+        """
         result = ensure_nonempty_tool_result(tool_name, result)
         try:
             content = maybe_persist_tool_result(
@@ -781,7 +1031,16 @@ class AgentRunner:
     def _drop_orphan_tool_results(
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Drop tool results that have no matching assistant tool_call earlier in the history."""
+        """删除孤立的工具结果
+        
+        移除没有对应assistant消息的tool结果。
+        
+        Args:
+            messages: 消息列表
+            
+        Returns:
+            清理后的消息列表
+        """
         declared: set[str] = set()
         updated: list[dict[str, Any]] | None = None
         for idx, msg in enumerate(messages):
@@ -807,7 +1066,17 @@ class AgentRunner:
     def _backfill_missing_tool_results(
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Insert synthetic error results for orphaned tool_use blocks."""
+        """为孤立的tool_use块插入合成的错误结果
+        
+        如果assistant消息声明了工具调用但没有对应结果，
+        插入一个错误结果占位。
+        
+        Args:
+            messages: 消息列表
+            
+        Returns:
+            处理后的消息列表
+        """
         declared: list[tuple[int, str, str]] = []  # (assistant_idx, call_id, name)
         fulfilled: set[str] = set()
         for idx, msg in enumerate(messages):
@@ -846,7 +1115,16 @@ class AgentRunner:
 
     @staticmethod
     def _microcompact(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Replace old compactable tool results with one-line summaries."""
+        """用单行摘要替换旧的可压缩工具结果
+        
+        减少长工具输出占用的上下文空间。
+        
+        Args:
+            messages: 消息列表
+            
+        Returns:
+            处理后的消息列表
+        """
         compactable_indices: list[int] = []
         for idx, msg in enumerate(messages):
             if msg.get("role") == "tool" and msg.get("name") in _COMPACTABLE_TOOLS:
@@ -875,6 +1153,17 @@ class AgentRunner:
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        """应用工具结果预算限制
+        
+        规范化所有工具结果，确保不超过限制。
+        
+        Args:
+            spec: 运行配置
+            messages: 消息列表
+            
+        Returns:
+            处理后的消息列表
+        """
         updated = messages
         for idx, message in enumerate(messages):
             if message.get("role") != "tool":
@@ -896,6 +1185,18 @@ class AgentRunner:
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        """截断历史消息以适应上下文窗口
+        
+        如果消息超过上下文窗口限制，从后向前保留消息，
+        直到满足预算。
+        
+        Args:
+            spec: 运行配置
+            messages: 消息列表
+            
+        Returns:
+            截断后的消息列表
+        """
         if not messages or not spec.context_window_tokens:
             return messages
 
@@ -941,15 +1242,11 @@ class AgentRunner:
                     kept = kept[i:]
                     break
             else:
-                # Recover nearest user message from outside the kept window;
-                # GLM rejects system→assistant (error 1214).  Budget is
-                # intentionally exceeded — oversized beats invalid.
+                # 从保留窗口外恢复最近的用户消息
                 for idx in range(len(non_system) - 1, -1, -1):
                     if non_system[idx].get("role") == "user":
                         kept = non_system[idx:]
                         break
-                # If no user exists at all, _enforce_role_alternation
-                # will insert a synthetic one as a safety net.
             start = find_legal_message_start(kept)
             if start:
                 kept = kept[start:]
@@ -965,6 +1262,17 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_calls: list[ToolCallRequest],
     ) -> list[list[ToolCallRequest]]:
+        """将工具调用分区为批次
+        
+        如果concurrent_tools为True，将并发安全的工具放在同一批次。
+        
+        Args:
+            spec: 运行配置
+            tool_calls: 工具调用列表
+            
+        Returns:
+            工具调用批次列表
+        """
         if not spec.concurrent_tools:
             return [[tool_call] for tool_call in tool_calls]
 
@@ -984,4 +1292,3 @@ class AgentRunner:
         if current:
             batches.append(current)
         return batches
-
