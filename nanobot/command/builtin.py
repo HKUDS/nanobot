@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from typing import Any
 
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
@@ -80,6 +81,22 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         task_count += loop.subagents.get_running_count_by_session(ctx.key)
     except Exception:
         pass
+
+    # Calculate context breakdown (best-effort, never blocks the response)
+    context_breakdown: dict[str, Any] | None = None
+    try:
+        from nanobot.utils.helpers import calculate_context_breakdown
+        context_breakdown = calculate_context_breakdown(
+            context_builder=loop.context,
+            session=session,
+            loop=loop,
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+        )
+    except Exception as e:
+        from loguru import logger
+        logger.warning("Failed to calculate context breakdown: {}", e)
+
     return OutboundMessage(
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
@@ -94,6 +111,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             max_completion_tokens=getattr(
                 getattr(loop.provider, "generation", None), "max_tokens", 8192
             ),
+            context_breakdown=context_breakdown,
         ),
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
