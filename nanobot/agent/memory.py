@@ -221,10 +221,26 @@ class MemoryStore:
     # -- history.jsonl — append-only, JSONL format ---------------------------
 
     def append_history(self, entry: str) -> int:
-        """Append *entry* to history.jsonl and return its auto-incrementing cursor."""
+        """Append *entry* to history.jsonl and return its auto-incrementing cursor.
+
+        Entries are passed through `strip_think` to drop template-level leaks
+        (e.g. unclosed `<think` prefixes, `<channel|>` markers) before being
+        persisted. If the cleaned content is empty but the raw entry wasn't,
+        the record is persisted with an empty string rather than falling back
+        to the raw leak — otherwise `strip_think`'s guarantees would be
+        undone by history replay / consolidation downstream.
+        """
         cursor = self._next_cursor()
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-        record = {"cursor": cursor, "timestamp": ts, "content": strip_think(entry.rstrip()) or entry.rstrip()}
+        raw = entry.rstrip()
+        content = strip_think(raw)
+        if raw and not content:
+            logger.debug(
+                "history entry {} stripped to empty (likely template leak); "
+                "persisting empty content to avoid re-polluting context",
+                cursor,
+            )
+        record = {"cursor": cursor, "timestamp": ts, "content": content}
         with open(self.history_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
         self._cursor_file.write_text(str(cursor), encoding="utf-8")
