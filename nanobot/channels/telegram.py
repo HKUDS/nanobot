@@ -26,6 +26,11 @@ from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
+# Telegram's actual API limit is 4096; we split raw markdown at 4000 as a
+# safety margin for mid-stream edits (plain text).  For _stream_end, we
+# convert to HTML first and then split at the true 4096-char boundary so
+# the final rendered message never overflows.
+TELEGRAM_HTML_MAX_LEN = 4096
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
 
 
@@ -564,12 +569,13 @@ class TelegramChannel(BaseChannel):
             thread_kwargs = {}
             if message_thread_id := meta.get("message_thread_id"):
                 thread_kwargs["message_thread_id"] = message_thread_id
-            html = _markdown_to_telegram_html(buf.text)
-            if len(html) <= 4096:
+            raw_text = buf.text
+            html = _markdown_to_telegram_html(raw_text)
+            if len(html) <= TELEGRAM_HTML_MAX_LEN:
                 primary_html = html
                 extra_html_chunks = []
             else:
-                html_chunks = split_message(html, 4096)
+                html_chunks = split_message(html, TELEGRAM_HTML_MAX_LEN)
                 primary_html = html_chunks[0]
                 extra_html_chunks = html_chunks[1:]
             try:
@@ -587,11 +593,13 @@ class TelegramChannel(BaseChannel):
                     self._stream_bufs.pop(chat_id, None)
                     return
                 logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
+                # Fall back to raw markdown (not HTML) so users don't see raw tags.
+                primary_plain = split_message(raw_text, TELEGRAM_MAX_MESSAGE_LEN)[0] if len(raw_text) > TELEGRAM_MAX_MESSAGE_LEN else raw_text
                 try:
                     await self._call_with_retry(
                         self._app.bot.edit_message_text,
                         chat_id=int_chat_id, message_id=buf.message_id,
-                        text=primary_html,
+                        text=primary_plain,
                     )
                 except Exception as e2:
                     if self._is_not_modified_error(e2):
@@ -600,12 +608,16 @@ class TelegramChannel(BaseChannel):
                         logger.warning("Final stream edit failed: {}", e2)
                         raise  # Let ChannelManager handle retry
             for extra_html_chunk in extra_html_chunks:
-                await self._call_with_retry(
-                    self._app.bot.send_message,
-                    chat_id=int_chat_id, text=extra_html_chunk,
-                    parse_mode="HTML",
-                    **thread_kwargs,
-                )
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.send_message,
+                        chat_id=int_chat_id, text=extra_html_chunk,
+                        parse_mode="HTML",
+                        **thread_kwargs,
+                    )
+                except Exception:
+                    # Fall back to _send_text which handles HTML→plain gracefully.
+                    await self._send_text(int_chat_id, extra_html_chunk)
             self._stream_bufs.pop(chat_id, None)
             return
 
