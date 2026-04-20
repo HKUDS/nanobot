@@ -575,6 +575,39 @@ async def test_send_delta_incremental_edit_treats_not_modified_as_success() -> N
 
 
 @pytest.mark.asyncio
+async def test_send_delta_incremental_edit_splits_oversized_buffer() -> None:
+    """Mid-stream overflow: once buf.text exceeds Telegram's limit, split into
+    chunks, edit the current message with the first chunk, and re-anchor the
+    buffer to a new message for the tail so further deltas keep streaming."""
+    from nanobot.channels.telegram import TELEGRAM_MAX_MESSAGE_LEN
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock()
+    channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
+
+    oversized = "x" * (TELEGRAM_MAX_MESSAGE_LEN + 500)
+    channel._stream_bufs["123"] = _StreamBuf(
+        text=oversized, message_id=7, last_edit=0.0, stream_id="s:0"
+    )
+
+    await channel.send_delta("123", "y", {"_stream_delta": True, "_stream_id": "s:0"})
+
+    channel._app.bot.edit_message_text.assert_called_once()
+    edit_text = channel._app.bot.edit_message_text.call_args.kwargs.get("text", "")
+    assert len(edit_text) <= TELEGRAM_MAX_MESSAGE_LEN
+
+    channel._app.bot.send_message.assert_called_once()
+    buf = channel._stream_bufs["123"]
+    assert buf.message_id == 99
+    assert len(buf.text) <= TELEGRAM_MAX_MESSAGE_LEN
+    assert buf.last_edit > 0.0
+
+
+@pytest.mark.asyncio
 async def test_send_delta_initial_send_keeps_message_in_thread() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
