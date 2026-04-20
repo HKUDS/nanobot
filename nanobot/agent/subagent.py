@@ -52,6 +52,8 @@ class SubagentManager:
         exec_config: "ExecToolConfig | None" = None,
         restrict_to_workspace: bool = False,
         extra_hooks: list[AgentHook] | None = None,
+        reasoning_effort: str | None = None,
+        max_tokens: int | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
 
@@ -64,6 +66,8 @@ class SubagentManager:
         self.exec_config = exec_config or ExecToolConfig()
         self.restrict_to_workspace = restrict_to_workspace
         self._extra_hooks: list[AgentHook] = list(extra_hooks or [])
+        self.reasoning_effort = reasoning_effort
+        self.max_tokens = max_tokens
         self.runner = AgentRunner(provider)
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
@@ -159,6 +163,8 @@ class SubagentManager:
                 max_iterations_message="Task completed but no final response was generated.",
                 error_message=None,
                 fail_on_tool_error=True,
+                reasoning_effort=self.reasoning_effort,
+                max_tokens=self.max_tokens,
             ))
             if result.stop_reason == "tool_error":
                 await self._announce_result(
