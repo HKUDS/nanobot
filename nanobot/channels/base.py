@@ -45,14 +45,12 @@ class BaseChannel(ABC):
         try:
             if self.transcription_provider == "openai":
                 from nanobot.providers.transcription import OpenAITranscriptionProvider
-
                 provider = OpenAITranscriptionProvider(
                     api_key=self.transcription_api_key,
                     api_base=self.transcription_api_base or None,
                 )
             else:
                 from nanobot.providers.transcription import GroqTranscriptionProvider
-
                 provider = GroqTranscriptionProvider(
                     api_key=self.transcription_api_key,
                     api_base=self.transcription_api_base or None,
