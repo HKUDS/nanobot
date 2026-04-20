@@ -922,6 +922,10 @@ def _run_gateway(
             console.print(f"[yellow]Could not open browser ({e}); visit {open_browser_url}[/yellow]")
 
     async def run():
+        # Start ClawLink identity HTTP server for network discovery
+        from nanobot.web.server import start_http_server
+        http_server = await start_http_server(host=config.gateway.host, port=port)
+
         try:
             await cron.start()
             await heartbeat.start()
@@ -941,6 +945,9 @@ def _run_gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
+            if http_server is not None:
+                http_server.close()
+                await http_server.wait_closed()
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
