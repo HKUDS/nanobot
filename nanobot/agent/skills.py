@@ -26,11 +26,18 @@ class SkillsLoader:
     specific tools or perform certain tasks.
     """
 
-    def __init__(self, workspace: Path, builtin_skills_dir: Path | None = None, disabled_skills: set[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        builtin_skills_dir: Path | None = None,
+        disabled_skills: set[str] | None = None,
+        exec_env_keys: set[str] | None = None,
+    ):
         self.workspace = workspace
         self.workspace_skills = workspace / "skills"
         self.builtin_skills = builtin_skills_dir or BUILTIN_SKILLS_DIR
         self.disabled_skills = disabled_skills or set()
+        self.exec_env_keys = exec_env_keys
 
     def _skill_entries_from_dir(self, base: Path, source: str, *, skip_names: set[str] | None = None) -> list[dict[str, str]]:
         if not base.exists():
@@ -141,6 +148,14 @@ class SkillsLoader:
                 lines.append(f"- **{skill_name}** — {desc}{suffix}  `{entry['path']}`")
         return "\n".join(lines)
 
+    def _env_var_available(self, var: str) -> bool:
+        """Check if an env var is set and accessible to exec subprocesses."""
+        if not os.environ.get(var):
+            return False
+        if self.exec_env_keys is not None:
+            return var in self.exec_env_keys
+        return True
+
     def _get_missing_requirements(self, skill_meta: dict) -> str:
         """Get a description of missing requirements."""
         requires = skill_meta.get("requires", {})
@@ -148,7 +163,7 @@ class SkillsLoader:
         required_env_vars = requires.get("env", [])
         return ", ".join(
             [f"CLI: {command_name}" for command_name in required_bins if not shutil.which(command_name)]
-            + [f"ENV: {env_name}" for env_name in required_env_vars if not os.environ.get(env_name)]
+            + [f"ENV: {env_name}" for env_name in required_env_vars if not self._env_var_available(env_name)]
         )
 
     def _get_skill_description(self, name: str) -> str:
@@ -192,7 +207,7 @@ class SkillsLoader:
         required_bins = requires.get("bins", [])
         required_env_vars = requires.get("env", [])
         return all(shutil.which(cmd) for cmd in required_bins) and all(
-            os.environ.get(var) for var in required_env_vars
+            self._env_var_available(var) for var in required_env_vars
         )
 
     def _get_skill_meta(self, name: str) -> dict:

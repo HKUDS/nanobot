@@ -26,7 +26,7 @@ from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.notebook import NotebookEditTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.search import GlobTool, GrepTool
-from nanobot.agent.tools.shell import ExecTool
+from nanobot.agent.tools.shell import ExecTool, get_default_exec_env_keys
 from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
@@ -194,7 +194,8 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        exec_env_keys = list(get_default_exec_env_keys() | set(self.exec_config.allowed_env_keys))
+        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills, exec_env_keys=exec_env_keys)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
