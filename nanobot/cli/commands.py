@@ -726,12 +726,17 @@ def _run_gateway(
         cron_token = None
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
+
+        async def _silent(*_args, **_kwargs):
+            pass
+
         try:
             resp = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                on_progress=_silent,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
