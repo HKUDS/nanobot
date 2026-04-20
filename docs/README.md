@@ -27,6 +27,7 @@ Use these when you want deeper customization, integration, or extension details.
 | Topic | Repo docs | What it covers |
 |---|---|---|
 | Memory | [`memory.md`](./memory.md) | How nanobot stores, consolidates, and restores memory |
+| Behavioral learning | [`behavioral-learning.md`](./behavioral-learning.md) | Teach your agent to learn from user feedback over time |
 | Python SDK | [`python-sdk.md`](./python-sdk.md) | Use nanobot programmatically from Python |
 | Channel plugin guide | [`channel-plugin-guide.md`](./channel-plugin-guide.md) | Build and test custom chat channel plugins |
 | WebSocket channel | [`websocket.md`](./websocket.md) | Real-time WebSocket access and protocol details |
