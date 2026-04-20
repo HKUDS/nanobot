@@ -395,10 +395,7 @@ class EmailChannel(BaseChannel):
                         "(no 'spf=pass' in Authentication-Results header)",
                         sender,
                     )
-                    if uid:
-                        cycle_uids.add(uid)
-                        if dedupe:
-                            self._processed_uids.add(uid)
+                    self._remember_processed_uid(uid, dedupe, cycle_uids)
                     continue
                 if self.config.verify_dkim and not dkim_pass:
                     logger.warning(
@@ -406,10 +403,7 @@ class EmailChannel(BaseChannel):
                         "(no 'dkim=pass' in Authentication-Results header)",
                         sender,
                     )
-                    if uid:
-                        cycle_uids.add(uid)
-                        if dedupe:
-                            self._processed_uids.add(uid)
+                    self._remember_processed_uid(uid, dedupe, cycle_uids)
                     continue
 
                 subject = self._decode_header_value(parsed.get("Subject", ""))
