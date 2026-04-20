@@ -113,6 +113,12 @@ class AgentDefaults(Base):
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     fallback_models: list[str] = Field(default_factory=list)  # e.g. ["openrouter/anthropic/claude-sonnet-4"]
     fallback_cooldown_s: int = 60  # seconds to skip a failed provider before retrying
+    # --- Subagent model override (optional) ---
+    # 未配置 → subagent 复用主 agent 的 provider/model（向后兼容）。
+    # 配置后 → SubagentManager 使用独立 provider 跑后台任务，主 agent 不受影响。
+    subagent_model: str | None = None
+    subagent_reasoning_effort: str | None = None  # None → provider 默认行为
+    subagent_max_tokens: int | None = None        # None → 继承主 agent max_tokens
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     context_pruning: ContextPruningConfig = Field(default_factory=ContextPruningConfig)
     dream: DreamConfig = Field(default_factory=DreamConfig)
