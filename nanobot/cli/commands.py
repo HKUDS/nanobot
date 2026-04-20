@@ -726,12 +726,16 @@ def _run_gateway(
         cron_token = None
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
+        cron_metadata: dict[str, Any] = {}
+        if job.payload.message_thread_id:
+            cron_metadata["message_thread_id"] = job.payload.message_thread_id
         try:
             resp = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                metadata=cron_metadata or None,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
@@ -749,10 +753,14 @@ def _run_gateway(
             )
             if should_notify:
                 from nanobot.bus.events import OutboundMessage
+                outbound_meta: dict[str, Any] = {}
+                if job.payload.message_thread_id:
+                    outbound_meta["message_thread_id"] = job.payload.message_thread_id
                 await bus.publish_outbound(OutboundMessage(
                     channel=job.payload.channel or "cli",
                     chat_id=job.payload.to,
                     content=response,
+                    metadata=outbound_meta,
                 ))
         return response
 
