@@ -20,6 +20,7 @@ from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.runner import (
     STOP_EMPTY_FINAL,
     STOP_ERROR,
+    STOP_INTENTIONAL_SILENCE,
     STOP_MAX_ITERATIONS,
     _MAX_INJECTIONS_PER_TURN,
     AgentRunSpec,
@@ -863,13 +864,28 @@ class AgentLoop:
         # suppressed just because MessageTool was used earlier in the turn.
         # However, if the turn falls back to the empty-final-response
         # placeholder, suppress it when the real user-visible output already
-        # came from MessageTool.
+        # came from MessageTool — the user-visible output was intentional,
+        # so the trailing empty turn is silence by design, not a failure.
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             if not had_injections or stop_reason == STOP_EMPTY_FINAL:
-                return None
+                stop_reason = STOP_INTENTIONAL_SILENCE
 
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+        # Keep non-delivered turns at debug so log review isn't misled into
+        # thinking a real message went out.
+        if stop_reason == STOP_INTENTIONAL_SILENCE:
+            logger.debug(
+                "Intentional silence for {}:{} — MessageTool already delivered output",
+                msg.channel, msg.sender_id,
+            )
+            return None
+        elif stop_reason == STOP_EMPTY_FINAL:
+            logger.debug(
+                "Empty final response for {}:{} — downstream filter will decide delivery",
+                msg.channel, msg.sender_id,
+            )
+        else:
+            preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
+            logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         meta = dict(msg.metadata or {})
         if on_stream is not None and stop_reason != STOP_ERROR:

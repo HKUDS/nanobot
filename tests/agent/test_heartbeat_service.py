@@ -5,7 +5,12 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.agent.runner import STOP_COMPLETED, STOP_EMPTY_FINAL, STOP_ERROR
+from nanobot.agent.runner import (
+    STOP_COMPLETED,
+    STOP_EMPTY_FINAL,
+    STOP_ERROR,
+    STOP_INTENTIONAL_SILENCE,
+)
 from nanobot.bus.events import OutboundMessage
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 from nanobot.heartbeat.service import (
@@ -1569,3 +1574,36 @@ class TestFilterHeartbeatResponse:
         resp = _make_resp("error", stop_reason=STOP_ERROR)
         result = filter_heartbeat_response(resp, "Balance check (system)")
         assert "Balance check (system)" in result
+
+    def test_intentional_silence_returns_empty(self):
+        """Heartbeat turn that completed silently by design — MessageTool
+        already delivered the user-visible output, so the trailing empty
+        turn should be silenced without logging as a failure."""
+        resp = _make_resp("", stop_reason=STOP_INTENTIONAL_SILENCE)
+        assert filter_heartbeat_response(resp, "Gmail scan") == ""
+
+    def test_intentional_silence_distinct_from_empty_final(self, caplog):
+        """Intentional silence should log at debug (benign), while empty-final
+        still logs at info (worth watching as a potential model regression)."""
+        import logging
+        from loguru import logger as loguru_logger
+
+        handler_id = loguru_logger.add(caplog.handler, level="DEBUG", format="{message}")
+        try:
+            with caplog.at_level(logging.DEBUG):
+                filter_heartbeat_response(
+                    _make_resp("", stop_reason=STOP_INTENTIONAL_SILENCE),
+                    "Gmail scan",
+                )
+                filter_heartbeat_response(
+                    _make_resp(EMPTY_FINAL_RESPONSE_MESSAGE, stop_reason=STOP_EMPTY_FINAL),
+                    "Morning briefing",
+                )
+        finally:
+            loguru_logger.remove(handler_id)
+
+        messages = [rec.message for rec in caplog.records]
+        # Intentional silence is benign — logged with "by design" marker
+        assert any("silent turn (by design)" in m for m in messages)
+        # Empty-final is worth seeing in default logs — logged as "suppressed empty response"
+        assert any("suppressed empty response" in m for m in messages)

@@ -80,6 +80,7 @@ class AgentRunSpec:
 STOP_COMPLETED = "completed"
 STOP_ERROR = "error"
 STOP_EMPTY_FINAL = "empty_final_response"
+STOP_INTENTIONAL_SILENCE = "intentional_silence"
 STOP_MAX_ITERATIONS = "max_iterations"
 STOP_TOOL_ERROR = "tool_error"
 

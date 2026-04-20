@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable, Coroutine, Literal
 from loguru import logger
 from zoneinfo import ZoneInfo
 
-from nanobot.agent.runner import STOP_EMPTY_FINAL, STOP_ERROR
+from nanobot.agent.runner import STOP_EMPTY_FINAL, STOP_ERROR, STOP_INTENTIONAL_SILENCE
 from nanobot.bus.events import OutboundMessage
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
@@ -37,6 +37,12 @@ def filter_heartbeat_response(
     empty string when the response should be silenced.
     """
     if not resp:
+        return ""
+
+    if resp.stop_reason == STOP_INTENTIONAL_SILENCE:
+        # Heartbeat turn completed silently by design — the MessageTool
+        # already delivered the real user-visible output; no failure here.
+        logger.debug("Heartbeat: silent turn (by design) for: {}", tasks[:120])
         return ""
 
     if resp.stop_reason == STOP_EMPTY_FINAL or resp.content == EMPTY_FINAL_RESPONSE_MESSAGE:
