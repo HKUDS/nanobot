@@ -24,14 +24,17 @@ async def test_before_iteration_records_start_time(hook, ctx):
     assert hook._iter_t0 is not None and hook._iter_t0 > 0.0
 
 
-async def test_after_iteration_logs_elapsed_time(hook, ctx, capfd):
-    """Verify after_iteration records a meaningful elapsed time."""
-    with patch("nanobot.agent.profiling.time.perf_counter", side_effect=[100.0, 100.05]):
-        await hook.before_iteration(ctx)
-        await hook.after_iteration(ctx)
-    # 50ms elapsed (0.05s * 1000)
-    # Logger writes to stderr; just verify no exception and the hook ran.
-    # The real assertion is that perf_counter was called correctly.
+async def test_after_iteration_logs_elapsed_time(hook, ctx):
+    """after_iteration must log the elapsed ms derived from perf_counter."""
+    with patch("nanobot.agent.profiling.logger") as mock_logger:
+        with patch("nanobot.agent.profiling.time.perf_counter", side_effect=[100.0, 100.05]):
+            await hook.before_iteration(ctx)
+            await hook.after_iteration(ctx)
+    # perf_counter delta is 0.05s → 50ms. The hook formats with "{:.0f}ms",
+    # so the integer 50 must appear in the log args.
+    mock_logger.debug.assert_called_once()
+    args = mock_logger.debug.call_args.args
+    assert 50 == round(args[2])  # elapsed_ms positional arg
 
 
 async def test_after_iteration_without_before_is_safe(hook, ctx):
