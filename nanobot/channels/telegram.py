@@ -188,6 +188,7 @@ class TelegramConfig(Base):
     reply_to_message: bool = False
     react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
+    chat_policy: dict[str, Literal["open", "mention", "muted"]] = Field(default_factory=dict)
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
@@ -215,6 +216,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("dream_log", "Show the latest Dream memory change"),
         BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
         BotCommand("help", "Show available commands"),
+        BotCommand("chatid", "Show current chat ID"),
     ]
 
     @classmethod
@@ -235,6 +237,7 @@ class TelegramChannel(BaseChannel):
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
         self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
+        self._seen_group_chats: set[int] = set()  # Track seen group chat IDs for logging
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -315,6 +318,7 @@ class TelegramChannel(BaseChannel):
             )
         )
         self._app.add_handler(MessageHandler(filters.Regex(r"^/help(?:@\w+)?$"), self._on_help))
+        self._app.add_handler(MessageHandler(filters.Regex(r"^/chatid(?:@\w+)?$"), self._on_chatid))
 
         # Add message handler for text, photos, voice, documents, and locations
         self._app.add_handler(
@@ -658,6 +662,13 @@ class TelegramChannel(BaseChannel):
             return
         await update.message.reply_text(build_help_text())
 
+    async def _on_chatid(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /chatid command, bypassing ACL so all users can access it."""
+        if not update.message:
+            return
+        chat_id = update.message.chat_id
+        await update.message.reply_text(f"Chat ID: `{chat_id}`", parse_mode="Markdown")
+
     @staticmethod
     def _sender_id(user) -> str:
         """Build sender_id with username for allowlist matching."""
@@ -804,9 +815,34 @@ class TelegramChannel(BaseChannel):
 
     async def _is_group_message_for_bot(self, message) -> bool:
         """Allow group messages when policy is open, @mentioned, or replying to the bot."""
-        if message.chat.type == "private" or self.config.group_policy == "open":
+        chat_id = message.chat_id
+
+        # Private chats always pass through
+        if message.chat.type == "private":
             return True
 
+        # Check per-chat policy override first
+        policy = self.config.chat_policy.get(str(chat_id), self.config.group_policy)
+
+        # Log new group chat IDs at INFO level for discoverability
+        if message.chat.type != "private" and chat_id not in self._seen_group_chats:
+            self._seen_group_chats.add(chat_id)
+            logger.info(
+                "New group chat: {} (type={}, policy={})",
+                chat_id,
+                message.chat.type,
+                policy,
+            )
+
+        # Muted: receive nothing (but outbound still works)
+        if policy == "muted":
+            return False
+
+        # Open: respond to all messages
+        if policy == "open":
+            return True
+
+        # Mention policy: check for @mention or reply-to-bot
         bot_id, bot_username = await self._ensure_bot_identity()
         if bot_username:
             text = message.text or ""
