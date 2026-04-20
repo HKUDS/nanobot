@@ -256,12 +256,25 @@ class MemoryStore:
         # Fallback: read last line's cursor from the JSONL file.
         last = self._read_last_entry()
         if last and last.get("cursor"):
-            return last["cursor"] + 1
+            cursor = last["cursor"]
+            if isinstance(cursor, int):
+                return cursor + 1
+            # Corrupted (non-int) cursor — scan all entries for the highest valid one.
+            entries = self._read_entries()
+            for entry in reversed(entries):
+                c = entry.get("cursor")
+                if isinstance(c, int):
+                    return c + 1
+            return 1
         return 1
 
     def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
         """Return history entries with cursor > *since_cursor*."""
-        return [e for e in self._read_entries() if e.get("cursor", 0) > since_cursor]
+        return [
+            e
+            for e in self._read_entries()
+            if isinstance(e.get("cursor"), int) and e["cursor"] > since_cursor
+        ]
 
     def compact_history(self) -> None:
         """Drop oldest entries if the file exceeds *max_history_entries*."""
