@@ -33,6 +33,11 @@ echo "✅ 环境检查通过"
 # 进入项目目录
 cd /mnt/d/collections2026/phd_application/nanobot1/milestone2
 
+# 设置环境变量（降低阈值以观察自动触发）
+export KM_MERGE_THRESHOLD=3
+export KM_MERGE_INTERVAL=5.0
+export CONSOLIDATOR_SIMHASH_THRESHOLD=8
+
 # 清理现有容器
 echo "🧹 清理现有容器..."
 docker stop $(docker ps -aq) 2>/dev/null || true

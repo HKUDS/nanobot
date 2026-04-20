@@ -107,8 +107,8 @@ class ContainerOrchestrator:
         self._lock = asyncio.Lock()  # 异步锁保护并发操作
         self.container_ports = container_ports if container_ports else {}
 
-    def _get_container_name(self, conversation_id: str) -> str:
-        return f"nanobot_conv_{conversation_id}"
+    def _get_container_name(self, conversation_id: str, name_prefix: str = "nanobot_conv") -> str:
+        return f"{name_prefix}_{conversation_id}"
 
     def _get_volume_name(self, conversation_id: str) -> str:
         return f"{self.volume_prefix}{conversation_id}"
@@ -223,9 +223,10 @@ class ContainerOrchestrator:
         model: str = "deepseek-chat",
         api_key: str = "",
         agent_type: str = "collab",
+        name_prefix: str = "nanobot_conv",
     ) -> dict:
         """Create and start a new container for a conversation."""
-        container_name = self._get_container_name(conversation_id)
+        container_name = self._get_container_name(conversation_id, name_prefix)
         volume_name = self._get_volume_name(conversation_id)
 
         try:
@@ -274,7 +275,12 @@ class ContainerOrchestrator:
             os.makedirs(public_memory_host_path, exist_ok=True)
             volumes[public_memory_host_path] = {"bind": "/app/public_memory", "mode": "rw"}
             environment["KM_PUBLIC_MEMORY_PATH"] = "/app/public_memory/public_memory.jsonl"
+            environment["KM_MERGE_THRESHOLD"] = os.environ.get("KM_MERGE_THRESHOLD", "6")
+            environment["KM_MERGE_INTERVAL"] = os.environ.get("KM_MERGE_INTERVAL", "60.0")
+            environment["BFF_BASE_URL"] = os.environ.get("BFF_BASE_URL", "http://host.docker.internal:8000")
             print(f"[Orchestrator] KM容器挂载PublicMemory: {public_memory_host_path} -> /app/public_memory")
+            print(f"[Orchestrator] KM合并阈值: {environment['KM_MERGE_THRESHOLD']}, 间隔: {environment['KM_MERGE_INTERVAL']}秒")
+            print(f"[Orchestrator] KM的BFF_BASE_URL: {environment['BFF_BASE_URL']}")
 
         container = self.docker_client.containers.run(
             image=self.image_name,

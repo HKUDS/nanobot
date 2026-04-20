@@ -1,0 +1,72 @@
+{
+  "group": "A",
+  "description": "SAYG-Mem 并发分段写入 + 异步合并",
+  "total_time": 211.31822967529297,
+  "round_times": {
+    "total": 772.0709843000077,
+    "avg": 30.88283937200031,
+    "max": 78.14565364700684,
+    "min": 14.99436203399091
+  },
+  "inference_times": {
+    "total": 678.4542902600224,
+    "avg": 27.138171610400896,
+    "max": 73.49417962299776,
+    "min": 12.525606474999222
+  },
+  "idle_ratio": -2.2105809863281585,
+  "pm_entry_count": 142,
+  "merge_result": {
+    "status": "ok",
+    "original_count": 175,
+    "deduped_count": 142,
+    "removed_count": 33,
+    "pages_marked": 50
+  },
+  "agent_count": 5,
+  "round_count": 5,
+  "total_success": 25,
+  "total_failed": 0,
+  "agents": [
+    {
+      "agent_id": "0927e1d9",
+      "role": "技术架构师",
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    },
+    {
+      "agent_id": "851a98cd",
+      "role": "产品经理",
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    },
+    {
+      "agent_id": "3dc76643",
+      "role": "数据分析师",
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    },
+    {
+      "agent_id": "a67c83f5",
+      "role": "安全专家",
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    },
+    {
+      "agent_id": "34f83b45",
+      "role": "运维工程师",
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    }
+  ]
+}

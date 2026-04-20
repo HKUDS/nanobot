@@ -1,0 +1,152 @@
+{
+  "trial": 1,
+  "timestamp": "2026-04-20T12:43:25.271229",
+  "a_group": {
+    "group": "A",
+    "description": "SAYG-Mem 并发分段写入 + 异步合并",
+    "total_time": 533.3874197006226,
+    "round_times": {
+      "total": 2818.7978077610032,
+      "avg": 57.52648587267353,
+      "max": 117.93435798900009,
+      "min": 17.80804503699983
+    },
+    "inference_times": {
+      "total": 1500.0279235609996,
+      "avg": 30.61281476655101,
+      "max": 97.30987591299981,
+      "min": 7.551318707999599
+    },
+    "idle_ratio": 0.1556078843951891,
+    "pm_entry_count": 64,
+    "merge_result": {
+      "status": "completed",
+      "pm_final_count": 64,
+      "wait_seconds": 8
+    },
+    "agent_count": 10,
+    "round_count": 5,
+    "total_success": 48,
+    "total_failed": 1,
+    "agents": [
+      {
+        "agent_id": "8454a585",
+        "role": "技术架构师",
+        "total_time": 397.7248227780001,
+        "success": 5,
+        "failed": 0,
+        "heap_total": 8,
+        "heap_unmerged": 4
+      },
+      {
+        "agent_id": "fb94cee6",
+        "role": "产品经理",
+        "total_time": 262.83890775599957,
+        "success": 5,
+        "failed": 0,
+        "heap_total": 8,
+        "heap_unmerged": 8
+      },
+      {
+        "agent_id": "6bb9b3b0",
+        "role": "数据分析师",
+        "total_time": 284.2615715510001,
+        "success": 5,
+        "failed": 0,
+        "heap_total": 8,
+        "heap_unmerged": 8
+      },
+      {
+        "agent_id": "d358617b",
+        "role": "安全专家",
+        "total_time": 190.56109803100026,
+        "success": 5,
+        "failed": 0,
+        "heap_total": 8,
+        "heap_unmerged": 8
+      },
+      {
+        "agent_id": "c308695e",
+        "role": "运维工程师",
+        "total_time": 260.32074659299997,
+        "success": 5,
+        "failed": 0,
+        "heap_total": 8,
+        "heap_unmerged": 8
+      },
+      {
+        "agent_id": "293cfedf",
+        "role": "前端工程师",
+        "total_time": 279.7497060779997,
+        "success": 5,
+        "failed": 0,
+        "heap_total": 8,
+        "heap_unmerged": 8
+      },
+      {
+        "agent_id": "82e43fe2",
+        "role": "后端工程师",
+        "total_time": 276.07866706299956,
+        "success": 5,
+        "failed": 0,
+        "heap_total": 8,
+        "heap_unmerged": 8
+      },
+      {
+        "agent_id": "cb7deae1",
+        "role": "移动开发工程师",
+        "total_time": 254.68358118200013,
+        "success": 5,
+        "failed": 0,
+        "heap_total": 8,
+        "heap_unmerged": 8
+      },
+      {
+        "agent_id": "62cc54ae",
+        "role": "DevOps工程师",
+        "total_time": 239.86612863400023,
+        "success": 3,
+        "failed": 1,
+        "heap_total": 8,
+        "heap_unmerged": 8
+      },
+      {
+        "agent_id": "dd6347ff",
+        "role": "QA工程师",
+        "total_time": 450.3881317579999,
+        "success": 5,
+        "failed": 0,
+        "heap_total": 8,
+        "heap_unmerged": 4
+      }
+    ]
+  },
+  "b_group": {
+    "group": "B_baseline",
+    "description": "B组Baseline：5轮学习任务（与A组对比）",
+    "total_time": 307.1616116899995,
+    "pm_entry_count": 55,
+    "agent_count": 10,
+    "round_count": 5,
+    "valid_count": 50,
+    "total_count": 50,
+    "inference_times": {
+      "avg": 30.47730672358006,
+      "max": 98.29958331199941,
+      "min": 9.85261077800078,
+      "total": 1523.865336179003
+    },
+    "write_times": {
+      "avg": 0.009287463119962923,
+      "max": 0.03287900000032096,
+      "min": 0.003965087999858952
+    },
+    "lock_stats": {
+      "total_wait_time": 0.016518985004040587,
+      "acquire_count": 55,
+      "avg_wait_time": 0.000300345181891647,
+      "max_wait_time": 0.0016098589994726353,
+      "min_wait_time": 0.00010990200007654494
+    }
+  }
+}

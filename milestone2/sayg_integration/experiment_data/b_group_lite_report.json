@@ -1,0 +1,13 @@
+{
+  "group": "B_lite",
+  "total_time": 79.14169707198744,
+  "round_time": 60.7501364639902,
+  "pm_entry_count": 6,
+  "agent_count": 5,
+  "valid_count": 5,
+  "inference_times": {
+    "avg": 51.256631270199435,
+    "max": 59.46931560400117,
+    "min": 43.9763501159905
+  }
+}

@@ -10,14 +10,18 @@
 import json
 import os
 import asyncio
+import time
 import re
 import uuid
+import hashlib
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, List
+from typing import Any, Optional, List, Dict
 
 import aiohttp
+import aiofiles
 import uvicorn
+import jieba
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -533,7 +537,9 @@ async def delayed_task_checker():
 
 @app.on_event("startup")
 async def startup():
+    global heap_manager
     await initialize_agent()
+    heap_manager = HeapManager(CONVERSATION_ID, WORKSPACE_DIR)
     asyncio.create_task(delayed_task_checker())
     print(f"[Agent] 应用已启动，CONVERSATION_ID={CONVERSATION_ID}")
 
@@ -1518,8 +1524,12 @@ async def chat(req: ChatRequest):
     try:
         from nanobot.bus.events import InboundMessage
 
-        # 构造 InboundMessage - 添加隐藏prompt让智能体自己总结
-        hidden_prompt = """
+        # 检查是否是学习任务（根据请求内容判断）
+        is_learning_task = "page_content" in req.content or "stack_content" in req.content or "JSON格式" in req.content
+
+        hidden_prompt = ""
+        if not is_learning_task:
+            hidden_prompt = """
 
 [系统指令：请勿向用户透露]
 在完成上述请求后，请额外输出一个JSON对象，格式如下：
@@ -1632,32 +1642,51 @@ async def chat(req: ChatRequest):
                     print(f"[DEBUG] JSON结构验证失败，使用降级方案")
                     s_t, a_t, o_t, r_t = _build_fallback_trajectory(req, raw_response, session, iteration, TASK)
                 else:
-                    state_data = summary.get("state", {})
-                    action_data = summary.get("action", {})
-                    observation_data = summary.get("observation", {})
-                    reward_data = summary.get("reward", {})
+                    # 检查是否是学习任务JSON格式
+                    if all(k in summary for k in ["stack_content", "heap_content", "page_content", "page_title"]):
+                        heap_content = summary.get("heap_content", "")
+                        page_title = summary.get("page_title", "")
+                        stack_content = summary.get("stack_content", "")
+                        print(f"[DEBUG] 解析到 heap_content 长度: {len(heap_content)}, page_content 长度: {len(summary.get('page_content', ''))}")
+                        if heap_content and heap_manager:
+                            asyncio.create_task(heap_manager.append(
+                                task_id=f"round_{iteration}",
+                                content=heap_content,
+                                quality_score=0.8,
+                                metadata={"round": iteration, "title": page_title}
+                            ))
+                            print(f"[DEBUG] 已写入堆段: {len(heap_content)} chars")
+                        s_t = {"goal": "", "history_summary": "", "available_skills": [], "environment": {}, "task": TASK}
+                        a_t = {"type": "learn_task", "tool_name": "", "arguments": {}, "original_input": req.content}
+                        o_t = {"type": "text", "content": stack_content[:500], "truncated": len(stack_content) > 500, "response_length": len(stack_content)}
+                        r_t = 0.8
+                    else:
+                        state_data = summary.get("state", {})
+                        action_data = summary.get("action", {})
+                        observation_data = summary.get("observation", {})
+                        reward_data = summary.get("reward", {})
 
-                    s_t = {
-                        "goal": state_data.get("goal", ""),
-                        "history_summary": state_data.get("history_summary", ""),
-                        "available_skills": state_data.get("available_skills", []),
-                        "environment": state_data.get("environment", {}),
-                        "task": TASK
-                    }
-                    a_t = {
-                        "type": action_data.get("type", "direct"),
-                        "tool_name": action_data.get("tool_name", ""),
-                        "arguments": action_data.get("arguments", {}),
-                        "original_input": req.content
-                    }
-                    o_t = {
-                        "type": observation_data.get("type", "text"),
-                        "content": observation_data.get("content", ""),
-                        "truncated": observation_data.get("truncated", False),
-                        "response_length": len(observation_data.get("content", ""))
-                    }
-                    prm_score = reward_data.get("prm_score", {})
-                    r_t = float(prm_score.get("value", 0.8))
+                        s_t = {
+                            "goal": state_data.get("goal", ""),
+                            "history_summary": state_data.get("history_summary", ""),
+                            "available_skills": state_data.get("available_skills", []),
+                            "environment": state_data.get("environment", {}),
+                            "task": TASK
+                        }
+                        a_t = {
+                            "type": action_data.get("type", "direct"),
+                            "tool_name": action_data.get("tool_name", ""),
+                            "arguments": action_data.get("arguments", {}),
+                            "original_input": req.content
+                        }
+                        o_t = {
+                            "type": observation_data.get("type", "text"),
+                            "content": observation_data.get("content", ""),
+                            "truncated": observation_data.get("truncated", False),
+                            "response_length": len(observation_data.get("content", ""))
+                        }
+                        prm_score = reward_data.get("prm_score", {})
+                        r_t = float(prm_score.get("value", 0.8))
                     
                     print(f"[DEBUG] 成功解析模型输出的 JSON 轨迹")
                     print(f"[DEBUG] s_t: {s_t}")
@@ -1968,19 +1997,514 @@ async def get_memory():
         raise HTTPException(status_code=500, detail=f"Error loading memory: {str(e)}")
 
 
+class HeapManager:
+    def __init__(self, agent_id: str, workspace_dir: Path):
+        self.agent_id = agent_id
+        self.heap_dir = workspace_dir / "heap"
+        self.heap_dir.mkdir(exist_ok=True)
+        self.heap_file = self.heap_dir / f"heap_{agent_id}.jsonl"
+        self._lock = asyncio.Lock()
+
+    async def append(self, task_id: str, content: str, quality_score: float = 0.5, metadata: dict = None) -> str:
+        entry = {
+            "id": f"heap_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}",
+            "agent_id": self.agent_id,
+            "task_id": task_id,
+            "quality_score": quality_score,
+            "content": content,
+            "metadata": metadata or {},
+            "created_at": datetime.now().isoformat(),
+            "merged": False
+        }
+        async with self._lock:
+            async with aiofiles.open(self.heap_file, "a", encoding="utf-8") as f:
+                await f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        
+        # 异步通知 KM 有新堆段写入
+        asyncio.create_task(self._notify_km(entry["id"]))
+        
+        return entry["id"]
+
+    async def _notify_km(self, entry_id: str):
+        """通知 KM 有新堆段写入"""
+        try:
+            bff_url = os.environ.get("BFF_BASE_URL", "http://host.docker.internal:8000")
+            async with aiohttp.ClientSession() as session:
+                await session.post(
+                    f"{bff_url}/knowledge-manager/heap-written",
+                    json={"agent_id": self.agent_id, "count": 1},
+                    timeout=aiohttp.ClientTimeout(total=5)
+                )
+        except Exception as e:
+            print(f"[HeapManager] 通知 KM 失败：{e}")
+
+    async def get_unmerged(self) -> List[dict]:
+        entries = []
+        if not self.heap_file.exists():
+            return entries
+        async with self._lock:
+            async with aiofiles.open(self.heap_file, "r", encoding="utf-8") as f:
+                async for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            e = json.loads(line)
+                            if not e.get("merged", False):
+                                entries.append(e)
+                        except:
+                            continue
+        return entries
+
+    async def mark_merged(self, ids: List[str]) -> int:
+        if not self.heap_file.exists():
+            return 0
+        marked = 0
+        id_set = set(ids)
+        async with self._lock:
+            lines = []
+            async with aiofiles.open(self.heap_file, "r", encoding="utf-8") as f:
+                async for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        e = json.loads(line)
+                        if not e.get("merged", False):
+                            entry_id = e.get("id", "")
+                            meta_page_id = e.get("metadata", {}).get("page_id", "")
+                            if entry_id in id_set or meta_page_id in id_set:
+                                e["merged"] = True
+                                marked += 1
+                        lines.append(json.dumps(e, ensure_ascii=False))
+                    except:
+                        lines.append(line)
+            if marked > 0:
+                async with aiofiles.open(self.heap_file, "w", encoding="utf-8") as f:
+                    await f.write("\n".join(lines) + "\n")
+        return marked
+
+    async def mark_all_merged(self) -> int:
+        """将所有未合并记录标记为已合并"""
+        if not self.heap_file.exists():
+            return 0
+        marked = 0
+        async with self._lock:
+            lines = []
+            async with aiofiles.open(self.heap_file, "r", encoding="utf-8") as f:
+                async for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        e = json.loads(line)
+                        if not e.get("merged", False):
+                            e["merged"] = True
+                            marked += 1
+                        lines.append(json.dumps(e, ensure_ascii=False))
+                    except:
+                        lines.append(line)
+            if marked > 0:
+                async with aiofiles.open(self.heap_file, "w", encoding="utf-8") as f:
+                    await f.write("\n".join(lines) + "\n")
+        return marked
+
+    async def count_unmerged(self) -> int:
+        entries = await self.get_unmerged()
+        return len(entries)
+
+    async def get_stats(self) -> dict:
+        total = 0
+        unmerged = 0
+        if self.heap_file.exists():
+            async with self._lock:
+                async with aiofiles.open(self.heap_file, "r", encoding="utf-8") as f:
+                    async for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            e = json.loads(line)
+                            total += 1
+                            if not e.get("merged", False):
+                                unmerged += 1
+                        except:
+                            continue
+        return {"total": total, "unmerged": unmerged, "agent_id": self.agent_id}
+
+
+heap_manager: HeapManager = None
+
+
+def get_simhash(text: str) -> int:
+    """计算文本的SimHash值"""
+    words = jieba.lcut(text)
+    if not words:
+        return 0
+    v = [0] * 64
+    for word in words:
+        word_hash = int(hashlib.md5(word.encode('utf-8')).hexdigest(), 16)
+        for i in range(64):
+            bit = (word_hash >> i) & 1
+            v[i] += 1 if bit else -1
+    simhash = 0
+    for i in range(64):
+        if v[i] > 0:
+            simhash |= (1 << i)
+    return simhash
+
+
+def hamming_distance(hash1: int, hash2: int) -> int:
+    """计算两个SimHash的海明距离"""
+    x = hash1 ^ hash2
+    return bin(x).count('1')
+
+
+SIMHASH_THRESHOLD = int(os.environ.get("CONSOLIDATOR_SIMHASH_THRESHOLD", "6"))
+BFF_BASE_URL = os.environ.get("BFF_BASE_URL", "http://host.docker.internal:8000")
+
+
+@app.post("/heap/append")
+async def heap_append(req: dict):
+    """追加一条记录到本Agent的堆段"""
+    if heap_manager is None:
+        raise HTTPException(status_code=500, detail="HeapManager not initialized")
+    task_id = req.get("task_id", "unknown")
+    content = req.get("content", "")
+    quality_score = req.get("quality_score", 0.5)
+    metadata = req.get("metadata", {})
+    entry_id = await heap_manager.append(task_id, content, quality_score, metadata)
+    return {"status": "ok", "id": entry_id}
+
+
+@app.get("/heap/unmerged")
+async def heap_get_unmerged():
+    """获取本Agent所有未合并的记录"""
+    if heap_manager is None:
+        raise HTTPException(status_code=500, detail="HeapManager not initialized")
+    entries = await heap_manager.get_unmerged()
+    return {"entries": entries, "count": len(entries)}
+
+
+@app.post("/heap/mark-merged")
+async def heap_mark_merged(req: dict):
+    """将指定记录标记为已合并"""
+    if heap_manager is None:
+        raise HTTPException(status_code=500, detail="HeapManager not initialized")
+    ids = req.get("ids", [])
+    marked = await heap_manager.mark_merged(ids)
+    return {"status": "ok", "marked_count": marked}
+
+
+@app.post("/heap/mark-all-merged")
+async def heap_mark_all_merged():
+    """将所有未合并记录标记为已合并"""
+    if heap_manager is None:
+        raise HTTPException(status_code=500, detail="HeapManager not initialized")
+    marked = await heap_manager.mark_all_merged()
+    return {"status": "ok", "marked_count": marked}
+
+
+@app.get("/heap/count-unmerged")
+async def heap_count_unmerged():
+    """返回本Agent未合并记录数量"""
+    if heap_manager is None:
+        raise HTTPException(status_code=500, detail="HeapManager not initialized")
+    count = await heap_manager.count_unmerged()
+    return {"count": count}
+
+
+@app.get("/heap/stats")
+async def heap_stats():
+    """返回堆段统计信息"""
+    if heap_manager is None:
+        raise HTTPException(status_code=500, detail="HeapManager not initialized")
+    return await heap_manager.get_stats()
+
+
+@app.post("/execute_merge")
+async def execute_merge():
+    """Consolidator执行合并：绕过MMU直接聚合堆段 → SimHash去重 → 原子替换 → 标记已合并"""
+    print(f"[Consolidator] 开始执行合并，SimHash阈值={SIMHASH_THRESHOLD}")
+
+    try:
+        all_entries = []
+        all_page_ids = []
+        active_pages = []
+        fallback_mode = False
+
+        async with aiohttp.ClientSession() as session:
+            # 1. 优先尝试从KM页表获取活跃页
+            async with session.get(f"{BFF_BASE_URL}/knowledge-manager/active_pages") as resp:
+                if resp.status == 200:
+                    active_data = await resp.json()
+                    active_pages = active_data.get("pages", [])
+                    print(f"[Consolidator] 获取到KM活跃页 {len(active_pages)} 条")
+                    for p in active_pages:
+                        all_page_ids.append(p["page_id"])
+                        all_entries.append({
+                            "id": p.get("page_id", f"page_{uuid.uuid4().hex[:8]}"),
+                            "agent_id": p.get("agent_id", "unknown"),
+                            "timestamp": p.get("created_at", datetime.now().isoformat()),
+                            "type": p.get("type", "heap"),
+                            "content": p.get("content", ""),
+                            "metadata": {
+                                "page_id": p.get("page_id", ""),
+                                "source": "km_page_table",
+                                **p.get("metadata", {})
+                            }
+                        })
+
+            # 2. 如果KM页表为空，降级为直接聚合所有Agent的未合并堆段
+            if not active_pages:
+                fallback_mode = True
+                print("[Consolidator] KM页表为空，降级为直接聚合堆段...")
+                async with session.get(f"{BFF_BASE_URL}/heap/all-unmerged") as resp:
+                    if resp.status == 200:
+                        heap_data = await resp.json()
+                        heap_entries = heap_data.get("entries", [])
+                        print(f"[Consolidator] 获取到未合并堆段记录 {len(heap_entries)} 条")
+                        for e in heap_entries:
+                            page_id = e.get("id", f"heap_{uuid.uuid4().hex[:8]}")
+                            all_page_ids.append(page_id)
+                            all_entries.append({
+                                "id": page_id,
+                                "agent_id": e.get("source_agent_id", "unknown"),
+                                "timestamp": e.get("timestamp", datetime.now().isoformat()),
+                                "type": "heap",
+                                "content": e.get("content", ""),
+                                "metadata": {
+                                    "page_id": page_id,
+                                    "source": "heap_unmerged",
+                                    **e.get("metadata", {})
+                                }
+                            })
+
+            # 3. 获取PublicMemory记录
+            pm_url = f"{BFF_BASE_URL}/knowledge-manager/public-memory"
+            print(f"[Consolidator] 读取PublicMemory: {pm_url}")
+            async with session.get(pm_url, params={"top_k": 10000}) as resp:
+                if resp.status == 200:
+                    pm_data = await resp.json()
+                    pm_entries = pm_data.get("entries", [])
+                    print(f"[Consolidator] 获取到PublicMemory记录 {len(pm_entries)} 条")
+                    for e in pm_entries:
+                        all_entries.append({
+                            "id": e.get("id", f"pm_{uuid.uuid4().hex[:8]}"),
+                            "agent_id": e.get("agent_id", "unknown"),
+                            "timestamp": e.get("timestamp", datetime.now().isoformat()),
+                            "type": "pm",
+                            "content": e.get("content", ""),
+                            "metadata": e.get("metadata", {})
+                        })
+
+        if not all_entries:
+            return {"status": "ok", "message": "empty", "original_count": 0, "deduped_count": 0}
+
+        print(f"[Consolidator] 共 {len(all_entries)} 条记录待去重")
+
+        page_infos = []
+        for e in all_entries:
+            content = e.get("content", "")
+            if not content:
+                continue
+            simhash = get_simhash(content)
+            page_infos.append({"entry": e, "simhash": simhash})
+
+        deduped_entries = []
+        while page_infos:
+            cur = page_infos.pop(0)
+            deduped_entries.append(cur["entry"])
+            page_infos = [p for p in page_infos if hamming_distance(cur["simhash"], p["simhash"]) > SIMHASH_THRESHOLD]
+
+        removed_count = len(all_entries) - len(deduped_entries)
+        print(f"[Consolidator] 去重完成: 原始{len(all_entries)}条 → 去重后{len(deduped_entries)}条，移除{removed_count}条")
+
+        # 调用 BFF 的 /knowledge-manager/replace（带重试机制）
+        replace_success = False
+        replace_url = f"{BFF_BASE_URL}/knowledge-manager/replace"
+        print(f"[Consolidator] 写入PublicMemory: {replace_url} ({len(deduped_entries)}条)")
+        for retry in range(3):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(f"{BFF_BASE_URL}/knowledge-manager/replace", json=deduped_entries, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                        if resp.status == 200:
+                            replace_data = await resp.json()
+                            print(f"[Consolidator] PublicMemory替换成功: {replace_data}")
+                            replace_success = True
+                            break
+                        else:
+                            resp_text = await resp.text()
+                            print(f"[Consolidator] PublicMemory替换失败 (attempt {retry+1}/3): HTTP {resp.status} {resp_text[:200]}")
+            except Exception as replace_err:
+                print(f"[Consolidator] PublicMemory替换异常 (attempt {retry+1}/3): {replace_err}")
+            if retry < 2:
+                await asyncio.sleep(1)
+
+        if not replace_success:
+            return {"status": "error", "detail": "Failed to replace PublicMemory after 3 retries"}
+
+        # 标记堆段（只有在写入成功后才有意义）
+        async with aiohttp.ClientSession() as session:
+            if active_pages and all_page_ids:
+                print(f"[Consolidator] 标记 KM 页表: {len(all_page_ids)} 条")
+                try:
+                    async with session.post(f"{BFF_BASE_URL}/knowledge-manager/mark_pages_merged", json={"page_ids": all_page_ids}, timeout=aiohttp.ClientTimeout(total=30)) as mark_resp:
+                        if mark_resp.status == 200:
+                            mark_data = await mark_resp.json()
+                            print(f"[Consolidator] KM标记成功: {mark_data.get('marked_count', 0)}条")
+                        else:
+                            resp_text = await mark_resp.text()
+                            print(f"[Consolidator] KM标记失败: HTTP {mark_resp.status} {resp_text[:200]}")
+                except Exception as mark_err:
+                    print(f"[Consolidator] KM标记失败: {mark_err}")
+
+                # 标记Agent本地堆段（并发执行）
+                agent_heap_ids = {}
+                for p in active_pages:
+                    agent_id = p.get("agent_id")
+                    page_id = p.get("page_id")
+                    if not agent_id or not page_id:
+                        continue
+                    if agent_id not in agent_heap_ids:
+                        agent_heap_ids[agent_id] = []
+                    agent_heap_ids[agent_id].append(page_id)
+
+                print(f"[Consolidator] 并发标记 {len(agent_heap_ids)} 个 Agent 的本地堆段")
+                if agent_heap_ids:
+                    mark_tasks = [
+                        session.post(
+                            f"{BFF_BASE_URL}/agents/{agent_id}/heap/mark-merged",
+                            json={"ids": page_ids},
+                            timeout=aiohttp.ClientTimeout(total=10)
+                        )
+                        for agent_id, page_ids in agent_heap_ids.items()
+                    ]
+                    mark_results = await asyncio.gather(*mark_tasks, return_exceptions=True)
+                    for i, (agent_id, page_ids) in enumerate(agent_heap_ids.items()):
+                        result = mark_results[i]
+                        if isinstance(result, Exception):
+                            print(f"[Consolidator] Agent {agent_id[:8]} 堆段标记异常: {result}")
+                        elif result.status == 200:
+                            mark_data = await result.json()
+                            print(f"[Consolidator] Agent {agent_id[:8]} 堆段标记成功: {mark_data.get('marked_count', 0)}/{len(page_ids)}")
+                        else:
+                            print(f"[Consolidator] Agent {agent_id[:8]} 堆段标记失败: HTTP {result.status}")
+
+            # 如果是从堆段降级获取的，并发标记所有Agent的堆段为已合并
+            if fallback_mode and all_page_ids:
+                print("[Consolidator] 并发标记所有Agent的堆段为已合并...")
+                async with session.get(f"{BFF_BASE_URL}/heap/all-agents") as agents_resp:
+                    if agents_resp.status == 200:
+                        agents_data = await agents_resp.json()
+                        agent_ids = agents_data.get("agent_ids", [])
+                        print(f"[Consolidator] 找到 {len(agent_ids)} 个Agent，并发标记...")
+                        if agent_ids:
+                            mark_tasks = [
+                                session.post(
+                                    f"{BFF_BASE_URL}/agents/{agent_id}/heap/mark-all-merged",
+                                    json={},
+                                    timeout=aiohttp.ClientTimeout(total=10)
+                                )
+                                for agent_id in agent_ids
+                            ]
+                            mark_results = await asyncio.gather(*mark_tasks, return_exceptions=True)
+                            for i, agent_id in enumerate(agent_ids):
+                                result = mark_results[i]
+                                if isinstance(result, Exception):
+                                    print(f"[Consolidator] Agent {agent_id[:8]} 堆段全部标记异常: {result}")
+                                elif result.status == 200:
+                                    print(f"[Consolidator] Agent {agent_id[:8]} 堆段全部标记成功")
+                                else:
+                                    print(f"[Consolidator] Agent {agent_id[:8]} 堆段全部标记失败: HTTP {result.status}")
+
+        return {
+            "status": "ok",
+            "original_count": len(all_entries),
+            "deduped_count": len(deduped_entries),
+            "removed_count": removed_count,
+            "pages_marked": len(all_page_ids),
+            "source": "km_page_table" if active_pages else "heap_unmerged"
+        }
+    except Exception as e:
+        print(f"[Consolidator] 合并失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"status": "error", "detail": str(e)}
+
+
 class KnowledgeManagerKM:
-    """KM Agent专用的KnowledgeManager简化实现"""
-    
+    """KM Agent专用的KnowledgeManager简化实现 - CWW异步合并版 + 基于堆段计数触发"""
+
     def __init__(self, public_memory_path: Path):
         self.public_memory_path = Path(public_memory_path)
         self.public_memory_path.parent.mkdir(parents=True, exist_ok=True)
         self._page_counter = 0
         self._merged_count = 0
-        self._queue = []
-        self._queue_lock = asyncio.Lock()
-        
+        self._running = True
+
+        self.merge_threshold = int(os.environ.get("KM_MERGE_THRESHOLD", "20"))
+        self.merge_interval = float(os.environ.get("KM_MERGE_INTERVAL", "60.0"))
+
+        # 防抖机制
+        self._merge_in_progress = False
+        self._last_merge_time = 0
+        self._merge_cooldown = 5.0  # 合并冷却时间（秒）
+
+        # MMU 页表
+        self.page_table: Dict[str, dict] = {}
+        self._page_table_lock = asyncio.Lock()
+
         if not self.public_memory_path.exists():
             self.public_memory_path.write_text("", encoding="utf-8")
+
+        # 启动后台持续监控任务
+        asyncio.create_task(self._background_merge_monitor())
+    
+    async def allocate_page(self, agent_id: str, content: str, content_type: str = "heap", metadata: dict = None) -> dict:
+        """分配页：Agent 写入前向 KM 申请页"""
+        page_id = f"page_{agent_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{self._page_counter}"
+        self._page_counter += 1
+
+        entry = {
+            "page_id": page_id,
+            "agent_id": agent_id,
+            "type": content_type,
+            "status": "active",
+            "content": content,
+            "metadata": metadata or {},
+            "created_at": datetime.now().isoformat(),
+            "merged_at": None
+        }
+
+        async with self._page_table_lock:
+            self.page_table[page_id] = entry
+
+        print(f"[KM-MMU] 分配页: page_id={page_id}, agent={agent_id[:8]}, type={content_type}")
+
+        return {
+            "page_id": page_id,
+            "type": content_type,
+            "status": "allocated"
+        }
+    
+    async def get_active_pages(self) -> List[dict]:
+        """获取所有活跃页（status=active）"""
+        async with self._page_table_lock:
+            active = [p for p in self.page_table.values() if p.get("status") == "active"]
+        print(f"[KM-MMU] 获取活跃页: {len(active)} 条")
+        return active
+    
+    async def mark_pages_merged(self, page_ids: List[str]) -> int:
+        """批量标记页为已合并"""
+        marked = 0
+        async with self._page_table_lock:
+            for pid in page_ids:
+                if pid in self.page_table and self.page_table[pid].get("status") != "merged":
+                    self.page_table[pid]["status"] = "merged"
+                    self.page_table[pid]["merged_at"] = datetime.now().isoformat()
+                    marked += 1
+        print(f"[KM-MMU] 标记已合并: {marked} 条")
+        return marked
     
     async def preset_skill_0(self, content: str, skill_version: str = "1.0") -> str:
         """预置0号Skill"""
@@ -1992,57 +2516,143 @@ class KnowledgeManagerKM:
             "content": content,
             "metadata": {"page_id": "page_0_skill", "skill_version": skill_version}
         }
-        async with self._queue_lock:
-            with open(self.public_memory_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        with open(self.public_memory_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         return "page_0_skill"
     
     async def submit_page(self, agent_id: str, page_content: str, page_title: str, round_num: int = None) -> str:
         """接收协作者提交的page_content（立即返回，不阻塞）"""
         page_id = f"page_{agent_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{self._page_counter}"
         self._page_counter += 1
-        
-        submission = {
-            "page_id": page_id,
-            "agent_id": agent_id,
-            "content": page_content,
-            "page_title": page_title,
-            "round_num": round_num,
-            "submitted_at": datetime.now().isoformat()
-        }
-        
-        async with self._queue_lock:
-            self._queue.append(submission)
-        
-        asyncio.create_task(self._async_merge())
+        print(f"[KM] Page提交: page_id={page_id}, agent={agent_id[:8]}")
+
+        # 立即检查一次阈值，实现快速触发（不影响后台定时）
+        asyncio.create_task(self._check_and_trigger_if_needed())
         return page_id
-    
-    async def _async_merge(self):
-        """异步合并"""
-        await asyncio.sleep(0.5)
-        async with self._queue_lock:
-            if not self._queue:
-                return
-            pages = list(self._queue)
-            self._queue.clear()
+
+    async def _background_merge_monitor(self):
+        """后台持续监控，定时检查并触发合并（带异常保护与详细日志）"""
+        print(f"[KM] 启动后台合并监控: 每 {self.merge_interval} 秒检查一次，阈值 {self.merge_threshold} 条")
+        consecutive_failures = 0  # 连续失败计数，用于告警抑制
+        while self._running:
+            await asyncio.sleep(self.merge_interval)
+            try:
+                should_trigger = await self._should_trigger_merge()
+                if should_trigger:
+                    print(f"[KM] 达到合并阈值，触发自动合并")
+                    await self._trigger_consolidation()
+                consecutive_failures = 0  # 成功执行，重置失败计数
+            except asyncio.CancelledError:
+                print(f"[KM] 后台合并监控被取消")
+                break
+            except Exception as e:
+                consecutive_failures += 1
+                # 连续失败多次时输出更醒目的告警
+                if consecutive_failures <= 3 or consecutive_failures % 10 == 0:
+                    print(f"[KM] 后台监控异常 (连续失败 {consecutive_failures} 次): {type(e).__name__} - {e}")
+                # 短暂延迟后继续，避免异常循环过密
+                await asyncio.sleep(1)
+
+    async def _check_and_trigger_if_needed(self):
+        """立即检查阈值，若达到则触发合并（非阻塞，带防抖）"""
+        # 防抖检查：如果正在合并中或冷却时间内，跳过
+        current_time = time.time()
+        if self._merge_in_progress:
+            print(f"[KM] 合并进行中，跳过本次触发")
+            return
+        if current_time - self._last_merge_time < self._merge_cooldown:
+            elapsed = current_time - self._last_merge_time
+            print(f"[KM] 合并冷却中 ({elapsed:.1f}s/{self._merge_cooldown}s)，跳过本次触发")
+            return
+
+        if await self._should_trigger_merge():
+            print(f"[KM] 提交后立即达到阈值，触发合并")
+            await self._trigger_consolidation()
+
+    async def _should_trigger_merge(self) -> bool:
+        """检查全局未合并堆段数是否达到阈值（带重试与详细日志）"""
+        bff_url = os.environ.get("BFF_BASE_URL", "http://host.docker.internal:8000")
+        max_retries = 3
+        base_delay = 5.0  # 指数退避基数（秒）：5s, 10s, 20s
         
-        for page in pages:
-            entry = {
-                "id": f"mem_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}",
-                "agent_id": page["agent_id"],
-                "timestamp": datetime.now().isoformat(),
-                "type": "data",
-                "content": page["content"],
-                "metadata": {
-                    "page_id": page["page_id"],
-                    "page_title": page["page_title"],
-                    "submitted_at": page["submitted_at"],
-                    "round": page.get("round_num")
-                }
-            }
-            with open(self.public_memory_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-            self._merged_count += 1
+        for attempt in range(max_retries):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    resp = await session.get(
+                        f"{bff_url}/heap/all-unmerged",
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    )
+                    
+                    if resp.status == 200:
+                        data = await resp.json()
+                        total_count = data.get("total_count", 0)
+                        print(f"[KM] 全局未合并堆段数: {total_count}, 阈值: {self.merge_threshold}")
+                        return total_count >= self.merge_threshold
+                    else:
+                        resp_text = await resp.text()
+                        print(f"[KM] BFF返回异常状态码 {resp.status} (attempt {attempt+1}/{max_retries}): {resp_text[:200]}")
+                        if 400 <= resp.status < 500:
+                            print(f"[KM] 客户端错误，放弃重试。")
+                            return False
+                            
+            except asyncio.TimeoutError:
+                print(f"[KM] 请求BFF超时 (attempt {attempt+1}/{max_retries}, timeout=10s)")
+            except aiohttp.ClientConnectorError as e:
+                print(f"[KM] 连接BFF失败 (attempt {attempt+1}/{max_retries}): {type(e).__name__} - {e}")
+            except aiohttp.ClientError as e:
+                print(f"[KM] aiohttp客户端异常 (attempt {attempt+1}/{max_retries}): {type(e).__name__} - {e}")
+            except Exception as e:
+                print(f"[KM] 未知异常 (attempt {attempt+1}/{max_retries}): {type(e).__name__} - {e}")
+            
+            if attempt < max_retries - 1:
+                wait_time = base_delay * (2 ** attempt)
+                print(f"[KM] 等待 {wait_time:.1f}s 后重试...")
+                await asyncio.sleep(wait_time)
+        
+        print(f"[KM] ❌ 检查未合并堆段数最终失败，已重试{max_retries}次。合并监控可能失效！")
+        return False
+
+    async def _trigger_consolidation(self):
+        """通知BFF启动合并（带防抖状态管理）"""
+        bff_url = os.environ.get("BFF_BASE_URL", "http://host.docker.internal:8000")
+        self._merge_in_progress = True
+        try:
+            async with aiohttp.ClientSession() as session:
+                print(f"[KM] 发送合并请求到BFF: {bff_url}/consolidator/merge")
+                async with session.post(f"{bff_url}/consolidator/merge", timeout=aiohttp.ClientTimeout(total=300)) as resp:
+                    if resp.status == 200:
+                        result = await resp.json()
+                        print(f"[KM] 合并成功: {result}")
+                    else:
+                        resp_text = await resp.text()
+                        print(f"[KM] 合并失败: HTTP {resp.status} {resp_text}")
+        except Exception as e:
+            print(f"[KM] 触发合并异常: {e}")
+        finally:
+            self._merge_in_progress = False
+            
+            # 检查合并后计数是否真的下降了
+            try:
+                async with aiohttp.ClientSession() as session:
+                    resp = await session.get(
+                        f"{bff_url}/heap/all-unmerged",
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    )
+                    if resp.status == 200:
+                        data = await resp.json()
+                        new_count = data.get("total_count", 0)
+                        print(f"[KM] 合并后检查: 当前 {new_count} 条未合并")
+                        
+                        # 如果合并后计数仍然很高，不重置冷却时间
+                        if new_count >= self.merge_threshold * 0.5:  # 仍然超过阈值一半
+                            print(f"[KM] 合并后计数仍高 ({new_count})，保持冷却状态")
+                            self._last_merge_time = time.time()  # 保持冷却，不重置
+                        else:
+                            self._last_merge_time = time.time()
+                            print(f"[KM] 合并后计数正常 ({new_count})，冷却时间已重置")
+            except Exception as check_err:
+                print(f"[KM] 合并后检查失败: {check_err}")
+                self._last_merge_time = time.time()  # 默认重置
     
     async def get_public_memory(self) -> list:
         """获取PublicMemory所有内容"""
@@ -2054,13 +2664,14 @@ class KnowledgeManagerKM:
     async def get_stats(self) -> dict:
         """获取统计"""
         entries = await self.get_public_memory()
-        async with self._queue_lock:
-            return {
-                "total_entries": len(entries),
-                "queue_size": len(self._queue),
-                "merged_count": self._merged_count,
-                "has_skill_0": any(e.get("metadata", {}).get("page_id") == "page_0_skill" for e in entries)
-            }
+        return {
+            "total_entries": len(entries),
+            "merged_count": self._merged_count,
+            "has_skill_0": any(e.get("metadata", {}).get("page_id") == "page_0_skill" for e in entries),
+            "merge_threshold": self.merge_threshold,
+            "merge_interval": self.merge_interval,
+            "running": self._running
+        }
 
 
 km_agent_knowledge_manager: KnowledgeManagerKM = None
@@ -2081,8 +2692,11 @@ PROMPTS = [
 
 将推理过程写入栈段，最终答案写入堆段，并将核心定义提炼为Page提交给KnowledgeManager。
 
-请严格以JSON格式返回：
-{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "栈段语义"}"""
+【重要】你必须严格输出以下JSON格式，不要添加任何额外的解释、标记或代码块符号：
+{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "栈段语义"}
+
+示例（请按照此格式输出）：
+{"stack_content": "栈段是Agent私有临时存储，用于隔离推理噪声...", "heap_content": "栈段采用LIFO栈结构，任务结束自动清空，保证推理过程不污染共享空间。", "page_content": "栈段语义：Agent私有短期噪声隔离区，存储单轮推理步骤、临时假设等，通过push追加，任务结束自动清空。", "page_title": "栈段语义"}"""
     },
     {
         "round": 2,
@@ -2091,7 +2705,11 @@ PROMPTS = [
 
 推理→栈段，结论→堆段，核心定义→提交KnowledgeManager。
 
-JSON格式：{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "堆段语义"}"""
+【重要】你必须严格输出以下JSON格式，不要添加任何额外的解释、标记或代码块符号：
+{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "堆段语义"}
+
+示例（请按照此格式输出）：
+{"stack_content": "堆段与栈段的主要区别在于生命周期和访问权限...", "heap_content": "堆段是进程级别的共享空间，所有线程可并发访问...", "page_content": "堆段语义：进程级共享中期存储，存储阶段性结论和可共享的中间共识，支持无锁并发追加。", "page_title": "堆段语义"}"""
     },
     {
         "round": 3,
@@ -2100,7 +2718,11 @@ JSON格式：{"stack_content": "...", "heap_content": "...", "page_content": "..
 
 推理→栈段，结论→堆段，核心定义→提交KnowledgeManager。
 
-JSON格式：{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "数据段语义"}"""
+【重要】你必须严格输出以下JSON格式，不要添加任何额外的解释、标记或代码块符号：
+{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "数据段语义"}
+
+示例（请按照此格式输出）：
+{"stack_content": "数据段与堆段的设计目标不同...", "heap_content": "数据段采用只读权限控制...", "page_content": "数据段语义：全局只读长期知识库，存储经过验证的Skill和方法论，仅KM有写入权限。", "page_title": "数据段语义"}"""
     },
     {
         "round": 4,
@@ -2109,7 +2731,11 @@ JSON格式：{"stack_content": "...", "heap_content": "...", "page_content": "..
 
 推理→栈段，表格→堆段，表格精简版→提交KnowledgeManager。
 
-JSON格式：{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "三段内存对比"}"""
+【重要】你必须严格输出以下JSON格式，不要添加任何额外的解释、标记或代码块符号：
+{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "三段内存对比"}
+
+示例（请按照此格式输出）：
+{"stack_content": "对比维度包括归属、存储内容、写入方式、生命周期...", "heap_content": "| 段名 | 归属 | 内容 | 写入方式 | 生命周期 |\\n|------|------|------|----------|----------|\\n| 栈段 | Agent私有 | 推理步骤 | push | 任务结束 |...", "page_content": "三段对比：栈段(Agent私有/推理噪声)、堆段(进程共享/中间共识)、数据段(全局只读/验证知识)。", "page_title": "三段内存对比"}"""
     },
     {
         "round": 5,
@@ -2118,7 +2744,11 @@ JSON格式：{"stack_content": "...", "heap_content": "...", "page_content": "..
 
 推理→栈段，结论→堆段，核心阐述→提交KnowledgeManager。
 
-JSON格式：{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "设计价值总结"}"""
+【重要】你必须严格输出以下JSON格式，不要添加任何额外的解释、标记或代码块符号：
+{"stack_content": "...", "heap_content": "...", "page_content": "...", "page_title": "设计价值总结"}
+
+示例（请按照此格式输出）：
+{"stack_content": "多Agent协作需要解决信息隔离和共享的矛盾...", "heap_content": "通过三级存储分离噪声、共识和知识...", "page_content": "设计价值：三级内存分离实现推理噪声隔离、并发共识与知识沉淀的解耦，提升多Agent系统的信息质量和协作效率。", "page_title": "设计价值总结"}"""
     }
 ]
 
@@ -2144,7 +2774,7 @@ async def preset_skill_0(req: PresetSkill0Request):
 
 @app.post("/submit-page")
 async def submit_page(req: PageSubmitRequest, request: Request):
-    """KM Agent：接收协作者提交的page_content（CWW机制：立即返回）"""
+    """KM Agent：接收协作者提交的 page_content（CWW 机制：立即返回）"""
     agent_id = request.headers.get("X-Agent-Id", "unknown")
     km = get_km_agent_km()
     page_id = await km.submit_page(
@@ -2154,6 +2784,59 @@ async def submit_page(req: PageSubmitRequest, request: Request):
         round_num=agent_round_map.get(agent_id, 0)
     )
     return {"status": "ok", "page_id": page_id}
+
+
+class HeapWrittenRequest(BaseModel):
+    agent_id: str
+    count: int = 1
+
+
+@app.post("/heap-written")
+async def heap_written(req: HeapWrittenRequest):
+    """KM Agent：接收协作者堆段写入通知，触发阈值检查"""
+    km = get_km_agent_km()
+    asyncio.create_task(km._check_and_trigger_if_needed())
+    return {"status": "ok"}
+
+
+class AllocatePageRequest(BaseModel):
+    agent_id: str
+    content: str
+    content_type: str = "heap"
+    metadata: dict = {}
+
+
+class MarkPagesMergedRequest(BaseModel):
+    page_ids: List[str]
+
+
+@app.post("/allocate_page")
+async def allocate_page(req: AllocatePageRequest):
+    """MMU：分配页，Agent 写入前向 KM 申请"""
+    km = get_km_agent_km()
+    result = await km.allocate_page(
+        agent_id=req.agent_id,
+        content=req.content,
+        content_type=req.content_type,
+        metadata=req.metadata
+    )
+    return result
+
+
+@app.get("/active_pages")
+async def get_active_pages():
+    """MMU：获取所有活跃页（Consolidator 调用）"""
+    km = get_km_agent_km()
+    pages = await km.get_active_pages()
+    return {"pages": pages, "count": len(pages)}
+
+
+@app.post("/mark_pages_merged")
+async def mark_pages_merged(req: MarkPagesMergedRequest):
+    """MMU：批量标记页为已合并（Consolidator 调用）"""
+    km = get_km_agent_km()
+    marked = await km.mark_pages_merged(req.page_ids)
+    return {"status": "ok", "marked_count": marked}
 
 
 @app.get("/stats")
@@ -2167,7 +2850,7 @@ async def get_stats():
 async def force_merge():
     """KM Agent：强制立即合并"""
     km = get_km_agent_km()
-    await km._async_merge()
+    await km._trigger_consolidation()
     entries = await km.get_public_memory()
     return {"status": "ok", "total_entries": len(entries), "merged_count": km._merged_count}
 
@@ -2184,25 +2867,22 @@ async def replace_public_memory(entries: List[dict]):
 
 @app.get("/task")
 async def get_task(agent_id: str):
-    """KM Agent：返回下一轮Prompt给协作者"""
+    """KM Agent：返回下一轮Prompt给协作者（无限轮次，循环复用5个任务）"""
     global agent_round_map
 
     if agent_id not in agent_round_map:
         agent_round_map[agent_id] = 0
 
     current_round = agent_round_map[agent_id]
-
-    if current_round >= 5:
-        return {"prompt": None, "completed": True}
-
     current_round += 1
     agent_round_map[agent_id] = current_round
 
-    task = PROMPTS[current_round - 1]
+    # 取模循环使用 5 个任务，无限轮次
+    task = PROMPTS[(current_round - 1) % len(PROMPTS)]
     return {
         "prompt": task["prompt"],
         "round": current_round,
-        "title": task["title"],
+        "title": f"{task['title']} (轮次{current_round})",
         "page_id": f"page_{agent_id}_r{current_round}"
     }
 

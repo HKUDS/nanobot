@@ -1,0 +1,93 @@
+{
+  "trial": 1,
+  "timestamp": "2026-04-20T21:47:16.245122",
+  "a_group": {
+    "group": "A",
+    "time_budget": 300,
+    "agent_count": 10,
+    "total_rounds": 77,
+    "avg_rounds_per_agent": 7.7,
+    "total_inference_time": 3044.2014862100023,
+    "actual_time": 380.9257065660004,
+    "idle_ratio": 0.20084115255619944,
+    "failed_rounds": 0,
+    "public_memory_count": 92,
+    "agent_details": [
+      {
+        "role": "技术架构师",
+        "completed_rounds": 13,
+        "failed_rounds": 0,
+        "inference_time": 284.2571081030037
+      },
+      {
+        "role": "产品经理",
+        "completed_rounds": 11,
+        "failed_rounds": 0,
+        "inference_time": 275.3243722320003
+      },
+      {
+        "role": "数据分析师",
+        "completed_rounds": 2,
+        "failed_rounds": 0,
+        "inference_time": 374.5665600029988
+      },
+      {
+        "role": "安全专家",
+        "completed_rounds": 9,
+        "failed_rounds": 0,
+        "inference_time": 294.4666055670041
+      },
+      {
+        "role": "运维工程师",
+        "completed_rounds": 6,
+        "failed_rounds": 0,
+        "inference_time": 307.5544370239986
+      },
+      {
+        "role": "前端工程师",
+        "completed_rounds": 9,
+        "failed_rounds": 0,
+        "inference_time": 297.10596436599553
+      },
+      {
+        "role": "后端工程师",
+        "completed_rounds": 4,
+        "failed_rounds": 0,
+        "inference_time": 296.0956192210033
+      },
+      {
+        "role": "移动开发工程师",
+        "completed_rounds": 9,
+        "failed_rounds": 0,
+        "inference_time": 277.12645016999704
+      },
+      {
+        "role": "DevOps工程师",
+        "completed_rounds": 11,
+        "failed_rounds": 0,
+        "inference_time": 284.61871872100164
+      },
+      {
+        "role": "QA工程师",
+        "completed_rounds": 3,
+        "failed_rounds": 0,
+        "inference_time": 353.0856508029992
+      }
+    ]
+  },
+  "b_group": {
+    "group": "B",
+    "time_budget": 300,
+    "agent_count": 10,
+    "total_rounds": 10,
+    "completed_full_rounds": 1,
+    "avg_rounds_per_agent": 1.0,
+    "total_inference_time": 1037.4564680330022,
+    "total_merge_time": 7.642505259000245,
+    "actual_time": 327.1546794320002,
+    "idle_ratio": 0.6828850286249261,
+    "merge_time_ratio": 0.023360525584622597,
+    "failed_rounds": 0,
+    "public_memory_count": 22
+  }
+}

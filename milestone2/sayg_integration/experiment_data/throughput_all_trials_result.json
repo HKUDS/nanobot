@@ -1,0 +1,98 @@
+{
+  "trials": [
+    {
+      "trial": 1,
+      "timestamp": "2026-04-20T18:09:50.716182",
+      "a_group": {
+        "group": "A",
+        "time_budget": 300,
+        "agent_count": 10,
+        "total_rounds": 43,
+        "avg_rounds_per_agent": 4.3,
+        "total_inference_time": 1655.126341786,
+        "actual_time": 344.54568489400003,
+        "idle_ratio": 0.519620644125843,
+        "failed_rounds": 0,
+        "public_memory_count": 3,
+        "agent_details": [
+          {
+            "role": "技术架构师",
+            "completed_rounds": 4,
+            "failed_rounds": 0,
+            "inference_time": 181.74795188000007
+          },
+          {
+            "role": "产品经理",
+            "completed_rounds": 5,
+            "failed_rounds": 0,
+            "inference_time": 144.26795175499979
+          },
+          {
+            "role": "数据分析师",
+            "completed_rounds": 3,
+            "failed_rounds": 0,
+            "inference_time": 180.9758615290002
+          },
+          {
+            "role": "安全专家",
+            "completed_rounds": 4,
+            "failed_rounds": 0,
+            "inference_time": 163.6490096629998
+          },
+          {
+            "role": "运维工程师",
+            "completed_rounds": 4,
+            "failed_rounds": 0,
+            "inference_time": 185.77001695900003
+          },
+          {
+            "role": "前端工程师",
+            "completed_rounds": 5,
+            "failed_rounds": 0,
+            "inference_time": 170.0250628579995
+          },
+          {
+            "role": "后端工程师",
+            "completed_rounds": 4,
+            "failed_rounds": 0,
+            "inference_time": 166.7624932460003
+          },
+          {
+            "role": "移动开发工程师",
+            "completed_rounds": 5,
+            "failed_rounds": 0,
+            "inference_time": 150.0247494160003
+          },
+          {
+            "role": "DevOps工程师",
+            "completed_rounds": 5,
+            "failed_rounds": 0,
+            "inference_time": 157.97197752700004
+          },
+          {
+            "role": "QA工程师",
+            "completed_rounds": 4,
+            "failed_rounds": 0,
+            "inference_time": 153.93126695299998
+          }
+        ]
+      },
+      "b_group": {
+        "group": "B",
+        "time_budget": 300,
+        "agent_count": 10,
+        "total_rounds": 10,
+        "completed_full_rounds": 1,
+        "avg_rounds_per_agent": 1.0,
+        "total_inference_time": 871.7724383140003,
+        "total_merge_time": 78.85232756800042,
+        "actual_time": 315.62642935799977,
+        "idle_ratio": 0.7237961218624087,
+        "merge_time_ratio": 0.24982802526515308,
+        "failed_rounds": 0,
+        "public_memory_count": 3
+      }
+    }
+  ],
+  "time_budget": 300
+}

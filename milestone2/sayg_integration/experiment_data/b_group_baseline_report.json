@@ -1,0 +1,28 @@
+{
+  "group": "B_baseline",
+  "description": "B组Baseline：5轮学习任务（与A组对比）",
+  "total_time": 307.1616116899995,
+  "pm_entry_count": 55,
+  "agent_count": 10,
+  "round_count": 5,
+  "valid_count": 50,
+  "total_count": 50,
+  "inference_times": {
+    "avg": 30.47730672358006,
+    "max": 98.29958331199941,
+    "min": 9.85261077800078,
+    "total": 1523.865336179003
+  },
+  "write_times": {
+    "avg": 0.009287463119962923,
+    "max": 0.03287900000032096,
+    "min": 0.003965087999858952
+  },
+  "lock_stats": {
+    "total_wait_time": 0.016518985004040587,
+    "acquire_count": 55,
+    "avg_wait_time": 0.000300345181891647,
+    "max_wait_time": 0.0016098589994726353,
+    "min_wait_time": 0.00010990200007654494
+  }
+}

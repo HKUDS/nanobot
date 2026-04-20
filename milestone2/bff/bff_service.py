@@ -25,6 +25,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 关键日志输出到 MD 文件
+LOG_MD_PATH = Path(__file__).parent / "key_logs.md"
+
+def log_to_md(tag: str, message: str):
+    """将关键日志写入 MD 文件"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(LOG_MD_PATH, "a", encoding="utf-8") as f:
+        f.write(f"[{timestamp}] {tag} {message}\n")
+
 import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,6 +61,34 @@ container_ports: dict = {}
 
 # KM容器管理
 km_container_id: Optional[str] = None  # KM容器的conversation_id
+_km_lock: asyncio.Lock = None  # KM容器锁（延迟初始化）
+
+# Consolidator容器管理
+consolidator_conv_id: Optional[str] = None  # Consolidator容器的conversation_id
+_consolidator_lock: asyncio.Lock = None  # Consolidator容器锁（延迟初始化）
+
+def _get_consolidator_lock() -> asyncio.Lock:
+    global _consolidator_lock
+    if _consolidator_lock is None:
+        _consolidator_lock = asyncio.Lock()
+    return _consolidator_lock
+
+# all-unmerged 缓存和请求合并
+_all_unmerged_cache: dict = {"entries": [], "total_count": 0, "timestamp": 0}
+_all_unmerged_lock: asyncio.Lock = None  # 请求合并锁
+_all_unmerged_fetching: asyncio.Event = None  # 是否有请求正在执行
+
+def _get_all_unmerged_lock() -> asyncio.Lock:
+    global _all_unmerged_lock
+    if _all_unmerged_lock is None:
+        _all_unmerged_lock = asyncio.Lock()
+    return _all_unmerged_lock
+
+def _get_all_unmerged_event() -> asyncio.Event:
+    global _all_unmerged_fetching
+    if _all_unmerged_fetching is None:
+        _all_unmerged_fetching = asyncio.Event()
+    return _all_unmerged_fetching
 
 # 再初始化依赖字典的组件
 token_wallet = TokenWallet()
@@ -147,6 +184,7 @@ class ConversationCreate(BaseModel):
     title: str
     model: str = "deepseek-chat"
     agent_type: str = "km"  # km=KnowledgeManager, collab=协作者
+    name_prefix: str = "nanobot_conv"  # 容器名前缀
 
 
 class ConversationResponse(BaseModel):
@@ -212,6 +250,7 @@ async def create_conversation(req: ConversationCreate):
         model=req.model,
         api_key=api_key,
         agent_type=req.agent_type,
+        name_prefix=req.name_prefix,
     )
 
     # 使用锁保护全局字典写入
@@ -257,7 +296,7 @@ async def create_conversation(req: ConversationCreate):
 
 
 async def get_km_container_url() -> str:
-    """获取KM容器的URL，若不存在则自动创建"""
+    """获取KM容器的URL，若不存在则自动创建（带重试机制）"""
     global km_container_id
     async with _km_lock:
         if km_container_id and km_container_id not in container_ports:
@@ -268,13 +307,23 @@ async def get_km_container_url() -> str:
         
         if km_container_id is None or km_container_id not in container_ports:
             print(f"[BFF] KM容器不存在，创建中...")
-            conv = await create_conversation(ConversationCreate(
-                title="KnowledgeManager",
-                model="deepseek-chat",
-                agent_type="km"
-            ))
-            km_container_id = conv.conversation_id
-            print(f"[BFF] KM容器已创建: {km_container_id}, 端口: {container_ports.get(km_container_id)}")
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    conv = await create_conversation(ConversationCreate(
+                        title="KnowledgeManager",
+                        model="deepseek-chat",
+                        agent_type="km"
+                    ))
+                    km_container_id = conv.conversation_id
+                    print(f"[BFF] KM容器已创建: {km_container_id}, 端口: {container_ports.get(km_container_id)}")
+                    break
+                except Exception as e:
+                    print(f"[BFF] KM容器创建失败 (attempt {attempt+1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2)
+                    else:
+                        raise RuntimeError(f"KM容器创建失败，已重试{max_retries}次: {e}")
         return get_container_url(km_container_id)
 
 
@@ -575,6 +624,46 @@ async def health_check():
     }
 
 
+@app.post("/experiment/cleanup")
+async def experiment_cleanup():
+    """清理实验环境 - 停止所有协作者容器、Consolidator，清理PublicMemory"""
+    print("[BFF] 执行实验清理...")
+    results = {"stopped_agents": 0, "stopped_consolidator": 0, "cleaned_files": []}
+    
+    # 停止所有协作者容器
+    agent_type_counter = 0
+    for conv_id in list(conversations.keys()):
+        if conversations.get(conv_id, {}).get("agent_type") == "collab":
+            try:
+                container_name = f"nanobot_conv_{conv_id}"
+                container = orchestrator.docker_client.containers.get(container_name)
+                container.stop(timeout=5)
+                agent_type_counter += 1
+                print(f"[BFF] 已停止容器: {container_name}")
+            except Exception as e:
+                print(f"[BFF] 停止容器 {conv_id} 失败: {e}")
+    results["stopped_agents"] = agent_type_counter
+    
+    # 停止 Consolidator
+    try:
+        for container in orchestrator.docker_client.containers.list(all=True):
+            if container.name and "consolidator" in container.name.lower():
+                container.stop(timeout=5)
+                results["stopped_consolidator"] += 1
+                print(f"[BFF] 已停止 Consolidator: {container.name}")
+    except Exception as e:
+        print(f"[BFF] 停止 Consolidator 失败: {e}")
+    
+    # 清理全局状态
+    cleared_convs = len(conversations)
+    conversations.clear()
+    branches.clear()
+    container_ports.clear()
+    print(f"[BFF] 已清空 conversations ({cleared_convs}), branches 和 container_ports")
+    
+    return results
+
+
 @app.get("/conversations/status")
 async def get_conversations_status():
     """获取所有对话的真实状态（包括容器状态）"""
@@ -685,20 +774,29 @@ async def _check_container_health():
     unhealthy_count = 0
     for conv_id in conv_ids:
         try:
-            container_name = f"nanobot_conv_{conv_id}"
+            # 检查容器名前缀（协作者用 nanobot_conv，Consolidator用 consolidator_）
+            conv_info = conversations.get(conv_id, {})
+            agent_type = conv_info.get("agent_type", "collab")
+            prefix = "consolidator" if agent_type == "consolidator" else "nanobot_conv"
+            container_name = f"{prefix}_{conv_id}"
+
             container = orchestrator.docker_client.containers.get(container_name)
             if container.status != "running":
                 print(f"[BFF] 容器不健康 {conv_id}: {container.status}")
                 unhealthy_count += 1
         except Exception as e:
-            # 容器不存在
-            print(f"[BFF] 容器不存在 {conv_id}: {e}")
+            # 容器不存在，清理无效对话
+            print(f"[BFF] 容器不存在 {conv_id}，清理中...")
+            if conv_id in conversations:
+                del conversations[conv_id]
+            if conv_id in container_ports:
+                del container_ports[conv_id]
+            if conv_id in branches:
+                del branches[conv_id]
             unhealthy_count += 1
 
     if unhealthy_count > 0:
-        print(f"[BFF] 健康检查: {len(conv_ids)} 个容器中 {unhealthy_count} 个不健康")
-    else:
-        print(f"[BFF] 健康检查: 所有 {len(conv_ids)} 个容器运行正常")
+        print(f"[BFF] 健康检查: 已清理 {unhealthy_count} 个无效容器")
 
 
 async def _periodic_neighbor_discovery():
@@ -1117,10 +1215,8 @@ async def api_list_bounties(issuer_id: str = None, status: str = None):
     try:
         if issuer_id:
             bounties = await bounty_hub.list_bounties_by_issuer(issuer_id, status)
-            logger.info(f"[bounties] 返回 {len(bounties)} 个悬赏 (issuer={issuer_id}, status={status})")
         else:
             bounties = await bounty_hub.list_open_bounties()
-            logger.info(f"[bounties] 返回 {len(bounties)} 个开放悬赏")
         return {"bounties": bounties}
     except Exception as e:
         logger.error(f"[bounties] 列出悬赏失败: {e}")
@@ -1672,7 +1768,7 @@ async def api_get_km_url():
 
 @app.post("/knowledge-manager/submit-page")
 async def api_submit_page(req: PageSubmitRequest):
-    """接收协作者提交的page_content - 转发到KM容器"""
+    """接收协作者提交的 page_content - 转发到 KM 容器"""
     try:
         km_url = await get_km_container_url()
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -1688,7 +1784,85 @@ async def api_submit_page(req: PageSubmitRequest):
             resp.raise_for_status()
             return resp.json()
     except Exception as e:
-        print(f"[BFF] 转发 submit-page 失败: {e}")
+        print(f"[BFF] 转发 submit-page 失败：{e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/knowledge-manager/heap-written")
+async def api_heap_written(req: dict):
+    """转发堆段写入通知到 KM 容器"""
+    try:
+        km_url = await get_km_container_url()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(f"{km_url}/heap-written", json=req)
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        print(f"[BFF] 转发 heap-written 失败：{e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class AllocatePageRequest(BaseModel):
+    agent_id: str
+    content: str
+    content_type: str = "heap"
+    metadata: dict = {}
+
+
+class MarkPagesMergedRequest(BaseModel):
+    page_ids: List[str]
+
+
+@app.post("/knowledge-manager/allocate_page")
+async def api_allocate_page(req: AllocatePageRequest):
+    """MMU：分配页 - 转发到KM容器"""
+    try:
+        km_url = await get_km_container_url()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{km_url}/allocate_page",
+                json={
+                    "agent_id": req.agent_id,
+                    "content": req.content,
+                    "content_type": req.content_type,
+                    "metadata": req.metadata
+                }
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        print(f"[BFF] 转发 allocate_page 失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/knowledge-manager/active_pages")
+async def api_get_active_pages():
+    """MMU：获取所有活跃页 - 转发到KM容器"""
+    try:
+        km_url = await get_km_container_url()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(f"{km_url}/active_pages")
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        print(f"[BFF] 转发 active_pages 失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/knowledge-manager/mark_pages_merged")
+async def api_mark_pages_merged(req: MarkPagesMergedRequest):
+    """MMU：批量标记页为已合并 - 转发到KM容器"""
+    try:
+        km_url = await get_km_container_url()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{km_url}/mark_pages_merged",
+                json={"page_ids": req.page_ids}
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        print(f"[BFF] 转发 mark_pages_merged 失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1723,7 +1897,12 @@ async def api_get_public_memory(
             pm_path = Path(pm_host_path) / "public_memory.jsonl"
         else:
             pm_path = Path(__file__).parent.parent / "data" / "public_memory" / "public_memory.jsonl"
+        
+        print(f"[BFF] 读取PublicMemory (物理路径): {pm_path}, top_k={top_k}")
+        log_to_md("[BFF-READ-PM]", f"{pm_path}, top_k={top_k}")
+        
         if not pm_path.exists():
+            print(f"[BFF] PublicMemory文件不存在: {pm_path}")
             return {"entries": [], "count": 0, "query": query}
 
         entries = []
@@ -1735,6 +1914,8 @@ async def api_get_public_memory(
                         entries.append(json.loads(line))
                     except:
                         continue
+
+        print(f"[BFF] 读取PublicMemory完成: {len(entries)} 条记录")
 
         if not query:
             return {"entries": entries[:top_k], "count": min(len(entries), top_k), "query": None}
@@ -1764,6 +1945,35 @@ async def api_get_public_memory(
         return {"entries": results, "count": len(results), "query": query, "top_k": top_k}
     except Exception as e:
         print(f"[BFF] 读取PublicMemory失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/knowledge-manager/replace")
+async def api_replace_public_memory(entries: List[dict]):
+    """原子替换 PublicMemory 文件"""
+    try:
+        pm_host_path = os.environ.get("PUBLIC_MEMORY_HOST_PATH")
+        if pm_host_path:
+            pm_path = Path(pm_host_path) / "public_memory.jsonl"
+        else:
+            pm_path = Path(__file__).parent.parent / "data" / "public_memory" / "public_memory.jsonl"
+
+        print(f"[BFF] 写入PublicMemory (物理路径): {pm_path}")
+        log_to_md("[BFF-WRITE-PM]", f"{pm_path}, {len(entries)}条")
+        
+        pm_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        tmp_path = pm_path.with_suffix(".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            for entry in entries:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        tmp_path.replace(pm_path)
+        print(f"[BFF] 原子替换PublicMemory: {len(entries)} 条记录 -> {pm_path}")
+        return {"status": "ok", "count": len(entries)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[BFF] 替换PublicMemory失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1836,6 +2046,221 @@ async def api_force_merge():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def get_consolidator_container_url() -> str:
+    """获取Consolidator容器的URL"""
+    global consolidator_conv_id
+    if not consolidator_conv_id or consolidator_conv_id not in container_ports:
+        raise HTTPException(status_code=404, detail="Consolidator container not found")
+    port = container_ports[consolidator_conv_id]
+    return f"http://localhost:{port}"
+
+
+async def ensure_consolidator_container():
+    """确保Consolidator容器运行中（带重试机制和并发锁）"""
+    global consolidator_conv_id
+    
+    # 先快速检查是否已存在（不加锁）
+    if consolidator_conv_id and consolidator_conv_id in container_ports:
+        print(f"[BFF] Consolidator容器已存在: {consolidator_conv_id}")
+        return
+    
+    # 加锁防止并发创建
+    async with _get_consolidator_lock():
+        # 双重检查（加锁后再次检查）
+        if consolidator_conv_id and consolidator_conv_id in container_ports:
+            print(f"[BFF] Consolidator容器已存在（双重检查）: {consolidator_conv_id}")
+            return
+        
+        print(f"[BFF] 创建Consolidator容器...")
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                from pydantic import BaseModel
+                class ConversationCreate(BaseModel):
+                    title: str = "Consolidator"
+                    model: str = "deepseek-chat"
+                    agent_type: str = "collab"
+                    name_prefix: str = "consolidator"
+                conv = await create_conversation(ConversationCreate(title="Consolidator", model="deepseek-chat", agent_type="collab", name_prefix="consolidator"))
+                consolidator_conv_id = conv.conversation_id
+                print(f"[BFF] Consolidator容器已创建: {consolidator_conv_id}")
+                print(f"[BFF] Consolidator容器已创建: {consolidator_conv_id}")
+                print(f"[BFF] Consolidator容器已创建: {consolidator_conv_id}")
+                log_to_md("[Consolidator]", f"容器已创建: {consolidator_conv_id}")
+                break
+            except Exception as e:
+                print(f"[BFF] Consolidator容器创建失败 (attempt {attempt+1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2)
+                else:
+                    raise RuntimeError(f"Consolidator容器创建失败，已重试{max_retries}次: {e}")
+
+
+@app.get("/consolidator/health")
+async def consolidator_health():
+    """检查Consolidator容器健康状态"""
+    try:
+        url = await get_consolidator_container_url()
+        health_url = f"{url}/health"
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(health_url)
+            if resp.status_code == 200:
+                return {"status": "healthy", "url": url}
+            else:
+                return {"status": "unhealthy", "url": url}, 503
+    except Exception as e:
+        return {"status": "not_found", "detail": str(e)}, 503
+
+
+@app.post("/consolidator/merge")
+async def trigger_consolidator_merge():
+    """触发Consolidator执行合并"""
+    try:
+        await ensure_consolidator_container()
+        url = await get_consolidator_container_url()
+        merge_url = f"{url}/execute_merge"
+        print(f"[BFF] 转发合并请求到Consolidator: {merge_url}")
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            resp = await client.post(merge_url)
+            resp.raise_for_status()
+            result = resp.json()
+            print(f"[BFF] Consolidator合并完成: {result}")
+            return result
+    except Exception as e:
+        print(f"[BFF] 触发Consolidator合并失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/heap/all-unmerged")
+async def bff_heap_all_unmerged():
+    """聚合所有Agent的未合并堆段记录（供Consolidator使用）- 带请求合并和缓存"""
+    import time
+    cache_ttl = 5.0  # 缓存有效期（秒）
+    current_time = time.time()
+
+    # 检查缓存
+    if current_time - _all_unmerged_cache["timestamp"] < cache_ttl:
+        print(f"[BFF] all-unmerged 命中缓存: {_all_unmerged_cache['total_count']} 条 (缓存剩余 {cache_ttl - (current_time - _all_unmerged_cache['timestamp']):.1f}s)")
+        return {"entries": _all_unmerged_cache["entries"], "total_count": _all_unmerged_cache["total_count"], "cached": True}
+
+    # 检查是否有请求正在进行
+    event = _get_all_unmerged_event()
+    if event.is_set():
+        print("[BFF] all-unmerged 请求正在进行，等待完成...")
+        # 等待正在进行的请求完成
+        try:
+            await asyncio.wait_for(event.wait(), timeout=30.0)
+        except asyncio.TimeoutError:
+            print("[BFF] all-unmerged 等待超时，返回空结果")
+            return {"entries": [], "total_count": 0, "error": "timeout"}
+        # 返回缓存的最新结果
+        return {"entries": _all_unmerged_cache["entries"], "total_count": _all_unmerged_cache["total_count"], "cached": True}
+
+    # 开始获取数据
+    event.set()
+    try:
+        all_entries = []
+        async with conversations_lock:
+            agent_ids = [cid for cid, conv in conversations.items() if conv.get("agent_type") == "collab"]
+        for agent_id in agent_ids:
+            if agent_id not in container_ports:
+                continue
+            try:
+                port = container_ports[agent_id]
+                url = f"http://localhost:{port}/heap/unmerged"
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        entries = data.get("entries", [])
+                        for e in entries:
+                            e["source_agent_id"] = agent_id
+                            e["agent_port"] = port
+                        all_entries.extend(entries)
+                        print(f"[BFF] 获取Agent {agent_id[:8]} 堆段: {len(entries)} 条")
+            except Exception as e:
+                print(f"[BFF] 获取Agent {agent_id[:8]} 堆段失败: {e}")
+
+        # 更新缓存
+        _all_unmerged_cache["entries"] = all_entries
+        _all_unmerged_cache["total_count"] = len(all_entries)
+        _all_unmerged_cache["timestamp"] = time.time()
+
+        print(f"[BFF] all-unmerged 获取完成: {len(all_entries)} 条")
+        return {"entries": all_entries, "total_count": len(all_entries)}
+    finally:
+        event.clear()
+
+
+@app.get("/heap/all-agents")
+async def bff_heap_all_agents():
+    """返回有堆段记录的Agent列表"""
+    async with conversations_lock:
+        agents = [cid for cid, conv in conversations.items() if conv.get("agent_type") == "collab"]
+    return {"agent_ids": agents}
+
+
+@app.post("/agents/{agent_id}/heap/append")
+async def bff_append_heap(agent_id: str, req: dict):
+    """转发堆段追加请求到指定Agent容器"""
+    try:
+        async with conversations_lock:
+            if agent_id not in container_ports:
+                raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+            port = container_ports[agent_id]
+        url = f"http://localhost:{port}/heap/append"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, json=req)
+            resp.raise_for_status()
+            return resp.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[BFF] 转发堆段追加失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/agents/{agent_id}/heap/mark-merged")
+async def bff_mark_heap_merged(agent_id: str, req: dict):
+    """转发标记请求到指定Agent容器"""
+    try:
+        async with conversations_lock:
+            if agent_id not in container_ports:
+                raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+            port = container_ports[agent_id]
+        ids = req.get("ids", [])
+        url = f"http://localhost:{port}/heap/mark-merged"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, json={"ids": ids})
+            resp.raise_for_status()
+            return resp.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[BFF] 转发标记失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/agents/{agent_id}/heap/mark-all-merged")
+async def bff_mark_all_heap_merged(agent_id: str):
+    """将指定Agent的所有未合并堆段记录标记为已合并"""
+    try:
+        async with conversations_lock:
+            if agent_id not in container_ports:
+                raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+            port = container_ports[agent_id]
+        url = f"http://localhost:{port}/heap/mark-all-merged"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(url, json={})
+            resp.raise_for_status()
+            return resp.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[BFF] 转发标记全部失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, access_log=False)

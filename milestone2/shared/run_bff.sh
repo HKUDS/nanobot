@@ -40,6 +40,11 @@ export https_proxy="${HTTPS_PROXY}"
 export DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-sk-b192d1bf26f740adace7d5f628656921}"
 export DASHSCOPE_API_KEY="${DASHSCOPE_API_KEY:-sk-91fe1c9c529b46bb88dc200a2e97b2b6}"
 
+# 设置KM合并阈值（降低阈值以观察自动触发）
+export KM_MERGE_THRESHOLD=3
+export KM_MERGE_INTERVAL=5.0
+export CONSOLIDATOR_SIMHASH_THRESHOLD=8
+
 # 打印环境变量状态
 echo "� 环境变量状态:"
 echo "   PYTHONPATH: $PYTHONPATH"

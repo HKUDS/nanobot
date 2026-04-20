@@ -1,0 +1,123 @@
+{
+  "group": "A",
+  "description": "SAYG-Mem 并发分段写入 + 异步合并",
+  "total_time": 476.0856034755707,
+  "round_times": {
+    "total": 1733.3602004260006,
+    "avg": 34.66720400852001,
+    "max": 100.44806684100013,
+    "min": 8.217321386000094
+  },
+  "inference_times": {
+    "total": 1603.3550442979995,
+    "avg": 32.06710088595999,
+    "max": 94.75472834999982,
+    "min": 7.007315431999814
+  },
+  "idle_ratio": 0.13870166612790552,
+  "pm_entry_count": 87,
+  "merge_result": {
+    "status": "ok",
+    "original_count": 101,
+    "deduped_count": 87,
+    "removed_count": 14,
+    "pages_marked": 100,
+    "source": "km_page_table"
+  },
+  "agent_count": 10,
+  "round_count": 5,
+  "total_success": 50,
+  "total_failed": 0,
+  "agents": [
+    {
+      "agent_id": "2bd3baa5",
+      "role": "技术架构师",
+      "total_time": 115.92017036800007,
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    },
+    {
+      "agent_id": "16bd1522",
+      "role": "产品经理",
+      "total_time": 114.78036846000032,
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    },
+    {
+      "agent_id": "78d239d8",
+      "role": "数据分析师",
+      "total_time": 135.280422413,
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    },
+    {
+      "agent_id": "cdd313cc",
+      "role": "安全专家",
+      "total_time": 248.02006112300023,
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    },
+    {
+      "agent_id": "f3aba014",
+      "role": "运维工程师",
+      "total_time": 410.05173705399966,
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    },
+    {
+      "agent_id": "ad2342d3",
+      "role": "前端工程师",
+      "total_time": 136.75662802899978,
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    },
+    {
+      "agent_id": "70a30d10",
+      "role": "后端工程师",
+      "total_time": 110.32609368900012,
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    },
+    {
+      "agent_id": "da505c24",
+      "role": "移动开发工程师",
+      "total_time": 105.48781981800039,
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    },
+    {
+      "agent_id": "73fd6ffe",
+      "role": "DevOps工程师",
+      "total_time": 221.76673357900017,
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    },
+    {
+      "agent_id": "b242e518",
+      "role": "QA工程师",
+      "total_time": 136.65364187100022,
+      "success": 5,
+      "failed": 0,
+      "heap_total": 10,
+      "heap_unmerged": 10
+    }
+  ]
+}

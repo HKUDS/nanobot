@@ -486,6 +486,17 @@ async def main():
         collab_conv_id = collab_info.get("conversation_id")
         print(f"[协作者] conversation_id: {collab_conv_id}")
 
+        print("\n[Step 1.5] 创建Consolidator容器")
+        print("=" * 70)
+        print("[Consolidator] 确保Consolidator容器存在...")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(f"{BFF_BASE_URL}/consolidator/merge")
+                resp.raise_for_status()
+                print(f"[Consolidator] ✅ Consolidator容器就绪")
+        except Exception as e:
+            print(f"[Consolidator] ⚠️ 创建失败（不影响主流程）: {e}")
+
         print("\n[Step 2] 预置0号Skill到KM（通过BFF）")
         print("=" * 70)
         preset_result = await call_bff_km_preset_skill(SKILL_0_CONTENT)
