@@ -638,58 +638,60 @@ class TelegramChannel(BaseChannel):
                 raise  # Let ChannelManager handle retry
         elif (now - buf.last_edit) >= self.config.stream_edit_interval:
             if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
-                # Finish current message
-                current_text = buf.text[:TELEGRAM_MAX_MESSAGE_LEN]
-                try:
-                    await self._call_with_retry(
-                        self._app.bot.edit_message_text,
-                        chat_id=int_chat_id,
-                        message_id=buf.message_id,
-                        text=current_text,
-                    )
-                except Exception as e:
-                    logger.warning("Failed to edit current message before splitting: {}", e)
-                    raise  # Let ChannelManager handle retry
-
-                # Prepare remaining content for a new message
-                remaining = buf.text[TELEGRAM_MAX_MESSAGE_LEN:]
-                logger.debug(f"[!] Splitting long message: {len(buf.text)} chars → new message with {len(remaining)} chars")
-
-                # Create new buffer for the next chunk
-                self._stream_bufs[chat_id] = _StreamBuf(stream_id=stream_id)
-                new_buf = self._stream_bufs[chat_id]
-                new_buf.text = remaining
-                new_buf.last_edit = now
-
-                # Immediately start the new message
-                if remaining.strip():
-                    try:
-                        sent = await self._call_with_retry(
-                            self._app.bot.send_message,
-                            chat_id=int_chat_id,
-                            text=remaining[:TELEGRAM_MAX_MESSAGE_LEN],
-                            **thread_kwargs
-                        )
-                        new_buf.message_id = sent.message_id
-                    except Exception as e:
-                        logger.error("Failed to send new message chunk after split: {}", e)
-                        raise  # Let ChannelManager handle retry
-            else:
-                # Normal edit (message is still under the limit)
-                try:
-                    await self._call_with_retry(
-                        self._app.bot.edit_message_text,
-                        chat_id=int_chat_id,
-                        message_id=buf.message_id,
-                        text=buf.text,
-                    )
+                await self._flush_stream_overflow(int_chat_id, buf, thread_kwargs)
+                buf.last_edit = now
+                return
+            try:
+                await self._call_with_retry(
+                    self._app.bot.edit_message_text,
+                    chat_id=int_chat_id, message_id=buf.message_id,
+                    text=buf.text,
+                )
+                buf.last_edit = now
+            except Exception as e:
+                if self._is_not_modified_error(e):
                     buf.last_edit = now
-                except Exception as e:
-                    if self._is_not_modified_error(e):
-                        buf.last_edit = now
-                        return
-                    logger.warning("Stream edit failed: {}", e)
-                    raise  # Let ChannelManager handle retry
+                    return
+                logger.warning("Stream edit failed: {}", e)
+                raise  # Let ChannelManager handle retry
+
+    async def _flush_stream_overflow(
+        self,
+        chat_id: int,
+        buf: "_StreamBuf",
+        thread_kwargs: dict,
+    ) -> None:
+        """Split an oversized stream buffer mid-flight.
+
+        Edits the current stream message with the first chunk, sends any
+        intermediate chunks as standalone messages, then opens a new message
+        for the tail so subsequent deltas continue streaming into it.
+        """
+        chunks = split_message(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
+        if len(chunks) <= 1:
+            return
+        try:
+            await self._call_with_retry(
+                self._app.bot.edit_message_text,
+                chat_id=chat_id, message_id=buf.message_id,
+                text=chunks[0],
+            )
+        except Exception as e:
+            if not self._is_not_modified_error(e):
+                logger.warning("Stream overflow edit failed: {}", e)
+                raise
+        for chunk in chunks[1:-1]:
+            await self._call_with_retry(
+                self._app.bot.send_message,
+                chat_id=chat_id, text=chunk, **thread_kwargs,
+            )
+        tail = chunks[-1]
+        sent = await self._call_with_retry(
+            self._app.bot.send_message,
+            chat_id=chat_id, text=tail, **thread_kwargs,
+        )
+        buf.message_id = sent.message_id
+        buf.text = tail
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
