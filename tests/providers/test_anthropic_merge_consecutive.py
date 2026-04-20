@@ -60,7 +60,80 @@ class TestMergeConsecutive:
         result = AnthropicProvider._merge_consecutive(msgs)
         assert len(result) == 1
 
-    def test_single_assistant_stripped(self):
+    def test_single_assistant_rerouted_to_user(self):
+        """When stripping leaves nothing, the last assistant is rerouted to
+        ``user`` so we don't produce an empty messages array."""
         msgs = [{"role": "assistant", "content": "hi"}]
         result = AnthropicProvider._merge_consecutive(msgs)
-        assert len(result) == 0
+        assert len(result) == 1
+        assert result[0]["role"] == "user"
+        assert result[0]["content"] == "hi"
+
+    def test_all_assistants_collapse_then_rerouted(self):
+        """Consecutive trailing assistants merge into one, which is then
+        rerouted as a user turn carrying the merged content."""
+        msgs = [
+            {"role": "assistant", "content": "a"},
+            {"role": "assistant", "content": "b"},
+        ]
+        result = AnthropicProvider._merge_consecutive(msgs)
+        assert len(result) == 1
+        assert result[0]["role"] == "user"
+        # "b" was merged into "a"'s block list during the merge pass.
+        assert result[0]["content"] == [
+            {"type": "text", "text": "a"},
+            {"type": "text", "text": "b"},
+        ]
+
+    def test_assistant_with_tool_use_not_rerouted(self):
+        """A trailing assistant carrying ``tool_use`` blocks cannot become a
+        user turn (Anthropic rejects ``tool_use`` inside user messages), so
+        the method returns an empty list rather than forging a bad request."""
+        msgs = [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "let me search"},
+                    {"type": "tool_use", "id": "t1", "name": "search", "input": {}},
+                ],
+            }
+        ]
+        result = AnthropicProvider._merge_consecutive(msgs)
+        assert result == []
+
+    def test_leading_assistant_gets_synthetic_user(self):
+        """If the first turn is a bare assistant (e.g. history truncation
+        dropped the original user request), prepend a synthetic opener so
+        the conversation still starts with ``user``."""
+        msgs = [
+            {"role": "assistant", "content": "hi"},
+            {"role": "user", "content": "ok"},
+            {"role": "assistant", "content": "reply"},
+        ]
+        result = AnthropicProvider._merge_consecutive(msgs)
+        assert [m["role"] for m in result] == ["user", "assistant", "user"]
+        assert result[0]["content"] == "(conversation continued)"
+        assert result[1]["content"] == "hi"
+        assert result[2]["content"] == "ok"
+
+    def test_leading_assistant_with_tool_use_left_alone(self):
+        """Don't prepend a synthetic opener before an assistant carrying
+        ``tool_use``; doing so would orphan the paired ``tool_result`` that
+        follows.  The caller will see the original 400 rather than a
+        harder-to-diagnose tool-pair mismatch."""
+        msgs = [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "t1", "name": "search", "input": {}},
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "t1", "content": "ok"},
+                ],
+            },
+        ]
+        result = AnthropicProvider._merge_consecutive(msgs)
+        assert [m["role"] for m in result] == ["assistant", "user"]
