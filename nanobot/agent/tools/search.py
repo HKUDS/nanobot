@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, TypeVar
 
 from nanobot.agent.tools.filesystem import ListDirTool, _FsTool
+from nanobot.utils.sensitive import is_sensitive_path
 
 _DEFAULT_HEAD_LIMIT = 250
 T = TypeVar("T")
@@ -400,6 +401,19 @@ class GrepTool(_SearchTool):
             if not (target.is_dir() or target.is_file()):
                 return f"Error: Unsupported path: {path}"
 
+            # MIT-136: refuse direct grep against a known-sensitive file.
+            # Recursive descent into a directory that *contains* sensitive
+            # files is handled later by skipping individual entries
+            # (see the per-file sensitivity check in the walk loop).
+            if target.is_file() and (
+                is_sensitive_path(path) or is_sensitive_path(target)
+            ):
+                return (
+                    f"Error: Path is protected by security policy: {path}. "
+                    "Grepping sensitive files (SSH keys, credentials, "
+                    ".env, PEM, etc.) is not permitted."
+                )
+
             flags = re.IGNORECASE if case_insensitive else 0
             try:
                 needle = re.escape(pattern) if fixed_strings else pattern
@@ -422,6 +436,7 @@ class GrepTool(_SearchTool):
             size_truncated = False
             skipped_binary = 0
             skipped_large = 0
+            skipped_sensitive = 0
             matching_files: list[str] = []
             counts: dict[str, int] = {}
             file_mtimes: dict[str, float] = {}
@@ -432,6 +447,12 @@ class GrepTool(_SearchTool):
                 if glob and not _match_glob(rel_path, file_path.name, glob):
                     continue
                 if not _matches_type(file_path.name, type):
+                    continue
+                # MIT-136: silently skip sensitive files during recursive
+                # grep so one stray key file cannot fail the whole call,
+                # while still preventing contents from reaching the model.
+                if is_sensitive_path(file_path):
+                    skipped_sensitive += 1
                     continue
 
                 raw = file_path.read_bytes()
@@ -542,6 +563,10 @@ class GrepTool(_SearchTool):
                 notes.append(f"(skipped {skipped_binary} binary/unreadable files)")
             if skipped_large:
                 notes.append(f"(skipped {skipped_large} large files)")
+            if skipped_sensitive:
+                notes.append(
+                    f"(skipped {skipped_sensitive} sensitive-path files)"
+                )
             if output_mode == "count" and counts:
                 notes.append(
                     f"(total matches: {sum(counts.values())} in {len(counts)} files)"
