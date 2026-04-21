@@ -15,7 +15,6 @@ from nanobot.channels.manager import ChannelManager
 from nanobot.config.schema import ChannelsConfig
 from nanobot.utils.restart import RestartNotice
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -200,8 +199,8 @@ async def test_manager_propagates_groq_transcription_api_base_to_channels():
     fake_config = SimpleNamespace(
         channels=ChannelsConfig.model_validate({
             "fakeplugin": {"enabled": True, "allowFrom": ["*"]},
+            "transcriptionLanguage": "en",
         }),
-        transcription_provider="groq",
         providers=SimpleNamespace(
             groq=SimpleNamespace(api_key="groq-key", api_base="http://proxy.local/v1/audio/transcriptions"),
             openai=SimpleNamespace(api_key="openai-key", api_base="https://api.openai.com/v1/audio/transcriptions"),
@@ -223,6 +222,7 @@ async def test_manager_propagates_groq_transcription_api_base_to_channels():
     assert channel.transcription_provider == "groq"
     assert channel.transcription_api_key == "groq-key"
     assert channel.transcription_api_base == "http://proxy.local/v1/audio/transcriptions"
+    assert channel.transcription_language == "en"
 
 
 @pytest.mark.asyncio
@@ -269,13 +269,15 @@ async def test_base_channel_passes_api_base_to_openai_transcription_provider():
     channel.transcription_provider = "openai"
     channel.transcription_api_key = "k"
     channel.transcription_api_base = "http://override/v1/audio/transcriptions"
+    channel.transcription_language = "en"
 
     captured: dict[str, object] = {}
 
     class _StubOpenAI:
-        def __init__(self, api_key=None, api_base=None):
+        def __init__(self, api_key=None, api_base=None, language=None):
             captured["api_key"] = api_key
             captured["api_base"] = api_base
+            captured["language"] = language
 
         async def transcribe(self, file_path):
             return "ok"
@@ -286,6 +288,7 @@ async def test_base_channel_passes_api_base_to_openai_transcription_provider():
     assert result == "ok"
     assert captured["api_key"] == "k"
     assert captured["api_base"] == "http://override/v1/audio/transcriptions"
+    assert captured["language"] == "en"
 
 
 def test_openai_transcription_provider_honors_api_base_argument():
@@ -300,10 +303,80 @@ def test_openai_transcription_provider_honors_api_base_argument():
     assert custom.api_url == "http://override/v1/audio/transcriptions"
 
 
+@pytest.mark.asyncio
+async def test_base_channel_passes_language_to_groq_transcription_provider():
+    """BaseChannel.transcribe_audio must forward transcription_language to Groq."""
+    from nanobot.providers import transcription as transcription_mod
+
+    channel = _FakePlugin({"enabled": True, "allowFrom": ["*"]}, MessageBus())
+    channel.transcription_provider = "groq"
+    channel.transcription_api_key = "k"
+    channel.transcription_api_base = "http://override/v1/audio/transcriptions"
+    channel.transcription_language = "ko"
+
+    captured: dict[str, object] = {}
+
+    class _StubGroq:
+        def __init__(self, api_key=None, api_base=None, language=None):
+            captured["api_key"] = api_key
+            captured["api_base"] = api_base
+            captured["language"] = language
+
+        async def transcribe(self, file_path):
+            return "ok"
+
+    with patch.object(transcription_mod, "GroqTranscriptionProvider", _StubGroq):
+        result = await channel.transcribe_audio("/tmp/does-not-matter.wav")
+
+    assert result == "ok"
+    assert captured["api_key"] == "k"
+    assert captured["api_base"] == "http://override/v1/audio/transcriptions"
+    assert captured["language"] == "ko"
+
+
+@pytest.mark.asyncio
+async def test_groq_transcription_provider_includes_language(tmp_path):
+    from nanobot.providers.transcription import GroqTranscriptionProvider
+
+    audio = tmp_path / "sample.wav"
+    audio.write_bytes(b"audio")
+    captured: dict[str, object] = {}
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"text": "hello"}
+
+    class _AsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers=None, files=None, timeout=None):
+            captured["url"] = url
+            captured["headers"] = headers
+            captured["files"] = files
+            captured["timeout"] = timeout
+            return _Response()
+
+    provider = GroqTranscriptionProvider(api_key="k", language="ko")
+
+    with patch("nanobot.providers.transcription.httpx.AsyncClient", return_value=_AsyncClient()):
+        result = await provider.transcribe(audio)
+
+    assert result == "hello"
+    assert captured["files"]["language"] == (None, "ko")
+
+
 def test_channels_login_uses_discovered_plugin_class(monkeypatch):
+    from typer.testing import CliRunner
+
     from nanobot.cli.commands import app
     from nanobot.config.schema import Config
-    from typer.testing import CliRunner
 
     runner = CliRunner()
     seen: dict[str, object] = {}
@@ -329,9 +402,10 @@ def test_channels_login_uses_discovered_plugin_class(monkeypatch):
 
 
 def test_channels_login_sets_custom_config_path(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
     from nanobot.cli.commands import app
     from nanobot.config.schema import Config
-    from typer.testing import CliRunner
 
     runner = CliRunner()
     seen: dict[str, object] = {}
@@ -358,9 +432,10 @@ def test_channels_login_sets_custom_config_path(monkeypatch, tmp_path):
 
 
 def test_channels_status_sets_custom_config_path(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+
     from nanobot.cli.commands import app
     from nanobot.config.schema import Config
-    from typer.testing import CliRunner
 
     runner = CliRunner()
     seen: dict[str, object] = {}
