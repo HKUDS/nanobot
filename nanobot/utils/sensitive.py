@@ -124,11 +124,14 @@ _SECRET_CONTENT_PATTERNS: list[tuple[re.Pattern, str]] = [
     # *prefix* of the token (not a label followed by `=` or `:`). Added as a
     # parallel pattern rather than broadening the labeled regex above —
     # widening that one would catch far too much ordinary prose.
-    # Token charset covers JWT (base64url + dot), opaque tokens, hex, and
-    # provider-specific formats (dash, dot, underscore, alphanum). Minimum
-    # length of 20 filters out documentation-style placeholders like
-    # `Bearer token`, `Bearer xxx`, or `Bearer abc123`.
-    (re.compile(r"\bBearer\s+[A-Za-z0-9_\-\.]{20,}"), "bearer token"),
+    #
+    # Case-insensitive: RFC 7235 says auth-scheme names are case-insensitive,
+    # and middleware / log formatters freely normalize between `Bearer`,
+    # `bearer`, and `BEARER`. Charset matches the labeled-credential regex
+    # above (`[A-Za-z0-9_\-/.+]`) so opaque base64 tokens with `/` and `+`
+    # aren't missed. Minimum length of 20 filters documentation placeholders
+    # like `Bearer token`, `Bearer xxx`, or `Bearer YOUR_TOKEN_HERE`.
+    (re.compile(r"\bBearer\s+[A-Za-z0-9_\-/.+]{20,}", re.IGNORECASE), "bearer token"),
     # GitHub / GitLab / npm tokens
     (re.compile(r"(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}"), "GitHub token"),
     (re.compile(r"glpat-[A-Za-z0-9\-_]{20,}"), "GitLab token"),

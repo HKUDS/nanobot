@@ -238,6 +238,12 @@ def test_ssh_public_key_inside_ssh_dir_still_blocked_by_path_rule() -> None:
         "2026-04-21 http POST /api Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9xxxxxxx 200",
         # With surrounding structured-output quotes — generic synthetic token
         'headers = {"Authorization": "Bearer tkn_fakefakefakefakefakefake"}',
+        # Case variants — RFC 7235 says auth-scheme is case-insensitive
+        "authorization: bearer abcdefghijklmnopqrstuvwxyz",  # lowercase
+        "Authorization: BEARER ABCDEFGHIJKLMNOPQRSTUVWXYZ",  # uppercase
+        "Authorization: BeArEr MixedCaseTokenAbcdefghijklmn",  # mixed
+        # Base64 token with `/` and `+` characters (opaque tokens)
+        "Authorization: Bearer abc/def+ghi/jkl+mno/pqrstuvw",
     ],
 )
 def test_bearer_token_is_detected(text: str) -> None:
@@ -273,6 +279,34 @@ def test_bearer_redaction_output_shape() -> None:
     assert "eyJhbGciOiJIUzI1NiIs_abcdefghijklmnopqrst" not in result
     assert "REDACTED" in result
     assert "bearer token" in result
+
+
+def test_bearer_case_insensitive_redaction() -> None:
+    """Defence-in-depth regression: the redactor must scrub lowercase/UPPERCASE Bearer too."""
+    # Lowercase header — common when middleware normalizes headers
+    lower = "authorization: bearer opaque_token_abcdefghij1234567890\n"
+    out_lower = redact_if_sensitive(lower)
+    assert "opaque_token_abcdefghij1234567890" not in out_lower
+    assert "REDACTED" in out_lower
+
+    # All-caps
+    upper = "AUTHORIZATION: BEARER opaque_token_ABCDEFGHIJ1234567890\n"
+    out_upper = redact_if_sensitive(upper)
+    assert "opaque_token_ABCDEFGHIJ1234567890" not in out_upper
+    assert "REDACTED" in out_upper
+
+
+def test_bearer_base64_token_redaction() -> None:
+    """Regression: base64 tokens with `/` and `+` in the payload must be scrubbed.
+
+    Opaque/session bearer tokens are often raw base64 — the pattern must include
+    those characters (matching the labeled-credential regex charset) or real
+    Authorization headers will leak through.
+    """
+    payload = "Authorization: Bearer abc/def+ghi/jkl+mno/pqrstuvwxyz01\n"
+    result = redact_if_sensitive(payload)
+    assert "abc/def+ghi/jkl+mno/pqrstuvwxyz01" not in result
+    assert "REDACTED" in result
 
 
 def test_existing_credential_patterns_still_match() -> None:
