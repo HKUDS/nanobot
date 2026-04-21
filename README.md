@@ -1,4 +1,4 @@
-![cover-v5-optimized](./images/GitHub_README.png)
+![cover-v5-optimized](./images/nanobot_demo.gif)
 
 <div align="center">
   <p>
