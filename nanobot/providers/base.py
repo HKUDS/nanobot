@@ -54,6 +54,7 @@ class LLMResponse:
     retry_after: float | None = None  # Provider supplied retry wait in seconds.
     reasoning_content: str | None = None  # Kimi, DeepSeek-R1, MiMo etc.
     thinking_blocks: list[dict] | None = None  # Anthropic extended thinking
+    ttft_ms: float | None = None  # Time to first token (streaming only)
     # Structured error metadata used by retry policy when finish_reason == "error".
     error_status_code: int | None = None
     error_kind: str | None = None  # e.g. "timeout", "connection"
@@ -204,12 +205,6 @@ class LLMProvider(ABC):
                         clean["content"] = "(empty)"
                     result.append(clean)
                     continue
-
-            if isinstance(content, dict):
-                clean = dict(msg)
-                clean["content"] = [content]
-                result.append(clean)
-                continue
 
             result.append(msg)
         return result
