@@ -53,6 +53,34 @@ def _strip_md(s: str) -> str:
     return s.strip()
 
 
+def _strip_md_block(text: str) -> str:
+    """Strip block-level and inline markdown for readable plain-text preview.
+
+    Used during streaming mid-edits so users see clean text instead of raw
+    markdown syntax while the response is still being generated.
+    """
+    # Code blocks -> just the code
+    text = re.sub(r'```[\w]*\n?([\s\S]*?)```', r'\1', text)
+    # Headers -> plain text
+    text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
+    # Blockquotes
+    text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
+    # Bold / italic / strikethrough
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = re.sub(r'__(.+?)__', r'\1', text)
+    text = re.sub(r'(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])', r'\1', text)
+    text = re.sub(r'~~(.+?)~~', r'\1', text)
+    # Inline code
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+    # Links [text](url) -> text
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    # Bullet lists
+    text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
+    # Numbered lists (normalize spacing)
+    text = re.sub(r'^(\d+)\.\s+', r'\1. ', text, flags=re.MULTILINE)
+    return text
+
+
 def _render_table_box(table_lines: list[str]) -> str:
     """Convert markdown pipe-table to compact aligned text for <pre> display."""
 
@@ -129,8 +157,8 @@ def _markdown_to_telegram_html(text: str) -> str:
 
     text = re.sub(r'`([^`]+)`', save_inline_code, text)
 
-    # 3. Headers # Title -> just the title text
-    text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
+    # 3. Headers # Title -> <b>Title</b> (preserve visual hierarchy)
+    text = re.sub(r'^#{1,6}\s+(.+)$', r'⟪B⟫\1⟪/B⟫', text, flags=re.MULTILINE)
 
     # 4. Blockquotes > text -> just the text (before HTML escaping)
     text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
@@ -154,6 +182,9 @@ def _markdown_to_telegram_html(text: str) -> str:
     # 10. Bullet lists - item -> • item
     text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
 
+    # 10.5. Numbered lists  1. item -> 1. item (keep number, normalize indent)
+    text = re.sub(r'^(\d+)\.\s+', r'\1. ', text, flags=re.MULTILINE)
+
     # 11. Restore inline code with HTML tags
     for i, code in enumerate(inline_codes):
         # Escape HTML in code content
@@ -165,6 +196,9 @@ def _markdown_to_telegram_html(text: str) -> str:
         # Escape HTML in code content
         escaped = _escape_telegram_html(code)
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
+
+    # 13. Restore header bold markers (inserted in step 3, after HTML escaping)
+    text = text.replace('⟪B⟫', '<b>').replace('⟪/B⟫', '</b>')
 
     return text
 
@@ -637,10 +671,11 @@ class TelegramChannel(BaseChannel):
         if message_thread_id := meta.get("message_thread_id"):
             thread_kwargs["message_thread_id"] = message_thread_id
         if buf.message_id is None:
+            preview = _strip_md_block(buf.text)
             try:
                 sent = await self._call_with_retry(
                     self._app.bot.send_message,
-                    chat_id=int_chat_id, text=buf.text,
+                    chat_id=int_chat_id, text=preview,
                     **thread_kwargs,
                 )
                 buf.message_id = sent.message_id
@@ -653,11 +688,12 @@ class TelegramChannel(BaseChannel):
                 await self._flush_stream_overflow(int_chat_id, buf, thread_kwargs)
                 buf.last_edit = now
                 return
+            preview = _strip_md_block(buf.text)
             try:
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
-                    text=buf.text,
+                    text=preview,
                 )
                 buf.last_edit = now
             except Exception as e:

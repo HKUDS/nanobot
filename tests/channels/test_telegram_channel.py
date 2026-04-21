@@ -1471,3 +1471,123 @@ async def test_send_text_bad_request_plain_fallback_exhausted() -> None:
     # so HTML fails after 1 attempt → fallback to plain also fails after 1 attempt.
     # Before the fix: 2 total. After the fix: still 2 (BadRequest SHOULD fallback).
     assert call_count == 2, f"Expected 2 calls (1 HTML + 1 plain), got {call_count}"
+
+
+# ---------------------------------------------------------------------------
+# _markdown_to_telegram_html formatting tests
+# ---------------------------------------------------------------------------
+
+def test_markdown_to_html_headers_become_bold() -> None:
+    from nanobot.channels.telegram import _markdown_to_telegram_html
+
+    assert _markdown_to_telegram_html("# Title") == "<b>Title</b>"
+    assert _markdown_to_telegram_html("## Subtitle") == "<b>Subtitle</b>"
+    assert _markdown_to_telegram_html("### Deep") == "<b>Deep</b>"
+
+
+def test_markdown_to_html_numbered_lists_preserved() -> None:
+    from nanobot.channels.telegram import _markdown_to_telegram_html
+
+    text = "1. First\n2. Second\n3. Third"
+    result = _markdown_to_telegram_html(text)
+    assert "1. First" in result
+    assert "2. Second" in result
+    assert "3. Third" in result
+
+
+def test_markdown_to_html_numbered_list_normalizes_whitespace() -> None:
+    from nanobot.channels.telegram import _markdown_to_telegram_html
+
+    # Extra spaces after dot should be normalized
+    text = "1.   Lots of space\n2.  Two spaces"
+    result = _markdown_to_telegram_html(text)
+    assert "1. Lots of space" in result
+    assert "2. Two spaces" in result
+
+
+def test_markdown_to_html_headers_survive_html_escaping() -> None:
+    """Headers containing special HTML chars should still render as bold."""
+    from nanobot.channels.telegram import _markdown_to_telegram_html
+
+    result = _markdown_to_telegram_html("# A < B & C > D")
+    assert "<b>A &lt; B &amp; C &gt; D</b>" == result
+
+
+def test_markdown_to_html_mixed_formatting() -> None:
+    """Headers, bullets, numbered lists, and bold coexist correctly."""
+    from nanobot.channels.telegram import _markdown_to_telegram_html
+
+    text = "# Overview\n\n- bullet one\n- bullet two\n\n1. step one\n2. step two\n\n**bold text**"
+    result = _markdown_to_telegram_html(text)
+    assert "<b>Overview</b>" in result
+    assert "\u2022 bullet one" in result
+    assert "1. step one" in result
+    assert "<b>bold text</b>" in result
+
+
+# ---------------------------------------------------------------------------
+# _strip_md_block tests
+# ---------------------------------------------------------------------------
+
+def test_strip_md_block_removes_inline_formatting() -> None:
+    from nanobot.channels.telegram import _strip_md_block
+
+    text = "**bold** and _italic_ and ~~struck~~"
+    result = _strip_md_block(text)
+    assert result == "bold and italic and struck"
+
+
+def test_strip_md_block_strips_headers() -> None:
+    from nanobot.channels.telegram import _strip_md_block
+
+    assert _strip_md_block("## Title\nBody") == "Title\nBody"
+
+
+def test_strip_md_block_converts_bullets_and_numbers() -> None:
+    from nanobot.channels.telegram import _strip_md_block
+
+    text = "- item a\n1. item b\n2. item c"
+    result = _strip_md_block(text)
+    assert "\u2022 item a" in result
+    assert "1. item b" in result
+    assert "2. item c" in result
+
+
+def test_strip_md_block_strips_links() -> None:
+    from nanobot.channels.telegram import _strip_md_block
+
+    assert _strip_md_block("[click here](https://example.com)") == "click here"
+
+
+# ---------------------------------------------------------------------------
+# Streaming mid-edit uses _strip_md_block
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_send_delta_mid_stream_strips_markdown() -> None:
+    """Mid-stream edits should strip markdown so users see clean text."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=42))
+    channel._app.bot.edit_message_text = AsyncMock()
+
+    # Initial send with markdown
+    await channel.send_delta("999", "**hello** world")
+    sent_text = channel._app.bot.send_message.call_args.kwargs.get("text", "")
+    # Should NOT contain raw markdown asterisks
+    assert "**" not in sent_text
+    assert "hello world" in sent_text
+
+    # Mid-stream edit
+    import time
+    buf = channel._stream_bufs["999"]
+    buf.last_edit = time.monotonic() - 10  # force edit interval
+    await channel.send_delta("999", "\n### Title\n1. step")
+    edited_text = channel._app.bot.edit_message_text.call_args.kwargs.get("text", "")
+    assert "###" not in edited_text
+    assert "**" not in edited_text
+    assert "Title" in edited_text
+    assert "1. step" in edited_text
