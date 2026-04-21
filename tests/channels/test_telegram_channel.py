@@ -130,17 +130,22 @@ class _FakeBuilder:
 def _make_telegram_update(
     *,
     chat_type: str = "group",
+    chat_id: int = -100123,
     text: str | None = None,
     caption: str | None = None,
     entities=None,
     caption_entities=None,
     reply_to_message=None,
     location=None,
+    has_mention: bool = False,
 ):
     user = SimpleNamespace(id=12345, username="alice", first_name="Alice")
+    # Build mention entity if has_mention is True
+    if has_mention and entities is None:
+        entities = [SimpleNamespace(type="mention", offset=0, length=len("@nanobot")), SimpleNamespace(type="text_mention", offset=0, length=len("@nanobot"), user=user)]
     message = SimpleNamespace(
-        chat=SimpleNamespace(type=chat_type, is_forum=False),
-        chat_id=-100123,
+        chat=SimpleNamespace(type=chat_type, is_forum=False, id=chat_id),
+        chat_id=chat_id,
         text=text,
         caption=caption,
         entities=entities or [],
@@ -1471,3 +1476,221 @@ async def test_send_text_bad_request_plain_fallback_exhausted() -> None:
     # so HTML fails after 1 attempt → fallback to plain also fails after 1 attempt.
     # Before the fix: 2 total. After the fix: still 2 (BadRequest SHOULD fallback).
     assert call_count == 2, f"Expected 2 calls (1 HTML + 1 plain), got {call_count}"
+
+
+# ---------------------------------------------------------------------------
+# Tests for per-chat group policy overrides (issue #3309)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_chat_policy_open_overrides_mention_default() -> None:
+    """Per-chat 'open' policy should override global 'mention' policy."""
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            group_policy="mention",  # default is mention
+            chat_policy={"-1001234567890": "open"},  # but this chat is open
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    # Group message without mention should be handled because chat_policy overrides
+    update = _make_telegram_update(text="hello everyone", chat_id=-1001234567890, chat_type="group")
+    await channel._on_message(update, None)
+
+    assert len(handled) == 1, "Open per-chat policy should accept unmentioned group message"
+
+
+@pytest.mark.asyncio
+async def test_chat_policy_muted_ignores_inbound() -> None:
+    """Per-chat 'muted' policy should drop all inbound messages."""
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            group_policy="open",  # default is open
+            chat_policy={"-1001234567890": "muted"},  # but this chat is muted
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    update = _make_telegram_update(text="hello", chat_id=-1001234567890, chat_type="group")
+    await channel._on_message(update, None)
+
+    assert handled == [], "Muted per-chat policy should drop all inbound messages"
+
+
+@pytest.mark.asyncio
+async def test_chat_policy_muted_still_allows_mention() -> None:
+    """Per-chat 'muted' should NOT be overridden by mention - muted is stronger."""
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            group_policy="mention",
+            chat_policy={"-1001234567890": "muted"},
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    # Even with mention, muted should still drop
+    update = _make_telegram_update(
+        text="@nanobot hello",
+        chat_id=-1001234567890,
+        chat_type="group",
+        has_mention=True,
+    )
+    await channel._on_message(update, None)
+
+    assert handled == [], "Muted policy should drop even mentioned messages"
+
+
+@pytest.mark.asyncio
+async def test_chat_policy_absent_falls_back_to_group_policy() -> None:
+    """When chat_policy has no entry, fall back to group_policy."""
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            group_policy="open",  # fallback is open
+            chat_policy={},  # no override for this chat
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    update = _make_telegram_update(text="hello", chat_id=-1009999999999, chat_type="group")
+    await channel._on_message(update, None)
+
+    assert len(handled) == 1, "Absent chat_policy should fall back to group_policy"
+
+
+@pytest.mark.asyncio
+async def test_chat_policy_logs_new_group_chats(caplog: pytest.LogCaptureFixture) -> None:
+    """First message from a new group should be logged at INFO level."""
+    import logging
+
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            group_policy="open",  # Use open so the message is handled
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._seen_group_chats = set()  # Reset tracking
+
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    # First message from this group - should be logged
+    update = _make_telegram_update(
+        text="hello everyone",
+        chat_id=-1001111111111,
+        chat_type="group",
+    )
+
+    with caplog.at_level(logging.INFO):
+        await channel._on_message(update, None)
+
+    assert -1001111111111 in channel._seen_group_chats
+    assert len(handled) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_policy_does_not_log_repeat_group_chats(caplog: pytest.LogCaptureFixture) -> None:
+    """Subsequent messages from known group should not be re-logged."""
+    import logging
+
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            group_policy="open",
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._seen_group_chats = {-1002222222222}  # Already known
+
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    update = _make_telegram_update(
+        text="hello",
+        chat_id=-1002222222222,
+        chat_type="group",
+    )
+
+    await channel._on_message(update, None)
+
+    # Should be handled but not logged again (only one chat in seen_group_chats)
+    assert len(handled) == 1
+    assert -1002222222222 in channel._seen_group_chats
+
+
+def test_telegram_config_chat_policy_default_is_empty() -> None:
+    """chat_policy should default to empty dict."""
+    config = TelegramConfig()
+    assert config.chat_policy == {}
+
+
+def test_telegram_config_chat_policy_accepts_muted() -> None:
+    """chat_policy should accept 'muted' as a valid policy value."""
+    config = TelegramConfig(chat_policy={"-1001234567890": "muted"})
+    assert config.chat_policy == {"-1001234567890": "muted"}
+
