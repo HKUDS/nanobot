@@ -528,3 +528,128 @@ class TestEditFileSensitivePathBlocking:
         assert "sensitive path" in result.lower()
         # File must be untouched.
         assert secret_file.read_text() == original
+
+
+# ---------------------------------------------------------------------------
+# MIT-121 review follow-up: symlink and traversal regression tests.
+#
+# The sensitive-path check runs twice — once on the caller-provided path and
+# once on the post-`_resolve()` form. The second pass exists specifically to
+# catch indirection: a symlink at an innocent-looking path that terminates
+# inside a sensitive directory, or a `..` traversal that escapes a safe
+# prefix into one. Without a test the defense-in-depth claim is untested.
+# ---------------------------------------------------------------------------
+
+
+class TestSymlinkTraversalBlocking:
+    """Regression tests for symlink / `..` escapes to sensitive targets."""
+
+    def _make_sensitive_target(self, tmp_path):
+        """Materialise a sensitive file inside tmp_path and return its path."""
+        secret_dir = tmp_path / ".ssh"
+        secret_dir.mkdir(exist_ok=True)
+        secret = secret_dir / "id_rsa"
+        secret.write_text("SUPER_SECRET_KEY_MATERIAL", encoding="utf-8")
+        return secret
+
+    @pytest.mark.asyncio
+    async def test_read_blocks_symlink_to_sensitive_target(self, tmp_path):
+        """Symlink from innocent-looking path to a sensitive target must block."""
+        secret = self._make_sensitive_target(tmp_path)
+        link = tmp_path / "notes.txt"
+        link.symlink_to(secret)
+
+        tool = ReadFileTool(workspace=tmp_path)
+        try:
+            result = await tool.execute(path=str(link))
+        finally:
+            # Teardown: remove symlink, leave the target for other tests / tmp_path cleanup.
+            if link.is_symlink() or link.exists():
+                link.unlink()
+
+        assert isinstance(result, str)
+        assert result.startswith("Error:")
+        assert "sensitive path" in result.lower()
+        # Contents must never appear in the error response.
+        assert "SUPER_SECRET_KEY_MATERIAL" not in result
+
+    @pytest.mark.asyncio
+    async def test_read_blocks_symlink_chain_to_sensitive_target(self, tmp_path):
+        """Two-hop symlink chain to a sensitive target must still be blocked."""
+        secret = self._make_sensitive_target(tmp_path)
+        hop1 = tmp_path / "hop1.txt"
+        hop2 = tmp_path / "hop2.txt"
+        hop1.symlink_to(secret)
+        hop2.symlink_to(hop1)
+
+        tool = ReadFileTool(workspace=tmp_path)
+        try:
+            result = await tool.execute(path=str(hop2))
+        finally:
+            for link in (hop2, hop1):
+                if link.is_symlink() or link.exists():
+                    link.unlink()
+
+        assert result.startswith("Error:")
+        assert "sensitive path" in result.lower()
+        assert "SUPER_SECRET_KEY_MATERIAL" not in result
+
+    @pytest.mark.asyncio
+    async def test_read_blocks_traversal_to_sensitive_target(self, tmp_path):
+        """A `..` path that resolves into a sensitive directory must block."""
+        secret = self._make_sensitive_target(tmp_path)
+        safe_dir = tmp_path / "safe"
+        safe_dir.mkdir()
+        # safe/../.ssh/id_rsa → resolves to the sensitive file above.
+        traversal = f"{safe_dir}/../.ssh/{secret.name}"
+
+        tool = ReadFileTool(workspace=tmp_path)
+        result = await tool.execute(path=traversal)
+
+        assert result.startswith("Error:")
+        assert "sensitive path" in result.lower()
+        assert "SUPER_SECRET_KEY_MATERIAL" not in result
+
+    @pytest.mark.asyncio
+    async def test_edit_blocks_symlink_to_sensitive_target(self, tmp_path):
+        """edit_file must refuse to write through a symlink to a sensitive file."""
+        secret = self._make_sensitive_target(tmp_path)
+        original = secret.read_text()
+        link = tmp_path / "notes.txt"
+        link.symlink_to(secret)
+
+        tool = EditFileTool(workspace=tmp_path)
+        try:
+            result = await tool.execute(
+                path=str(link),
+                old_text="SUPER_SECRET_KEY_MATERIAL",
+                new_text="TAMPERED",
+            )
+        finally:
+            if link.is_symlink() or link.exists():
+                link.unlink()
+
+        assert result.startswith("Error:")
+        assert "sensitive path" in result.lower()
+        # The underlying target must not have been modified.
+        assert secret.read_text() == original
+
+    @pytest.mark.asyncio
+    async def test_edit_blocks_traversal_to_sensitive_target(self, tmp_path):
+        """edit_file must refuse a `..` path that resolves into a sensitive dir."""
+        secret = self._make_sensitive_target(tmp_path)
+        original = secret.read_text()
+        safe_dir = tmp_path / "safe"
+        safe_dir.mkdir()
+        traversal = f"{safe_dir}/../.ssh/{secret.name}"
+
+        tool = EditFileTool(workspace=tmp_path)
+        result = await tool.execute(
+            path=traversal,
+            old_text="SUPER_SECRET_KEY_MATERIAL",
+            new_text="TAMPERED",
+        )
+
+        assert result.startswith("Error:")
+        assert "sensitive path" in result.lower()
+        assert secret.read_text() == original

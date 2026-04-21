@@ -160,14 +160,28 @@ class ReadFileTool(_FsTool):
                 return f"Error: Reading {path} is blocked (device path that could hang or produce infinite output)."
 
             # Sensitive-path blocklist (MIT-121): refuse to read private keys,
-            # credential caches, keyrings, etc. Catches both the raw input
-            # (e.g. '~/.ssh/id_rsa') and the resolved path (symlinks / ../ escapes).
+            # credential caches, keyrings, etc. Runs on the raw input AND on
+            # the resolved path so a symlink at an innocent name or a ".."
+            # traversal that terminates in a sensitive location is still caught.
+            #
+            # Policy: "better false positive than leak." is_sensitive_path()
+            # blocks broadly and deliberately:
+            #   - Private key material (id_rsa, *.pem, *.key, etc.)
+            #   - Credential caches (~/.aws/, ~/.config/gcloud/, ~/.docker/config.json)
+            #   - Environment files (.env*)
+            #   - Credential JSON (credentials.json, service_account_key.json)
+            # This includes a few files that are not strictly secret — public
+            # TLS certs shipped as *.pem and public SSH keys id_*.pub — on
+            # purpose. The cost of a blocked read is "use shell to copy it";
+            # the cost of a leaked private key is unbounded. MIT-140 tracks a
+            # narrowing for id_*.pub where the false positive is most painful.
             if is_sensitive_path(path):
                 return f"Error: Reading {path} is blocked (sensitive path — credentials or key material)."
 
             fp = self._resolve(path)
             if _is_blocked_device(fp):
                 return f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output)."
+            # Post-resolve pass: defense-in-depth against symlink / traversal escapes.
             if is_sensitive_path(fp):
                 return f"Error: Reading {path} is blocked (sensitive path — credentials or key material)."
             if not fp.exists():
@@ -702,7 +716,10 @@ class EditFileTool(_FsTool):
                 return "Error: This is a Jupyter notebook. Use the notebook_edit tool instead of edit_file."
 
             # Sensitive-path blocklist (MIT-121): refuse to edit private keys,
-            # credential caches, keyrings, etc.
+            # credential caches, keyrings, etc. Same "better false positive
+            # than leak" policy as read_file — see the policy block there for
+            # the full list and rationale. Post-resolve pass guards against
+            # symlink / ".." traversal to a sensitive target.
             if is_sensitive_path(path):
                 return f"Error: Editing {path} is blocked (sensitive path — credentials or key material)."
 
