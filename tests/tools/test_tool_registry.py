@@ -250,3 +250,71 @@ async def test_execute_does_not_redact_error_output() -> None:
     result = await registry.execute("boom", {})
 
     assert result.startswith("Error: something bad")
+
+
+class _AnyReturningTool(Tool):
+    """Fake tool that returns an arbitrary non-string payload verbatim."""
+
+    def __init__(self, name: str, payload: Any):
+        self._name = name
+        self._payload = payload
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def description(self) -> str:
+        return f"{self._name} tool"
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {}}
+
+    async def execute(self, **kwargs: Any) -> Any:
+        return self._payload
+
+
+@pytest.mark.asyncio
+async def test_execute_passes_structured_payload_containing_secret_string_unchanged() -> None:
+    """Document string-only redaction scope: nested structured payloads pass through.
+
+    Current behavior is string-only redaction; `ToolRegistry.execute()` guards the
+    scrubber with `isinstance(result, str)`, so dict/list results flow through
+    untouched even when they embed secret-looking strings in nested fields. This
+    is intentional today (image blocks from ReadFileTool are list[dict]), but it
+    is a known scope limit: if a future tool returns user-facing text in a nested
+    field, consider recursive scanning (tracked separately, unticketed).
+
+    This test is a regression guard + scope-documentation test, not a fix.
+    """
+    pem = (
+        "-----BEGIN RSA PRIVATE KEY-----\n"
+        "MIIEowIBAAKCAQEAy3... (truncated)\n"
+        "-----END RSA PRIVATE KEY-----\n"
+    )
+    # Nested dict (simulating a future tool that returns structured output)
+    dict_payload: dict[str, Any] = {"content": pem, "meta": {"path": "/tmp/key.pem"}}
+    registry = ToolRegistry()
+    registry.register(_AnyReturningTool("structured_dict", dict_payload))
+
+    result = await registry.execute("structured_dict", {})
+
+    # Pass-through: the dict flows through untouched, secret string still present.
+    assert result is dict_payload
+    assert isinstance(result, dict)
+    assert "BEGIN RSA PRIVATE KEY" in result["content"]
+    assert "REDACTED" not in result["content"]
+
+    # Same contract for a list of dicts with a nested secret string.
+    list_payload: list[dict[str, Any]] = [
+        {"type": "text", "text": "Authorization: token ghp_0123456789abcdef0123456789abcdef0123"},
+    ]
+    registry2 = ToolRegistry()
+    registry2.register(_AnyReturningTool("structured_list", list_payload))
+
+    result2 = await registry2.execute("structured_list", {})
+
+    assert result2 is list_payload
+    assert isinstance(result2, list)
+    assert "ghp_0123456789abcdef0123456789abcdef0123" in result2[0]["text"]
