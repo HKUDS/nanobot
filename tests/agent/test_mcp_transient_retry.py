@@ -162,6 +162,30 @@ async def test_tool_success_on_first_try_no_retry():
 
 
 @pytest.mark.asyncio
+async def test_tool_does_not_retry_on_cancelled_error():
+    """`asyncio.CancelledError` must short-circuit the retry loop.
+
+    Regression guard: the retry branch lives under ``except Exception``,
+    but ``CancelledError`` inherits from ``BaseException``, not
+    ``Exception``, so it naturally bypasses the retry branch today.  If a
+    future refactor ever widens the retry branch to ``BaseException`` (or
+    re-orders the handlers), ``/stop`` would start retrying instead of
+    cancelling — this test pins that invariant.
+    """
+    session = AsyncMock()
+    session.call_tool = AsyncMock(side_effect=asyncio.CancelledError())
+
+    wrapper = MCPToolWrapper(session, "test_server", _make_tool_def(), tool_timeout=5)
+
+    with patch("nanobot.agent.tools.mcp.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+        output = await wrapper.execute()
+
+    assert "cancelled" in output
+    assert session.call_tool.call_count == 1
+    mock_sleep.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_tool_retry_on_connection_reset():
     """ConnectionResetError (a stdlib exception) should also trigger retry."""
     session = AsyncMock()
