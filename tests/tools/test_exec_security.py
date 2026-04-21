@@ -385,6 +385,7 @@ class TestResolveTirithPath:
 
     def test_tilde_expansion(self, monkeypatch, tmp_path):
         import sys
+        from pathlib import Path
 
         from nanobot.agent.tools.tirith_security import _resolve_tirith_path
 
@@ -398,7 +399,12 @@ class TestResolveTirithPath:
         monkeypatch.setenv("HOME", str(home))
         if sys.platform == "win32":
             monkeypatch.setenv("USERPROFILE", str(home))
-        assert _resolve_tirith_path("~/bin/tirith") == str(binpath)
+        resolved = _resolve_tirith_path("~/bin/tirith")
+        assert resolved is not None
+        # Path equality normalizes ntpath.expanduser's mixed separators on
+        # Windows: the tilde expansion preserves '/' in the input suffix but
+        # str(binpath) serialises with the native separator.
+        assert Path(resolved) == binpath
 
     def test_relative_path_treated_as_explicit(self, monkeypatch, tmp_path):
         """./tirith and bin/tirith must be treated as explicit paths, not PATH lookups."""
