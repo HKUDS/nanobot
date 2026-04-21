@@ -25,6 +25,14 @@ def _resolve_provider(config: Any, model: str, provider_override: str | None = N
 
 
 def _resolve_api_base(provider_config: Any, spec: Any) -> str | None:
+    """Resolve API base URL from already-matched provider config and spec.
+
+    This mirrors the logic in ``Config.get_api_base()`` but operates on
+    pre-resolved objects.  We cannot call ``get_api_base(model)`` directly
+    because it re-resolves the provider via ``_match_provider(model)`` which
+    only reads ``agents.defaults.provider`` — that would return the wrong
+    provider config for fallback targets that override the provider.
+    """
     if provider_config and provider_config.api_base:
         return provider_config.api_base
     if spec and spec.default_api_base:
