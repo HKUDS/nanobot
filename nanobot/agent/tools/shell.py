@@ -135,10 +135,7 @@ class ExecTool(Tool):
         env = self._build_env()
 
         if self.path_append:
-            if _IS_WINDOWS:
-                env["PATH"] = env.get("PATH", "") + ";" + self.path_append
-            else:
-                command = f'export PATH="$PATH:{self.path_append}"; {command}'
+            env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
 
         try:
             process = await self._spawn(command, cwd, env)
