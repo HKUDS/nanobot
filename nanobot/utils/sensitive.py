@@ -129,8 +129,11 @@ _SECRET_CONTENT_PATTERNS: list[tuple[re.Pattern, str]] = [
     # and middleware / log formatters freely normalize between `Bearer`,
     # `bearer`, and `BEARER`. Charset matches the labeled-credential regex
     # above (`[A-Za-z0-9_\-/.+]`) so opaque base64 tokens with `/` and `+`
-    # aren't missed. Minimum length of 20 filters documentation placeholders
-    # like `Bearer token`, `Bearer xxx`, or `Bearer YOUR_TOKEN_HERE`.
+    # aren't missed. Minimum length of 20 filters out short placeholders
+    # (`Bearer token`, `Bearer xxx`, `Bearer TODO`); longer token-shaped
+    # placeholders like `Bearer YOUR_DEVELOPMENT_ACCESS_TOKEN` may still
+    # match. Accepted false-positive cost — redacting a stray placeholder
+    # is cheaper than leaking a real token.
     (re.compile(r"\bBearer\s+[A-Za-z0-9_\-/.+]{20,}", re.IGNORECASE), "bearer token"),
     # GitHub / GitLab / npm tokens
     (re.compile(r"(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}"), "GitHub token"),
