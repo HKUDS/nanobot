@@ -21,6 +21,7 @@ from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tools.audit import AuditLogger
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -146,6 +147,29 @@ class _LoopHook(AgentHook):
             u.get("completion_tokens", 0),
             u.get("cached_tokens", 0),
         )
+        # Ziggy: Prometheus metrics + audit log for each LLM call
+        response = context.response
+        latency_ms = context.latency_ms
+        if latency_ms is not None:
+            try:
+                from nanobot.dashboard.server import _PROM_AVAILABLE
+                if _PROM_AVAILABLE:
+                    from nanobot.dashboard.server import PROM_LLM_DURATION
+                    PROM_LLM_DURATION.observe(latency_ms)
+            except Exception:
+                pass
+        try:
+            self._loop._audit_logger.log_llm_call(
+                session_id=self._chat_id,
+                channel=self._channel,
+                model=self._loop.model,
+                tokens_in=u.get("prompt_tokens"),
+                tokens_out=u.get("completion_tokens"),
+                latency_ms=latency_ms,
+                ttft_ms=getattr(response, "ttft_ms", None) if response else None,
+            )
+        except Exception:
+            pass
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         return self._loop._strip_think(content)
@@ -226,6 +250,8 @@ class AgentLoop:
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
+        self._audit_logger = AuditLogger()
+        self.tools.set_audit_logger(self._audit_logger)
         self.runner = AgentRunner(provider)
         self.subagents = SubagentManager(
             provider=provider,
