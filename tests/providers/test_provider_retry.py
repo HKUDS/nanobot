@@ -3,7 +3,10 @@ import copy
 
 import pytest
 
+from nanobot.config.schema import Config
+from nanobot.providers import factory
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
+from nanobot.providers.fallback_provider import FallbackProvider
 
 
 class ScriptedProvider(LLMProvider):
@@ -560,3 +563,140 @@ async def test_chat_stream_with_retry_normalizes_explicit_none_max_tokens() -> N
     assert response.content == "ok"
     assert provider.last_kwargs["max_tokens"] == 4096
     assert provider.last_kwargs["temperature"] == 0.7
+
+
+class StreamingErrorProvider(ScriptedProvider):
+    async def chat_stream(self, *args, **kwargs) -> LLMResponse:
+        self.calls += 1
+        self.last_kwargs = kwargs
+        on_content_delta = kwargs.get("on_content_delta")
+        if on_content_delta:
+            await on_content_delta("partial")
+        return LLMResponse(content="503 upstream reset", finish_reason="error")
+
+
+@pytest.mark.asyncio
+async def test_fallback_provider_advances_to_next_candidate_after_transient_error(monkeypatch) -> None:
+    primary = ScriptedProvider([
+        LLMResponse(content="429 rate limit a", finish_reason="error"),
+        LLMResponse(content="429 rate limit b", finish_reason="error"),
+        LLMResponse(content="429 rate limit c", finish_reason="error"),
+        LLMResponse(content="503 final server error", finish_reason="error"),
+    ])
+    fallback = ScriptedProvider([LLMResponse(content="ok from fallback")])
+    provider = FallbackProvider([
+        factory.FallbackCandidate(provider=primary, model="gpt-5.4", provider_name="openai"),
+        factory.FallbackCandidate(provider=fallback, model="claude-sonnet-4-6", provider_name="anthropic"),
+    ])
+
+    async def _fake_sleep(delay: float) -> None:
+        return None
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.content == "ok from fallback"
+    assert primary.calls == 4
+    assert fallback.calls == 1
+    assert primary.last_kwargs["model"] == "gpt-5.4"
+    assert fallback.last_kwargs["model"] == "claude-sonnet-4-6"
+
+
+@pytest.mark.asyncio
+async def test_fallback_provider_stops_on_non_transient_error() -> None:
+    primary = ScriptedProvider([LLMResponse(content="401 unauthorized", finish_reason="error")])
+    fallback = ScriptedProvider([LLMResponse(content="should not run")])
+    provider = FallbackProvider([
+        factory.FallbackCandidate(provider=primary, model="gpt-5.4", provider_name="openai"),
+        factory.FallbackCandidate(provider=fallback, model="claude-sonnet-4-6", provider_name="anthropic"),
+    ])
+
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.content == "401 unauthorized"
+    assert primary.calls == 1
+    assert fallback.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_fallback_provider_stream_does_not_fail_over_after_first_delta(monkeypatch) -> None:
+    fallback = ScriptedProvider([LLMResponse(content="should not run")])
+    provider = FallbackProvider([
+        factory.FallbackCandidate(provider=StreamingErrorProvider([]), model="gpt-5.4", provider_name="openai"),
+        factory.FallbackCandidate(provider=fallback, model="claude-sonnet-4-6", provider_name="anthropic"),
+    ])
+    deltas: list[str] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        return None
+
+    async def _on_delta(delta: str) -> None:
+        deltas.append(delta)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_stream_with_retry(
+        messages=[{"role": "user", "content": "hello"}],
+        on_content_delta=_on_delta,
+    )
+
+    assert response.content == "503 upstream reset"
+    assert deltas == ["partial"]
+    assert fallback.calls == 0
+
+
+def test_config_parses_explicit_fallback_targets() -> None:
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "model": "gpt-5.4",
+                "fallbacks": [
+                    {"model": "claude-sonnet-4-6", "provider": "anthropic"},
+                    {"model": "gpt-4.1-mini"},
+                ],
+            },
+        },
+    })
+
+    assert [target.model for target in config.agents.defaults.fallbacks] == [
+        "claude-sonnet-4-6",
+        "gpt-4.1-mini",
+    ]
+    assert [target.provider for target in config.agents.defaults.fallbacks] == [
+        "anthropic",
+        "auto",
+    ]
+
+
+def test_build_provider_wraps_primary_and_configured_fallbacks(monkeypatch) -> None:
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "model": "gpt-5.4",
+                "provider": "openai",
+                "fallbacks": [
+                    {"model": "claude-sonnet-4-6", "provider": "anthropic"},
+                ],
+            },
+        },
+    })
+    created: list[tuple[str, str | None]] = []
+
+    def _fake_build_single_provider(cfg, model, provider_override=None):
+        created.append((model, provider_override))
+        return ScriptedProvider([LLMResponse(content=f"ok:{model}")]), (provider_override or "auto")
+
+    monkeypatch.setattr(factory, "build_single_provider", _fake_build_single_provider)
+
+    provider = factory.build_provider(config)
+
+    assert isinstance(provider, FallbackProvider)
+    assert created == [
+        ("gpt-5.4", "openai"),
+        ("claude-sonnet-4-6", "anthropic"),
+    ]
+    assert [candidate.model for candidate in provider._candidates] == [
+        "gpt-5.4",
+        "claude-sonnet-4-6",
+    ]
