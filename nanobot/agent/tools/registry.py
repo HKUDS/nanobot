@@ -132,21 +132,35 @@ class ToolRegistry:
             status = "error" if isinstance(result, str) and result.startswith("Error") else "ok"
             self._audit(status, name, params, t0, sid, ch)
             self._prom_observe(name, status, duration_ms)
-            if status == "error":
-                return result + _HINT
-            # Defence-in-depth: scrub embedded secrets (private keys, API tokens,
-            # AWS/GitHub/Slack creds, ...) from successful tool output before the
-            # model ever sees it. Non-string results (e.g. ReadFileTool's image
-            # content blocks -> list[dict]) bypass the scrubber and pass through
-            # untouched.
+            # Defence-in-depth: scrub embedded secrets from any string result,
+            # both success AND error paths (MIT-147).
+            #
+            # Tool authors can legitimately return error strings that embed the
+            # offending payload for the model to reason about — e.g. "Error:
+            # invalid AWS credentials: AKIA..." or "Error parsing PEM: -----BEGIN
+            # RSA PRIVATE KEY-----...". Before MIT-147, the error branch was a
+            # short-circuit that bypassed the redactor entirely, so anything a
+            # (possibly adversarial) tool stuffed into an `Error:` prefix would
+            # leak straight to the model. The fix routes both branches through
+            # the same scrubber; the `_HINT` suffix is appended *after* the
+            # redactor so the model still gets the "try something else" nudge
+            # on error even when the body got redacted.
+            #
+            # Non-string results (e.g. ReadFileTool's image content blocks ->
+            # list[dict]) bypass the scrubber and pass through untouched.
             if isinstance(result, str):
                 result = redact_if_sensitive(result)
+                if status == "error":
+                    result = result + _HINT
             return result
         except Exception as e:
             duration_ms = (time.monotonic() - t0) * 1000
             self._audit("error", name, params, t0, sid, ch, error=str(e))
             self._prom_observe(name, "error", duration_ms)
-            return f"Error executing {name}: {str(e)}" + _HINT
+            # Exception strings can also carry secrets — e.g. a ValueError raised
+            # while parsing a file embeds the line that failed. Run the redactor
+            # on the exception path too (MIT-147).
+            return redact_if_sensitive(f"Error executing {name}: {str(e)}") + _HINT
 
     def _audit(
         self,
