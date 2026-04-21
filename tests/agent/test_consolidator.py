@@ -46,7 +46,7 @@ class TestConsolidatorSummarize:
             {"role": "assistant", "content": "Done, fixed the race condition."},
         ]
         result = await consolidator.archive(messages)
-        assert result is True
+        assert result == "User fixed a bug in the auth module."
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
 
@@ -55,14 +55,54 @@ class TestConsolidatorSummarize:
         mock_provider.chat_with_retry.side_effect = Exception("API error")
         messages = [{"role": "user", "content": "hello"}]
         result = await consolidator.archive(messages)
-        assert result is True  # always succeeds
+        assert result is None  # no summary on raw dump fallback
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 1
         assert "[RAW]" in entries[0]["content"]
 
     async def test_summarize_skips_empty_messages(self, consolidator):
         result = await consolidator.archive([])
-        assert result is False
+        assert result is None
+
+
+class TestConsolidatorArchiveErrorHandling:
+    """archive() must fall back to raw_archive when the LLM returns an error
+    response (finish_reason == 'error'), e.g. overloaded / quota exceeded.
+    See https://github.com/HKUDS/nanobot/issues/3244
+    """
+
+    async def test_archive_falls_back_on_error_finish_reason(self, consolidator, mock_provider, store):
+        """LLM returning finish_reason='error' should trigger raw_archive, not write error text."""
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Error: {'type': 'error', 'error': {'type': 'overloaded_error', 'message': 'overloaded_error (529)'}}",
+            finish_reason="error",
+        )
+        messages = [
+            {"role": "user", "content": "fix the auth bug"},
+            {"role": "assistant", "content": "Done, fixed the race condition."},
+        ]
+        result = await consolidator.archive(messages)
+        assert result is None
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 1
+        assert "[RAW]" in entries[0]["content"]
+        assert "Error:" not in entries[0]["content"]
+
+    async def test_archive_preserves_summary_on_success(self, consolidator, mock_provider, store):
+        """Normal LLM response should still produce a proper summary entry."""
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="User fixed a bug in the auth module.",
+            finish_reason="stop",
+        )
+        messages = [
+            {"role": "user", "content": "fix the auth bug"},
+            {"role": "assistant", "content": "Done."},
+        ]
+        result = await consolidator.archive(messages)
+        assert result == "User fixed a bug in the auth module."
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 1
+        assert "[RAW]" not in entries[0]["content"]
 
 
 class TestConsolidatorTokenBudget:
@@ -76,3 +116,52 @@ class TestConsolidatorTokenBudget:
         consolidator.archive = AsyncMock(return_value=True)
         await consolidator.maybe_consolidate_by_tokens(session)
         consolidator.archive.assert_not_called()
+
+    async def test_chunk_cap_preserves_user_turn_boundary(self, consolidator):
+        """Chunk cap should rewind to the last user boundary within the cap."""
+        consolidator._SAFETY_BUFFER = 0
+        session = MagicMock()
+        session.last_consolidated = 0
+        session.key = "test:key"
+        session.messages = [
+            {
+                "role": "user" if i in {0, 50, 61} else "assistant",
+                "content": f"m{i}",
+            }
+            for i in range(70)
+        ]
+        consolidator.estimate_session_prompt_tokens = MagicMock(
+            side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
+        )
+        consolidator.pick_consolidation_boundary = MagicMock(return_value=(61, 999))
+        consolidator.archive = AsyncMock(return_value=True)
+
+        await consolidator.maybe_consolidate_by_tokens(session)
+
+        archived_chunk = consolidator.archive.await_args.args[0]
+        assert len(archived_chunk) == 50
+        assert archived_chunk[0]["content"] == "m0"
+        assert archived_chunk[-1]["content"] == "m49"
+        assert session.last_consolidated == 50
+
+    async def test_chunk_cap_skips_when_no_user_boundary_within_cap(self, consolidator):
+        """If the cap would cut mid-turn, consolidation should skip that round."""
+        consolidator._SAFETY_BUFFER = 0
+        session = MagicMock()
+        session.last_consolidated = 0
+        session.key = "test:key"
+        session.messages = [
+            {
+                "role": "user" if i in {0, 61} else "assistant",
+                "content": f"m{i}",
+            }
+            for i in range(70)
+        ]
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(1200, "tiktoken"))
+        consolidator.pick_consolidation_boundary = MagicMock(return_value=(61, 999))
+        consolidator.archive = AsyncMock(return_value=True)
+
+        await consolidator.maybe_consolidate_by_tokens(session)
+
+        consolidator.archive.assert_not_awaited()
+        assert session.last_consolidated == 0

@@ -1003,3 +1003,185 @@ async def test_download_media_item_non_image_requires_aes_key_even_with_full_url
 
     assert saved_path is None
     channel._client.get.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Tests for media-send error classification (network vs non-network errors)
+# ---------------------------------------------------------------------------
+
+
+def _make_outbound_msg(chat_id: str = "wx-user", content: str = "", media: list | None = None):
+    """Build a minimal OutboundMessage-like object for send() tests."""
+    from nanobot.bus.events import OutboundMessage
+
+    return OutboundMessage(
+        channel="weixin",
+        chat_id=chat_id,
+        content=content,
+        media=media or [],
+        metadata={},
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_media_timeout_error_propagates_without_text_fallback() -> None:
+    """httpx.TimeoutException during media send must re-raise immediately,
+    NOT fall back to _send_text (which would also fail during network issues)."""
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "ctx-1"
+    channel._send_media_file = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
+    channel._send_text = AsyncMock()
+
+    msg = _make_outbound_msg(chat_id="wx-user", media=["/tmp/photo.jpg"])
+
+    with pytest.raises(httpx.TimeoutException, match="timed out"):
+        await channel.send(msg)
+
+    # _send_text must NOT have been called as a fallback
+    channel._send_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_media_transport_error_propagates_without_text_fallback() -> None:
+    """httpx.TransportError during media send must re-raise immediately."""
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "ctx-1"
+    channel._send_media_file = AsyncMock(
+        side_effect=httpx.TransportError("connection reset")
+    )
+    channel._send_text = AsyncMock()
+
+    msg = _make_outbound_msg(chat_id="wx-user", media=["/tmp/photo.jpg"])
+
+    with pytest.raises(httpx.TransportError, match="connection reset"):
+        await channel.send(msg)
+
+    channel._send_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_media_5xx_http_status_error_propagates_without_text_fallback() -> None:
+    """httpx.HTTPStatusError with a 5xx status must re-raise immediately."""
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "ctx-1"
+
+    fake_response = httpx.Response(
+        status_code=503,
+        request=httpx.Request("POST", "https://example.test/upload"),
+    )
+    channel._send_media_file = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "Service Unavailable", request=fake_response.request, response=fake_response
+        )
+    )
+    channel._send_text = AsyncMock()
+
+    msg = _make_outbound_msg(chat_id="wx-user", media=["/tmp/photo.jpg"])
+
+    with pytest.raises(httpx.HTTPStatusError, match="Service Unavailable"):
+        await channel.send(msg)
+
+    channel._send_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_media_4xx_http_status_error_falls_back_to_text() -> None:
+    """httpx.HTTPStatusError with a 4xx status should fall back to text, not re-raise."""
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "ctx-1"
+
+    fake_response = httpx.Response(
+        status_code=400,
+        request=httpx.Request("POST", "https://example.test/upload"),
+    )
+    channel._send_media_file = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "Bad Request", request=fake_response.request, response=fake_response
+        )
+    )
+    channel._send_text = AsyncMock()
+
+    msg = _make_outbound_msg(chat_id="wx-user", media=["/tmp/photo.jpg"])
+
+    # Should NOT raise — 4xx is a client error, non-retryable
+    await channel.send(msg)
+
+    # _send_text should have been called with the fallback message
+    channel._send_text.assert_awaited_once_with(
+        "wx-user", "[Failed to send: photo.jpg]", "ctx-1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_media_file_not_found_falls_back_to_text() -> None:
+    """FileNotFoundError (a non-network error) should fall back to text."""
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "ctx-1"
+    channel._send_media_file = AsyncMock(
+        side_effect=FileNotFoundError("Media file not found: /tmp/missing.jpg")
+    )
+    channel._send_text = AsyncMock()
+
+    msg = _make_outbound_msg(chat_id="wx-user", media=["/tmp/missing.jpg"])
+
+    # Should NOT raise
+    await channel.send(msg)
+
+    channel._send_text.assert_awaited_once_with(
+        "wx-user", "[Failed to send: missing.jpg]", "ctx-1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_media_value_error_falls_back_to_text() -> None:
+    """ValueError (e.g. unsupported format) should fall back to text."""
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "ctx-1"
+    channel._send_media_file = AsyncMock(
+        side_effect=ValueError("Unsupported media format")
+    )
+    channel._send_text = AsyncMock()
+
+    msg = _make_outbound_msg(chat_id="wx-user", media=["/tmp/file.xyz"])
+
+    # Should NOT raise
+    await channel.send(msg)
+
+    channel._send_text.assert_awaited_once_with(
+        "wx-user", "[Failed to send: file.xyz]", "ctx-1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_media_network_error_does_not_double_api_calls() -> None:
+    """During network issues, media send should make exactly 1 API call attempt,
+    not 2 (media + text fallback).  Verify total call count."""
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "ctx-1"
+    channel._send_media_file = AsyncMock(
+        side_effect=httpx.ConnectError("connection refused")
+    )
+    channel._send_text = AsyncMock()
+
+    msg = _make_outbound_msg(chat_id="wx-user", content="hello", media=["/tmp/img.png"])
+
+    with pytest.raises(httpx.ConnectError):
+        await channel.send(msg)
+
+    # _send_media_file called once, _send_text never called
+    channel._send_media_file.assert_awaited_once()
+    channel._send_text.assert_not_awaited()

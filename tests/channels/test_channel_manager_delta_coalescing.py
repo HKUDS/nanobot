@@ -296,3 +296,50 @@ class TestDispatchOutboundWithCoalescing:
         # Should have pending regular message
         assert len(pending) == 1
         assert pending[0].content == "Final"
+
+
+class TestRetryWaitFiltering:
+    """Internal provider retry heartbeats must never reach channels."""
+
+    @pytest.mark.asyncio
+    async def test_retry_wait_message_dropped(self, manager, bus):
+        """A ``_retry_wait`` message must be filtered before channel dispatch.
+
+        Regression: provider retry diagnostics like
+        ``Model request failed, retry in 1s (attempt 1).`` were being
+        delivered to end-user channels because the runner bound
+        ``on_retry_wait`` to the progress callback.
+        """
+        retry_msg = OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="Model request failed, retry in 1s (attempt 1).",
+            metadata={"_retry_wait": True},
+        )
+        real_msg = OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="final answer",
+            metadata={},
+        )
+        await bus.publish_outbound(retry_msg)
+        await bus.publish_outbound(real_msg)
+
+        task = asyncio.create_task(manager._dispatch_outbound())
+        try:
+            for _ in range(30):
+                if manager.channels["mock"]._send_mock.await_count >= 1:
+                    break
+                await asyncio.sleep(0.05)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        send_mock = manager.channels["mock"]._send_mock
+        assert send_mock.await_count == 1
+        sent = send_mock.await_args_list[0].args[0]
+        assert sent.content == "final answer"
+        assert not sent.metadata.get("_retry_wait")

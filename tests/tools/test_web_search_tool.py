@@ -1,7 +1,5 @@
 """Tests for multi-provider web search."""
 
-import asyncio
-
 import httpx
 import pytest
 
@@ -18,6 +16,25 @@ def _response(status: int = 200, json: dict | None = None) -> httpx.Response:
     r = httpx.Response(status, json=json)
     r._request = httpx.Request("GET", "https://mock")
     return r
+
+
+def test_duckduckgo_search_is_exclusive():
+    tool = _tool(provider="duckduckgo")
+    assert tool.exclusive is True
+    assert tool.concurrency_safe is False
+
+
+def test_brave_with_api_key_remains_concurrency_safe():
+    tool = _tool(provider="brave", api_key="brave-key")
+    assert tool.exclusive is False
+    assert tool.concurrency_safe is True
+
+
+def test_brave_without_api_key_is_treated_as_duckduckgo_for_concurrency(monkeypatch):
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+    tool = _tool(provider="brave", api_key="")
+    assert tool.exclusive is True
+    assert tool.concurrency_safe is False
 
 
 @pytest.mark.asyncio
@@ -79,7 +96,6 @@ async def test_duckduckgo_search(monkeypatch):
     import nanobot.agent.tools.web as web_mod
     monkeypatch.setattr(web_mod, "DDGS", MockDDGS, raising=False)
 
-    from ddgs import DDGS
     monkeypatch.setattr("ddgs.DDGS", MockDDGS)
 
     tool = _tool(provider="duckduckgo")
@@ -118,6 +134,27 @@ async def test_jina_search(monkeypatch):
     result = await tool.execute(query="test")
     assert "Jina Result" in result
     assert "https://jina.ai" in result
+
+
+@pytest.mark.asyncio
+async def test_kagi_search(monkeypatch):
+    async def mock_get(self, url, **kw):
+        assert "kagi.com/api/v0/search" in url
+        assert kw["headers"]["Authorization"] == "Bot kagi-key"
+        assert kw["params"] == {"q": "test", "limit": 2}
+        return _response(json={
+            "data": [
+                {"t": 0, "title": "Kagi Result", "url": "https://kagi.com", "snippet": "Premium search"},
+                {"t": 1, "list": ["ignored related search"]},
+            ]
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+    tool = _tool(provider="kagi", api_key="kagi-key")
+    result = await tool.execute(query="test", count=2)
+    assert "Kagi Result" in result
+    assert "https://kagi.com" in result
+    assert "ignored related search" not in result
 
 
 @pytest.mark.asyncio
@@ -190,6 +227,23 @@ async def test_jina_422_falls_back_to_duckduckgo(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_kagi_fallback_to_duckduckgo_when_no_key(monkeypatch):
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "DuckDuckGo fallback"}]
+
+    monkeypatch.setattr("ddgs.DDGS", MockDDGS)
+    monkeypatch.delenv("KAGI_API_KEY", raising=False)
+
+    tool = _tool(provider="kagi", api_key="")
+    result = await tool.execute(query="test")
+    assert "Fallback" in result
+
+
+@pytest.mark.asyncio
 async def test_jina_search_uses_path_encoded_query(monkeypatch):
     calls = {}
 
@@ -227,5 +281,3 @@ async def test_duckduckgo_timeout_returns_error(monkeypatch):
     result = await tool.execute(query="test")
     gate.set()
     assert "Error" in result
-
-

@@ -985,7 +985,43 @@ class WeixinChannel(BaseChannel):
             for media_path in (msg.media or []):
                 try:
                     await self._send_media_file(msg.chat_id, media_path, ctx_token)
+                except (httpx.TimeoutException, httpx.TransportError) as net_err:
+                    # Network/transport errors: do NOT fall back to text —
+                    # the text send would also likely fail, and the outer
+                    # except will re-raise so ChannelManager retries properly.
+                    logger.error(
+                        "Network error sending WeChat media {}: {}",
+                        media_path,
+                        net_err,
+                    )
+                    raise
+                except httpx.HTTPStatusError as http_err:
+                    status_code = (
+                        http_err.response.status_code
+                        if http_err.response is not None
+                        else 0
+                    )
+                    if status_code >= 500:
+                        # Server-side / retryable HTTP error — same as network.
+                        logger.error(
+                            "Server error ({} {}) sending WeChat media {}: {}",
+                            status_code,
+                            http_err.response.reason_phrase
+                            if http_err.response is not None
+                            else "",
+                            media_path,
+                            http_err,
+                        )
+                        raise
+                    # 4xx client errors are NOT retryable — fall back to text.
+                    filename = Path(media_path).name
+                    logger.error("Failed to send WeChat media {}: {}", media_path, http_err)
+                    await self._send_text(
+                        msg.chat_id, f"[Failed to send: {filename}]", ctx_token,
+                    )
                 except Exception as e:
+                    # Non-network errors (format, file-not-found, etc.):
+                    # notify the user via text fallback.
                     filename = Path(media_path).name
                     logger.error("Failed to send WeChat media {}: {}", media_path, e)
                     # Notify user about failure via text

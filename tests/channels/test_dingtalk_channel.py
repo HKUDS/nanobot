@@ -2,7 +2,9 @@ import asyncio
 import zipfile
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 # Check optional dingtalk dependencies before running tests
@@ -50,6 +52,21 @@ class _FakeHttp:
     async def get(self, url: str, **kwargs):
         self.calls.append({"method": "GET", "url": url})
         return self._next_response()
+
+
+class _NetworkErrorHttp:
+    """HTTP client stub that raises httpx.TransportError on every request."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def post(self, url: str, json=None, headers=None, **kwargs):
+        self.calls.append({"method": "POST", "url": url, "json": json, "headers": headers})
+        raise httpx.ConnectError("Connection refused")
+
+    async def get(self, url: str, **kwargs):
+        self.calls.append({"method": "GET", "url": url})
+        raise httpx.ConnectError("Connection refused")
 
 
 @pytest.mark.asyncio
@@ -298,3 +315,141 @@ async def test_send_media_ref_zips_html_before_upload(tmp_path, monkeypatch) -> 
 
     archive = zipfile.ZipFile(BytesIO(captured["data"]))
     assert archive.namelist() == ["report.html"]
+
+
+# ── Exception handling tests ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_send_batch_message_propagates_transport_error() -> None:
+    """Network/transport errors must re-raise so callers can retry."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+    channel._http = _NetworkErrorHttp()
+
+    with pytest.raises(httpx.ConnectError, match="Connection refused"):
+        await channel._send_batch_message(
+            "token",
+            "user123",
+            "sampleMarkdown",
+            {"text": "hello", "title": "Nanobot Reply"},
+        )
+
+    # The POST was attempted exactly once
+    assert len(channel._http.calls) == 1
+    assert channel._http.calls[0]["method"] == "POST"
+
+
+@pytest.mark.asyncio
+async def test_send_batch_message_returns_false_on_api_error() -> None:
+    """DingTalk API-level errors (non-200 status, errcode != 0) should return False."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+
+    # Non-200 status code → API error → return False
+    channel._http = _FakeHttp(responses=[_FakeResponse(400, {"errcode": 400})])
+    result = await channel._send_batch_message(
+        "token", "user123", "sampleMarkdown", {"text": "hello"}
+    )
+    assert result is False
+
+    # 200 with non-zero errcode → API error → return False
+    channel._http = _FakeHttp(responses=[_FakeResponse(200, {"errcode": 100})])
+    result = await channel._send_batch_message(
+        "token", "user123", "sampleMarkdown", {"text": "hello"}
+    )
+    assert result is False
+
+    # 200 with errcode=0 → success → return True
+    channel._http = _FakeHttp(responses=[_FakeResponse(200, {"errcode": 0})])
+    result = await channel._send_batch_message(
+        "token", "user123", "sampleMarkdown", {"text": "hello"}
+    )
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_send_media_ref_short_circuits_on_transport_error() -> None:
+    """When the first send fails with a transport error, _send_media_ref must
+    re-raise immediately instead of trying download+upload+fallback."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+    channel._http = _NetworkErrorHttp()
+
+    # An image URL triggers the sampleImageMsg path first
+    with pytest.raises(httpx.ConnectError, match="Connection refused"):
+        await channel._send_media_ref("token", "user123", "https://example.com/photo.jpg")
+
+    # Only one POST should have been attempted — no download/upload/fallback
+    assert len(channel._http.calls) == 1
+    assert channel._http.calls[0]["method"] == "POST"
+
+
+@pytest.mark.asyncio
+async def test_send_media_ref_short_circuits_on_download_transport_error() -> None:
+    """When the image URL send returns an API error (False) but the download
+    for the fallback hits a transport error, it must re-raise rather than
+    silently returning False."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+
+    # First POST (sampleImageMsg) returns API error → False, then GET (download) raises transport error
+    class _MixedHttp:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def post(self, url, json=None, headers=None, **kwargs):
+            self.calls.append({"method": "POST", "url": url})
+            # API-level failure: 200 with errcode != 0
+            return _FakeResponse(200, {"errcode": 100})
+
+        async def get(self, url, **kwargs):
+            self.calls.append({"method": "GET", "url": url})
+            raise httpx.ConnectError("Connection refused")
+
+    channel._http = _MixedHttp()
+
+    with pytest.raises(httpx.ConnectError, match="Connection refused"):
+        await channel._send_media_ref("token", "user123", "https://example.com/photo.jpg")
+
+    # Should have attempted POST (image URL) and GET (download), but NOT upload
+    assert len(channel._http.calls) == 2
+    assert channel._http.calls[0]["method"] == "POST"
+    assert channel._http.calls[1]["method"] == "GET"
+
+
+@pytest.mark.asyncio
+async def test_send_media_ref_short_circuits_on_upload_transport_error() -> None:
+    """When download succeeds but upload hits a transport error, must re-raise."""
+    config = DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"])
+    channel = DingTalkChannel(config, MessageBus())
+
+    image_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 100  # minimal JPEG-ish data
+
+    class _UploadFailsHttp:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def post(self, url, json=None, headers=None, files=None, **kwargs):
+            self.calls.append({"method": "POST", "url": url})
+            # If it's the upload endpoint, raise transport error
+            if "media/upload" in url:
+                raise httpx.ConnectError("Connection refused")
+            # Otherwise (sampleImageMsg), return API error to trigger fallback
+            return _FakeResponse(200, {"errcode": 100})
+
+        async def get(self, url, **kwargs):
+            self.calls.append({"method": "GET", "url": url})
+            resp = _FakeResponse(200)
+            resp.content = image_bytes
+            resp.headers = {"content-type": "image/jpeg"}
+            return resp
+
+    channel._http = _UploadFailsHttp()
+
+    with pytest.raises(httpx.ConnectError, match="Connection refused"):
+        await channel._send_media_ref("token", "user123", "https://example.com/photo.jpg")
+
+    # POST (image URL), GET (download), POST (upload) attempted — no further sends
+    methods = [c["method"] for c in channel._http.calls]
+    assert methods == ["POST", "GET", "POST"]

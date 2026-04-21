@@ -1,0 +1,83 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "Menghubungkan ke nanobot…",
+      "boot": "Memuat nanobot…"
+    },
+    "error": {
+      "title": "Tidak dapat menjangkau nanobot",
+      "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot web`) dan halaman ini dibuka pada mesin yang sama."
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "UI web nanobot — ngobrol dengan workspace nanobot Anda."
+    }
+  },
+  "sidebar": {
+    "collapse": "Ciutkan sidebar",
+    "toggleTheme": "Ganti tema",
+    "newChat": "Obrolan baru",
+    "recent": "Terbaru",
+    "refreshSessions": "Segarkan sesi",
+    "language": {
+      "label": "Bahasa",
+      "ariaLabel": "Ganti bahasa"
+    }
+  },
+  "chat": {
+    "fallbackTitle": "Obrolan {{id}}",
+    "loading": "Memuat…",
+    "noSessions": "Belum ada sesi.",
+    "actions": "Aksi obrolan untuk {{title}}",
+    "delete": "Hapus",
+    "newChat": "Obrolan baru"
+  },
+  "deleteConfirm": {
+    "title": "Hapus “{{title}}”?",
+    "description": "File sesi akan dihapus dari disk. Tindakan ini tidak dapat dibatalkan.",
+    "cancel": "Batal",
+    "confirm": "Hapus"
+  },
+  "connection": {
+    "idle": "Idle",
+    "connecting": "Menghubungkan…",
+    "open": "Terhubung",
+    "reconnecting": "Menyambung ulang…",
+    "closed": "Terputus",
+    "error": "Kesalahan koneksi"
+  },
+  "thread": {
+    "loadingConversation": "Memuat percakapan…",
+    "empty": {
+      "description": "Ajukan pertanyaan, lanjutkan pekerjaan lokal, atau mulai thread baru."
+    },
+    "header": {
+      "toggleSidebar": "Tampilkan atau sembunyikan sidebar"
+    },
+    "composer": {
+      "placeholderThread": "Ketik pesan Anda…",
+      "placeholderHero": "Apa yang sedang Anda pikirkan?",
+      "placeholderOpening": "Membuka obrolan baru…",
+      "inputAria": "Input pesan",
+      "sendHint": "Enter untuk kirim · Shift+Enter untuk baris baru",
+      "send": "Kirim pesan"
+    },
+    "scrollToBottom": "Gulir ke bawah"
+  },
+  "message": {
+    "streaming": "sedang mengalir",
+    "assistantTyping": "Asisten sedang mengetik",
+    "toolSingle": "Menggunakan sebuah alat",
+    "toolMany": "Menggunakan {{count}} alat"
+  },
+  "code": {
+    "fallbackLanguage": "kode",
+    "copyAria": "Salin kode",
+    "copy": "Salin",
+    "copied": "Tersalin"
+  }
+}

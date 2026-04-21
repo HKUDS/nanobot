@@ -25,11 +25,11 @@ class SpawnTool(Tool):
         self._origin_chat_id = "direct"
         self._session_key = "cli:direct"
 
-    def set_context(self, channel: str, chat_id: str) -> None:
+    def set_context(self, channel: str, chat_id: str, effective_key: str | None = None) -> None:
         """Set the origin context for subagent announcements."""
         self._origin_channel = channel
         self._origin_chat_id = chat_id
-        self._session_key = f"{channel}:{chat_id}"
+        self._session_key = effective_key or f"{channel}:{chat_id}"
 
     @property
     def name(self) -> str:

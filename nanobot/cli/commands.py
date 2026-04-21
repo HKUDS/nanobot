@@ -591,6 +591,9 @@ def serve(
         channels_config=runtime_config.channels,
         timezone=runtime_config.agents.defaults.timezone,
         unified_session=runtime_config.agents.defaults.unified_session,
+        disabled_skills=runtime_config.agents.defaults.disabled_skills,
+        session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
+        tools_config=runtime_config.tools,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -633,6 +636,21 @@ def gateway(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Start the nanobot gateway."""
+    if verbose:
+        import logging
+
+        logging.basicConfig(level=logging.DEBUG)
+    cfg = _load_runtime_config(config, workspace)
+    _run_gateway(cfg, port=port)
+
+
+def _run_gateway(
+    config: Config,
+    *,
+    port: int | None = None,
+    open_browser_url: str | None = None,
+) -> None:
+    """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
@@ -641,12 +659,6 @@ def gateway(
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
 
-    if verbose:
-        import logging
-
-        logging.basicConfig(level=logging.DEBUG)
-
-    config = _load_runtime_config(config, workspace)
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
@@ -683,6 +695,9 @@ def gateway(
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
         unified_session=config.agents.defaults.unified_session,
+        disabled_skills=config.agents.defaults.disabled_skills,
+        session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        tools_config=config.tools,
     )
 
     # Set cron callback (needs agent)
@@ -711,12 +726,17 @@ def gateway(
         cron_token = None
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
+
+        async def _silent(*_args, **_kwargs):
+            pass
+
         try:
             resp = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                on_progress=_silent,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
@@ -725,7 +745,7 @@ def gateway(
         response = resp.content if resp else ""
 
         message_tool = agent.tools.get("message")
-        if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+        if job.payload.deliver and isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
             return response
 
         if job.payload.deliver and job.payload.to and response:
@@ -743,8 +763,9 @@ def gateway(
 
     cron.on_job = on_cron_job
 
-    # Create channel manager
-    channels = ChannelManager(config, bus)
+    # Create channel manager (forwards SessionManager so the WebSocket channel
+    # can serve the embedded webui's REST surface).
+    channels = ChannelManager(config, bus, session_manager=session_manager)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -817,12 +838,55 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
+    async def _health_server(host: str, health_port: int):
+        """Lightweight HTTP health endpoint on the gateway port."""
+        import json as _json
+
+        async def handle(reader, writer):
+            try:
+                data = await asyncio.wait_for(reader.read(4096), timeout=5)
+            except (asyncio.TimeoutError, ConnectionError):
+                writer.close()
+                return
+
+            request_line = data.split(b"\r\n", 1)[0].decode("utf-8", errors="replace")
+            method, path = "", ""
+            parts = request_line.split(" ")
+            if len(parts) >= 2:
+                method, path = parts[0], parts[1]
+
+            if method == "GET" and path == "/health":
+                body = _json.dumps({"status": "ok"})
+                resp = (
+                    f"HTTP/1.0 200 OK\r\n"
+                    f"Content-Type: application/json\r\n"
+                    f"Content-Length: {len(body)}\r\n"
+                    f"\r\n{body}"
+                )
+            else:
+                body = "Not Found"
+                resp = (
+                    f"HTTP/1.0 404 Not Found\r\n"
+                    f"Content-Type: text/plain\r\n"
+                    f"Content-Length: {len(body)}\r\n"
+                    f"\r\n{body}"
+                )
+
+            writer.write(resp.encode())
+            await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_server(handle, host, health_port)
+        console.print(f"[green]✓[/green] Health endpoint: http://{host}:{health_port}/health")
+        async with server:
+            await server.serve_forever()
     # Register Dream system job (always-on, idempotent on restart)
     dream_cfg = config.agents.defaults.dream
     if dream_cfg.model_override:
         agent.dream.model = dream_cfg.model_override
     agent.dream.max_batch_size = dream_cfg.max_batch_size
     agent.dream.max_iterations = dream_cfg.max_iterations
+    agent.dream.annotate_line_ages = dream_cfg.annotate_line_ages
     from nanobot.cron.types import CronJob, CronPayload
     cron.register_system_job(CronJob(
         id="dream",
@@ -832,14 +896,43 @@ def gateway(
     ))
     console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
 
+    async def _open_browser_when_ready() -> None:
+        """Wait for the gateway to bind, then point the user's browser at the webui."""
+        if not open_browser_url:
+            return
+        import webbrowser
+        # Channels start asynchronously; a short poll lets us avoid racing the bind.
+        for _ in range(40):  # ~4s max
+            try:
+                reader, writer = await asyncio.open_connection(
+                    config.gateway.host or "127.0.0.1", port
+                )
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+                break
+            except OSError:
+                await asyncio.sleep(0.1)
+        try:
+            webbrowser.open(open_browser_url)
+            console.print(f"[green]✓[/green] Opened browser at {open_browser_url}")
+        except Exception as e:
+            console.print(f"[yellow]Could not open browser ({e}); visit {open_browser_url}[/yellow]")
+
     async def run():
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
+            tasks = [
                 agent.run(),
                 channels.start_all(),
-            )
+                _health_server(config.gateway.host, port),
+            ]
+            if open_browser_url:
+                tasks.append(_open_browser_when_ready())
+            await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         except Exception:
@@ -855,6 +948,68 @@ def gateway(
             await channels.stop_all()
 
     asyncio.run(run())
+
+
+@app.command()
+def web(
+    port: int | None = typer.Option(None, "--port", "-p", help="WebSocket port for the webui"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open the browser when ready"),
+):
+    """Start the gateway with the embedded webui and (by default) open a browser."""
+    if verbose:
+        import logging
+
+        logging.basicConfig(level=logging.DEBUG)
+
+    cfg = _load_runtime_config(config, workspace)
+
+    # Force the websocket channel on with token-gated auth so the webui is functional.
+    # ``--port`` applies to the webui's websocket/HTTP port, not the gateway's
+    # management port, since that's the only surface users visit.
+    ws_section = cfg.channels.websocket
+    if isinstance(ws_section, dict):
+        ws_section.setdefault("host", "127.0.0.1")
+        ws_section["enabled"] = True
+        ws_section["websocketRequiresToken"] = True
+        if port is not None:
+            ws_section["port"] = port
+        ws_host = ws_section.get("host", "127.0.0.1")
+        ws_port = ws_section.get("port", 8765)
+        ws_path = ws_section.get("path", "/")
+    else:
+        ws_section.enabled = True
+        if hasattr(ws_section, "websocket_requires_token"):
+            ws_section.websocket_requires_token = True
+        if port is not None:
+            ws_section.port = port
+        ws_host = getattr(ws_section, "host", "127.0.0.1") or "127.0.0.1"
+        ws_port = getattr(ws_section, "port", 8765)
+        ws_path = getattr(ws_section, "path", "/") or "/"
+
+    # Confirm the bundled SPA exists before promising the user a browser launch.
+    from nanobot.channels.manager import _default_webui_dist
+
+    dist = _default_webui_dist()
+    if dist is None:
+        console.print(
+            "[yellow]Warning: webui assets not found at nanobot/web/dist/. "
+            "Run `cd webui && bun install && bun run build` from a source checkout.[/yellow]"
+        )
+
+    scheme = "http"
+    # Browsers refuse cookies/JS on 0.0.0.0 — collapse to loopback for the visit URL.
+    visit_host = "127.0.0.1" if ws_host in {"0.0.0.0", "::"} else ws_host
+    open_url = f"{scheme}://{visit_host}:{ws_port}{ws_path if ws_path != '/' else ''}/"
+
+    # The gateway's management port is separate from the webui port; leave it
+    # on its configured default so --port only moves the visible surface.
+    _run_gateway(
+        cfg,
+        open_browser_url=open_url if open_browser else None,
+    )
 
 
 # ============================================================================
@@ -915,6 +1070,9 @@ def agent(
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
         unified_session=config.agents.defaults.unified_session,
+        disabled_skills=config.agents.defaults.disabled_skills,
+        session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        tools_config=config.tools,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
@@ -958,7 +1116,7 @@ def agent(
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
         _init_prompt_session()
-        console.print(f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n")
+        console.print(f"{__logo__} Interactive mode [bold blue]({config.agents.defaults.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)

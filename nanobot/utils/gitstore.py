@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -22,6 +23,23 @@ class CommitInfo:
         if diff:
             return f"{header}\n```diff\n{diff}\n```"
         return f"{header}\n(no file changes)"
+
+
+@dataclass
+class LineAge:
+    """Age of a single line based on git blame."""
+
+    age_days: int  # days since last modification
+
+
+def _compute_line_ages(annotated) -> list[LineAge]:
+    """Convert annotate results to per-line ages."""
+    now = datetime.now(tz=timezone.utc).date()
+    ages: list[LineAge] = []
+    for (commit, _tree_entry), _line_bytes in annotated:
+        dt = datetime.fromtimestamp(commit.commit_time, tz=timezone.utc).date()
+        ages.append(LineAge(age_days=(now - dt).days))
+    return ages
 
 
 class GitStore:
@@ -46,14 +64,35 @@ class GitStore:
         if self.is_initialized():
             return False
 
+        if self._is_inside_git_repo():
+            logger.warning(
+                "Workspace {} is already inside a git repo; "
+                "skipping nested repo initialization",
+                self._workspace,
+            )
+            return False
+
         try:
             from dulwich import porcelain
 
             porcelain.init(str(self._workspace))
 
-            # Write .gitignore
+            # Write .gitignore (merge with existing if present)
             gitignore = self._workspace / ".gitignore"
-            gitignore.write_text(self._build_gitignore(), encoding="utf-8")
+            dream_entries = self._build_gitignore()
+            if gitignore.exists():
+                existing = gitignore.read_text(encoding="utf-8")
+                existing_lines = set(existing.splitlines())
+                new_lines = [
+                    line
+                    for line in dream_entries.splitlines()
+                    if line not in existing_lines
+                ]
+                if new_lines:
+                    merged = existing.rstrip("\n") + "\n" + "\n".join(new_lines) + "\n"
+                    gitignore.write_text(merged, encoding="utf-8")
+            else:
+                gitignore.write_text(dream_entries, encoding="utf-8")
 
             # Ensure tracked files exist (touch them if missing) so the initial
             # commit has something to track.
@@ -137,6 +176,22 @@ class GitStore:
         except Exception:
             return None
 
+    def _is_inside_git_repo(self) -> bool:
+        """Check if self._workspace is already inside a git repository.
+
+        Walks up from self._workspace to the filesystem root, returning True
+        if any parent directory contains a .git entry.
+
+        Git worktrees and submodules can use a ``.git`` file instead of a
+        directory, so we must treat either form as "already inside a repo".
+        """
+        current = self._workspace.resolve()
+        while current != current.parent:
+            if (current / ".git").exists():
+                return True
+            current = current.parent
+        return False
+
     def _build_gitignore(self) -> str:
         """Generate .gitignore content from tracked files."""
         dirs: set[str] = set()
@@ -190,6 +245,34 @@ class GitStore:
         except Exception:
             logger.warning("Git log failed")
             return []
+
+    def line_ages(self, file_path: str) -> list[LineAge]:
+        """Compute the age of each line in a tracked file via git blame.
+
+        Returns one LineAge per line, in order.
+        Returns an empty list if the repo is not initialized, the file is
+        empty, or annotation fails.
+        """
+
+        if not self.is_initialized():
+            return []
+
+        target = self._workspace / file_path
+        if not target.exists() or target.stat().st_size == 0:
+            return []
+
+        try:
+            from dulwich import porcelain
+
+            annotated = porcelain.annotate(str(self._workspace), file_path)
+        except Exception:
+            logger.warning("Git line_ages annotate failed for {}", file_path)
+            return []
+
+        if not annotated:
+            return []
+
+        return _compute_line_ages(annotated)
 
     def diff_commits(self, sha1: str, sha2: str) -> str:
         """Show diff between two commits."""

@@ -273,17 +273,41 @@ async def test_stop_is_safe_after_partial_start(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_on_message_ignores_bot_messages() -> None:
-    # Incoming bot-authored messages must be ignored to prevent feedback loops.
+async def test_on_message_ignores_self_messages() -> None:
+    # Self-loop guard: messages from this bot's own account must be dropped (#3217).
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    channel._bot_user_id = "999"  # simulate bot identity populated in on_ready()
     handled: list[dict] = []
     channel._handle_message = lambda **kwargs: handled.append(kwargs)  # type: ignore[method-assign]
 
-    await channel._on_message(_make_message(author_bot=True))
+    await channel._on_message(_make_message(author_id=999, author_bot=True))
 
     assert handled == []
 
+
+@pytest.mark.asyncio
+async def test_on_message_accepts_messages_from_other_bots() -> None:
+    # Multi-agent setups: messages from OTHER bots must be processed, not dropped (#3217).
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    channel._bot_user_id = "999"
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+
+    await channel._on_message(_make_message(author_id=123, author_bot=True))
+
+    assert len(handled) == 1
+    assert handled[0]["sender_id"] == "123"
+
+
+@pytest.mark.asyncio
+async def test_on_message_stops_typing_on_handle_exception() -> None:
     # If inbound handling raises, typing should be stopped for that channel.
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+
     async def fail_handle(**kwargs) -> None:
         raise RuntimeError("boom")
 
@@ -311,6 +335,45 @@ async def test_on_message_accepts_allowlisted_dm() -> None:
     assert len(handled) == 1
     assert handled[0]["chat_id"] == "456"
     assert handled[0]["metadata"] == {"message_id": "789", "guild_id": None, "reply_to": None}
+
+
+@pytest.mark.asyncio
+async def test_on_message_accepts_when_channel_in_allow_channels() -> None:
+    # When allow_channels is set, messages from listed channels should be forwarded.
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], allow_channels=["456"]),
+        MessageBus(),
+    )
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+
+    await channel._on_message(_make_message(author_id=123, channel_id=456))
+
+    assert len(handled) == 1
+    assert handled[0]["chat_id"] == "456"
+
+
+@pytest.mark.asyncio
+async def test_on_message_drops_when_channel_not_in_allow_channels() -> None:
+    # When allow_channels is set and incoming channel is not listed, drop silently.
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], allow_channels=["999"]),
+        MessageBus(),
+    )
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+
+    await channel._on_message(_make_message(author_id=123, channel_id=456))
+
+    assert handled == []
 
 
 @pytest.mark.asyncio
@@ -867,3 +930,100 @@ async def test_start_no_proxy_auth_when_only_password(monkeypatch) -> None:
     assert channel.is_running is False
     assert _FakeDiscordClient.instances[0].proxy == "http://127.0.0.1:7890"
     assert _FakeDiscordClient.instances[0].proxy_auth is None
+
+
+# ---------------------------------------------------------------------------
+# Tests for the send() exception propagation fix
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_send_re_raises_network_error() -> None:
+    """Network errors during send must propagate so ChannelManager can retry."""
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _FakeDiscordClient(channel, intents=None)
+    channel._client = client
+    channel._running = True
+
+    async def _failing_send_outbound(msg: OutboundMessage) -> None:
+        raise ConnectionError("network unreachable")
+
+    client.send_outbound = _failing_send_outbound  # type: ignore[method-assign]
+
+    with pytest.raises(ConnectionError, match="network unreachable"):
+        await channel.send(OutboundMessage(channel="discord", chat_id="123", content="hello"))
+
+
+@pytest.mark.asyncio
+async def test_send_re_raises_generic_exception() -> None:
+    """Any exception from send_outbound must propagate, not be swallowed."""
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _FakeDiscordClient(channel, intents=None)
+    channel._client = client
+    channel._running = True
+
+    async def _failing_send_outbound(msg: OutboundMessage) -> None:
+        raise RuntimeError("discord API failure")
+
+    client.send_outbound = _failing_send_outbound  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="discord API failure"):
+        await channel.send(OutboundMessage(channel="discord", chat_id="123", content="hello"))
+
+
+@pytest.mark.asyncio
+async def test_send_still_stops_typing_on_error() -> None:
+    """Typing cleanup must still run in the finally block even when send raises."""
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _FakeDiscordClient(channel, intents=None)
+    channel._client = client
+    channel._running = True
+
+    # Start a typing task so we can verify it gets cleaned up
+    start = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_typing() -> None:
+        start.set()
+        await release.wait()
+
+    typing_channel = _FakeChannel(channel_id=123)
+    typing_channel.typing_enter_hook = slow_typing
+    await channel._start_typing(typing_channel)
+    await asyncio.wait_for(start.wait(), timeout=1.0)
+
+    async def _failing_send_outbound(msg: OutboundMessage) -> None:
+        raise ConnectionError("timeout")
+
+    client.send_outbound = _failing_send_outbound  # type: ignore[method-assign]
+
+    with pytest.raises(ConnectionError, match="timeout"):
+        await channel.send(OutboundMessage(channel="discord", chat_id="123", content="hello"))
+
+    release.set()
+    await asyncio.sleep(0)
+
+    # Typing should have been cleaned up by the finally block
+    assert channel._typing_tasks == {}
+
+
+@pytest.mark.asyncio
+async def test_send_succeeds_normally() -> None:
+    """Successful sends should work without raising."""
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = _FakeDiscordClient(channel, intents=None)
+    channel._client = client
+    channel._running = True
+
+    sent_messages: list[OutboundMessage] = []
+
+    async def _capture_send_outbound(msg: OutboundMessage) -> None:
+        sent_messages.append(msg)
+
+    client.send_outbound = _capture_send_outbound  # type: ignore[method-assign]
+
+    msg = OutboundMessage(channel="discord", chat_id="123", content="hello world")
+    await channel.send(msg)
+
+    assert len(sent_messages) == 1
+    assert sent_messages[0].content == "hello world"
+    assert sent_messages[0].chat_id == "123"

@@ -80,6 +80,7 @@ class CronService:
         self._store: CronStore | None = None
         self._timer_task: asyncio.Task | None = None
         self._running = False
+        self._timer_active = False
         self.max_sleep_ms = max_sleep_ms
 
     def _load_jobs(self) -> tuple[list[CronJob], int]:
@@ -171,7 +172,11 @@ class CronService:
     def _load_store(self) -> CronStore:
         """Load jobs from disk. Reloads automatically if file was modified externally.
         - Reload every time because it needs to merge operations on the jobs object from other instances.
+        - During _on_timer execution, return the existing store to prevent concurrent
+          _load_store calls (e.g. from list_jobs polling) from replacing it mid-execution.
         """
+        if self._timer_active and self._store:
+            return self._store
         jobs, version = self._load_jobs()
         self._store = CronStore(version=version, jobs=jobs)
         self._merge_action()
@@ -290,18 +295,23 @@ class CronService:
         """Handle timer tick - run due jobs."""
         self._load_store()
         if not self._store:
+            self._arm_timer()
             return
 
-        now = _now_ms()
-        due_jobs = [
-            j for j in self._store.jobs
-            if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
-        ]
+        self._timer_active = True
+        try:
+            now = _now_ms()
+            due_jobs = [
+                j for j in self._store.jobs
+                if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
+            ]
 
-        for job in due_jobs:
-            await self._execute_job(job)
+            for job in due_jobs:
+                await self._execute_job(job)
 
-        self._save_store()
+            self._save_store()
+        finally:
+            self._timer_active = False
         self._arm_timer()
 
     async def _execute_job(self, job: CronJob) -> None:
@@ -459,6 +469,59 @@ class CronService:
                     self._append_action("update", asdict(job))
                 return job
         return None
+
+    def update_job(
+        self,
+        job_id: str,
+        *,
+        name: str | None = None,
+        schedule: CronSchedule | None = None,
+        message: str | None = None,
+        deliver: bool | None = None,
+        channel: str | None = ...,
+        to: str | None = ...,
+        delete_after_run: bool | None = None,
+    ) -> CronJob | Literal["not_found", "protected"]:
+        """Update mutable fields of an existing job. System jobs cannot be updated.
+
+        For ``channel`` and ``to``, pass an explicit value (including ``None``)
+        to update; omit (sentinel ``...``) to leave unchanged.
+        """
+        store = self._load_store()
+        job = next((j for j in store.jobs if j.id == job_id), None)
+        if job is None:
+            return "not_found"
+        if job.payload.kind == "system_event":
+            return "protected"
+
+        if schedule is not None:
+            _validate_schedule_for_add(schedule)
+            job.schedule = schedule
+        if name is not None:
+            job.name = name
+        if message is not None:
+            job.payload.message = message
+        if deliver is not None:
+            job.payload.deliver = deliver
+        if channel is not ...:
+            job.payload.channel = channel
+        if to is not ...:
+            job.payload.to = to
+        if delete_after_run is not None:
+            job.delete_after_run = delete_after_run
+
+        job.updated_at_ms = _now_ms()
+        if job.enabled:
+            job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+
+        if self._running:
+            self._save_store()
+            self._arm_timer()
+        else:
+            self._append_action("update", asdict(job))
+
+        logger.info("Cron: updated job '{}' ({})", job.name, job.id)
+        return job
 
     async def run_job(self, job_id: str, force: bool = False) -> bool:
         """Manually run a job without disturbing the service's running state."""
