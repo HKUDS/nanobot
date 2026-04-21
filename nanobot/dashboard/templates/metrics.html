@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>nanobot metrics</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Reset & base (matches index.html dark theme)                        */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #0d1117;
+      --bg-card:     #161b22;
+      --bg-card-alt: #1c2128;
+      --border:      #30363d;
+      --border-dim:  #21262d;
+      --text:        #c9d1d9;
+      --text-dim:    #8b949e;
+      --text-bright: #f0f6fc;
+      --accent:      #58a6ff;
+      --green:       #3fb950;
+      --red:         #f85149;
+      --yellow:      #d29922;
+      --orange:      #db8b2f;
+      --purple:      #bc8cff;
+      --radius:      8px;
+      --mono:        'Cascadia Code', 'Fira Code', 'JetBrains Mono',
+                     ui-monospace, 'Courier New', monospace;
+    }
+
+    html { font-size: 15px; scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      min-height: 100vh;
+      padding: 0 0 3rem;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ------------------------------------------------------------------ */
+    /* Header                                                               */
+    /* ------------------------------------------------------------------ */
+    header {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--text-bright);
+      letter-spacing: -0.02em;
+    }
+
+    .header-brand .cat { font-size: 1.4rem; }
+
+    .header-nav {
+      display: flex;
+      align-items: center;
+      gap: 1.2rem;
+      font-size: 0.8rem;
+    }
+
+    .header-nav a {
+      color: var(--text-dim);
+      transition: color 0.15s;
+    }
+
+    .header-nav a:hover,
+    .header-nav a.active {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    .header-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.2rem;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Main layout                                                          */
+    /* ------------------------------------------------------------------ */
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 0;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Summary cards row                                                    */
+    /* ------------------------------------------------------------------ */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .summary-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.1rem 1.3rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+      transition: border-color 0.2s;
+    }
+
+    .summary-card:hover { border-color: var(--accent); }
+
+    .summary-card .label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-dim);
+      font-weight: 600;
+    }
+
+    .summary-card .value {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: var(--text-bright);
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+    }
+
+    .summary-card .sub {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Chart cards                                                          */
+    /* ------------------------------------------------------------------ */
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(540px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .chart-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem 1.4rem 1rem;
+      transition: border-color 0.2s;
+    }
+
+    .chart-card:hover { border-color: var(--accent); }
+
+    .chart-card .chart-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-dim);
+      font-weight: 600;
+      margin-bottom: 0.8rem;
+    }
+
+    .chart-card canvas {
+      width: 100% !important;
+      max-height: 280px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Recent table                                                         */
+    /* ------------------------------------------------------------------ */
+    .recent-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem 1.4rem 1rem;
+      margin-bottom: 1.5rem;
+      overflow-x: auto;
+    }
+
+    .recent-card .chart-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-dim);
+      font-weight: 600;
+      margin-bottom: 0.8rem;
+    }
+
+    .recent-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+    }
+
+    .recent-table th {
+      text-align: left;
+      color: var(--text-dim);
+      font-weight: 600;
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .recent-table td {
+      padding: 0.4rem 0.6rem;
+      border-bottom: 1px solid var(--border-dim);
+      color: var(--text);
+    }
+
+    .recent-table tr:hover td {
+      background: var(--bg-card-alt);
+    }
+
+    .status-ok { color: var(--green); }
+    .status-err { color: var(--red); }
+
+    /* ------------------------------------------------------------------ */
+    /* Refresh bar                                                          */
+    /* ------------------------------------------------------------------ */
+    .refresh-bar {
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.75rem;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    .refresh-bar button {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--accent);
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      padding: 0.25em 0.75em;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .refresh-bar button:hover { background: var(--bg-card-alt); }
+
+    .progress-wrap {
+      width: 120px;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    #refresh-progress {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width 1s linear;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Loading overlay                                                      */
+    /* ------------------------------------------------------------------ */
+    #loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(13,17,23,0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.9rem;
+      color: var(--text-dim);
+      z-index: 100;
+    }
+
+    #loading-overlay.hidden { display: none; }
+
+    .spinner {
+      display: inline-block;
+      width: 1em;
+      height: 1em;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 0.5em;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ------------------------------------------------------------------ */
+    /* Footer                                                               */
+    /* ------------------------------------------------------------------ */
+    footer {
+      text-align: center;
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      margin-top: 3rem;
+      padding: 0 1rem;
+      opacity: 0.6;
+    }
+
+    @media (max-width: 600px) {
+      .chart-grid { grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<div id="loading-overlay">
+  <span class="spinner"></span> Loading metrics...
+</div>
+
+<header>
+  <div class="header-brand">
+    <span class="cat" aria-hidden="true">&#x1F408;</span>
+    nanobot <span style="color:var(--text-dim);font-weight:400">/ metrics</span>
+  </div>
+  <div class="header-nav">
+    <a href="/">status</a>
+    <a href="/metrics" class="active">metrics</a>
+  </div>
+  <div class="header-meta">
+    <span id="last-update">&mdash;</span>
+    <span>auto-refresh every 60s</span>
+  </div>
+</header>
+
+<main>
+  <!-- Summary cards -->
+  <div class="summary-grid">
+    <div class="summary-card">
+      <span class="label">Total Messages</span>
+      <span class="value" id="sum-total">--</span>
+      <span class="sub">all time</span>
+    </div>
+    <div class="summary-card">
+      <span class="label">Avg Response Time</span>
+      <span class="value" id="sum-avg-ms">--</span>
+      <span class="sub">milliseconds</span>
+    </div>
+    <div class="summary-card">
+      <span class="label">Error Rate</span>
+      <span class="value" id="sum-error-rate">--</span>
+      <span class="sub">percent</span>
+    </div>
+    <div class="summary-card">
+      <span class="label">Active Sessions</span>
+      <span class="value" id="sum-active">--</span>
+      <span class="sub">last hour</span>
+    </div>
+  </div>
+
+  <!-- Refresh controls -->
+  <div class="refresh-bar">
+    <span id="refresh-status">last fetched &mdash;</span>
+    <div class="progress-wrap" title="next auto-refresh">
+      <div id="refresh-progress"></div>
+    </div>
+    <button id="btn-refresh" onclick="fetchMetrics()">refresh now</button>
+  </div>
+
+  <!-- Chart grid -->
+  <div class="chart-grid">
+    <div class="chart-card">
+      <div class="chart-title">Response Latency Timeline (24h)</div>
+      <canvas id="chart-latency"></canvas>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Error Rate (24h)</div>
+      <canvas id="chart-errors"></canvas>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Tool Usage (call count)</div>
+      <canvas id="chart-tool-usage"></canvas>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Tool Performance (avg ms)</div>
+      <canvas id="chart-tool-perf"></canvas>
+    </div>
+  </div>
+
+  <!-- Recent executions table -->
+  <div class="recent-card">
+    <div class="chart-title">Recent Tool Executions</div>
+    <table class="recent-table">
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>Tool</th>
+          <th>Duration (ms)</th>
+          <th>Status</th>
+          <th>Session</th>
+          <th>Channel</th>
+        </tr>
+      </thead>
+      <tbody id="recent-tbody">
+        <tr><td colspan="6" style="color:var(--text-dim)">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<footer>
+  nanobot metrics dashboard &mdash; port 18791
+</footer>
+
+<script>
+  /* ------------------------------------------------------------------ */
+  /* Helpers                                                               */
+  /* ------------------------------------------------------------------ */
+  function el(id) { return document.getElementById(id); }
+
+  /* Chart.js global defaults for dark theme */
+  Chart.defaults.color = '#8b949e';
+  Chart.defaults.borderColor = '#21262d';
+  Chart.defaults.font.family = "'Cascadia Code', 'Fira Code', monospace";
+  Chart.defaults.font.size = 11;
+
+  /* Chart instances (so we can destroy + recreate on refresh) */
+  let chartLatency = null;
+  let chartErrors = null;
+  let chartToolUsage = null;
+  let chartToolPerf = null;
+
+  /* ------------------------------------------------------------------ */
+  /* Render summary cards                                                  */
+  /* ------------------------------------------------------------------ */
+  function renderSummary(data) {
+    const ov = data.overall || {};
+    const ss = data.session_stats || {};
+
+    el('sum-total').textContent = (ov.total_messages || 0).toLocaleString();
+    el('sum-avg-ms').textContent = (ov.avg_response_ms || 0).toFixed(1);
+    el('sum-error-rate').textContent = (ov.error_rate || 0).toFixed(2) + '%';
+    el('sum-active').textContent = ss.active_last_hour || 0;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Render charts                                                         */
+  /* ------------------------------------------------------------------ */
+  function formatHourLabel(isoHour) {
+    /* "2026-03-16T14" -> "14:00" */
+    const parts = isoHour.split('T');
+    if (parts.length === 2) return parts[1] + ':00';
+    return isoHour;
+  }
+
+  function renderLatencyChart(timeline) {
+    const labels = timeline.map(t => formatHourLabel(t.hour));
+    const values = timeline.map(t => t.avg_ms);
+
+    if (chartLatency) chartLatency.destroy();
+    chartLatency = new Chart(el('chart-latency'), {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Avg Latency (ms)',
+          data: values,
+          borderColor: '#58a6ff',
+          backgroundColor: 'rgba(88, 166, 255, 0.1)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 3,
+          pointBackgroundColor: '#58a6ff',
+          borderWidth: 2,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+        },
+        scales: {
+          x: {
+            grid: { color: '#21262d' },
+            ticks: { maxRotation: 45, maxTicksLimit: 12 },
+          },
+          y: {
+            grid: { color: '#21262d' },
+            beginAtZero: true,
+            title: { display: true, text: 'ms', color: '#8b949e' },
+          },
+        },
+      },
+    });
+  }
+
+  function renderErrorChart(timeline) {
+    const labels = timeline.map(t => formatHourLabel(t.hour));
+    const values = timeline.map(t => t.errors);
+
+    if (chartErrors) chartErrors.destroy();
+    chartErrors = new Chart(el('chart-errors'), {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Errors',
+          data: values,
+          borderColor: '#f85149',
+          backgroundColor: 'rgba(248, 81, 73, 0.1)',
+          fill: true,
+          tension: 0.3,
+          pointRadius: 3,
+          pointBackgroundColor: '#f85149',
+          borderWidth: 2,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+        },
+        scales: {
+          x: {
+            grid: { color: '#21262d' },
+            ticks: { maxRotation: 45, maxTicksLimit: 12 },
+          },
+          y: {
+            grid: { color: '#21262d' },
+            beginAtZero: true,
+            title: { display: true, text: 'errors', color: '#8b949e' },
+          },
+        },
+      },
+    });
+  }
+
+  function renderToolUsageChart(toolStats) {
+    /* Sort by count descending, take top 15 */
+    const sorted = [...toolStats].sort((a, b) => b.count - a.count).slice(0, 15);
+    const labels = sorted.map(t => t.tool);
+    const values = sorted.map(t => t.count);
+
+    /* Generate colours: accent-based gradient */
+    const colours = sorted.map((_, i) => {
+      const hue = 210 + (i * 17) % 60;
+      return `hsla(${hue}, 70%, 60%, 0.85)`;
+    });
+
+    if (chartToolUsage) chartToolUsage.destroy();
+    chartToolUsage = new Chart(el('chart-tool-usage'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: 'Call Count',
+          data: values,
+          backgroundColor: colours,
+          borderColor: colours.map(c => c.replace('0.85', '1')),
+          borderWidth: 1,
+          borderRadius: 3,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        indexAxis: 'y',
+        plugins: {
+          legend: { display: false },
+        },
+        scales: {
+          x: {
+            grid: { color: '#21262d' },
+            beginAtZero: true,
+            title: { display: true, text: 'calls', color: '#8b949e' },
+          },
+          y: {
+            grid: { display: false },
+          },
+        },
+      },
+    });
+  }
+
+  function renderToolPerfChart(toolStats) {
+    /* Sort by avg_ms descending, take top 15 */
+    const sorted = [...toolStats]
+      .filter(t => t.avg_ms > 0)
+      .sort((a, b) => b.avg_ms - a.avg_ms)
+      .slice(0, 15);
+    const labels = sorted.map(t => t.tool);
+    const avgVals = sorted.map(t => t.avg_ms);
+    const p95Vals = sorted.map(t => t.p95_ms);
+
+    if (chartToolPerf) chartToolPerf.destroy();
+    chartToolPerf = new Chart(el('chart-tool-perf'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Avg (ms)',
+            data: avgVals,
+            backgroundColor: 'rgba(88, 166, 255, 0.7)',
+            borderColor: 'rgba(88, 166, 255, 1)',
+            borderWidth: 1,
+            borderRadius: 3,
+          },
+          {
+            label: 'P95 (ms)',
+            data: p95Vals,
+            backgroundColor: 'rgba(210, 153, 34, 0.5)',
+            borderColor: 'rgba(210, 153, 34, 1)',
+            borderWidth: 1,
+            borderRadius: 3,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            labels: { boxWidth: 12, padding: 16 },
+          },
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { maxRotation: 45 },
+          },
+          y: {
+            grid: { color: '#21262d' },
+            beginAtZero: true,
+            title: { display: true, text: 'ms', color: '#8b949e' },
+          },
+        },
+      },
+    });
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Render recent executions table                                        */
+  /* ------------------------------------------------------------------ */
+  function renderRecent(recent) {
+    const tbody = el('recent-tbody');
+    if (!recent || recent.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="color:var(--text-dim)">No recent executions</td></tr>';
+      return;
+    }
+
+    /* Show newest first */
+    const rows = [...recent].reverse();
+    tbody.innerHTML = rows.map(r => {
+      const ts = r.timestamp || '--';
+      const tool = r.tool_name || '--';
+      const dur = r.duration_ms != null ? r.duration_ms.toFixed(1) : '--';
+      const status = r.result_status || 'ok';
+      const isErr = status !== 'ok' && status !== 'success' && status !== '';
+      const statusCls = isErr ? 'status-err' : 'status-ok';
+      const session = r.session_id || '--';
+      const channel = r.channel || '--';
+
+      /* Truncate long timestamps for readability */
+      let tsShort = ts;
+      if (ts.length > 19) tsShort = ts.substring(11, 19);
+
+      return `<tr>
+        <td>${tsShort}</td>
+        <td>${tool}</td>
+        <td>${dur}</td>
+        <td class="${statusCls}">${status}</td>
+        <td style="font-size:0.7rem;color:var(--text-dim)">${session.substring(0, 12)}</td>
+        <td>${channel}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Fetch & render                                                        */
+  /* ------------------------------------------------------------------ */
+  async function fetchMetrics() {
+    el('btn-refresh').disabled = true;
+    try {
+      const resp = await fetch('/api/metrics');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+
+      renderSummary(data);
+      renderLatencyChart(data.timeline || []);
+      renderErrorChart(data.timeline || []);
+      renderToolUsageChart(data.tool_stats || []);
+      renderToolPerfChart(data.tool_stats || []);
+      renderRecent(data.recent || []);
+
+      el('last-update').textContent = new Date().toLocaleTimeString();
+      el('refresh-status').textContent = 'last fetched ' + new Date().toLocaleTimeString();
+      el('loading-overlay').classList.add('hidden');
+    } catch (err) {
+      el('refresh-status').textContent = 'fetch error: ' + err.message;
+      el('loading-overlay').classList.add('hidden');
+    } finally {
+      el('btn-refresh').disabled = false;
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Auto-refresh with progress bar                                        */
+  /* ------------------------------------------------------------------ */
+  const REFRESH_INTERVAL_MS = 60_000;
+  let _refreshTimer = null;
+
+  function startRefreshCycle() {
+    const bar = el('refresh-progress');
+    bar.style.transition = 'none';
+    bar.style.width = '0%';
+
+    setTimeout(() => {
+      bar.style.transition = `width ${REFRESH_INTERVAL_MS / 1000}s linear`;
+      bar.style.width = '100%';
+    }, 50);
+
+    clearTimeout(_refreshTimer);
+    _refreshTimer = setTimeout(async () => {
+      await fetchMetrics();
+      startRefreshCycle();
+    }, REFRESH_INTERVAL_MS);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Boot                                                                  */
+  /* ------------------------------------------------------------------ */
+  fetchMetrics().then(startRefreshCycle);
+</script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+Nanobot Status Dashboard
+========================
+
+Standalone usage
+----------------
+
+    python -m nanobot.dashboard.server
+    python -m nanobot.dashboard.server --port 18791
+    python -m nanobot.dashboard.server --host 127.0.0.1 --port 18791
+
+Then open http://localhost:18791 in a browser.
+
+The server uses only the Python standard library (http.server, socket,
+urllib.request) plus pathlib/json — no pip dependencies required.
+
+
+CLI integration (nanobot/nanobot/cli/commands.py)
+-------------------------------------------------
+
+Add the following command to commands.py so users can start the dashboard
+via `nanobot dashboard`:
+
+    @app.command()
+    def dashboard(
+        port: int = typer.Option(18791, "--port", "-p", help="Dashboard port"),
+        host: str = typer.Option("0.0.0.0", "--host", help="Bind address"),
+    ):
+        """Start the nanobot web status dashboard (port 18791 by default)."""
+        from nanobot.dashboard.server import run
+        console.print(f"{__logo__} Dashboard at http://localhost:{port}")
+        run(host=host, port=port)
+
+Paste it in the "Gateway / Server" section, after the existing `gateway`
+command, then users can run:
+
+    nanobot dashboard
+    nanobot dashboard --port 9000
+
+
+Running alongside the gateway
+------------------------------
+
+The dashboard and the gateway run independently on different ports (18790
+for the gateway, 18791 for the dashboard).  You can start them in
+separate terminals or add both to your systemd/supervisord unit files.
+
+Example systemd drop-in (~/.config/systemd/user/nanobot-dashboard.service):
+
+    [Unit]
+    Description=Nanobot status dashboard
+    After=network.target
+
+    [Service]
+    ExecStart=/usr/bin/python3 -m nanobot.dashboard.server --port 18791
+    Restart=on-failure
+    RestartSec=5
+
+    [Install]
+    WantedBy=default.target
+
+
+API endpoint
+------------
+
+GET /api/status  →  JSON
+
+    {
+      "uptime":            "1d 2h 3m 4s",
+      "uptime_seconds":    93784.0,
+      "server_time":       "2026-03-09 10:00:00 UTC",
+      "llama_server": {
+        "status":  "ok" | "error" | "unreachable",
+        "detail":  "..."
+      },
+      "gateway": {
+        "status":  "up" | "down",
+        "port":    18790
+      },
+      "sessions": {
+        "count":         12,
+        "last_modified": "2026-03-09 09:58:00 UTC",
+        "last_modified_ts": 1741514280.0
+      },
+      "last_message_time": "2026-03-09 09:58:00 UTC",
+      "last_message_ts":   1741514280.0,
+      "memory": {
+        "memory_bytes":   4096,
+        "history_bytes":  8192,
+        "memory_exists":  true,
+        "history_exists": true
+      },
+      "cron_jobs": {
+        "count": 3,
+        "path":  "/home/user/.nanobot/cron/jobs.json"
+      },
+      "disk_usage": {
+        "bytes": 10485760,
+        "human": "10.0 MB"
+      }
+    }

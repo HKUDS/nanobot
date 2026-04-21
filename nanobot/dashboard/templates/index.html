@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>nanobot status</title>
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Reset & base                                                         */
+    /* ------------------------------------------------------------------ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #0d1117;
+      --bg-card:     #161b22;
+      --bg-card-alt: #1c2128;
+      --border:      #30363d;
+      --border-dim:  #21262d;
+      --text:        #c9d1d9;
+      --text-dim:    #8b949e;
+      --text-bright: #f0f6fc;
+      --accent:      #58a6ff;
+      --green:       #3fb950;
+      --red:         #f85149;
+      --yellow:      #d29922;
+      --radius:      8px;
+      --mono:        'Cascadia Code', 'Fira Code', 'JetBrains Mono',
+                     ui-monospace, 'Courier New', monospace;
+    }
+
+    html { font-size: 15px; scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      min-height: 100vh;
+      padding: 0 0 3rem;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ------------------------------------------------------------------ */
+    /* Header                                                               */
+    /* ------------------------------------------------------------------ */
+    header {
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--text-bright);
+      letter-spacing: -0.02em;
+    }
+
+    .header-brand .cat { font-size: 1.4rem; }
+
+    .header-meta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.2rem;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    #server-time { color: var(--text); }
+
+    /* ------------------------------------------------------------------ */
+    /* Main layout                                                          */
+    /* ------------------------------------------------------------------ */
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 0;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Top summary bar                                                      */
+    /* ------------------------------------------------------------------ */
+    .summary-bar {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 0.85rem 1.4rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .summary-item {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+
+    .summary-item .label { color: var(--text-dim); }
+    .summary-item .value { color: var(--text-bright); font-weight: 600; }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dot-green  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .dot-red    { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+    .dot-yellow { background: var(--yellow); }
+    .dot-grey   { background: var(--text-dim); }
+
+    /* ------------------------------------------------------------------ */
+    /* Card grid                                                            */
+    /* ------------------------------------------------------------------ */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 1rem;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem 1.4rem 1.1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      transition: border-color 0.2s;
+    }
+
+    .card:hover { border-color: var(--accent); }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-dim);
+      font-weight: 600;
+    }
+
+    .badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 0.15em 0.55em;
+      border-radius: 4px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    .badge-ok     { background: rgba(63,185,80,0.15);  color: var(--green);  border: 1px solid rgba(63,185,80,0.35); }
+    .badge-err    { background: rgba(248,81,73,0.15);  color: var(--red);    border: 1px solid rgba(248,81,73,0.35); }
+    .badge-warn   { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid rgba(210,153,34,0.35); }
+    .badge-grey   { background: rgba(139,148,158,0.15); color: var(--text-dim); border: 1px solid var(--border-dim); }
+
+    .card-value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--text-bright);
+      line-height: 1;
+      letter-spacing: -0.03em;
+    }
+
+    .card-value.small { font-size: 1.1rem; letter-spacing: -0.01em; }
+
+    .card-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .card-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 0.78rem;
+      border-top: 1px solid var(--border-dim);
+      padding-top: 0.35rem;
+    }
+
+    .card-row .rk { color: var(--text-dim); }
+    .card-row .rv { color: var(--text); font-weight: 500; }
+    .card-row .rv.ok  { color: var(--green); }
+    .card-row .rv.err { color: var(--red);   }
+
+    /* ------------------------------------------------------------------ */
+    /* Last message section                                                 */
+    /* ------------------------------------------------------------------ */
+    .last-msg-card {
+      grid-column: 1 / -1;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Refresh bar                                                          */
+    /* ------------------------------------------------------------------ */
+    .refresh-bar {
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.75rem;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    .refresh-bar button {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      color: var(--accent);
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      padding: 0.25em 0.75em;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    .refresh-bar button:hover { background: var(--bg-card-alt); }
+
+    #refresh-status { opacity: 0.7; }
+
+    /* progress bar that animates toward next auto-refresh */
+    .progress-wrap {
+      width: 120px;
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    #refresh-progress {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width 1s linear;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Loading / error overlay                                             */
+    /* ------------------------------------------------------------------ */
+    #loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(13,17,23,0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.9rem;
+      color: var(--text-dim);
+      z-index: 100;
+    }
+
+    #loading-overlay.hidden { display: none; }
+
+    .spinner {
+      display: inline-block;
+      width: 1em;
+      height: 1em;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 0.5em;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ------------------------------------------------------------------ */
+    /* Footer                                                               */
+    /* ------------------------------------------------------------------ */
+    footer {
+      text-align: center;
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      margin-top: 3rem;
+      padding: 0 1rem;
+      opacity: 0.6;
+    }
+  </style>
+</head>
+<body>
+
+<div id="loading-overlay">
+  <span class="spinner"></span> Loading status...
+</div>
+
+<header>
+  <div class="header-brand">
+    <span class="cat" aria-hidden="true">&#x1F408;</span>
+    nanobot <span style="color:var(--text-dim);font-weight:400">/ status</span>
+  </div>
+  <div class="header-meta">
+    <span id="server-time">&mdash;</span>
+    <span>auto-refresh every 30s</span>
+  </div>
+</header>
+
+<main>
+  <!-- summary strip -->
+  <div class="summary-bar" id="summary-bar">
+    <div class="summary-item">
+      <div class="dot dot-grey" id="dot-llm"></div>
+      <span class="label">LLM</span>
+      <span class="value" id="sum-llm">&mdash;</span>
+    </div>
+    <div class="summary-item">
+      <div class="dot dot-grey" id="dot-gw"></div>
+      <span class="label">Gateway</span>
+      <span class="value" id="sum-gw">&mdash;</span>
+    </div>
+    <div class="summary-item">
+      <span class="label">Uptime</span>
+      <span class="value" id="sum-uptime">&mdash;</span>
+    </div>
+    <div class="summary-item">
+      <span class="label">Sessions</span>
+      <span class="value" id="sum-sessions">&mdash;</span>
+    </div>
+    <div class="summary-item">
+      <span class="label">Cron jobs</span>
+      <span class="value" id="sum-cron">&mdash;</span>
+    </div>
+    <div class="summary-item">
+      <span class="label">Disk</span>
+      <span class="value" id="sum-disk">&mdash;</span>
+    </div>
+  </div>
+
+  <!-- refresh controls -->
+  <div class="refresh-bar">
+    <span id="refresh-status">last fetched &mdash;</span>
+    <div class="progress-wrap" title="next auto-refresh">
+      <div id="refresh-progress"></div>
+    </div>
+    <button id="btn-refresh" onclick="fetchAndRender()">refresh now</button>
+  </div>
+
+  <!-- card grid -->
+  <div class="grid" id="card-grid">
+
+    <!-- LLM Server card -->
+    <div class="card" id="card-llm">
+      <div class="card-header">
+        <span class="card-title">LLM Server</span>
+        <span class="badge badge-grey" id="badge-llm">...</span>
+      </div>
+      <div class="card-value small" id="val-llm">&mdash;</div>
+      <div class="card-rows">
+        <div class="card-row">
+          <span class="rk">endpoint</span>
+          <span class="rv">localhost:8001</span>
+        </div>
+        <div class="card-row">
+          <span class="rk">health path</span>
+          <span class="rv">/health</span>
+        </div>
+        <div class="card-row">
+          <span class="rk">detail</span>
+          <span class="rv" id="llm-detail">&mdash;</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gateway card -->
+    <div class="card" id="card-gw">
+      <div class="card-header">
+        <span class="card-title">Gateway</span>
+        <span class="badge badge-grey" id="badge-gw">...</span>
+      </div>
+      <div class="card-value small" id="val-gw">&mdash;</div>
+      <div class="card-rows">
+        <div class="card-row">
+          <span class="rk">port</span>
+          <span class="rv" id="gw-port">&mdash;</span>
+        </div>
+        <div class="card-row">
+          <span class="rk">check</span>
+          <span class="rv">TCP connect</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Uptime card -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Dashboard Uptime</span>
+        <span class="badge badge-ok">live</span>
+      </div>
+      <div class="card-value" id="val-uptime">&mdash;</div>
+      <div class="card-rows">
+        <div class="card-row">
+          <span class="rk">dashboard port</span>
+          <span class="rv">18791</span>
+        </div>
+        <div class="card-row">
+          <span class="rk">server time</span>
+          <span class="rv" id="row-server-time">&mdash;</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sessions card -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Sessions</span>
+        <span class="badge badge-grey" id="badge-sessions">...</span>
+      </div>
+      <div class="card-value" id="val-sessions">&mdash;</div>
+      <div class="card-rows">
+        <div class="card-row">
+          <span class="rk">path</span>
+          <span class="rv" style="font-size:0.68rem">~/.nanobot/workspace/sessions/</span>
+        </div>
+        <div class="card-row">
+          <span class="rk">format</span>
+          <span class="rv">*.jsonl</span>
+        </div>
+        <div class="card-row">
+          <span class="rk">most recent</span>
+          <span class="rv" id="session-mtime">&mdash;</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Memory card -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Memory</span>
+        <span class="badge badge-grey" id="badge-memory">...</span>
+      </div>
+      <div class="card-value small" id="val-memory">&mdash;</div>
+      <div class="card-rows">
+        <div class="card-row">
+          <span class="rk">MEMORY.md</span>
+          <span class="rv" id="mem-memory">&mdash;</span>
+        </div>
+        <div class="card-row">
+          <span class="rk">HISTORY.md</span>
+          <span class="rv" id="mem-history">&mdash;</span>
+        </div>
+        <div class="card-row">
+          <span class="rk">path</span>
+          <span class="rv" style="font-size:0.68rem">~/.nanobot/workspace/memory/</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cron card -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Cron Jobs</span>
+        <span class="badge badge-grey" id="badge-cron">...</span>
+      </div>
+      <div class="card-value" id="val-cron">&mdash;</div>
+      <div class="card-rows">
+        <div class="card-row">
+          <span class="rk">store path</span>
+          <span class="rv" id="cron-path" style="font-size:0.68rem">&mdash;</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Disk Usage card -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Disk Usage</span>
+        <span class="badge badge-grey" id="badge-disk">info</span>
+      </div>
+      <div class="card-value" id="val-disk">&mdash;</div>
+      <div class="card-rows">
+        <div class="card-row">
+          <span class="rk">root</span>
+          <span class="rv" style="font-size:0.68rem">~/.nanobot/</span>
+        </div>
+        <div class="card-row">
+          <span class="rk">bytes</span>
+          <span class="rv" id="disk-bytes">&mdash;</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Last message card (full width) -->
+    <div class="card last-msg-card">
+      <div class="card-header">
+        <span class="card-title">Last Activity</span>
+        <span class="badge badge-grey" id="badge-activity">...</span>
+      </div>
+      <div class="card-value small" id="val-last-msg">&mdash;</div>
+      <div class="card-rows">
+        <div class="card-row">
+          <span class="rk">relative</span>
+          <span class="rv" id="last-msg-rel">&mdash;</span>
+        </div>
+        <div class="card-row">
+          <span class="rk">source</span>
+          <span class="rv">most recently modified session file</span>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /.grid -->
+</main>
+
+<footer>
+  nanobot dashboard &mdash; port 18791 &mdash; no external dependencies
+</footer>
+
+<script>
+  /* ------------------------------------------------------------------ */
+  /* Helpers                                                               */
+  /* ------------------------------------------------------------------ */
+
+  function el(id) { return document.getElementById(id); }
+
+  function humanBytes(n) {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let u = 0;
+    while (n >= 1024 && u < units.length - 1) { n /= 1024; u++; }
+    return n.toFixed(1) + ' ' + units[u];
+  }
+
+  function relativeTime(tsSeconds) {
+    if (!tsSeconds) return 'never';
+    const diff = Math.floor(Date.now() / 1000 - tsSeconds);
+    if (diff < 5)   return 'just now';
+    if (diff < 60)  return `${diff}s ago`;
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  }
+
+  /* badge helpers */
+  function setBadge(id, cls, text) {
+    const b = el(id);
+    b.className = 'badge ' + cls;
+    b.textContent = text;
+  }
+
+  /* coloured dot */
+  function setDot(id, cls) {
+    el(id).className = 'dot ' + cls;
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Render                                                                */
+  /* ------------------------------------------------------------------ */
+
+  function render(data) {
+    /* Header / summary */
+    el('server-time').textContent  = data.server_time || '—';
+    el('row-server-time').textContent = data.server_time || '—';
+
+    /* Uptime */
+    el('val-uptime').textContent  = data.uptime || '—';
+    el('sum-uptime').textContent  = data.uptime || '—';
+
+    /* LLM Server */
+    const llm = data.llama_server || {};
+    const llmOk = llm.status === 'ok';
+    const llmDown = llm.status === 'unreachable';
+    el('val-llm').textContent = llmOk ? 'healthy' : (llmDown ? 'unreachable' : (llm.status || '—'));
+    el('llm-detail').textContent = llm.detail || '—';
+    setBadge('badge-llm', llmOk ? 'badge-ok' : (llmDown ? 'badge-err' : 'badge-warn'),
+             llmOk ? 'ok' : (llmDown ? 'down' : 'error'));
+    setDot('dot-llm', llmOk ? 'dot-green' : 'dot-red');
+    el('sum-llm').textContent = llmOk ? 'ok' : (llmDown ? 'down' : 'err');
+
+    /* Gateway */
+    const gw = data.gateway || {};
+    const gwUp = gw.status === 'up';
+    el('val-gw').textContent  = gwUp ? 'up' : 'down';
+    el('gw-port').textContent = gw.port || '18790';
+    setBadge('badge-gw', gwUp ? 'badge-ok' : 'badge-err', gwUp ? 'up' : 'down');
+    setDot('dot-gw', gwUp ? 'dot-green' : 'dot-red');
+    el('sum-gw').textContent = gwUp ? 'up' : 'down';
+
+    /* Sessions */
+    const sess = data.sessions || {};
+    const sessCount = sess.count ?? 0;
+    el('val-sessions').textContent     = sessCount;
+    el('session-mtime').textContent    = sess.last_modified || 'none';
+    el('sum-sessions').textContent     = sessCount;
+    setBadge('badge-sessions', sessCount > 0 ? 'badge-ok' : 'badge-grey',
+             sessCount > 0 ? sessCount + ' files' : 'empty');
+
+    /* Memory */
+    const mem = data.memory || {};
+    const memTotal = (mem.memory_bytes || 0) + (mem.history_bytes || 0);
+    el('val-memory').textContent  = humanBytes(memTotal);
+    el('mem-memory').textContent  = mem.memory_exists
+      ? humanBytes(mem.memory_bytes || 0) : 'not found';
+    el('mem-history').textContent = mem.history_exists
+      ? humanBytes(mem.history_bytes || 0) : 'not found';
+    const memOk = mem.memory_exists || mem.history_exists;
+    setBadge('badge-memory', memOk ? 'badge-ok' : 'badge-warn', memOk ? 'found' : 'missing');
+
+    /* Cron */
+    const cron = data.cron_jobs || {};
+    const cronCount = cron.count ?? 0;
+    el('val-cron').textContent  = cronCount;
+    el('sum-cron').textContent  = cronCount;
+    el('cron-path').textContent = cron.path || '—';
+    setBadge('badge-cron', cronCount > 0 ? 'badge-ok' : 'badge-grey',
+             cronCount > 0 ? cronCount + ' jobs' : 'none');
+
+    /* Disk */
+    const disk = data.disk_usage || {};
+    el('val-disk').textContent   = disk.human || humanBytes(disk.bytes || 0);
+    el('disk-bytes').textContent = (disk.bytes || 0).toLocaleString() + ' B';
+    el('sum-disk').textContent   = disk.human || '—';
+    setBadge('badge-disk', 'badge-grey', 'info');
+
+    /* Last activity */
+    const lmt = data.last_message_ts;
+    const lmtStr = data.last_message_time;
+    el('val-last-msg').textContent  = lmtStr || 'no sessions yet';
+    el('last-msg-rel').textContent  = relativeTime(lmt);
+    const actBadge = lmt
+      ? (Date.now() / 1000 - lmt < 3600 ? 'badge-ok' : 'badge-grey')
+      : 'badge-grey';
+    setBadge('badge-activity', actBadge, lmt ? 'recent' : 'idle');
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Fetch                                                                 */
+  /* ------------------------------------------------------------------ */
+
+  let _lastFetchTs = null;
+
+  async function fetchAndRender() {
+    el('btn-refresh').disabled = true;
+    try {
+      const resp = await fetch('/api/status');
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const data = await resp.json();
+      render(data);
+      _lastFetchTs = Date.now();
+      el('refresh-status').textContent =
+        'last fetched ' + new Date(_lastFetchTs).toLocaleTimeString();
+      el('loading-overlay').classList.add('hidden');
+    } catch (err) {
+      el('refresh-status').textContent = 'fetch error: ' + err.message;
+    } finally {
+      el('btn-refresh').disabled = false;
+    }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Auto-refresh with progress bar                                        */
+  /* ------------------------------------------------------------------ */
+
+  const REFRESH_INTERVAL_MS = 30_000;
+  let _refreshTimer  = null;
+  let _progressTimer = null;
+
+  function startRefreshCycle() {
+    /* animate progress bar from 0 -> 100% over REFRESH_INTERVAL_MS */
+    const bar = el('refresh-progress');
+    bar.style.transition = 'none';
+    bar.style.width = '0%';
+
+    /* tiny delay so the browser picks up the 0% reset before animating */
+    setTimeout(() => {
+      bar.style.transition = `width ${REFRESH_INTERVAL_MS / 1000}s linear`;
+      bar.style.width = '100%';
+    }, 50);
+
+    clearTimeout(_refreshTimer);
+    _refreshTimer = setTimeout(async () => {
+      await fetchAndRender();
+      startRefreshCycle();
+    }, REFRESH_INTERVAL_MS);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Relative-time ticker (updates every 10s without a full fetch)        */
+  /* ------------------------------------------------------------------ */
+
+  function tickRelativeTimes() {
+    /* We keep a module-level cache of last_message_ts from most recent fetch */
+    if (window._lastMsgTs !== undefined) {
+      el('last-msg-rel').textContent = relativeTime(window._lastMsgTs);
+    }
+  }
+
+  /* Patch render() to cache the ts */
+  const _origRender = render;
+  function render(data) {
+    window._lastMsgTs = data.last_message_ts || null;
+    _origRender(data);
+  }
+
+  setInterval(tickRelativeTimes, 10_000);
+
+  /* ------------------------------------------------------------------ */
+  /* Boot                                                                  */
+  /* ------------------------------------------------------------------ */
+
+  fetchAndRender().then(startRefreshCycle);
+</script>
+</body>
+</html>
