@@ -547,6 +547,56 @@ async def test_chat_with_retry_normalizes_explicit_none_max_tokens() -> None:
 
 
 @pytest.mark.asyncio
+async def test_chat_with_retry_retries_zhipu_1302_rate_limit(monkeypatch) -> None:
+    """ZhiPu returns code 1302 with Chinese rate-limit text instead of HTTP 429."""
+    provider = ScriptedProvider([
+        LLMResponse(
+            content='Error: {\'code\': \'1302\', \'message\': \'您的账户已达到速率限制，请您控制请求频率\'}',
+            finish_reason="error",
+        ),
+        LLMResponse(content="ok"),
+    ])
+    delays: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.content == "ok"
+    assert provider.calls == 2
+    assert delays == [1]
+
+
+@pytest.mark.asyncio
+async def test_chat_with_retry_retries_zhipu_1302_with_429_status(monkeypatch) -> None:
+    """ZhiPu 1302 error with HTTP 429 status should also retry."""
+    provider = ScriptedProvider([
+        LLMResponse(
+            content='Error: {\'code\': \'1302\', \'message\': \'您的账户已达到速率限制，请您控制请求频率\'}',
+            finish_reason="error",
+            error_status_code=429,
+            error_code="1302",
+        ),
+        LLMResponse(content="ok"),
+    ])
+    delays: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+
+    response = await provider.chat_with_retry(messages=[{"role": "user", "content": "hello"}])
+
+    assert response.content == "ok"
+    assert provider.calls == 2
+    assert delays == [1]
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_with_retry_normalizes_explicit_none_max_tokens() -> None:
     """chat_stream_with_retry must apply the same None-guard as chat_with_retry."""
     provider = ScriptedProvider([LLMResponse(content="ok")])
