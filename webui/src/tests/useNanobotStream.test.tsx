@@ -13,6 +13,7 @@ function fakeClient() {
       status: "open" as const,
       defaultChatId: null as string | null,
       onStatus: () => () => {},
+      onError: () => () => {},
       onChat(chatId: string, h: (ev: InboundEvent) => void) {
         let set = handlers.get(chatId);
         if (!set) {

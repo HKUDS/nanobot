@@ -123,12 +123,25 @@ export function useSessionHistory(key: string | null): {
         const ui: UIMessage[] = body.messages.flatMap((m, idx) => {
           if (m.role !== "user" && m.role !== "assistant") return [];
           if (typeof m.content !== "string") return [];
+          // Hydrate signed media URLs into the bubble's ``images`` slot so
+          // historical user turns render real previews (the live-send path
+          // uses data URLs; both shapes converge on the same ``UIImage``).
+          const images =
+            m.role === "user" &&
+            Array.isArray(m.media_urls) &&
+            m.media_urls.length > 0
+              ? m.media_urls.map((mu) => ({
+                  url: mu.url,
+                  name: mu.name,
+                }))
+              : undefined;
           return [
             {
               id: `hist-${idx}`,
               role: m.role,
               content: m.content,
               createdAt: m.timestamp ? Date.parse(m.timestamp) : Date.now(),
+              ...(images ? { images } : {}),
             },
           ];
         });

@@ -11,7 +11,12 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
-from nanobot.utils.helpers import ensure_dir, find_legal_message_start, safe_filename
+from nanobot.utils.helpers import (
+    ensure_dir,
+    find_legal_message_start,
+    image_placeholder_text,
+    safe_filename,
+)
 
 
 @dataclass
@@ -54,7 +59,19 @@ class Session:
 
         out: list[dict[str, Any]] = []
         for message in sliced:
-            entry: dict[str, Any] = {"role": message["role"], "content": message.get("content", "")}
+            content = message.get("content", "")
+            # Synthesize an ``[image: path]`` breadcrumb from the persisted
+            # ``media`` kwarg so LLM replay still sees *something* where the
+            # image used to be. Without this, an image-only user turn
+            # replays as an empty user message — the assistant's reply then
+            # looks like it's responding to nothing.
+            media = message.get("media")
+            if isinstance(media, list) and media and isinstance(content, str):
+                breadcrumbs = "\n".join(
+                    image_placeholder_text(p) for p in media if isinstance(p, str) and p
+                )
+                content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+            entry: dict[str, Any] = {"role": message["role"], "content": content}
             for key in ("tool_calls", "tool_call_id", "name", "reasoning_content"):
                 if key in message:
                     entry[key] = message[key]

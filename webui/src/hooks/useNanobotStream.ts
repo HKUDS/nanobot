@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
-import type { InboundEvent, UIMessage } from "@/lib/types";
+import type { StreamError } from "@/lib/nanobot-client";
+import type {
+  InboundEvent,
+  OutboundMedia,
+  UIImage,
+  UIMessage,
+} from "@/lib/types";
 
 interface StreamBuffer {
   /** ID of the assistant message currently receiving deltas. */
@@ -16,24 +22,52 @@ interface StreamBuffer {
  * separately (e.g. via ``fetchSessionMessages``) since the server only replays
  * live events.
  */
+/** Payload passed to ``send`` when the user attaches one or more images.
+ *
+ * ``media`` is handed to the wire client verbatim; ``preview`` powers the
+ * optimistic user bubble (blob URLs so the preview appears before the server
+ * acks the frame). Keeping the two separate lets the bubble re-use the local
+ * blob URL even after the server persists the file under a different name. */
+export interface SendImage {
+  media: OutboundMedia;
+  preview: UIImage;
+}
+
 export function useNanobotStream(
   chatId: string | null,
   initialMessages: UIMessage[] = [],
 ): {
   messages: UIMessage[];
   isStreaming: boolean;
-  send: (content: string) => void;
+  send: (content: string, images?: SendImage[]) => void;
   setMessages: React.Dispatch<React.SetStateAction<UIMessage[]>>;
+  /** Latest transport-level fault raised since the last ``dismissStreamError``.
+   * ``null`` when there is nothing to show. */
+  streamError: StreamError | null;
+  /** Clear the current ``streamError`` (e.g. after the user dismisses the
+   * notification or starts a fresh action). */
+  dismissStreamError: () => void;
 } {
   const { client } = useClient();
   const [messages, setMessages] = useState<UIMessage[]>(initialMessages);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [streamError, setStreamError] = useState<StreamError | null>(null);
   const buffer = useRef<StreamBuffer | null>(null);
 
-  // Reset local state when switching chats.
+  useEffect(() => {
+    return client.onError((err) => setStreamError(err));
+  }, [client]);
+
+  const dismissStreamError = useCallback(() => setStreamError(null), []);
+
+  // Reset local state when switching chats. ``streamError`` is scoped to the
+  // send that triggered it, so a chat swap should wipe it out: a stale
+  // "Message too large" banner on a freshly-opened chat-B would confuse the
+  // user about which send actually failed (and in which chat).
   useEffect(() => {
     setMessages(initialMessages);
     setIsStreaming(false);
+    setStreamError(null);
     buffer.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId]);
@@ -145,8 +179,14 @@ export function useNanobotStream(
   }, [chatId, client]);
 
   const send = useCallback(
-    (content: string) => {
-      if (!chatId || !content.trim()) return;
+    (content: string, images?: SendImage[]) => {
+      if (!chatId) return;
+      const hasImages = !!images && images.length > 0;
+      // Text is optional when images are attached — the agent will still see
+      // the image blocks via ``media`` paths.
+      if (!hasImages && !content.trim()) return;
+
+      const previews = hasImages ? images!.map((i) => i.preview) : undefined;
       setMessages((prev) => [
         ...prev,
         {
@@ -154,12 +194,21 @@ export function useNanobotStream(
           role: "user",
           content,
           createdAt: Date.now(),
+          ...(previews ? { images: previews } : {}),
         },
       ]);
-      client.sendMessage(chatId, content);
+      const wireMedia = hasImages ? images!.map((i) => i.media) : undefined;
+      client.sendMessage(chatId, content, wireMedia);
     },
     [chatId, client],
   );
 
-  return { messages, isStreaming, send, setMessages };
+  return {
+    messages,
+    isStreaming,
+    send,
+    setMessages,
+    streamError,
+    dismissStreamError,
+  };
 }

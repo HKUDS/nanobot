@@ -64,7 +64,19 @@
       "placeholderOpening": "Abriendo un nuevo chat…",
       "inputAria": "Entrada de mensaje",
       "sendHint": "Enter para enviar · Shift+Enter para nueva línea",
-      "send": "Enviar mensaje"
+      "send": "Enviar mensaje",
+      "attachImage": "Adjuntar imagen",
+      "encoding": "Procesando…",
+      "remove": "Quitar adjunto",
+      "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "imageRejected": {
+        "unsupported_type": "Tipo de archivo no compatible",
+        "too_many_images": "Máximo {{max}} imágenes por mensaje",
+        "magic_mismatch": "El archivo no parece una imagen real",
+        "decode_failed": "No se pudo decodificar esta imagen",
+        "too_large": "Imagen demasiado grande — prueba una más pequeña",
+        "io": "No se pudo leer este archivo"
+      }
     },
     "scrollToBottom": "Desplazarse al final"
   },
@@ -72,12 +84,29 @@
     "streaming": "transmitiendo",
     "assistantTyping": "El asistente está escribiendo",
     "toolSingle": "Usando una herramienta",
-    "toolMany": "Se usaron {{count}} herramientas"
+    "toolMany": "Se usaron {{count}} herramientas",
+    "imageAttachment": "Imagen adjunta"
+  },
+  "lightbox": {
+    "title": "Vista previa de imagen",
+    "open": "Ver imagen",
+    "prev": "Imagen anterior",
+    "next": "Imagen siguiente",
+    "close": "Cerrar vista previa"
   },
   "code": {
     "fallbackLanguage": "código",
     "copyAria": "Copiar código",
     "copy": "Copiar",
     "copied": "Copiado"
+  },
+  "common": {
+    "dismiss": "Cerrar"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "Mensaje demasiado grande",
+      "body": "El servidor rechazó tu último mensaje por superar el tamaño permitido. Quita algunas imágenes o usa archivos más pequeños y vuelve a enviarlo."
+    }
   }
 }

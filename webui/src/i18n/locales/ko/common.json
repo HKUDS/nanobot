@@ -64,7 +64,19 @@
       "placeholderOpening": "새 채팅을 여는 중…",
       "inputAria": "메시지 입력",
       "sendHint": "Enter로 전송 · Shift+Enter로 줄바꿈",
-      "send": "메시지 보내기"
+      "send": "메시지 보내기",
+      "attachImage": "이미지 첨부",
+      "encoding": "처리 중…",
+      "remove": "첨부 제거",
+      "normalizedSizeHint": "{{orig}} → {{current}} (자동 압축)",
+      "imageRejected": {
+        "unsupported_type": "지원하지 않는 파일 형식입니다",
+        "too_many_images": "메시지당 최대 {{max}}장까지 가능합니다",
+        "magic_mismatch": "이미지 파일이 아닌 것 같습니다",
+        "decode_failed": "이 이미지를 디코딩할 수 없습니다",
+        "too_large": "이미지가 너무 큽니다. 더 작은 걸로 시도해 주세요",
+        "io": "이 파일을 읽을 수 없습니다"
+      }
     },
     "scrollToBottom": "맨 아래로 스크롤"
   },
@@ -72,12 +84,29 @@
     "streaming": "생성 중",
     "assistantTyping": "도우미가 입력 중",
     "toolSingle": "도구 사용 중",
-    "toolMany": "도구 {{count}}개 사용됨"
+    "toolMany": "도구 {{count}}개 사용됨",
+    "imageAttachment": "이미지 첨부"
+  },
+  "lightbox": {
+    "title": "이미지 미리보기",
+    "open": "이미지 보기",
+    "prev": "이전 이미지",
+    "next": "다음 이미지",
+    "close": "미리보기 닫기"
   },
   "code": {
     "fallbackLanguage": "코드",
     "copyAria": "코드 복사",
     "copy": "복사",
     "copied": "복사됨"
+  },
+  "common": {
+    "dismiss": "닫기"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "메시지가 너무 큽니다",
+      "body": "마지막 메시지가 서버의 크기 제한을 초과하여 거부되었습니다. 이미지를 줄이거나 더 작은 파일로 바꿔서 다시 보내 주세요."
+    }
   }
 }

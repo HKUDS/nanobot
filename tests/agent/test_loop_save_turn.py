@@ -234,6 +234,87 @@ async def test_process_message_persists_user_message_before_turn_completes(tmp_p
     assert persisted.updated_at >= persisted.created_at
 
 
+# 1x1 PNG used by the media-persistence tests. ``extract_documents`` runs
+# at the top of ``_process_message`` and filters ``msg.media`` down to
+# paths that magic-byte-sniff as images, so the test fixture needs real
+# bytes on disk (not just placeholder paths).
+_PNG_1X1 = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+    b"\x00\x00\x00\nIDATx\x9cc\x00\x00\x00\x02\x00\x01"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+@pytest.mark.asyncio
+async def test_process_message_persists_media_paths_on_user_turn(tmp_path: Path) -> None:
+    """User turns that attach images must record the media paths alongside
+    the text so the webui can rehydrate previews on session replay.
+
+    This is the producer half of the signed-media-URL round-trip: paths are
+    stored here, then :meth:`WebSocketChannel._augment_media_urls` maps them
+    onto signed URLs on the way out.
+    """
+    img_a = tmp_path / "uuid-1.png"
+    img_a.write_bytes(_PNG_1X1)
+    img_b = tmp_path / "uuid-2.png"
+    img_b.write_bytes(_PNG_1X1)
+
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("interrupt"))  # type: ignore[method-assign]
+
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u1",
+        chat_id="c-media",
+        content="look",
+        media=[str(img_a), str(img_b)],
+    )
+    with pytest.raises(RuntimeError, match="interrupt"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate("websocket:c-media")
+    persisted = loop.sessions.get_or_create("websocket:c-media")
+    assert [m["role"] for m in persisted.messages] == ["user"]
+    assert persisted.messages[0]["content"] == "look"
+    assert persisted.messages[0]["media"] == [str(img_a), str(img_b)]
+
+
+@pytest.mark.asyncio
+async def test_process_message_persists_media_only_turn_without_text(tmp_path: Path) -> None:
+    """A turn with images but no text still persists (previously silent-dropped).
+
+    The old early-persist gate skipped messages without text, leaving pure
+    image turns un-checkpointed. They now materialise as an empty-content
+    user row with ``media`` attached.
+    """
+    img = tmp_path / "only.png"
+    img.write_bytes(_PNG_1X1)
+
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
+
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u1",
+        chat_id="c-images-only",
+        content="",
+        media=[str(img)],
+    )
+    with pytest.raises(RuntimeError):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate("websocket:c-images-only")
+    persisted = loop.sessions.get_or_create("websocket:c-images-only")
+    assert len(persisted.messages) == 1
+    assert persisted.messages[0]["role"] == "user"
+    assert persisted.messages[0]["content"] == ""
+    assert persisted.messages[0]["media"] == [str(img)]
+
+
 @pytest.mark.asyncio
 async def test_process_message_does_not_duplicate_early_persisted_user_message(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
