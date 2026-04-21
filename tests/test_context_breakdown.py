@@ -127,9 +127,9 @@ def test_build_status_content_with_breakdown():
 
     # Verify context breakdown is present
     assert "Context Breakdown" in output
-    assert "System Prompt:" in output
-    assert "Conversation:" in output
-    assert "Tools Definitions:" in output
+    assert "System Prompt" in output
+    assert "Conversation" in output
+    assert "Tools" in output
 
     # Verify tool names are shown
     assert "read_file" in output
@@ -141,7 +141,7 @@ def test_build_status_content_with_breakdown():
     assert "1234" in output
 
     # Verify tool messages count shown when > 0
-    assert "25 user / 17 assistant" in output
+    assert "25U / 17A" in output
 
 
 def test_build_status_content_with_tool_messages():
@@ -181,7 +181,7 @@ def test_build_status_content_with_tool_messages():
         context_breakdown=breakdown,
     )
 
-    assert "3 user / 3 assistant / 4 tool" in output
+    assert "3U / 3A / 4T" in output
 
 
 def test_build_status_content_without_breakdown():

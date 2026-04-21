@@ -33,32 +33,20 @@ class ContextBuilder:
         channel: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
-        parts = [self._get_identity(channel=channel)]
+        raw = self.get_context_parts(channel=channel)
 
-        bootstrap = self._load_bootstrap_files()
-        if bootstrap:
-            parts.append(bootstrap)
-
-        memory = self.memory.get_memory_context()
-        if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
-            parts.append(f"# Memory\n\n{memory}")
-
-        always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
-
-        skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
+        parts = [raw["identity"]]
+        if raw["bootstrap"]:
+            parts.append(raw["bootstrap"])
+        if raw["memory"]:
+            parts.append(f"# Memory\n\n{raw['memory']}")
+        if raw["always_skills"]:
+            parts.append(f"# Active Skills\n\n{raw['always_skills']}")
+        skills_summary = self.skills.build_skills_summary(exclude=set(self.skills.get_always_skills()))
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
-
-        entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
-        if entries:
-            capped = entries[-self._MAX_RECENT_HISTORY:]
-            parts.append("# Recent History\n\n" + "\n".join(
-                f"- [{e['timestamp']}] {e['content']}" for e in capped
-            ))
+        if raw["recent_history"]:
+            parts.append(f"# Recent History\n\n{raw['recent_history']}")
 
         return "\n\n---\n\n".join(parts)
 
@@ -67,12 +55,27 @@ class ContextBuilder:
         channel: str | None = None,
         chat_id: str | None = None,
     ) -> dict[str, str]:
-        """Return individual context part strings for breakdown analysis."""
+        """Return individual context part strings for breakdown analysis.
+
+        The raw parts returned here are the single source of truth used by
+        both ``build_system_prompt`` (which adds section headers and joins
+        them with separators) and ``calculate_context_breakdown`` (which
+        counts tokens per part).
+        """
         always_skills = self.skills.get_always_skills()
         always_content = ""
         if always_skills:
             ac = self.skills.load_skills_for_context(always_skills)
             always_content = ac or ""
+
+        # Memory: skip if user hasn't customized the template
+        raw_memory = self.memory.get_memory_context()
+        memory = ""
+        if raw_memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
+            memory = raw_memory
+
+        # Skills summary: exclude always-skills to avoid double-counting
+        skills_summary = self.skills.build_skills_summary(exclude=set(always_skills)) or ""
 
         recent_history = ""
         entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
@@ -83,9 +86,9 @@ class ContextBuilder:
         return {
             "identity": self._get_identity(channel=channel),
             "bootstrap": self._load_bootstrap_files(),
-            "memory": self.memory.get_memory_context() or "",
+            "memory": memory,
             "always_skills": always_content,
-            "skills_summary": self.skills.build_skills_summary() or "",
+            "skills_summary": skills_summary,
             "recent_history": recent_history,
             "runtime_context": self._build_runtime_context(
                 channel=channel, chat_id=chat_id, timezone=self.timezone, session_summary=None,

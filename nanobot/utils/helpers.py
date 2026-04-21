@@ -13,6 +13,16 @@ from typing import Any, TypedDict
 import tiktoken
 from loguru import logger
 
+# Lazy-initialised tiktoken encoding — shared by all token-counting helpers.
+_tiktoken_enc: tiktoken.Encoding | None = None
+
+
+def _get_tiktoken_enc() -> tiktoken.Encoding:
+    global _tiktoken_enc
+    if _tiktoken_enc is None:
+        _tiktoken_enc = tiktoken.get_encoding("cl100k_base")
+    return _tiktoken_enc
+
 
 def strip_think(text: str) -> str:
     """Remove thinking blocks, unclosed trailing tags, and tokenizer-level
@@ -434,9 +444,16 @@ def _count_tokens(text: str) -> int:
     if not text:
         return 0
     try:
-        return len(tiktoken.get_encoding("cl100k_base").encode(text))
+        return len(_get_tiktoken_enc().encode(text))
     except Exception:
         return len(text) // 4
+
+
+def _fmt_tokens(count: int) -> str:
+    """Format token count for display (e.g. 1200 -> '1.2k')."""
+    if count >= 1000:
+        return f"{count / 1000:.1f}k"
+    return str(count)
 
 
 class _TokenParts(TypedDict):
@@ -498,9 +515,15 @@ def calculate_context_breakdown(
     history = session.get_history(max_messages=0)
     tokens["history_messages"] = _count_tokens(json.dumps(history, ensure_ascii=False))
 
-    user_count = sum(1 for m in history if m.get("role") == "user")
-    assistant_count = sum(1 for m in history if m.get("role") == "assistant")
-    tool_count = sum(1 for m in history if m.get("role") == "tool")
+    user_count = assistant_count = tool_count = 0
+    for m in history:
+        role = m.get("role")
+        if role == "user":
+            user_count += 1
+        elif role == "assistant":
+            assistant_count += 1
+        elif role == "tool":
+            tool_count += 1
 
     # Tool definitions
     tools = loop.tools.get_definitions()
@@ -543,7 +566,7 @@ def build_status_content(
     search_usage_text: str | None = None,
     active_task_count: int = 0,
     max_completion_tokens: int = 8192,
-    context_breakdown: dict[str, Any] | None = None,
+    context_breakdown: ContextBreakdown | None = None,
 ) -> str:
     """Build a human-readable runtime status snapshot.
 
@@ -565,12 +588,8 @@ def build_status_content(
     # Budget mirrors Consolidator formula: ctx_window - max_completion - _SAFETY_BUFFER
     ctx_budget = max(ctx_total - int(max_completion_tokens) - 1024, 1)
     ctx_pct = min(int((context_tokens_estimate / ctx_budget) * 100), 999) if ctx_budget > 0 else 0
-    ctx_used_str = (
-        f"{context_tokens_estimate // 1000}k"
-        if context_tokens_estimate >= 1000
-        else str(context_tokens_estimate)
-    )
-    ctx_total_str = f"{ctx_total // 1000}k" if ctx_total > 0 else "n/a"
+    ctx_used_str = _fmt_tokens(context_tokens_estimate)
+    ctx_total_str = _fmt_tokens(ctx_total) if ctx_total > 0 else "n/a"
     token_line = f"\U0001f4ca Tokens: {last_in} in / {last_out} out"
     if cached and last_in:
         token_line += f" ({cached * 100 // last_in}% cached)"
@@ -591,57 +610,60 @@ def build_status_content(
         tokens = context_breakdown["tokens"]
         total = context_breakdown["total_tokens"]
 
-        def _format_size(count: int) -> str:
-            """Format token count with k suffix if >= 1000."""
-            if count >= 1000:
-                return f"{count / 1000:.1f}k"
-            return str(count)
-
-        def _calc_pct(count: int) -> int:
-            """Calculate percentage of total."""
+        def _pct(count: int) -> int:
             return int((count / total) * 100) if total > 0 else 0
+
+        def _bar(pct_val: int) -> str:
+            filled = min(max(pct_val, 0) // 10, 10)
+            return "\u2588" * filled + "\u2591" * (10 - filled)
 
         lines.append("")
         lines.append("\U0001f4cb Context Breakdown (Estimated)")
         lines.append("")
 
-        # System Prompt section
-        sys_total = tokens["system_prompt_total"]
-        lines.append(f"System Prompt: {_format_size(sys_total)} tokens ({_calc_pct(sys_total)}%)")
-        lines.append(f"  \u251c\u2500 Identity: {_format_size(tokens['identity'])} ({_calc_pct(tokens['identity'])}%)")
-        lines.append(f"  \u251c\u2500 Bootstrap: {_format_size(tokens['bootstrap'])} ({_calc_pct(tokens['bootstrap'])}%)")
-        lines.append(f"  \u251c\u2500 Memory: {_format_size(tokens['memory'])} ({_calc_pct(tokens['memory'])}%)")
-        lines.append(f"  \u251c\u2500 Always Skills: {_format_size(tokens['always_skills'])} ({_calc_pct(tokens['always_skills'])}%)")
-        lines.append(f"  \u251c\u2500 Skills Summary: {_format_size(tokens['skills_summary'])} ({_calc_pct(tokens['skills_summary'])}%)")
-        lines.append(f"  \u2514\u2500 Memory Log: {_format_size(tokens['recent_history'])} ({_calc_pct(tokens['recent_history'])}%)")
+        # System Prompt
+        sp = tokens["system_prompt_total"]
+        lines.append(f"System Prompt  {_fmt_tokens(sp):>5}  {_bar(_pct(sp))}  {_pct(sp):>3}%")
+        sub_items = [
+            ("Identity", tokens["identity"]),
+            ("Bootstrap", tokens["bootstrap"]),
+            ("Memory", tokens["memory"]),
+            ("Active Skills", tokens["always_skills"]),
+            ("Skills Index", tokens["skills_summary"]),
+            ("Memory Log", tokens["recent_history"]),
+        ]
+        for i, (name, val) in enumerate(sub_items):
+            junction = "\u2514\u2500" if i == len(sub_items) - 1 else "\u251c\u2500"
+            lines.append(f"  {junction} {name:13} {_fmt_tokens(val):>5}")
         lines.append("")
 
-        # Conversation (session messages)
-        hist_tokens = tokens["history_messages"]
+        # Conversation
+        ht = tokens["history_messages"]
         hist_stats = context_breakdown["history_stats"]
-        lines.append(f"Conversation: {_format_size(hist_tokens)} tokens ({_calc_pct(hist_tokens)}%)")
-        msg_detail = f"{hist_stats['user_messages']} user / {hist_stats['assistant_messages']} assistant"
+        lines.append(f"Conversation   {_fmt_tokens(ht):>5}  {_bar(_pct(ht))}  {_pct(ht):>3}%")
+        detail = f"{hist_stats['user_messages']}U / {hist_stats['assistant_messages']}A"
         tool_msgs = hist_stats.get("tool_messages", 0)
         if tool_msgs:
-            msg_detail += f" / {tool_msgs} tool"
-        lines.append(f"  \u2514\u2500 {hist_stats['total_messages']} messages ({msg_detail})")
+            detail += f" / {tool_msgs}T"
+        lines.append(f"  \u2514\u2500 {hist_stats['total_messages']} msgs ({detail})")
         lines.append("")
 
-        # Tools Definitions
-        tools_tokens = tokens["tools_definitions"]
+        # Tools
+        tt = tokens["tools_definitions"]
         tools_stats = context_breakdown["tools_stats"]
-        lines.append(f"Tools Definitions: {_format_size(tools_tokens)} tokens ({_calc_pct(tools_tokens)}%)")
+        lines.append(f"Tools          {_fmt_tokens(tt):>5}  {_bar(_pct(tt))}  {_pct(tt):>3}%")
         tool_names = context_breakdown.get("tool_names", [])
-        if tool_names:
-            lines.append(f"  \u2514\u2500 {tools_stats['total_tools']} tools: {', '.join(tool_names)}")
+        if len(tool_names) > 3:
+            lines.append(f"  \u2514\u2500 {', '.join(tool_names[:3])} +{len(tool_names) - 3} more")
+        elif tool_names:
+            lines.append(f"  \u2514\u2500 {', '.join(tool_names)}")
         else:
-            lines.append(f"  \u2514\u2500 {tools_stats['total_tools']} tools loaded")
+            lines.append(f"  \u2514\u2500 {tools_stats['total_tools']} loaded")
         lines.append("")
 
-        # Runtime Context
-        runtime_tokens = tokens["runtime_context"]
-        lines.append(f"Runtime Context: {_format_size(runtime_tokens)} tokens ({_calc_pct(runtime_tokens)}%)")
-        lines.append(f"  \u2514\u2500 Time, channel, chat_id")
+        # Runtime
+        rt = tokens["runtime_context"]
+        lines.append(f"Runtime        {_fmt_tokens(rt):>5}  {_bar(_pct(rt))}  {_pct(rt):>3}%")
 
     return "\n".join(lines)
 

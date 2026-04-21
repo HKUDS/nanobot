@@ -109,9 +109,9 @@ async def test_status_includes_context_breakdown():
 
     # Context breakdown should be present
     assert "Context Breakdown" in out.content
-    assert "System Prompt:" in out.content
-    assert "Conversation:" in out.content
-    assert "Tools Definitions:" in out.content
+    assert "System Prompt" in out.content
+    assert "Conversation" in out.content
+    assert "Tools" in out.content
 
 
 @pytest.mark.asyncio
