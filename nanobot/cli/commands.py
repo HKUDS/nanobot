@@ -145,7 +145,7 @@ def _make_console() -> Console:
 def _render_interactive_ansi(render_fn) -> str:
     """Render Rich output to ANSI so prompt_toolkit can print it safely."""
     ansi_console = Console(
-        force_terminal=True,
+        force_terminal=sys.stdout.isatty(),
         color_system=console.color_system or "standard",
         width=console.width,
     )
