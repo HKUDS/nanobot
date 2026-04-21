@@ -384,6 +384,8 @@ class TestResolveTirithPath:
         assert called["which"] is False  # explicit path → no PATH lookup
 
     def test_tilde_expansion(self, monkeypatch, tmp_path):
+        import sys
+
         from nanobot.agent.tools.tirith_security import _resolve_tirith_path
 
         home = tmp_path
@@ -391,7 +393,11 @@ class TestResolveTirithPath:
         binpath = home / "bin" / "tirith"
         binpath.write_text("")
         binpath.chmod(0o755)
+        # os.path.expanduser reads HOME on POSIX but USERPROFILE on Windows,
+        # so set both to make the test platform-agnostic.
         monkeypatch.setenv("HOME", str(home))
+        if sys.platform == "win32":
+            monkeypatch.setenv("USERPROFILE", str(home))
         assert _resolve_tirith_path("~/bin/tirith") == str(binpath)
 
     def test_relative_path_treated_as_explicit(self, monkeypatch, tmp_path):
