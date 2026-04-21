@@ -146,3 +146,63 @@ def test_ordinary_paths_not_flagged() -> None:
     """No false positives on regular source files."""
     assert is_sensitive_path("/home/mihai/project/main.py") is False
     assert is_sensitive_path("/home/mihai/project/README.md") is False
+
+
+# ---------------------------------------------------------------------------
+# MIT-140: narrow id_*.pub exclusion from sensitive filename patterns
+#
+# Public SSH keys (id_*.pub) are, by definition, safe to disclose — agents
+# legitimately need to read them to deploy authorized_keys, configure CI
+# runners, etc.  The filename-only regex must block bare private-key names
+# while allowing `.pub` siblings.  Private keys *inside* `~/.ssh/` are still
+# blocked by the separate `/.ssh/` path-prefix rule, which catches public
+# AND private alike — callers who need to read `id_*.pub` should keep the
+# file outside `~/.ssh/`, or the block will (correctly) fire anyway.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "id_rsa",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+        "/tmp/keys/id_rsa",
+        "/tmp/keys/id_ed25519",
+    ],
+)
+def test_ssh_private_key_filenames_still_blocked(filename: str) -> None:
+    """MIT-140: bare SSH private-key filenames remain blocked regardless of directory."""
+    assert is_sensitive_path(filename) is True, f"Expected block for: {filename!r}"
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "id_rsa.pub",
+        "id_dsa.pub",
+        "id_ecdsa.pub",
+        "id_ed25519.pub",
+        "/tmp/keys/id_rsa.pub",
+        "/tmp/keys/id_ed25519.pub",
+    ],
+)
+def test_ssh_public_key_filenames_allowed_outside_ssh_dir(filename: str) -> None:
+    """MIT-140: `.pub` siblings of SSH keys are public info — filename regex must allow them.
+
+    (Files under `~/.ssh/` are still caught by the `/.ssh/` path-prefix rule,
+    which is intentional — the filename regex itself should not block `.pub`.)
+    """
+    assert is_sensitive_path(filename) is False, f"Unexpected block for: {filename!r}"
+
+
+def test_ssh_public_key_inside_ssh_dir_still_blocked_by_path_rule() -> None:
+    """Regression: `.pub` files inside `~/.ssh/` stay blocked via the path-prefix rule.
+
+    The filename rule now permits `id_*.pub`, but the `/.ssh/` path prefix in
+    `_SENSITIVE_PATH_PATTERNS` catches anything under the SSH directory.  This
+    is the defence-in-depth split MIT-140 documents.
+    """
+    assert is_sensitive_path("/home/mihai/.ssh/id_rsa.pub") is True
+    assert is_sensitive_path("/root/.ssh/id_ed25519.pub") is True
