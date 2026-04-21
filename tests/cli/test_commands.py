@@ -1288,10 +1288,15 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         async def run(self) -> None:
             return None
 
+    class _FakeSessionManager:
+        def flush_all(self) -> int:
+            return 0
+
     class _FakeAgentLoop:
         def __init__(self, **_kwargs) -> None:
             self.model = "test-model"
             self.dream = _FakeDream()
+            self.sessions = _FakeSessionManager()
 
         async def run(self) -> None:
             await asyncio.Event().wait()

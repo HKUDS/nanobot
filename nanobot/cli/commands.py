@@ -946,6 +946,12 @@ def _run_gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            # Flush all cached sessions to durable storage before exit.
+            # This prevents data loss on filesystems with write-back
+            # caching (rclone VFS, NFS, FUSE mounts, etc.).
+            flushed = agent.sessions.flush_all()
+            if flushed:
+                logger.info("Shutdown: flushed {} session(s) to disk", flushed)
 
     asyncio.run(run())
 
