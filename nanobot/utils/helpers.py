@@ -8,7 +8,7 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import tiktoken
 from loguru import logger
@@ -429,85 +429,84 @@ def estimate_prompt_tokens_chain(
     return 0, "none"
 
 
+def _count_tokens(text: str) -> int:
+    """Estimate token count for a text string via tiktoken."""
+    if not text:
+        return 0
+    try:
+        return len(tiktoken.get_encoding("cl100k_base").encode(text))
+    except Exception:
+        return len(text) // 4
+
+
+class _TokenParts(TypedDict):
+    identity: int
+    bootstrap: int
+    memory: int
+    always_skills: int
+    skills_summary: int
+    recent_history: int
+    system_prompt_total: int
+    history_messages: int
+    tools_definitions: int
+    runtime_context: int
+
+
+class _HistoryStats(TypedDict):
+    total_messages: int
+    user_messages: int
+    assistant_messages: int
+    tool_messages: int
+
+
+class ContextBreakdown(TypedDict):
+    tokens: _TokenParts
+    total_tokens: int
+    history_stats: _HistoryStats
+    tools_stats: dict[str, int]
+    tool_names: list[str]
+
+
 def calculate_context_breakdown(
     context_builder: Any,
     session: Any,
     loop: Any,
     channel: str | None = None,
     chat_id: str | None = None,
-) -> dict[str, Any]:
-    """Calculate character count and percentage breakdown of context parts.
+) -> ContextBreakdown:
+    """Calculate token breakdown of context parts.
 
-    Args:
-        context_builder: ContextBuilder instance
-        session: Session instance
-        loop: AgentLoop instance
-        channel: Channel name (optional)
-        chat_id: Chat ID (optional)
-
-    Returns:
-        {
-            "parts": {...},
-            "total_chars": int,
-            "history_stats": {...},
-            "tools_stats": {...},
-            "tool_names": [...]
-        }
+    Uses the public ``get_context_parts`` API so that internal ContextBuilder
+    refactors do not silently break the breakdown.
     """
-    import json
+    ctx_parts = context_builder.get_context_parts(channel=channel, chat_id=chat_id)
 
-    parts = {}
+    tokens: _TokenParts = {  # type: ignore[typeddict-item]
+        "identity": _count_tokens(ctx_parts["identity"]),
+        "bootstrap": _count_tokens(ctx_parts["bootstrap"]),
+        "memory": _count_tokens(ctx_parts["memory"]),
+        "always_skills": _count_tokens(ctx_parts["always_skills"]),
+        "skills_summary": _count_tokens(ctx_parts["skills_summary"]),
+        "recent_history": _count_tokens(ctx_parts["recent_history"]),
+        "system_prompt_total": _count_tokens(context_builder.build_system_prompt(channel=channel)),
+        "history_messages": 0,
+        "tools_definitions": 0,
+        "runtime_context": _count_tokens(ctx_parts["runtime_context"]),
+    }
 
-    # 1. System Prompt sub-parts
-    identity = context_builder._get_identity(channel=channel)
-    parts["identity"] = len(identity)
-
-    bootstrap = context_builder._load_bootstrap_files()
-    parts["bootstrap"] = len(bootstrap)
-
-    memory = context_builder.memory.get_memory_context()
-    parts["memory"] = len(memory) if memory else 0
-
-    always_skills = context_builder.skills.get_always_skills()
-    if always_skills:
-        always_content = context_builder.skills.load_skills_for_context(always_skills)
-        parts["always_skills"] = len(always_content) if always_content else 0
-    else:
-        parts["always_skills"] = 0
-
-    skills_summary = context_builder.skills.build_skills_summary()
-    parts["skills_summary"] = len(skills_summary) if skills_summary else 0
-
-    entries = context_builder.memory.read_unprocessed_history(
-        since_cursor=context_builder.memory.get_last_dream_cursor()
-    )
-    if entries:
-        capped = entries[-context_builder._MAX_RECENT_HISTORY:]
-        recent_history = "\n".join(f"- [{e['timestamp']}] {e['content']}" for e in capped)
-        parts["recent_history"] = len(recent_history)
-    else:
-        parts["recent_history"] = 0
-
-    # System prompt total (including separators "\n\n---\n\n")
-    system_prompt_parts = sum(parts.values())
-    separator_overhead = 7 * 6  # 6 separators
-    parts["system_prompt_total"] = system_prompt_parts + separator_overhead
-
-    # 2. History Messages
+    # History messages
     history = session.get_history(max_messages=0)
-    history_chars = sum(len(json.dumps(msg, ensure_ascii=False)) for msg in history)
-    parts["history_messages"] = history_chars
+    tokens["history_messages"] = _count_tokens(json.dumps(history, ensure_ascii=False))
 
-    # Count message types
     user_count = sum(1 for m in history if m.get("role") == "user")
     assistant_count = sum(1 for m in history if m.get("role") == "assistant")
+    tool_count = sum(1 for m in history if m.get("role") == "tool")
 
-    # 3. Tools Definitions
+    # Tool definitions
     tools = loop.tools.get_definitions()
-    parts["tools_definitions"] = len(json.dumps(tools, ensure_ascii=False))
+    tokens["tools_definitions"] = _count_tokens(json.dumps(tools, ensure_ascii=False))
 
-    # Extract tool names for display
-    tool_names = []
+    tool_names: list[str] = []
     for tool in tools:
         if "function" in tool and isinstance(tool["function"], dict):
             name = tool["function"].get("name")
@@ -516,34 +515,18 @@ def calculate_context_breakdown(
         if name:
             tool_names.append(name)
 
-    # 4. Runtime Context
-    runtime_ctx = context_builder._build_runtime_context(
-        channel=channel,
-        chat_id=chat_id,
-        timezone=context_builder.timezone,
-        session_summary=None,
-    )
-    parts["runtime_context"] = len(runtime_ctx)
-
-    # 5. Total characters
-    total_chars = (
-        parts["system_prompt_total"]
-        + parts["history_messages"]
-        + parts["tools_definitions"]
-        + parts["runtime_context"]
-    )
+    total_tokens = tokens["system_prompt_total"] + tokens["history_messages"] + tokens["tools_definitions"] + tokens["runtime_context"]
 
     return {
-        "parts": parts,
-        "total_chars": total_chars,
+        "tokens": tokens,
+        "total_tokens": total_tokens,
         "history_stats": {
             "total_messages": len(history),
             "user_messages": user_count,
             "assistant_messages": assistant_count,
+            "tool_messages": tool_count,
         },
-        "tools_stats": {
-            "total_tools": len(tools),
-        },
+        "tools_stats": {"total_tools": len(tools)},
         "tool_names": tool_names,
     }
 
@@ -605,46 +588,49 @@ def build_status_content(
 
     # Context breakdown section (if provided)
     if context_breakdown:
-        parts = context_breakdown["parts"]
-        total = context_breakdown["total_chars"]
+        tokens = context_breakdown["tokens"]
+        total = context_breakdown["total_tokens"]
 
-        def _format_size(chars: int) -> str:
-            """Format character count with k suffix if >= 1000."""
-            if chars >= 1000:
-                return f"{chars / 1000:.1f}k"
-            return str(chars)
+        def _format_size(count: int) -> str:
+            """Format token count with k suffix if >= 1000."""
+            if count >= 1000:
+                return f"{count / 1000:.1f}k"
+            return str(count)
 
-        def _calc_pct(chars: int) -> int:
+        def _calc_pct(count: int) -> int:
             """Calculate percentage of total."""
-            return int((chars / total) * 100) if total > 0 else 0
+            return int((count / total) * 100) if total > 0 else 0
 
         lines.append("")
-        lines.append("\U0001f4ca Context Breakdown (Last Call)")
+        lines.append("\U0001f4cb Context Breakdown (Estimated)")
         lines.append("")
 
         # System Prompt section
-        sys_total = parts["system_prompt_total"]
-        lines.append(f"System Prompt: {_format_size(sys_total)} chars ({_calc_pct(sys_total)}%)")
-        lines.append(f"  \u251c\u2500 Identity: {_format_size(parts['identity'])} ({_calc_pct(parts['identity'])}%)")
-        lines.append(f"  \u251c\u2500 Bootstrap: {_format_size(parts['bootstrap'])} ({_calc_pct(parts['bootstrap'])}%)")
-        lines.append(f"  \u251c\u2500 Memory: {_format_size(parts['memory'])} ({_calc_pct(parts['memory'])}%)")
-        lines.append(f"  \u251c\u2500 Always Skills: {_format_size(parts['always_skills'])} ({_calc_pct(parts['always_skills'])}%)")
-        lines.append(f"  \u251c\u2500 Skills Summary: {_format_size(parts['skills_summary'])} ({_calc_pct(parts['skills_summary'])}%)")
-        lines.append(f"  \u2514\u2500 Recent History: {_format_size(parts['recent_history'])} ({_calc_pct(parts['recent_history'])}%)")
+        sys_total = tokens["system_prompt_total"]
+        lines.append(f"System Prompt: {_format_size(sys_total)} tokens ({_calc_pct(sys_total)}%)")
+        lines.append(f"  \u251c\u2500 Identity: {_format_size(tokens['identity'])} ({_calc_pct(tokens['identity'])}%)")
+        lines.append(f"  \u251c\u2500 Bootstrap: {_format_size(tokens['bootstrap'])} ({_calc_pct(tokens['bootstrap'])}%)")
+        lines.append(f"  \u251c\u2500 Memory: {_format_size(tokens['memory'])} ({_calc_pct(tokens['memory'])}%)")
+        lines.append(f"  \u251c\u2500 Always Skills: {_format_size(tokens['always_skills'])} ({_calc_pct(tokens['always_skills'])}%)")
+        lines.append(f"  \u251c\u2500 Skills Summary: {_format_size(tokens['skills_summary'])} ({_calc_pct(tokens['skills_summary'])}%)")
+        lines.append(f"  \u2514\u2500 Memory Log: {_format_size(tokens['recent_history'])} ({_calc_pct(tokens['recent_history'])}%)")
         lines.append("")
 
-        # History Messages
-        hist_chars = parts["history_messages"]
+        # Conversation (session messages)
+        hist_tokens = tokens["history_messages"]
         hist_stats = context_breakdown["history_stats"]
-        lines.append(f"History Messages: {_format_size(hist_chars)} chars ({_calc_pct(hist_chars)}%)")
-        lines.append(f"  \u2514\u2500 {hist_stats['total_messages']} messages "
-                     f"({hist_stats['user_messages']} user / {hist_stats['assistant_messages']} assistant)")
+        lines.append(f"Conversation: {_format_size(hist_tokens)} tokens ({_calc_pct(hist_tokens)}%)")
+        msg_detail = f"{hist_stats['user_messages']} user / {hist_stats['assistant_messages']} assistant"
+        tool_msgs = hist_stats.get("tool_messages", 0)
+        if tool_msgs:
+            msg_detail += f" / {tool_msgs} tool"
+        lines.append(f"  \u2514\u2500 {hist_stats['total_messages']} messages ({msg_detail})")
         lines.append("")
 
         # Tools Definitions
-        tools_chars = parts["tools_definitions"]
+        tools_tokens = tokens["tools_definitions"]
         tools_stats = context_breakdown["tools_stats"]
-        lines.append(f"Tools Definitions: {_format_size(tools_chars)} chars ({_calc_pct(tools_chars)}%)")
+        lines.append(f"Tools Definitions: {_format_size(tools_tokens)} tokens ({_calc_pct(tools_tokens)}%)")
         tool_names = context_breakdown.get("tool_names", [])
         if tool_names:
             lines.append(f"  \u2514\u2500 {tools_stats['total_tools']} tools: {', '.join(tool_names)}")
@@ -653,31 +639,9 @@ def build_status_content(
         lines.append("")
 
         # Runtime Context
-        runtime_chars = parts["runtime_context"]
-        lines.append(f"Runtime Context: {_format_size(runtime_chars)} chars ({_calc_pct(runtime_chars)}%)")
+        runtime_tokens = tokens["runtime_context"]
+        lines.append(f"Runtime Context: {_format_size(runtime_tokens)} tokens ({_calc_pct(runtime_tokens)}%)")
         lines.append(f"  \u2514\u2500 Time, channel, chat_id")
-        lines.append("")
-
-        # Token Usage
-        lines.append("---")
-        lines.append("\U0001f4c8 Token Usage (Last Call)")
-
-        prompt_tokens = last_usage.get("prompt_tokens", 0)
-        completion_tokens = last_usage.get("completion_tokens", 0)
-        cached_tokens = last_usage.get("cached_tokens", 0)
-
-        if prompt_tokens > 0:
-            cache_pct = int((cached_tokens / prompt_tokens) * 100)
-            lines.append(f"Input: {prompt_tokens:,} tokens")
-            lines.append(f"Output: {completion_tokens:,} tokens")
-            lines.append(f"Cache Read: {cached_tokens:,} tokens ({cache_pct}% of input)")
-
-            # Estimate char/token ratio
-            if total > 0:
-                ratio = total / prompt_tokens
-                lines.append(f"Estimated Ratio: 1 char \u2248 {1/ratio:.2f} tokens")
-        else:
-            lines.append("No token usage data yet")
 
     return "\n".join(lines)
 
