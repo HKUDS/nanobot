@@ -15,6 +15,20 @@ from nanobot.config.paths import get_media_dir
 from nanobot.utils.sensitive import is_sensitive_path
 
 
+# ---------------------------------------------------------------------------
+# Module-level context set by ToolRegistry.set_context().
+#
+# `_current_sender_id` carries the identity of the message sender whose
+# request is currently being executed.  It is set by
+# `ToolRegistry.set_context(..., sender_id=...)` at the start of each turn
+# and is available to filesystem tools that need owner-only authorization
+# (e.g. owner-only write/edit guards on protected paths — see MIT-121-series
+# security work).  Defaults to empty string, meaning "no sender attributed"
+# (internal caller, subagent, or legacy path).
+# ---------------------------------------------------------------------------
+_current_sender_id: str = ""
+
+
 def _resolve_path(
     path: str,
     workspace: Path | None = None,
