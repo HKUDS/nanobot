@@ -150,6 +150,15 @@ if DISCORD_AVAILABLE:
                 ) -> None:
                     await self._forward_slash_command(interaction, _command_text)
 
+            @self.tree.command(name="session-role", description="Set or get the current session role")
+            @app_commands.describe(role="The session role description")
+            async def session_role_command(
+                interaction: discord.Interaction,
+                role: str | None = None,
+            ) -> None:
+                command_text = f"/session-role {role}" if role else "/session-role"
+                await self._forward_slash_command(interaction, command_text)
+
             @self.tree.command(name="help", description="Show available commands")
             async def help_command(interaction: discord.Interaction) -> None:
                 sender_id = str(interaction.user.id)
@@ -453,6 +462,11 @@ class DiscordChannel(BaseChannel):
 
         media_paths, attachment_markers = await self._download_attachments(message.attachments)
         full_content = self._compose_inbound_content(content, attachment_markers)
+
+        if full_content.strip().startswith("/session-role"):
+            import re
+            full_content = re.sub(r"<@!?(\d+)>", "", full_content).strip()
+
         metadata = self._build_inbound_metadata(message)
 
         await self._start_typing(message.channel)

@@ -116,6 +116,35 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_session_role(ctx: CommandContext) -> OutboundMessage:
+    """Set or show the current session role context."""
+    loop = ctx.loop
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    args = ctx.args.strip()
+
+    if not args:
+        current = session.metadata.get("session_role", "")
+        content = (
+            f"Current session role:\n\n{current}"
+            if current else "No session role set. Use `/session-role <description>` to set one."
+        )
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=content,
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
+
+    session.metadata["session_role"] = args
+    loop.sessions.save(session)
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content="Session role updated. This will apply to all future messages in this session.",
+        metadata=dict(ctx.msg.metadata or {}),
+    )
+
+
 async def cmd_dream(ctx: CommandContext) -> OutboundMessage:
     """Manually trigger a Dream consolidation run."""
     import time
@@ -328,6 +357,7 @@ def build_help_text() -> str:
     lines = [
         "🐈 nanobot commands:",
         "/new — Start a new conversation",
+        "/session-role — Show or set the current session role",
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",
@@ -346,6 +376,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
+    router.exact("/session-role", cmd_session_role)
+    router.prefix("/session-role ", cmd_session_role)
     router.exact("/dream", cmd_dream)
     router.exact("/dream-log", cmd_dream_log)
     router.prefix("/dream-log ", cmd_dream_log)
