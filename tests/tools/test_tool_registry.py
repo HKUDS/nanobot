@@ -183,6 +183,32 @@ class _ListReturningTool(Tool):
         return self._payload
 
 
+class _RaisingTool(Tool):
+    """Fake tool that raises a caller-supplied exception when executed.
+
+    Used to exercise the `except Exception` branch of `ToolRegistry.execute()`.
+    """
+
+    def __init__(self, name: str, exc: BaseException):
+        self._name = name
+        self._exc = exc
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def description(self) -> str:
+        return f"{self._name} tool"
+
+    @property
+    def parameters(self) -> dict[str, Any]:
+        return {"type": "object", "properties": {}}
+
+    async def execute(self, **kwargs: Any) -> Any:
+        raise self._exc
+
+
 @pytest.mark.asyncio
 async def test_execute_redacts_private_key_in_output() -> None:
     payload = (
@@ -258,19 +284,205 @@ async def test_execute_does_not_touch_list_results() -> None:
     assert result[0]["image_url"]["url"] == "data:image/png;base64,AAAA"
 
 
-@pytest.mark.asyncio
-async def test_execute_does_not_redact_error_output() -> None:
-    """Error outputs are short-circuited before the redactor runs.
+# ---------------------------------------------------------------------------
+# Error-path redaction (MIT-147)
+#
+# Before MIT-147, `ToolRegistry.execute()` short-circuited on
+# `isinstance(result, str) and result.startswith("Error")` and returned
+# `result + _HINT` without running the secret scrubber. A tool that produced
+# an error string carrying a secret — e.g. an auth module that echoes the
+# rejected AKIA key back in its error message, or a PEM parser that dumps
+# the offending blob — would therefore leak that secret straight to the
+# model.  MIT-147 routes both success and error branches through the same
+# `redact_if_sensitive()` call; the `_HINT` suffix is appended *after*
+# redaction on the error branch so the "try another approach" nudge still
+# reaches the model.
+#
+# Downstream contract: `AgentRunner._run_tool()` (and other consumers) use
+# `result.startswith("Error")` to detect failed tool calls. The bare
+# redaction notice does NOT begin with "Error", so the registry re-wraps
+# the redacted body in an "Error ..." shell on the error branches to
+# preserve that contract.
+# ---------------------------------------------------------------------------
 
-    Error strings are safe by construction (they come from our own error
-    builders) and we want them to reach the model verbatim so it can react.
-    """
+
+@pytest.mark.asyncio
+async def test_execute_redacts_aws_key_in_error_output() -> None:
+    """MIT-147: AKIA-style secrets embedded in Error: strings must be scrubbed."""
+    payload = "Error: invalid AWS credentials: AKIAABCDEFGHIJKLMNOP is not valid"
     registry = ToolRegistry()
-    registry.register(_StringReturningTool("boom", "Error: something bad"))
+    registry.register(_StringReturningTool("boom", payload))
 
     result = await registry.execute("boom", {})
 
-    assert result.startswith("Error: something bad")
+    assert "AKIAABCDEFGHIJKLMNOP" not in result
+    assert "REDACTED" in result
+    # The error-path hint still attaches so the model knows to try again.
+    assert "Analyze the error above" in result
+    # Downstream-contract: failure detection via startswith("Error")
+    assert result.startswith("Error")
+
+
+@pytest.mark.asyncio
+async def test_execute_redacts_pem_material_in_error_output() -> None:
+    """MIT-147: a tool that dumps a PEM blob into its error message must have it scrubbed."""
+    payload = (
+        "Error parsing key file:\n"
+        "-----BEGIN RSA PRIVATE KEY-----\n"
+        "MIIEowIBAAKCAQEAy3SECRETSECRETSECRETSECRETSECRETSECRETSECRETSECRET==\n"
+        "-----END RSA PRIVATE KEY-----\n"
+    )
+    registry = ToolRegistry()
+    registry.register(_StringReturningTool("parser", payload))
+
+    result = await registry.execute("parser", {})
+
+    assert "BEGIN RSA PRIVATE KEY" not in result
+    assert "MIIEowIBAAKCAQEAy3SECRETSECRETSECRET" not in result
+    assert "REDACTED" in result
+    assert "Analyze the error above" in result
+    assert result.startswith("Error")
+
+
+@pytest.mark.asyncio
+async def test_execute_redacts_github_token_in_error_output() -> None:
+    """MIT-147: a GitHub token exfiltration attempt via Error: string is scrubbed."""
+    payload = (
+        "Error: GitHub API rejected token "
+        "ghp_0123456789abcdef0123456789abcdef0123 (403 Forbidden)"
+    )
+    registry = ToolRegistry()
+    registry.register(_StringReturningTool("gh", payload))
+
+    result = await registry.execute("gh", {})
+
+    assert "ghp_0123456789abcdef0123456789abcdef0123" not in result
+    assert "REDACTED" in result
+    assert "Analyze the error above" in result
+    assert result.startswith("Error")
+
+
+@pytest.mark.asyncio
+async def test_execute_clean_error_passes_through_with_hint() -> None:
+    """MIT-147: error strings with no secrets stay intact and still gain the HINT suffix.
+
+    This is the regression guard for the previous test_execute_does_not_redact_error_output
+    behavior — the hint is still there, the body is still readable; the only change is
+    that secret-bearing error bodies now get scrubbed.
+    """
+    registry = ToolRegistry()
+    registry.register(_StringReturningTool("boom", "Error: something bad happened"))
+
+    result = await registry.execute("boom", {})
+
+    assert result.startswith("Error: something bad happened")
+    assert "Analyze the error above" in result
+    # No REDACTED substitution for clean errors.
+    assert "REDACTED" not in result
+
+
+@pytest.mark.asyncio
+async def test_execute_redacts_secret_in_exception_message() -> None:
+    """MIT-147: secrets embedded in raised exceptions must also be scrubbed.
+
+    A tool that raises `ValueError(f"could not parse {pem_content}")` would previously
+    surface the PEM blob verbatim in the `Error executing {name}: {str(e)}` line.
+    """
+    pem_in_exc = (
+        "could not parse: -----BEGIN OPENSSH PRIVATE KEY----- "
+        "MIIEowIBAAKCAQEAy3 (truncated) -----END OPENSSH PRIVATE KEY-----"
+    )
+    registry = ToolRegistry()
+    registry.register(_RaisingTool("parser", ValueError(pem_in_exc)))
+
+    result = await registry.execute("parser", {})
+
+    assert "BEGIN OPENSSH PRIVATE KEY" not in result
+    assert "REDACTED" in result
+    assert "Analyze the error above" in result
+    assert result.startswith("Error")
+
+
+@pytest.mark.asyncio
+async def test_execute_redacts_akia_in_exception_message() -> None:
+    """MIT-147: AKIA keys in exception messages are scrubbed on the except branch."""
+    registry = ToolRegistry()
+    registry.register(
+        _RaisingTool("aws", RuntimeError("connection failed for AKIAABCDEFGHIJKLMNOP"))
+    )
+
+    result = await registry.execute("aws", {})
+
+    assert "AKIAABCDEFGHIJKLMNOP" not in result
+    assert "REDACTED" in result
+    assert "Analyze the error above" in result
+    assert result.startswith("Error")
+
+
+@pytest.mark.asyncio
+async def test_execute_clean_exception_passes_through_with_hint() -> None:
+    """Regression: clean exception messages surface intact with the HINT suffix."""
+    registry = ToolRegistry()
+    registry.register(_RaisingTool("boom", RuntimeError("disk full")))
+
+    result = await registry.execute("boom", {})
+
+    assert "Error executing boom" in result
+    assert "disk full" in result
+    assert "Analyze the error above" in result
+    assert "REDACTED" not in result
+    assert result.startswith("Error")
+
+
+@pytest.mark.asyncio
+async def test_execute_preserves_error_prefix_when_whole_body_is_redacted() -> None:
+    """MIT-147 (codex review): `AgentRunner._run_tool()` relies on
+    `result.startswith("Error")` to classify tool calls as failed.
+
+    Before the codex fix, when a tool returned an error string consisting ONLY
+    of secret material (worst case), `redact_if_sensitive()` would replace the
+    whole body with `[REDACTED — ...]` — which does NOT start with "Error".
+    The runner would then mark the call as `ok` and skip `fail_on_tool_error`
+    handling. This test pins the fix: the registry re-wraps a scrubbed error
+    body in an `Error (...)` shell so the downstream detector keeps working.
+    """
+    # Pathological case: the entire error body is the secret. The redactor
+    # replaces the whole string, leaving no "Error:" prefix in the raw match.
+    secret_only = "AKIAABCDEFGHIJKLMNOP"
+    registry = ToolRegistry()
+    # The tool returns a pure-error string starting with "Error" (so the
+    # registry classifies status=error), but the payload after that is just
+    # the secret — redaction swallows everything downstream of the first match.
+    registry.register(
+        _StringReturningTool("pure_error", f"Error: {secret_only}")
+    )
+
+    result = await registry.execute("pure_error", {})
+
+    # Secret must be gone.
+    assert secret_only not in result
+    # Redaction notice must be present.
+    assert "REDACTED" in result
+    # CRITICAL: the runner uses startswith("Error") to detect failures.
+    # If this regresses, `fail_on_tool_error` paths stop firing.
+    assert result.startswith("Error")
+    # Hint is still appended.
+    assert "Analyze the error above" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_preserves_error_prefix_when_exception_body_is_redacted() -> None:
+    """Same downstream-contract guarantee on the exception branch."""
+    secret_only_exc = RuntimeError("AKIAABCDEFGHIJKLMNOP")
+    registry = ToolRegistry()
+    registry.register(_RaisingTool("bad_exc", secret_only_exc))
+
+    result = await registry.execute("bad_exc", {})
+
+    assert "AKIAABCDEFGHIJKLMNOP" not in result
+    assert "REDACTED" in result
+    assert result.startswith("Error")  # downstream failure detection contract
+    assert "Analyze the error above" in result
 
 
 class _AnyReturningTool(Tool):
