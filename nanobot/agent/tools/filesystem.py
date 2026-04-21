@@ -12,6 +12,7 @@ from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchem
 from nanobot.agent.tools import file_state
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 from nanobot.config.paths import get_media_dir
+from nanobot.utils.sensitive import is_sensitive_path
 
 
 def _resolve_path(
@@ -158,9 +159,17 @@ class ReadFileTool(_FsTool):
             if _is_blocked_device(path):
                 return f"Error: Reading {path} is blocked (device path that could hang or produce infinite output)."
 
+            # Sensitive-path blocklist (MIT-121): refuse to read private keys,
+            # credential caches, keyrings, etc. Catches both the raw input
+            # (e.g. '~/.ssh/id_rsa') and the resolved path (symlinks / ../ escapes).
+            if is_sensitive_path(path):
+                return f"Error: Reading {path} is blocked (sensitive path — credentials or key material)."
+
             fp = self._resolve(path)
             if _is_blocked_device(fp):
                 return f"Error: Reading {fp} is blocked (device path that could hang or produce infinite output)."
+            if is_sensitive_path(fp):
+                return f"Error: Reading {path} is blocked (sensitive path — credentials or key material)."
             if not fp.exists():
                 return f"Error: File not found: {path}"
             if not fp.is_file():
@@ -692,7 +701,14 @@ class EditFileTool(_FsTool):
             if path.endswith(".ipynb"):
                 return "Error: This is a Jupyter notebook. Use the notebook_edit tool instead of edit_file."
 
+            # Sensitive-path blocklist (MIT-121): refuse to edit private keys,
+            # credential caches, keyrings, etc.
+            if is_sensitive_path(path):
+                return f"Error: Editing {path} is blocked (sensitive path — credentials or key material)."
+
             fp = self._resolve(path)
+            if is_sensitive_path(fp):
+                return f"Error: Editing {path} is blocked (sensitive path — credentials or key material)."
 
             # Create-file semantics: old_text='' + file doesn't exist → create
             if not fp.exists():

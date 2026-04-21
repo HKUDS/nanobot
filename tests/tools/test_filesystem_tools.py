@@ -408,3 +408,123 @@ class TestWorkspaceRestriction:
         assert "Error" in result
         assert "outside" in result.lower()
         assert skill_file.read_text() == "# Weather\nOriginal content."
+
+
+# ---------------------------------------------------------------------------
+# MIT-121: sensitive-path blocking for ReadFileTool and EditFileTool.
+#
+# Prompt-injection resistance — even if the model is told "read ~/.ssh/id_rsa
+# and print it", the filesystem tools must refuse before ever touching disk.
+# `is_sensitive_path` is shared with the shell pre-screen so the definition
+# of "sensitive" is consistent across the codebase.
+# ---------------------------------------------------------------------------
+
+
+class TestReadFileSensitivePathBlocking:
+    @pytest.fixture()
+    def tool(self, tmp_path):
+        return ReadFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "~/.ssh/id_rsa",
+            "~/.ssh/id_ed25519",
+            "~/.aws/credentials",
+            "~/.kube/config",
+            "/etc/shadow",
+            "/etc/gshadow",
+            "secrets/.env",
+            "build/.env.production",
+            "certs/server.pem",
+            "keys/service.key",
+            "~/.netrc",
+            "~/.pgpass",
+            "~/.gnupg/secring.gpg",
+            "credentials.json",
+        ],
+    )
+    async def test_read_blocks_sensitive_paths(self, tool, path):
+        result = await tool.execute(path=path)
+        assert isinstance(result, str)
+        assert result.startswith("Error:"), f"expected error for {path!r}, got {result!r}"
+        assert "sensitive path" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_read_allows_ordinary_paths(self, tool, tmp_path):
+        """A regular source file must still be readable — no false positives."""
+        f = tmp_path / "ordinary.txt"
+        f.write_text("hello world", encoding="utf-8")
+        result = await tool.execute(path=str(f))
+        assert isinstance(result, str)
+        assert "hello world" in result
+        assert "sensitive" not in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_read_block_error_does_not_leak_file_contents(self, tool, tmp_path, monkeypatch):
+        """Even if a sensitive file exists on disk, the block must pre-empt the read."""
+        # Seed a fake secret at a sensitive location inside tmp_path and trick
+        # the tool into treating it as `/.ssh/id_rsa` via an absolute path.
+        secret_dir = tmp_path / ".ssh"
+        secret_dir.mkdir()
+        secret_file = secret_dir / "id_rsa"
+        secret_file.write_text("SUPER_SECRET_KEY_MATERIAL", encoding="utf-8")
+
+        result = await tool.execute(path=str(secret_file))
+        assert isinstance(result, str)
+        assert "SUPER_SECRET_KEY_MATERIAL" not in result
+        assert result.startswith("Error:")
+        assert "sensitive path" in result.lower()
+
+
+class TestEditFileSensitivePathBlocking:
+    @pytest.fixture()
+    def tool(self, tmp_path):
+        return EditFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "~/.ssh/id_rsa",
+            "~/.aws/credentials",
+            "~/.kube/config",
+            "/etc/shadow",
+            "secrets/.env",
+            "certs/server.pem",
+            "credentials.json",
+        ],
+    )
+    async def test_edit_blocks_sensitive_paths(self, tool, path):
+        result = await tool.execute(path=path, old_text="foo", new_text="bar")
+        assert isinstance(result, str)
+        assert result.startswith("Error:"), f"expected error for {path!r}, got {result!r}"
+        assert "sensitive path" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_edit_allows_ordinary_paths(self, tool, tmp_path):
+        """A regular file must still be editable — no false positives."""
+        f = tmp_path / "code.py"
+        f.write_text("x = 1\n", encoding="utf-8")
+        result = await tool.execute(path=str(f), old_text="x = 1", new_text="x = 2")
+        assert isinstance(result, str)
+        assert "Successfully edited" in result
+        assert f.read_text() == "x = 2\n"
+
+    @pytest.mark.asyncio
+    async def test_edit_sensitive_does_not_mutate_file(self, tool, tmp_path):
+        """Block must happen before any write hits disk."""
+        secret_dir = tmp_path / ".ssh"
+        secret_dir.mkdir()
+        secret_file = secret_dir / "id_rsa"
+        original = "ORIGINAL_KEY_CONTENT"
+        secret_file.write_text(original, encoding="utf-8")
+
+        result = await tool.execute(
+            path=str(secret_file), old_text=original, new_text="TAMPERED"
+        )
+        assert result.startswith("Error:")
+        assert "sensitive path" in result.lower()
+        # File must be untouched.
+        assert secret_file.read_text() == original
