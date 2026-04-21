@@ -14,6 +14,7 @@ from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.sandbox import wrap_command
 from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.config.paths import get_media_dir
+from nanobot.utils.sensitive import check_shell_command
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -275,6 +276,14 @@ class ExecTool(Tool):
         for pattern in self.deny_patterns:
             if re.search(pattern, lower):
                 return "Error: Command blocked by safety guard (dangerous pattern detected)"
+
+        # Secret-dump / key-exfiltration pre-screen (MIT-123). Delegates to
+        # the shared sensitive-data denylist in nanobot.utils.sensitive so the
+        # same rules apply to shell as to filesystem tools. We translate the
+        # returned reason into this module's "safety guard" phrasing for
+        # consistency with the surrounding messages.
+        if check_shell_command(cmd) is not None:
+            return "Error: Command blocked by safety guard (sensitive data access detected)"
 
         if self.allow_patterns:
             if not any(re.search(p, lower) for p in self.allow_patterns):
