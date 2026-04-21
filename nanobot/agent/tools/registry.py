@@ -120,6 +120,9 @@ class ToolRegistry:
 
         t0 = time.monotonic()
         try:
+            # Schema-driven cast (e.g. stringly-typed ints from LLM JSON) before
+            # validation — regression restored from pre-1d18d24 prepare_call().
+            params = tool.cast_params(params)
             errors = tool.validate_params(params)
             if errors:
                 self._audit("error", name, params, t0, sid, ch, error="; ".join(errors))
