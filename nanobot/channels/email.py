@@ -199,7 +199,7 @@ class EmailChannel(BaseChannel):
             logger.info("Skip automatic email reply to {}: auto_reply_enabled is false", to_addr)
             return
 
-        base_subject = self._last_subject_by_chat.get(to_addr, "nanobot reply")
+        base_subject = self._last_subject_by_chat.get(to_addr, "Ziggy reply")
         subject = self._reply_subject(base_subject)
         if msg.metadata and isinstance(msg.metadata.get("subject"), str):
             override = msg.metadata["subject"].strip()
@@ -671,7 +671,7 @@ class EmailChannel(BaseChannel):
         return html.unescape(text)
 
     def _reply_subject(self, base_subject: str) -> str:
-        subject = (base_subject or "").strip() or "nanobot reply"
+        subject = (base_subject or "").strip() or "Ziggy reply"
         prefix = self.config.subject_prefix or "Re: "
         if subject.lower().startswith("re:"):
             return subject
