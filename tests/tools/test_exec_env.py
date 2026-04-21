@@ -87,15 +87,24 @@ async def test_exec_allowed_env_keys_does_not_leak_others(monkeypatch):
 @_UNIX_ONLY
 @pytest.mark.asyncio
 async def test_exec_allowed_env_keys_missing_var_ignored(monkeypatch):
-    """If an allowed key is not set in the parent process, it should be silently skipped."""
+    """If an allowed key is not set in the parent process, it should be silently skipped.
+
+    The contract under test: when a key listed in `allowed_env_keys` is not
+    set in the parent, the subprocess env must not contain it at all — NOT
+    present-but-empty. This distinguishes a correct skip from a regression
+    that forwards missing keys as `VAR=""`.
+    """
     monkeypatch.delenv("NONEXISTENT_VAR_12345", raising=False)
     tool = ExecTool(allowed_env_keys=["NONEXISTENT_VAR_12345"])
-    # `[ -n "$VAR" ] || exit 1` exits with code 1 when VAR is empty or
-    # unset — equivalent to `printenv VAR`'s exit-1-on-missing behaviour
-    # pre-MIT-123. Confirms the child sees the allowed key as unset when
-    # the parent didn't export it, and that nothing in the passthrough
-    # layer errors or sets a default.
+    # `${VAR+set}` expands to "set" only when VAR is *defined* (even if
+    # empty); it's empty when VAR is unset.  `[ -z "${VAR+set}" ]` therefore
+    # succeeds (exit 0) iff the var is truly unset. We negate with `|| exit
+    # 1` so the test passes only when the child's env has NO entry for
+    # NONEXISTENT_VAR_12345 — this catches a hypothetical regression where
+    # the passthrough layer starts forwarding missing keys as empty strings,
+    # which the old `printenv` check (and a naive `-n` replacement) would
+    # have let slip through.
     result = await tool.execute(
-        command='sh -c \'[ -n "$NONEXISTENT_VAR_12345" ] || exit 1\''
+        command='sh -c \'[ -z "${NONEXISTENT_VAR_12345+set}" ] || exit 1\''
     )
-    assert "Exit code: 1" in result
+    assert "Exit code: 0" in result
