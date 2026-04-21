@@ -784,6 +784,25 @@ def test_kimi_k25_thinking_enabled_with_openrouter_prefix() -> None:
     kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.5", reasoning_effort="medium")
     assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
 
+
+def test_kimi_k26_thinking_enabled() -> None:
+    """kimi-k2.6 with reasoning_effort set should opt in to thinking."""
+    kw = _build_kwargs_for("moonshot", "kimi-k2.6", reasoning_effort="medium")
+    assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+
+
+def test_kimi_k26_thinking_enabled_with_openrouter_prefix() -> None:
+    """OpenRouter-style names like moonshotai/kimi-k2.6 must trigger thinking."""
+    kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.6", reasoning_effort="medium")
+    assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+
+
+def test_moonshot_kimi_k26_temperature_override() -> None:
+    """Moonshot registry forces temperature 1.0 for kimi-k2.6 (API requirement)."""
+    kw = _build_kwargs_for("moonshot", "kimi-k2.6", reasoning_effort=None)
+    assert kw["temperature"] == 1.0
+
+
 def test_kimi_k25_thinking_disabled_with_openrouter_prefix() -> None:
     """OpenRouter names must NOT trigger thinking without reasoning_effort."""
     kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.5", reasoning_effort=None)

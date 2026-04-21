@@ -54,6 +54,7 @@ _DEFAULT_OPENROUTER_HEADERS = {
 }
 _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.5",
+    "kimi-k2.6",
     "k2.6-code-preview",
 })
 
@@ -62,7 +63,7 @@ def _is_kimi_thinking_model(model_name: str) -> bool:
     """Return True if model_name refers to a Kimi thinking-capable model.
 
     Supports two forms:
-    - Exact match: kimi-k2.5 in _KIMI_THINKING_MODELS
+    - Exact match: e.g. kimi-k2.5 / kimi-k2.6 in _KIMI_THINKING_MODELS
     - Slug match:  moonshotai/kimi-k2.5 -> the part after the last "/"
                    is checked against _KIMI_THINKING_MODELS
 
