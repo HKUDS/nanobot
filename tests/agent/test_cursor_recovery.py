@@ -108,3 +108,81 @@ class TestReadUnprocessedWithCorruption:
         assert len(entries) == 2
         assert entries[0]["cursor"] == 2
         assert entries[1]["cursor"] == 3
+
+
+class TestCursorValidationInvariant:
+    """First-principles checks: the cursor validity rules and the
+    observability we layer on top of them."""
+
+    def test_bool_cursor_rejected(self, store):
+        """``isinstance(True, int) is True`` in Python; the guard must
+        still treat ``{"cursor": true}`` as corruption, otherwise a
+        boolean silently becomes cursor ``1`` / ``0`` downstream.
+        """
+        assert MemoryStore._valid_cursor(True) is None
+        assert MemoryStore._valid_cursor(False) is None
+        assert MemoryStore._valid_cursor(5) == 5
+        assert MemoryStore._valid_cursor(0) == 0
+
+        store.history_file.write_text(
+            '{"cursor": 4, "timestamp": "2026-04-01 10:00", "content": "real"}\n'
+            '{"cursor": true, "timestamp": "2026-04-01 10:01", "content": "bool"}\n',
+            encoding="utf-8",
+        )
+        store._cursor_file.unlink(missing_ok=True)
+        assert store.append_history("next") == 5
+
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert [e["cursor"] for e in entries] == [4, 5]
+
+    def test_next_cursor_returns_max_not_just_last_int(self, store):
+        """Under adversarial corruption, file order ≠ numeric order.  The
+        recovery scan must return ``max(valid cursors) + 1``, not the
+        first int seen from the tail, so the returned cursor is strictly
+        greater than every legitimate cursor already on disk.
+        """
+        # Tail is corrupt → recovery scan runs.  Valid cursors are 100
+        # and 5, in that order on disk; a naive "first int from the tail"
+        # recovery would return 6, which would then silently collide with
+        # the existing cursor 100.  ``max`` is the only safe choice.
+        store.history_file.write_text(
+            '{"cursor": 100, "timestamp": "2026-04-01 10:00", "content": "high"}\n'
+            '{"cursor": 5,   "timestamp": "2026-04-01 10:01", "content": "out of order"}\n'
+            '{"cursor": "poison", "timestamp": "2026-04-01 10:02", "content": "tail corrupt"}\n',
+            encoding="utf-8",
+        )
+        store._cursor_file.unlink(missing_ok=True)
+        assert store.append_history("safe next") == 101
+
+    def test_corruption_is_logged_exactly_once_per_store(self, store, caplog):
+        """Observability without spam: the first non-int cursor emits one
+        warning, subsequent reads on the same store stay quiet.  Without
+        this, a poisoned file produces one warning per agent turn."""
+        import logging
+        from loguru import logger as loguru_logger
+
+        store.history_file.write_text(
+            '{"cursor": "bad1", "timestamp": "2026-04-01 10:00", "content": "x"}\n'
+            '{"cursor": 2, "timestamp": "2026-04-01 10:01", "content": "y"}\n',
+            encoding="utf-8",
+        )
+        store._cursor_file.unlink(missing_ok=True)
+
+        handler_id = loguru_logger.add(
+            caplog.handler, format="{message}", level="WARNING"
+        )
+        try:
+            with caplog.at_level(logging.WARNING):
+                store.read_unprocessed_history(since_cursor=0)
+                store.read_unprocessed_history(since_cursor=0)
+                store.append_history("another")
+        finally:
+            loguru_logger.remove(handler_id)
+
+        corruption_warnings = [
+            r for r in caplog.records if "non-int cursor" in r.getMessage()
+        ]
+        assert len(corruption_warnings) == 1, (
+            "Expected exactly one corruption warning per store instance; "
+            f"got {len(corruption_warnings)}: {[r.getMessage() for r in corruption_warnings]}"
+        )

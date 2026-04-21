@@ -8,7 +8,7 @@ import re
 import weakref
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from loguru import logger
 
@@ -49,6 +49,7 @@ class MemoryStore:
         self.user_file = workspace / "USER.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
+        self._corruption_logged = False  # rate-limit non-int cursor warning
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md",
         ])
@@ -246,35 +247,52 @@ class MemoryStore:
         self._cursor_file.write_text(str(cursor), encoding="utf-8")
         return cursor
 
+    @staticmethod
+    def _valid_cursor(value: Any) -> int | None:
+        """Int cursors only — reject bool (``isinstance(True, int)`` is True)."""
+        if isinstance(value, bool) or not isinstance(value, int):
+            return None
+        return value
+
+    def _iter_valid_entries(self) -> Iterator[tuple[dict[str, Any], int]]:
+        """Yield ``(entry, cursor)`` for entries with int cursors; warn once on corruption."""
+        poisoned: Any = None
+        for entry in self._read_entries():
+            raw = entry.get("cursor")
+            if raw is None:
+                continue
+            cursor = self._valid_cursor(raw)
+            if cursor is None:
+                poisoned = raw
+                continue
+            yield entry, cursor
+        if poisoned is not None and not self._corruption_logged:
+            self._corruption_logged = True
+            logger.warning(
+                "history.jsonl contains a non-int cursor ({!r}); dropping it. "
+                "Usually caused by an external writer; further occurrences suppressed.",
+                poisoned,
+            )
+
     def _next_cursor(self) -> int:
-        """Read the current cursor counter and return next value."""
+        """Read the current cursor counter and return the next value."""
         if self._cursor_file.exists():
             try:
                 return int(self._cursor_file.read_text(encoding="utf-8").strip()) + 1
             except (ValueError, OSError):
                 pass
-        # Fallback: read last line's cursor from the JSONL file.
-        last = self._read_last_entry()
-        if last and last.get("cursor"):
-            cursor = last["cursor"]
-            if isinstance(cursor, int):
-                return cursor + 1
-            # Corrupted (non-int) cursor — scan all entries for the highest valid one.
-            entries = self._read_entries()
-            for entry in reversed(entries):
-                c = entry.get("cursor")
-                if isinstance(c, int):
-                    return c + 1
-            return 1
-        return 1
+        # Fast path: trust the tail when intact.  Otherwise scan the whole
+        # file and take ``max`` — that stays correct even if the monotonic
+        # invariant was broken by external writes.
+        last = self._read_last_entry() or {}
+        cursor = self._valid_cursor(last.get("cursor"))
+        if cursor is not None:
+            return cursor + 1
+        return max((c for _, c in self._iter_valid_entries()), default=0) + 1
 
     def read_unprocessed_history(self, since_cursor: int) -> list[dict[str, Any]]:
-        """Return history entries with cursor > *since_cursor*."""
-        return [
-            e
-            for e in self._read_entries()
-            if isinstance(e.get("cursor"), int) and e["cursor"] > since_cursor
-        ]
+        """Return history entries with a valid cursor > *since_cursor*."""
+        return [e for e, c in self._iter_valid_entries() if c > since_cursor]
 
     def compact_history(self) -> None:
         """Drop oldest entries if the file exceeds *max_history_entries*."""
