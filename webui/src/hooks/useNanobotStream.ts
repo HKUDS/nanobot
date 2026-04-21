@@ -22,7 +22,7 @@ export function useNanobotStream(
 ): {
   messages: UIMessage[];
   isStreaming: boolean;
-  send: (content: string) => void;
+  send: (content: string, media?: string[]) => void;
   setMessages: React.Dispatch<React.SetStateAction<UIMessage[]>>;
 } {
   const { client } = useClient();
@@ -145,8 +145,8 @@ export function useNanobotStream(
   }, [chatId, client]);
 
   const send = useCallback(
-    (content: string) => {
-      if (!chatId || !content.trim()) return;
+    (content: string, media?: string[]) => {
+      if (!chatId || (!content.trim() && !media?.length)) return;
       setMessages((prev) => [
         ...prev,
         {
@@ -156,7 +156,7 @@ export function useNanobotStream(
           createdAt: Date.now(),
         },
       ]);
-      client.sendMessage(chatId, content);
+      client.sendMessage(chatId, content || " ", media);
     },
     [chatId, client],
   );

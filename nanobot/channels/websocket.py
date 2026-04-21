@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import email.utils
 import hmac
 import http
@@ -28,7 +29,9 @@ from websockets.http11 import Response
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.utils.helpers import safe_filename
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
@@ -207,6 +210,10 @@ def _parse_envelope(raw: str) -> dict[str, Any] | None:
 
 
 _LOCALHOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_MAX_MEDIA_SIZE = 10 * 1024 * 1024  # 10 MB per file
+_MAX_MEDIA_COUNT = 20
+_MAX_TOTAL_MEDIA_SIZE = 25 * 1024 * 1024  # 25 MB per message
+_DATA_URL_RE = re.compile(r"^data:([^;]+);base64,(.+)$", re.DOTALL)
 
 # Matches the legacy chat-id pattern but allows file-system-safe stems too,
 # so the API can address sessions whose keys came from non-WebSocket channels.
@@ -500,6 +507,44 @@ class WebSocketChannel(BaseChannel):
             if now > expiry:
                 self._api_tokens.pop(token_key, None)
 
+    @staticmethod
+    def _save_media_data_urls(media: Any) -> list[str]:
+        """Convert base64 data-URL strings from a WS envelope to on-disk paths."""
+        if not isinstance(media, list):
+            return []
+        if len(media) > _MAX_MEDIA_COUNT:
+            logger.warning("websocket: media array exceeds {} items, truncating", _MAX_MEDIA_COUNT)
+            media = media[:_MAX_MEDIA_COUNT]
+        media_dir = get_media_dir("websocket")
+        media_dir.mkdir(parents=True, exist_ok=True)
+        saved: list[str] = []
+        total_size = 0
+        for item in media:
+            if not isinstance(item, str):
+                continue
+            m = _DATA_URL_RE.match(item)
+            if not m:
+                continue
+            mime_type, b64 = m.group(1), m.group(2)
+            try:
+                raw = base64.b64decode(b64)
+            except Exception as e:
+                logger.debug("websocket: failed to decode base64 media: {}", e)
+                continue
+            if len(raw) > _MAX_MEDIA_SIZE:
+                logger.warning("websocket: skipping media payload exceeding {}MB", _MAX_MEDIA_SIZE // (1024 * 1024))
+                continue
+            total_size += len(raw)
+            if total_size > _MAX_TOTAL_MEDIA_SIZE:
+                logger.warning("websocket: total media size exceeds {}MB, stopping", _MAX_TOTAL_MEDIA_SIZE // (1024 * 1024))
+                break
+            ext = mimetypes.guess_extension(mime_type) or ".bin"
+            filename = f"{uuid.uuid4().hex[:12]}{ext}"
+            dest = media_dir / safe_filename(filename)
+            dest.write_bytes(raw)
+            saved.append(str(dest))
+        return saved
+
     def _handle_webui_bootstrap(self, connection: Any) -> Response:
         if not _is_localhost(connection):
             return _http_error(403, "webui bootstrap is localhost-only")
@@ -783,14 +828,18 @@ class WebSocketChannel(BaseChannel):
                 await self._send_event(connection, "error", detail="invalid chat_id")
                 return
             if not isinstance(content, str) or not content.strip():
-                await self._send_event(connection, "error", detail="missing content")
-                return
+                if "media" not in envelope:
+                    await self._send_event(connection, "error", detail="missing content")
+                    return
+                content = ""
             # Auto-attach on first use so clients can one-shot without a separate attach.
             self._attach(connection, cid)
+            media = self._save_media_data_urls(envelope.get("media"))
             await self._handle_message(
                 sender_id=client_id,
                 chat_id=cid,
                 content=content,
+                media=media or None,
                 metadata={"remote": getattr(connection, "remote_address", None)},
             )
             return

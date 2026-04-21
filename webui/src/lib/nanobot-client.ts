@@ -151,9 +151,9 @@ export class NanobotClient {
     }
   }
 
-  sendMessage(chatId: string, content: string): void {
+  sendMessage(chatId: string, content: string, media?: string[]): void {
     this.knownChats.add(chatId);
-    this.queueSend({ type: "message", chat_id: chatId, content });
+    this.queueSend({ type: "message", chat_id: chatId, content, media });
   }
 
   // -- internals ---------------------------------------------------------
