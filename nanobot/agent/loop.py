@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import dataclasses
 import json
 import os
@@ -47,6 +48,34 @@ if TYPE_CHECKING:
 
 
 UNIFIED_SESSION_KEY = "unified:default"
+
+# Only Mihai can modify system internals (architecture, skills, prompts, code)
+OWNER_USER_ID = "1476998117906845890"
+
+# Patterns that indicate system modification intent (checked against user messages)
+_SYSTEM_MOD_PATTERNS = [
+    # Architecture
+    r"update\s+architecture", r"modify\s+architecture", r"change\s+architecture",
+    # Skills / plugins
+    r"(add|install|create|remove|delete|uninstall)\s+(a\s+)?(skill|plugin|extension|tool)",
+    # System prompts / personality
+    r"(change|modify|update|edit|rewrite)\s+(your|the|ziggy.s?|nanobot.s?)?\s*(system\s+prompt|personality|soul|identity|instructions|behavior)",
+    r"(change|modify|update)\s+.*SOUL\.md",
+    r"(change|modify|update)\s+.*AGENTS\.md",
+    # Code changes to nanobot itself
+    r"(change|modify|edit|update|rewrite)\s+(your|the|ziggy.s?|nanobot.s?)?\s*(source\s+)?code",
+]
+
+_compiled_system_mod = [re.compile(p, re.IGNORECASE) for p in _SYSTEM_MOD_PATTERNS]
+
+
+def is_system_modification(content: str) -> bool:
+    """Check if message requests system-level changes (skills, prompts, code, config)."""
+    text = content.strip()
+    for pattern in _compiled_system_mod:
+        if pattern.search(text):
+            return True
+    return False
 
 
 class _LoopHook(AgentHook):
@@ -563,6 +592,17 @@ class AgentLoop:
             msg = dataclasses.replace(msg, session_key_override=session_key)
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
+
+        # Ziggy: guard — only owner can request system modifications
+        if is_system_modification(msg.content):
+            if msg.sender_id != OWNER_USER_ID:
+                await self.bus.publish_outbound(OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="I can't make changes to my own system, skills, or configuration. "
+                            "Only my owner can authorize that. Let me know if there's something "
+                            "else I can help you with!",
+                ))
+                return
 
         # Register a pending queue so follow-up messages for this session are
         # routed here (mid-turn injection) instead of spawning a new task.
