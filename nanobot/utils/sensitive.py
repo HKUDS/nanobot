@@ -118,6 +118,23 @@ _SECRET_CONTENT_PATTERNS: list[tuple[re.Pattern, str]] = [
         r"""password|passwd|bearer)\s*[:=]\s*['"]?[A-Za-z0-9_\-/.+]{20,}""",
         re.IGNORECASE,
     ), "credential/token"),
+    # HTTP Authorization Bearer header (MIT-148).
+    # The labeled-credential regex above matches `bearer=xyz` / `bearer: xyz`
+    # forms, but NOT the actual HTTP header shape where `Bearer` is the
+    # *prefix* of the token (not a label followed by `=` or `:`). Added as a
+    # parallel pattern rather than broadening the labeled regex above —
+    # widening that one would catch far too much ordinary prose.
+    #
+    # Case-insensitive: RFC 7235 says auth-scheme names are case-insensitive,
+    # and middleware / log formatters freely normalize between `Bearer`,
+    # `bearer`, and `BEARER`. Charset matches the labeled-credential regex
+    # above (`[A-Za-z0-9_\-/.+]`) so opaque base64 tokens with `/` and `+`
+    # aren't missed. Minimum length of 20 filters out short placeholders
+    # (`Bearer token`, `Bearer xxx`, `Bearer TODO`); longer token-shaped
+    # placeholders like `Bearer YOUR_DEVELOPMENT_ACCESS_TOKEN` may still
+    # match. Accepted false-positive cost — redacting a stray placeholder
+    # is cheaper than leaking a real token.
+    (re.compile(r"\bBearer\s+[A-Za-z0-9_\-/.+]{20,}", re.IGNORECASE), "bearer token"),
     # GitHub / GitLab / npm tokens
     (re.compile(r"(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}"), "GitHub token"),
     (re.compile(r"glpat-[A-Za-z0-9\-_]{20,}"), "GitLab token"),

@@ -7,6 +7,8 @@ import pytest
 from nanobot.utils.sensitive import (
     check_shell_command,
     is_sensitive_path,
+    redact_if_sensitive,
+    scan_content,
 )
 
 
@@ -206,3 +208,125 @@ def test_ssh_public_key_inside_ssh_dir_still_blocked_by_path_rule() -> None:
     """
     assert is_sensitive_path("/home/mihai/.ssh/id_rsa.pub") is True
     assert is_sensitive_path("/root/.ssh/id_ed25519.pub") is True
+
+
+# ---------------------------------------------------------------------------
+# MIT-148: HTTP Authorization Bearer header detection
+#
+# The pre-MIT-148 labeled-credential regex matched `bearer=token` or
+# `bearer: token` shapes, but NOT the real-world HTTP header
+# `Authorization: Bearer <token>` — `Bearer` is the *prefix* of the token,
+# not a label followed by `=` / `:`.  The new parallel pattern fills that
+# gap without broadening the labeled regex (which, if widened, would catch
+# too much ordinary prose / logs).
+#
+# Note on test fixtures: all Bearer-token literals below are deliberately
+# synthetic and do NOT match any provider-specific secret shape (no
+# `sk_live_`, `pk_`, `ghp_`, etc.). This avoids tripping GitHub's push
+# protection secret scanner on what are clearly test-only strings.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Canonical HTTP header form with a JWT-shaped token
+        "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abc.def",
+        # Header-less Bearer form (curl examples, middleware logs)
+        "Bearer kid_abcdefghij1234567890",
+        # Mid-line occurrence in a log line
+        "2026-04-21 http POST /api Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9xxxxxxx 200",
+        # With surrounding structured-output quotes — generic synthetic token
+        'headers = {"Authorization": "Bearer tkn_fakefakefakefakefakefake"}',
+        # Case variants — RFC 7235 says auth-scheme is case-insensitive
+        "authorization: bearer abcdefghijklmnopqrstuvwxyz",  # lowercase
+        "Authorization: BEARER ABCDEFGHIJKLMNOPQRSTUVWXYZ",  # uppercase
+        "Authorization: BeArEr MixedCaseTokenAbcdefghijklmn",  # mixed
+        # Base64 token with `/` and `+` characters (opaque tokens)
+        "Authorization: Bearer abc/def+ghi/jkl+mno/pqrstuvw",
+    ],
+)
+def test_bearer_token_is_detected(text: str) -> None:
+    """MIT-148: real-world Bearer-prefix tokens (20+ chars) must be flagged."""
+    assert scan_content(text) == "bearer token", f"Expected bearer-token match for: {text!r}"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Documentation-style placeholders — too short to be a real token
+        "Bearer short",
+        "Bearer token",
+        "Bearer xxx",
+        "Bearer abc123",
+        "Authorization: Bearer YOUR_TOKEN_HERE",  # 16 chars, under the 20-char floor
+        # Prose usage of the word "bearer" unrelated to auth
+        "The bearer of this letter is authorized to...",
+        # Bearer followed by too-short token at end of string
+        "Try: Bearer foo",
+    ],
+)
+def test_bearer_placeholder_and_prose_not_flagged(text: str) -> None:
+    """MIT-148: short placeholders (< 20 chars) and non-auth prose must not match."""
+    # Either no match at all, or a match from a different pattern — just not "bearer token".
+    assert scan_content(text) != "bearer token", f"False positive bearer-token for: {text!r}"
+
+
+def test_bearer_redaction_output_shape() -> None:
+    """The full redact_if_sensitive pipeline must replace the token with the REDACTED notice."""
+    payload = "Authorization: Bearer eyJhbGciOiJIUzI1NiIs_abcdefghijklmnopqrst\n"
+    result = redact_if_sensitive(payload)
+    assert "eyJhbGciOiJIUzI1NiIs_abcdefghijklmnopqrst" not in result
+    assert "REDACTED" in result
+    assert "bearer token" in result
+
+
+def test_bearer_case_insensitive_redaction() -> None:
+    """Defence-in-depth regression: the redactor must scrub lowercase/UPPERCASE Bearer too."""
+    # Lowercase header — common when middleware normalizes headers
+    lower = "authorization: bearer opaque_token_abcdefghij1234567890\n"
+    out_lower = redact_if_sensitive(lower)
+    assert "opaque_token_abcdefghij1234567890" not in out_lower
+    assert "REDACTED" in out_lower
+
+    # All-caps
+    upper = "AUTHORIZATION: BEARER opaque_token_ABCDEFGHIJ1234567890\n"
+    out_upper = redact_if_sensitive(upper)
+    assert "opaque_token_ABCDEFGHIJ1234567890" not in out_upper
+    assert "REDACTED" in out_upper
+
+
+def test_bearer_base64_token_redaction() -> None:
+    """Regression: base64 tokens with `/` and `+` in the payload must be scrubbed.
+
+    Opaque/session bearer tokens are often raw base64 — the pattern must include
+    those characters (matching the labeled-credential regex charset) or real
+    Authorization headers will leak through.
+    """
+    payload = "Authorization: Bearer abc/def+ghi/jkl+mno/pqrstuvwxyz01\n"
+    result = redact_if_sensitive(payload)
+    assert "abc/def+ghi/jkl+mno/pqrstuvwxyz01" not in result
+    assert "REDACTED" in result
+
+
+def test_existing_credential_patterns_still_match() -> None:
+    """Regression: MIT-148 added a parallel pattern; existing detections must still fire."""
+    # The labeled form — `bearer=<token>` — should still match (via the
+    # pre-existing labeled-credential regex, now labeled "credential/token").
+    # We only assert a match occurred; the label may be "credential/token"
+    # OR "bearer token" depending on ordering, both are correct.
+    assert scan_content("bearer=abcdefghij1234567890xxxx") is not None
+
+    # AWS access key
+    assert scan_content("AKIAABCDEFGHIJKLMNOP") == "AWS access key"
+    # GitHub token
+    assert scan_content("ghp_0123456789abcdef0123456789abcdef0123") == "GitHub token"
+    # Private key blob
+    assert scan_content("-----BEGIN RSA PRIVATE KEY-----\n...") == "private key"
+
+
+def test_clean_text_not_flagged() -> None:
+    """No false positives on ordinary prose (no secrets at all)."""
+    assert scan_content("hello world") is None
+    assert scan_content("The quick brown fox.") is None
+    assert scan_content("Response headers: Content-Type: application/json") is None
