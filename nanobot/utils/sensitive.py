@@ -57,11 +57,20 @@ _SENSITIVE_PATH_PATTERNS: list[str] = [
 # names (e.g. `secrets/app.env`) should rely on path-based blocks (by adding
 # `/secrets/` to `_SENSITIVE_PATH_PATTERNS`) rather than a broad filename
 # catch-all.
+#
+# Note on SSH key filename scope (MIT-140): the `id_(rsa|dsa|ecdsa|ed25519)`
+# pattern intentionally excludes the `.pub` suffix. Public keys are, by
+# definition, safe to disclose — agent workflows legitimately need to read
+# `id_*.pub` to configure deployment targets, authorized_keys, CI runners,
+# etc. Private-key material is still blocked by this filename rule (for the
+# bare names) and, more importantly, by the `/.ssh/` path prefix in
+# `_SENSITIVE_PATH_PATTERNS` (which catches any file — public or private —
+# living under `~/.ssh/`).
 _SENSITIVE_FILENAME_PATTERNS: list[re.Pattern] = [
     re.compile(r"(^|/)\.env(\..+)?$", re.IGNORECASE),            # .env, .env.local, .env.production
     re.compile(r"(^|/)credentials\.json$", re.IGNORECASE),
     re.compile(r"(^|/)service[-_]?account[-_]?key\.json$", re.IGNORECASE),
-    re.compile(r"(^|/)id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$"),       # SSH key files by name
+    re.compile(r"(^|/)id_(rsa|dsa|ecdsa|ed25519)$"),               # SSH private key files by name (MIT-140: exclude .pub)
     re.compile(r"(^|/).*\.pem$", re.IGNORECASE),
     re.compile(r"(^|/).*\.key$", re.IGNORECASE),                   # TLS private keys
 ]
