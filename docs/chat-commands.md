@@ -4,7 +4,7 @@ These commands work inside chat channels and interactive agent sessions:
 
 | Command | Description |
 |---------|-------------|
-| `/new` | Start a new conversation |
+| `/new` | Stop current task and start a new conversation |
 | `/stop` | Stop the current task |
 | `/restart` | Restart the bot |
 | `/status` | Show bot status |
