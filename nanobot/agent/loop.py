@@ -8,6 +8,7 @@ import json
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext
+from nanobot.agent.tools.mcp import MCPConnectionContext
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -212,7 +213,7 @@ class AgentLoop:
         self._unified_session = unified_session
         self._running = False
         self._mcp_servers = mcp_servers or {}
-        self._mcp_stacks: dict[str, AsyncExitStack] = {}
+        self._mcp_stacks: dict[str, MCPConnectionContext] = {}
         self._mcp_connected = False
         self._mcp_connecting = False
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
