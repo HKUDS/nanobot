@@ -4,6 +4,7 @@ import time
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+from nanobot.utils.sensitive import redact_if_sensitive
 
 
 class ToolRegistry:
@@ -130,6 +131,13 @@ class ToolRegistry:
             self._prom_observe(name, status, duration_ms)
             if status == "error":
                 return result + _HINT
+            # Defence-in-depth: scrub embedded secrets (private keys, API tokens,
+            # AWS/GitHub/Slack creds, ...) from successful tool output before the
+            # model ever sees it. Non-string results (e.g. ReadFileTool's image
+            # content blocks -> list[dict]) bypass the scrubber and pass through
+            # untouched.
+            if isinstance(result, str):
+                result = redact_if_sensitive(result)
             return result
         except Exception as e:
             duration_ms = (time.monotonic() - t0) * 1000
