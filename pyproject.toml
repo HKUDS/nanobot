@@ -52,6 +52,7 @@ dependencies = [
     "jinja2>=3.1.0,<4.0.0",
     "dulwich>=0.22.0,<1.0.0",
     "filelock>=3.25.2",
+    "posthog>=3.7.0,<4.0.0",
 ]
 
 [project.optional-dependencies]

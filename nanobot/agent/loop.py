@@ -783,11 +783,24 @@ class AgentLoop:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
+        # PostHog analytics — capture inbound context
+        from nanobot.analytics.hook import get_analytics_hook
+        _analytics = get_analytics_hook()
+
         # Resolve guest_agent workspace if sender is in guest agent ACL
         guest = self._resolve_guest_agent_workspace(msg.sender_id) if msg.sender_id else None
         context = guest[0] if guest else self.context
         sessions = guest[1] if guest else self.sessions
         blocked_tools = guest[2] if guest else frozenset()
+
+        _analytics_ctx = _analytics.on_message_received(
+            channel=msg.channel,
+            sender_id=msg.sender_id,
+            content=msg.content,
+            media=msg.media,
+            timestamp=msg.timestamp,
+            is_guest=guest is not None,
+        )
 
         key = session_key or msg.session_key
         session = sessions.get_or_create(key)
@@ -836,7 +849,7 @@ class AgentLoop:
         # Restrict file tools to guest workspace for the duration of the agent loop
         fs_ctx = self._restrict_fs_tools(context.workspace) if guest else nullcontext()
         with fs_ctx:
-            final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
+            final_content, tools_used, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
                 initial_messages,
                 on_progress=on_progress or _bus_progress,
                 on_stream=on_stream,
@@ -886,6 +899,19 @@ class AgentLoop:
         else:
             preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
             logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
+
+        # PostHog analytics — fire events after response is built
+        escalation_used = "escalate" in tools_used or "resolve_escalation" in tools_used
+        try:
+            await _analytics.on_response_sent(
+                _analytics_ctx,
+                response_content=final_content,
+                tools_used=tools_used,
+                escalation_triggered=escalation_used,
+                schedule_background=self._schedule_background,
+            )
+        except Exception:
+            logger.debug("Analytics hook error (non-fatal)", exc_info=True)
 
         meta = dict(msg.metadata or {})
         if on_stream is not None and stop_reason != STOP_ERROR:
