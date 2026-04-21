@@ -203,6 +203,13 @@ class Tool(ABC):
                 return val
 
         if t == "string":
+            # Don't stringify composite types — a malformed tool call like
+            # ``{"path": ["/tmp/x"]}`` should surface as a validation error,
+            # not be silently coerced to ``"['/tmp/x']"`` which bypasses
+            # validate_params and produces confusing runtime behavior.
+            # Pass composites through so validate_params rejects them cleanly.
+            if isinstance(val, (list, dict, set, tuple)):
+                return val
             return val if val is None else str(val)
 
         if t == "boolean" and isinstance(val, str):
