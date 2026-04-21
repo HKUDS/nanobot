@@ -450,9 +450,10 @@ def _count_tokens(text: str) -> int:
 
 
 def _fmt_tokens(count: int) -> str:
-    """Format token count for display (e.g. 1200 -> '1.2k')."""
+    """Format token count for display (e.g. 1200 -> '1.2k', 2000 -> '2k')."""
     if count >= 1000:
-        return f"{count / 1000:.1f}k"
+        value = count / 1000
+        return f"{value:.0f}k" if value == int(value) else f"{value:.1f}k"
     return str(count)
 
 
@@ -498,17 +499,25 @@ def calculate_context_breakdown(
     """
     ctx_parts = context_builder.get_context_parts(channel=channel, chat_id=chat_id)
 
+    identity_t = _count_tokens(ctx_parts["identity"])
+    bootstrap_t = _count_tokens(ctx_parts["bootstrap"])
+    memory_t = _count_tokens(ctx_parts["memory"])
+    always_skills_t = _count_tokens(ctx_parts["always_skills"])
+    skills_summary_t = _count_tokens(ctx_parts["skills_summary"])
+    recent_history_t = _count_tokens(ctx_parts["recent_history"])
+    runtime_t = _count_tokens(ctx_parts["runtime_context"])
+
     tokens: _TokenParts = {  # type: ignore[typeddict-item]
-        "identity": _count_tokens(ctx_parts["identity"]),
-        "bootstrap": _count_tokens(ctx_parts["bootstrap"]),
-        "memory": _count_tokens(ctx_parts["memory"]),
-        "always_skills": _count_tokens(ctx_parts["always_skills"]),
-        "skills_summary": _count_tokens(ctx_parts["skills_summary"]),
-        "recent_history": _count_tokens(ctx_parts["recent_history"]),
-        "system_prompt_total": _count_tokens(context_builder.build_system_prompt(channel=channel)),
+        "identity": identity_t,
+        "bootstrap": bootstrap_t,
+        "memory": memory_t,
+        "always_skills": always_skills_t,
+        "skills_summary": skills_summary_t,
+        "recent_history": recent_history_t,
+        "system_prompt_total": identity_t + bootstrap_t + memory_t + always_skills_t + skills_summary_t + recent_history_t,
         "history_messages": 0,
         "tools_definitions": 0,
-        "runtime_context": _count_tokens(ctx_parts["runtime_context"]),
+        "runtime_context": runtime_t,
     }
 
     # History messages
@@ -588,8 +597,12 @@ def build_status_content(
     # Budget mirrors Consolidator formula: ctx_window - max_completion - _SAFETY_BUFFER
     ctx_budget = max(ctx_total - int(max_completion_tokens) - 1024, 1)
     ctx_pct = min(int((context_tokens_estimate / ctx_budget) * 100), 999) if ctx_budget > 0 else 0
-    ctx_used_str = _fmt_tokens(context_tokens_estimate)
-    ctx_total_str = _fmt_tokens(ctx_total) if ctx_total > 0 else "n/a"
+    ctx_used_str = (
+        f"{context_tokens_estimate // 1000}k"
+        if context_tokens_estimate >= 1000
+        else str(context_tokens_estimate)
+    )
+    ctx_total_str = f"{ctx_total // 1000}k" if ctx_total > 0 else "n/a"
     token_line = f"\U0001f4ca Tokens: {last_in} in / {last_out} out"
     if cached and last_in:
         token_line += f" ({cached * 100 // last_in}% cached)"
