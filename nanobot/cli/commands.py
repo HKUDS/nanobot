@@ -797,6 +797,7 @@ def _run_gateway(
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
+            model_override=hb_cfg.model,
         )
 
         # Keep a small tail of heartbeat history so the loop stays bounded
@@ -825,6 +826,7 @@ def _run_gateway(
         interval_s=hb_cfg.interval_s,
         enabled=hb_cfg.enabled,
         timezone=config.agents.defaults.timezone,
+        heartbeat_model=hb_cfg.model,
     )
 
     if channels.enabled_channels:

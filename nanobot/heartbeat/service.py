@@ -60,10 +60,11 @@ class HeartbeatService:
         interval_s: int = 30 * 60,
         enabled: bool = True,
         timezone: str | None = None,
+        heartbeat_model: str | None = None,
     ):
         self.workspace = workspace
         self.provider = provider
-        self.model = model
+        self.model = heartbeat_model or model
         self.on_execute = on_execute
         self.on_notify = on_notify
         self.interval_s = interval_s
