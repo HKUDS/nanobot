@@ -48,6 +48,15 @@ _SENSITIVE_PATH_PATTERNS: list[str] = [
 ]
 
 # File name patterns that are sensitive regardless of directory
+#
+# Note on `.env` scope: the pattern below matches files whose basename begins
+# with `.env` (e.g. `.env`, `.env.local`, `.env.production`).  We intentionally
+# do NOT widen this to `*.env` — that would collide with legitimate filenames
+# like `example.env`, `template.env`, or documentation fixtures where
+# disclosure is safe.  Operators who place dotenv files under non-standard
+# names (e.g. `secrets/app.env`) should rely on path-based blocks (by adding
+# `/secrets/` to `_SENSITIVE_PATH_PATTERNS`) rather than a broad filename
+# catch-all.
 _SENSITIVE_FILENAME_PATTERNS: list[re.Pattern] = [
     re.compile(r"(^|/)\.env(\..+)?$", re.IGNORECASE),            # .env, .env.local, .env.production
     re.compile(r"(^|/)credentials\.json$", re.IGNORECASE),
@@ -144,6 +153,14 @@ def redact_if_sensitive(text: str) -> str:
 # 3. Shell command pre-screening
 # ---------------------------------------------------------------------------
 
+# Reusable fragment: optional path prefix ending in `/` that precedes `.ssh/`.
+# Matches `~/`, `./`, `/home/user/`, `/root/`, or empty (bare `.ssh/`).
+# Shape: `(?:~/|\S*/)?\.ssh/`
+#   - `~/`          — explicit home-relative
+#   - `\S*/`        — any non-space run ending in `/` (absolute, relative, etc.)
+#   - `?`           — or no prefix at all (just `.ssh/`)
+_SSH_PATH_PREFIX = r"(?:~/|\S*/)?\.ssh/"
+
 # Commands whose primary purpose is to dump environment / secrets.
 _BLOCKED_SHELL_COMMANDS: list[re.Pattern] = [
     # env-dumping commands (standalone or at start of pipe)
@@ -152,25 +169,25 @@ _BLOCKED_SHELL_COMMANDS: list[re.Pattern] = [
     re.compile(r"(?:^|\|)\s*\bexport\s+-p\b"),
     re.compile(r"(?:^|\|)\s*\bset\s*$"),                 # bare 'set' dumps shell vars
     re.compile(r"(?:^|\|)\s*\bdeclare\s+-x\b"),
-    # Direct reads of sensitive paths
-    re.compile(r"\bcat\s+[~]?/?\.ssh/", re.IGNORECASE),
+    # Direct reads of sensitive paths (absolute, ~, or relative)
+    re.compile(r"\bcat\s+" + _SSH_PATH_PREFIX, re.IGNORECASE),
     re.compile(r"\bcat\s+/etc/shadow\b", re.IGNORECASE),
     re.compile(r"\bcat\s+.*\.env\b", re.IGNORECASE),
     re.compile(r"\bcat\s+.*\.pem\b", re.IGNORECASE),
     re.compile(r"\bcat\s+.*\.key\b", re.IGNORECASE),
     re.compile(r"\bcat\s+.*/credentials\.json\b", re.IGNORECASE),
     # Reading sensitive dirs with other tools
-    re.compile(r"\b(?:less|more|head|tail|bat|nano|vim?|view)\s+[~]?/?\.ssh/", re.IGNORECASE),
+    re.compile(r"\b(?:less|more|head|tail|bat|nano|vim?|view)\s+" + _SSH_PATH_PREFIX, re.IGNORECASE),
     re.compile(r"\b(?:less|more|head|tail|bat|nano|vim?|view)\s+/etc/shadow\b", re.IGNORECASE),
     # Key scanning / dumping
     re.compile(r"\bssh-add\s+-[lL]\b"),
     re.compile(r"\bgpg\s+--export-secret", re.IGNORECASE),
     # Base64 encoding of key files (exfiltration attempt)
-    re.compile(r"\bbase64\s+[~]?/?\.ssh/", re.IGNORECASE),
+    re.compile(r"\bbase64\s+" + _SSH_PATH_PREFIX, re.IGNORECASE),
     re.compile(r"\bbase64\s+.*\.pem\b", re.IGNORECASE),
     re.compile(r"\bbase64\s+.*\.key\b", re.IGNORECASE),
-    # xxd / od on key files
-    re.compile(r"\b(?:xxd|od|hexdump)\s+[~]?/?\.ssh/", re.IGNORECASE),
+    # xxd / od / hexdump on key files
+    re.compile(r"\b(?:xxd|od|hexdump)\s+" + _SSH_PATH_PREFIX, re.IGNORECASE),
 ]
 
 
