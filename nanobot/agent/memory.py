@@ -377,6 +377,7 @@ class Consolidator:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         max_completion_tokens: int = 4096,
+        on_archive: Callable[[], Any] | None = None,
     ):
         self.store = store
         self.provider = provider
@@ -386,6 +387,7 @@ class Consolidator:
         self.max_completion_tokens = max_completion_tokens
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
+        self._on_archive = on_archive
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
@@ -483,11 +485,21 @@ class Consolidator:
                 raise RuntimeError(f"LLM returned error: {response.content}")
             summary = response.content or "[no summary]"
             self.store.append_history(summary)
+            self._fire_on_archive()
             return summary
         except Exception:
             logger.warning("Consolidation LLM call failed, raw-dumping to history")
             self.store.raw_archive(messages)
+            self._fire_on_archive()
             return None
+        
+    def _fire_on_archive(self) -> None:
+        """Invoke the on_archive callback (if set), swallowing errors."""
+        if self._on_archive:
+            try:
+                self._on_archive()
+            except Exception:
+                logger.debug("on_archive callback failed", exc_info=True)
 
     async def maybe_consolidate_by_tokens(
         self,
@@ -638,6 +650,7 @@ class Dream:
         self.annotate_line_ages = annotate_line_ages
         self._runner = AgentRunner(provider)
         self._tools = self._build_tools()
+        self._lock = asyncio.Lock()
 
     # -- tool registry -------------------------------------------------------
 
@@ -740,7 +753,20 @@ class Dream:
         return result
 
     async def run(self) -> bool:
-        """Process unprocessed history entries. Returns True if work was done."""
+        """Process unprocessed history entries. Returns True if work was done.
+
+        Re-entrant safe: if a run is already in progress, returns False
+        immediately so concurrent triggers (cron + consolidation) don't
+        waste tokens.
+        """
+        if self._lock.locked():
+            logger.debug("Dream: skipping — already running")
+            return False
+        async with self._lock:
+            return await self._run_inner()
+
+    async def _run_inner(self) -> bool:
+        """Actual Dream logic (called under self._lock)."""
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 
         last_cursor = self.store.get_last_dream_cursor()
