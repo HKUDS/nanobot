@@ -275,6 +275,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         ),
     ),
     # MiniMax: OpenAI-compatible API
+    # M2.5 is trained at temp=1.0, top_p=0.95 per the model card.
     ProviderSpec(
         name="minimax",
         keywords=("minimax",),
@@ -282,6 +283,9 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="MiniMax",
         backend="openai_compat",
         default_api_base="https://api.minimax.io/v1",
+        model_overrides=(
+            ("minimax-m2.5", {"temperature": 1.0, "top_p": 0.95}),
+        ),
     ),
     # MiniMax Anthropic-compatible endpoint: supports thinking mode
     ProviderSpec(
