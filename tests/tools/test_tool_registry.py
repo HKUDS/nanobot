@@ -297,6 +297,12 @@ async def test_execute_does_not_touch_list_results() -> None:
 # `redact_if_sensitive()` call; the `_HINT` suffix is appended *after*
 # redaction on the error branch so the "try another approach" nudge still
 # reaches the model.
+#
+# Downstream contract: `AgentRunner._run_tool()` (and other consumers) use
+# `result.startswith("Error")` to detect failed tool calls. The bare
+# redaction notice does NOT begin with "Error", so the registry re-wraps
+# the redacted body in an "Error ..." shell on the error branches to
+# preserve that contract.
 # ---------------------------------------------------------------------------
 
 
@@ -313,6 +319,8 @@ async def test_execute_redacts_aws_key_in_error_output() -> None:
     assert "REDACTED" in result
     # The error-path hint still attaches so the model knows to try again.
     assert "Analyze the error above" in result
+    # Downstream-contract: failure detection via startswith("Error")
+    assert result.startswith("Error")
 
 
 @pytest.mark.asyncio
@@ -333,6 +341,7 @@ async def test_execute_redacts_pem_material_in_error_output() -> None:
     assert "MIIEowIBAAKCAQEAy3SECRETSECRETSECRET" not in result
     assert "REDACTED" in result
     assert "Analyze the error above" in result
+    assert result.startswith("Error")
 
 
 @pytest.mark.asyncio
@@ -350,6 +359,7 @@ async def test_execute_redacts_github_token_in_error_output() -> None:
     assert "ghp_0123456789abcdef0123456789abcdef0123" not in result
     assert "REDACTED" in result
     assert "Analyze the error above" in result
+    assert result.startswith("Error")
 
 
 @pytest.mark.asyncio
@@ -390,6 +400,7 @@ async def test_execute_redacts_secret_in_exception_message() -> None:
     assert "BEGIN OPENSSH PRIVATE KEY" not in result
     assert "REDACTED" in result
     assert "Analyze the error above" in result
+    assert result.startswith("Error")
 
 
 @pytest.mark.asyncio
@@ -405,6 +416,7 @@ async def test_execute_redacts_akia_in_exception_message() -> None:
     assert "AKIAABCDEFGHIJKLMNOP" not in result
     assert "REDACTED" in result
     assert "Analyze the error above" in result
+    assert result.startswith("Error")
 
 
 @pytest.mark.asyncio
@@ -419,6 +431,58 @@ async def test_execute_clean_exception_passes_through_with_hint() -> None:
     assert "disk full" in result
     assert "Analyze the error above" in result
     assert "REDACTED" not in result
+    assert result.startswith("Error")
+
+
+@pytest.mark.asyncio
+async def test_execute_preserves_error_prefix_when_whole_body_is_redacted() -> None:
+    """MIT-147 (codex review): `AgentRunner._run_tool()` relies on
+    `result.startswith("Error")` to classify tool calls as failed.
+
+    Before the codex fix, when a tool returned an error string consisting ONLY
+    of secret material (worst case), `redact_if_sensitive()` would replace the
+    whole body with `[REDACTED — ...]` — which does NOT start with "Error".
+    The runner would then mark the call as `ok` and skip `fail_on_tool_error`
+    handling. This test pins the fix: the registry re-wraps a scrubbed error
+    body in an `Error (...)` shell so the downstream detector keeps working.
+    """
+    # Pathological case: the entire error body is the secret. The redactor
+    # replaces the whole string, leaving no "Error:" prefix in the raw match.
+    secret_only = "AKIAABCDEFGHIJKLMNOP"
+    registry = ToolRegistry()
+    # The tool returns a pure-error string starting with "Error" (so the
+    # registry classifies status=error), but the payload after that is just
+    # the secret — redaction swallows everything downstream of the first match.
+    registry.register(
+        _StringReturningTool("pure_error", f"Error: {secret_only}")
+    )
+
+    result = await registry.execute("pure_error", {})
+
+    # Secret must be gone.
+    assert secret_only not in result
+    # Redaction notice must be present.
+    assert "REDACTED" in result
+    # CRITICAL: the runner uses startswith("Error") to detect failures.
+    # If this regresses, `fail_on_tool_error` paths stop firing.
+    assert result.startswith("Error")
+    # Hint is still appended.
+    assert "Analyze the error above" in result
+
+
+@pytest.mark.asyncio
+async def test_execute_preserves_error_prefix_when_exception_body_is_redacted() -> None:
+    """Same downstream-contract guarantee on the exception branch."""
+    secret_only_exc = RuntimeError("AKIAABCDEFGHIJKLMNOP")
+    registry = ToolRegistry()
+    registry.register(_RaisingTool("bad_exc", secret_only_exc))
+
+    result = await registry.execute("bad_exc", {})
+
+    assert "AKIAABCDEFGHIJKLMNOP" not in result
+    assert "REDACTED" in result
+    assert result.startswith("Error")  # downstream failure detection contract
+    assert "Analyze the error above" in result
 
 
 class _AnyReturningTool(Tool):
