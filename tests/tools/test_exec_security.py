@@ -182,3 +182,78 @@ async def test_exec_ignores_workspace_check_when_not_restricted(tmp_path):
     result = await tool.execute(command="echo ok", working_dir=str(other))
     assert "ok" in result
     assert "outside the configured workspace" not in result
+
+
+# ---------------------------------------------------------------------------
+# MIT-123: shell command pre-screen against the secret-dump denylist.
+#
+# `_guard_command` is the single safety chokepoint for `ExecTool`. It must
+# reject commands whose purpose is to dump environment variables, read SSH /
+# GPG keys, cat credential files, base64 key material for exfil, etc.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # env-dumpers
+        "printenv",
+        "env",
+        "env | grep SECRET",
+        "export -p",
+        # SSH / key file reads
+        "cat ~/.ssh/id_rsa",
+        "less ~/.ssh/id_rsa.pub",
+        # shadow / credential file reads
+        "cat /etc/shadow",
+        "cat ./.env",
+        "cat app/.env.production",
+        "cat /root/credentials.json",
+        # exfil via base64 / xxd
+        "base64 ~/.ssh/id_rsa",
+        "base64 server.pem",
+        "xxd ~/.ssh/id_ed25519",
+        # key management tools
+        "ssh-add -l",
+        "gpg --export-secret-keys",
+    ],
+)
+def test_exec_prescreens_secret_dump_commands(command):
+    """Every command in the sensitive-data denylist must be blocked."""
+    tool = ExecTool()
+    result = tool._guard_command(command, "/tmp")
+    assert result is not None, f"expected block for: {command!r}"
+    # Error phrasing must match the rest of _guard_command ("safety guard"),
+    # not the raw "security policy" wording from sensitive.py. This alignment
+    # is the whole reason for translating the result locally.
+    assert result.startswith("Error: Command blocked by safety guard"), result
+    assert "sensitive data" in result.lower()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # env with an inline variable assignment is a command runner, not a dump
+        "env FOO=bar make build",
+        # cat of regular files is fine
+        "cat README.md",
+        "cat src/main.py",
+        # ls / grep of normal paths is fine
+        "ls ~/projects",
+        "grep TODO notes.txt",
+        # base64 of a regular payload
+        "echo hello | base64",
+        # curl to public URL (not a secret dumper)
+        "curl https://example.com/api",
+    ],
+)
+def test_exec_prescreen_allows_legitimate_commands(command):
+    """Legitimate commands that happen to mention env/cat/base64 must pass."""
+    tool = ExecTool()
+    result = tool._guard_command(command, "/tmp")
+    # Result may be None (allowed) or blocked for an unrelated reason, but
+    # must not be blocked with the sensitive-data message.
+    if result is not None:
+        assert "sensitive data" not in result.lower(), (
+            f"command was wrongly flagged as sensitive-data access: {command!r} -> {result!r}"
+        )
