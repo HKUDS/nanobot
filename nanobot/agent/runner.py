@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 import inspect
 from pathlib import Path
@@ -267,7 +268,9 @@ class AgentRunner:
                     messages_for_model = messages
             context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
+            _t0 = time.perf_counter()
             response = await self._request_model(spec, messages_for_model, hook, context)
+            context.latency_ms = (time.perf_counter() - _t0) * 1000
             raw_usage = self._usage_dict(response.usage)
             context.response = response
             context.usage = dict(raw_usage)
