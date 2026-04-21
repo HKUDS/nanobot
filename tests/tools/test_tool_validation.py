@@ -658,3 +658,164 @@ def test_cast_nullable_param_no_crash() -> None:
     assert result["name"] == "hello"
     result = tool.cast_params({"name": None})
     assert result["name"] is None
+
+
+# --- MIT-145: composite-to-string coercion guard ---
+
+
+def test_cast_params_list_not_stringified_for_string_type() -> None:
+    """Lists passed where a string is expected must not be stringified.
+
+    Regression: codex flagged during PR #8 review that ``str([...])`` silently
+    produced ``"['/tmp/x']"`` which passed ``validate_params`` (since the
+    result is a string) and reached the tool's execute() with garbage input.
+    """
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        }
+    )
+    result = tool.cast_params({"path": ["/tmp/x"]})
+    # Composite value must pass through unchanged, not be stringified.
+    assert result["path"] == ["/tmp/x"]
+    assert isinstance(result["path"], list)
+    # validate_params must now reject it cleanly.
+    errors = tool.validate_params(result)
+    assert any("path should be string" in e for e in errors)
+
+
+def test_cast_params_dict_not_stringified_for_string_type() -> None:
+    """Dicts passed where a string is expected must not be stringified."""
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        }
+    )
+    result = tool.cast_params({"path": {"k": "v"}})
+    assert result["path"] == {"k": "v"}
+    assert isinstance(result["path"], dict)
+    errors = tool.validate_params(result)
+    assert any("path should be string" in e for e in errors)
+
+
+def test_cast_params_tuple_not_stringified_for_string_type() -> None:
+    """Tuples must also skip stringification (same failure mode)."""
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+        }
+    )
+    result = tool.cast_params({"path": ("/tmp/x", "/tmp/y")})
+    assert result["path"] == ("/tmp/x", "/tmp/y")
+    errors = tool.validate_params(result)
+    assert any("path should be string" in e for e in errors)
+
+
+def test_cast_params_set_not_stringified_for_string_type() -> None:
+    """Sets must also skip stringification."""
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+        }
+    )
+    value = {"/tmp/x"}
+    result = tool.cast_params({"path": value})
+    assert result["path"] == value
+    assert isinstance(result["path"], set)
+    errors = tool.validate_params(result)
+    assert any("path should be string" in e for e in errors)
+
+
+def test_cast_params_nullable_string_list_not_stringified() -> None:
+    """Composite guard also applies for nullable string unions."""
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"path": {"type": ["string", "null"]}},
+        }
+    )
+    result = tool.cast_params({"path": ["/tmp/x"]})
+    assert result["path"] == ["/tmp/x"]
+    errors = tool.validate_params(result)
+    assert any("path should be string" in e for e in errors)
+
+
+def test_cast_params_primitive_casts_preserved_integer() -> None:
+    """Existing primitive casts must keep working (regression sentinel)."""
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"count": {"type": "integer"}},
+        }
+    )
+    result = tool.cast_params({"count": "3"})
+    assert result["count"] == 3
+    assert isinstance(result["count"], int)
+
+
+def test_cast_params_primitive_casts_preserved_boolean() -> None:
+    """Existing boolean string casts must keep working."""
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"enabled": {"type": "boolean"}},
+        }
+    )
+    assert tool.cast_params({"enabled": "true"})["enabled"] is True
+    assert tool.cast_params({"enabled": "false"})["enabled"] is False
+
+
+def test_cast_params_integer_stringification_still_works_for_string_type() -> None:
+    """Non-composite scalars (int, float, bool) should still stringify for string target."""
+    tool = CastTestTool(
+        {
+            "type": "object",
+            "properties": {"label": {"type": "string"}},
+        }
+    )
+    # Preserving pre-MIT-145 behavior: scalars get str()'d.
+    assert tool.cast_params({"label": 42})["label"] == "42"
+    assert tool.cast_params({"label": 3.14})["label"] == "3.14"
+    assert tool.cast_params({"label": True})["label"] == "True"
+
+
+async def test_registry_rejects_composite_string_coercion() -> None:
+    """End-to-end: ToolRegistry.execute with composite-for-string returns a
+    validation error instead of silently executing with stringified garbage.
+    """
+    from nanobot.agent.tools.registry import ToolRegistry
+
+    class _StringPathTool(Tool):
+        @property
+        def name(self) -> str:
+            return "string_path_tool"
+
+        @property
+        def description(self) -> str:
+            return "requires a string path"
+
+        @property
+        def parameters(self) -> dict[str, Any]:
+            return {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            }
+
+        async def execute(self, **kwargs: Any) -> str:
+            # If we reach here with a list, the bug is back.
+            return f"executed with path={kwargs['path']!r}"
+
+    reg = ToolRegistry()
+    reg.register(_StringPathTool())
+    result = await reg.execute("string_path_tool", {"path": ["/tmp/x"]})
+    assert "Invalid parameters" in result
+    assert "path should be string" in result
+    # And it must NOT have reached execute() with the stringified list.
+    assert "executed with path=" not in result
