@@ -387,14 +387,28 @@ class OpenAICompatProvider(LLMProvider):
                     kwargs.update(overrides)
                     break
 
-        if reasoning_effort:
-            kwargs["reasoning_effort"] = reasoning_effort
+        # Normalize reasoning_effort into a semantic form (OpenAI vocab)
+        # used for internal decisions, and a wire form actually sent out.
+        # "minimum" is accepted as a DashScope-native alias for "minimal".
+        semantic_effort: str | None = None
+        if isinstance(reasoning_effort, str):
+            semantic_effort = reasoning_effort.lower()
+            if semantic_effort == "minimum":
+                semantic_effort = "minimal"
+
+        wire_effort = reasoning_effort
+        if spec and spec.name == "dashscope" and semantic_effort == "minimal":
+            # DashScope accepts none/minimum/low/medium/high/xhigh; "minimal" 400s.
+            wire_effort = "minimum"
+
+        if wire_effort:
+            kwargs["reasoning_effort"] = wire_effort
 
         # Provider-specific thinking parameters.
         # Only sent when reasoning_effort is explicitly configured so that
         # the provider default is preserved otherwise.
         if spec and reasoning_effort is not None:
-            thinking_enabled = reasoning_effort.lower() != "minimal"
+            thinking_enabled = semantic_effort != "minimal"
             extra: dict[str, Any] | None = None
             if spec.name == "dashscope":
                 extra = {"enable_thinking": thinking_enabled}
@@ -415,7 +429,7 @@ class OpenAICompatProvider(LLMProvider):
         # so that OpenRouter-style names like "moonshotai/kimi-k2.5" are handled
         # identically to bare names like "kimi-k2.5".
         if reasoning_effort is not None and _is_kimi_thinking_model(model_name):
-            thinking_enabled = reasoning_effort.lower() != "minimal"
+            thinking_enabled = semantic_effort != "minimal"
             kwargs.setdefault("extra_body", {}).update(
                 {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
             )
