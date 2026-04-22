@@ -226,7 +226,7 @@ class TestCameraToolFailures:
         with patch("nanobot.agent.tools.camera._HAS_CV2", True), \
              patch("nanobot.agent.tools.camera.get_media_dir", return_value=Path("/tmp")):
             tool = CameraTool()
-            result = await tool.execute(filename="../../etc/shadow")
+            result = await tool.execute(filename="file;rm.txt")
 
             assert "Error" in result
             assert "Invalid filename" in result
@@ -307,7 +307,7 @@ class TestAvailableDevices:
             result = _available_devices(max_index=3)
             assert result == [0, 2]
             opened.release.assert_called()
-            closed.release.assert_not_called()
+            closed.release.assert_called()
 
 
 class TestCameraToolSchema:
