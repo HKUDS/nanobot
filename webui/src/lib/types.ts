@@ -71,4 +71,4 @@ export type InboundEvent =
 export type Outbound =
   | { type: "new_chat" }
   | { type: "attach"; chat_id: string }
-  | { type: "message"; chat_id: string; content: string };
+  | { type: "message"; chat_id: string; content: string; media?: string[] };

@@ -64,7 +64,9 @@
       "placeholderOpening": "Opening a new chat…",
       "inputAria": "Message input",
       "sendHint": "Enter to send · Shift+Enter for newline",
-      "send": "Send message"
+      "send": "Send message",
+      "attach": "Attach file",
+      "removeAttachment": "Remove attachment"
     },
     "scrollToBottom": "Scroll to bottom"
   },

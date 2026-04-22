@@ -40,7 +40,7 @@ export function ThreadShell({
   const { messages: historical, loading } = useSessionHistory(historyKey);
   const { client, modelName } = useClient();
   const [booting, setBooting] = useState(false);
-  const pendingFirstRef = useRef<string | null>(null);
+  const pendingFirstRef = useRef<{ content: string; media?: string[] } | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
 
   const initial = useMemo(() => {
@@ -78,13 +78,13 @@ export function ThreadShell({
     const pending = pendingFirstRef.current;
     if (!pending) return;
     pendingFirstRef.current = null;
-    client.sendMessage(chatId, pending);
+    client.sendMessage(chatId, pending.content, pending.media);
     setMessages((prev) => [
       ...prev,
       {
         id: crypto.randomUUID(),
         role: "user",
-        content: pending,
+        content: pending.content,
         createdAt: Date.now(),
       },
     ]);
@@ -92,10 +92,10 @@ export function ThreadShell({
   }, [chatId, client, setMessages]);
 
   const handleWelcomeSend = useCallback(
-    async (content: string) => {
+    async (content: string, media?: string[]) => {
       if (booting) return;
       setBooting(true);
-      pendingFirstRef.current = content;
+      pendingFirstRef.current = { content, media };
       const newId = await onNewChat();
       if (!newId) {
         pendingFirstRef.current = null;

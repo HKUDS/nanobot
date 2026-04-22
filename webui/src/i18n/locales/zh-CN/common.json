@@ -64,7 +64,9 @@
       "placeholderOpening": "正在打开新对话…",
       "inputAria": "消息输入框",
       "sendHint": "Enter 发送 · Shift+Enter 换行",
-      "send": "发送消息"
+      "send": "发送消息",
+      "attach": "添加附件",
+      "removeAttachment": "移除附件"
     },
     "scrollToBottom": "滚动到底部"
   },

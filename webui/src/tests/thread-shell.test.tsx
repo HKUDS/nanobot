@@ -88,6 +88,7 @@ describe("ThreadShell", () => {
       expect(client.sendMessage).toHaveBeenCalledWith(
         "chat-a",
         "persist me across tabs",
+        undefined,
       ),
     );
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
@@ -151,6 +152,7 @@ describe("ThreadShell", () => {
       expect(client.sendMessage).toHaveBeenCalledWith(
         "chat-a",
         "delete me cleanly",
+        undefined,
       ),
     );
     expect(screen.getByText("delete me cleanly")).toBeInTheDocument();
