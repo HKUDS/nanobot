@@ -43,7 +43,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <p
             className={cn(
               "ml-auto w-fit rounded-[18px] border border-border/60 bg-secondary/70 px-4 py-2",
-              "text-right text-[18px]/[1.8] whitespace-pre-wrap break-words",
+              "text-left text-[18px]/[1.8] whitespace-pre-wrap break-words",
               "shadow-[0_10px_24px_-18px_rgba(0,0,0,0.55)]",
             )}
           >
