@@ -4,7 +4,7 @@ from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
+from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
@@ -14,8 +14,8 @@ if TYPE_CHECKING:
     tool_parameters_schema(
         task=StringSchema("The task for the subagent to complete"),
         label=StringSchema("Optional short label for the task (for display)"),
-        max_iterations=StringSchema("Optional maximum model iterations for the subagent (default 15)"),
-        timeout_seconds=StringSchema("Optional maximum wall-clock time in seconds before the subagent is cancelled (default 300)"),
+        max_iterations=IntegerSchema(0, description="Optional maximum model iterations for the subagent (default 15)", nullable=True),
+        timeout_seconds=IntegerSchema(0, description="Optional maximum wall-clock time in seconds before the subagent is cancelled (default 300)", nullable=True),
         required=["task"],
     )
 )
@@ -52,11 +52,6 @@ class SpawnTool(Tool):
                       max_iterations: int | None = None, timeout_seconds: int | None = None,
                       **kwargs: Any) -> str:
         """Spawn a subagent to execute the given task."""
-        # tool_parameters wraps everything as StringSchema — coerce to int
-        if max_iterations is not None:
-            max_iterations = int(max_iterations)
-        if timeout_seconds is not None:
-            timeout_seconds = int(timeout_seconds)
         return await self._manager.spawn(
             task=task,
             label=label,
@@ -64,5 +59,5 @@ class SpawnTool(Tool):
             origin_chat_id=self._origin_chat_id.get(),
             session_key=self._session_key.get(),
             max_iterations=max_iterations,
-            timeout_seconds=timeout_seconds, (fix(spawn): coerce max_iterations and timeout_seconds from string to int)
+            timeout_seconds=timeout_seconds,
         )

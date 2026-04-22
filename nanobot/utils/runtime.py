@@ -9,8 +9,7 @@ from loguru import logger
 from nanobot.utils.helpers import stringify_text_blocks
 
 _MAX_REPEAT_EXTERNAL_LOOKUPS = 2
-_MAX_REPEAT_SAME_DOMAIN = 3
-_MAX_REPEAT_SAME_DOMAIN = 3
+_MAX_REPEAT_SAME_DOMAIN = 10
 
 EMPTY_FINAL_RESPONSE_MESSAGE = (
     "I completed the tool steps but couldn't produce a final answer. "

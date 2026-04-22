@@ -2,16 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
+
+if TYPE_CHECKING:
+    from nanobot.agent.subagent import SubagentManager
 
 
+@tool_parameters(
+    tool_parameters_schema(
+        task_id=StringSchema("Task ID of the subagent to cancel"),
+        required=["task_id"],
+    )
+)
 class SpawnCancelTool(Tool):
     """Cancel a running subagent by its task ID."""
 
-    def __init__(self, subagent_manager) -> None:
-        self._manager = subagent_manager
+    def __init__(self, manager: "SubagentManager") -> None:
+        self._manager = manager
 
     @property
     def name(self) -> str:
@@ -31,16 +41,3 @@ class SpawnCancelTool(Tool):
         if count > 0:
             return f"Cancelled subagent {task_id}."
         return f"No running subagent found with ID {task_id}."
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "Task ID of the subagent to cancel",
-                },
-            },
-            "required": ["task_id"],
-        }

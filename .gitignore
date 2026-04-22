@@ -92,3 +92,4 @@ logs/
 tmp/
 temp/
 *.tmp
+nanobot.env/

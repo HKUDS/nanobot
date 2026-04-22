@@ -226,6 +226,15 @@ class SubagentManager:
                 logger.info("Subagent [{}] completed successfully", task_id)
                 await self._announce_result(task_id, label, task, final_result, origin, "ok")
 
+        except asyncio.TimeoutError:
+            status.phase = "error"
+            status.error = f"Timed out after {timeout} seconds"
+            logger.error("Subagent [{}] timed out after {} seconds", task_id, timeout)
+            await self._announce_result(task_id, label, task, f"Error: {status.error}", origin, "error")
+        except asyncio.CancelledError:
+            status.phase = "error"
+            status.error = "Cancelled"
+            logger.info("Subagent [{}] cancelled", task_id)
         except Exception as e:
             status.phase = "error"
             status.error = str(e)

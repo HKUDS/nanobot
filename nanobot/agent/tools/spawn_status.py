@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.tools.base import Tool
+from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
+
+if TYPE_CHECKING:
+    from nanobot.agent.subagent import SubagentManager
 
 
+@tool_parameters(
+    tool_parameters_schema(
+        task_id=StringSchema("Optional: task ID of a specific subagent to check", nullable=True),
+    )
+)
 class SpawnStatusTool(Tool):
     """Check the status of spawned subagents."""
 
-    def __init__(self, subagent_manager) -> None:
-        self._manager = subagent_manager
+    def __init__(self, manager: "SubagentManager") -> None:
+        self._manager = manager
 
     @property
     def name(self) -> str:
@@ -29,15 +38,3 @@ class SpawnStatusTool(Tool):
         if task_id:
             return self._manager.get_task_status(task_id)
         return self._manager.get_all_status()
-
-    @property
-    def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "task_id": {
-                    "type": "string",
-                    "description": "Optional: task ID of a specific subagent to check",
-                },
-            },
-        }
