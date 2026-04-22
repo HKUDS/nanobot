@@ -147,6 +147,7 @@ class HeartbeatConfig(Base):
     enabled: bool = True
     interval_s: int = 30 * 60  # 30 minutes
     keep_recent_messages: int = 8
+    model: str | None = None  # Override model for heartbeat (Phase 1 + Phase 2)
 
 
 class ApiConfig(Base):
