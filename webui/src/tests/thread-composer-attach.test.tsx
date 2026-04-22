@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import type { EncodeResponse } from "@/lib/imageEncode";
 
-const encodeImage = vi.fn<[File], Promise<EncodeResponse>>();
+const encodeImage = vi.fn<(file: File) => Promise<EncodeResponse>>();
 
 vi.mock("@/lib/imageEncode", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/imageEncode")>();
@@ -29,10 +29,11 @@ function resolveReady(file: File): EncodeResponse {
     id: "stub",
     ok: true,
     dataUrl: `data:image/png;base64,${btoa(file.name)}`,
-    mimeType: "image/png",
+    mime: "image/png",
     bytes: file.size,
+    origBytes: file.size,
     normalized: false,
-  } as EncodeResponse;
+  };
 }
 
 beforeEach(() => {
