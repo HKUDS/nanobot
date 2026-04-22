@@ -167,7 +167,9 @@ class AnthropicProvider(LLMProvider):
             "type": "tool_result",
             "tool_use_id": msg.get("tool_call_id", ""),
         }
-        if isinstance(content, (str, list)):
+        if isinstance(content, list):
+            block["content"] = AnthropicProvider._convert_user_content(content)
+        elif isinstance(content, str):
             block["content"] = content
         else:
             block["content"] = str(content) if content else ""
@@ -208,7 +210,8 @@ class AnthropicProvider(LLMProvider):
 
         return blocks or [{"type": "text", "text": ""}]
 
-    def _convert_user_content(self, content: Any) -> Any:
+    @staticmethod
+    def _convert_user_content(content: Any) -> Any:
         """Convert user message content, translating image_url blocks."""
         if isinstance(content, str) or content is None:
             return content or "(empty)"
@@ -221,7 +224,7 @@ class AnthropicProvider(LLMProvider):
                 result.append({"type": "text", "text": str(item)})
                 continue
             if item.get("type") == "image_url":
-                converted = self._convert_image_block(item)
+                converted = AnthropicProvider._convert_image_block(item)
                 if converted:
                     result.append(converted)
                 continue
