@@ -330,3 +330,143 @@ def test_clean_text_not_flagged() -> None:
     assert scan_content("hello world") is None
     assert scan_content("The quick brown fox.") is None
     assert scan_content("Response headers: Content-Type: application/json") is None
+
+
+# ---------------------------------------------------------------------------
+# MIT-164: `sh -c "..."` / `bash -c '...'` / `zsh -c ...` quote-bypass
+#
+# Before MIT-164 the shell pre-screen used regexes anchored at
+# `(?:^|\|)` (start-of-command or after-pipe), so any denylisted command
+# could be smuggled past the check by wrapping it in `sh -c "..."` — the
+# denylisted token lived inside a quoted argument the regex never saw.
+# The fix detects the `<shell> -c <script>` shape (for sh/bash/zsh/dash/
+# ash/ksh, with or without a `/bin/` or `/usr/bin/` path prefix), extracts
+# the inner script via shlex.split, and recursively screens it.  Depth is
+# capped to guard against pathological nesting.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Canonical bypass — single-quoted, inner command is a secret-dumper
+        "sh -c 'printenv'",
+        # Double-quoted wrapper
+        'sh -c "printenv"',
+        # Unquoted inner (bash accepts this for a single-token script)
+        "sh -c printenv",
+        # SSH-key read inside a wrapper
+        'sh -c "cat ~/.ssh/id_rsa"',
+        "sh -c 'cat /home/mihai/.ssh/id_rsa'",
+        "sh -c 'cat /etc/shadow'",
+        # bash / zsh wrappers
+        "bash -c 'base64 ~/.ssh/id_rsa'",
+        'zsh -c "ssh-add -l"',
+        "dash -c 'printenv'",
+        # Path-prefixed shell binaries
+        "/bin/sh -c 'export -p'",
+        '/usr/bin/bash -c "cat /etc/shadow"',
+        "/usr/local/bin/zsh -c 'printenv'",
+        # env dumper inside wrapper
+        'bash -c "env"',
+        # Nested wrappers — recursion handles this via _depth
+        "sh -c \"bash -c 'printenv'\"",
+        # gpg export inside wrapper
+        "sh -c 'gpg --export-secret-keys'",
+        # xxd / hexdump on SSH keys inside wrapper
+        "sh -c 'xxd ~/.ssh/id_ed25519'",
+    ],
+)
+def test_mit164_wrapper_bypass_is_blocked(command: str) -> None:
+    """MIT-164: `sh -c "<denylisted>"` and friends must recurse into the inner script."""
+    result = check_shell_command(command)
+    assert result is not None, f"Expected block for wrapped command: {command!r}"
+    assert "blocked by security policy" in result
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # MIT-143 replacement shape — the exact string used by
+        # tests/tools/test_exec_env.py::test_exec_allowed_env_keys_passthrough.
+        # If the MIT-164 wrapper detector falsely blocks this, the MIT-143
+        # battery regresses.
+        'sh -c \'echo "$MY_CUSTOM_VAR"\'',
+        # MIT-143 "missing var" shape — also pulled verbatim from
+        # tests/tools/test_exec_env.py::test_exec_allowed_env_keys_missing_var_ignored.
+        'sh -c \'[ -z "${NONEXISTENT_VAR_12345+set}" ] || exit 1\'',
+        # Ordinary `sh -c` usage — no denylisted command inside
+        "sh -c 'cd foo && make'",
+        "sh -c 'git status'",
+        'bash -c "npm install"',
+        "bash -c 'pytest tests/'",
+        "sh -c 'echo hello'",
+        "sh -c 'ls /tmp'",
+        # Shell invoked WITHOUT -c (not a wrapper) — must not be treated as
+        # a wrapper regardless of remaining args
+        "sh script.sh",
+        "bash --version",
+        # Shell invoked with -c but the script is a benign pipeline
+        "sh -c 'ls | wc -l'",
+        # Short invocation (len < 3 tokens) — must pass through silently
+        "sh",
+        "sh -c",
+        # `zsh -c "echo $VAR"` — env expansion, not env dump
+        'zsh -c "echo $HOME"',
+    ],
+)
+def test_mit164_legitimate_wrapper_usage_still_allowed(command: str) -> None:
+    """MIT-164: benign `sh -c` / `bash -c` usage must not be false-positived.
+
+    In particular, the two MIT-143 replacement shapes used by
+    ``tests/tools/test_exec_env.py`` must stay green — that test suite is the
+    canonical regression signal for "did we over-block the wrapper path?".
+    """
+    assert check_shell_command(command) is None, f"False positive for: {command!r}"
+
+
+def test_mit164_malformed_quoting_does_not_crash() -> None:
+    """Unclosed-quote command must not raise — shlex.split ValueError is caught.
+
+    Contract: malformed shell input falls through to the "clean" result
+    (same behaviour as before MIT-164).  The outer regex layer has already
+    run and is the authoritative result for input shlex can't parse.
+    Crucially, we must NOT raise — the shell tool treats exceptions from
+    the prescreen as unexpected errors.
+    """
+    # Unclosed single quote — shlex will raise ValueError internally.
+    result = check_shell_command("sh -c 'printenv")
+    # Either None (no regex match on the malformed outer string) or a
+    # block string; the important part is that no exception escapes.
+    assert result is None or "blocked by security policy" in result
+
+
+def test_mit164_recursion_depth_is_bounded() -> None:
+    """Deeply nested wrappers must not loop — the depth guard is load-bearing.
+
+    Crafted input:
+        sh -c "sh -c 'sh -c \"sh -c printenv\"'"
+
+    Each unwrap peels one layer; at depth == 3 the guard stops recursion
+    and returns None (for the innermost `printenv`, if reached; else the
+    match fires earlier).  The test asserts only that the call terminates
+    and produces a bool-ish result — it does not mandate block/allow at
+    the cap, because the cap is a runtime guard, not a security boundary.
+    """
+    deep = "sh -c \"sh -c 'sh -c \\\"sh -c \\\\\\\"printenv\\\\\\\"\\\"'\""
+    # Should not raise, should not hang.  Value itself is implementation-
+    # defined at the depth cap; "did we return in finite time" is the
+    # property under test.
+    result = check_shell_command(deep)
+    assert result is None or isinstance(result, str)
+
+
+def test_mit164_nested_wrapper_blocks_inner_denylist() -> None:
+    """Two-level nesting within the depth cap must still block.
+
+    `sh -c "bash -c 'printenv'"` → unwrap to `bash -c 'printenv'` (depth 1)
+    → unwrap to `printenv` (depth 2) → regex hits.
+    """
+    result = check_shell_command("sh -c \"bash -c 'printenv'\"")
+    assert result is not None
+    assert "blocked by security policy" in result

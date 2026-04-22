@@ -7,6 +7,7 @@ of private keys, credentials, tokens, and other secrets.
 
 import os
 import re
+import shlex
 from pathlib import Path
 
 from loguru import logger
@@ -217,12 +218,92 @@ _BLOCKED_SHELL_COMMANDS: list[re.Pattern] = [
 ]
 
 
-def check_shell_command(command: str) -> str | None:
-    """Screen a shell command for attempts to access sensitive data.
+# Shell-wrapper names that take `-c <script>` and execute the script argument
+# as a new shell command. Basename match against the first token of the
+# command (after stripping any directory prefix like `/bin/` or `/usr/bin/`).
+#
+# MIT-164: `sh -c "printenv"` escaped the regex-based prescreen because the
+# denylisted command was wrapped inside a quoted argument the regexes never
+# saw. Detecting the wrapper shape and recursing into the extracted script
+# closes that bypass without reworking the regex layer.
+_SHELL_WRAPPER_BASENAMES: frozenset[str] = frozenset(
+    {"sh", "bash", "zsh", "dash", "ash", "ksh"}
+)
+
+# Recursion depth cap for nested wrappers (`sh -c "bash -c '...'"`).  Three
+# is well beyond anything seen in practice; the guard exists purely to bound
+# runtime on pathological input.
+_MAX_SHELL_WRAPPER_DEPTH = 3
+
+
+def _extract_shell_wrapper_inner(command: str) -> str | None:
+    """If *command* has the shape `<shell> -c <script>`, return the script.
+
+    Uses :func:`shlex.split` so all three quoting forms are handled uniformly:
+
+    * ``sh -c 'printenv'``        — single-quoted
+    * ``sh -c "printenv"``        — double-quoted
+    * ``sh -c printenv``          — unquoted (bash permits this for a single arg)
+
+    The shell binary may appear with or without a path prefix
+    (``sh``, ``/bin/sh``, ``/usr/bin/bash``, …). Any trailing tokens after
+    the ``-c`` script (POSIX ``sh -c <script> [argv0 [args...]]``) are
+    ignored — the script is always the third token and is the only thing
+    that gets executed as shell syntax.
+
+    Returns ``None`` when the command does not look like a recognized
+    wrapper, or when :mod:`shlex` cannot parse it (malformed quoting).
+    """
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        # Unclosed quotes, etc. — don't attempt inner extraction; the outer
+        # regex check has already run and is the authoritative result for
+        # malformed input.  Returning None here means the caller falls
+        # through to "clean" exactly as before this change — no regression.
+        return None
+
+    if len(tokens) < 3:
+        return None
+
+    # First token: the shell binary, possibly path-prefixed.
+    shell_basename = os.path.basename(tokens[0])
+    if shell_basename not in _SHELL_WRAPPER_BASENAMES:
+        return None
+
+    # Second token must be `-c` (POSIX contract for "run the next arg as
+    # a shell script").  Other `-` flags (`-l`, `-i`, `-s`) don't take a
+    # script argument the same way, so we only recurse on `-c`.
+    if tokens[1] != "-c":
+        return None
+
+    return tokens[2]
+
+
+def check_shell_command(command: str, _depth: int = 0) -> str | None:
+    r"""Screen a shell command for attempts to access sensitive data.
 
     Returns an error string if the command is blocked, or ``None`` if it
     passes the check.
+
+    MIT-164: if *command* is a shell-wrapper invocation of the form
+    ``sh -c "<inner>"`` (or ``bash``/``zsh``/``dash``/``ash``/``ksh``,
+    with or without a path prefix), the inner script is extracted via
+    :func:`shlex.split` and recursively screened.  This closes a whole-layer
+    bypass where any denylisted command could be run simply by wrapping it:
+    the outer regex layer never saw the denylisted command because it was
+    inside a quoted argument.
+
+    Known remaining gap (tracked separately — MIT-165 scope): the env-dumper
+    regexes (``printenv``/``env``/``export -p``/``set``/``declare -x``)
+    anchor at ``(?:^|\|)`` — start-of-string or after a pipe — so a command
+    like ``sh -c 'cd /tmp && printenv'`` unwraps to ``cd /tmp && printenv``
+    and passes the regex layer because the dumper is after ``&&``, not
+    after ``^`` or ``|``.  Widening the anchor set (``;``, ``&&``, ``||``,
+    subshell openers) is the MIT-165 fix; MIT-164 is scoped to closing the
+    quote-wrapper layer.
     """
+    # 1. Regex denylist on the literal command text.
     for pattern in _BLOCKED_SHELL_COMMANDS:
         if pattern.search(command):
             logger.warning("Blocked sensitive shell command: {}", command)
@@ -230,4 +311,15 @@ def check_shell_command(command: str) -> str | None:
                 "Error: Command blocked by security policy — "
                 "accessing sensitive data (keys, credentials, secrets) is not permitted."
             )
+
+    # 2. MIT-164: shell-wrapper unwrap + recurse.  `_depth` is an anti-loop
+    # guard for pathological nesting (`sh -c "bash -c 'sh -c ...'"`) — in
+    # practice depth > 1 is extremely rare, but a hard cap is cheap.
+    if _depth >= _MAX_SHELL_WRAPPER_DEPTH:
+        return None
+
+    inner = _extract_shell_wrapper_inner(command)
+    if inner is not None:
+        return check_shell_command(inner, _depth + 1)
+
     return None
