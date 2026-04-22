@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import secrets
@@ -160,18 +161,48 @@ class AnthropicProvider(LLMProvider):
 
         return system, self._merge_consecutive(raw)
 
-    @staticmethod
-    def _tool_result_block(msg: dict[str, Any]) -> dict[str, Any]:
+    def _tool_result_block(self, msg: dict[str, Any]) -> dict[str, Any]:
         content = msg.get("content")
         block: dict[str, Any] = {
             "type": "tool_result",
             "tool_use_id": msg.get("tool_call_id", ""),
         }
-        if isinstance(content, (str, list)):
-            block["content"] = content
-        else:
-            block["content"] = str(content) if content else ""
+        block["content"] = self._normalize_tool_result_content(content)
         return block
+
+    def _normalize_tool_result_content(self, content: Any) -> str | list[dict[str, Any]]:
+        """Normalize tool_result payloads to Anthropic-supported content blocks."""
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return str(content) if content else ""
+
+        normalized: list[dict[str, Any]] = []
+        for item in content:
+            if isinstance(item, str):
+                normalized.append({"type": "text", "text": item})
+                continue
+            if not isinstance(item, dict):
+                normalized.append({"type": "text", "text": str(item)})
+                continue
+
+            item_type = item.get("type")
+            if item_type in {"text", "input_text", "output_text"}:
+                text = item.get("text", "")
+                normalized.append({"type": "text", "text": text if isinstance(text, str) else str(text)})
+                continue
+            if item_type == "image_url":
+                converted = self._convert_image_block(item)
+                if converted:
+                    normalized.append(converted)
+                    continue
+            if item_type in {"image", "document"}:
+                normalized.append(dict(item))
+                continue
+
+            normalized.append({"type": "text", "text": json.dumps(item, ensure_ascii=False)})
+
+        return normalized or ""
 
     @staticmethod
     def _assistant_blocks(msg: dict[str, Any]) -> list[dict[str, Any]]:
