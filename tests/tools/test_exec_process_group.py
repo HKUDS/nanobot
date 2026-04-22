@@ -34,9 +34,19 @@ import pytest
 
 from nanobot.agent.tools.shell import ExecTool
 
+# Skip on Windows (no POSIX process groups) *and* on POSIX platforms without
+# a Linux-style /proc filesystem (macOS/BSD). The real-subprocess tests locate
+# their grandchildren by scanning /proc/<pid>/cmdline; there's no portable
+# equivalent we can rely on without shelling out to pgrep, which the exec
+# prescreen may itself filter. The production fix (start_new_session + killpg)
+# is exercised generically via the mocked _kill_process tests below, so the
+# /proc-dependent cases just add Linux-side defense in depth.
 pytestmark = pytest.mark.skipif(
-    sys.platform == "win32",
-    reason="Process-group cleanup is POSIX-only; Windows uses a different path.",
+    sys.platform == "win32" or not os.path.isdir("/proc"),
+    reason=(
+        "Process-group cleanup tests require a Linux-style /proc filesystem; "
+        "Windows has no POSIX process groups and macOS/BSD lack /proc."
+    ),
 )
 
 
