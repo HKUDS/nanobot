@@ -31,6 +31,7 @@
 - **2026-04-16** 📡 SSE streaming for OpenAI-compatible API, Discord channel allow-list.
 - **2026-04-15** 🎛️ LM Studio & nullable API keys, MiniMax thinking endpoint, runtime SelfTool.
 - **2026-04-14** 🚀 Released **v0.1.5.post1** — Dream skill discovery, mid-turn follow-up injection, WebSocket channel, and deeper channel integrations. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.5.post1) for details.
+- **2026-04-14** 🛡️ Added **Restricted Mode** and privilege-aware tool access — unprivileged users are now isolated from sensitive system info and tools.
 - **2026-04-13** 🛡️ Agent turn hardened — user messages persisted early, auto-compact skips active tasks.
 - **2026-04-12** 🔒 Lark global domain support, Dream learns discovered skills, shell sandbox tightened.
 - **2026-04-11** ⚡ Context compact shrinks sessions on the fly; Kagi web search; QQ & WeCom full media.
@@ -120,8 +121,8 @@
 ## 📦 Install
 
 > [!IMPORTANT]
-> If you want the newest features and experiments, install from source. 
-> 
+> If you want the newest features and experiments, install from source.
+>
 > If you want the most stable day-to-day experience, install from PyPI or with `uv`.
 
 **Install from source**

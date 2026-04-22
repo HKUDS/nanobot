@@ -1,3 +1,4 @@
+import re
 import shlex
 import subprocess
 import sys
@@ -564,8 +565,11 @@ async def test_exec_head_tail_truncation(tmp_path) -> None:
         command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script_file))}"
     result = await tool.execute(command=command)
     assert "chars truncated" in result
+    # Strip terminal escape sequences (e.g. OSC title sequences from bash
+    # shell integration) so the assertion is environment-robust.
+    result_clean = re.sub(r"\x1b\][^\x07]*\x07|\x1b\[[0-9;]*m", "", result)
     # Head portion should start with As
-    assert result.startswith("A")
+    assert result_clean.startswith("A")
     # Tail portion should end with the exit code which comes after Bs
     assert "Exit code:" in result
 

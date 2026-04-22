@@ -110,6 +110,12 @@ class ProviderConfig(Base):
 class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
+    model_config = ConfigDict(
+        alias_generator=to_camel,
+        populate_by_name=True,
+        extra="allow",
+    )
+
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -222,6 +228,7 @@ class ToolsConfig(Base):
     restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
+    admin_tools: list[str] | None = None  # Tools that require explicit allowFrom privilege. If None, uses hardcoded CLI_TOOLS.
 
 
 class Config(BaseSettings):
@@ -239,6 +246,21 @@ class Config(BaseSettings):
         """Get expanded workspace path."""
         return Path(self.agents.defaults.workspace).expanduser()
 
+    def _get_provider_config(self, name: str) -> ProviderConfig | None:
+        """Helper to retrieve provider config from both fixed and dynamic fields."""
+        # 1. Check fixed fields
+        val = getattr(self.providers, name, None)
+        if isinstance(val, ProviderConfig):
+            return val
+        # 2. Check dynamic fields in model_extra
+        if self.providers.model_extra and name in self.providers.model_extra:
+            extra = self.providers.model_extra[name]
+            if isinstance(extra, ProviderConfig):
+                return extra
+            if isinstance(extra, dict):
+                return ProviderConfig(**extra)
+        return None
+
     def _match_provider(
         self, model: str | None = None
     ) -> tuple["ProviderConfig | None", str | None]:
@@ -249,7 +271,7 @@ class Config(BaseSettings):
         if forced != "auto":
             spec = find_by_name(forced)
             if spec:
-                p = getattr(self.providers, spec.name, None)
+                p = self._get_provider_config(spec.name)
                 return (p, spec.name) if p else (None, None)
             return None, None
 
@@ -264,14 +286,20 @@ class Config(BaseSettings):
 
         # Explicit provider prefix wins — prevents `github-copilot/...codex` matching openai_codex.
         for spec in PROVIDERS:
-            p = getattr(self.providers, spec.name, None)
+            p = self._get_provider_config(spec.name)
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or p.api_key:
                     return p, spec.name
 
+        # Also check dynamic providers by prefix if not in static registry
+        if model_prefix:
+            p = self._get_provider_config(normalized_prefix)
+            if p and p.api_key:
+                return p, normalized_prefix
+
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
-            p = getattr(self.providers, spec.name, None)
+            p = self._get_provider_config(spec.name)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
                 if spec.is_oauth or spec.is_local or p.api_key:
                     return p, spec.name
@@ -284,7 +312,7 @@ class Config(BaseSettings):
         for spec in PROVIDERS:
             if not spec.is_local:
                 continue
-            p = getattr(self.providers, spec.name, None)
+            p = self._get_provider_config(spec.name)
             if not (p and p.api_base):
                 continue
             if spec.detect_by_base_keyword and spec.detect_by_base_keyword in p.api_base:
@@ -299,7 +327,7 @@ class Config(BaseSettings):
         for spec in PROVIDERS:
             if spec.is_oauth:
                 continue
-            p = getattr(self.providers, spec.name, None)
+            p = self._get_provider_config(spec.name)
             if p and p.api_key:
                 return p, spec.name
         return None, None

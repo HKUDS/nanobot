@@ -406,7 +406,11 @@ class LLMProvider(ABC):
                 merged.append(dict(msg))
 
         last_popped = None
-        while merged and merged[-1].get("role") == "assistant":
+        while (
+            merged
+            and merged[-1].get("role") == "assistant"
+            and not merged[-1].get("tool_calls")
+        ):
             last_popped = merged.pop()
 
         # If removing trailing assistant messages left only system messages,

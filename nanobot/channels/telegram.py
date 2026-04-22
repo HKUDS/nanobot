@@ -16,7 +16,7 @@ from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
@@ -46,10 +46,10 @@ def _tool_hint_to_telegram_blockquote(text: str) -> str:
 
 def _strip_md(s: str) -> str:
     """Strip markdown inline formatting from text."""
-    s = re.sub(r'\*\*(.+?)\*\*', r'\1', s)
-    s = re.sub(r'__(.+?)__', r'\1', s)
-    s = re.sub(r'~~(.+?)~~', r'\1', s)
-    s = re.sub(r'`([^`]+)`', r'\1', s)
+    s = re.sub(r"\*\*(.+?)\*\*", r"\1", s)
+    s = re.sub(r"__(.+?)__", r"\1", s)
+    s = re.sub(r"~~(.+?)~~", r"\1", s)
+    s = re.sub(r"`([^`]+)`", r"\1", s)
     return s.strip()
 
 
@@ -85,32 +85,32 @@ def _render_table_box(table_lines: list[str]) -> str:
     """Convert markdown pipe-table to compact aligned text for <pre> display."""
 
     def dw(s: str) -> int:
-        return sum(2 if unicodedata.east_asian_width(c) in ('W', 'F') else 1 for c in s)
+        return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
 
     rows: list[list[str]] = []
     has_sep = False
     for line in table_lines:
-        cells = [_strip_md(c) for c in line.strip().strip('|').split('|')]
-        if all(re.match(r'^:?-+:?$', c) for c in cells if c):
+        cells = [_strip_md(c) for c in line.strip().strip("|").split("|")]
+        if all(re.match(r"^:?-+:?$", c) for c in cells if c):
             has_sep = True
             continue
         rows.append(cells)
     if not rows or not has_sep:
-        return '\n'.join(table_lines)
+        return "\n".join(table_lines)
 
     ncols = max(len(r) for r in rows)
     for r in rows:
-        r.extend([''] * (ncols - len(r)))
+        r.extend([""] * (ncols - len(r)))
     widths = [max(dw(r[c]) for r in rows) for c in range(ncols)]
 
     def dr(cells: list[str]) -> str:
-        return '  '.join(f'{c}{" " * (w - dw(c))}' for c, w in zip(cells, widths))
+        return "  ".join(f"{c}{' ' * (w - dw(c))}" for c, w in zip(cells, widths))
 
     out = [dr(rows[0])]
-    out.append('  '.join('─' * w for w in widths))
+    out.append("  ".join("─" * w for w in widths))
     for row in rows[1:]:
         out.append(dr(row))
-    return '\n'.join(out)
+    return "\n".join(out)
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -122,24 +122,25 @@ def _markdown_to_telegram_html(text: str) -> str:
 
     # 1. Extract and protect code blocks (preserve content from other processing)
     code_blocks: list[str] = []
+
     def save_code_block(m: re.Match) -> str:
         code_blocks.append(m.group(1))
         return f"\x00CB{len(code_blocks) - 1}\x00"
 
-    text = re.sub(r'```[\w]*\n?([\s\S]*?)```', save_code_block, text)
+    text = re.sub(r"```[\w]*\n?([\s\S]*?)```", save_code_block, text)
 
     # 1.5. Convert markdown tables to box-drawing (reuse code_block placeholders)
-    lines = text.split('\n')
+    lines = text.split("\n")
     rebuilt: list[str] = []
     li = 0
     while li < len(lines):
-        if re.match(r'^\s*\|.+\|', lines[li]):
+        if re.match(r"^\s*\|.+\|", lines[li]):
             tbl: list[str] = []
-            while li < len(lines) and re.match(r'^\s*\|.+\|', lines[li]):
+            while li < len(lines) and re.match(r"^\s*\|.+\|", lines[li]):
                 tbl.append(lines[li])
                 li += 1
             box = _render_table_box(tbl)
-            if box != '\n'.join(tbl):
+            if box != "\n".join(tbl):
                 code_blocks.append(box)
                 rebuilt.append(f"\x00CB{len(code_blocks) - 1}\x00")
             else:
@@ -147,40 +148,41 @@ def _markdown_to_telegram_html(text: str) -> str:
         else:
             rebuilt.append(lines[li])
             li += 1
-    text = '\n'.join(rebuilt)
+    text = "\n".join(rebuilt)
 
     # 2. Extract and protect inline code
     inline_codes: list[str] = []
+
     def save_inline_code(m: re.Match) -> str:
         inline_codes.append(m.group(1))
         return f"\x00IC{len(inline_codes) - 1}\x00"
 
-    text = re.sub(r'`([^`]+)`', save_inline_code, text)
+    text = re.sub(r"`([^`]+)`", save_inline_code, text)
 
     # 3. Headers # Title -> <b>Title</b> (preserve visual hierarchy)
     text = re.sub(r'^#{1,6}\s+(.+)$', r'⟪B⟫\1⟪/B⟫', text, flags=re.MULTILINE)
 
     # 4. Blockquotes > text -> just the text (before HTML escaping)
-    text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
+    text = re.sub(r"^>\s*(.*)$", r"\1", text, flags=re.MULTILINE)
 
     # 5. Escape HTML special characters
     text = _escape_telegram_html(text)
 
     # 6. Links [text](url) - must be before bold/italic to handle nested cases
-    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2">\1</a>', text)
 
     # 7. Bold **text** or __text__
-    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-    text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
+    text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+    text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
 
     # 8. Italic _text_ (avoid matching inside words like some_var_name)
-    text = re.sub(r'(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])', r'<i>\1</i>', text)
+    text = re.sub(r"(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])", r"<i>\1</i>", text)
 
     # 9. Strikethrough ~~text~~
-    text = re.sub(r'~~(.+?)~~', r'<s>\1</s>', text)
+    text = re.sub(r"~~(.+?)~~", r"<s>\1</s>", text)
 
     # 10. Bullet lists - item -> • item
-    text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
+    text = re.sub(r"^[-*]\s+", "• ", text, flags=re.MULTILINE)
 
     # 10.5. Numbered lists  1. item -> 1. item (keep number, normalize indent)
     text = re.sub(r'^(\d+)\.\s+', r'\1. ', text, flags=re.MULTILINE)
@@ -211,6 +213,7 @@ _STREAM_EDIT_INTERVAL_DEFAULT = 0.6  # min seconds between edit_message_text cal
 @dataclass
 class _StreamBuf:
     """Per-chat streaming accumulator for progressive message editing."""
+
     text: str = ""
     message_id: int | None = None
     last_edit: float = 0.0
@@ -227,6 +230,8 @@ class TelegramConfig(Base):
     reply_to_message: bool = False
     react_emoji: str = "👀"
     group_policy: Literal["open", "mention"] = "mention"
+    group_allow_from: list[str] = Field(default_factory=list)
+    log_all_messages: bool = False
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
@@ -284,15 +289,58 @@ class TelegramChannel(BaseChannel):
         if not allow_list or "*" in allow_list:
             return False
 
+        # If no pipe, we already checked it via super().is_allowed()
         sender_str = str(sender_id)
-        if sender_str.count("|") != 1:
+        if "|" not in sender_str:
             return False
 
-        sid, username = sender_str.split("|", 1)
-        if not sid.isdigit() or not username:
+        # sender_id format: "id|name" or "id|name [BOT]" or "id|username"
+        parts = sender_str.split("|", 1)
+        sid = parts[0]
+        if not sid.isdigit():
             return False
 
-        return sid in allow_list or username in allow_list
+        # Remove [BOT] suffix from name/username for matching if present
+        remainder = parts[1].replace(" [BOT]", "").strip()
+
+        return sid in allow_list or remainder in allow_list
+
+    async def _handle_message(
+        self,
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        media: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        """Apply sender allowlist to DMs and to groups when group_allow_from is unset."""
+        meta = metadata or {}
+        if not meta.get("is_group") or not self.config.group_allow_from:
+            await super()._handle_message(
+                sender_id=sender_id,
+                chat_id=chat_id,
+                content=content,
+                media=media,
+                metadata=meta,
+                session_key=session_key,
+            )
+            return
+
+        if self.supports_streaming:
+            meta = {**meta, "_wants_stream": True}
+
+        await self.bus.publish_inbound(
+            InboundMessage(
+                channel=self.name,
+                sender_id=str(sender_id),
+                chat_id=str(chat_id),
+                content=content,
+                media=media or [],
+                metadata=meta,
+                session_key_override=session_key,
+            )
+        )
 
     @staticmethod
     def _normalize_telegram_command(content: str) -> str:
@@ -349,7 +397,9 @@ class TelegramChannel(BaseChannel):
         )
         self._app.add_handler(
             MessageHandler(
-                filters.Regex(r"^/(dream-log|dream_log|dream-restore|dream_restore)(?:@\w+)?(?:\s+.*)?$"),
+                filters.Regex(
+                    r"^/(dream-log|dream_log|dream-restore|dream_restore)(?:@\w+)?(?:\s+.*)?$"
+                ),
                 self._forward_command,
             )
         )
@@ -358,9 +408,16 @@ class TelegramChannel(BaseChannel):
         # Add message handler for text, photos, voice, documents, and locations
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL | filters.LOCATION)
+                (
+                    filters.TEXT
+                    | filters.PHOTO
+                    | filters.VOICE
+                    | filters.AUDIO
+                    | filters.Document.ALL
+                    | filters.LOCATION
+                )
                 & ~filters.COMMAND,
-                self._on_message
+                self._on_message,
             )
         )
 
@@ -461,12 +518,11 @@ class TelegramChannel(BaseChannel):
         if self.config.reply_to_message:
             if reply_to_message_id:
                 reply_params = ReplyParameters(
-                    message_id=reply_to_message_id,
-                    allow_sending_without_reply=True
+                    message_id=reply_to_message_id, allow_sending_without_reply=True
                 )
 
         # Send media files
-        for media_path in (msg.media or []):
+        for media_path in msg.media or []:
             try:
                 media_type = self._get_media_type(media_path)
                 sender = {
@@ -474,7 +530,13 @@ class TelegramChannel(BaseChannel):
                     "voice": self._app.bot.send_voice,
                     "audio": self._app.bot.send_audio,
                 }.get(media_type, self._app.bot.send_document)
-                param = "photo" if media_type == "photo" else media_type if media_type in ("voice", "audio") else "document"
+                param = (
+                    "photo"
+                    if media_type == "photo"
+                    else media_type
+                    if media_type in ("voice", "audio")
+                    else "document"
+                )
 
                 # Telegram Bot API accepts HTTP(S) URLs directly for media params.
                 if self._is_remote_media_url(media_path):
@@ -512,14 +574,17 @@ class TelegramChannel(BaseChannel):
             render_as_blockquote = bool(msg.metadata.get("_tool_hint"))
             for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
                 await self._send_text(
-                    chat_id, chunk, reply_params, thread_kwargs,
+                    chat_id,
+                    chunk,
+                    reply_params,
+                    thread_kwargs,
                     render_as_blockquote=render_as_blockquote,
                 )
 
     async def _call_with_retry(self, fn, *args, **kwargs):
         """Call an async Telegram API function with retry on pool/network timeout and RetryAfter."""
         from telegram.error import RetryAfter
-        
+
         for attempt in range(1, _SEND_MAX_RETRIES + 1):
             try:
                 return await fn(*args, **kwargs)
@@ -529,7 +594,9 @@ class TelegramChannel(BaseChannel):
                 delay = _SEND_RETRY_BASE_DELAY * (2 ** (attempt - 1))
                 logger.warning(
                     "Telegram timeout (attempt {}/{}), retrying in {:.1f}s",
-                    attempt, _SEND_MAX_RETRIES, delay,
+                    attempt,
+                    _SEND_MAX_RETRIES,
+                    delay,
                 )
                 await asyncio.sleep(delay)
             except RetryAfter as e:
@@ -538,7 +605,9 @@ class TelegramChannel(BaseChannel):
                 delay = float(e.retry_after)
                 logger.warning(
                     "Telegram Flood Control (attempt {}/{}), retrying in {:.1f}s",
-                    attempt, _SEND_MAX_RETRIES, delay,
+                    attempt,
+                    _SEND_MAX_RETRIES,
+                    delay,
                 )
                 await asyncio.sleep(delay)
 
@@ -552,10 +621,16 @@ class TelegramChannel(BaseChannel):
     ) -> None:
         """Send a plain text message with HTML fallback."""
         try:
-            html = _tool_hint_to_telegram_blockquote(text) if render_as_blockquote else _markdown_to_telegram_html(text)
+            html = (
+                _tool_hint_to_telegram_blockquote(text)
+                if render_as_blockquote
+                else _markdown_to_telegram_html(text)
+            )
             await self._call_with_retry(
                 self._app.bot.send_message,
-                chat_id=chat_id, text=html, parse_mode="HTML",
+                chat_id=chat_id,
+                text=html,
+                parse_mode="HTML",
                 reply_parameters=reply_params,
                 **(thread_kwargs or {}),
             )
@@ -580,7 +655,9 @@ class TelegramChannel(BaseChannel):
     def _is_not_modified_error(exc: Exception) -> bool:
         return isinstance(exc, BadRequest) and "message is not modified" in str(exc).lower()
 
-    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
+    async def send_delta(
+        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+    ) -> None:
         """Progressive message editing: send on first delta, edit on subsequent ones."""
         if not self._app:
             return
@@ -656,7 +733,9 @@ class TelegramChannel(BaseChannel):
             return
 
         buf = self._stream_bufs.get(chat_id)
-        if buf is None or (stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id):
+        if buf is None or (
+            stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id
+        ):
             buf = _StreamBuf(stream_id=stream_id)
             self._stream_bufs[chat_id] = buf
         elif buf.stream_id is None:
@@ -761,9 +840,21 @@ class TelegramChannel(BaseChannel):
 
     @staticmethod
     def _sender_id(user) -> str:
-        """Build sender_id with username for allowlist matching."""
+        """Build sender_id with username or full_name for allowlist matching and logging."""
         sid = str(user.id)
-        return f"{sid}|{user.username}" if user.username else sid
+        is_bot = " [BOT]" if getattr(user, "is_bot", False) else ""
+
+        # Use full_name (combines first and last) if available, it's more descriptive than username
+        name = getattr(user, "full_name", None) or user.first_name or ""
+        suffix = f" ({user.username})" if user.username else ""
+
+        if name:
+            return f"{sid}|{name}{suffix}{is_bot}"
+
+        if user.username:
+            return f"{sid}|{user.username}{is_bot}"
+
+        return f"{sid}{is_bot}"
 
     @staticmethod
     def _derive_topic_session_key(message) -> str | None:
@@ -796,13 +887,13 @@ class TelegramChannel(BaseChannel):
         text = getattr(reply, "text", None) or getattr(reply, "caption", None) or ""
         if len(text) > TELEGRAM_REPLY_CONTEXT_MAX_LEN:
             text = text[:TELEGRAM_REPLY_CONTEXT_MAX_LEN] + "..."
-            
+
         if not text:
             return None
-            
+
         bot_id, _ = await self._ensure_bot_identity()
         reply_user = getattr(reply, "from_user", None)
-        
+
         if bot_id and reply_user and getattr(reply_user, "id", None) == bot_id:
             return f"[Reply to bot: {text}]"
         elif reply_user and getattr(reply_user, "username", None):
@@ -875,6 +966,7 @@ class TelegramChannel(BaseChannel):
         bot_info = await self._app.bot.get_me()
         self._bot_user_id = getattr(bot_info, "id", None)
         self._bot_username = getattr(bot_info, "username", None)
+        logger.debug("Telegram bot identity: id={}, username={}", self._bot_user_id, self._bot_username)
         return self._bot_user_id, self._bot_username
 
     @staticmethod
@@ -930,6 +1022,24 @@ class TelegramChannel(BaseChannel):
         reply_user = getattr(getattr(message, "reply_to_message", None), "from_user", None)
         return bool(bot_id and reply_user and reply_user.id == bot_id)
 
+    def _is_group_allowed(self, message) -> bool:
+        """Allow private chats by default; optionally restrict non-private chats by chat_id."""
+        if getattr(message.chat, "type", "private") == "private":
+            return True
+
+        allowed_groups = self.config.group_allow_from
+        if not allowed_groups:
+            return True
+
+        return str(message.chat_id) in allowed_groups
+
+    def _is_update_group_allowed(self, update: Update) -> bool:
+        """Apply groupAllowFrom gating consistently for any handler working from an Update."""
+        message = getattr(update, "effective_message", None)
+        if message is None:
+            return True
+        return self._is_group_allowed(message)
+
     def _remember_thread_context(self, message) -> None:
         """Cache Telegram thread context by chat/message id for follow-up replies."""
         message_thread_id = getattr(message, "message_thread_id", None)
@@ -944,20 +1054,39 @@ class TelegramChannel(BaseChannel):
         """Forward slash commands to the bus for unified handling in AgentLoop."""
         if not update.message or not update.effective_user:
             return
+
+        # Skip messages from the bot itself
+        bot_id, _ = await self._ensure_bot_identity()
+        if bot_id and update.effective_user.id == bot_id:
+            return
+
         message = update.message
+        if not self._is_group_allowed(message):
+            return
         user = update.effective_user
+        sender_id = self._sender_id(user)
+        if not self.is_allowed(sender_id):
+            return
         self._remember_thread_context(message)
-        
-        # Strip @bot_username suffix if present
+
         content = message.text or ""
+        # Handle @bot_username suffix in commands
         if content.startswith("/") and "@" in content:
-            cmd_part, *rest = content.split(" ", 1)
-            cmd_part = cmd_part.split("@")[0]
-            content = f"{cmd_part} {rest[0]}" if rest else cmd_part
+            bot_id, bot_username = await self._ensure_bot_identity()
+            if bot_username:
+                handle = f"@{bot_username}".lower()
+                cmd_part, *rest = content.split(" ", 1)
+                if cmd_part.lower().endswith(handle):
+                    # Command is for this bot - strip the @username
+                    cmd_part = cmd_part.split("@")[0]
+                    content = f"{cmd_part} {rest[0]}" if rest else cmd_part
+                else:
+                    # Command is for a different bot - ignore it
+                    return
         content = self._normalize_telegram_command(content)
-            
+
         await self._handle_message(
-            sender_id=self._sender_id(user),
+            sender_id=sender_id,
             chat_id=str(message.chat_id),
             content=content,
             metadata=self._build_message_metadata(message, user),
@@ -969,7 +1098,14 @@ class TelegramChannel(BaseChannel):
         if not update.message or not update.effective_user:
             return
 
+        # Skip messages from the bot itself to avoid loops
+        bot_id, _ = await self._ensure_bot_identity()
+        if bot_id and update.effective_user.id == bot_id:
+            return
+
         message = update.message
+        if not self._is_group_allowed(message):
+            return
         user = update.effective_user
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
@@ -979,6 +1115,40 @@ class TelegramChannel(BaseChannel):
         self._chat_ids[sender_id] = chat_id
 
         if not await self._is_group_message_for_bot(message):
+            if self.config.log_all_messages:
+                content_parts = []
+                media_paths = []
+
+                if message.text:
+                    content_parts.append(message.text)
+                if message.caption:
+                    content_parts.append(message.caption)
+
+                if message.location:
+                    lat = message.location.latitude
+                    lon = message.location.longitude
+                    content_parts.append(f"[location: {lat}, {lon}]")
+
+                current_media_paths, current_media_parts = await self._download_message_media(
+                    message, add_failure_content=True
+                )
+                media_paths.extend(current_media_paths)
+                content_parts.extend(current_media_parts)
+
+                content = "\n".join(content_parts) if content_parts else "[empty message]"
+                str_chat_id = str(chat_id)
+                metadata = self._build_message_metadata(message, user)
+                session_key = self._derive_topic_session_key(message)
+                silent_metadata = {**metadata, "_store_only": True}
+
+                await self._handle_message(
+                    sender_id=sender_id,
+                    chat_id=str_chat_id,
+                    content=content,
+                    media=media_paths,
+                    metadata=silent_metadata,
+                    session_key=session_key,
+                )
             return
 
         # Build content from text and/or media
@@ -1014,7 +1184,9 @@ class TelegramChannel(BaseChannel):
             if reply_media:
                 media_paths = reply_media + media_paths
                 logger.debug("Attached replied-to media: {}", reply_media[0])
-            tag = reply_ctx or (f"[Reply to: {reply_media_parts[0]}]" if reply_media_parts else None)
+            tag = reply_ctx or (
+                f"[Reply to: {reply_media_parts[0]}]" if reply_media_parts else None
+            )
             if tag:
                 content_parts.insert(0, tag)
         content = "\n".join(content_parts) if content_parts else "[empty message]"
@@ -1025,13 +1197,28 @@ class TelegramChannel(BaseChannel):
         metadata = self._build_message_metadata(message, user)
         session_key = self._derive_topic_session_key(message)
 
+        # Apply permission check before visual feedback (typing/reaction)
+        if not self.is_allowed(sender_id):
+            # Still call _handle_message so it can log the denial
+            await self._handle_message(
+                sender_id=sender_id,
+                chat_id=str_chat_id,
+                content=content,
+                media=media_paths,
+                metadata=metadata,
+                session_key=session_key,
+            )
+            return
+
         # Telegram media groups: buffer briefly, forward as one aggregated turn.
         if media_group_id := getattr(message, "media_group_id", None):
             key = f"{str_chat_id}:{media_group_id}"
             if key not in self._media_group_buffers:
                 self._media_group_buffers[key] = {
-                    "sender_id": sender_id, "chat_id": str_chat_id,
-                    "contents": [], "media": [],
+                    "sender_id": sender_id,
+                    "chat_id": str_chat_id,
+                    "contents": [],
+                    "media": [],
                     "metadata": metadata,
                     "session_key": session_key,
                 }
@@ -1045,7 +1232,7 @@ class TelegramChannel(BaseChannel):
                 self._media_group_tasks[key] = asyncio.create_task(self._flush_media_group(key))
             return
 
-        # Start typing indicator before processing
+        # Start typing indicator before processing (for allowed users)
         self._start_typing(str_chat_id)
         await self._add_reaction(str_chat_id, message.message_id, self.config.react_emoji)
 
@@ -1067,8 +1254,10 @@ class TelegramChannel(BaseChannel):
                 return
             content = "\n".join(buf["contents"]) or "[empty message]"
             await self._handle_message(
-                sender_id=buf["sender_id"], chat_id=buf["chat_id"],
-                content=content, media=list(dict.fromkeys(buf["media"])),
+                sender_id=buf["sender_id"],
+                chat_id=buf["chat_id"],
+                content=content,
+                media=list(dict.fromkeys(buf["media"])),
                 metadata=buf["metadata"],
                 session_key=buf.get("session_key"),
             )
@@ -1164,8 +1353,12 @@ class TelegramChannel(BaseChannel):
         """Get file extension based on media type or original filename."""
         if mime_type:
             ext_map = {
-                "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
-                "audio/ogg": ".ogg", "audio/mpeg": ".mp3", "audio/mp4": ".m4a",
+                "image/jpeg": ".jpg",
+                "image/png": ".png",
+                "image/gif": ".gif",
+                "audio/ogg": ".ogg",
+                "audio/mpeg": ".mp3",
+                "audio/mp4": ".m4a",
             }
             if mime_type in ext_map:
                 return ext_map[mime_type]

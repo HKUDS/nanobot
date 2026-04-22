@@ -731,12 +731,15 @@ def _run_gateway(
             pass
 
         try:
+            logger.info("Cron: running job '{}' for {}:{} (sender: {})", job.name, job.payload.channel or "cli", job.payload.to or "direct", job.payload.sender_id or "user")
             resp = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                sender_id=job.payload.sender_id or "user",
                 on_progress=_silent,
+                privileged=True,  # Cron jobs are system-initiated; always grant full tool access
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
@@ -797,6 +800,7 @@ def _run_gateway(
             channel=channel,
             chat_id=chat_id,
             on_progress=_silent,
+            privileged=True,  # Heartbeat is system-initiated; always grant full tool access
         )
 
         # Keep a small tail of heartbeat history so the loop stays bounded

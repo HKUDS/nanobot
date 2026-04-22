@@ -174,6 +174,97 @@ async def test_send_updates_reaction_when_final_response_sent() -> None:
     ]
 
 
+def test_is_allowed_group_checks_user_allow_from() -> None:
+    """Groups should check both group_allow_from and user-level allow_from."""
+    channel = SlackChannel(
+        SlackConfig(
+            enabled=True,
+            allow_from=["U123"],
+            group_policy="allowlist",
+            group_allow_from=["C456"],
+        ),
+        MessageBus(),
+    )
+
+    # User in allow_from, channel in group_allow_from - should succeed
+    assert channel._is_allowed("U123", "C456", "channel") is True
+
+    # User NOT in allow_from, but channel in group_allow_from - should fail
+    assert channel._is_allowed("U999", "C456", "channel") is False
+
+    # User in allow_from, channel NOT in group_allow_from - should fail
+    assert channel._is_allowed("U123", "C999", "channel") is False
+
+
+def test_is_allowed_group_wildcard_allows_all_users() -> None:
+    """Groups with allow_from=['*'] should allow all users in whitelisted channels."""
+    channel = SlackChannel(
+        SlackConfig(
+            enabled=True,
+            allow_from=["*"],
+            group_policy="allowlist",
+            group_allow_from=["C456"],
+        ),
+        MessageBus(),
+    )
+
+    # Any user should be allowed in whitelisted channel
+    assert channel._is_allowed("U123", "C456", "channel") is True
+    assert channel._is_allowed("U999", "C456", "channel") is True
+
+
+def test_is_allowed_group_empty_allow_from_denies_all() -> None:
+    """Groups with empty allow_from should deny all users."""
+    channel = SlackChannel(
+        SlackConfig(
+            enabled=True,
+            allow_from=[],
+            group_policy="allowlist",
+            group_allow_from=["C456"],
+        ),
+        MessageBus(),
+    )
+
+    # Even in whitelisted channel, no user should be allowed
+    assert channel._is_allowed("U123", "C456", "channel") is False
+
+
+def test_is_allowed_group_open_policy_with_user_allow_from() -> None:
+    """Groups with 'open' policy should still check user-level allow_from."""
+    channel = SlackChannel(
+        SlackConfig(
+            enabled=True,
+            allow_from=["U123"],
+            group_policy="open",
+        ),
+        MessageBus(),
+    )
+
+    # User in allow_from - should succeed
+    assert channel._is_allowed("U123", "C456", "channel") is True
+
+    # User NOT in allow_from - should fail
+    assert channel._is_allowed("U999", "C456", "channel") is False
+
+
+def test_is_allowed_dm_uses_dm_config() -> None:
+    """DMs should use dm.allow_from, not top-level allow_from."""
+    channel = SlackChannel(
+        SlackConfig(
+            enabled=True,
+            allow_from=["U123"],
+            dm={"enabled": True, "policy": "allowlist", "allow_from": ["U456"]},
+        ),
+        MessageBus(),
+    )
+
+    # DM: user in dm.allow_from - should succeed
+    assert channel._is_allowed("U456", "D123", "im") is True
+
+    # DM: user NOT in dm.allow_from (but in top-level allow_from) - should fail
+    assert channel._is_allowed("U123", "D123", "im") is False
+
+
 @pytest.mark.asyncio
 async def test_send_resolves_channel_name_to_channel_id() -> None:
     channel = SlackChannel(SlackConfig(enabled=True), MessageBus())

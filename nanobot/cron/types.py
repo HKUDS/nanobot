@@ -27,6 +27,7 @@ class CronPayload:
     deliver: bool = False
     channel: str | None = None  # e.g. "whatsapp"
     to: str | None = None  # e.g. phone number
+    sender_id: str | None = None  # The creator of the job (for privilege checks)
 
 
 @dataclass

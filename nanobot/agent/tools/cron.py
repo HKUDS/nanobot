@@ -60,12 +60,14 @@ class CronTool(Tool):
         self._default_timezone = default_timezone
         self._channel: ContextVar[str] = ContextVar("cron_channel", default="")
         self._chat_id: ContextVar[str] = ContextVar("cron_chat_id", default="")
+        self._sender_id: ContextVar[str] = ContextVar("cron_sender_id", default="")
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
-    def set_context(self, channel: str, chat_id: str) -> None:
+    def set_context(self, channel: str, chat_id: str, sender_id: str = "") -> None:
         """Set the current session context for delivery."""
         self._channel.set(channel)
         self._chat_id.set(chat_id)
+        self._sender_id.set(sender_id)
 
     def set_cron_context(self, active: bool):
         """Mark whether the tool is executing inside a cron job callback."""
@@ -198,8 +200,10 @@ class CronTool(Tool):
             deliver=deliver,
             channel=channel,
             to=chat_id,
+            sender_id=self._sender_id.get(),
             delete_after_run=delete_after,
         )
+
         return f"Created job '{job.name}' (id: {job.id})"
 
     def _format_timing(self, schedule: CronSchedule) -> str:

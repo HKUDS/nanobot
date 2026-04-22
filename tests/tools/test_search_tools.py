@@ -324,8 +324,9 @@ async def test_subagent_registers_grep_and_glob(tmp_path: Path) -> None:
     mgr.runner.run = fake_run
     mgr._announce_result = AsyncMock()
 
+    from nanobot.agent.subagent import SubagentStatus
     status = SubagentStatus(task_id="sub-1", label="label", task_description="search task", started_at=time.monotonic())
-    await mgr._run_subagent("sub-1", "search task", "label", {"channel": "cli", "chat_id": "direct"}, status)
+    await mgr._run_subagent("sub-1", "search task", "label", {"channel": "cli", "chat_id": "direct"}, status, is_privileged=True)
 
     assert "grep" in captured["tool_names"]
     assert "glob" in captured["tool_names"]

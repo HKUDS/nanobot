@@ -41,6 +41,13 @@ from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
+from nanobot.config.schema import (
+    AgentDefaults,
+    ChannelsConfig,
+    ExecToolConfig,
+    WebToolsConfig,
+)
+
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, ToolsConfig, WebToolsConfig
     from nanobot.cron.service import CronService
@@ -73,16 +80,44 @@ class _LoopHook(AgentHook):
         self._message_id = message_id
         self._stream_buf = ""
 
+    @staticmethod
+    def _trim_partial_reasoning_prefix(text: str) -> str:
+        """Trim trailing partial reasoning tag prefixes during streaming."""
+        lower = text.lower()
+        partials = (
+            "</thought",
+            "</thoug",
+            "</thou",
+            "</tho",
+            "</th",
+            "</t",
+            "</",
+            "<thought",
+            "<thoug",
+            "<thou",
+            "<tho",
+            "<think",
+            "<thin",
+            "<thi",
+            "<th",
+            "<t",
+            "<",
+        )
+        for prefix in partials:
+            if lower.endswith(prefix):
+                return text[:-len(prefix)]
+        return text
+
     def wants_streaming(self) -> bool:
         return self._on_stream is not None
 
     async def on_stream(self, context: AgentHookContext, delta: str) -> None:
         from nanobot.utils.helpers import strip_think
 
-        prev_clean = strip_think(self._stream_buf)
+        prev_clean = self._trim_partial_reasoning_prefix(strip_think(self._stream_buf))
         self._stream_buf += delta
-        new_clean = strip_think(self._stream_buf)
-        incremental = new_clean[len(prev_clean) :]
+        new_clean = self._trim_partial_reasoning_prefix(strip_think(self._stream_buf))
+        incremental = new_clean[len(prev_clean):]
         if incremental and self._on_stream:
             await self._on_stream(incremental)
 
@@ -107,7 +142,6 @@ class _LoopHook(AgentHook):
         for tc in context.tool_calls:
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
-        self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         u = context.usage or {}
@@ -136,6 +170,12 @@ class AgentLoop:
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
+
+    # Tools that require explicit allowFrom privilege in the channel config.
+    CLI_TOOLS = frozenset({
+        "read_file", "write_file", "edit_file", "list_dir", "grep", "glob",
+        "exec", "notebook_edit", "spawn"
+    })
 
     def __init__(
         self,
@@ -168,6 +208,7 @@ class AgentLoop:
         defaults = AgentDefaults()
         self.bus = bus
         self.channels_config = channels_config
+        self.tools_config = tools_config
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
@@ -375,11 +416,58 @@ class AgentLoop:
         sub_cancelled = await self.subagents.cancel_by_session(key)
         return cancelled + sub_cancelled
 
+    def _is_strict_policy(self, channel_name: str) -> bool:
+        """True if the channel has an explicit allow-list of user IDs."""
+        if channel_name == "cli":
+            return True
+        if not self.channels_config:
+            return False
+        cfg = self.channels_config.model_extra.get(channel_name)
+        if not isinstance(cfg, dict):
+            return False
+        allow_from = cfg.get("allowFrom") or cfg.get("allow_from", [])
+        if not allow_from:
+            return False
+        # If it's just ["*"], it's not a strict policy (back to old logic).
+        if len(allow_from) == 1 and allow_from[0] == "*":
+            return False
+        return True
+
+    def _is_privileged(self, channel_name: str, sender_id: str) -> bool:
+        """Check if sender_id has explicit permission to use CLI tools in this channel."""
+        if channel_name == "cli":
+            return True
+        if not self._is_strict_policy(channel_name):
+            # Back to old logic: if no strict allow-list, everyone who can talk is privileged.
+            return True
+        if not self.channels_config or not sender_id:
+            return False
+        cfg = self.channels_config.model_extra.get(channel_name)
+        if not isinstance(cfg, dict):
+            return False
+        allow_from = cfg.get("allowFrom") or cfg.get("allow_from", [])
+
+        # Support "id|name" format by checking both the full string and just the ID part
+        sender_str = str(sender_id)
+        is_allowed = sender_str in allow_from
+        if not is_allowed and "|" in sender_str:
+            sid = sender_str.split("|")[0]
+            is_allowed = sid in allow_from
+
+        logger.debug("Privilege check for {}:{}: {}", channel_name, sender_id, is_allowed)
+        return is_allowed
+
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
         if self._unified_session and not msg.session_key_override:
             return UNIFIED_SESSION_KEY
-        return msg.session_key
+        if msg.session_key_override:
+            return msg.session_key_override
+        if not self._is_strict_policy(msg.channel):
+            # Point 4: Back to old logic (group-based session) if not strict.
+            return f"{msg.channel}:{msg.chat_id}"
+        # Point 2: Ensure session isolation by including sender_id for strict channels.
+        return f"{msg.channel}:{msg.chat_id}:{msg.sender_id}"
 
     async def _run_agent_loop(
         self,
@@ -392,9 +480,11 @@ class AgentLoop:
         session: Session | None = None,
         channel: str = "cli",
         chat_id: str = "direct",
+        sender_id: str | None = None,
         message_id: str | None = None,
         pending_queue: asyncio.Queue | None = None,
-    ) -> tuple[str | None, list[str], list[dict], str, bool]:
+        privileged: bool | None = None,
+    ) -> tuple[str | None, list[str], list[dict], str, bool, ToolRegistry]:
         """Run the agent iteration loop.
 
         *on_stream*: called with each content delta during streaming.
@@ -402,7 +492,7 @@ class AgentLoop:
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
 
-        Returns (final_content, tools_used, messages, stop_reason, had_injections).
+        Returns (final_content, tools_used, messages, stop_reason, had_injections, run_tools).
         """
         loop_hook = _LoopHook(
             self,
@@ -450,9 +540,59 @@ class AgentLoop:
                 items.append({"role": "user", "content": merged})
             return items
 
+        # Point 1: Filter tools if the user is not privileged (explicitly in allowFrom).
+        # We also separate stateful tool instances per run to avoid concurrency races.
+        import copy
+        run_tools = ToolRegistry()
+        is_privileged = privileged if privileged is not None else self._is_privileged(channel, sender_id)
+        
+        admin_tools = frozenset()
+        if self.tools_config and self.tools_config.admin_tools is not None:
+            admin_tools = frozenset(self.tools_config.admin_tools)
+
+        for name in self.tools.tool_names:
+            if not is_privileged and (name in admin_tools or name.startswith("mcp_")):
+                continue
+                
+            if tool := self.tools.get(name):
+                # Separate context for stateful tools to avoid race conditions
+                if name in ("message", "spawn", "cron"):
+                    tool = copy.copy(tool)
+                    if name == "message":
+                        tool.set_context(channel, chat_id, message_id)
+                        tool.start_turn()
+                    elif name == "cron":
+                        tool.set_context(channel, chat_id, sender_id)
+                    elif name == "spawn":
+                        effective_key = UNIFIED_SESSION_KEY if self._unified_session else f"{channel}:{chat_id}"
+                        tool.set_context(channel, chat_id, effective_key=effective_key, is_privileged=is_privileged)
+                    
+                run_tools.register(tool)
+
+        async def _log_unauthorized_tool(payload: dict[str, Any]) -> None:
+            await _checkpoint(payload)
+            if not is_privileged and payload.get("phase") == "awaiting_tools":
+                for tc in payload.get("pending_tool_calls", []):
+                    name = tc.get("function", {}).get("name")
+                    # Use the same admin_tools set here (fall back to CLI_TOOLS)
+                    check_tools = self.CLI_TOOLS
+                    if (
+                        self.tools_config
+                        and self.tools_config.admin_tools is not None
+                    ):
+                        check_tools = frozenset(self.tools_config.admin_tools)
+
+                    if name in check_tools or (name and name.startswith("mcp_")):
+                        logger.warning(
+                            "Unauthorized tool call attempt by {}: {}({})",
+                            sender_id,
+                            name,
+                            tc.get("function", {}).get("arguments", ""),
+                        )
+
         result = await self.runner.run(AgentRunSpec(
             initial_messages=initial_messages,
-            tools=self.tools,
+            tools=run_tools,
             model=self.model,
             max_iterations=self.max_iterations,
             max_tool_result_chars=self.max_tool_result_chars,
@@ -466,7 +606,7 @@ class AgentLoop:
             provider_retry_mode=self.provider_retry_mode,
             progress_callback=on_progress,
             retry_wait_callback=on_retry_wait,
-            checkpoint_callback=_checkpoint,
+            checkpoint_callback=_log_unauthorized_tool,
             injection_callback=_drain_pending,
         ))
         self._last_usage = result.usage
@@ -479,7 +619,7 @@ class AgentLoop:
                 await on_stream_end(resuming=False)
         elif result.stop_reason == "error":
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
-        return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections
+        return result.final_content, result.tools_used, result.messages, result.stop_reason, result.had_injections, run_tools
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -506,62 +646,75 @@ class AgentLoop:
                 logger.warning("Error consuming inbound message: {}, continuing...", e)
                 continue
 
-            raw = msg.content.strip()
-            if self.commands.is_priority(raw):
-                await self._dispatch_command_inline(
-                    msg, msg.session_key, raw,
-                    self.commands.dispatch_priority,
-                )
-                continue
-            effective_key = self._effective_session_key(msg)
-            # If this session already has an active pending queue (i.e. a task
-            # is processing this session), route the message there for mid-turn
-            # injection instead of creating a competing task.
-            if effective_key in self._pending_queues:
-                # Non-priority commands must not be queued for injection;
-                # dispatch them directly (same pattern as priority commands).
-                if self.commands.is_dispatchable_command(raw):
-                    await self._dispatch_command_inline(
-                        msg, effective_key, raw,
-                        self.commands.dispatch,
-                    )
-                    continue
-                pending_msg = msg
-                if effective_key != msg.session_key:
-                    pending_msg = dataclasses.replace(
-                        msg,
-                        session_key_override=effective_key,
-                    )
-                try:
-                    self._pending_queues[effective_key].put_nowait(pending_msg)
-                except asyncio.QueueFull:
-                    logger.warning(
-                        "Pending queue full for session {}, falling back to queued task",
-                        effective_key,
-                    )
-                else:
-                    logger.info(
-                        "Routed follow-up message to pending queue for session {}",
-                        effective_key,
-                    )
-                    continue
-            # Compute the effective session key before dispatching
-            # This ensures /stop command can find tasks correctly when unified session is enabled
-            task = asyncio.create_task(self._dispatch(msg))
-            self._active_tasks.setdefault(effective_key, []).append(task)
-            task.add_done_callback(
-                lambda t, k=effective_key: self._active_tasks.get(k, [])
-                and self._active_tasks[k].remove(t)
-                if t in self._active_tasks.get(k, [])
-                else None
+            await self._handle_inbound(msg)
+
+    async def _handle_inbound(self, msg: InboundMessage) -> None:
+        """Handle an inbound message: priority commands, filters, and dispatching."""
+        raw = msg.content.strip()
+        if self.commands.is_priority(raw):
+            await self._dispatch_command_inline(
+                msg, msg.session_key, raw,
+                self.commands.dispatch_priority,
             )
+            return
+
+        # Skip _store_only messages - they're for logging only, not processing
+        if msg.metadata.get("_store_only"):
+            return
+
+        effective_key = self._effective_session_key(msg)
+        # If this session already has an active pending queue (i.e. a task
+        # is processing this session), route the message there for mid-turn
+        # injection instead of creating a competing task.
+        if effective_key in self._pending_queues:
+            # Non-priority commands must not be queued for injection;
+            # dispatch them directly (same pattern as priority commands).
+            if self.commands.is_dispatchable_command(raw):
+                await self._dispatch_command_inline(
+                    msg, effective_key, raw,
+                    self.commands.dispatch,
+                )
+                return
+            pending_msg = msg
+            if effective_key != msg.session_key:
+                pending_msg = dataclasses.replace(
+                    msg,
+                    session_key_override=effective_key,
+                )
+            try:
+                self._pending_queues[effective_key].put_nowait(pending_msg)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "Pending queue full for session {}, falling back to queued task",
+                    effective_key,
+                )
+            else:
+                logger.info(
+                    "Routed follow-up message to pending queue for session {}",
+                    effective_key,
+                )
+                return
+
+        # Compute the effective session key before dispatching
+        # This ensures /stop command can find tasks correctly when unified session is enabled
+        task = asyncio.create_task(self._dispatch(msg))
+        self._active_tasks.setdefault(effective_key, []).append(task)
+        task.add_done_callback(
+            lambda t, k=effective_key: self._active_tasks.get(k, [])
+            and self._active_tasks[k].remove(t)
+            if t in self._active_tasks.get(k, [])
+            else None
+        )
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
-        lock = self._session_locks.setdefault(session_key, asyncio.Lock())
+        
+        # Point 3: Group-level queueing. Use channel:chat_id for the lock.
+        gate_key = f"{msg.channel}:{msg.chat_id}"
+        lock = self._session_locks.setdefault(gate_key, asyncio.Lock())
         gate = self._concurrency_gate or nullcontext()
 
         # Register a pending queue so follow-up messages for this session are
@@ -698,6 +851,7 @@ class AgentLoop:
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         pending_queue: asyncio.Queue | None = None,
+        privileged: bool | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -728,8 +882,10 @@ class AgentLoop:
             if is_subagent and self._persist_subagent_followup(session, msg):
                 self.sessions.save(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            
             history = session.get_history(max_messages=0)
             current_role = "assistant" if is_subagent else "user"
+            is_privileged = privileged if privileged is not None else self._is_privileged(channel, msg.sender_id)
 
             # Subagent content is already in `history` above; passing it again
             # as current_message would double-project it into the prompt.
@@ -740,10 +896,14 @@ class AgentLoop:
                 chat_id=chat_id,
                 session_summary=pending,
                 current_role=current_role,
+                is_privileged=is_privileged,
+                sender_id=msg.sender_id,
             )
-            final_content, _, all_msgs, _, _ = await self._run_agent_loop(
+            final_content, _, all_msgs, _, _, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
+                sender_id=msg.sender_id,
                 message_id=msg.metadata.get("message_id"),
+                privileged=privileged,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self._clear_runtime_checkpoint(session)
@@ -773,6 +933,20 @@ class AgentLoop:
 
         session, pending = self.auto_compact.prepare_session(session, key)
 
+        # Channels can request persistence-only logging for a message.
+        if msg.metadata.get("_store_only"):
+            session.add_message(
+                "user",
+                msg.content,
+                media=msg.media,
+                channel=msg.channel,
+                sender_id=msg.sender_id,
+                metadata=msg.metadata,
+            )
+            self.sessions.save(session)
+            self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
+            return None
+
         # Slash commands
         raw = msg.content.strip()
         ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self)
@@ -784,12 +958,8 @@ class AgentLoop:
             session_summary=pending,
         )
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool):
-                message_tool.start_turn()
-
         history = session.get_history(max_messages=0)
+        is_privileged = privileged if privileged is not None else self._is_privileged(msg.channel, msg.sender_id)
 
         initial_messages = self.context.build_messages(
             history=history,
@@ -798,6 +968,8 @@ class AgentLoop:
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            is_privileged=is_privileged,
+            sender_id=msg.sender_id,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -838,7 +1010,7 @@ class AgentLoop:
             self.sessions.save(session)
             user_persisted_early = True
 
-        final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
+        final_content, _, all_msgs, stop_reason, had_injections, run_tools = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
             on_stream=on_stream,
@@ -847,8 +1019,10 @@ class AgentLoop:
             session=session,
             channel=msg.channel,
             chat_id=msg.chat_id,
+            sender_id=msg.sender_id,
             message_id=msg.metadata.get("message_id"),
             pending_queue=pending_queue,
+            privileged=privileged,
         )
 
         if final_content is None or not final_content.strip():
@@ -868,7 +1042,7 @@ class AgentLoop:
         # However, if the turn falls back to the empty-final-response
         # placeholder, suppress it when the real user-visible output already
         # came from MessageTool.
-        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
+        if (mt := run_tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             if not had_injections or stop_reason == "empty_final_response":
                 return None
 
@@ -1101,15 +1275,23 @@ class AgentLoop:
         session_key: str = "cli:direct",
         channel: str = "cli",
         chat_id: str = "direct",
+        sender_id: str = "user",
         media: list[str] | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
+        privileged: bool | None = None,
     ) -> OutboundMessage | None:
-        """Process a message directly and return the outbound payload."""
+        """Process a message directly and return the outbound payload.
+
+        Args:
+            privileged: If True, bypass channel-level tool restrictions.
+                Used by cron jobs and heartbeat tasks that are system-initiated
+                and need full tool access regardless of channel allowFrom policy.
+        """
         await self._connect_mcp()
         msg = InboundMessage(
-            channel=channel, sender_id="user", chat_id=chat_id,
+            channel=channel, sender_id=sender_id, chat_id=chat_id,
             content=content, media=media or [],
         )
         return await self._process_message(
@@ -1118,4 +1300,5 @@ class AgentLoop:
             on_progress=on_progress,
             on_stream=on_stream,
             on_stream_end=on_stream_end,
+            privileged=privileged,
         )
