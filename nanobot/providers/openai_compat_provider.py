@@ -387,14 +387,37 @@ class OpenAICompatProvider(LLMProvider):
                     kwargs.update(overrides)
                     break
 
-        if reasoning_effort:
-            kwargs["reasoning_effort"] = reasoning_effort
+        # Semantic vs. wire distinction for reasoning_effort.
+        # - semantic_effort is nanobot's internal canonical form (OpenAI's
+        #   vocabulary: "minimal" / "low" / "medium" / "high"). It drives
+        #   decisions like whether to disable provider thinking modes.
+        # - wire_effort is what we actually serialize to the provider; some
+        #   providers (notably DashScope) reject "minimal" and require
+        #   "minimum" instead. We accept either spelling on input and
+        #   always compare on the semantic form so a user who configured
+        #   "minimum" (DashScope's native spelling) still gets thinking
+        #   disabled instead of accidentally enabled.
+        semantic_effort: str | None = None
+        if isinstance(reasoning_effort, str):
+            semantic_effort = reasoning_effort.lower()
+            if semantic_effort == "minimum":
+                semantic_effort = "minimal"
+
+        wire_effort = reasoning_effort
+        if spec and spec.name == "dashscope" and semantic_effort == "minimal":
+            # DashScope's reasoning_effort.effort enum accepts: none /
+            # minimum / low / medium / high / xhigh. Literal "minimal"
+            # returns 400 invalid_value; translate on the outbound side.
+            wire_effort = "minimum"
+
+        if wire_effort:
+            kwargs["reasoning_effort"] = wire_effort
 
         # Provider-specific thinking parameters.
         # Only sent when reasoning_effort is explicitly configured so that
         # the provider default is preserved otherwise.
         if spec and reasoning_effort is not None:
-            thinking_enabled = reasoning_effort.lower() != "minimal"
+            thinking_enabled = semantic_effort != "minimal"
             extra: dict[str, Any] | None = None
             if spec.name == "dashscope":
                 extra = {"enable_thinking": thinking_enabled}
@@ -415,7 +438,7 @@ class OpenAICompatProvider(LLMProvider):
         # so that OpenRouter-style names like "moonshotai/kimi-k2.5" are handled
         # identically to bare names like "kimi-k2.5".
         if reasoning_effort is not None and _is_kimi_thinking_model(model_name):
-            thinking_enabled = reasoning_effort.lower() != "minimal"
+            thinking_enabled = semantic_effort != "minimal"
             kwargs.setdefault("extra_body", {}).update(
                 {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
             )

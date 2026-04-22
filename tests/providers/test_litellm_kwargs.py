@@ -731,8 +731,30 @@ def test_dashscope_thinking_enabled_with_reasoning_effort() -> None:
 
 
 def test_dashscope_thinking_disabled_for_minimal() -> None:
+    """OpenAI-style 'minimal' → DashScope wire value 'minimum' + thinking off.
+    DashScope rejects the literal string 'minimal' (invalid_value), so we
+    must translate on the outbound side while still honouring the 'no
+    thinking' intent via extra_body."""
     kw = _build_kwargs_for("dashscope", "qwen3-plus", reasoning_effort="minimal")
+    assert kw["reasoning_effort"] == "minimum"
     assert kw["extra_body"] == {"enable_thinking": False}
+
+
+def test_dashscope_thinking_disabled_for_minimum_alias() -> None:
+    """Users who read DashScope docs may configure the native 'minimum'
+    spelling. Internally it's the same semantic as 'minimal' → thinking
+    must still be disabled (not enabled just because the string isn't
+    literally 'minimal')."""
+    kw = _build_kwargs_for("dashscope", "qwen3-plus", reasoning_effort="minimum")
+    assert kw["reasoning_effort"] == "minimum"
+    assert kw["extra_body"] == {"enable_thinking": False}
+
+
+def test_non_dashscope_minimal_not_retranslated() -> None:
+    """The DashScope-specific translation must not leak to other providers;
+    OpenAI / Anthropic / etc. speak 'minimal' natively."""
+    kw = _build_kwargs_for("openai", "gpt-5", reasoning_effort="minimal")
+    assert kw["reasoning_effort"] == "minimal"
 
 
 def test_dashscope_no_extra_body_when_reasoning_effort_none() -> None:
