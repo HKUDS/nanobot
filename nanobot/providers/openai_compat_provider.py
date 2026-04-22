@@ -434,6 +434,19 @@ class OpenAICompatProvider(LLMProvider):
                 {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
             )
 
+        # OpenRouter fallback chain
+        # Reads OPENROUTER_FALLBACK_MODELS env var (comma-separated model list).
+        # Only injected when this request goes to OpenRouter.
+        if _uses_openrouter_attribution(spec, self._effective_base):
+            fallback_env = os.environ.get("OPENROUTER_FALLBACK_MODELS", "")
+            if fallback_env:
+                fallback_models = [m.strip() for m in fallback_env.split(",") if m.strip()]
+                if fallback_models:
+                    kwargs.setdefault("extra_body", {}).update({
+                        "models": fallback_models,
+                        "route": "fallback",
+                    })
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
