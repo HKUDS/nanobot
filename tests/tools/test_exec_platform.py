@@ -165,6 +165,7 @@ class TestPathAppendPlatform:
 
         with (
             patch ("nanobot.agent.tools.shell._IS_WINDOWS", False),
+            patch ("nanobot.agent.tools.shell.os.pathsep", ":"),
             patch.object (ExecTool, "_spawn", side_effect=capture_spawn),
             patch.object (ExecTool, "_guard_command", return_value=None),
         ):
