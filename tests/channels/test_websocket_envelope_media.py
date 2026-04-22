@@ -354,7 +354,11 @@ async def test_message_rejected_when_media_field_is_not_list() -> None:
 
 @pytest.mark.asyncio
 async def test_failed_media_does_not_partially_persist(tmp_path) -> None:
-    """If the second image is invalid, the first must not be forwarded."""
+    """If the second image is invalid, the first must not be forwarded.
+
+    Also: images already written in this call are cleaned up on failure, so
+    a mixed-valid/invalid batch never leaves orphan files in the media dir.
+    """
     channel = _make_channel()
     mock_conn = AsyncMock()
     envelope = {
@@ -373,11 +377,11 @@ async def test_failed_media_does_not_partially_persist(tmp_path) -> None:
         await channel._dispatch_envelope(mock_conn, "client-1", envelope)
 
     channel._handle_message.assert_not_awaited()
-    # The first image was saved to disk (we don't roll it back — the caller
-    # is expected to not reference it) but the agent never sees the paths.
-    # That's the important invariant: no partial publish.
     err = json.loads(mock_conn.send.call_args[0][0])
     assert err["reason"] == "mime"
+    # Partial-batch failures must not leak files to disk.
+    leftover = [p for p in tmp_path.iterdir() if p.is_file()]
+    assert leftover == [], f"orphan media after rejected batch: {leftover}"
 
 
 @pytest.mark.asyncio

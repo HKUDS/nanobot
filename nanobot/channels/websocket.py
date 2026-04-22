@@ -745,6 +745,9 @@ class WebSocketChannel(BaseChannel):
             content_type=mime,
             extra_headers=[
                 ("Cache-Control", "private, max-age=31536000, immutable"),
+                # Paired with the MIME whitelist above: prevents browsers from
+                # MIME-sniffing an octet-stream fallback into executable HTML.
+                ("X-Content-Type-Options", "nosniff"),
             ],
         )
 
@@ -942,6 +945,8 @@ class WebSocketChannel(BaseChannel):
         Returns ``(paths, None)`` on success or ``([], reason)`` on the first
         failure — the caller is expected to surface ``reason`` to the client
         and skip publishing so no half-formed message ever reaches the agent.
+        On failure, any images already written to disk earlier in the same
+        call are unlinked so partial ingress doesn't leak orphan files.
         ``reason`` is a short, stable token suitable for UI localization.
 
         Shape: ``list[{"data_url": str, "name"?: str | None}]``.
@@ -950,28 +955,39 @@ class WebSocketChannel(BaseChannel):
             return [], "too_many_images"
         media_dir = get_media_dir("websocket")
         paths: list[str] = []
+
+        def _abort(reason: str) -> tuple[list[str], str]:
+            for p in paths:
+                try:
+                    Path(p).unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning(
+                        "websocket: failed to unlink partial media {}: {}", p, exc
+                    )
+            return [], reason
+
         for item in media:
             if not isinstance(item, dict):
-                return [], "malformed"
+                return _abort("malformed")
             data_url = item.get("data_url")
             if not isinstance(data_url, str) or not data_url:
-                return [], "malformed"
+                return _abort("malformed")
             mime = _extract_data_url_mime(data_url)
             if mime is None:
-                return [], "decode"
+                return _abort("decode")
             if mime not in _IMAGE_MIME_ALLOWED:
-                return [], "mime"
+                return _abort("mime")
             try:
                 saved = save_base64_data_url(
                     data_url, media_dir, max_bytes=_MAX_IMAGE_BYTES,
                 )
             except FileSizeExceeded:
-                return [], "size"
+                return _abort("size")
             except Exception as exc:
                 logger.warning("websocket: media decode failed: {}", exc)
-                return [], "decode"
+                return _abort("decode")
             if saved is None:
-                return [], "decode"
+                return _abort("decode")
             paths.append(saved)
         return paths, None
 

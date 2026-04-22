@@ -155,6 +155,8 @@ async def test_media_route_serves_signed_file(
     assert resp.headers["content-type"].startswith("image/png")
     # Immutable cache header lets the browser skip round-trips on replay.
     assert "immutable" in resp.headers.get("cache-control", "")
+    # nosniff keeps the browser from second-guessing our Content-Type.
+    assert resp.headers.get("x-content-type-options") == "nosniff"
 
 
 @pytest.mark.asyncio
@@ -281,6 +283,9 @@ async def test_media_route_degrades_non_image_to_octet_stream(
             await server_task
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("application/octet-stream")
+    # nosniff is the actual defence when we downgrade to octet-stream:
+    # without it the browser might still sniff the bytes as HTML.
+    assert resp.headers.get("x-content-type-options") == "nosniff"
 
 
 # ---------------------------------------------------------------------------
