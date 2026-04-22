@@ -366,10 +366,11 @@ class TestTimeoutCleanup:
         with patch.object(mgr, "_build_subagent_prompt", return_value="test prompt"), \
              patch("nanobot.agent.subagent.ToolRegistry"), \
              patch("nanobot.agent.subagent.WebToolsConfig"):
-            await mgr._run_subagent(
-                "sub-1", "do thing", "cancelled-task",
-                {"channel": "test", "chat_id": "c1"}, status,
-            )
+            with pytest.raises(asyncio.CancelledError):
+                await mgr._run_subagent(
+                    "sub-1", "do thing", "cancelled-task",
+                    {"channel": "test", "chat_id": "c1"}, status,
+                )
 
         assert status.phase == "error"
         assert status.error == "Cancelled"

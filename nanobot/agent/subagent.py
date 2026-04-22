@@ -235,6 +235,7 @@ class SubagentManager:
             status.phase = "error"
             status.error = "Cancelled"
             logger.info("Subagent [{}] cancelled", task_id)
+            raise
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
