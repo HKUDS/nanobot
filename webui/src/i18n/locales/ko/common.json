@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "nanobot에 연결할 수 없습니다",
-      "gatewayHint": "gateway(`nanobot web`)가 실행 중인지, 그리고 이 페이지가 같은 머신에서 열려 있는지 확인하세요."
+      "gatewayHint": "gateway(`nanobot gateway`)가 실행 중인지, 그리고 이 페이지가 같은 머신에서 열려 있는지 확인하세요."
     },
     "documentTitle": {
       "base": "nanobot",

@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "Couldn't reach nanobot",
-      "gatewayHint": "Make sure the gateway is running (`nanobot web`) and that this page is open on the same machine."
+      "gatewayHint": "Make sure the gateway is running (`nanobot gateway`) and that this page is open on the same machine."
     },
     "documentTitle": {
       "base": "nanobot",

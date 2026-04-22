@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "No se pudo conectar con nanobot",
-      "gatewayHint": "Asegúrate de que la gateway esté en ejecución (`nanobot web`) y de que esta página esté abierta en la misma máquina."
+      "gatewayHint": "Asegúrate de que la gateway esté en ejecución (`nanobot gateway`) y de que esta página esté abierta en la misma máquina."
     },
     "documentTitle": {
       "base": "nanobot",

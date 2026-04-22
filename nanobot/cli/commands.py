@@ -145,7 +145,7 @@ def _make_console() -> Console:
 def _render_interactive_ansi(render_fn) -> str:
     """Render Rich output to ANSI so prompt_toolkit can print it safely."""
     ansi_console = Console(
-        force_terminal=True,
+        force_terminal=sys.stdout.isatty(),
         color_system=console.color_system or "standard",
         width=console.width,
     )
@@ -946,70 +946,14 @@ def _run_gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            # Flush all cached sessions to durable storage before exit.
+            # This prevents data loss on filesystems with write-back
+            # caching (rclone VFS, NFS, FUSE mounts, etc.).
+            flushed = agent.sessions.flush_all()
+            if flushed:
+                logger.info("Shutdown: flushed {} session(s) to disk", flushed)
 
     asyncio.run(run())
-
-
-@app.command()
-def web(
-    port: int | None = typer.Option(None, "--port", "-p", help="WebSocket port for the webui"),
-    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
-    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
-    open_browser: bool = typer.Option(True, "--open/--no-open", help="Open the browser when ready"),
-):
-    """Start the gateway with the embedded webui and (by default) open a browser."""
-    if verbose:
-        import logging
-
-        logging.basicConfig(level=logging.DEBUG)
-
-    cfg = _load_runtime_config(config, workspace)
-
-    # Force the websocket channel on with token-gated auth so the webui is functional.
-    # ``--port`` applies to the webui's websocket/HTTP port, not the gateway's
-    # management port, since that's the only surface users visit.
-    ws_section = cfg.channels.websocket
-    if isinstance(ws_section, dict):
-        ws_section.setdefault("host", "127.0.0.1")
-        ws_section["enabled"] = True
-        ws_section["websocketRequiresToken"] = True
-        if port is not None:
-            ws_section["port"] = port
-        ws_host = ws_section.get("host", "127.0.0.1")
-        ws_port = ws_section.get("port", 8765)
-        ws_path = ws_section.get("path", "/")
-    else:
-        ws_section.enabled = True
-        if hasattr(ws_section, "websocket_requires_token"):
-            ws_section.websocket_requires_token = True
-        if port is not None:
-            ws_section.port = port
-        ws_host = getattr(ws_section, "host", "127.0.0.1") or "127.0.0.1"
-        ws_port = getattr(ws_section, "port", 8765)
-        ws_path = getattr(ws_section, "path", "/") or "/"
-
-    # Confirm the bundled SPA exists before promising the user a browser launch.
-    from nanobot.channels.manager import _default_webui_dist
-
-    dist = _default_webui_dist()
-    if dist is None:
-        console.print(
-            "[yellow]Warning: webui assets not found at nanobot/web/dist/. "
-            "Run `cd webui && bun install && bun run build` from a source checkout.[/yellow]"
-        )
-
-    scheme = "http"
-    # Browsers refuse cookies/JS on 0.0.0.0 — collapse to loopback for the visit URL.
-    visit_host = "127.0.0.1" if ws_host in {"0.0.0.0", "::"} else ws_host
-    open_url = f"{scheme}://{visit_host}:{ws_port}{ws_path if ws_path != '/' else ''}/"
-
-    # The gateway's management port is separate from the webui port; leave it
-    # on its configured default so --port only moves the visible surface.
-    _run_gateway(
-        cfg,
-        open_browser_url=open_url if open_browser else None,
-    )
 
 
 # ============================================================================

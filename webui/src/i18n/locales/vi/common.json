@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "Không thể kết nối tới nanobot",
-      "gatewayHint": "Hãy chắc chắn gateway đang chạy (`nanobot web`) và trang này được mở trên cùng máy."
+      "gatewayHint": "Hãy chắc chắn gateway đang chạy (`nanobot gateway`) và trang này được mở trên cùng máy."
     },
     "documentTitle": {
       "base": "nanobot",

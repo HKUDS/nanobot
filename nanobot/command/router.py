@@ -57,6 +57,20 @@ class CommandRouter:
     def is_priority(self, text: str) -> bool:
         return text.strip().lower() in self._priority
 
+    def is_dispatchable_command(self, text: str) -> bool:
+        """Check whether *text* matches any non-priority command tier (exact or prefix).
+
+        Does NOT check priority or interceptor tiers.
+        If this returns True, ``dispatch()`` is guaranteed to match a handler.
+        """
+        cmd = text.strip().lower()
+        if cmd in self._exact:
+            return True
+        for pfx, _ in self._prefix:
+            if cmd.startswith(pfx):
+                return True
+        return False
+
     async def dispatch_priority(self, ctx: CommandContext) -> OutboundMessage | None:
         """Dispatch a priority command. Called from run() without the lock."""
         handler = self._priority.get(ctx.raw.lower())

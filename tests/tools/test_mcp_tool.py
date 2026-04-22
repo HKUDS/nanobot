@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import AsyncExitStack, asynccontextmanager
 import sys
+from contextlib import asynccontextmanager
 from types import ModuleType, SimpleNamespace
 
 import pytest
 
+import nanobot.agent.tools.mcp as mcp_mod
 from nanobot.agent.tools.mcp import (
-    MCPResourceWrapper,
     MCPPromptWrapper,
+    MCPResourceWrapper,
     MCPToolWrapper,
+    _normalize_windows_stdio_command,
     connect_mcp_servers,
 )
 from nanobot.agent.tools.registry import ToolRegistry
@@ -176,6 +178,99 @@ def test_wrapper_normalizes_nullable_property_anyof() -> None:
         "description": "optional name",
         "nullable": True,
     }
+
+
+def test_normalize_windows_stdio_command_is_noop_off_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_mod.os, "name", "posix", raising=False)
+
+    command, args, env = _normalize_windows_stdio_command(
+        "npx",
+        ["-y", "chrome-devtools-mcp@latest"],
+        {"FOO": "bar"},
+    )
+
+    assert command == "npx"
+    assert args == ["-y", "chrome-devtools-mcp@latest"]
+    assert env == {"FOO": "bar"}
+
+
+def test_normalize_windows_stdio_command_wraps_npx_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_mod.os, "name", "nt", raising=False)
+    monkeypatch.setattr(
+        mcp_mod.shutil,
+        "which",
+        lambda command, path=None: r"C:\Program Files\nodejs\npx.cmd",
+    )
+    monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+
+    command, args, env = _normalize_windows_stdio_command(
+        "npx",
+        ["-y", "chrome-devtools-mcp@latest"],
+        None,
+    )
+
+    assert command == r"C:\Windows\System32\cmd.exe"
+    assert args == ["/d", "/c", "npx", "-y", "chrome-devtools-mcp@latest"]
+    assert env is None
+
+
+def test_normalize_windows_stdio_command_wraps_resolved_cmd_launcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_mod.os, "name", "nt", raising=False)
+
+    def _fake_which(command: str, path: str | None = None) -> str:
+        assert command == "custom-launcher"
+        assert path == r"C:\Tools"
+        return r"C:\Tools\custom-launcher.cmd"
+
+    monkeypatch.setattr(mcp_mod.shutil, "which", _fake_which)
+    monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+
+    command, args, _env = _normalize_windows_stdio_command(
+        "custom-launcher",
+        ["serve"],
+        {"PATH": r"C:\Tools"},
+    )
+
+    assert command == r"C:\Windows\System32\cmd.exe"
+    assert args == ["/d", "/c", "custom-launcher", "serve"]
+
+
+def test_normalize_windows_stdio_command_keeps_real_executables_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_mod.os, "name", "nt", raising=False)
+
+    command, args, env = _normalize_windows_stdio_command(
+        "python.exe",
+        ["-m", "http.server"],
+        {"FOO": "bar"},
+    )
+
+    assert command == "python.exe"
+    assert args == ["-m", "http.server"]
+    assert env == {"FOO": "bar"}
+
+
+def test_normalize_windows_stdio_command_skips_existing_shells(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_mod.os, "name", "nt", raising=False)
+
+    command, args, env = _normalize_windows_stdio_command(
+        "cmd.exe",
+        ["/c", "echo", "hello"],
+        None,
+    )
+
+    assert command == "cmd.exe"
+    assert args == ["/c", "echo", "hello"]
+    assert env is None
 
 
 @pytest.mark.asyncio
@@ -421,6 +516,48 @@ async def test_connect_mcp_servers_one_failure_does_not_block_others(
 
     assert registry.tool_names == ["mcp_good_demo"]
     assert set(stacks) == {"good"}
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_wraps_windows_stdio_launchers(
+    fake_mcp_runtime: dict[str, object | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session(["demo"])
+    captured: dict[str, object] = {}
+
+    @asynccontextmanager
+    async def _capturing_stdio_client(params: object):
+        captured["command"] = params.command
+        captured["args"] = params.args
+        captured["env"] = params.env
+        yield object(), object()
+
+    monkeypatch.setattr(mcp_mod.os, "name", "nt", raising=False)
+    monkeypatch.setattr(
+        mcp_mod.shutil,
+        "which",
+        lambda command, path=None: r"C:\Program Files\nodejs\npx.cmd",
+    )
+    monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+    monkeypatch.setattr(sys.modules["mcp.client.stdio"], "stdio_client", _capturing_stdio_client)
+
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {
+            "test": MCPServerConfig(
+                command="npx",
+                args=["-y", "chrome-devtools-mcp@latest"],
+            )
+        },
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert captured["command"] == r"C:\Windows\System32\cmd.exe"
+    assert captured["args"] == ["/d", "/c", "npx", "-y", "chrome-devtools-mcp@latest"]
+    assert captured["env"] is None
 
 
 # ---------------------------------------------------------------------------

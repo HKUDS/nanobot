@@ -135,7 +135,7 @@ if DISCORD_AVAILABLE:
 
         def _register_app_commands(self) -> None:
             commands = (
-                ("new", "Start a new conversation", "/new"),
+                ("new", "Stop current task and start a new conversation", "/new"),
                 ("stop", "Stop the current task", "/stop"),
                 ("restart", "Restart the bot", "/restart"),
                 ("status", "Show bot status", "/status"),

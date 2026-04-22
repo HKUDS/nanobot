@@ -1,6 +1,8 @@
 """MCP client: connects to MCP servers and wraps their tools as native nanobot tools."""
 
 import asyncio
+import os
+import shutil
 from contextlib import AsyncExitStack
 from typing import Any
 
@@ -24,10 +26,48 @@ _TRANSIENT_EXC_NAMES: frozenset[str] = frozenset((
     "ConnectionError",
 ))
 
+_WINDOWS_SHELL_LAUNCHERS: frozenset[str] = frozenset(("npx", "npm", "pnpm", "yarn", "bunx"))
+
 
 def _is_transient(exc: BaseException) -> bool:
     """Check if an exception looks like a transient connection error."""
     return type(exc).__name__ in _TRANSIENT_EXC_NAMES
+
+
+def _windows_command_basename(command: str) -> str:
+    """Return the lowercase basename for a Windows command or path."""
+    return command.replace("\\", "/").rsplit("/", maxsplit=1)[-1].lower()
+
+
+def _normalize_windows_stdio_command(
+    command: str,
+    args: list[str] | None,
+    env: dict[str, str] | None,
+) -> tuple[str, list[str], dict[str, str] | None]:
+    """Wrap Windows shell launchers so MCP stdio servers start reliably."""
+    normalized_args = list(args or [])
+    if os.name != "nt":
+        return command, normalized_args, env
+
+    basename = _windows_command_basename(command)
+    if basename in {"cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe"}:
+        return command, normalized_args, env
+
+    if basename.endswith((".exe", ".com")):
+        return command, normalized_args, env
+
+    resolved = shutil.which(command, path=(env or {}).get("PATH")) or command
+    resolved_basename = _windows_command_basename(resolved)
+    should_wrap = (
+        basename in _WINDOWS_SHELL_LAUNCHERS
+        or basename.endswith((".cmd", ".bat"))
+        or resolved_basename.endswith((".cmd", ".bat"))
+    )
+    if not should_wrap:
+        return command, normalized_args, env
+
+    comspec = (env or {}).get("COMSPEC") or os.environ.get("COMSPEC") or "cmd.exe"
+    return comspec, ["/d", "/c", command, *normalized_args], env
 
 
 def _extract_nullable_branch(options: Any) -> tuple[dict[str, Any], bool] | None:
@@ -416,8 +456,15 @@ async def connect_mcp_servers(
                     return name, None
 
             if transport_type == "stdio":
+                command, args, env = _normalize_windows_stdio_command(
+                    cfg.command,
+                    cfg.args,
+                    cfg.env or None,
+                )
                 params = StdioServerParameters(
-                    command=cfg.command, args=cfg.args, env=cfg.env or None
+                    command=command,
+                    args=args,
+                    env=env,
                 )
                 read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":

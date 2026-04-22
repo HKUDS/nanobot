@@ -21,7 +21,7 @@ def _resolve_version() -> str:
         return _pkg_version("nanobot-ai")
     except PackageNotFoundError:
         # Source checkouts often import nanobot without installed dist-info.
-        return _read_pyproject_version() or "0.1.5.post1"
+        return _read_pyproject_version() or "0.1.5.post2"
 
 
 __version__ = _resolve_version()
