@@ -1,0 +1,83 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "Connexion à nanobot…",
+      "boot": "Chargement de nanobot…"
+    },
+    "error": {
+      "title": "Impossible de joindre nanobot",
+      "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot gateway`) et que cette page est ouverte sur la même machine."
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "Interface web nanobot — discutez avec votre espace de travail nanobot."
+    }
+  },
+  "sidebar": {
+    "collapse": "Réduire la barre latérale",
+    "toggleTheme": "Changer de thème",
+    "newChat": "Nouvelle discussion",
+    "recent": "Récentes",
+    "refreshSessions": "Actualiser les sessions",
+    "language": {
+      "label": "Langue",
+      "ariaLabel": "Changer de langue"
+    }
+  },
+  "chat": {
+    "fallbackTitle": "Discussion {{id}}",
+    "loading": "Chargement…",
+    "noSessions": "Aucune session pour le moment.",
+    "actions": "Actions de la discussion {{title}}",
+    "delete": "Supprimer",
+    "newChat": "Nouvelle discussion"
+  },
+  "deleteConfirm": {
+    "title": "Supprimer « {{title}} » ?",
+    "description": "Le fichier de session sera supprimé du disque. Cette action est irréversible.",
+    "cancel": "Annuler",
+    "confirm": "Supprimer"
+  },
+  "connection": {
+    "idle": "Inactif",
+    "connecting": "Connexion…",
+    "open": "Connecté",
+    "reconnecting": "Reconnexion…",
+    "closed": "Déconnecté",
+    "error": "Erreur de connexion"
+  },
+  "thread": {
+    "loadingConversation": "Chargement de la conversation…",
+    "empty": {
+      "description": "Posez des questions, poursuivez votre travail local ou démarrez un nouveau fil."
+    },
+    "header": {
+      "toggleSidebar": "Afficher ou masquer la barre latérale"
+    },
+    "composer": {
+      "placeholderThread": "Saisissez votre message…",
+      "placeholderHero": "Qu’avez-vous en tête ?",
+      "placeholderOpening": "Ouverture d’une nouvelle discussion…",
+      "inputAria": "Champ de message",
+      "sendHint": "Entrée pour envoyer · Maj+Entrée pour un retour à la ligne",
+      "send": "Envoyer le message"
+    },
+    "scrollToBottom": "Faire défiler vers le bas"
+  },
+  "message": {
+    "streaming": "en cours de génération",
+    "assistantTyping": "L’assistant est en train d’écrire",
+    "toolSingle": "Utilisation d’un outil",
+    "toolMany": "{{count}} outils utilisés"
+  },
+  "code": {
+    "fallbackLanguage": "code",
+    "copyAria": "Copier le code",
+    "copy": "Copier",
+    "copied": "Copié"
+  }
+}

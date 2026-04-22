@@ -53,6 +53,7 @@ class DiscordConfig(Base):
     enabled: bool = False
     token: str = ""
     allow_from: list[str] = Field(default_factory=list)
+    allow_channels: list[str] = Field(default_factory=list)  # Allowed channel IDs (empty = all)
     intents: int = 37377
     group_policy: Literal["mention", "open"] = "mention"
     read_receipt_emoji: str = "👀"
@@ -134,7 +135,7 @@ if DISCORD_AVAILABLE:
 
         def _register_app_commands(self) -> None:
             commands = (
-                ("new", "Start a new conversation", "/new"),
+                ("new", "Stop current task and start a new conversation", "/new"),
                 ("stop", "Stop the current task", "/stop"),
                 ("restart", "Restart the bot", "/restart"),
                 ("status", "Show bot status", "/status"),
@@ -432,8 +433,15 @@ class DiscordChannel(BaseChannel):
             raise
 
     async def _handle_discord_message(self, message: discord.Message) -> None:
-        """Handle incoming Discord messages from discord.py."""
-        if message.author.bot:
+        """Handle incoming Discord messages from discord.py.
+
+        Self-loop guard: only drop messages from this bot's own account. Messages
+        from other bots are allowed through so multi-agent setups (one bot asking
+        another for help, a bot mentioning another by @name, etc.) can work.
+        Bot-from-bot loops are still prevented per-instance because each bot
+        still ignores its own outbound messages. (#3217)
+        """
+        if self._bot_user_id is not None and str(message.author.id) == self._bot_user_id:
             return
 
         sender_id = str(message.author.id)
@@ -533,6 +541,12 @@ class DiscordChannel(BaseChannel):
         """Check if inbound Discord message should be processed."""
         if not self.is_allowed(sender_id):
             return False
+        # Channel-based filtering: only respond in allowed channels
+        allow_channels = self.config.allow_channels
+        if allow_channels:
+            channel_id = self._channel_key(message.channel)
+            if channel_id not in allow_channels:
+                return False
         if message.guild is not None and not self._should_respond_in_group(message, content):
             return False
         return True

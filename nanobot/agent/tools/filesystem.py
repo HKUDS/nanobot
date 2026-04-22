@@ -2,6 +2,7 @@
 
 import difflib
 import mimetypes
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -74,9 +75,22 @@ def _is_blocked_device(path: str | Path) -> bool:
     """Check if path is a blocked device that could hang or produce infinite output."""
     import re
     raw = str(path)
-    if raw in _BLOCKED_DEVICE_PATHS:
+
+    # Resolve symlinks to check the actual target
+    try:
+        resolved = str(Path(raw).resolve())
+    except (OSError, ValueError):
+        resolved = raw
+
+    if raw in _BLOCKED_DEVICE_PATHS or resolved in _BLOCKED_DEVICE_PATHS:
         return True
     if re.match(r"/proc/\d+/fd/[012]$", raw) or re.match(r"/proc/self/fd/[012]$", raw):
+        return True
+    if re.match(r"/proc/\d+/fd/[012]$", resolved) or re.match(r"/proc/self/fd/[012]$", resolved):
+        return True
+
+    # Check if resolved path starts with /dev/ (covers symlinks to devices)
+    if resolved.startswith("/dev/"):
         return True
     return False
 
@@ -123,10 +137,11 @@ class ReadFileTool(_FsTool):
     @property
     def description(self) -> str:
         return (
-            "Read a file (text or image). Text output format: LINE_NUM|CONTENT. "
+            "Read a file (text, image, or document). "
+            "Text output format: LINE_NUM|CONTENT. "
             "Images return visual content for analysis. "
-            "Use offset and limit for large files. "
-            "Cannot read non-image binary files. "
+            "Supports PDF, DOCX, XLSX, PPTX documents. "
+            "Use offset and limit for large text files. "
             "Reads exceeding ~128K chars are truncated."
         )
 
@@ -155,6 +170,10 @@ class ReadFileTool(_FsTool):
             if fp.suffix.lower() == ".pdf":
                 return self._read_pdf(fp, pages)
 
+            # Office document support
+            if fp.suffix.lower() in {".docx", ".xlsx", ".pptx"}:
+                return self._read_office_doc(fp)
+
             raw = fp.read_bytes()
             if not raw:
                 return f"(Empty file: {path})"
@@ -164,13 +183,51 @@ class ReadFileTool(_FsTool):
                 return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
 
             # Read dedup: same path + offset + limit + unchanged mtime → stub
-            if file_state.is_unchanged(fp, offset=offset, limit=limit):
-                return f"[File unchanged since last read: {path}]"
+            # Always check for external modifications before dedup
+            entry = file_state._state.get(str(fp.resolve()))
+            try:
+                current_mtime = os.path.getmtime(fp)
+            except OSError:
+                current_mtime = 0.0
+            if entry and entry.can_dedup and entry.offset == offset and entry.limit == limit:
+                if current_mtime != entry.mtime:
+                    # File was modified externally - force full read and mark as not dedupable
+                    entry.can_dedup = False
+                    file_state.record_read(fp, offset=offset, limit=limit)  # Update state with new mtime
+                    # Continue to read full content (don't return dedup message)
+                else:
+                    # File unchanged - return dedup message
+                    # But only if content is actually unchanged (not just mtime)
+                    current_hash = file_state._hash_file(str(fp))
+                    if current_hash == entry.content_hash:
+                        return f"[File unchanged since last read: {path}]"
+                    else:
+                        # Content changed despite same mtime - force full read
+                        entry.can_dedup = False
+                        file_state.record_read(fp, offset=offset, limit=limit)
+            else:
+                # No previous state or marked as not dedupable - read full content
+                file_state.record_read(fp, offset=offset, limit=limit)
+                # Force full read by setting can_dedup to False for this read
+                if entry:
+                    entry.can_dedup = False
 
+            # Read the file content after dedup check
+            raw = fp.read_bytes()
             try:
                 text_content = raw.decode("utf-8")
             except UnicodeDecodeError:
+                # Binary file - return error message
+                mime = detect_image_mime(raw) or mimetypes.guess_type(path)[0]
+                if mime and mime.startswith("image/"):
+                    return build_image_content_blocks(raw, mime, str(fp), f"(Image file: {path})")
                 return f"Error: Cannot read binary file {path} (MIME: {mime or 'unknown'}). Only UTF-8 text and images are supported."
+
+            # Normalize CRLF -> LF before line-splitting. Primarily a Windows
+            # concern (git checkouts with autocrlf, editors saving CRLF) but
+            # applied on all platforms so downstream StrReplace/Grep behavior
+            # is consistent regardless of where the file was written.
+            text_content = text_content.replace("\r\n", "\n")
 
             all_lines = text_content.splitlines()
             total = len(all_lines)
@@ -250,6 +307,25 @@ class ReadFileTool(_FsTool):
             result += f"\n\n(Showing pages {start + 1}-{end + 1} of {total_pages}. Use pages='{end + 2}-{min(end + 1 + self._MAX_PDF_PAGES, total_pages)}' to continue.)"
         if len(result) > self._MAX_CHARS:
             result = result[:self._MAX_CHARS] + "\n\n(PDF text truncated at ~128K chars)"
+        return result
+
+    def _read_office_doc(self, fp: Path) -> str:
+        from nanobot.utils.document import extract_text
+
+        result = extract_text(fp)
+
+        if result is None:
+            return f"Error: Unsupported file format: {fp.suffix}"
+
+        if result.startswith("[error:"):
+            return f"Error reading {fp.suffix.upper()} file: {result}"
+
+        if not result:
+            return f"({fp.suffix.upper().lstrip('.')} has no extractable text: {fp})"
+
+        if len(result) > self._MAX_CHARS:
+            result = result[:self._MAX_CHARS] + "\n\n(Document text truncated at ~128K chars)"
+
         return result
 
 

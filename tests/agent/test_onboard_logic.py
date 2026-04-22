@@ -22,6 +22,9 @@ from nanobot.cli.onboard import (
     _format_value,
     _get_field_display_name,
     _get_field_type_info,
+    _get_constraint_hint,
+    _input_text,
+    _validate_field_constraint,
     run_onboard,
 )
 from nanobot.config.schema import Config
@@ -206,6 +209,25 @@ class TestGetFieldTypeInfo:
         type_name, inner = _get_field_type_info(field_info)
         assert type_name == "str"
         assert inner is None
+
+    def test_literal_type_returns_literal_with_choices(self):
+        """Literal["a", "b"] should return ("literal", ["a", "b"])."""
+        from typing import Literal
+
+        class Model(BaseModel):
+            mode: Literal["standard", "persistent"] = "standard"
+
+        type_name, inner = _get_field_type_info(Model.model_fields["mode"])
+        assert type_name == "literal"
+        assert inner == ["standard", "persistent"]
+
+    def test_real_provider_retry_mode_field(self):
+        """Validate against actual AgentDefaults.provider_retry_mode field."""
+        from nanobot.config.schema import AgentDefaults
+
+        type_name, inner = _get_field_type_info(AgentDefaults.model_fields["provider_retry_mode"])
+        assert type_name == "literal"
+        assert inner == ["standard", "persistent"]
 
 
 class TestGetFieldDisplayName:
@@ -493,3 +515,448 @@ class TestRunOnboardExitBehavior:
 
         assert result.should_save is False
         assert result.config.model_dump(by_alias=True) == initial_config.model_dump(by_alias=True)
+
+
+class TestValidateFieldConstraint:
+    """Tests for _validate_field_constraint schema-aware input validation."""
+
+    def test_returns_none_when_no_constraints(self):
+        """Fields without constraints should pass validation."""
+        from pydantic import BaseModel
+
+        class M(BaseModel):
+            name: str = "hello"
+
+        field_info = M.model_fields["name"]
+        from nanobot.cli.onboard import _validate_field_constraint
+
+        assert _validate_field_constraint("anything", field_info) is None
+
+    def test_rejects_value_below_ge_bound(self):
+        """Value below ge (>=) bound should return error."""
+        from pydantic import BaseModel, Field
+
+        class M(BaseModel):
+            count: int = Field(default=3, ge=0)
+
+        field_info = M.model_fields["count"]
+        from nanobot.cli.onboard import _validate_field_constraint
+
+        result = _validate_field_constraint(-1, field_info)
+        assert result is not None
+        assert "0" in result
+
+    def test_accepts_value_at_ge_bound(self):
+        """Value exactly at ge (>=) bound should pass."""
+        from pydantic import BaseModel, Field
+
+        class M(BaseModel):
+            count: int = Field(default=3, ge=0)
+
+        field_info = M.model_fields["count"]
+        from nanobot.cli.onboard import _validate_field_constraint
+
+        assert _validate_field_constraint(0, field_info) is None
+
+    def test_rejects_value_above_le_bound(self):
+        """Value above le (<=) bound should return error."""
+        from pydantic import BaseModel, Field
+
+        class M(BaseModel):
+            retries: int = Field(default=3, le=10)
+
+        field_info = M.model_fields["retries"]
+        from nanobot.cli.onboard import _validate_field_constraint
+
+        result = _validate_field_constraint(11, field_info)
+        assert result is not None
+        assert "10" in result
+
+    def test_accepts_value_at_le_bound(self):
+        """Value exactly at le (<=) bound should pass."""
+        from pydantic import BaseModel, Field
+
+        class M(BaseModel):
+            retries: int = Field(default=3, le=10)
+
+        field_info = M.model_fields["retries"]
+        from nanobot.cli.onboard import _validate_field_constraint
+
+        assert _validate_field_constraint(10, field_info) is None
+
+    def test_combined_ge_and_le_bounds(self):
+        """Field with both ge and le should validate both."""
+        from pydantic import BaseModel, Field
+
+        class M(BaseModel):
+            retries: int = Field(default=3, ge=0, le=10)
+
+        field_info = M.model_fields["retries"]
+        from nanobot.cli.onboard import _validate_field_constraint
+
+        assert _validate_field_constraint(5, field_info) is None
+        assert _validate_field_constraint(-1, field_info) is not None
+        assert _validate_field_constraint(11, field_info) is not None
+
+    def test_gt_and_lt_bounds(self):
+        """Strict inequality bounds (gt, lt) should exclude boundary."""
+        from pydantic import BaseModel, Field
+
+        class M(BaseModel):
+            ratio: float = Field(default=0.5, gt=0.0, lt=1.0)
+
+        field_info = M.model_fields["ratio"]
+        from nanobot.cli.onboard import _validate_field_constraint
+
+        assert _validate_field_constraint(0.5, field_info) is None
+        assert _validate_field_constraint(0.0, field_info) is not None
+        assert _validate_field_constraint(1.0, field_info) is not None
+
+    def test_min_length_constraint(self):
+        """min_length should validate string/list length."""
+        from pydantic import BaseModel, Field
+
+        class M(BaseModel):
+            name: str = Field(default="x", min_length=1)
+
+        field_info = M.model_fields["name"]
+        from nanobot.cli.onboard import _validate_field_constraint
+
+        assert _validate_field_constraint("a", field_info) is None
+        assert _validate_field_constraint("", field_info) is not None
+
+    def test_max_length_constraint(self):
+        """max_length should validate string/list length."""
+        from pydantic import BaseModel, Field
+
+        class M(BaseModel):
+            tag: str = Field(default="x", max_length=5)
+
+        field_info = M.model_fields["tag"]
+        from nanobot.cli.onboard import _validate_field_constraint
+
+        assert _validate_field_constraint("abc", field_info) is None
+        assert _validate_field_constraint("abcdef", field_info) is not None
+
+    def test_real_send_max_retries_field(self):
+        """Validate against the actual ChannelsConfig.send_max_retries field."""
+        from nanobot.config.schema import ChannelsConfig
+        from nanobot.cli.onboard import _validate_field_constraint
+
+        field_info = ChannelsConfig.model_fields["send_max_retries"]
+        assert _validate_field_constraint(3, field_info) is None
+        assert _validate_field_constraint(0, field_info) is None
+        assert _validate_field_constraint(10, field_info) is None
+        assert _validate_field_constraint(-1, field_info) is not None
+        assert _validate_field_constraint(11, field_info) is not None
+
+
+class TestGetConstraintHint:
+    """Tests for _get_constraint_hint field display suffix."""
+
+    def test_no_constraints_returns_empty(self):
+        """Fields without constraints should return empty string."""
+        from pydantic import BaseModel
+
+        class M(BaseModel):
+            name: str = "hello"
+
+        field_info = M.model_fields["name"]
+        assert _get_constraint_hint(field_info) == ""
+
+    def test_ge_le_range(self):
+        """Field with ge+le should show '(min-max)'."""
+        from pydantic import BaseModel, Field
+
+        class M(BaseModel):
+            retries: int = Field(default=3, ge=0, le=10)
+
+        field_info = M.model_fields["retries"]
+        hint = _get_constraint_hint(field_info)
+        assert "0" in hint
+        assert "10" in hint
+
+    def test_ge_only(self):
+        """Field with only ge should show '(>= N)'."""
+        from pydantic import BaseModel, Field
+
+        class M(BaseModel):
+            count: int = Field(default=1, ge=0)
+
+        field_info = M.model_fields["count"]
+        hint = _get_constraint_hint(field_info)
+        assert "0" in hint
+        assert ">=" in hint
+
+    def test_le_only(self):
+        """Field with only le should show '(<= N)'."""
+        from pydantic import BaseModel, Field
+
+        class M(BaseModel):
+            ratio: float = Field(default=1.0, le=100.0)
+
+        field_info = M.model_fields["ratio"]
+        hint = _get_constraint_hint(field_info)
+        assert "100" in hint
+        assert "<=" in hint
+
+    def test_real_send_max_retries_hint(self):
+        """Actual ChannelsConfig.send_max_retries should show '(0-10)'."""
+        from nanobot.config.schema import ChannelsConfig
+
+        field_info = ChannelsConfig.model_fields["send_max_retries"]
+        hint = _get_constraint_hint(field_info)
+        assert "0" in hint
+        assert "10" in hint
+
+
+class TestInputTextWithValidation:
+    """Tests for _input_text integration with constraint validation."""
+
+    def test_rejects_out_of_range_int(self, monkeypatch):
+        """_input_text with field_info should reject values violating ge/le constraints."""
+        from pydantic import BaseModel, Field
+
+        class M(BaseModel):
+            retries: int = Field(default=3, ge=0, le=10)
+
+        field_info = M.model_fields["retries"]
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_questionary",
+            lambda: SimpleNamespace(text=lambda *a, **kw: SimpleNamespace(ask=lambda: "15")),
+        )
+
+        result = _input_text("Retries", 3, "int", field_info=field_info)
+        assert result is None
+
+    def test_accepts_valid_int(self, monkeypatch):
+        """_input_text with field_info should accept valid constrained values."""
+        from pydantic import BaseModel, Field
+
+        class M(BaseModel):
+            retries: int = Field(default=3, ge=0, le=10)
+
+        field_info = M.model_fields["retries"]
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_questionary",
+            lambda: SimpleNamespace(text=lambda *a, **kw: SimpleNamespace(ask=lambda: "5")),
+        )
+
+        result = _input_text("Retries", 3, "int", field_info=field_info)
+        assert result == 5
+
+    def test_works_without_field_info(self, monkeypatch):
+        """_input_text without field_info should work as before (no validation)."""
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_questionary",
+            lambda: SimpleNamespace(text=lambda *a, **kw: SimpleNamespace(ask=lambda: "42")),
+        )
+
+        result = _input_text("Count", 0, "int")
+        assert result == 42
+
+
+class TestChannelCommonRegistration:
+    """Tests for Channel Common menu registration."""
+
+    def test_channel_common_in_settings_sections(self):
+        """Channel Common should be registered in _SETTINGS_SECTIONS."""
+        from nanobot.cli.onboard import _SETTINGS_SECTIONS
+
+        assert "Channel Common" in _SETTINGS_SECTIONS
+
+    def test_channel_common_getter_returns_channels(self):
+        """Channel Common getter should return config.channels."""
+        from nanobot.cli.onboard import _SETTINGS_GETTER
+
+        config = Config()
+        result = _SETTINGS_GETTER["Channel Common"](config)
+        assert result is config.channels
+
+    def test_channel_common_setter_writes_channels(self):
+        """Channel Common setter should update config.channels."""
+        from nanobot.cli.onboard import _SETTINGS_SETTER
+
+        config = Config()
+        original = config.channels
+        new_channels = original.model_copy(deep=True)
+        new_channels.send_tool_hints = True
+        _SETTINGS_SETTER["Channel Common"](config, new_channels)
+        assert config.channels.send_tool_hints is True
+
+    def test_channel_common_edit_preserves_extras(self):
+        """Editing Channel Common should not lose per-channel extras."""
+        config = Config()
+        config.channels.feishu = {"enabled": True, "appId": "test123"}
+        channels = config.channels.model_copy(deep=True)
+        channels.send_tool_hints = True
+        config.channels = channels
+        assert config.channels.send_tool_hints is True
+        assert config.channels.feishu["appId"] == "test123"
+
+
+class TestApiServerRegistration:
+    """Tests for API Server menu registration."""
+
+    def test_api_server_in_settings_sections(self):
+        """API Server should be registered in _SETTINGS_SECTIONS."""
+        from nanobot.cli.onboard import _SETTINGS_SECTIONS
+
+        assert "API Server" in _SETTINGS_SECTIONS
+
+    def test_api_server_getter_returns_api(self):
+        """API Server getter should return config.api."""
+        from nanobot.cli.onboard import _SETTINGS_GETTER
+
+        config = Config()
+        result = _SETTINGS_GETTER["API Server"](config)
+        assert result is config.api
+
+    def test_api_server_setter_writes_api(self):
+        """API Server setter should update config.api."""
+        from nanobot.cli.onboard import _SETTINGS_SETTER
+
+        config = Config()
+        from nanobot.config.schema import ApiConfig
+
+        new_api = ApiConfig(host="0.0.0.0", port=9999)
+        _SETTINGS_SETTER["API Server"](config, new_api)
+        assert config.api.host == "0.0.0.0"
+        assert config.api.port == 9999
+
+
+class TestMainMenuUpdate:
+    """Tests for main menu including new Channel Common and API Server items."""
+
+    def test_main_menu_dispatch_includes_channel_common(self):
+        """Main menu dispatch should route [H] to Channel Common."""
+        from nanobot.cli.onboard import run_onboard
+
+        # We verify by checking the dispatch table is set up correctly
+        # The menu items are defined inline in run_onboard, so we test
+        # that _configure_general_settings handles the new sections.
+        from nanobot.cli.onboard import _SETTINGS_SECTIONS, _SETTINGS_GETTER, _SETTINGS_SETTER
+
+        assert "Channel Common" in _SETTINGS_SECTIONS
+        assert "Channel Common" in _SETTINGS_GETTER
+        assert "Channel Common" in _SETTINGS_SETTER
+
+    def test_main_menu_dispatch_includes_api_server(self):
+        """Main menu dispatch should route [I] to API Server."""
+        from nanobot.cli.onboard import _SETTINGS_SECTIONS, _SETTINGS_GETTER, _SETTINGS_SETTER
+
+        assert "API Server" in _SETTINGS_SECTIONS
+        assert "API Server" in _SETTINGS_GETTER
+        assert "API Server" in _SETTINGS_SETTER
+
+    def test_run_onboard_channel_common_edit(self, monkeypatch):
+        """run_onboard should handle [H] Channel Common correctly."""
+        initial_config = Config()
+
+        responses = iter([
+            "[H] Channel Common",
+            KeyboardInterrupt(),
+            "[S] Save and Exit",
+        ])
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                if isinstance(self.response, BaseException):
+                    raise self.response
+                return self.response
+
+        def fake_select(*_args, **_kwargs):
+            return FakePrompt(next(responses))
+
+        def fake_configure_general_settings(config, section):
+            if section == "Channel Common":
+                config.channels.send_tool_hints = True
+
+        monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
+        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_configure_general_settings", fake_configure_general_settings)
+
+        result = run_onboard(initial_config=initial_config)
+
+        assert result.should_save is True
+        assert result.config.channels.send_tool_hints is True
+
+    def test_run_onboard_api_server_edit(self, monkeypatch):
+        """run_onboard should handle [I] API Server correctly."""
+        initial_config = Config()
+
+        responses = iter([
+            "[I] API Server",
+            KeyboardInterrupt(),
+            "[S] Save and Exit",
+        ])
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                if isinstance(self.response, BaseException):
+                    raise self.response
+                return self.response
+
+        def fake_select(*_args, **_kwargs):
+            return FakePrompt(next(responses))
+
+        def fake_configure_general_settings(config, section):
+            if section == "API Server":
+                config.api.port = 9999
+
+        monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
+        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        monkeypatch.setattr(onboard_wizard, "_configure_general_settings", fake_configure_general_settings)
+
+        result = run_onboard(initial_config=initial_config)
+
+        assert result.should_save is True
+        assert result.config.api.port == 9999
+
+    def test_view_summary_calls_pause(self, monkeypatch):
+        """[V] View Summary should pause before returning to main menu."""
+        initial_config = Config()
+        pause_called = {"n": 0}
+
+        responses = iter([
+            "[V] View Configuration Summary",
+            "[S] Save and Exit",
+        ])
+
+        class FakePrompt:
+            def __init__(self, response):
+                self.response = response
+
+            def ask(self):
+                if isinstance(self.response, BaseException):
+                    raise self.response
+                return self.response
+
+        def fake_select(*_args, **_kwargs):
+            return FakePrompt(next(responses))
+
+        def fake_pause():
+            pause_called["n"] += 1
+
+        monkeypatch.setattr(onboard_wizard, "_show_main_menu_header", lambda: None)
+        monkeypatch.setattr(onboard_wizard, "questionary", SimpleNamespace(select=fake_select))
+        # _pause is called inside _show_summary, so we patch it there
+        monkeypatch.setattr(onboard_wizard, "_pause", fake_pause)
+        # Suppress summary output but still call _pause
+        monkeypatch.setattr(onboard_wizard, "_print_summary_panel", lambda *a, **kw: None)
+        monkeypatch.setattr(onboard_wizard, "_get_provider_names", lambda: {})
+        monkeypatch.setattr(onboard_wizard, "_get_channel_names", lambda: {})
+
+        result = run_onboard(initial_config=initial_config)
+
+        assert result.should_save is True
+        assert pause_called["n"] == 1

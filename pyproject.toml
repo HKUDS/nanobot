@@ -1,6 +1,6 @@
 [project]
 name = "nanobot-ai"
-version = "0.1.5.post1"
+version = "0.1.5.post2"
 description = "A lightweight personal AI assistant framework"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -15,6 +15,10 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+]
+license-files = [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
 ]
 
 dependencies = [
@@ -40,7 +44,7 @@ dependencies = [
     "slack-sdk>=3.39.0,<4.0.0",
     "slackify-markdown>=0.2.0,<1.0.0",
     "qq-botpy>=1.2.0,<2.0.0",
-    "python-socks[asyncio]>=2.8.0,<3.0.0",
+    "python-socks[asyncio]>=2.8.0,<3.0.0; sys_platform != 'win32'",
     "prompt-toolkit>=3.0.50,<4.0.0",
     "questionary>=2.0.0,<3.0.0",
     "mcp>=1.26.0,<2.0.0",
@@ -50,6 +54,7 @@ dependencies = [
     "tiktoken>=0.12.0,<1.0.0",
     "jinja2>=3.1.0,<4.0.0",
     "dulwich>=0.22.0,<1.0.0",
+    "pyyaml>=6.0,<7.0.0",
     "pypdf>=5.0.0,<6.0.0",
     "python-docx>=1.1.0,<2.0.0",
     "openpyxl>=3.1.0,<4.0.0",
@@ -74,7 +79,7 @@ msteams = [
 ]
 
 matrix = [
-    "matrix-nio[e2e]>=0.25.2",
+    "matrix-nio[e2e]>=0.25.2; sys_platform != 'win32'",
     "mistune>=3.0.0,<4.0.0",
     "nh3>=0.2.17,<1.0.0",
 ]
@@ -129,6 +134,8 @@ include = [
     "bridge/",
     "README.md",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "pyproject.toml",
 ]
 
 [tool.ruff]

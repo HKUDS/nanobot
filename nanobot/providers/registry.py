@@ -223,6 +223,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.githubcopilot.com",
         strip_model_prefix=True,
         is_oauth=True,
+        supports_max_completion_tokens=True,
     ),
     # DeepSeek: OpenAI-compatible at api.deepseek.com
     ProviderSpec(
@@ -261,7 +262,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
     ),
-    # Moonshot (月之暗面): Kimi models. K2.5 enforces temperature >= 1.0.
+    # Moonshot (月之暗面): Kimi K2.5 / K2.6 enforce temperature >= 1.0.
     ProviderSpec(
         name="moonshot",
         keywords=("moonshot", "kimi"),
@@ -269,7 +270,10 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Moonshot",
         backend="openai_compat",
         default_api_base="https://api.moonshot.ai/v1",
-        model_overrides=(("kimi-k2.5", {"temperature": 1.0}),),
+        model_overrides=(
+            ("kimi-k2.5", {"temperature": 1.0}),
+            ("kimi-k2.6", {"temperature": 1.0}),
+        ),
     ),
     # MiniMax: OpenAI-compatible API
     ProviderSpec(

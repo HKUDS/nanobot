@@ -467,8 +467,46 @@ async def test_send_delta_stream_end_falls_back_on_bad_request() -> None:
 
 @pytest.mark.asyncio
 async def test_send_delta_stream_end_splits_oversized_reply() -> None:
-    """Final streamed reply exceeding Telegram limit is split into chunks."""
-    from nanobot.channels.telegram import TELEGRAM_MAX_MESSAGE_LEN
+    """Final streamed reply exceeding Telegram limit is split into chunks.
+
+    The fix converts markdown to HTML first, then splits by 4096 (actual Telegram
+    limit), ensuring the edited message always fits within Telegram's constraint.
+    Previously, the code split by 4000 (TELEGRAM_MAX_MESSAGE_LEN) before HTML
+    conversion, which could still overflow when HTML tags were added.
+    """
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock()
+    channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
+
+    oversized = "x" * (4000 + 500)
+    channel._stream_bufs["123"] = _StreamBuf(text=oversized, message_id=7, last_edit=0.0)
+
+    await channel.send_delta("123", "", {"_stream_end": True})
+
+    channel._app.bot.edit_message_text.assert_called_once()
+    edit_text = channel._app.bot.edit_message_text.call_args.kwargs.get("text", "")
+    assert len(edit_text) <= 4096, f"edit_text length {len(edit_text)} exceeds Telegram's 4096 limit"
+
+    channel._app.bot.send_message.assert_called_once()
+    send_text = channel._app.bot.send_message.call_args.kwargs.get("text", "")
+    assert len(send_text) <= 4096
+    assert "123" not in channel._stream_bufs
+
+
+@pytest.mark.asyncio
+async def test_send_delta_stream_end_html_expansion_does_not_overflow() -> None:
+    """Markdown that expands when converted to HTML is still split correctly.
+
+    This is the actual bug from issue #3315: markdown like **bold** expands to
+    <b>bold</b>, adding ~33% characters. A 3600-char message with heavy markdown
+    could become 4800+ chars after HTML conversion, exceeding 4096 limit.
+    The fix converts to HTML first, THEN splits by 4096.
+    """
+    from nanobot.channels.telegram import _markdown_to_telegram_html
 
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
@@ -478,14 +516,21 @@ async def test_send_delta_stream_end_splits_oversized_reply() -> None:
     channel._app.bot.edit_message_text = AsyncMock()
     channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
 
-    oversized = "x" * (TELEGRAM_MAX_MESSAGE_LEN + 500)
-    channel._stream_bufs["123"] = _StreamBuf(text=oversized, message_id=7, last_edit=0.0)
+    markdown_text = "**bold** " * 400  # 3600 chars raw, expands ~33% to 4800 HTML
+    raw_len = len(markdown_text)
+    html_len = len(_markdown_to_telegram_html(markdown_text))
+    assert html_len > 4096, f"Test precondition failed: HTML should exceed 4096 (was {html_len})"
+
+    channel._stream_bufs["123"] = _StreamBuf(text=markdown_text, message_id=7, last_edit=0.0)
 
     await channel.send_delta("123", "", {"_stream_end": True})
 
     channel._app.bot.edit_message_text.assert_called_once()
     edit_text = channel._app.bot.edit_message_text.call_args.kwargs.get("text", "")
-    assert len(edit_text) <= TELEGRAM_MAX_MESSAGE_LEN
+    assert len(edit_text) <= 4096, (
+        f"HTML text length {len(edit_text)} exceeds Telegram's 4096 limit. "
+        f"Raw was {raw_len}, HTML was {html_len}."
+    )
 
     channel._app.bot.send_message.assert_called_once()
     assert "123" not in channel._stream_bufs
@@ -528,6 +573,39 @@ async def test_send_delta_incremental_edit_treats_not_modified_as_success() -> N
     await channel.send_delta("123", "", {"_stream_delta": True, "_stream_id": "s:0"})
 
     assert channel._stream_bufs["123"].last_edit > 0.0
+
+
+@pytest.mark.asyncio
+async def test_send_delta_incremental_edit_splits_oversized_buffer() -> None:
+    """Mid-stream overflow: once buf.text exceeds Telegram's limit, split into
+    chunks, edit the current message with the first chunk, and re-anchor the
+    buffer to a new message for the tail so further deltas keep streaming."""
+    from nanobot.channels.telegram import TELEGRAM_MAX_MESSAGE_LEN
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.edit_message_text = AsyncMock()
+    channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=99))
+
+    oversized = "x" * (TELEGRAM_MAX_MESSAGE_LEN + 500)
+    channel._stream_bufs["123"] = _StreamBuf(
+        text=oversized, message_id=7, last_edit=0.0, stream_id="s:0"
+    )
+
+    await channel.send_delta("123", "y", {"_stream_delta": True, "_stream_id": "s:0"})
+
+    channel._app.bot.edit_message_text.assert_called_once()
+    edit_text = channel._app.bot.edit_message_text.call_args.kwargs.get("text", "")
+    assert len(edit_text) <= TELEGRAM_MAX_MESSAGE_LEN
+
+    channel._app.bot.send_message.assert_called_once()
+    buf = channel._stream_bufs["123"]
+    assert buf.message_id == 99
+    assert len(buf.text) <= TELEGRAM_MAX_MESSAGE_LEN
+    assert buf.last_edit > 0.0
 
 
 @pytest.mark.asyncio
@@ -1393,3 +1471,123 @@ async def test_send_text_bad_request_plain_fallback_exhausted() -> None:
     # so HTML fails after 1 attempt → fallback to plain also fails after 1 attempt.
     # Before the fix: 2 total. After the fix: still 2 (BadRequest SHOULD fallback).
     assert call_count == 2, f"Expected 2 calls (1 HTML + 1 plain), got {call_count}"
+
+
+# ---------------------------------------------------------------------------
+# _markdown_to_telegram_html formatting tests
+# ---------------------------------------------------------------------------
+
+def test_markdown_to_html_headers_become_bold() -> None:
+    from nanobot.channels.telegram import _markdown_to_telegram_html
+
+    assert _markdown_to_telegram_html("# Title") == "<b>Title</b>"
+    assert _markdown_to_telegram_html("## Subtitle") == "<b>Subtitle</b>"
+    assert _markdown_to_telegram_html("### Deep") == "<b>Deep</b>"
+
+
+def test_markdown_to_html_numbered_lists_preserved() -> None:
+    from nanobot.channels.telegram import _markdown_to_telegram_html
+
+    text = "1. First\n2. Second\n3. Third"
+    result = _markdown_to_telegram_html(text)
+    assert "1. First" in result
+    assert "2. Second" in result
+    assert "3. Third" in result
+
+
+def test_markdown_to_html_numbered_list_normalizes_whitespace() -> None:
+    from nanobot.channels.telegram import _markdown_to_telegram_html
+
+    # Extra spaces after dot should be normalized
+    text = "1.   Lots of space\n2.  Two spaces"
+    result = _markdown_to_telegram_html(text)
+    assert "1. Lots of space" in result
+    assert "2. Two spaces" in result
+
+
+def test_markdown_to_html_headers_survive_html_escaping() -> None:
+    """Headers containing special HTML chars should still render as bold."""
+    from nanobot.channels.telegram import _markdown_to_telegram_html
+
+    result = _markdown_to_telegram_html("# A < B & C > D")
+    assert "<b>A &lt; B &amp; C &gt; D</b>" == result
+
+
+def test_markdown_to_html_mixed_formatting() -> None:
+    """Headers, bullets, numbered lists, and bold coexist correctly."""
+    from nanobot.channels.telegram import _markdown_to_telegram_html
+
+    text = "# Overview\n\n- bullet one\n- bullet two\n\n1. step one\n2. step two\n\n**bold text**"
+    result = _markdown_to_telegram_html(text)
+    assert "<b>Overview</b>" in result
+    assert "\u2022 bullet one" in result
+    assert "1. step one" in result
+    assert "<b>bold text</b>" in result
+
+
+# ---------------------------------------------------------------------------
+# _strip_md_block tests
+# ---------------------------------------------------------------------------
+
+def test_strip_md_block_removes_inline_formatting() -> None:
+    from nanobot.channels.telegram import _strip_md_block
+
+    text = "**bold** and _italic_ and ~~struck~~"
+    result = _strip_md_block(text)
+    assert result == "bold and italic and struck"
+
+
+def test_strip_md_block_strips_headers() -> None:
+    from nanobot.channels.telegram import _strip_md_block
+
+    assert _strip_md_block("## Title\nBody") == "Title\nBody"
+
+
+def test_strip_md_block_converts_bullets_and_numbers() -> None:
+    from nanobot.channels.telegram import _strip_md_block
+
+    text = "- item a\n1. item b\n2. item c"
+    result = _strip_md_block(text)
+    assert "\u2022 item a" in result
+    assert "1. item b" in result
+    assert "2. item c" in result
+
+
+def test_strip_md_block_strips_links() -> None:
+    from nanobot.channels.telegram import _strip_md_block
+
+    assert _strip_md_block("[click here](https://example.com)") == "click here"
+
+
+# ---------------------------------------------------------------------------
+# Streaming mid-edit uses _strip_md_block
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_send_delta_mid_stream_strips_markdown() -> None:
+    """Mid-stream edits should strip markdown so users see clean text."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=42))
+    channel._app.bot.edit_message_text = AsyncMock()
+
+    # Initial send with markdown
+    await channel.send_delta("999", "**hello** world")
+    sent_text = channel._app.bot.send_message.call_args.kwargs.get("text", "")
+    # Should NOT contain raw markdown asterisks
+    assert "**" not in sent_text
+    assert "hello world" in sent_text
+
+    # Mid-stream edit
+    import time
+    buf = channel._stream_bufs["999"]
+    buf.last_edit = time.monotonic() - 10  # force edit interval
+    await channel.send_delta("999", "\n### Title\n1. step")
+    edited_text = channel._app.bot.edit_message_text.call_args.kwargs.get("text", "")
+    assert "###" not in edited_text
+    assert "**" not in edited_text
+    assert "Title" in edited_text
+    assert "1. step" in edited_text

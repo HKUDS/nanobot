@@ -442,6 +442,35 @@ async def test_direct_openai_responses_404_falls_back_to_chat_completions() -> N
 
 
 @pytest.mark.asyncio
+async def test_direct_openai_open_circuit_skips_responses_api() -> None:
+    mock_chat = AsyncMock(return_value=_fake_chat_response("from chat"))
+    mock_responses = AsyncMock(return_value=_fake_responses_response("from responses"))
+    spec = find_by_name("openai")
+
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_chat
+        client_instance.responses.create = mock_responses
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="gpt-5-chat",
+            spec=spec,
+        )
+        for _ in range(3):
+            provider._record_responses_failure("gpt-5-chat", None)
+
+        result = await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="gpt-5-chat",
+        )
+
+    assert result.content == "from chat"
+    mock_responses.assert_not_awaited()
+    mock_chat.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_direct_openai_stream_responses_unsupported_param_falls_back() -> None:
     mock_chat = AsyncMock(return_value=_fake_chat_stream("fallback stream"))
     mock_responses = AsyncMock(
@@ -702,12 +731,42 @@ def test_dashscope_thinking_enabled_with_reasoning_effort() -> None:
 
 
 def test_dashscope_thinking_disabled_for_minimal() -> None:
+    """'minimal' → wire 'minimum' + thinking off on DashScope."""
     kw = _build_kwargs_for("dashscope", "qwen3-plus", reasoning_effort="minimal")
+    assert kw["reasoning_effort"] == "minimum"
     assert kw["extra_body"] == {"enable_thinking": False}
+
+
+def test_dashscope_thinking_disabled_for_minimum_alias() -> None:
+    """Native 'minimum' spelling must also disable thinking, not enable it."""
+    kw = _build_kwargs_for("dashscope", "qwen3-plus", reasoning_effort="minimum")
+    assert kw["reasoning_effort"] == "minimum"
+    assert kw["extra_body"] == {"enable_thinking": False}
+
+
+def test_non_dashscope_minimal_not_retranslated() -> None:
+    """DashScope-specific translation must not leak to other providers."""
+    kw = _build_kwargs_for("openai", "gpt-5", reasoning_effort="minimal")
+    assert kw["reasoning_effort"] == "minimal"
 
 
 def test_dashscope_no_extra_body_when_reasoning_effort_none() -> None:
     kw = _build_kwargs_for("dashscope", "qwen-turbo", reasoning_effort=None)
+    assert "extra_body" not in kw
+
+
+def test_minimax_reasoning_split_enabled_with_reasoning_effort() -> None:
+    kw = _build_kwargs_for("minimax", "MiniMax-M2.7", reasoning_effort="medium")
+    assert kw["extra_body"] == {"reasoning_split": True}
+
+
+def test_minimax_reasoning_split_disabled_for_minimal() -> None:
+    kw = _build_kwargs_for("minimax", "MiniMax-M2.7", reasoning_effort="minimal")
+    assert kw["extra_body"] == {"reasoning_split": False}
+
+
+def test_minimax_no_extra_body_when_reasoning_effort_none() -> None:
+    kw = _build_kwargs_for("minimax", "MiniMax-M2.7", reasoning_effort=None)
     assert "extra_body" not in kw
 
 
@@ -754,6 +813,25 @@ def test_kimi_k25_thinking_enabled_with_openrouter_prefix() -> None:
     """OpenRouter-style model names like moonshotai/kimi-k2.5 must trigger thinking."""
     kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.5", reasoning_effort="medium")
     assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+
+
+def test_kimi_k26_thinking_enabled() -> None:
+    """kimi-k2.6 with reasoning_effort set should opt in to thinking."""
+    kw = _build_kwargs_for("moonshot", "kimi-k2.6", reasoning_effort="medium")
+    assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+
+
+def test_kimi_k26_thinking_enabled_with_openrouter_prefix() -> None:
+    """OpenRouter-style names like moonshotai/kimi-k2.6 must trigger thinking."""
+    kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.6", reasoning_effort="medium")
+    assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+
+
+def test_moonshot_kimi_k26_temperature_override() -> None:
+    """Moonshot registry forces temperature 1.0 for kimi-k2.6 (API requirement)."""
+    kw = _build_kwargs_for("moonshot", "kimi-k2.6", reasoning_effort=None)
+    assert kw["temperature"] == 1.0
+
 
 def test_kimi_k25_thinking_disabled_with_openrouter_prefix() -> None:
     """OpenRouter names must NOT trigger thinking without reasoning_effort."""

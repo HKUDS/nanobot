@@ -1,0 +1,83 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "nanobot에 연결 중…",
+      "boot": "nanobot 불러오는 중…"
+    },
+    "error": {
+      "title": "nanobot에 연결할 수 없습니다",
+      "gatewayHint": "gateway(`nanobot gateway`)가 실행 중인지, 그리고 이 페이지가 같은 머신에서 열려 있는지 확인하세요."
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "nanobot 웹 UI — nanobot 작업공간과 대화하세요."
+    }
+  },
+  "sidebar": {
+    "collapse": "사이드바 접기",
+    "toggleTheme": "테마 전환",
+    "newChat": "새 채팅",
+    "recent": "최근 대화",
+    "refreshSessions": "세션 새로고침",
+    "language": {
+      "label": "언어",
+      "ariaLabel": "언어 변경"
+    }
+  },
+  "chat": {
+    "fallbackTitle": "채팅 {{id}}",
+    "loading": "불러오는 중…",
+    "noSessions": "아직 세션이 없습니다.",
+    "actions": "{{title}} 채팅 작업",
+    "delete": "삭제",
+    "newChat": "새 채팅"
+  },
+  "deleteConfirm": {
+    "title": "“{{title}}”을(를) 삭제할까요?",
+    "description": "세션 파일이 디스크에서 제거됩니다. 이 작업은 되돌릴 수 없습니다.",
+    "cancel": "취소",
+    "confirm": "삭제"
+  },
+  "connection": {
+    "idle": "대기 중",
+    "connecting": "연결 중…",
+    "open": "연결됨",
+    "reconnecting": "재연결 중…",
+    "closed": "연결 끊김",
+    "error": "연결 오류"
+  },
+  "thread": {
+    "loadingConversation": "대화 불러오는 중…",
+    "empty": {
+      "description": "질문을 하거나, 로컬 작업을 이어가거나, 새 스레드를 시작할 수 있습니다."
+    },
+    "header": {
+      "toggleSidebar": "사이드바 전환"
+    },
+    "composer": {
+      "placeholderThread": "메시지를 입력하세요…",
+      "placeholderHero": "무슨 생각을 하고 있나요?",
+      "placeholderOpening": "새 채팅을 여는 중…",
+      "inputAria": "메시지 입력",
+      "sendHint": "Enter로 전송 · Shift+Enter로 줄바꿈",
+      "send": "메시지 보내기"
+    },
+    "scrollToBottom": "맨 아래로 스크롤"
+  },
+  "message": {
+    "streaming": "생성 중",
+    "assistantTyping": "도우미가 입력 중",
+    "toolSingle": "도구 사용 중",
+    "toolMany": "도구 {{count}}개 사용됨"
+  },
+  "code": {
+    "fallbackLanguage": "코드",
+    "copyAria": "코드 복사",
+    "copy": "복사",
+    "copied": "복사됨"
+  }
+}

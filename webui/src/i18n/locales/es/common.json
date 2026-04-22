@@ -1,0 +1,83 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "Conectando con nanobot…",
+      "boot": "Cargando nanobot…"
+    },
+    "error": {
+      "title": "No se pudo conectar con nanobot",
+      "gatewayHint": "Asegúrate de que la gateway esté en ejecución (`nanobot gateway`) y de que esta página esté abierta en la misma máquina."
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "Interfaz web de nanobot: conversa con tu espacio de trabajo de nanobot."
+    }
+  },
+  "sidebar": {
+    "collapse": "Contraer barra lateral",
+    "toggleTheme": "Cambiar tema",
+    "newChat": "Nuevo chat",
+    "recent": "Recientes",
+    "refreshSessions": "Actualizar sesiones",
+    "language": {
+      "label": "Idioma",
+      "ariaLabel": "Cambiar idioma"
+    }
+  },
+  "chat": {
+    "fallbackTitle": "Chat {{id}}",
+    "loading": "Cargando…",
+    "noSessions": "Todavía no hay sesiones.",
+    "actions": "Acciones del chat {{title}}",
+    "delete": "Eliminar",
+    "newChat": "Nuevo chat"
+  },
+  "deleteConfirm": {
+    "title": "¿Eliminar “{{title}}”?",
+    "description": "El archivo de sesión se eliminará del disco. Esta acción no se puede deshacer.",
+    "cancel": "Cancelar",
+    "confirm": "Eliminar"
+  },
+  "connection": {
+    "idle": "Inactivo",
+    "connecting": "Conectando…",
+    "open": "Conectado",
+    "reconnecting": "Reconectando…",
+    "closed": "Desconectado",
+    "error": "Error de conexión"
+  },
+  "thread": {
+    "loadingConversation": "Cargando conversación…",
+    "empty": {
+      "description": "Haz preguntas, continúa tu trabajo local o inicia un nuevo hilo."
+    },
+    "header": {
+      "toggleSidebar": "Mostrar u ocultar la barra lateral"
+    },
+    "composer": {
+      "placeholderThread": "Escribe tu mensaje…",
+      "placeholderHero": "¿Qué tienes en mente?",
+      "placeholderOpening": "Abriendo un nuevo chat…",
+      "inputAria": "Entrada de mensaje",
+      "sendHint": "Enter para enviar · Shift+Enter para nueva línea",
+      "send": "Enviar mensaje"
+    },
+    "scrollToBottom": "Desplazarse al final"
+  },
+  "message": {
+    "streaming": "transmitiendo",
+    "assistantTyping": "El asistente está escribiendo",
+    "toolSingle": "Usando una herramienta",
+    "toolMany": "Se usaron {{count}} herramientas"
+  },
+  "code": {
+    "fallbackLanguage": "código",
+    "copyAria": "Copiar código",
+    "copy": "Copiar",
+    "copied": "Copiado"
+  }
+}

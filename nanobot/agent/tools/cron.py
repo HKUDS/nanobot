@@ -5,54 +5,67 @@ from datetime import datetime
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
+from nanobot.agent.tools.schema import (
+    BooleanSchema,
+    IntegerSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronJobState, CronSchedule
 
-
-@tool_parameters(
-    tool_parameters_schema(
-        action=StringSchema("Action to perform", enum=["add", "list", "remove"]),
-        name=StringSchema(
-            "Optional short human-readable label for the job "
-            "(e.g., 'weather-monitor', 'daily-standup'). Defaults to first 30 chars of message."
-        ),
-        message=StringSchema(
-            "Instruction for the agent to execute when the job triggers "
-            "(e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report')"
-        ),
-        every_seconds=IntegerSchema(0, description="Interval in seconds (for recurring tasks)"),
-        cron_expr=StringSchema("Cron expression like '0 9 * * *' (for scheduled tasks)"),
-        tz=StringSchema(
-            "Optional IANA timezone for cron expressions (e.g. 'America/Vancouver'). "
-            "When omitted with cron_expr, the tool's default timezone applies."
-        ),
-        at=StringSchema(
-            "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00'). "
-            "Naive values use the tool's default timezone."
-        ),
-        deliver=BooleanSchema(
-            description="Whether to deliver the execution result to the user channel (default true)",
-            default=True,
-        ),
-        job_id=StringSchema("Job ID (for remove)"),
-        required=["action"],
-    )
+_CRON_PARAMETERS = tool_parameters_schema(
+    action=StringSchema("Action to perform", enum=["add", "list", "remove"]),
+    name=StringSchema(
+        "Optional short human-readable label for the job "
+        "(e.g., 'weather-monitor', 'daily-standup'). Defaults to first 30 chars of message."
+    ),
+    message=StringSchema(
+        "REQUIRED when action='add'. Instruction for the agent to execute when the job triggers "
+        "(e.g., 'Send a reminder to WeChat: xxx' or 'Check system status and report'). "
+        "Not used for action='list' or action='remove'."
+    ),
+    every_seconds=IntegerSchema(0, description="Interval in seconds (for recurring tasks)"),
+    cron_expr=StringSchema("Cron expression like '0 9 * * *' (for scheduled tasks)"),
+    tz=StringSchema(
+        "Optional IANA timezone for cron expressions (e.g. 'America/Vancouver'). "
+        "When omitted with cron_expr, the tool's default timezone applies."
+    ),
+    at=StringSchema(
+        "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00'). "
+        "Naive values use the tool's default timezone."
+    ),
+    deliver=BooleanSchema(
+        description="Whether to deliver the execution result to the user channel (default true)",
+        default=True,
+    ),
+    job_id=StringSchema("REQUIRED when action='remove'. Job ID to remove (obtain via action='list')."),
+    required=["action"],
+    description=(
+        "Action-specific parameters: add requires a non-empty message plus one schedule "
+        "(every_seconds, cron_expr, or at); remove requires job_id; list only needs action. "
+        "Per-action requirements are enforced at runtime (see field descriptions) so the "
+        "top-level schema stays compatible with providers (e.g. OpenAI Codex/Responses) that "
+        "reject oneOf/anyOf/allOf/enum/not at the root of function parameters."
+    ),
 )
+
+
+@tool_parameters(_CRON_PARAMETERS)
 class CronTool(Tool):
     """Tool to schedule reminders and recurring tasks."""
 
     def __init__(self, cron_service: CronService, default_timezone: str = "UTC"):
         self._cron = cron_service
         self._default_timezone = default_timezone
-        self._channel = ""
-        self._chat_id = ""
+        self._channel: ContextVar[str] = ContextVar("cron_channel", default="")
+        self._chat_id: ContextVar[str] = ContextVar("cron_chat_id", default="")
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
     def set_context(self, channel: str, chat_id: str) -> None:
         """Set the current session context for delivery."""
-        self._channel = channel
-        self._chat_id = chat_id
+        self._channel.set(channel)
+        self._chat_id.set(chat_id)
 
     def set_cron_context(self, active: bool):
         """Mark whether the tool is executing inside a cron job callback."""
@@ -94,6 +107,15 @@ class CronTool(Tool):
             f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}."
         )
 
+    def validate_params(self, params: dict[str, Any]) -> list[str]:
+        errors = super().validate_params(params)
+        action = params.get("action")
+        if action == "add" and not str(params.get("message") or "").strip():
+            errors.append("message is required when action='add'")
+        if action == "remove" and not str(params.get("job_id") or "").strip():
+            errors.append("job_id is required when action='remove'")
+        return errors
+
     async def execute(
         self,
         action: str,
@@ -128,8 +150,14 @@ class CronTool(Tool):
         deliver: bool = True,
     ) -> str:
         if not message:
-            return "Error: message is required for add"
-        if not self._channel or not self._chat_id:
+            return (
+                "Error: cron action='add' requires a non-empty 'message' parameter "
+                "describing what to do when the job triggers "
+                "(e.g. the reminder text). Retry including message=\"...\"."
+            )
+        channel = self._channel.get()
+        chat_id = self._chat_id.get()
+        if not channel or not chat_id:
             return "Error: no session context (channel/chat_id)"
         if tz and not cron_expr:
             return "Error: tz can only be used with cron_expr"
@@ -168,8 +196,8 @@ class CronTool(Tool):
             schedule=schedule,
             message=message,
             deliver=deliver,
-            channel=self._channel,
-            to=self._chat_id,
+            channel=channel,
+            to=chat_id,
             delete_after_run=delete_after,
         )
         return f"Created job '{job.name}' (id: {job.id})"

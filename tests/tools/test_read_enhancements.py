@@ -1,4 +1,8 @@
-"""Tests for ReadFileTool enhancements: description fix, read dedup, PDF support, device blacklist."""
+"""Tests for ReadFileTool enhancements: description fix, read dedup, PDF support, device blacklist, office docs."""
+
+import os
+import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -143,6 +147,7 @@ class TestReadPdf:
 # Device path blacklist
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(sys.platform == "win32", reason="/dev directory doesn't exist on Windows")
 class TestReadDeviceBlacklist:
 
     @pytest.fixture()
@@ -178,3 +183,187 @@ class TestReadDeviceBlacklist:
         result = await tool.execute(path=str(link))
         assert "Error" in result
         assert "blocked" in result.lower() or "device" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# file_state: mtime-unchanged / content-changed fallback
+# ---------------------------------------------------------------------------
+# On filesystems with coarse mtime resolution (NTFS ~100ms, FAT 2s) a fast
+# write-after-read can leave mtime unchanged. The content-hash fallback is
+# what protects against stale-read warnings being false-negative on those
+# platforms. Lock that behavior down here so nobody reverts it silently.
+
+class TestFileStateHashFallback:
+
+    def test_check_read_warns_when_content_changed_but_mtime_same(self, tmp_path):
+        f = tmp_path / "data.txt"
+        f.write_text("original", encoding="utf-8")
+        file_state.record_read(f)
+        original_mtime = os.path.getmtime(f)
+
+        f.write_text("modified", encoding="utf-8")
+        os.utime(f, (original_mtime, original_mtime))
+        assert os.path.getmtime(f) == original_mtime
+
+        warning = file_state.check_read(f)
+        assert warning is not None
+        assert "modified" in warning.lower()
+
+    def test_check_read_passes_when_content_and_mtime_unchanged(self, tmp_path):
+        f = tmp_path / "data.txt"
+        f.write_text("stable", encoding="utf-8")
+        file_state.record_read(f)
+
+        assert file_state.check_read(f) is None
+
+
+# ---------------------------------------------------------------------------
+# Line-ending normalization
+# ---------------------------------------------------------------------------
+# ReadFileTool normalizes CRLF -> LF before line-splitting. This primarily
+# helps Windows users whose checkouts carry CRLF line endings and whose
+# subsequent StrReplace edits would otherwise miss on `\r` boundaries. The
+# normalization applies on all platforms; these tests lock that in so the
+# behavior is intentional and discoverable, not accidental.
+
+class TestReadFileLineEndingNormalization:
+
+    @pytest.fixture()
+    def tool(self, tmp_path):
+        return ReadFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_crlf_is_normalized_to_lf(self, tool, tmp_path):
+        f = tmp_path / "crlf.txt"
+        f.write_bytes(b"alpha\r\nbeta\r\ngamma\r\n")
+        result = await tool.execute(path=str(f))
+        assert "\r" not in result
+        assert "alpha" in result and "beta" in result and "gamma" in result
+
+    @pytest.mark.asyncio
+    async def test_lf_only_is_preserved(self, tool, tmp_path):
+        f = tmp_path / "lf.txt"
+        f.write_bytes(b"alpha\nbeta\ngamma\n")
+        result = await tool.execute(path=str(f))
+        assert "\r" not in result
+        assert "alpha" in result and "beta" in result and "gamma" in result
+
+
+# ---------------------------------------------------------------------------
+# Office document support (DOCX, XLSX, PPTX)
+# ---------------------------------------------------------------------------
+
+class TestReadOfficeDocuments:
+
+    @pytest.fixture()
+    def tool(self, tmp_path):
+        return ReadFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_docx_returns_extracted_text(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="Title\n\nParagraph 1"):
+            f = tmp_path / "test.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "Title" in result
+        assert "Paragraph 1" in result
+        assert "Error" not in result
+
+    @pytest.mark.asyncio
+    async def test_xlsx_returns_extracted_text(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="--- Sheet: Sheet1 ---\nName\tAge\nAlice\t30"):
+            f = tmp_path / "test.xlsx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "Sheet1" in result
+        assert "Alice" in result
+
+    @pytest.mark.asyncio
+    async def test_pptx_returns_extracted_text(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="--- Slide 1 ---\nWelcome\n--- Slide 2 ---\nContent"):
+            f = tmp_path / "test.pptx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "Welcome" in result
+        assert "Content" in result
+
+    @pytest.mark.asyncio
+    async def test_docx_missing_library(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="[error: python-docx not installed]"):
+            f = tmp_path / "test.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "Error" in result
+        assert "python-docx not installed" in result
+
+    @pytest.mark.asyncio
+    async def test_docx_corrupt_file(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="[error: failed to extract DOCX: bad zip]"):
+            f = tmp_path / "test.docx"
+            f.write_bytes(b"not-a-zip")
+            result = await tool.execute(path=str(f))
+        assert "Error" in result
+        assert "failed to extract DOCX" in result
+
+    @pytest.mark.asyncio
+    async def test_unsupported_extension(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value=None):
+            f = tmp_path / "test.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "Error" in result
+        assert "Unsupported" in result
+
+    @pytest.mark.asyncio
+    async def test_empty_document_returns_descriptive_message(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value=""):
+            f = tmp_path / "empty.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "no extractable text" in result
+
+
+class TestOfficeDocTruncation:
+
+    @pytest.fixture()
+    def tool(self, tmp_path):
+        return ReadFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_large_document_truncated(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="x" * 200_000):
+            f = tmp_path / "large.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert len(result) <= ReadFileTool._MAX_CHARS + 100
+        assert "truncated at ~128K chars" in result
+
+    @pytest.mark.asyncio
+    async def test_small_document_not_truncated(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="Hello world"):
+            f = tmp_path / "small.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "truncated" not in result
+        assert "Hello world" in result
+
+    @pytest.mark.asyncio
+    async def test_error_response_not_truncated(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="[error: failed to extract DOCX: something went wrong]"):
+            f = tmp_path / "bad.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "Error" in result
+        assert "truncated" not in result
+
+
+class TestReadDescriptionUpdate:
+
+    def test_description_mentions_documents(self):
+        tool = ReadFileTool()
+        desc = tool.description.lower()
+        assert "document" in desc or "docx" in desc or "xlsx" in desc or "pptx" in desc
+
+    def test_description_no_longer_says_cannot_read(self):
+        tool = ReadFileTool()
+        assert "cannot read" not in tool.description.lower()

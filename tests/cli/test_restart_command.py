@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -31,6 +32,15 @@ def _make_loop():
     return loop, bus
 
 
+async def _wait_until(predicate, *, timeout: float = 0.2, interval: float = 0.01) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        await asyncio.sleep(interval)
+    assert predicate()
+
+
 class TestRestartCommand:
 
     @pytest.mark.asyncio
@@ -47,7 +57,23 @@ class TestRestartCommand:
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
+        async def _fast_sleep(_delay: float) -> None:
+            return None
+
+        scheduled: list[asyncio.Task] = []
+
+        def _capture_task(coro):
+            task = asyncio.create_task(coro)
+            scheduled.append(task)
+            return task
+
+        fake_asyncio = SimpleNamespace(
+            sleep=_fast_sleep,
+            create_task=_capture_task,
+        )
+
         with patch.dict(os.environ, {}, clear=False), \
+             patch("nanobot.command.builtin.asyncio", new=fake_asyncio), \
              patch("nanobot.command.builtin.os.execv") as mock_execv:
             out = await cmd_restart(ctx)
             assert "Restarting" in out.content
@@ -55,7 +81,8 @@ class TestRestartCommand:
             assert os.environ.get(RESTART_NOTIFY_CHAT_ID_ENV) == "direct"
             assert os.environ.get(RESTART_STARTED_AT_ENV)
 
-            await asyncio.sleep(1.5)
+            assert scheduled
+            await scheduled[0]
             mock_execv.assert_called_once()
 
     @pytest.mark.asyncio
@@ -149,7 +176,7 @@ class TestRestartCommand:
         assert response is not None
         assert "Model: test-model" in response.content
         assert "Tokens: 0 in / 0 out" in response.content
-        assert "Context: 20k/65k (31%)" in response.content
+        assert "Context: 20k/65k (31% of input budget)" in response.content
         assert "Session: 3 messages" in response.content
         assert "Uptime: 2m 5s" in response.content
         assert "Tasks: 0 active" in response.content
@@ -213,7 +240,7 @@ class TestRestartCommand:
 
         assert response is not None
         assert "Tokens: 1200 in / 34 out" in response.content
-        assert "Context: 1k/65k (1%)" in response.content
+        assert "Context: 1k/65k (1% of input budget)" in response.content
         assert "Tasks: 0 active" in response.content
 
     @pytest.mark.asyncio

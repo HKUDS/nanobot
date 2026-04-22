@@ -190,6 +190,45 @@ async def test_server_send_message(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
+async def test_server_send_tags_tool_hint_with_kind(bus: MagicMock) -> None:
+    """``_tool_hint`` metadata must surface as ``kind: "tool_hint"`` so WS
+    clients render breadcrumbs separately from conversational replies."""
+    ch = _ch(bus, 29919)
+    t = asyncio.create_task(ch.start())
+    await asyncio.sleep(0.3)
+    try:
+        async with WsTestClient("ws://127.0.0.1:29919/", client_id="h") as c:
+            ready = await c.recv_ready()
+            # Plain reply: no "kind" field.
+            await ch.send(OutboundMessage(
+                channel="websocket", chat_id=ready.chat_id, content="hi",
+            ))
+            plain = await c.recv_message()
+            assert plain.raw.get("kind") is None
+
+            # Tool-hint breadcrumb: kind == "tool_hint".
+            await ch.send(OutboundMessage(
+                channel="websocket", chat_id=ready.chat_id,
+                content='weather("get")',
+                metadata={"_progress": True, "_tool_hint": True},
+            ))
+            hint = await c.recv_message()
+            assert hint.raw.get("kind") == "tool_hint"
+            assert hint.text == 'weather("get")'
+
+            # Generic progress (non-tool-hint) gets the softer "progress" label.
+            await ch.send(OutboundMessage(
+                channel="websocket", chat_id=ready.chat_id,
+                content="thinking…",
+                metadata={"_progress": True},
+            ))
+            prog = await c.recv_message()
+            assert prog.raw.get("kind") == "progress"
+    finally:
+        await ch.stop(); await t
+
+
+@pytest.mark.asyncio
 async def test_server_send_with_media_and_reply(bus: MagicMock) -> None:
     ch = _ch(bus, 29910)
     t = asyncio.create_task(ch.start())
@@ -290,10 +329,11 @@ async def test_disconnected_client_cleanup(bus: MagicMock) -> None:
         async with WsTestClient("ws://127.0.0.1:29914/", client_id="tmp") as c:
             chat_id = (await c.recv_ready()).chat_id
         # disconnected
+        await asyncio.sleep(0.1)
         await ch.send(OutboundMessage(
             channel="websocket", chat_id=chat_id, content="orphan",
         ))
-        assert chat_id not in ch._connections
+        assert chat_id not in ch._subs
     finally:
         await ch.stop(); await t
 
