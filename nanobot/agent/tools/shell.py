@@ -255,6 +255,7 @@ class ExecTool(Tool):
         home = os.environ.get("HOME", "/tmp")
         env = {
             "HOME": home,
+            "PATH": os.environ.get ("PATH", "/usr/bin:/bin"),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
             "TERM": os.environ.get("TERM", "dumb"),
         }
