@@ -461,6 +461,8 @@ class Consolidator:
         for idx in range(capped_end, start, -1):
             if session.messages[idx].get("role") == "user":
                 return idx
+        
+        # If no user boundary found, return None to skip consolidation
         return None
 
     def estimate_session_prompt_tokens(
