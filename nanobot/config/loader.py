@@ -78,6 +78,9 @@ def save_config(config: Config, config_path: Path | None = None) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+_ENV_REF_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
 def resolve_config_env_vars(config: Config) -> Config:
     """Return a copy of *config* with ``${VAR}`` env-var references resolved.
 
@@ -85,14 +88,28 @@ def resolve_config_env_vars(config: Config) -> Config:
     Raises :class:`ValueError` if a referenced variable is not set.
     """
     data = config.model_dump(mode="json", by_alias=True)
+    if not _has_env_refs(data):
+        # Skip the dump→revalidate roundtrip so fields with ``exclude=True`` survive.
+        return config
     data = _resolve_env_vars(data)
     return Config.model_validate(data)
+
+
+def _has_env_refs(obj: object) -> bool:
+    """Return True if any string value contains a ``${VAR}`` reference."""
+    if isinstance(obj, str):
+        return bool(_ENV_REF_PATTERN.search(obj))
+    if isinstance(obj, dict):
+        return any(_has_env_refs(v) for v in obj.values())
+    if isinstance(obj, list):
+        return any(_has_env_refs(v) for v in obj)
+    return False
 
 
 def _resolve_env_vars(obj: object) -> object:
     """Recursively resolve ``${VAR}`` patterns in string values."""
     if isinstance(obj, str):
-        return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", _env_replace, obj)
+        return _ENV_REF_PATTERN.sub(_env_replace, obj)
     if isinstance(obj, dict):
         return {k: _resolve_env_vars(v) for k, v in obj.items()}
     if isinstance(obj, list):

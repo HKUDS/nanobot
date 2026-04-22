@@ -80,3 +80,25 @@ class TestResolveConfig:
 
         saved = json.loads(config_path.read_text(encoding="utf-8"))
         assert saved["channels"]["telegram"]["token"] == "${MY_TOKEN}"
+
+    def test_preserves_excluded_fields_when_no_env_refs(self, tmp_path):
+        """Regression: fields with ``exclude=True`` (e.g. DreamConfig.cron)
+        must survive ``resolve_config_env_vars`` when the config has no
+        ``${VAR}`` references. Previously the unconditional dump→revalidate
+        roundtrip silently dropped them."""
+        config_path = tmp_path / "config.json"
+        config_path.write_text(
+            json.dumps(
+                {"agents": {"defaults": {"dream": {"cron": "5 11 * * *"}}}}
+            ),
+            encoding="utf-8",
+        )
+
+        raw = load_config(config_path)
+        assert raw.agents.defaults.dream.cron == "5 11 * * *"
+
+        resolved = resolve_config_env_vars(raw)
+        assert resolved.agents.defaults.dream.cron == "5 11 * * *"
+        assert resolved.agents.defaults.dream.describe_schedule() == (
+            "cron 5 11 * * * (legacy)"
+        )
