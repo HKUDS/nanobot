@@ -387,16 +387,9 @@ class OpenAICompatProvider(LLMProvider):
                     kwargs.update(overrides)
                     break
 
-        # Semantic vs. wire distinction for reasoning_effort.
-        # - semantic_effort is nanobot's internal canonical form (OpenAI's
-        #   vocabulary: "minimal" / "low" / "medium" / "high"). It drives
-        #   decisions like whether to disable provider thinking modes.
-        # - wire_effort is what we actually serialize to the provider; some
-        #   providers (notably DashScope) reject "minimal" and require
-        #   "minimum" instead. We accept either spelling on input and
-        #   always compare on the semantic form so a user who configured
-        #   "minimum" (DashScope's native spelling) still gets thinking
-        #   disabled instead of accidentally enabled.
+        # Normalize reasoning_effort into a semantic form (OpenAI vocab)
+        # used for internal decisions, and a wire form actually sent out.
+        # "minimum" is accepted as a DashScope-native alias for "minimal".
         semantic_effort: str | None = None
         if isinstance(reasoning_effort, str):
             semantic_effort = reasoning_effort.lower()
@@ -405,9 +398,7 @@ class OpenAICompatProvider(LLMProvider):
 
         wire_effort = reasoning_effort
         if spec and spec.name == "dashscope" and semantic_effort == "minimal":
-            # DashScope's reasoning_effort.effort enum accepts: none /
-            # minimum / low / medium / high / xhigh. Literal "minimal"
-            # returns 400 invalid_value; translate on the outbound side.
+            # DashScope accepts none/minimum/low/medium/high/xhigh; "minimal" 400s.
             wire_effort = "minimum"
 
         if wire_effort:
