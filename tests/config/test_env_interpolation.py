@@ -102,3 +102,28 @@ class TestResolveConfig:
         assert resolved.agents.defaults.dream.describe_schedule() == (
             "cron 5 11 * * * (legacy)"
         )
+
+    def test_preserves_excluded_fields_with_env_refs(self, tmp_path, monkeypatch):
+        """Excluded fields must also survive when the config contains
+        ``${VAR}`` refs elsewhere. An in-place walk preserves the legacy
+        ``cron`` override even as unrelated string fields are substituted."""
+        monkeypatch.setenv("TEST_API_KEY", "resolved-key")
+        config_path = tmp_path / "config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "agents": {"defaults": {"dream": {"cron": "5 11 * * *"}}},
+                    "providers": {"groq": {"apiKey": "${TEST_API_KEY}"}},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        raw = load_config(config_path)
+        resolved = resolve_config_env_vars(raw)
+
+        assert resolved.providers.groq.api_key == "resolved-key"
+        assert resolved.agents.defaults.dream.cron == "5 11 * * *"
+        assert resolved.agents.defaults.dream.describe_schedule() == (
+            "cron 5 11 * * * (legacy)"
+        )

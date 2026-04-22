@@ -4,9 +4,11 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Any
 
 import pydantic
 from loguru import logger
+from pydantic import BaseModel
 
 from nanobot.config.schema import Config
 
@@ -82,32 +84,50 @@ _ENV_REF_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
 def resolve_config_env_vars(config: Config) -> Config:
-    """Return a copy of *config* with ``${VAR}`` env-var references resolved.
+    """Return *config* with ``${VAR}`` env-var references resolved.
 
-    Only string values are affected; other types pass through unchanged.
-    Raises :class:`ValueError` if a referenced variable is not set.
+    Walks in place so fields declared with ``exclude=True`` (e.g.
+    ``DreamConfig.cron``) survive; returns the same instance when no
+    references are present. Raises ``ValueError`` if a referenced
+    variable is not set.
     """
-    data = config.model_dump(mode="json", by_alias=True)
-    if not _has_env_refs(data):
-        # Skip the dump→revalidate roundtrip so fields with ``exclude=True`` survive.
-        return config
-    data = _resolve_env_vars(data)
-    return Config.model_validate(data)
+    return _resolve_in_place(config)
 
 
-def _has_env_refs(obj: object) -> bool:
-    """Return True if any string value contains a ``${VAR}`` reference."""
+def _resolve_in_place(obj: Any) -> Any:
     if isinstance(obj, str):
-        return bool(_ENV_REF_PATTERN.search(obj))
+        new = _ENV_REF_PATTERN.sub(_env_replace, obj)
+        return new if new != obj else obj
+    if isinstance(obj, BaseModel):
+        updates: dict[str, Any] = {}
+        for name in type(obj).model_fields:
+            old = getattr(obj, name)
+            new = _resolve_in_place(old)
+            if new is not old:
+                updates[name] = new
+        extras = obj.__pydantic_extra__
+        new_extras: dict[str, Any] | None = None
+        if extras:
+            resolved = {k: _resolve_in_place(v) for k, v in extras.items()}
+            if any(resolved[k] is not extras[k] for k in extras):
+                new_extras = resolved
+        if not updates and new_extras is None:
+            return obj
+        copy = obj.model_copy(update=updates) if updates else obj.model_copy()
+        if new_extras is not None:
+            copy.__pydantic_extra__ = new_extras
+        return copy
     if isinstance(obj, dict):
-        return any(_has_env_refs(v) for v in obj.values())
+        resolved = {k: _resolve_in_place(v) for k, v in obj.items()}
+        return resolved if any(resolved[k] is not obj[k] for k in obj) else obj
     if isinstance(obj, list):
-        return any(_has_env_refs(v) for v in obj)
-    return False
+        resolved = [_resolve_in_place(v) for v in obj]
+        return resolved if any(nv is not ov for nv, ov in zip(resolved, obj)) else obj
+    return obj
 
 
 def _resolve_env_vars(obj: object) -> object:
-    """Recursively resolve ``${VAR}`` patterns in string values."""
+    """Recursively resolve ``${VAR}`` patterns in plain strings/dicts/lists."""
     if isinstance(obj, str):
         return _ENV_REF_PATTERN.sub(_env_replace, obj)
     if isinstance(obj, dict):
