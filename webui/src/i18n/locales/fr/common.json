@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "Impossible de joindre nanobot",
-      "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot web`) et que cette page est ouverte sur la même machine."
+      "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot gateway`) et que cette page est ouverte sur la même machine."
     },
     "documentTitle": {
       "base": "nanobot",

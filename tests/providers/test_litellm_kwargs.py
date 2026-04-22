@@ -731,12 +731,42 @@ def test_dashscope_thinking_enabled_with_reasoning_effort() -> None:
 
 
 def test_dashscope_thinking_disabled_for_minimal() -> None:
+    """'minimal' → wire 'minimum' + thinking off on DashScope."""
     kw = _build_kwargs_for("dashscope", "qwen3-plus", reasoning_effort="minimal")
+    assert kw["reasoning_effort"] == "minimum"
     assert kw["extra_body"] == {"enable_thinking": False}
+
+
+def test_dashscope_thinking_disabled_for_minimum_alias() -> None:
+    """Native 'minimum' spelling must also disable thinking, not enable it."""
+    kw = _build_kwargs_for("dashscope", "qwen3-plus", reasoning_effort="minimum")
+    assert kw["reasoning_effort"] == "minimum"
+    assert kw["extra_body"] == {"enable_thinking": False}
+
+
+def test_non_dashscope_minimal_not_retranslated() -> None:
+    """DashScope-specific translation must not leak to other providers."""
+    kw = _build_kwargs_for("openai", "gpt-5", reasoning_effort="minimal")
+    assert kw["reasoning_effort"] == "minimal"
 
 
 def test_dashscope_no_extra_body_when_reasoning_effort_none() -> None:
     kw = _build_kwargs_for("dashscope", "qwen-turbo", reasoning_effort=None)
+    assert "extra_body" not in kw
+
+
+def test_minimax_reasoning_split_enabled_with_reasoning_effort() -> None:
+    kw = _build_kwargs_for("minimax", "MiniMax-M2.7", reasoning_effort="medium")
+    assert kw["extra_body"] == {"reasoning_split": True}
+
+
+def test_minimax_reasoning_split_disabled_for_minimal() -> None:
+    kw = _build_kwargs_for("minimax", "MiniMax-M2.7", reasoning_effort="minimal")
+    assert kw["extra_body"] == {"reasoning_split": False}
+
+
+def test_minimax_no_extra_body_when_reasoning_effort_none() -> None:
+    kw = _build_kwargs_for("minimax", "MiniMax-M2.7", reasoning_effort=None)
     assert "extra_body" not in kw
 
 

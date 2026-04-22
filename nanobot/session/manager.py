@@ -262,8 +262,16 @@ class SessionManager:
             "messages": session.messages,
         }
 
-    def save(self, session: Session) -> None:
-        """Save a session to disk atomically."""
+    def save(self, session: Session, *, fsync: bool = False) -> None:
+        """Save a session to disk atomically.
+
+        When *fsync* is ``True`` the final file and its parent directory are
+        explicitly flushed to durable storage.  This is intentionally off by
+        default (the OS page-cache is sufficient for normal operation) but
+        should be enabled during graceful shutdown so that filesystems with
+        write-back caching (e.g. rclone VFS, NFS, FUSE mounts) do not lose
+        the most recent writes.
+        """
         path = self._get_session_path(session.key)
         tmp_path = path.with_suffix(".jsonl.tmp")
 
@@ -280,13 +288,46 @@ class SessionManager:
                 f.write(json.dumps(metadata_line, ensure_ascii=False) + "\n")
                 for msg in session.messages:
                     f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+                if fsync:
+                    f.flush()
+                    os.fsync(f.fileno())
 
             os.replace(tmp_path, path)
+
+            if fsync:
+                # fsync the directory so the rename is durable.
+                # On Windows, opening a directory with O_RDONLY raises
+                # PermissionError — skip the dir sync there (NTFS
+                # journals metadata synchronously).
+                try:
+                    fd = os.open(str(path.parent), os.O_RDONLY)
+                    try:
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                except PermissionError:
+                    pass  # Windows — directory fsync not supported
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise
 
         self._cache[session.key] = session
+
+    def flush_all(self) -> int:
+        """Re-save every cached session with fsync for durable shutdown.
+
+        Returns the number of sessions flushed.  Errors on individual
+        sessions are logged but do not prevent other sessions from being
+        flushed.
+        """
+        flushed = 0
+        for key, session in list(self._cache.items()):
+            try:
+                self.save(session, fsync=True)
+                flushed += 1
+            except Exception:
+                logger.warning("Failed to flush session {}", key, exc_info=True)
+        return flushed
 
     def invalidate(self, key: str) -> None:
         """Remove a session from the in-memory cache."""

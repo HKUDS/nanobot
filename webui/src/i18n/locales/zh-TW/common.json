@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "無法連線到 nanobot",
-      "gatewayHint": "請確認 gateway 已啟動（`nanobot web`），並且目前頁面與 gateway 在同一台機器上開啟。"
+      "gatewayHint": "請確認 gateway 已啟動（`nanobot gateway`），並且目前頁面與 gateway 在同一台機器上開啟。"
     },
     "documentTitle": {
       "base": "nanobot",

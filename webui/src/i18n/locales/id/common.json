@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "Tidak dapat menjangkau nanobot",
-      "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot web`) dan halaman ini dibuka pada mesin yang sama."
+      "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot gateway`) dan halaman ini dibuka pada mesin yang sama."
     },
     "documentTitle": {
       "base": "nanobot",

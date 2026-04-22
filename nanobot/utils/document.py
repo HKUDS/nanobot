@@ -134,18 +134,20 @@ def _extract_xlsx(path: Path) -> str:
     """Extract text from XLSX using openpyxl."""
     try:
         wb = load_workbook(path, read_only=True, data_only=True)
-        sheets: list[str] = []
-        for sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            rows: list[str] = []
-            for row in ws.iter_rows(values_only=True):
-                row_text = "\t".join(str(cell) if cell is not None else "" for cell in row)
-                if row_text.strip():
-                    rows.append(row_text)
-            if rows:
-                sheets.append(f"--- Sheet: {sheet_name} ---\n" + "\n".join(rows))
-        wb.close()
-        return _truncate("\n\n".join(sheets), _MAX_TEXT_LENGTH)
+        try:
+            sheets: list[str] = []
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                rows: list[str] = []
+                for row in ws.iter_rows(values_only=True):
+                    row_text = "\t".join(str(cell) if cell is not None else "" for cell in row)
+                    if row_text.strip():
+                        rows.append(row_text)
+                if rows:
+                    sheets.append(f"--- Sheet: {sheet_name} ---\n" + "\n".join(rows))
+            return _truncate("\n\n".join(sheets), _MAX_TEXT_LENGTH)
+        finally:
+            wb.close()
     except Exception as e:
         logger.error("Failed to extract XLSX {}: {}", path, e)
         return f"[error: failed to extract XLSX: {e!s}]"

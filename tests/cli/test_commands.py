@@ -421,13 +421,13 @@ async def test_github_copilot_provider_refreshes_client_api_key_before_chat():
     })
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI", return_value=mock_client):
-        provider = GitHubCopilotProvider(default_model="github-copilot/gpt-5.1")
+        provider = GitHubCopilotProvider(default_model="github-copilot/gpt-4")
 
     provider._get_copilot_access_token = AsyncMock(return_value="copilot-access-token")
 
     response = await provider.chat(
         messages=[{"role": "user", "content": "hi"}],
-        model="github-copilot/gpt-5.1",
+        model="github-copilot/gpt-4",
         max_tokens=16,
         temperature=0.1,
     )
@@ -1288,10 +1288,15 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         async def run(self) -> None:
             return None
 
+    class _FakeSessionManager:
+        def flush_all(self) -> int:
+            return 0
+
     class _FakeAgentLoop:
         def __init__(self, **_kwargs) -> None:
             self.model = "test-model"
             self.dream = _FakeDream()
+            self.sessions = _FakeSessionManager()
 
         async def run(self) -> None:
             await asyncio.Event().wait()

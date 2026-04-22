@@ -1,6 +1,6 @@
 # nanobot webui
 
-The browser front-end for `nanobot web`. It is built with Vite + React 18 +
+The browser front-end for the nanobot gateway. It is built with Vite + React 18 +
 TypeScript + Tailwind 3 + shadcn/ui, talks to the gateway over the WebSocket
 multiplex protocol, and reads session metadata from the embedded REST surface
 on the same port.
@@ -22,7 +22,7 @@ For the project overview, install guide, and general docs map, see the root
 
 ```text
 webui/                 source tree (this directory)
-nanobot/web/dist/      build output consumed by `nanobot web`
+nanobot/web/dist/      build output served by the gateway
 ```
 
 ## Develop from source
@@ -80,7 +80,7 @@ bun run build
 ```
 
 This writes the production assets to `../nanobot/web/dist`, which is the
-directory served by `nanobot web` and bundled into the Python wheel.
+directory served by `nanobot gateway` and bundled into the Python wheel.
 
 If you are cutting a release, run the build before packaging so the published
 wheel contains the current WebUI assets.
