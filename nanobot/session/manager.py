@@ -296,11 +296,17 @@ class SessionManager:
 
             if fsync:
                 # fsync the directory so the rename is durable.
-                fd = os.open(str(path.parent), os.O_RDONLY)
+                # On Windows, opening a directory with O_RDONLY raises
+                # PermissionError — skip the dir sync there (NTFS
+                # journals metadata synchronously).
                 try:
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
+                    fd = os.open(str(path.parent), os.O_RDONLY)
+                    try:
+                        os.fsync(fd)
+                    finally:
+                        os.close(fd)
+                except PermissionError:
+                    pass  # Windows — directory fsync not supported
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise

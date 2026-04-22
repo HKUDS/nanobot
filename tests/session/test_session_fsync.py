@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from nanobot.session.manager import SessionManager
+
+_IS_WINDOWS = sys.platform == "win32"
 
 
 @pytest.fixture
@@ -39,8 +42,9 @@ class TestSaveFsync:
 
         with patch("os.fsync") as mock_fsync:
             manager.save(session, fsync=True)
-            # Should be called twice: once for the file, once for the directory
-            assert mock_fsync.call_count == 2
+            # File fsync always runs; directory fsync only on non-Windows.
+            expected = 1 if _IS_WINDOWS else 2
+            assert mock_fsync.call_count == expected
 
     def test_save_default_no_fsync(self, manager: SessionManager):
         """Default save() should not fsync (backward compat)."""
@@ -77,8 +81,9 @@ class TestFlushAll:
 
         with patch("os.fsync") as mock_fsync:
             manager.flush_all()
-            # file fsync + directory fsync
-            assert mock_fsync.call_count == 2
+            # file fsync always; directory fsync only on non-Windows
+            expected = 1 if _IS_WINDOWS else 2
+            assert mock_fsync.call_count == expected
 
     def test_flush_all_continues_on_error(self, manager: SessionManager):
         """One broken session should not prevent others from flushing."""
