@@ -808,11 +808,31 @@ def _run_gateway(
         return resp.content if resp else ""
 
     async def on_heartbeat_notify(response: str) -> None:
-        """Deliver a heartbeat response to the user's channel."""
+        """Deliver a heartbeat response to the user's channel.
+
+        In addition to publishing the outbound message, this injects the
+        delivered text as an assistant turn into the *target channel's*
+        session.  Without this, a user reply on the channel (e.g. "Sure")
+        lands in a session that has no context about the heartbeat message
+        and the agent cannot follow through.
+        """
         from nanobot.bus.events import OutboundMessage
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
             return  # No external channel available to deliver to
+
+        # Inject the delivered message into the channel session so that
+        # user replies have conversational context.
+        from nanobot.agent.loop import UNIFIED_SESSION_KEY
+        target_key = (
+            UNIFIED_SESSION_KEY
+            if config.agents.defaults.unified_session
+            else f"{channel}:{chat_id}"
+        )
+        target_session = agent.sessions.get_or_create(target_key)
+        target_session.add_message("assistant", response)
+        agent.sessions.save(target_session)
+
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
     hb_cfg = config.gateway.heartbeat
