@@ -205,6 +205,13 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
+class CameraToolConfig(Base):
+    """Camera capture tool configuration."""
+
+    enable: bool = False  # enable the camera_capture tool
+    timeout: int = 15  # seconds before a capture attempt is cancelled
+
+
 class MyToolConfig(Base):
     """Self-inspection tool configuration."""
 
@@ -217,6 +224,7 @@ class ToolsConfig(Base):
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
+    camera: CameraToolConfig = Field(default_factory=CameraToolConfig)
     my: MyToolConfig = Field(default_factory=MyToolConfig)
     restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
