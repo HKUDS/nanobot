@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 import shutil
+import signal
 import sys
 from pathlib import Path
 from typing import Any
@@ -141,6 +142,7 @@ class ExecTool(Tool):
             else:
                 command = f'export PATH="$PATH:{self.path_append}"; {command}'
 
+        process: asyncio.subprocess.Process | None = None
         try:
             process = await self._spawn(command, cwd, env)
 
@@ -183,12 +185,28 @@ class ExecTool(Tool):
 
         except Exception as e:
             return f"Error executing command: {str(e)}"
+        finally:
+            # MIT-162: guarantee the subprocess *group* is torn down on every
+            # exit path — success, exception, timeout, or task cancellation.
+            # Without this, commands like `sudo nmap ...` leave orphaned child
+            # trees reparented to the gateway, leaking PIDs and memory long
+            # after the tool call has returned. Commands that already exited
+            # cleanly are cheap: _kill_process becomes a no-op once the
+            # process group is gone.
+            if process is not None and process.returncode is None:
+                await self._kill_process(process)
 
     @staticmethod
     async def _spawn(
         command: str, cwd: str, env: dict[str, str],
     ) -> asyncio.subprocess.Process:
-        """Launch *command* in a platform-appropriate shell."""
+        """Launch *command* in a platform-appropriate shell.
+
+        On Unix the child is placed in its own session (``start_new_session=True``)
+        so we can signal the entire process group during cleanup — without this,
+        fork-happy commands (``sudo``, ``bash -c 'cmd1 | cmd2'``, nmap) leave
+        orphan descendants behind when the parent exits (MIT-162).
+        """
         if _IS_WINDOWS:
             comspec = env.get("COMSPEC", os.environ.get("COMSPEC", "cmd.exe"))
             return await asyncio.create_subprocess_exec(
@@ -205,12 +223,42 @@ class ExecTool(Tool):
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=env,
+            start_new_session=True,
         )
 
     @staticmethod
     async def _kill_process(process: asyncio.subprocess.Process) -> None:
-        """Kill a subprocess and reap it to prevent zombies."""
-        process.kill()
+        """Kill a subprocess *and its entire process group*, then reap it.
+
+        MIT-162: we intentionally skip SIGTERM and go straight to SIGKILL on
+        the process group. ``sudo`` and other privilege-escalation wrappers
+        routinely swallow SIGTERM, leaving their children as orphans. On Unix
+        the child was spawned with ``start_new_session=True``, so its PID is
+        also its PGID; ``killpg`` takes down the whole tree in one call.
+        Windows has no process-group primitive available here, so we fall back
+        to the single-process kill the Python stdlib provides.
+        """
+        if not _IS_WINDOWS:
+            try:
+                pgid = os.getpgid(process.pid)
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                # Group already exited — nothing to signal.
+                pass
+            except PermissionError as e:
+                # Shouldn't happen since we own the child, but don't let it
+                # abort cleanup; fall through to the per-process kill below.
+                logger.debug("killpg denied for pid {}: {}", process.pid, e)
+
+        # Always ask the stdlib to kill the proc it owns — on Unix this is
+        # redundant after a successful killpg but still a cheap safety net
+        # (e.g. if getpgid raced with the child exiting); on Windows it's
+        # the primary kill path.
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+
         try:
             await asyncio.wait_for(process.wait(), timeout=5.0)
         except asyncio.TimeoutError:
@@ -307,8 +355,8 @@ class ExecTool(Tool):
                     continue
 
                 media_path = get_media_dir().resolve()
-                if (p.is_absolute() 
-                    and cwd_path not in p.parents 
+                if (p.is_absolute()
+                    and cwd_path not in p.parents
                     and p != cwd_path
                     and media_path not in p.parents
                     and p != media_path
