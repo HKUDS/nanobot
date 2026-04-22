@@ -423,15 +423,18 @@ class AgentLoop:
             self._set_runtime_checkpoint(session, payload)
 
         async def _drain_pending(*, limit: int = _MAX_INJECTIONS_PER_TURN) -> list[dict[str, Any]]:
-            """Non-blocking drain of follow-up messages from the pending queue."""
+            """Drain follow-up messages from the pending queue.
+
+            When no messages are immediately available but sub-agents
+            spawned in this dispatch are still running, blocks until at
+            least one result arrives (or timeout).  This keeps the runner
+            loop alive so subsequent sub-agent completions are consumed
+            in-order rather than dispatched separately.
+            """
             if pending_queue is None:
                 return []
-            items: list[dict[str, Any]] = []
-            while len(items) < limit:
-                try:
-                    pending_msg = pending_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
+
+            def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
                 content = pending_msg.content
                 media = pending_msg.media if pending_msg.media else None
                 if media:
@@ -447,7 +450,36 @@ class AgentLoop:
                     merged: str | list[dict[str, Any]] = f"{runtime_ctx}\n\n{user_content}"
                 else:
                     merged = [{"type": "text", "text": runtime_ctx}] + user_content
-                items.append({"role": "user", "content": merged})
+                return {"role": "user", "content": merged}
+
+            items: list[dict[str, Any]] = []
+            while len(items) < limit:
+                try:
+                    items.append(_to_user_message(pending_queue.get_nowait()))
+                except asyncio.QueueEmpty:
+                    break
+
+            # Block if nothing drained but sub-agents spawned in this dispatch
+            # are still running.  Keeps the runner loop alive so subsequent
+            # completions are injected in-order rather than dispatched separately.
+            if (not items
+                    and session is not None
+                    and self.subagents.get_running_count_by_session(session.key) > 0):
+                try:
+                    msg = await asyncio.wait_for(pending_queue.get(), timeout=300)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Timeout waiting for sub-agent completion in session {}",
+                        session.key,
+                    )
+                    return items
+                items.append(_to_user_message(msg))
+                while len(items) < limit:
+                    try:
+                        items.append(_to_user_message(pending_queue.get_nowait()))
+                    except asyncio.QueueEmpty:
+                        break
+
             return items
 
         result = await self.runner.run(AgentRunSpec(
@@ -744,6 +776,7 @@ class AgentLoop:
             final_content, _, all_msgs, _, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
+                pending_queue=pending_queue,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self._clear_runtime_checkpoint(session)
