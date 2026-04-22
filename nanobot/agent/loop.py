@@ -317,8 +317,8 @@ class AgentLoop:
             self.tools.register(WebFetchTool(proxy=self.web_config.proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
-        self.tools.register(SpawnStatusTool(subagent_manager=self.subagents))
-        self.tools.register(SpawnCancelTool(subagent_manager=self.subagents))
+        self.tools.register(SpawnStatusTool(manager=self.subagents))
+        self.tools.register(SpawnCancelTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(
                 CronTool(self.cron_service, default_timezone=self.context.timezone or "UTC")
