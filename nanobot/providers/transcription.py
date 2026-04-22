@@ -22,7 +22,7 @@ class OpenAITranscriptionProvider:
             or os.environ.get("OPENAI_TRANSCRIPTION_BASE_URL")
             or "https://api.openai.com/v1/audio/transcriptions"
         )
-        self.language = language
+        self.language = language or None
 
     async def transcribe(self, file_path: str | Path) -> str:
         if not self.api_key:
@@ -64,7 +64,7 @@ class GroqTranscriptionProvider:
     ):
         self.api_key = api_key or os.environ.get("GROQ_API_KEY")
         self.api_url = api_base or os.environ.get("GROQ_BASE_URL") or "https://api.groq.com/openai/v1/audio/transcriptions"
-        self.language = language
+        self.language = language or None
 
     async def transcribe(self, file_path: str | Path) -> str:
         """
