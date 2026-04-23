@@ -1,8 +1,12 @@
 """Tool registry for dynamic tool management."""
 
+from copy import deepcopy
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+
+# Minimum enum length that triggers collapsing to just the type in compact mode.
+_COMPACT_ENUM_THRESHOLD = 5
 
 
 class ToolRegistry:
@@ -12,9 +16,11 @@ class ToolRegistry:
     Allows dynamic registration and execution of tools.
     """
 
-    def __init__(self):
+    def __init__(self, compact_schemas: bool = False, compact_schemas_max_desc_length: int = 80):
         self._tools: dict[str, Tool] = {}
         self._cached_definitions: list[dict[str, Any]] | None = None
+        self._compact_schemas = compact_schemas
+        self._compact_schemas_max_desc_length = compact_schemas_max_desc_length
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
@@ -33,6 +39,52 @@ class ToolRegistry:
     def has(self, name: str) -> bool:
         """Check if a tool is registered."""
         return name in self._tools
+
+    @staticmethod
+    def _compact_schema(schema: dict[str, Any], max_desc_length: int) -> dict[str, Any]:
+        """Return a compacted copy of an OpenAI function schema.
+
+        Strips ``description`` and ``default`` fields from individual parameters,
+        collapses long ``enum`` lists (> ``_COMPACT_ENUM_THRESHOLD`` values) to
+        just the parameter type, and truncates the top-level tool description to
+        *max_desc_length* characters (0 = no truncation).
+        """
+
+        def _strip_props(obj: dict[str, Any]) -> None:
+            """Recursively strip verbose fields from a JSON Schema object in-place."""
+            props = obj.get("properties")
+            if not isinstance(props, dict):
+                return
+            for prop in props.values():
+                if not isinstance(prop, dict):
+                    continue
+                prop.pop("description", None)
+                prop.pop("default", None)
+                enum_vals = prop.get("enum")
+                if isinstance(enum_vals, list) and len(enum_vals) > _COMPACT_ENUM_THRESHOLD:
+                    prop.pop("enum", None)
+                # Recurse into nested objects and array item schemas
+                if prop.get("type") == "object" or "properties" in prop:
+                    _strip_props(prop)
+                items = prop.get("items")
+                if isinstance(items, dict):
+                    items.pop("description", None)
+                    items.pop("default", None)
+
+        schema = deepcopy(schema)
+        fn = schema.get("function")
+        if not isinstance(fn, dict):
+            return schema
+
+        desc = fn.get("description")
+        if isinstance(desc, str) and max_desc_length > 0 and len(desc) > max_desc_length:
+            fn["description"] = desc[:max_desc_length]
+
+        params = fn.get("parameters")
+        if isinstance(params, dict):
+            _strip_props(params)
+
+        return schema
 
     @staticmethod
     def _schema_name(schema: dict[str, Any]) -> str:
@@ -68,6 +120,12 @@ class ToolRegistry:
         builtins.sort(key=self._schema_name)
         mcp_tools.sort(key=self._schema_name)
         self._cached_definitions = builtins + mcp_tools
+
+        if self._compact_schemas:
+            return [
+                self._compact_schema(s, self._compact_schemas_max_desc_length)
+                for s in self._cached_definitions
+            ]
         return self._cached_definitions
 
     def prepare_call(
@@ -77,23 +135,31 @@ class ToolRegistry:
     ) -> tuple[Tool | None, dict[str, Any], str | None]:
         """Resolve, cast, and validate one tool call."""
         # Guard against invalid parameter types (e.g., list instead of dict)
-        if not isinstance(params, dict) and name in ('write_file', 'read_file'):
-            return None, params, (
-                f"Error: Tool '{name}' parameters must be a JSON object, got {type(params).__name__}. "
-                "Use named parameters: tool_name(param1=\"value1\", param2=\"value2\")"
+        if not isinstance(params, dict) and name in ("write_file", "read_file"):
+            return (
+                None,
+                params,
+                (
+                    f"Error: Tool '{name}' parameters must be a JSON object, got {type(params).__name__}. "
+                    'Use named parameters: tool_name(param1="value1", param2="value2")'
+                ),
             )
 
         tool = self._tools.get(name)
         if not tool:
-            return None, params, (
-                f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+            return (
+                None,
+                params,
+                (f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"),
             )
 
         cast_params = tool.cast_params(params)
         errors = tool.validate_params(cast_params)
         if errors:
-            return tool, cast_params, (
-                f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
+            return (
+                tool,
+                cast_params,
+                (f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)),
             )
         return tool, cast_params, None
 
