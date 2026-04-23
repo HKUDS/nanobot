@@ -68,9 +68,11 @@ class Schema(ABC):
             if "maximum" in schema and val > schema["maximum"]:
                 errors.append(f"{label} must be <= {schema['maximum']}")
         if t == "string":
-            if "minLength" in schema and len(val) < schema["minLength"]:
+            if val is None:
+                errors.append(f"{label} should be string, got None")
+            elif "minLength" in schema and len(val) < schema["minLength"]:
                 errors.append(f"{label} must be at least {schema['minLength']} chars")
-            if "maxLength" in schema and len(val) > schema["maxLength"]:
+            elif "maxLength" in schema and len(val) > schema["maxLength"]:
                 errors.append(f"{label} must be at most {schema['maxLength']} chars")
         if t == "object":
             props = schema.get("properties", {})
