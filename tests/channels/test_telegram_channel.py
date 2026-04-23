@@ -1617,3 +1617,64 @@ def test_build_keyboard_respects_inline_keyboards_flag() -> None:
     assert [[b.text for b in row] for row in rows] == [["Yes", "No"], ["Cancel"]]
     # callback_data mirrors label so _on_callback_query can echo the tap back.
     assert rows[0][0].callback_data == "Yes"
+
+
+def test_buttons_as_text_format_preserves_rows_and_labels() -> None:
+    # Canonical shape: one row per line, labels bracketed. Layout survives the fallback.
+    assert TelegramChannel._buttons_as_text([["Yes", "No"], ["Cancel"]]) == "[Yes] [No]\n[Cancel]"
+    assert TelegramChannel._buttons_as_text([["Only"]]) == "[Only]"
+    assert TelegramChannel._buttons_as_text([[], ["A"]]) == "[A]"  # empty rows skipped
+
+
+@pytest.mark.asyncio
+async def test_send_falls_back_buttons_to_inline_text_when_flag_off() -> None:
+    """Buttons are semantic options; with ``inline_keyboards=False`` we must
+    splice labels into the text so users still see the choices. Silent-drop
+    was the pre-fallback bug — the agent got a success reply while the user
+    saw a question with no options."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], inline_keyboards=False),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Proceed?",
+            buttons=[["Yes", "No"], ["Cancel"]],
+        )
+    )
+
+    assert len(channel._app.bot.sent_messages) == 1
+    sent = channel._app.bot.sent_messages[0]
+    assert sent.get("reply_markup") is None
+    assert "Proceed?" in sent["text"]
+    assert "[Yes] [No]" in sent["text"]
+    assert "[Cancel]" in sent["text"]
+
+
+@pytest.mark.asyncio
+async def test_send_uses_native_keyboard_when_flag_on() -> None:
+    """With the flag on, the content stays clean and buttons ride in ``reply_markup``."""
+    from telegram import InlineKeyboardMarkup
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], inline_keyboards=True),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Proceed?",
+            buttons=[["Yes", "No"]],
+        )
+    )
+
+    sent = channel._app.bot.sent_messages[0]
+    assert isinstance(sent.get("reply_markup"), InlineKeyboardMarkup)
+    assert "[Yes]" not in sent["text"]  # native keyboard owns the rendering

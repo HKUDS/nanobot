@@ -520,8 +520,13 @@ class TelegramChannel(BaseChannel):
         # Send text content
         if msg.content and msg.content != "[empty message]":
             render_as_blockquote = bool(msg.metadata.get("_tool_hint"))
-            chunks = split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN)
-            reply_markup = self._build_keyboard(msg.buttons) if getattr(msg, 'buttons', None) else None
+            buttons = getattr(msg, "buttons", None) or []
+            reply_markup = self._build_keyboard(buttons) if buttons else None
+            text = msg.content
+            # Fallback: no native keyboard → splice labels into the message so the choices survive.
+            if buttons and reply_markup is None:
+                text = f"{text}\n\n{self._buttons_as_text(buttons)}"
+            chunks = split_message(text, TELEGRAM_MAX_MESSAGE_LEN)
             for i, chunk in enumerate(chunks):
                 is_last = (i == len(chunks) - 1)
                 await self._send_text(
@@ -1204,6 +1209,11 @@ class TelegramChannel(BaseChannel):
             for row in buttons
         ]
         return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def _buttons_as_text(buttons: list[list[str]]) -> str:
+        # Buttons are semantic options; when we can't render a keyboard, the user still needs to see them.
+        return "\n".join(" ".join(f"[{label}]" for label in row) for row in buttons if row)
 
     async def _on_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle inline keyboard button clicks (callback queries)."""
