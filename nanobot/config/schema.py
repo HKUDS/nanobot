@@ -29,7 +29,6 @@ class ChannelsConfig(Base):
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
     transcription_provider: str = "groq"  # Voice transcription backend: "groq" or "openai"
-    transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # Optional ISO-639-1 hint for audio transcription
 
 
 class DreamConfig(Base):
@@ -50,6 +49,9 @@ class DreamConfig(Base):
     # on — set to False to feed MEMORY.md raw if a specific LLM reacts poorly
     # to the `← Nd` suffix or you want deterministic, git-independent prompts.
     annotate_line_ages: bool = True
+    # Allow Dream to edit SOUL.md and USER.md. Set to False if you want to protect
+    # these identity files from any automated modification.
+    allow_edit_identity_files: bool = True
 
     def build_schedule(self, timezone: str) -> CronSchedule:
         """Build the runtime schedule, preferring the legacy cron override if present."""
@@ -213,6 +215,24 @@ class MyToolConfig(Base):
     allow_set: bool = False  # let `my` modify loop state (read-only if False)
 
 
+class TTSConfig(Base):
+    """Text-to-Speech configuration using GPT-SoVITS."""
+
+    enabled: bool = True
+    api_url: str = "http://127.0.0.1:9880/"
+    refer_wav: str = ""
+    prompt_text: str = ""
+    prompt_language: str = "zh"
+    text_language: str = "zh"
+    gpt_path: str = ""
+    gpt_weight: str = ""
+    sovits_weight: str = ""
+    auto_start: bool = True
+    wait_startup: int = 8
+    tts0_python: str = ""
+    enabled_channels: list[str] = Field(default_factory=lambda: ["feishu", "cli"])
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
@@ -233,6 +253,7 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    tts: TTSConfig = Field(default_factory=TTSConfig)
 
     @property
     def workspace_path(self) -> Path:

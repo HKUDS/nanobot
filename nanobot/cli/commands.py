@@ -145,7 +145,7 @@ def _make_console() -> Console:
 def _render_interactive_ansi(render_fn) -> str:
     """Render Rich output to ANSI so prompt_toolkit can print it safely."""
     ansi_console = Console(
-        force_terminal=sys.stdout.isatty(),
+        force_terminal=True,
         color_system=console.color_system or "standard",
         width=console.width,
     )
@@ -594,6 +594,7 @@ def serve(
         disabled_skills=runtime_config.agents.defaults.disabled_skills,
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
         tools_config=runtime_config.tools,
+        dream_config=runtime_config.dream,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -698,6 +699,7 @@ def _run_gateway(
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         tools_config=config.tools,
+        dream_config=config.agents.defaults.dream,
     )
 
     # Set cron callback (needs agent)
@@ -765,7 +767,13 @@ def _run_gateway(
 
     # Create channel manager (forwards SessionManager so the WebSocket channel
     # can serve the embedded webui's REST surface).
-    channels = ChannelManager(config, bus, session_manager=session_manager)
+    # Pass provider + model so TTSService can call LLM for content briefing.
+    channels = ChannelManager(
+        config, bus,
+        session_manager=session_manager,
+        provider=provider,
+        model=config.agents.defaults.model,
+    )
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -946,12 +954,6 @@ def _run_gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
-            # Flush all cached sessions to durable storage before exit.
-            # This prevents data loss on filesystems with write-back
-            # caching (rclone VFS, NFS, FUSE mounts, etc.).
-            flushed = agent.sessions.flush_all()
-            if flushed:
-                logger.info("Shutdown: flushed {} session(s) to disk", flushed)
 
     asyncio.run(run())
 
@@ -1017,6 +1019,7 @@ def agent(
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         tools_config=config.tools,
+        dream_config=config.dream,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):

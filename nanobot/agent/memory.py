@@ -51,7 +51,7 @@ class MemoryStore:
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
         self._corruption_logged = False  # rate-limit non-int cursor warning
         self._git = GitStore(workspace, tracked_files=[
-            "SOUL.md", "USER.md", "memory/MEMORY.md",
+            "memory/MEMORY.md",
         ])
         self._maybe_migrate_legacy_history()
 
@@ -656,6 +656,7 @@ class Dream:
         max_iterations: int = 10,
         max_tool_result_chars: int = 16_000,
         annotate_line_ages: bool = True,
+        allow_edit_identity_files: bool = True,
     ):
         self.store = store
         self.provider = provider
@@ -667,6 +668,8 @@ class Dream:
         # Default True keeps the #3212 behavior; set False to feed MEMORY.md raw
         # (e.g. if a specific LLM reacts poorly to the `← Nd` suffix).
         self.annotate_line_ages = annotate_line_ages
+        # Allow Dream to modify SOUL.md and USER.md. Set to False to protect them.
+        self.allow_edit_identity_files = allow_edit_identity_files
         self._runner = AgentRunner(provider)
         self._tools = self._build_tools()
 
@@ -798,15 +801,22 @@ class Dream:
             if self.annotate_line_ages
             else raw_memory
         )
-        current_soul = self.store.read_soul() or "(empty)"
-        current_user = self.store.read_user() or "(empty)"
 
-        file_context = (
-            f"## Current Date\n{current_date}\n\n"
-            f"## Current MEMORY.md ({len(current_memory)} chars)\n{current_memory}\n\n"
-            f"## Current SOUL.md ({len(current_soul)} chars)\n{current_soul}\n\n"
-            f"## Current USER.md ({len(current_user)} chars)\n{current_user}"
-        )
+        file_context_parts: list[str] = [
+            f"## Current Date\n{current_date}\n\n",
+            f"## Current MEMORY.md ({len(current_memory)} chars)\n{current_memory}",
+        ]
+
+        # Optionally include identity files
+        if self.allow_edit_identity_files:
+            current_soul = self.store.read_soul() or "(empty)"
+            current_user = self.store.read_user() or "(empty)"
+            file_context_parts.extend([
+                f"\n\n## Current SOUL.md ({len(current_soul)} chars)\n{current_soul}",
+                f"\n\n## Current USER.md ({len(current_user)} chars)\n{current_user}",
+            ])
+
+        file_context = "".join(file_context_parts)
 
         # Phase 1: Analyze (no skills list — dedup is Phase 2's job)
         phase1_prompt = (

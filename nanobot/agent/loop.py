@@ -187,10 +187,13 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
+        dream_config: "DreamConfig | None" = None,
     ):
         from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
 
         _tc = tools_config or ToolsConfig()
+        from nanobot.config.schema import DreamConfig
+        _dc = dream_config
         defaults = AgentDefaults()
         self.bus = bus
         self.channels_config = channels_config
@@ -272,6 +275,8 @@ class AgentLoop:
             store=self.context.memory,
             provider=provider,
             model=self.model,
+            annotate_line_ages=_dc.annotate_line_ages if _dc else True,
+            allow_edit_identity_files=_dc.allow_edit_identity_files if _dc else True,
         )
         self._register_default_tools()
         if _tc.my.enable:
@@ -449,18 +454,15 @@ class AgentLoop:
             self._set_runtime_checkpoint(session, payload)
 
         async def _drain_pending(*, limit: int = _MAX_INJECTIONS_PER_TURN) -> list[dict[str, Any]]:
-            """Drain follow-up messages from the pending queue.
-
-            When no messages are immediately available but sub-agents
-            spawned in this dispatch are still running, blocks until at
-            least one result arrives (or timeout).  This keeps the runner
-            loop alive so subsequent sub-agent completions are consumed
-            in-order rather than dispatched separately.
-            """
+            """Non-blocking drain of follow-up messages from the pending queue."""
             if pending_queue is None:
                 return []
-
-            def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
+            items: list[dict[str, Any]] = []
+            while len(items) < limit:
+                try:
+                    pending_msg = pending_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
                 content = pending_msg.content
                 media = pending_msg.media if pending_msg.media else None
                 if media:
@@ -476,36 +478,7 @@ class AgentLoop:
                     merged: str | list[dict[str, Any]] = f"{runtime_ctx}\n\n{user_content}"
                 else:
                     merged = [{"type": "text", "text": runtime_ctx}] + user_content
-                return {"role": "user", "content": merged}
-
-            items: list[dict[str, Any]] = []
-            while len(items) < limit:
-                try:
-                    items.append(_to_user_message(pending_queue.get_nowait()))
-                except asyncio.QueueEmpty:
-                    break
-
-            # Block if nothing drained but sub-agents spawned in this dispatch
-            # are still running.  Keeps the runner loop alive so subsequent
-            # completions are injected in-order rather than dispatched separately.
-            if (not items
-                    and session is not None
-                    and self.subagents.get_running_count_by_session(session.key) > 0):
-                try:
-                    msg = await asyncio.wait_for(pending_queue.get(), timeout=300)
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "Timeout waiting for sub-agent completion in session {}",
-                        session.key,
-                    )
-                    return items
-                items.append(_to_user_message(msg))
-                while len(items) < limit:
-                    try:
-                        items.append(_to_user_message(pending_queue.get_nowait()))
-                    except asyncio.QueueEmpty:
-                        break
-
+                items.append({"role": "user", "content": merged})
             return items
 
         result = await self.runner.run(AgentRunSpec(
@@ -802,7 +775,6 @@ class AgentLoop:
             final_content, _, all_msgs, _, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
-                pending_queue=pending_queue,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self._clear_runtime_checkpoint(session)
@@ -891,17 +863,15 @@ class AgentLoop:
                 )
             )
 
-        # Persist the triggering user message up front so a mid-turn crash
-        # doesn't silently lose the prompt on recovery. ``media`` rides along
-        # as raw on-disk paths — sanitized image blocks are stripped from
-        # JSONL, and webui replay needs the paths to mint signed URLs.
+        # Persist the triggering user message immediately, before running the
+        # agent loop. If the process is killed mid-turn (OOM, SIGKILL, self-
+        # restart, etc.), the existing runtime_checkpoint preserves the
+        # in-flight assistant/tool state but NOT the user message itself, so
+        # the user's prompt is silently lost on recovery. Saving it up front
+        # makes recovery possible from the session log alone.
         user_persisted_early = False
-        media_paths = [p for p in (msg.media or []) if isinstance(p, str) and p]
-        has_text = isinstance(msg.content, str) and msg.content.strip()
-        if has_text or media_paths:
-            extra: dict[str, Any] = {"media": list(media_paths)} if media_paths else {}
-            text = msg.content if isinstance(msg.content, str) else ""
-            session.add_message("user", text, **extra)
+        if isinstance(msg.content, str) and msg.content.strip():
+            session.add_message("user", msg.content)
             self._mark_pending_user_turn(session)
             self.sessions.save(session)
             user_persisted_early = True
