@@ -40,7 +40,7 @@ from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
-from nanobot.config.schema import AgentDefaults
+from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.document import extract_documents
@@ -195,6 +195,8 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
+        model_presets: dict[str, ModelPresetConfig] | None = None,
+        model_preset: str | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
 
@@ -227,7 +229,6 @@ class AgentLoop:
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
-
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
@@ -282,6 +283,8 @@ class AgentLoop:
             provider=provider,
             model=self.model,
         )
+        self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
+        self._active_preset: str | None = model_preset if model_presets and model_preset in model_presets else None
         self._register_default_tools()
         if _tc.my.enable:
             self.tools.register(MyTool(loop=self, modify_allowed=_tc.my.allow_set))
@@ -289,6 +292,31 @@ class AgentLoop:
         self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+
+    # -- model_preset property --
+
+    @property
+    def model_preset(self) -> str | None:
+        return self._active_preset
+
+    @model_preset.setter
+    def model_preset(self, name: str | None) -> None:
+        """Resolve a preset by name and apply all fields atomically."""
+        from nanobot.providers.base import GenerationSettings
+
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("model_preset must be a non-empty string")
+        if name not in self.model_presets:
+            raise KeyError(f"model_preset {name!r} not found. Available: {', '.join(self.model_presets) or '(none)'}")
+        p = self.model_presets[name]
+        self.model = p.model
+        self.context_window_tokens = p.context_window_tokens
+        self.provider.generation = GenerationSettings(
+            temperature=p.temperature,
+            max_tokens=p.max_tokens,
+            reasoning_effort=p.reasoning_effort,
+        )
+        self._active_preset = name
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""

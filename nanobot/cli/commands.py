@@ -415,7 +415,8 @@ def _make_provider(config: Config):
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.registry import find_by_name
 
-    model = config.agents.defaults.model
+    resolved = config.resolve_preset()
+    model = resolved.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
     spec = find_by_name(provider_name) if provider_name else None
@@ -472,11 +473,10 @@ def _make_provider(config: Config):
             spec=spec,
         )
 
-    defaults = config.agents.defaults
     provider.generation = GenerationSettings(
-        temperature=defaults.temperature,
-        max_tokens=defaults.max_tokens,
-        reasoning_effort=defaults.reasoning_effort,
+        temperature=resolved.temperature,
+        max_tokens=resolved.max_tokens,
+        reasoning_effort=resolved.reasoning_effort,
     )
     return provider
 
@@ -577,13 +577,14 @@ def serve(
     bus = MessageBus()
     provider = _make_provider(runtime_config)
     session_manager = SessionManager(runtime_config.workspace_path)
+    _resolved = runtime_config.resolve_preset()
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=runtime_config.workspace_path,
-        model=runtime_config.agents.defaults.model,
+        model=_resolved.model,
         max_iterations=runtime_config.agents.defaults.max_tool_iterations,
-        context_window_tokens=runtime_config.agents.defaults.context_window_tokens,
+        context_window_tokens=_resolved.context_window_tokens,
         context_block_limit=runtime_config.agents.defaults.context_block_limit,
         max_tool_result_chars=runtime_config.agents.defaults.max_tool_result_chars,
         provider_retry_mode=runtime_config.agents.defaults.provider_retry_mode,
@@ -599,12 +600,16 @@ def serve(
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
         tools_config=runtime_config.tools,
+        model_presets=runtime_config.model_presets,
+        model_preset=runtime_config.agents.defaults.model_preset,
     )
 
-    model_name = runtime_config.agents.defaults.model
+    model_name = _resolved.model
+    preset_name = runtime_config.agents.defaults.model_preset
+    preset_tag = f" (preset: {preset_name})" if preset_name else ""
     console.print(f"{__logo__} Starting OpenAI-compatible API server")
     console.print(f"  [cyan]Endpoint[/cyan] : http://{host}:{port}/v1/chat/completions")
-    console.print(f"  [cyan]Model[/cyan]    : {model_name}")
+    console.print(f"  [cyan]Model[/cyan]    : {model_name}{preset_tag}")
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
     if host in {"0.0.0.0", "::"}:
@@ -683,13 +688,14 @@ def _run_gateway(
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
+    _resolved = config.resolve_preset()
     agent = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
+        model=_resolved.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
+        context_window_tokens=_resolved.context_window_tokens,
         web_config=config.tools.web,
         context_block_limit=config.agents.defaults.context_block_limit,
         max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
@@ -706,6 +712,8 @@ def _run_gateway(
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         tools_config=config.tools,
+        model_presets=config.model_presets,
+        model_preset=config.agents.defaults.model_preset,
     )
 
     from nanobot.agent.loop import UNIFIED_SESSION_KEY
@@ -1059,13 +1067,14 @@ def agent(
     else:
         logger.disable("nanobot")
 
+    _resolved = config.resolve_preset()
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
+        model=_resolved.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
+        context_window_tokens=_resolved.context_window_tokens,
         web_config=config.tools.web,
         context_block_limit=config.agents.defaults.context_block_limit,
         max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
@@ -1081,6 +1090,8 @@ def agent(
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         tools_config=config.tools,
+        model_presets=config.model_presets,
+        model_preset=config.agents.defaults.model_preset,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
@@ -1124,7 +1135,7 @@ def agent(
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
         _init_prompt_session()
-        console.print(f"{__logo__} Interactive mode [bold blue]({config.agents.defaults.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
+        console.print(f"{__logo__} Interactive mode [bold blue]({_resolved.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)
@@ -1463,7 +1474,10 @@ def status():
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
 
-        console.print(f"Model: {config.agents.defaults.model}")
+        _resolved = config.resolve_preset()
+        _preset = config.agents.defaults.model_preset
+        _preset_tag = f" (preset: {_preset})" if _preset else ""
+        console.print(f"Model: {_resolved.model}{_preset_tag}")
 
         # Check API keys from registry
         for spec in PROVIDERS:

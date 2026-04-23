@@ -330,6 +330,8 @@ class MyTool(Tool):
         # RESTRICTED keys
         for k in self.RESTRICTED:
             parts.append(self._format_value(getattr(loop, k, None), k))
+        # model_preset (property on AgentLoop)
+        parts.append(self._format_value(loop.model_preset, "model_preset"))
         # Other useful top-level keys shown in description
         for k in ("workspace", "provider_retry_mode", "max_tool_result_chars", "_current_iteration", "web_config", "exec_config", "subagents"):
             if _has_real_attr(loop, k):
@@ -386,7 +388,12 @@ class MyTool(Tool):
                 value = expected(value)
             except (ValueError, TypeError):
                 return f"Error: '{key}' must be {expected.__name__}, got {type(value).__name__}"
+
+        # --- existing restricted key logic ---
         old = getattr(self._loop, key)
+        # When model is set directly, it no longer matches any preset
+        if key == "model":
+            self._loop._active_preset = None
         if "min" in spec and value < spec["min"]:
             return f"Error: '{key}' must be >= {spec['min']}"
         if "max" in spec and value > spec["max"]:
@@ -410,7 +417,11 @@ class MyTool(Tool):
                         f"REJECTED type mismatch {key}: expects {old_t.__name__}, got {new_t.__name__}",
                     )
                     return f"Error: '{key}' expects {old_t.__name__}, got {new_t.__name__}"
-            setattr(self._loop, key, value)
+            try:
+                setattr(self._loop, key, value)
+            except (ValueError, KeyError) as e:
+                self._audit("modify", f"REJECTED {key}: {e}")
+                return f"Error: {e}"
             self._audit("modify", f"{key}: {old!r} -> {value!r}")
             return f"Set {key} = {value!r} (was {old!r})"
         if callable(value):

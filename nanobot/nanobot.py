@@ -65,14 +65,15 @@ class Nanobot:
         provider = _make_provider(config)
         bus = MessageBus()
         defaults = config.agents.defaults
+        _resolved = config.resolve_preset()
 
         loop = AgentLoop(
             bus=bus,
             provider=provider,
             workspace=config.workspace_path,
-            model=defaults.model,
+            model=_resolved.model,
             max_iterations=defaults.max_tool_iterations,
-            context_window_tokens=defaults.context_window_tokens,
+            context_window_tokens=_resolved.context_window_tokens,
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
             provider_retry_mode=defaults.provider_retry_mode,
@@ -86,6 +87,8 @@ class Nanobot:
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
             tools_config=config.tools,
+            model_presets=config.model_presets,
+            model_preset=defaults.model_preset,
         )
         return cls(loop)
 
@@ -123,7 +126,8 @@ def _make_provider(config: Any) -> Any:
     from nanobot.providers.base import GenerationSettings
     from nanobot.providers.registry import find_by_name
 
-    model = config.agents.defaults.model
+    resolved = config.resolve_preset()
+    model = resolved.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
     spec = find_by_name(provider_name) if provider_name else None
@@ -172,10 +176,9 @@ def _make_provider(config: Any) -> Any:
             spec=spec,
         )
 
-    defaults = config.agents.defaults
     provider.generation = GenerationSettings(
-        temperature=defaults.temperature,
-        max_tokens=defaults.max_tokens,
-        reasoning_effort=defaults.reasoning_effort,
+        temperature=resolved.temperature,
+        max_tokens=resolved.max_tokens,
+        reasoning_effort=resolved.reasoning_effort,
     )
     return provider
