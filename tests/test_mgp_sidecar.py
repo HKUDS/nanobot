@@ -75,11 +75,19 @@ def sidecar(fake_client: AsyncMock) -> AsyncMGPSidecar:
 
 
 class TestBuildRuntime:
-    def test_user_id_falls_back_to_user(self) -> None:
+    def test_user_id_falls_back_to_default_user_id(self) -> None:
+        sc = AsyncMGPSidecar(_config(default_user_id="alice"), workspace_id="/tmp/wks")
+        rt = sc.build_runtime(channel="cli", chat_id="direct")
+        assert rt.user_id == "alice"
+        assert rt.session_key == "cli:direct"
+
+    def test_user_id_falls_back_to_os_login_when_unconfigured(self, monkeypatch) -> None:
+        # When no default_user_id is set we should pick up the OS login so
+        # different workstations / accounts don't collide on a literal "user".
+        monkeypatch.setattr("nanobot.agent.mgp.sidecar.getpass.getuser", lambda: "carol")
         sc = AsyncMGPSidecar(_config(), workspace_id="/tmp/wks")
         rt = sc.build_runtime(channel="cli", chat_id="direct")
-        assert rt.user_id == "user"
-        assert rt.session_key == "cli:direct"
+        assert rt.user_id == "carol"
 
     def test_user_id_uses_chat_id_when_not_direct(self) -> None:
         sc = AsyncMGPSidecar(_config(), workspace_id="/tmp/wks")
@@ -96,6 +104,14 @@ class TestBuildRuntime:
         rt = sc.build_runtime(channel="cli", chat_id="bob", sender_id="user")
         # "user" is the synthetic literal, not a real id; chat_id wins.
         assert rt.user_id == "bob"
+
+    def test_dream_workspace_runtime_resolves_to_default_user(self) -> None:
+        # Dream uses chat_id="dream" — that synthetic id MUST fall through
+        # to default_user_id, otherwise [USER] facts written by Dream would
+        # land under subject "dream" and never match a CLI user's recall.
+        sc = AsyncMGPSidecar(_config(default_user_id="dave"), workspace_id="/tmp/wks")
+        rt = sc.build_runtime(channel="system", chat_id="dream", session_key="system:dream")
+        assert rt.user_id == "dave"
 
     def test_tenant_explicit_overrides_workspace(self) -> None:
         sc = AsyncMGPSidecar(_config(tenant_id="explicit-t"), workspace_id="/tmp/wks")

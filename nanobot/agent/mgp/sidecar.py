@@ -16,8 +16,13 @@ The sidecar is a thin wrapper over ``mgp_client.AsyncMGPClient`` that:
 from __future__ import annotations
 
 import asyncio
+import getpass
 import time
 from typing import TYPE_CHECKING, Any
+
+# Synthetic chat_id / sender_id placeholders that should NOT be treated as a
+# real user identity. Anything matching falls through to ``default_user_id``.
+_SYNTHETIC_USER_IDS = frozenset({"user", "direct", "dream"})
 
 import httpx
 from loguru import logger
@@ -68,6 +73,20 @@ class AsyncMGPSidecar:
         self._last_recall_at: float | None = None
         self._last_commits: list[CommitOutcome] = []
 
+    def _default_user_id(self) -> str:
+        """Resolve the fallback subject for synthetic-channel runtimes.
+
+        Priority: ``config.default_user_id`` (explicit) → ``getpass.getuser()``
+        (OS login) → ``"user"`` (last-resort literal, only hit on exotic OSes
+        where ``getpass`` raises).
+        """
+        if self.config.default_user_id:
+            return self.config.default_user_id
+        try:
+            return getpass.getuser() or "user"
+        except Exception:  # noqa: BLE001 - getpass can raise on misconfigured envs
+            return "user"
+
     # -- runtime construction ----------------------------------------------
 
     def build_runtime(
@@ -81,10 +100,19 @@ class AsyncMGPSidecar:
         """Construct a :class:`RuntimeState` from per-call routing context.
 
         ``user_id`` derivation priority:
-            1. ``sender_id`` (when provided and not the literal ``"user"``)
-            2. ``chat_id`` (when not the synthetic ``"direct"`` placeholder)
+            1. ``sender_id`` (when provided and not a synthetic placeholder
+               like ``"user"``)
+            2. ``chat_id`` (when not a synthetic placeholder like ``"direct"``
+               or ``"dream"``)
             3. ``session_key.split(":", 1)[1]`` (parses ``channel:chat_id``)
-            4. ``"user"`` fallback
+            4. ``config.default_user_id`` (configured fallback)
+            5. ``getpass.getuser()`` (OS login — keeps separate workstations /
+               accounts isolated even when nothing is configured)
+
+        Treating ``"direct"``/``"dream"`` as synthetic is critical for the
+        Dream commit path: Dream operates at workspace scope but its
+        ``[USER]`` tags MUST land under the real subject the CLI uses, or
+        ``recall_memory(scope="user")`` will never find them.
 
         ``tenant_id`` derivation:
             1. ``config.tenant_id`` if set,
@@ -97,16 +125,16 @@ class AsyncMGPSidecar:
             f"{resolved_channel}:{resolved_chat_id}" if resolved_chat_id else f"{resolved_channel}:direct"
         )
 
-        if sender_id and sender_id != "user":
+        if sender_id and sender_id not in _SYNTHETIC_USER_IDS:
             user_id = sender_id
-        elif resolved_chat_id and resolved_chat_id != "direct":
+        elif resolved_chat_id and resolved_chat_id not in _SYNTHETIC_USER_IDS:
             user_id = resolved_chat_id
         else:
-            # Last resort: try to recover something from session_key, but
-            # treat the synthetic "direct" sentinel as "no user" — otherwise
-            # CLI sessions would be mis-attributed to a literal user "direct".
             tail = resolved_session_key.split(":", 1)[1] if ":" in resolved_session_key else ""
-            user_id = tail if tail and tail != "direct" else "user"
+            if tail and tail not in _SYNTHETIC_USER_IDS:
+                user_id = tail
+            else:
+                user_id = self._default_user_id()
 
         if self.config.tenant_id:
             tenant_id = self.config.tenant_id

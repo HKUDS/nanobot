@@ -124,7 +124,12 @@ class TestSetContext:
         tool.set_context("telegram", "u-99", effective_key="telegram:u-99")
         await tool.execute(query="topic")
         kwargs = mock_sidecar.build_runtime.call_args.kwargs
-        assert kwargs == {"channel": "telegram", "chat_id": "u-99", "session_key": "telegram:u-99"}
+        assert kwargs == {
+            "channel": "telegram",
+            "chat_id": "u-99",
+            "session_key": "telegram:u-99",
+            "sender_id": None,
+        }
 
     @pytest.mark.asyncio
     async def test_set_context_synthesizes_session_key_when_missing(
@@ -146,7 +151,30 @@ class TestSetContext:
         tool.set_context(None, None)
         await tool.execute(query="x")
         kwargs = mock_sidecar.build_runtime.call_args.kwargs
-        assert kwargs == {"channel": None, "chat_id": None, "session_key": None}
+        assert kwargs == {
+            "channel": None,
+            "chat_id": None,
+            "session_key": None,
+            "sender_id": None,
+        }
+
+    @pytest.mark.asyncio
+    async def test_set_context_propagates_sender_id_for_group_chats(
+        self,
+        tool: MGPRecallTool,
+        mock_sidecar: MagicMock,
+    ) -> None:
+        # Regression: in group chats, every member shares one ``chat_id``.
+        # Without per-member ``sender_id`` plumbing the sidecar would
+        # collapse all of them into the same MGP subject. The tool MUST
+        # forward sender_id so user-scoped recall works correctly.
+        tool.set_context(
+            "telegram", "group-77", effective_key="telegram:group-77", sender_id="alice",
+        )
+        await tool.execute(query="topic")
+        kwargs = mock_sidecar.build_runtime.call_args.kwargs
+        assert kwargs["sender_id"] == "alice"
+        assert kwargs["chat_id"] == "group-77"
 
 
 # ---------------------------------------------------------------------------

@@ -69,6 +69,7 @@ class _LoopHook(AgentHook):
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        sender_id: str | None = None,
     ) -> None:
         super().__init__(reraise=True)
         self._loop = agent_loop
@@ -78,6 +79,7 @@ class _LoopHook(AgentHook):
         self._channel = channel
         self._chat_id = chat_id
         self._message_id = message_id
+        self._sender_id = sender_id
         self._stream_buf = ""
 
     def wants_streaming(self) -> bool:
@@ -114,7 +116,9 @@ class _LoopHook(AgentHook):
         for tc in context.tool_calls:
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
-        self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
+        self._loop._set_tool_context(
+            self._channel, self._chat_id, self._message_id, sender_id=self._sender_id,
+        )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         u = context.usage or {}
@@ -350,18 +354,35 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
-        """Update context for all tools that need routing info."""
+    def _set_tool_context(
+        self,
+        channel: str,
+        chat_id: str,
+        message_id: str | None = None,
+        *,
+        sender_id: str | None = None,
+    ) -> None:
+        """Update context for all tools that need routing info.
+
+        ``sender_id`` is plumbed only into tools that accept it (currently
+        just ``recall_memory``); other tools keep their existing signatures.
+        Without this, group-chat MGP recalls would mis-attribute every
+        member to the same ``chat_id`` instead of their real sender id.
+        """
         # Compute the effective session key (accounts for unified sessions)
         # so that subagent results route to the correct pending queue.
         effective_key = UNIFIED_SESSION_KEY if self._unified_session else f"{channel}:{chat_id}"
         # `recall_memory` joins the spawn branch because its `set_context`
-        # signature is `(channel, chat_id, effective_key=None)`, identical to
-        # SpawnTool — so it inherits unified-session-aware key derivation.
+        # signature is `(channel, chat_id, effective_key=None, sender_id=None)`
+        # — a strict superset of SpawnTool's, so the existing dispatch works.
         for name in ("message", "spawn", "cron", "my", "recall_memory"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    if name in ("spawn", "recall_memory"):
+                    if name == "recall_memory":
+                        tool.set_context(
+                            channel, chat_id, effective_key=effective_key, sender_id=sender_id,
+                        )
+                    elif name == "spawn":
                         tool.set_context(channel, chat_id, effective_key=effective_key)
                     else:
                         tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
@@ -430,6 +451,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        sender_id: str | None = None,
         pending_queue: asyncio.Queue | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
@@ -449,6 +471,7 @@ class AgentLoop:
             channel=channel,
             chat_id=chat_id,
             message_id=message_id,
+            sender_id=sender_id,
         )
         hook: AgentHook = (
             CompositeHook([loop_hook] + self._extra_hooks) if self._extra_hooks else loop_hook
@@ -796,7 +819,9 @@ class AgentLoop:
             is_subagent = msg.sender_id == "subagent"
             if is_subagent and self._persist_subagent_followup(session, msg):
                 self.sessions.save(session)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            self._set_tool_context(
+                channel, chat_id, msg.metadata.get("message_id"), sender_id=msg.sender_id,
+            )
             history = session.get_history(max_messages=0)
             current_role = "assistant" if is_subagent else "user"
 
@@ -814,6 +839,7 @@ class AgentLoop:
                 messages, session=session, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
                 pending_queue=pending_queue,
+                sender_id=msg.sender_id,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self._clear_runtime_checkpoint(session)
@@ -854,7 +880,9 @@ class AgentLoop:
             session_summary=pending,
         )
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        self._set_tool_context(
+            msg.channel, msg.chat_id, msg.metadata.get("message_id"), sender_id=msg.sender_id,
+        )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
@@ -920,6 +948,7 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
+            sender_id=msg.sender_id,
             pending_queue=pending_queue,
         )
 

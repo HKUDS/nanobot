@@ -85,6 +85,12 @@ class MGPConfig(Base):
     enable_dream_commit: bool = True                           # write Dream Phase-1 tags to MGP
     recall_default_scope: str = "user"                         # default scope when agent omits it
     recall_default_limit: int = Field(default=5, ge=1, le=20)  # default top-K when agent omits it
+    # Stable subject id for routes that don't carry a real per-user identifier
+    # (CLI direct sessions, Dream workspace runs). Defaults to None — at runtime
+    # we then fall back to the OS login (``getpass.getuser()``). Setting this
+    # explicitly is recommended for SDK / multi-user-but-single-tenant deployments
+    # so that Dream-extracted ``[USER]`` facts land under a discoverable subject.
+    default_user_id: str | None = None
 
 
 class AgentDefaults(Base):

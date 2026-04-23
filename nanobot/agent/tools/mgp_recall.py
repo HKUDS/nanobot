@@ -94,18 +94,27 @@ class MGPRecallTool(Tool):
         self._channel: ContextVar[str | None] = ContextVar("mgp_recall_channel", default=None)
         self._chat_id: ContextVar[str | None] = ContextVar("mgp_recall_chat_id", default=None)
         self._session_key: ContextVar[str | None] = ContextVar("mgp_recall_session_key", default=None)
+        self._sender_id: ContextVar[str | None] = ContextVar("mgp_recall_sender_id", default=None)
 
     def set_context(
         self,
         channel: str | None,
         chat_id: str | None,
         effective_key: str | None = None,
+        *,
+        sender_id: str | None = None,
     ) -> None:
-        """Per-task routing context. Signature mirrors :class:`SpawnTool` so
-        the loop's existing spawn-branch dispatch handles us with no new code.
+        """Per-task routing context. Signature is a superset of :class:`SpawnTool`
+        so the loop's existing spawn-branch dispatch handles us with no new code.
+
+        ``sender_id`` is the per-message sender (e.g. group-chat member id).
+        Without it, group-chat recalls all attribute to the same ``chat_id``
+        — meaning every group member shares one MGP subject. Threading
+        ``sender_id`` through gives each member their own user-scoped memory.
         """
         self._channel.set(channel)
         self._chat_id.set(chat_id)
+        self._sender_id.set(sender_id)
         self._session_key.set(
             effective_key
             or (f"{channel}:{chat_id}" if channel and chat_id else None)
@@ -126,6 +135,7 @@ class MGPRecallTool(Tool):
             channel=self._channel.get(),
             chat_id=self._chat_id.get(),
             session_key=self._session_key.get(),
+            sender_id=self._sender_id.get(),
         )
         intent = RecallIntent(
             query=query,
