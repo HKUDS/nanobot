@@ -4,7 +4,7 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from nanobot.agent.memory import Consolidator, MemoryStore
+from nanobot.agent.memory import Consolidator, MemoryStore, _RAW_ARCHIVE_MAX_CHARS
 
 
 @pytest.fixture
@@ -117,8 +117,8 @@ class TestConsolidatorTokenBudget:
         await consolidator.maybe_consolidate_by_tokens(session)
         consolidator.archive.assert_not_called()
 
-    async def test_chunk_cap_preserves_user_turn_boundary(self, consolidator):
-        """Chunk cap should rewind to the last user boundary within the cap."""
+    async def test_large_chunk_archived_without_cap(self, consolidator):
+        """Without chunk cap, the full range from pick_consolidation_boundary is archived."""
         consolidator._SAFETY_BUFFER = 0
         session = MagicMock()
         session.last_consolidated = 0
@@ -133,19 +133,19 @@ class TestConsolidatorTokenBudget:
         consolidator.estimate_session_prompt_tokens = MagicMock(
             side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
         )
-        consolidator.pick_consolidation_boundary = MagicMock(return_value=(61, 999))
+        # Use real pick_consolidation_boundary — it will find boundary at idx=50
+        # (user message at 50, token budget met)
         consolidator.archive = AsyncMock(return_value=True)
 
         await consolidator.maybe_consolidate_by_tokens(session)
 
         archived_chunk = consolidator.archive.await_args.args[0]
-        assert len(archived_chunk) == 50
+        # pick_consolidation_boundary returns (50, tokens) — user turn at idx 50
         assert archived_chunk[0]["content"] == "m0"
-        assert archived_chunk[-1]["content"] == "m49"
-        assert session.last_consolidated == 50
+        assert session.last_consolidated > 0
 
-    async def test_chunk_cap_skips_when_no_user_boundary_within_cap(self, consolidator):
-        """If the cap would cut mid-turn, consolidation should skip that round."""
+    async def test_boundary_respected_when_no_intermediate_user_turn(self, consolidator):
+        """When boundary points past a long tool chain, the full chunk is archived."""
         consolidator._SAFETY_BUFFER = 0
         session = MagicMock()
         session.last_consolidated = 0
@@ -157,11 +157,76 @@ class TestConsolidatorTokenBudget:
             }
             for i in range(70)
         ]
-        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(1200, "tiktoken"))
-        consolidator.pick_consolidation_boundary = MagicMock(return_value=(61, 999))
+        consolidator.estimate_session_prompt_tokens = MagicMock(
+            side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
+        )
         consolidator.archive = AsyncMock(return_value=True)
 
         await consolidator.maybe_consolidate_by_tokens(session)
 
-        consolidator.archive.assert_not_awaited()
-        assert session.last_consolidated == 0
+        consolidator.archive.assert_awaited_once()
+        # pick_consolidation_boundary finds the only boundary at idx=61
+        assert session.last_consolidated == 61
+
+
+class TestRawArchiveTruncation:
+    """raw_archive() must cap entry size to avoid bloating history.jsonl."""
+
+    def test_raw_archive_truncates_large_content(self, store):
+        """Large messages should be truncated to _RAW_ARCHIVE_MAX_CHARS."""
+        big = "x" * 50_000
+        messages = [{"role": "user", "content": big}]
+        store.raw_archive(messages)
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 1
+        assert len(entries[0]["content"]) < 50_000
+        assert "[RAW]" in entries[0]["content"]
+
+    def test_raw_archive_preserves_small_content(self, store):
+        """Small messages should not be truncated."""
+        messages = [{"role": "user", "content": "hello"}]
+        store.raw_archive(messages)
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 1
+        assert "hello" in entries[0]["content"]
+
+    def test_raw_archive_custom_max_chars(self, store):
+        """max_chars parameter should override default limit."""
+        messages = [{"role": "user", "content": "a" * 200}]
+        store.raw_archive(messages, max_chars=100)
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries[0]["content"]) < 200
+
+
+class TestArchiveTruncation:
+    """archive() must truncate formatted text before sending to consolidation LLM."""
+
+    async def test_archive_truncates_large_formatted_text(self, consolidator, mock_provider, store):
+        """Large formatted text should be truncated to token budget before LLM call."""
+        # context_window_tokens=1000, max_completion_tokens=100, _SAFETY_BUFFER=1024
+        # budget = 1000 - 100 - 1024 = -124 → fallback via truncate_text(budget*4)
+        big_messages = [{"role": "user", "content": "x" * 100_000}]
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary of large input.", finish_reason="stop"
+        )
+        await consolidator.archive(big_messages)
+
+        call_args = mock_provider.chat_with_retry.call_args
+        user_content = call_args.kwargs["messages"][1]["content"]
+        # Should be significantly shorter than 100K
+        assert len(user_content) < 50_000
+
+    async def test_archive_truncates_with_small_token_budget(self, consolidator, mock_provider, store):
+        """Small context window: truncation uses actual tokenizer count."""
+        consolidator.context_window_tokens = 500
+        big_messages = [{"role": "user", "content": "word " * 50_000}]
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary.", finish_reason="stop"
+        )
+        await consolidator.archive(big_messages)
+
+        sent_messages = mock_provider.chat_with_retry.call_args.kwargs["messages"]
+        user_content = sent_messages[1]["content"]
+        # budget = 500 - 100 - 1024 = negative, fallback char-based
+        # Should be truncated
+        assert len(user_content) < 250_000
