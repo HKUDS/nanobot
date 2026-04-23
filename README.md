@@ -187,6 +187,26 @@ Configure these **two parts** in your config (other options have defaults). Add 
 nanobot agent
 ```
 
+**Optional: Web search via Olostep**
+
+Default search provider stays `brave`, so existing setups are unchanged. To switch to Olostep:
+
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "olostep",
+        "olostepApiKey": "YOUR_OLOSTEP_API_KEY"
+      }
+    }
+  }
+}
+```
+
+You can also set the key with the `OLOSTEP_API_KEY` environment variable.
+Get an API key at https://www.olostep.com/dashboard.
+
 
 - Want different LLM providers, web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
 - Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [Chat Apps](./docs/chat-apps.md)

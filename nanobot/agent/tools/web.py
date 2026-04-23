@@ -17,6 +17,21 @@ from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.utils.helpers import build_image_content_blocks
 
+try:
+    from olostep import AsyncOlostep, Olostep, Olostep_BaseError
+
+    _OLOSTEP_SYNC_CLIENT = Olostep
+    _OLOSTEP_AVAILABLE = True
+except ImportError:
+    Olostep = None
+    AsyncOlostep = None
+    _OLOSTEP_SYNC_CLIENT = None
+
+    class Olostep_BaseError(Exception):
+        """Fallback error type when olostep package is unavailable."""
+
+    _OLOSTEP_AVAILABLE = False
+
 if TYPE_CHECKING:
     from nanobot.config.schema import WebSearchConfig
 
@@ -90,15 +105,27 @@ class WebSearchTool(Tool):
         "Use web_fetch to read a specific page in full."
     )
 
-    def __init__(self, config: WebSearchConfig | None = None, proxy: str | None = None):
+    def __init__(
+        self,
+        config: WebSearchConfig | None = None,
+        proxy: str | None = None,
+        provider: str | None = None,
+        olostep_api_key: str | None = None,
+    ):
         from nanobot.config.schema import WebSearchConfig
 
         self.config = config if config is not None else WebSearchConfig()
         self.proxy = proxy
+        self.provider = (provider or self.config.provider or "brave").strip().lower()
+        self.olostep_api_key = (
+            olostep_api_key
+            or self.config.olostep_api_key
+            or os.environ.get("OLOSTEP_API_KEY", "")
+        )
 
     def _effective_provider(self) -> str:
         """Resolve the backend that execute() will actually use."""
-        provider = self.config.provider.strip().lower() or "brave"
+        provider = self.provider or "brave"
         if provider == "duckduckgo":
             return "duckduckgo"
         if provider == "brave":
@@ -116,6 +143,8 @@ class WebSearchTool(Tool):
         if provider == "kagi":
             api_key = self.config.api_key or os.environ.get("KAGI_API_KEY", "")
             return "kagi" if api_key else "duckduckgo"
+        if provider == "olostep":
+            return "olostep"
         return provider
 
     @property
@@ -128,9 +157,19 @@ class WebSearchTool(Tool):
         return self._effective_provider() == "duckduckgo"
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        provider = self.config.provider.strip().lower() or "brave"
+        provider = self.provider or "brave"
         n = min(max(count or self.config.max_results, 1), 10)
 
+        if provider == "olostep":
+            if not self.olostep_api_key:
+                return (
+                    "Error: Olostep API key not configured. "
+                    "Set it in ~/.nanobot/config.json under "
+                    "tools.web.search.olostepApiKey and restart."
+                )
+            if not _OLOSTEP_AVAILABLE:
+                return "Error: olostep package not installed. Run: pip install olostep"
+            return await self._search_olostep(query, n)
         if provider == "duckduckgo":
             return await self._search_duckduckgo(query, n)
         elif provider == "tavily":
@@ -145,6 +184,39 @@ class WebSearchTool(Tool):
             return await self._search_kagi(query, n)
         else:
             return f"Error: unknown search provider '{provider}'"
+
+    async def _search_olostep(self, query: str, n: int) -> str:
+        if AsyncOlostep is None:
+            return "Error: olostep package not installed. Run: pip install olostep"
+        try:
+            async with AsyncOlostep(api_key=self.olostep_api_key) as client:
+                result = await client.answers.create(task=query)
+
+            answer_text = (getattr(result, "answer", "") or "").strip()
+            lines = [f"Answer: {answer_text}"] if answer_text else ["Answer:"]
+
+            sources = getattr(result, "sources", None) or []
+            if sources:
+                lines.append("")
+                lines.append("Sources:")
+                for i, source in enumerate(sources[:n], 1):
+                    if isinstance(source, dict):
+                        title = source.get("title", "")
+                        url = source.get("url", "")
+                    else:
+                        title = getattr(source, "title", "")
+                        url = getattr(source, "url", "")
+                    if title and url:
+                        lines.append(f"{i}. {title} — {url}")
+                    elif url:
+                        lines.append(f"{i}. {url}")
+                    elif title:
+                        lines.append(f"{i}. {title}")
+            return "\n".join(lines)
+        except Olostep_BaseError as e:
+            return f"Olostep search error: {type(e).__name__}: {e}"
+        except Exception as e:
+            return f"Olostep search error: {type(e).__name__}: {e}"
 
     async def _search_brave(self, query: str, n: int) -> str:
         api_key = self.config.api_key or os.environ.get("BRAVE_API_KEY", "")

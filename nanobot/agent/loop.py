@@ -284,7 +284,12 @@ class AgentLoop:
             )
         if self.web_config.enable:
             self.tools.register(
-                WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy)
+                WebSearchTool(
+                    config=self.web_config.search,
+                    proxy=self.web_config.proxy,
+                    provider=self.web_config.search.provider,
+                    olostep_api_key=self.web_config.search.olostep_api_key,
+                )
             )
             self.tools.register(WebFetchTool(proxy=self.web_config.proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
