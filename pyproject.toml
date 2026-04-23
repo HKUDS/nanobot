@@ -1,6 +1,6 @@
 [project]
 name = "nanobot-ai"
-version = "0.1.5.post1"
+version = "0.1.5.post2"
 description = "A lightweight personal AI assistant framework"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
@@ -15,6 +15,10 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+]
+license-files = [
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
 ]
 
 dependencies = [
@@ -130,6 +134,8 @@ include = [
     "bridge/",
     "README.md",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "pyproject.toml",
 ]
 
 [tool.ruff]

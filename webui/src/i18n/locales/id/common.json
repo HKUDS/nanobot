@@ -1,0 +1,112 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "Menghubungkan ke nanobot…",
+      "boot": "Memuat nanobot…"
+    },
+    "error": {
+      "title": "Tidak dapat menjangkau nanobot",
+      "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot gateway`) dan halaman ini dibuka pada mesin yang sama."
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "UI web nanobot — ngobrol dengan workspace nanobot Anda."
+    }
+  },
+  "sidebar": {
+    "collapse": "Ciutkan sidebar",
+    "toggleTheme": "Ganti tema",
+    "newChat": "Obrolan baru",
+    "recent": "Terbaru",
+    "refreshSessions": "Segarkan sesi",
+    "language": {
+      "label": "Bahasa",
+      "ariaLabel": "Ganti bahasa"
+    }
+  },
+  "chat": {
+    "fallbackTitle": "Obrolan {{id}}",
+    "loading": "Memuat…",
+    "noSessions": "Belum ada sesi.",
+    "actions": "Aksi obrolan untuk {{title}}",
+    "delete": "Hapus",
+    "newChat": "Obrolan baru"
+  },
+  "deleteConfirm": {
+    "title": "Hapus “{{title}}”?",
+    "description": "File sesi akan dihapus dari disk. Tindakan ini tidak dapat dibatalkan.",
+    "cancel": "Batal",
+    "confirm": "Hapus"
+  },
+  "connection": {
+    "idle": "Idle",
+    "connecting": "Menghubungkan…",
+    "open": "Terhubung",
+    "reconnecting": "Menyambung ulang…",
+    "closed": "Terputus",
+    "error": "Kesalahan koneksi"
+  },
+  "thread": {
+    "loadingConversation": "Memuat percakapan…",
+    "empty": {
+      "description": "Ajukan pertanyaan, lanjutkan pekerjaan lokal, atau mulai thread baru."
+    },
+    "header": {
+      "toggleSidebar": "Tampilkan atau sembunyikan sidebar"
+    },
+    "composer": {
+      "placeholderThread": "Ketik pesan Anda…",
+      "placeholderHero": "Apa yang sedang Anda pikirkan?",
+      "placeholderOpening": "Membuka obrolan baru…",
+      "inputAria": "Input pesan",
+      "sendHint": "Enter untuk kirim · Shift+Enter untuk baris baru",
+      "send": "Kirim pesan",
+      "attachImage": "Lampirkan gambar",
+      "encoding": "Memproses…",
+      "remove": "Hapus lampiran",
+      "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "imageRejected": {
+        "unsupported_type": "Tipe file tidak didukung",
+        "too_many_images": "Maksimal {{max}} gambar per pesan",
+        "magic_mismatch": "File ini tampaknya bukan gambar asli",
+        "decode_failed": "Tidak dapat mendekode gambar ini",
+        "too_large": "Gambar terlalu besar — coba yang lebih kecil",
+        "io": "Tidak dapat membaca file ini"
+      }
+    },
+    "scrollToBottom": "Gulir ke bawah"
+  },
+  "message": {
+    "streaming": "sedang mengalir",
+    "assistantTyping": "Asisten sedang mengetik",
+    "toolSingle": "Menggunakan sebuah alat",
+    "toolMany": "Menggunakan {{count}} alat",
+    "imageAttachment": "Lampiran gambar"
+  },
+  "lightbox": {
+    "title": "Pratinjau gambar",
+    "open": "Lihat gambar",
+    "prev": "Gambar sebelumnya",
+    "next": "Gambar berikutnya",
+    "close": "Tutup pratinjau"
+  },
+  "code": {
+    "fallbackLanguage": "kode",
+    "copyAria": "Salin kode",
+    "copy": "Salin",
+    "copied": "Tersalin"
+  },
+  "common": {
+    "dismiss": "Tutup"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "Pesan terlalu besar",
+      "body": "Server menolak pesan terakhir karena melebihi batas ukuran. Hapus beberapa gambar atau gunakan berkas yang lebih kecil, lalu coba lagi."
+    }
+  }
+}

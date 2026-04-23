@@ -1,0 +1,112 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "正在連線到 nanobot…",
+      "boot": "正在載入 nanobot…"
+    },
+    "error": {
+      "title": "無法連線到 nanobot",
+      "gatewayHint": "請確認 gateway 已啟動（`nanobot gateway`），並且目前頁面與 gateway 在同一台機器上開啟。"
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "nanobot Web UI —— 與你的 nanobot 工作區對話。"
+    }
+  },
+  "sidebar": {
+    "collapse": "收合側邊欄",
+    "toggleTheme": "切換主題",
+    "newChat": "新增對話",
+    "recent": "最近對話",
+    "refreshSessions": "重新整理會話",
+    "language": {
+      "label": "語言",
+      "ariaLabel": "切換語言"
+    }
+  },
+  "chat": {
+    "fallbackTitle": "對話 {{id}}",
+    "loading": "載入中…",
+    "noSessions": "目前還沒有會話。",
+    "actions": "「{{title}}」的會話操作",
+    "delete": "刪除",
+    "newChat": "新增對話"
+  },
+  "deleteConfirm": {
+    "title": "刪除「{{title}}」？",
+    "description": "這個會話檔案會從磁碟中移除，而且無法復原。",
+    "cancel": "取消",
+    "confirm": "刪除"
+  },
+  "connection": {
+    "idle": "閒置",
+    "connecting": "連線中…",
+    "open": "已連線",
+    "reconnecting": "重新連線中…",
+    "closed": "已中斷",
+    "error": "連線錯誤"
+  },
+  "thread": {
+    "loadingConversation": "正在載入對話…",
+    "empty": {
+      "description": "你可以提問、延續本地工作，或是開始新的執行緒。"
+    },
+    "header": {
+      "toggleSidebar": "切換側邊欄"
+    },
+    "composer": {
+      "placeholderThread": "輸入訊息…",
+      "placeholderHero": "你在想什麼？",
+      "placeholderOpening": "正在開啟新對話…",
+      "inputAria": "訊息輸入框",
+      "sendHint": "Enter 送出 · Shift+Enter 換行",
+      "send": "送出訊息",
+      "attachImage": "附加圖片",
+      "encoding": "處理中…",
+      "remove": "移除附件",
+      "normalizedSizeHint": "{{orig}} → {{current}}（已自動壓縮）",
+      "imageRejected": {
+        "unsupported_type": "不支援的檔案類型",
+        "too_many_images": "每則訊息最多 {{max}} 張圖片",
+        "magic_mismatch": "檔案看起來不像真正的圖片",
+        "decode_failed": "無法解碼這張圖片",
+        "too_large": "圖片太大，請換一張小一點的",
+        "io": "無法讀取這個檔案"
+      }
+    },
+    "scrollToBottom": "捲動到底部"
+  },
+  "message": {
+    "streaming": "串流輸出中",
+    "assistantTyping": "助理正在輸入",
+    "toolSingle": "正在使用工具",
+    "toolMany": "已使用 {{count}} 個工具",
+    "imageAttachment": "圖片附件"
+  },
+  "lightbox": {
+    "title": "圖片預覽",
+    "open": "檢視圖片",
+    "prev": "上一張",
+    "next": "下一張",
+    "close": "關閉預覽"
+  },
+  "code": {
+    "fallbackLanguage": "程式碼",
+    "copyAria": "複製程式碼",
+    "copy": "複製",
+    "copied": "已複製"
+  },
+  "common": {
+    "dismiss": "關閉"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "訊息過大",
+      "body": "伺服器因超過大小限制拒收了上一則訊息。可移除部分圖片或改用較小的圖片後再試。"
+    }
+  }
+}

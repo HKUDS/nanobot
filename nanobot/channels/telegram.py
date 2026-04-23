@@ -26,6 +26,11 @@ from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
+# Telegram's actual API limit is 4096; we split raw markdown at 4000 as a
+# safety margin for mid-stream edits (plain text).  For _stream_end, we
+# convert to HTML first and then split at the true 4096-char boundary so
+# the final rendered message never overflows.
+TELEGRAM_HTML_MAX_LEN = 4096
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
 
 
@@ -46,6 +51,34 @@ def _strip_md(s: str) -> str:
     s = re.sub(r'~~(.+?)~~', r'\1', s)
     s = re.sub(r'`([^`]+)`', r'\1', s)
     return s.strip()
+
+
+def _strip_md_block(text: str) -> str:
+    """Strip block-level and inline markdown for readable plain-text preview.
+
+    Used during streaming mid-edits so users see clean text instead of raw
+    markdown syntax while the response is still being generated.
+    """
+    # Code blocks -> just the code
+    text = re.sub(r'```[\w]*\n?([\s\S]*?)```', r'\1', text)
+    # Headers -> plain text
+    text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
+    # Blockquotes
+    text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
+    # Bold / italic / strikethrough
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = re.sub(r'__(.+?)__', r'\1', text)
+    text = re.sub(r'(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])', r'\1', text)
+    text = re.sub(r'~~(.+?)~~', r'\1', text)
+    # Inline code
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+    # Links [text](url) -> text
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    # Bullet lists
+    text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
+    # Numbered lists (normalize spacing)
+    text = re.sub(r'^(\d+)\.\s+', r'\1. ', text, flags=re.MULTILINE)
+    return text
 
 
 def _render_table_box(table_lines: list[str]) -> str:
@@ -124,8 +157,8 @@ def _markdown_to_telegram_html(text: str) -> str:
 
     text = re.sub(r'`([^`]+)`', save_inline_code, text)
 
-    # 3. Headers # Title -> just the title text
-    text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
+    # 3. Headers # Title -> <b>Title</b> (preserve visual hierarchy)
+    text = re.sub(r'^#{1,6}\s+(.+)$', r'⟪B⟫\1⟪/B⟫', text, flags=re.MULTILINE)
 
     # 4. Blockquotes > text -> just the text (before HTML escaping)
     text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
@@ -149,6 +182,9 @@ def _markdown_to_telegram_html(text: str) -> str:
     # 10. Bullet lists - item -> • item
     text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
 
+    # 10.5. Numbered lists  1. item -> 1. item (keep number, normalize indent)
+    text = re.sub(r'^(\d+)\.\s+', r'\1. ', text, flags=re.MULTILINE)
+
     # 11. Restore inline code with HTML tags
     for i, code in enumerate(inline_codes):
         # Escape HTML in code content
@@ -160,6 +196,9 @@ def _markdown_to_telegram_html(text: str) -> str:
         # Escape HTML in code content
         escaped = _escape_telegram_html(code)
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
+
+    # 13. Restore header bold markers (inserted in step 3, after HTML escaping)
+    text = text.replace('⟪B⟫', '<b>').replace('⟪/B⟫', '</b>')
 
     return text
 
@@ -561,14 +600,23 @@ class TelegramChannel(BaseChannel):
                     await self._remove_reaction(chat_id, int(reply_to_message_id))
                 except ValueError:
                     pass
-            chunks = split_message(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
-            primary_text = chunks[0] if chunks else buf.text
+            thread_kwargs = {}
+            if message_thread_id := meta.get("message_thread_id"):
+                thread_kwargs["message_thread_id"] = message_thread_id
+            raw_text = buf.text
+            html = _markdown_to_telegram_html(raw_text)
+            if len(html) <= TELEGRAM_HTML_MAX_LEN:
+                primary_html = html
+                extra_html_chunks = []
+            else:
+                html_chunks = split_message(html, TELEGRAM_HTML_MAX_LEN)
+                primary_html = html_chunks[0]
+                extra_html_chunks = html_chunks[1:]
             try:
-                html = _markdown_to_telegram_html(primary_text)
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
-                    text=html, parse_mode="HTML",
+                    text=primary_html, parse_mode="HTML",
                 )
             except BadRequest as e:
                 # Only fall back to plain text on actual HTML parse/format errors.
@@ -579,11 +627,13 @@ class TelegramChannel(BaseChannel):
                     self._stream_bufs.pop(chat_id, None)
                     return
                 logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
+                # Fall back to raw markdown (not HTML) so users don't see raw tags.
+                primary_plain = split_message(raw_text, TELEGRAM_MAX_MESSAGE_LEN)[0] if len(raw_text) > TELEGRAM_MAX_MESSAGE_LEN else raw_text
                 try:
                     await self._call_with_retry(
                         self._app.bot.edit_message_text,
                         chat_id=int_chat_id, message_id=buf.message_id,
-                        text=primary_text,
+                        text=primary_plain,
                     )
                 except Exception as e2:
                     if self._is_not_modified_error(e2):
@@ -591,10 +641,17 @@ class TelegramChannel(BaseChannel):
                     else:
                         logger.warning("Final stream edit failed: {}", e2)
                         raise  # Let ChannelManager handle retry
-            # If final content exceeds Telegram limit, keep the first chunk in
-            # the edited stream message and send the rest as follow-up messages.
-            for extra_chunk in chunks[1:]:
-                await self._send_text(int_chat_id, extra_chunk)
+            for extra_html_chunk in extra_html_chunks:
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.send_message,
+                        chat_id=int_chat_id, text=extra_html_chunk,
+                        parse_mode="HTML",
+                        **thread_kwargs,
+                    )
+                except Exception:
+                    # Fall back to _send_text which handles HTML→plain gracefully.
+                    await self._send_text(int_chat_id, extra_html_chunk)
             self._stream_bufs.pop(chat_id, None)
             return
 
@@ -614,10 +671,11 @@ class TelegramChannel(BaseChannel):
         if message_thread_id := meta.get("message_thread_id"):
             thread_kwargs["message_thread_id"] = message_thread_id
         if buf.message_id is None:
+            preview = _strip_md_block(buf.text)
             try:
                 sent = await self._call_with_retry(
                     self._app.bot.send_message,
-                    chat_id=int_chat_id, text=buf.text,
+                    chat_id=int_chat_id, text=preview,
                     **thread_kwargs,
                 )
                 buf.message_id = sent.message_id
@@ -626,11 +684,16 @@ class TelegramChannel(BaseChannel):
                 logger.warning("Stream initial send failed: {}", e)
                 raise  # Let ChannelManager handle retry
         elif (now - buf.last_edit) >= self.config.stream_edit_interval:
+            if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
+                await self._flush_stream_overflow(int_chat_id, buf, thread_kwargs)
+                buf.last_edit = now
+                return
+            preview = _strip_md_block(buf.text)
             try:
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
-                    text=buf.text,
+                    text=preview,
                 )
                 buf.last_edit = now
             except Exception as e:
@@ -639,6 +702,44 @@ class TelegramChannel(BaseChannel):
                     return
                 logger.warning("Stream edit failed: {}", e)
                 raise  # Let ChannelManager handle retry
+
+    async def _flush_stream_overflow(
+        self,
+        chat_id: int,
+        buf: "_StreamBuf",
+        thread_kwargs: dict,
+    ) -> None:
+        """Split an oversized stream buffer mid-flight.
+
+        Edits the current stream message with the first chunk, sends any
+        intermediate chunks as standalone messages, then opens a new message
+        for the tail so subsequent deltas continue streaming into it.
+        """
+        chunks = split_message(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
+        if len(chunks) <= 1:
+            return
+        try:
+            await self._call_with_retry(
+                self._app.bot.edit_message_text,
+                chat_id=chat_id, message_id=buf.message_id,
+                text=chunks[0],
+            )
+        except Exception as e:
+            if not self._is_not_modified_error(e):
+                logger.warning("Stream overflow edit failed: {}", e)
+                raise
+        for chunk in chunks[1:-1]:
+            await self._call_with_retry(
+                self._app.bot.send_message,
+                chat_id=chat_id, text=chunk, **thread_kwargs,
+            )
+        tail = chunks[-1]
+        sent = await self._call_with_retry(
+            self._app.bot.send_message,
+            chat_id=chat_id, text=tail, **thread_kwargs,
+        )
+        buf.message_id = sent.message_id
+        buf.text = tail
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""

@@ -421,13 +421,13 @@ async def test_github_copilot_provider_refreshes_client_api_key_before_chat():
     })
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI", return_value=mock_client):
-        provider = GitHubCopilotProvider(default_model="github-copilot/gpt-5.1")
+        provider = GitHubCopilotProvider(default_model="github-copilot/gpt-4")
 
     provider._get_copilot_access_token = AsyncMock(return_value="copilot-access-token")
 
     response = await provider.chat(
         messages=[{"role": "user", "content": "hi"}],
-        model="github-copilot/gpt-5.1",
+        model="github-copilot/gpt-4",
         max_tokens=16,
         temperature=0.1,
     )
@@ -1032,6 +1032,97 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
     )
 
 
+def test_gateway_cron_job_suppresses_intermediate_progress(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Cron jobs must pass on_progress=_silent to process_direct so that
+    tool hints and streaming deltas are never leaked to the user channel
+    before evaluate_response decides whether to deliver."""
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
+    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+            seen["cron"] = self
+
+    class _FakeAgentLoop:
+        def __init__(self, *args, **kwargs) -> None:
+            self.model = "test-model"
+            self.tools = {}
+
+        async def process_direct(self, *_args, on_progress=None, **_kwargs):
+            seen["on_progress"] = on_progress
+            return OutboundMessage(
+                channel="telegram",
+                chat_id="user-1",
+                content="Done.",
+            )
+
+        async def close_mcp(self) -> None:
+            return None
+
+        async def run(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _StopAfterCronSetup:
+        def __init__(self, *_args, **_kwargs) -> None:
+            raise _StopGatewayError("stop")
+
+    async def _always_reject(*_args, **_kwargs) -> bool:
+        return False
+
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _StopAfterCronSetup)
+    monkeypatch.setattr(
+        "nanobot.utils.evaluator.evaluate_response",
+        _always_reject,
+    )
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+    assert isinstance(result.exception, _StopGatewayError)
+
+    cron = seen["cron"]
+    job = CronJob(
+        id="cron-silent-test",
+        name="test-silent",
+        payload=CronPayload(
+            message="Run something.",
+            deliver=True,
+            channel="telegram",
+            to="user-1",
+        ),
+    )
+    response = asyncio.run(cron.on_job(job))
+
+    assert response == "Done."
+    # on_progress must be a callable (the _silent noop), not None and not bus_progress
+    assert seen["on_progress"] is not None
+    assert callable(seen["on_progress"])
+    # Verify it actually swallows calls (no side effects)
+    asyncio.run(seen["on_progress"]("tool_hint", "🔧 $ echo test"))
+    # Nothing published to bus since evaluator rejected
+    bus.publish_outbound.assert_not_awaited()
+
+
 def test_gateway_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -1197,10 +1288,15 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         async def run(self) -> None:
             return None
 
+    class _FakeSessionManager:
+        def flush_all(self) -> int:
+            return 0
+
     class _FakeAgentLoop:
         def __init__(self, **_kwargs) -> None:
             self.model = "test-model"
             self.dream = _FakeDream()
+            self.sessions = _FakeSessionManager()
 
         async def run(self) -> None:
             await asyncio.Event().wait()
@@ -1212,7 +1308,7 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
             return None
 
     class _FakeChannelManager:
-        def __init__(self, _config, _bus) -> None:
+        def __init__(self, _config, _bus, **_kwargs) -> None:
             self.enabled_channels = ["telegram", "discord"]
 
         async def start_all(self) -> None:

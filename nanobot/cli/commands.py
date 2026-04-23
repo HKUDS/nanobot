@@ -145,7 +145,7 @@ def _make_console() -> Console:
 def _render_interactive_ansi(render_fn) -> str:
     """Render Rich output to ANSI so prompt_toolkit can print it safely."""
     ansi_console = Console(
-        force_terminal=True,
+        force_terminal=sys.stdout.isatty(),
         color_system=console.color_system or "standard",
         width=console.width,
     )
@@ -636,6 +636,21 @@ def gateway(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Start the nanobot gateway."""
+    if verbose:
+        import logging
+
+        logging.basicConfig(level=logging.DEBUG)
+    cfg = _load_runtime_config(config, workspace)
+    _run_gateway(cfg, port=port)
+
+
+def _run_gateway(
+    config: Config,
+    *,
+    port: int | None = None,
+    open_browser_url: str | None = None,
+) -> None:
+    """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
@@ -644,12 +659,6 @@ def gateway(
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
 
-    if verbose:
-        import logging
-
-        logging.basicConfig(level=logging.DEBUG)
-
-    config = _load_runtime_config(config, workspace)
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
@@ -717,12 +726,17 @@ def gateway(
         cron_token = None
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
+
+        async def _silent(*_args, **_kwargs):
+            pass
+
         try:
             resp = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                on_progress=_silent,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
@@ -749,8 +763,9 @@ def gateway(
 
     cron.on_job = on_cron_job
 
-    # Create channel manager
-    channels = ChannelManager(config, bus)
+    # Create channel manager (forwards SessionManager so the WebSocket channel
+    # can serve the embedded webui's REST surface).
+    channels = ChannelManager(config, bus, session_manager=session_manager)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -881,15 +896,43 @@ def gateway(
     ))
     console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
 
+    async def _open_browser_when_ready() -> None:
+        """Wait for the gateway to bind, then point the user's browser at the webui."""
+        if not open_browser_url:
+            return
+        import webbrowser
+        # Channels start asynchronously; a short poll lets us avoid racing the bind.
+        for _ in range(40):  # ~4s max
+            try:
+                reader, writer = await asyncio.open_connection(
+                    config.gateway.host or "127.0.0.1", port
+                )
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+                break
+            except OSError:
+                await asyncio.sleep(0.1)
+        try:
+            webbrowser.open(open_browser_url)
+            console.print(f"[green]✓[/green] Opened browser at {open_browser_url}")
+        except Exception as e:
+            console.print(f"[yellow]Could not open browser ({e}); visit {open_browser_url}[/yellow]")
+
     async def run():
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
+            tasks = [
                 agent.run(),
                 channels.start_all(),
                 _health_server(config.gateway.host, port),
-            )
+            ]
+            if open_browser_url:
+                tasks.append(_open_browser_when_ready())
+            await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         except Exception:
@@ -903,6 +946,12 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            # Flush all cached sessions to durable storage before exit.
+            # This prevents data loss on filesystems with write-back
+            # caching (rclone VFS, NFS, FUSE mounts, etc.).
+            flushed = agent.sessions.flush_all()
+            if flushed:
+                logger.info("Shutdown: flushed {} session(s) to disk", flushed)
 
     asyncio.run(run())
 

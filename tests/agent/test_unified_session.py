@@ -241,6 +241,7 @@ class TestCmdNewUnifiedSession:
         loop = SimpleNamespace(
             sessions=sessions,
             consolidator=SimpleNamespace(archive=AsyncMock(return_value=True)),
+            _cancel_active_tasks=AsyncMock(return_value=0),
         )
         loop._schedule_background = lambda coro: asyncio.ensure_future(coro)
 
@@ -274,6 +275,7 @@ class TestCmdNewUnifiedSession:
         loop = SimpleNamespace(
             sessions=sessions,
             consolidator=SimpleNamespace(archive=AsyncMock(return_value=True)),
+            _cancel_active_tasks=AsyncMock(return_value=0),
         )
         loop._schedule_background = lambda coro: asyncio.ensure_future(coro)
 
@@ -395,7 +397,10 @@ class TestConsolidationUnaffectedByUnifiedSession:
         await consolidator.maybe_consolidate_by_tokens(session)
 
         # estimate was called (consolidation was attempted)
-        consolidator.estimate_session_prompt_tokens.assert_called_once_with(session)
+        consolidator.estimate_session_prompt_tokens.assert_called_once_with(
+            session,
+            session_summary=None,
+        )
         # but archive was not called (no valid boundary)
         consolidator.archive.assert_not_called()
 
