@@ -185,6 +185,15 @@ class WebToolsConfig(Base):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class TirithConfig(Base):
+    """Opt-in Tirith pre-exec content gate. Requires tirith on PATH."""
+
+    enabled: bool = False
+    bin: str = "tirith"
+    timeout: int = 5
+    fail_open: bool = True
+
+
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
@@ -193,6 +202,8 @@ class ExecToolConfig(Base):
     path_append: str = ""
     sandbox: str = ""  # sandbox backend: "" (none) or "bwrap"
     allowed_env_keys: list[str] = Field(default_factory=list)  # Env var names to pass through to subprocess (e.g. ["GOPATH", "JAVA_HOME"])
+    tirith: TirithConfig = Field(default_factory=TirithConfig)
+
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
