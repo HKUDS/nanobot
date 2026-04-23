@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import weakref
+import tiktoken
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator
@@ -13,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 from loguru import logger
 
 from nanobot.utils.prompt_templates import render_template
-from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, strip_think
+from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, strip_think, truncate_text
 
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.registry import ToolRegistry
@@ -373,11 +374,13 @@ class MemoryStore:
             )
         return "\n".join(lines)
 
-    def raw_archive(self, messages: list[dict]) -> None:
+    def raw_archive(self, messages: list[dict], *, max_chars: int | None = None) -> None:
         """Fallback: dump raw messages to history.jsonl without LLM summarization."""
+        limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
+        formatted = truncate_text(self._format_messages(messages), limit)
         self.append_history(
             f"[RAW] {len(messages)} messages\n"
-            f"{self._format_messages(messages)}"
+            f"{formatted}"
         )
         logger.warning(
             "Memory consolidation degraded: raw-archived {} messages", len(messages)
@@ -390,11 +393,13 @@ class MemoryStore:
 # ---------------------------------------------------------------------------
 
 
+_RAW_ARCHIVE_MAX_CHARS = 16_000  # cap raw_archive entries to avoid bloating history.jsonl
+
+
 class Consolidator:
     """Lightweight consolidation: summarizes evicted messages into history.jsonl."""
 
     _MAX_CONSOLIDATION_ROUNDS = 5
-    _MAX_CHUNK_MESSAGES = 60  # hard cap per consolidation round
 
     _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
 
@@ -447,22 +452,6 @@ class Consolidator:
 
         return last_boundary
 
-    def _cap_consolidation_boundary(
-        self,
-        session: Session,
-        end_idx: int,
-    ) -> int | None:
-        """Clamp the chunk size without breaking the user-turn boundary."""
-        start = session.last_consolidated
-        if end_idx - start <= self._MAX_CHUNK_MESSAGES:
-            return end_idx
-
-        capped_end = start + self._MAX_CHUNK_MESSAGES
-        for idx in range(capped_end, start, -1):
-            if session.messages[idx].get("role") == "user":
-                return idx
-        return None
-
     def estimate_session_prompt_tokens(
         self,
         session: Session,
@@ -486,6 +475,25 @@ class Consolidator:
             self._get_tool_definitions(),
         )
 
+    @property
+    def _input_token_budget(self) -> int:
+        """Available input token budget for consolidation LLM."""
+        return self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
+
+    def _truncate_to_token_budget(self, text: str) -> str:
+        """Truncate text so it fits within the consolidation LLM's token budget."""
+        budget = self._input_token_budget
+        if budget <= 0:
+            return truncate_text(text, _RAW_ARCHIVE_MAX_CHARS)
+        try:
+            enc = tiktoken.get_encoding("cl100k_base")
+            tokens = enc.encode(text)
+            if len(tokens) <= budget:
+                return text
+            return enc.decode(tokens[:budget]) + "\n... (truncated)"
+        except Exception:
+            return truncate_text(text, budget * 4)
+
     async def archive(self, messages: list[dict]) -> str | None:
         """Summarize messages via LLM and append to history.jsonl.
 
@@ -495,6 +503,7 @@ class Consolidator:
             return None
         try:
             formatted = MemoryStore._format_messages(messages)
+            formatted = self._truncate_to_token_budget(formatted)
             response = await self.provider.chat_with_retry(
                 model=self.model,
                 messages=[
@@ -536,7 +545,7 @@ class Consolidator:
 
         lock = self.get_lock(session.key)
         async with lock:
-            budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
+            budget = self._input_token_budget
             target = budget // 2
             try:
                 estimated, source = self.estimate_session_prompt_tokens(
@@ -575,14 +584,6 @@ class Consolidator:
                     break
 
                 end_idx = boundary[0]
-                end_idx = self._cap_consolidation_boundary(session, end_idx)
-                if end_idx is None:
-                    logger.debug(
-                        "Token consolidation: no capped boundary for {} (round {})",
-                        session.key,
-                        round_num,
-                    )
-                    break
 
                 chunk = session.messages[session.last_consolidated:end_idx]
                 if not chunk:
