@@ -1591,3 +1591,29 @@ async def test_send_delta_mid_stream_strips_markdown() -> None:
     assert "**" not in edited_text
     assert "Title" in edited_text
     assert "1. step" in edited_text
+
+
+def test_build_keyboard_respects_inline_keyboards_flag() -> None:
+    """``_build_keyboard`` returns ``None`` whenever the feature flag is off,
+    regardless of whether buttons are provided; returns a proper Markup only
+    when the flag is explicitly enabled. Pins the kill-switch so accidentally
+    flipping the default doesn't silently expose callback handlers."""
+    from telegram import InlineKeyboardMarkup
+
+    off = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", inline_keyboards=False),
+        MessageBus(),
+    )
+    assert off._build_keyboard([["A", "B"]]) is None
+
+    on = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", inline_keyboards=True),
+        MessageBus(),
+    )
+    assert on._build_keyboard([]) is None  # empty still no-op
+    markup = on._build_keyboard([["Yes", "No"], ["Cancel"]])
+    assert isinstance(markup, InlineKeyboardMarkup)
+    rows = markup.inline_keyboard
+    assert [[b.text for b in row] for row in rows] == [["Yes", "No"], ["Cancel"]]
+    # callback_data mirrors label so _on_callback_query can echo the tap back.
+    assert rows[0][0].callback_data == "Yes"
