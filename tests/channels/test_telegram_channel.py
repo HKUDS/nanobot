@@ -1591,3 +1591,125 @@ async def test_send_delta_mid_stream_strips_markdown() -> None:
     assert "**" not in edited_text
     assert "Title" in edited_text
     assert "1. step" in edited_text
+
+
+def test_build_keyboard_respects_inline_keyboards_flag() -> None:
+    """``_build_keyboard`` returns ``None`` whenever the feature flag is off,
+    regardless of whether buttons are provided; returns a proper Markup only
+    when the flag is explicitly enabled. Pins the kill-switch so accidentally
+    flipping the default doesn't silently expose callback handlers."""
+    from telegram import InlineKeyboardMarkup
+
+    off = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", inline_keyboards=False),
+        MessageBus(),
+    )
+    assert off._build_keyboard([["A", "B"]]) is None
+
+    on = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", inline_keyboards=True),
+        MessageBus(),
+    )
+    assert on._build_keyboard([]) is None  # empty still no-op
+    markup = on._build_keyboard([["Yes", "No"], ["Cancel"]])
+    assert isinstance(markup, InlineKeyboardMarkup)
+    rows = markup.inline_keyboard
+    assert [[b.text for b in row] for row in rows] == [["Yes", "No"], ["Cancel"]]
+    # callback_data mirrors label so _on_callback_query can echo the tap back.
+    assert rows[0][0].callback_data == "Yes"
+
+
+def test_safe_callback_data_truncates_at_utf8_boundary() -> None:
+    # Telegram's 64-byte callback_data cap is a hard API limit; silent 400s were the bug.
+    short = "Yes"
+    assert TelegramChannel._safe_callback_data(short) == short
+
+    long_ascii = "a" * 100
+    out = TelegramChannel._safe_callback_data(long_ascii)
+    assert len(out.encode("utf-8")) <= 64
+    assert long_ascii.startswith(out)
+
+    # Multibyte labels must not split a codepoint mid-byte.
+    long_cjk = "同意并继续下一步，我已阅读并同意了服务条款以及隐私政策"
+    assert len(long_cjk.encode("utf-8")) > 64
+    out = TelegramChannel._safe_callback_data(long_cjk)
+    assert len(out.encode("utf-8")) <= 64
+    assert long_cjk.startswith(out)
+    out.encode("utf-8").decode("utf-8")  # must round-trip cleanly
+
+
+def test_build_keyboard_uses_safe_callback_data_for_long_labels() -> None:
+    # Pins the integration so a long-label payload survives ``send_message`` instead of 400ing.
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", inline_keyboards=True),
+        MessageBus(),
+    )
+    long_label = "Approve and continue to the next step with the updated terms of service"
+    assert len(long_label.encode("utf-8")) > 64
+
+    markup = channel._build_keyboard([[long_label]])
+    btn = markup.inline_keyboard[0][0]
+    assert btn.text == long_label  # display preserved
+    assert len(btn.callback_data.encode("utf-8")) <= 64
+    assert long_label.startswith(btn.callback_data)
+
+
+def test_buttons_as_text_format_preserves_rows_and_labels() -> None:
+    # Canonical shape: one row per line, labels bracketed. Layout survives the fallback.
+    assert TelegramChannel._buttons_as_text([["Yes", "No"], ["Cancel"]]) == "[Yes] [No]\n[Cancel]"
+    assert TelegramChannel._buttons_as_text([["Only"]]) == "[Only]"
+    assert TelegramChannel._buttons_as_text([[], ["A"]]) == "[A]"  # empty rows skipped
+
+
+@pytest.mark.asyncio
+async def test_send_falls_back_buttons_to_inline_text_when_flag_off() -> None:
+    """Buttons are semantic options; with ``inline_keyboards=False`` we must
+    splice labels into the text so users still see the choices. Silent-drop
+    was the pre-fallback bug — the agent got a success reply while the user
+    saw a question with no options."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], inline_keyboards=False),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Proceed?",
+            buttons=[["Yes", "No"], ["Cancel"]],
+        )
+    )
+
+    assert len(channel._app.bot.sent_messages) == 1
+    sent = channel._app.bot.sent_messages[0]
+    assert sent.get("reply_markup") is None
+    assert "Proceed?" in sent["text"]
+    assert "[Yes] [No]" in sent["text"]
+    assert "[Cancel]" in sent["text"]
+
+
+@pytest.mark.asyncio
+async def test_send_uses_native_keyboard_when_flag_on() -> None:
+    """With the flag on, the content stays clean and buttons ride in ``reply_markup``."""
+    from telegram import InlineKeyboardMarkup
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], inline_keyboards=True),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Proceed?",
+            buttons=[["Yes", "No"]],
+        )
+    )
+
+    sent = channel._app.bot.sent_messages[0]
+    assert isinstance(sent.get("reply_markup"), InlineKeyboardMarkup)
+    assert "[Yes]" not in sent["text"]  # native keyboard owns the rendering

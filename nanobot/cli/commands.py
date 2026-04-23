@@ -1031,7 +1031,7 @@ def agent(
     # Shared reference for progress callbacks
     _thinking: ThinkingSpinner | None = None
 
-    async def _cli_progress(content: str, *, tool_hint: bool = False) -> None:
+    async def _cli_progress(content: str, *, tool_hint: bool = False, **_kwargs: Any) -> None:
         ch = agent_loop.channels_config
         if ch and tool_hint and not ch.send_tool_hints:
             return

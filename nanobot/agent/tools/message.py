@@ -17,6 +17,10 @@ from nanobot.bus.events import OutboundMessage
             StringSchema(""),
             description="Optional: list of file paths to attach (images, audio, documents)",
         ),
+        buttons=ArraySchema(
+            ArraySchema(StringSchema("Button label")),
+            description="Optional: inline keyboard buttons as list of rows, each row is list of button labels.",
+        ),
         required=["content"],
     )
 )
@@ -81,14 +85,20 @@ class MessageTool(Tool):
         chat_id: str | None = None,
         message_id: str | None = None,
         media: list[str] | None = None,
+        buttons: list[list[str]] | None = None,
         **kwargs: Any
     ) -> str:
         from nanobot.utils.helpers import strip_think
         content = strip_think(content)
 
+        if buttons is not None:
+            if not isinstance(buttons, list) or any(
+                not isinstance(row, list) or any(not isinstance(label, str) for label in row)
+                for row in buttons
+            ):
+                return "Error: buttons must be a list of list of strings"
         default_channel = self._default_channel.get()
         default_chat_id = self._default_chat_id.get()
-
         channel = channel or default_channel
         chat_id = chat_id or default_chat_id
         # Only inherit default message_id when targeting the same channel+chat.
@@ -112,6 +122,7 @@ class MessageTool(Tool):
             chat_id=chat_id,
             content=content,
             media=media or [],
+            buttons=buttons or [],
             metadata={
                 "message_id": message_id,
             } if message_id else {},
@@ -122,6 +133,7 @@ class MessageTool(Tool):
             if channel == default_channel and chat_id == default_chat_id:
                 self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
-            return f"Message sent to {channel}:{chat_id}{media_info}"
+            button_info = f" with {sum(len(row) for row in buttons)} button(s)" if buttons else ""
+            return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"
         except Exception as e:
             return f"Error sending message: {str(e)}"
