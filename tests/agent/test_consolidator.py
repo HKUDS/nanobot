@@ -230,3 +230,20 @@ class TestArchiveTruncation:
         # budget = 500 - 100 - 1024 = negative, fallback char-based
         # Should be truncated
         assert len(user_content) < 250_000
+
+    async def test_archive_truncates_via_tiktoken_with_positive_budget(self, consolidator, mock_provider, store):
+        """Positive token budget should use tiktoken for precise truncation."""
+        consolidator.context_window_tokens = 10_000
+        consolidator._SAFETY_BUFFER = 0
+        # budget = 10000 - 100 - 0 = 9900 tokens
+        big_messages = [{"role": "user", "content": "word " * 50_000}]
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary.", finish_reason="stop"
+        )
+        await consolidator.archive(big_messages)
+
+        import tiktoken
+        enc = tiktoken.get_encoding("cl100k_base")
+        sent_content = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        token_count = len(enc.encode(sent_content))
+        assert token_count <= 9_900 + 10  # small margin for truncation suffix
