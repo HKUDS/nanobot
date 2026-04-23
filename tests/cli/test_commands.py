@@ -1284,6 +1284,12 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         model = None
         max_batch_size = 0
         max_iterations = 0
+        enabled = True
+        phase1_template_path = None
+        phase2_template_path = None
+
+        def validate_templates(self) -> None:
+            return None
 
         async def run(self) -> None:
             return None

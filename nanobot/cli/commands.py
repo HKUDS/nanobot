@@ -880,21 +880,34 @@ def _run_gateway(
         console.print(f"[green]✓[/green] Health endpoint: http://{host}:{health_port}/health")
         async with server:
             await server.serve_forever()
-    # Register Dream system job (always-on, idempotent on restart)
+    # Register Dream system job (idempotent on restart). Skipped entirely when
+    # dream.enabled is False — the user has opted out (#3282).
     dream_cfg = config.agents.defaults.dream
     if dream_cfg.model_override:
         agent.dream.model = dream_cfg.model_override
     agent.dream.max_batch_size = dream_cfg.max_batch_size
     agent.dream.max_iterations = dream_cfg.max_iterations
     agent.dream.annotate_line_ages = dream_cfg.annotate_line_ages
+    agent.dream.enabled = dream_cfg.enabled
+    from nanobot.agent.memory import _resolve_dream_template_path
+    agent.dream.phase1_template_path = _resolve_dream_template_path(
+        dream_cfg.phase1_template, config.workspace_path,
+    )
+    agent.dream.phase2_template_path = _resolve_dream_template_path(
+        dream_cfg.phase2_template, config.workspace_path,
+    )
+    agent.dream.validate_templates()
     from nanobot.cron.types import CronJob, CronPayload
-    cron.register_system_job(CronJob(
-        id="dream",
-        name="dream",
-        schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
-        payload=CronPayload(kind="system_event"),
-    ))
-    console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
+    if dream_cfg.enabled:
+        cron.register_system_job(CronJob(
+            id="dream",
+            name="dream",
+            schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
+            payload=CronPayload(kind="system_event"),
+        ))
+        console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
+    else:
+        console.print("[yellow]Dream: disabled (dream.enabled=false)[/yellow]")
 
     async def _open_browser_when_ready() -> None:
         """Wait for the gateway to bind, then point the user's browser at the webui."""

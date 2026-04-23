@@ -37,6 +37,7 @@ class DreamConfig(Base):
 
     _HOUR_MS = 3_600_000
 
+    enabled: bool = True  # Kill switch; when False, no Dream cron job is registered (#3282)
     interval_h: int = Field(default=2, ge=1)  # Every 2 hours by default
     cron: str | None = Field(default=None, exclude=True)  # Legacy compatibility override
     model_override: str | None = Field(
@@ -50,6 +51,12 @@ class DreamConfig(Base):
     # on — set to False to feed MEMORY.md raw if a specific LLM reacts poorly
     # to the `← Nd` suffix or you want deterministic, git-independent prompts.
     annotate_line_ages: bool = True
+    # Custom Dream prompt paths (#3282). If set, used instead of the builtin
+    # templates. Absolute paths are used as-is; relative paths resolve against
+    # the workspace; ~ is expanded. Missing files raise at startup when Dream
+    # is enabled; ignored when enabled=False.
+    phase1_template: str | None = None
+    phase2_template: str | None = None
 
     def build_schedule(self, timezone: str) -> CronSchedule:
         """Build the runtime schedule, preferring the legacy cron override if present."""

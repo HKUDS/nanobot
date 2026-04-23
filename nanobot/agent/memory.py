@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 from loguru import logger
 
-from nanobot.utils.prompt_templates import render_template
+from nanobot.utils.prompt_templates import render_template, render_template_from_path
 from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, strip_think
 
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
@@ -639,6 +639,21 @@ class Consolidator:
 _STALE_THRESHOLD_DAYS = 14
 
 
+def _resolve_dream_template_path(raw: str | None, workspace: Path) -> Path | None:
+    """Resolve a user-supplied Dream template path (#3282).
+
+    Rules: ``~`` is expanded; absolute paths are used as-is; relative paths
+    resolve against *workspace*. Returns ``None`` when ``raw`` is ``None`` so
+    callers can fall back to the builtin template.
+    """
+    if raw is None:
+        return None
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = workspace / candidate
+    return candidate
+
+
 class Dream:
     """Two-phase memory processor: analyze history.jsonl, then edit files via AgentRunner.
 
@@ -667,8 +682,50 @@ class Dream:
         # Default True keeps the #3212 behavior; set False to feed MEMORY.md raw
         # (e.g. if a specific LLM reacts poorly to the `← Nd` suffix).
         self.annotate_line_ages = annotate_line_ages
+        # Dream scope controls (#3282). Set post-construction from DreamConfig
+        # by ``cli.commands.gateway`` (mirroring the pattern used for
+        # ``model``/``max_batch_size``/``max_iterations``). When
+        # ``enabled=False``, the cron job is never registered; the template
+        # paths are only validated when enabled is True.
+        self.enabled: bool = True
+        self.phase1_template_path: Path | None = None
+        self.phase2_template_path: Path | None = None
         self._runner = AgentRunner(provider)
         self._tools = self._build_tools()
+
+    def validate_templates(self) -> None:
+        """Raise ``FileNotFoundError`` if a configured custom template is missing.
+
+        Called from gateway startup so misconfiguration fails fast instead of
+        at the next Dream tick. No-op when ``enabled=False`` — users can stage
+        in-progress templates without being forced to keep them runnable.
+        """
+        if not self.enabled:
+            return
+        for key, path in (
+            ("phase1_template", self.phase1_template_path),
+            ("phase2_template", self.phase2_template_path),
+        ):
+            if path is None:
+                continue
+            if not path.is_file():
+                raise FileNotFoundError(
+                    f"Dream {key} path does not exist: {path}"
+                )
+
+    def _render_phase1_prompt(self, **kwargs: Any) -> str:
+        if self.phase1_template_path is not None:
+            return render_template_from_path(
+                self.phase1_template_path, strip=True, **kwargs,
+            )
+        return render_template("agent/dream_phase1.md", strip=True, **kwargs)
+
+    def _render_phase2_prompt(self, **kwargs: Any) -> str:
+        if self.phase2_template_path is not None:
+            return render_template_from_path(
+                self.phase2_template_path, strip=True, **kwargs,
+            )
+        return render_template("agent/dream_phase2.md", strip=True, **kwargs)
 
     # -- tool registry -------------------------------------------------------
 
@@ -819,9 +876,7 @@ class Dream:
                 messages=[
                     {
                         "role": "system",
-                        "content": render_template(
-                            "agent/dream_phase1.md",
-                            strip=True,
+                        "content": self._render_phase1_prompt(
                             stale_threshold_days=_STALE_THRESHOLD_DAYS,
                         ),
                     },
@@ -851,9 +906,7 @@ class Dream:
         messages: list[dict[str, Any]] = [
             {
                 "role": "system",
-                "content": render_template(
-                    "agent/dream_phase2.md",
-                    strip=True,
+                "content": self._render_phase2_prompt(
                     skill_creator_path=str(skill_creator_path),
                 ),
             },
