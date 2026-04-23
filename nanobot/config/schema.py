@@ -105,6 +105,7 @@ class ProviderConfig(Base):
     api_key: str | None = None
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    prefer_free: bool = False  # Prefer free models (OpenRouter: appends :free or uses openrouter/free)
 
 
 class ProvidersConfig(Base):

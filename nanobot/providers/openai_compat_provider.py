@@ -182,11 +182,13 @@ class OpenAICompatProvider(LLMProvider):
         default_model: str = "gpt-4o",
         extra_headers: dict[str, str] | None = None,
         spec: ProviderSpec | None = None,
+        prefer_free: bool = False,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._spec = spec
+        self.prefer_free = prefer_free
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -210,6 +212,18 @@ class OpenAICompatProvider(LLMProvider):
         # probe again after _RESPONSES_PROBE_INTERVAL_S seconds.
         self._responses_failures: dict[str, int] = {}
         self._responses_tripped_at: dict[str, float] = {}
+
+    def _maybe_add_free_suffix(self, model_name: str) -> str:
+        """Add :free suffix to model name if prefer_free is enabled and using OpenRouter."""
+        if not self.prefer_free:
+            return model_name
+        if not _uses_openrouter_attribution(self._spec, self._effective_base):
+            return model_name
+        if model_name.endswith(':free'):
+            return model_name
+        if model_name == 'openrouter/free':
+            return model_name
+        return f"{model_name}:free"
 
     def _setup_env(self, api_key: str, api_base: str | None) -> None:
         """Set environment variables based on provider spec."""
@@ -364,6 +378,9 @@ class OpenAICompatProvider(LLMProvider):
 
         if spec and spec.strip_model_prefix:
             model_name = model_name.split("/")[-1]
+
+        # Add :free suffix for OpenRouter if prefer_free is enabled
+        model_name = self._maybe_add_free_suffix(model_name)
 
         kwargs: dict[str, Any] = {
             "model": model_name,
@@ -530,6 +547,10 @@ class OpenAICompatProvider(LLMProvider):
         model_name = model or self.default_model
         if self._spec and self._spec.strip_model_prefix:
             model_name = model_name.split("/")[-1]
+
+        # Add :free suffix for OpenRouter if prefer_free is enabled
+        model_name = self._maybe_add_free_suffix(model_name)
+
         sanitized_messages = self._sanitize_messages(self._sanitize_empty_content(messages))
         instructions, input_items = convert_messages(sanitized_messages)
 
