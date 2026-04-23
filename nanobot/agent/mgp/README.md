@@ -245,15 +245,15 @@ is shared.
 Adapter selection lives **on the MGP gateway side**, not in `nanobot.yaml`.
 nanobot only needs to know `gateway_url` (and optionally `api_key`).
 
-Production-grade adapters:
+Production-grade adapters and required environment:
 
-| Adapter      | Install                                            | Required env                                                                                                         |
-| ------------ | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `postgres`   | `pip install "mgp-gateway[postgres]>=0.1.1"`       | `MGP_ADAPTER=postgres`, `MGP_POSTGRES_DSN=...`                                                                        |
-| `oceanbase`  | `pip install "mgp-gateway[oceanbase]>=0.1.1"`      | `MGP_ADAPTER=oceanbase`, `MGP_OCEANBASE_DSN=...`                                                                      |
-| `lancedb`    | `pip install "mgp-gateway[lancedb]>=0.1.1"`        | `MGP_ADAPTER=lancedb`, `MGP_LANCEDB_DIR=...`, `MGP_LANCEDB_EMBEDDING_PROVIDER`, `MGP_LANCEDB_EMBEDDING_MODEL`, `MGP_LANCEDB_EMBEDDING_API_KEY` |
-| `mem0`       | `pip install mem0ai`                               | `MGP_ADAPTER=mem0`, `MGP_MEM0_API_KEY=...`                                                                           |
-| `zep`        | `pip install zep-cloud`                            | `MGP_ADAPTER=zep`, `MGP_ZEP_API_KEY=...`                                                                             |
+| Adapter      | Install                                            | Required env                                                                                                                                   |
+| ------------ | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `postgres`   | `pip install "mgp-gateway[postgres]>=0.1.1"`       | `MGP_ADAPTER=postgres`, `MGP_POSTGRES_DSN=...`                                                                                                  |
+| `oceanbase`  | `pip install "mgp-gateway[oceanbase]>=0.1.1"`      | `MGP_ADAPTER=oceanbase`, **either** `MGP_OCEANBASE_DSN=...` **or** the discrete tuple `MGP_OCEANBASE_URI` + `MGP_OCEANBASE_USER` + `MGP_OCEANBASE_PASSWORD` + `MGP_OCEANBASE_DATABASE` (+ optional `MGP_OCEANBASE_TENANT`) |
+| `lancedb`    | `pip install "mgp-gateway[lancedb]>=0.1.1"`        | `MGP_ADAPTER=lancedb`, `MGP_LANCEDB_DIR=...`, `MGP_LANCEDB_EMBEDDING_PROVIDER`, `MGP_LANCEDB_EMBEDDING_MODEL`, `MGP_LANCEDB_EMBEDDING_API_KEY` (+ optional `MGP_LANCEDB_EMBEDDING_BASE_URL`, `MGP_LANCEDB_EMBEDDING_DIM`, `MGP_LANCEDB_TABLE`, `MGP_LANCEDB_ENABLE_HYBRID`) |
+| `mem0`       | `pip install mem0ai`                               | `MGP_ADAPTER=mem0`, `MGP_MEM0_API_KEY=...` (+ optional `MGP_MEM0_ORG_ID`, `MGP_MEM0_PROJECT_ID`, `MGP_MEM0_APP_ID`, `MGP_MEM0_ENABLE_GRAPH=true\|false`)                                                                                                  |
+| `zep`        | `pip install zep-cloud`                            | `MGP_ADAPTER=zep`, `MGP_ZEP_API_KEY=...` (+ optional `MGP_ZEP_BASE_URL`, `MGP_ZEP_GRAPH_USER_ID`, `MGP_ZEP_RERANKER`, `MGP_ZEP_RETURN_CONTEXT`, `MGP_ZEP_IGNORE_ROLES`)                                                                                                                                  |
 
 Reference adapters (`memory`, `file`, `graph`) are for protocol verification —
 do not use in production.
@@ -262,12 +262,117 @@ Authentication on the gateway side:
 
 ```bash
 export MGP_GATEWAY_AUTH_MODE=api_key   # off / api_key / bearer
-export MGP_GATEWAY_API_KEY=secret-...  # set the same value as nanobot.yaml mgp.api_key
+export MGP_GATEWAY_API_KEY=secret-...  # for api_key mode
+# export MGP_GATEWAY_BEARER_TOKEN=...  # for bearer mode
 mgp-gateway
 ```
 
+The `MGP_GATEWAY_API_KEY` (or `MGP_GATEWAY_BEARER_TOKEN`) on the gateway side
+**must match** `agents.defaults.mgp.api_key` on the nanobot side.
+
 See the [MGP repository](https://github.com/hkuds/MGP) for the full set of
 gateway environment variables.
+
+### Do I need to configure an embedding model?
+
+**Only `lancedb` needs it.** All other adapters either run lexical search
+(`memory` / `file` / `graph` / `postgres` / `oceanbase`) or handle embeddings
+on the vendor side (`mem0` / `zep`). Configuration lives entirely on the
+**gateway** side; nanobot never touches an embedding model.
+
+#### LanceDB embedding env vars
+
+| Env var                          | Required           | Purpose                                                           |
+| -------------------------------- | ------------------ | ----------------------------------------------------------------- |
+| `MGP_LANCEDB_DIR`                | Yes                | Storage path                                                      |
+| `MGP_LANCEDB_EMBEDDING_PROVIDER` | Yes                | One of LanceDB's [registry](https://docs.lancedb.com/embedding/) entries (`openai`, `gemini`, `sentence-transformers`, `ollama`, `cohere`, …) plus the MGP alias `openrouter`, or `fake` for tests |
+| `MGP_LANCEDB_EMBEDDING_MODEL`    | Yes                | Model name as that provider expects it                            |
+| `MGP_LANCEDB_EMBEDDING_API_KEY`  | Cloud providers    | API key                                                           |
+| `MGP_LANCEDB_EMBEDDING_BASE_URL` | Optional           | Override endpoint — required for OpenAI-compatible relays         |
+| `MGP_LANCEDB_EMBEDDING_DIM`      | Optional           | Pin output dimension (must match table)                           |
+
+#### Three common setups
+
+```bash
+# A. OpenAI direct — cheap, strong English
+export MGP_LANCEDB_EMBEDDING_PROVIDER=openai
+export MGP_LANCEDB_EMBEDDING_MODEL=text-embedding-3-small
+export MGP_LANCEDB_EMBEDDING_API_KEY=sk-...
+
+# B. Local, free, air-gapped (model auto-downloaded on first use)
+export MGP_LANCEDB_EMBEDDING_PROVIDER=sentence-transformers
+export MGP_LANCEDB_EMBEDDING_MODEL=BAAI/bge-small-en-v1.5
+
+# C. OpenRouter (built-in alias; aggregates many vendors behind one key)
+export MGP_LANCEDB_EMBEDDING_PROVIDER=openrouter
+export MGP_LANCEDB_EMBEDDING_API_KEY=sk-or-v1-...
+export MGP_LANCEDB_EMBEDDING_MODEL=openai/text-embedding-3-small  # vendor/model slug
+```
+
+#### Any other OpenAI-compatible relay
+
+Use `provider=openai` plus a custom `BASE_URL` — works for SiliconFlow,
+DeepInfra, Together, Fireworks, OneAPI/NewAPI, vLLM/Xinference/LocalAI, etc.
+
+```bash
+export MGP_LANCEDB_EMBEDDING_PROVIDER=openai
+export MGP_LANCEDB_EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+export MGP_LANCEDB_EMBEDDING_API_KEY=sk-...
+export MGP_LANCEDB_EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5
+```
+
+Verify any relay before pointing the gateway at it:
+
+```bash
+curl -s -X POST $MGP_LANCEDB_EMBEDDING_BASE_URL/embeddings \
+  -H "Authorization: Bearer $MGP_LANCEDB_EMBEDDING_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"<model>","input":"hello"}' | jq '.data[0].embedding | length'
+```
+
+> Azure OpenAI uses a different URL scheme and won't work with this path —
+> wrap it with LiteLLM/OneAPI first, or wait for a dedicated provider.
+
+#### Notes
+
+- **Switching provider/model invalidates existing vectors.** Either
+  `rm -rf $MGP_LANCEDB_DIR` and rewrite, or use `/mgp/export` → `/mgp/import`
+  to recompute on the new model.
+- `mem0` / `zep` ignore all `MGP_LANCEDB_EMBEDDING_*` vars — model and
+  pricing are controlled on the vendor dashboard.
+- `provider=fake` produces deterministic hash vectors. CI only.
+
+### Switching adapters
+
+The nanobot side never needs to know which backend the gateway uses — it only
+needs `gateway_url`. To change backends:
+
+1. **Stop** the running gateway (`pkill mgp-gateway` or Ctrl-C).
+2. **Install** the new adapter's extras / SDK (table above) and **export** the
+   new env vars. Unset the old adapter's vars to avoid surprises.
+3. **Restart** `mgp-gateway`. Existing data does **not** migrate
+   automatically — each adapter has its own storage. Use `/mgp/export` →
+   `/mgp/import` (see `gateway.routes.memory`) if you need to carry data over.
+
+Nanobot itself does not need a restart unless `gateway_url` changes. Verify
+with `curl http://127.0.0.1:8080/healthz` (lightweight) or
+`curl http://127.0.0.1:8080/mgp/capabilities` (also reports
+`adapter_name` so you can confirm the swap took effect).
+
+### Vendor-specific notes for SaaS adapters
+
+**mem0** — sign up at [app.mem0.ai](https://app.mem0.ai) for `MGP_MEM0_API_KEY`.
+The adapter falls back to the env name `MEM0_API_KEY` if `MGP_MEM0_API_KEY`
+is unset, so existing mem0 users can reuse their key. `MGP_MEM0_ENABLE_GRAPH`
+defaults to `true`; turn it off if your mem0 plan does not include the graph
+feature.
+
+**zep** — sign up at [www.getzep.com](https://www.getzep.com) for
+`MGP_ZEP_API_KEY`. The adapter also accepts `ZEP_API_KEY` as a fallback. For
+self-hosted Zep, set `MGP_ZEP_BASE_URL=http://your-zep:8000`. Zep stores
+episodes under a single graph user (`MGP_ZEP_GRAPH_USER_ID`, default
+`mgp-global`); MGP subject isolation is layered **on top** via metadata
+filters, so you typically do not need to change this.
 
 ---
 
@@ -275,29 +380,47 @@ gateway environment variables.
 
 ### By user profile
 
-| Your situation                                          | Should you enable MGP? | Recommended backend       |
-| ------------------------------------------------------- | ---------------------- | ------------------------- |
-| Single-user, single-language, single-channel            | No                     | —                         |
-| Multi-device sync, agent should remember me everywhere  | Yes                    | `postgres`                |
-| One bot serving multiple users (groups, support)        | Yes                    | `postgres` (subject-isolated) |
-| Frequent cross-language / synonym recall                | Yes                    | `lancedb` or `mem0`       |
-| Large history (thousands of entries), `grep` is slow    | Yes                    | `lancedb`                 |
-| Compliance / audit / GDPR-style data governance         | Yes                    | `postgres` + audit log    |
-| Already using mem0 or zep                               | Yes                    | `mem0` / `zep`            |
-| Cannot tolerate >1s first-token latency                 | Avoid SaaS backends    | `postgres` / local `lancedb` |
+| Your situation                                              | Should you enable MGP? | Recommended backend           |
+| ----------------------------------------------------------- | ---------------------- | ----------------------------- |
+| Single-user, single-language, single-channel                | No                     | —                             |
+| Multi-device sync, agent should remember me everywhere      | Yes                    | `postgres`                    |
+| One bot serving multiple users (groups, support)            | Yes                    | `postgres` (subject-isolated) |
+| Frequent cross-language / synonym recall                    | Yes                    | `lancedb` or `mem0`           |
+| Large history (thousands of entries), `grep` is slow        | Yes                    | `lancedb`                     |
+| Compliance / audit / GDPR-style data governance             | Yes                    | `postgres` + audit log        |
+| High-scale CN deployment, already on OceanBase / OB Cloud   | Yes                    | `oceanbase`                   |
+| Already using mem0 or zep                                   | Yes                    | `mem0` / `zep`                |
+| Cannot tolerate >1s first-token latency                     | Avoid SaaS backends    | `postgres` / local `lancedb`  |
+
+For most setups `postgres` is the right default — it gives subject isolation,
+audit log, JSONB GIN search, and ~50–100 ms recall with a single Docker
+container. Switch to `oceanbase` only when you already operate an OB cluster
+or hit Postgres scaling limits; the bring-up cost is materially higher
+(8 GB+ RAM for a minimal `oceanbase-ce` Docker, longer startup, more env
+vars). Switch to `lancedb` when lexical match is not enough (cross-language,
+synonyms) and you can afford an embedding API. Switch to `mem0`/`zep` only
+when you're already invested in those products.
 
 ### Retrieval behavior comparison (same data set)
 
-| Dimension                | nanobot native             | MGP postgres            | MGP lancedb               | MGP mem0    | MGP zep              |
-| ------------------------ | -------------------------- | ----------------------- | ------------------------- | ----------- | -------------------- |
-| Search method            | None (full bulk inject)    | SQL ILIKE / JSONB GIN   | Vector ANN (+ FTS hybrid) | Vector + graph | Vector + episode graph |
-| Ranks by relevance       | No                         | Yes (lexical score)     | Yes (cosine)              | Yes         | Yes                  |
-| Cross-language matching  | Only after Dream normalizes | No                      | Yes                       | Yes         | Yes                  |
-| Synonym recall           | Only after Dream normalizes | No                      | Yes                       | Yes         | Yes                  |
-| Multi-user isolation     | No (single MEMORY.md)      | Yes (subject filter)    | Yes                       | Yes         | Yes                  |
-| Cross-session sharing    | No (per-workspace)         | Yes (within tenant)     | Yes                       | Yes         | Yes                  |
-| Recall latency           | 0 (no recall step)         | ~50–100 ms              | ~50–200 ms                | ~8–15 s     | ~1–2 s               |
-| Curation quality         | Dream LLM (best)           | Raw bullets             | Raw bullets               | Light dedupe | Light dedupe         |
+| Dimension                | nanobot native              | MGP postgres            | MGP oceanbase           | MGP lancedb               | MGP mem0       | MGP zep                |
+| ------------------------ | --------------------------- | ----------------------- | ----------------------- | ------------------------- | -------------- | ---------------------- |
+| Search method            | None (full bulk inject)     | SQL ILIKE / JSONB GIN   | SQL `LOWER(...) LIKE`   | Vector ANN (+ FTS hybrid) | Vector + graph | Vector + episode graph |
+| Ranks by relevance       | No                          | Yes (lexical score)     | Yes (lexical score)     | Yes (cosine)              | Yes            | Yes                    |
+| Cross-language matching  | Only after Dream normalizes | No                      | No                      | Yes                       | Yes            | Yes                    |
+| Synonym recall           | Only after Dream normalizes | No                      | No                      | Yes                       | Yes            | Yes                    |
+| Embedding model needed   | No                          | No                      | No                      | **Yes** (gateway-side)    | No (mem0 handles it) | No (zep handles it) |
+| Multi-user isolation     | No (single MEMORY.md)       | Yes (subject filter)    | Yes (subject filter)    | Yes                       | Yes            | Yes                    |
+| Cross-session sharing    | No (per-workspace)          | Yes (within tenant)     | Yes (within tenant)     | Yes                       | Yes            | Yes                    |
+| Recall latency           | 0 (no recall step)          | ~50–100 ms              | ~50–150 ms              | ~50–200 ms                | ~8–15 s        | ~1–2 s                 |
+| Min infra cost           | 0                           | 1 Postgres container    | OB cluster (8 GB+ RAM)  | Local dir + embedding API | SaaS account   | SaaS account           |
+| Curation quality         | Dream LLM (best)            | Raw bullets             | Raw bullets             | Raw bullets               | Light dedupe   | Light dedupe           |
+
+> **Note on OceanBase**: although `pyobvector` is the SDK used, the current
+> `oceanbase` adapter performs purely lexical search — the vector index is
+> not yet wired through the MGP gateway. Retrieval characteristics are
+> therefore close to `postgres`. Track upstream for vector search support
+> if cross-language / synonym matching is a hard requirement.
 
 ---
 
@@ -356,12 +479,13 @@ When MGP is disabled, `/mgp-status` returns a one-liner pointing here.
 
 ### Latency
 
-| Backend          | Recall round-trip   | Notes                                    |
-| ---------------- | ------------------- | ---------------------------------------- |
-| `postgres` local | ~50–100 ms          | Dominated by SQL plan + JSON parse       |
-| `lancedb` local  | ~50–200 ms          | Vector ANN + (optional) FTS hybrid       |
-| `mem0` SaaS      | ~8–15 s             | Through MGP HTTP → SaaS round-trip       |
-| `zep` SaaS       | ~1–2 s              | Same path; Zep is faster on the wire     |
+| Backend           | Recall round-trip  | Notes                                          |
+| ----------------- | ------------------ | ---------------------------------------------- |
+| `postgres` local  | ~50–100 ms         | Dominated by SQL plan + JSON parse             |
+| `oceanbase` local | ~50–150 ms         | Similar to Postgres + optional vector ANN      |
+| `lancedb` local   | ~50–200 ms         | Vector ANN + (optional) FTS hybrid             |
+| `mem0` SaaS       | ~8–15 s            | Through MGP HTTP → SaaS round-trip             |
+| `zep` SaaS        | ~1–2 s             | Same path; Zep is faster on the wire           |
 
 A recall call adds at most one extra LLM round-trip (the agent decides → tool
 runs → agent reasons again). The agent only pays this cost when it judges
@@ -421,10 +545,15 @@ Check that:
 
 ### Tool exists but every call shows `[recall_memory degraded: ...]`
 
-- Confirm the gateway is running: `curl http://127.0.0.1:8080/mgp/capabilities`
+- Confirm the gateway is running: `curl http://127.0.0.1:8080/healthz`
+  (returns `{"status":"ok",...}`). For more detail including the active
+  adapter name, hit `curl http://127.0.0.1:8080/mgp/capabilities`.
 - Confirm `mgp.gateway_url` matches the gateway's bind address.
 - If the gateway requires auth, set `mgp.api_key` AND
   `MGP_GATEWAY_API_KEY` to the same value, with `MGP_GATEWAY_AUTH_MODE=api_key`.
+- For SaaS adapters, confirm the vendor key is valid:
+  `MGP_MEM0_API_KEY` for mem0, `MGP_ZEP_API_KEY` for zep. The adapter raises
+  `RuntimeError` on startup if the key is missing — check the gateway log.
 
 ### Agent never calls `recall_memory` even when relevant
 
