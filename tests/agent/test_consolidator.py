@@ -4,7 +4,12 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from nanobot.agent.memory import Consolidator, MemoryStore, _RAW_ARCHIVE_MAX_CHARS
+from nanobot.agent.memory import (
+    Consolidator,
+    MemoryStore,
+    _ARCHIVE_SUMMARY_MAX_CHARS,
+    _RAW_ARCHIVE_MAX_CHARS,
+)
 
 
 @pytest.fixture
@@ -144,6 +149,56 @@ class TestConsolidatorTokenBudget:
         assert archived_chunk[0]["content"] == "m0"
         assert session.last_consolidated > 0
 
+    async def test_raw_archive_fallback_advances_last_consolidated(self, consolidator):
+        """When archive() falls back to raw-archive (LLM failed), the cursor
+        must still advance. Otherwise the same chunk gets raw-archived again
+        on every subsequent maybe_consolidate_by_tokens() call, spamming
+        duplicate [RAW] entries into history.jsonl."""
+        consolidator._SAFETY_BUFFER = 0
+        session = MagicMock()
+        session.last_consolidated = 0
+        session.key = "test:key"
+        session.messages = [
+            {"role": "user" if i in {0, 50} else "assistant", "content": f"m{i}"}
+            for i in range(70)
+        ]
+        session.metadata = {}
+        consolidator.estimate_session_prompt_tokens = MagicMock(
+            side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
+        )
+        # LLM consolidation fails — archive() returns None (raw_archive fired).
+        consolidator.archive = AsyncMock(return_value=None)
+
+        await consolidator.maybe_consolidate_by_tokens(session)
+
+        consolidator.archive.assert_awaited_once()
+        # The chunk is considered "materialized" (as a raw-archive breadcrumb),
+        # so last_consolidated must have moved past it.
+        assert session.last_consolidated == 50
+
+    async def test_raw_archive_fallback_breaks_round_loop(self, consolidator):
+        """A degraded LLM should not trigger more archive() calls within the
+        same maybe_consolidate_by_tokens invocation — bail after one fallback."""
+        consolidator._SAFETY_BUFFER = 0
+        session = MagicMock()
+        session.last_consolidated = 0
+        session.key = "test:key"
+        session.messages = [
+            {"role": "user" if i in {0, 20, 40, 60} else "assistant", "content": f"m{i}"}
+            for i in range(70)
+        ]
+        session.metadata = {}
+        # Keep estimates high so the loop would otherwise run multiple rounds.
+        consolidator.estimate_session_prompt_tokens = MagicMock(
+            return_value=(1200, "tiktoken")
+        )
+        consolidator.archive = AsyncMock(return_value=None)
+
+        await consolidator.maybe_consolidate_by_tokens(session)
+
+        # Exactly one fallback per call — not _MAX_CONSOLIDATION_ROUNDS.
+        assert consolidator.archive.await_count == 1
+
     async def test_boundary_respected_when_no_intermediate_user_turn(self, consolidator):
         """When boundary points past a long tool chain, the full chunk is archived."""
         consolidator._SAFETY_BUFFER = 0
@@ -230,6 +285,19 @@ class TestArchiveTruncation:
         # budget = 500 - 100 - 1024 = negative, fallback char-based
         # Should be truncated
         assert len(user_content) < 250_000
+
+    async def test_oversized_summary_is_capped_before_append(self, consolidator, mock_provider, store):
+        """A pathologically large LLM summary must not land full-length in
+        history.jsonl — that would re-open the #3412 bloat vector from the
+        *success* path instead of the fallback path."""
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="S" * (_ARCHIVE_SUMMARY_MAX_CHARS * 10),
+            finish_reason="stop",
+        )
+        await consolidator.archive([{"role": "user", "content": "hi"}])
+
+        entry = store.read_unprocessed_history(since_cursor=0)[0]
+        assert len(entry["content"]) <= _ARCHIVE_SUMMARY_MAX_CHARS + 50
 
     async def test_archive_truncates_via_tiktoken_with_positive_budget(self, consolidator, mock_provider, store):
         """Positive token budget should use tiktoken for precise truncation."""
