@@ -46,7 +46,7 @@ Weak triggers (consider but don't always call):
   - Bad: `"what indentation do I prefer?"`, `"can you tell me my project name?"`
 - `scope`: usually `"user"`. Use `"agent"` only for stable facts about the bot itself.
 - `limit`: defaults to 5; ask for more (up to 20) only when the topic is broad.
-- `types`: optional filter (`preference` / `semantic_fact` / `identity` / `episodic_event`)
+- `types`: optional filter (`preference` / `semantic_fact` / `profile` / `episodic_event`)
 
 Cite recalled facts naturally in your reply; do NOT quote tool output verbatim.
 

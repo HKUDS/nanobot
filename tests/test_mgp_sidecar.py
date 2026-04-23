@@ -273,7 +273,7 @@ class TestCommitDreamTags:
         sent_candidates = [call.args[1] for call in fake_client.write_candidate.await_args_list]
         scopes_types = sorted((c.scope, c.proposed_type) for c in sent_candidates)
         assert scopes_types == [
-            ("agent", "identity"),
+            ("agent", "profile"),
             ("agent", "semantic_fact"),
             ("user", "preference"),
         ]

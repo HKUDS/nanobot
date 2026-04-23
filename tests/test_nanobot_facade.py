@@ -166,3 +166,32 @@ def test_import_from_top_level():
     from nanobot import Nanobot as N, RunResult as R
     assert N is Nanobot
     assert R is RunResult
+
+
+def test_from_config_propagates_mgp_config(tmp_path):
+    """Regression: SDK facade must hand defaults.mgp to AgentLoop, otherwise
+    programmatic users silently lose the MGP sidecar even when the config
+    file enables it. See nanobot/nanobot.py: previous versions omitted
+    ``mgp_config=`` so the agent loop fell back to the default-disabled MGPConfig."""
+    config_path = _write_config(
+        tmp_path,
+        overrides={
+            "agents": {
+                "defaults": {
+                    "model": "openai/gpt-4.1",
+                    "mgp": {
+                        "enabled": True,
+                        "gatewayUrl": "http://gw.test:8080",
+                        "tenantId": "t-sdk",
+                        "actorAgent": "nanobot/sdk-test",
+                    },
+                }
+            },
+        },
+    )
+    bot = Nanobot.from_config(config_path, workspace=tmp_path)
+    sidecar = bot._loop.mgp_sidecar
+    assert sidecar is not None, "SDK facade should build the MGP sidecar when mgp.enabled=true"
+    assert sidecar.config.gateway_url == "http://gw.test:8080"
+    assert sidecar.config.tenant_id == "t-sdk"
+    assert sidecar.config.actor_agent == "nanobot/sdk-test"

@@ -19,10 +19,17 @@ from .models import ParsedFact
 
 
 # Tag → (scope, type) mapping for Dream Phase 1 output.
+#
+# NOTE: ``SOUL`` maps to ``profile`` (not ``identity``) because the MGP
+# spec's ``supported_memory_types`` set is ``profile / preference /
+# episodic_event / semantic_fact / procedural_rule / relationship /
+# checkpoint_pointer / artifact_summary`` — there is no ``identity``
+# type. ``profile`` is the closest semantic match for SOUL.md content
+# (stable agent persona / identity facts).
 DREAM_TAG_TO_MGP: dict[str, tuple[str, str]] = {
     "USER": ("user", "preference"),
     "MEMORY": ("agent", "semantic_fact"),
-    "SOUL": ("agent", "identity"),
+    "SOUL": ("agent", "profile"),
 }
 
 

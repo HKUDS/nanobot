@@ -47,7 +47,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing-only
         maximum=20,
     ),
     types=ArraySchema(
-        items=StringSchema(enum=["preference", "semantic_fact", "identity", "episodic_event"]),
+        items=StringSchema(enum=["preference", "semantic_fact", "profile", "episodic_event"]),
         description="Optional filter by memory types.",
     ),
     required=["query"],

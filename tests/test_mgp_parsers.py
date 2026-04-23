@@ -111,8 +111,10 @@ class TestParseDreamPhase1Tags:
         assert by_type["preference"].statement == "location is Tokyo"
         assert by_type["semantic_fact"].scope == "agent"
         assert by_type["semantic_fact"].statement == "project Atlas uses pgvector"
-        assert by_type["identity"].scope == "agent"
-        assert by_type["identity"].statement.startswith("respond in Chinese")
+        # SOUL maps to "profile" (the closest type in MGP's
+        # supported_memory_types — there is no "identity" type).
+        assert by_type["profile"].scope == "agent"
+        assert by_type["profile"].statement.startswith("respond in Chinese")
 
     def test_file_remove_lines_ignored(self) -> None:
         # FILE-REMOVE may be supported in a future stage; for MVP we ignore.
@@ -154,4 +156,4 @@ class TestParseDreamPhase1Tags:
         # surface in the diff.
         assert DREAM_TAG_TO_MGP["USER"] == ("user", "preference")
         assert DREAM_TAG_TO_MGP["MEMORY"] == ("agent", "semantic_fact")
-        assert DREAM_TAG_TO_MGP["SOUL"] == ("agent", "identity")
+        assert DREAM_TAG_TO_MGP["SOUL"] == ("agent", "profile")

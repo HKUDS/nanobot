@@ -85,6 +85,7 @@ class Nanobot:
             disabled_skills=defaults.disabled_skills,
             session_ttl_minutes=defaults.session_ttl_minutes,
             tools_config=config.tools,
+            mgp_config=defaults.mgp,
         )
         return cls(loop)
 

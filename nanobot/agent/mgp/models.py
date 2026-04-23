@@ -96,7 +96,7 @@ class ParsedFact:
     """
 
     scope: str          # "user" / "agent" / "session"
-    type: str           # "preference" / "semantic_fact" / "identity" / "episodic_event"
+    type: str           # "preference" / "semantic_fact" / "profile" / "episodic_event"
     statement: str
     preference_value: str | None = None
     source_ref: str | None = None
