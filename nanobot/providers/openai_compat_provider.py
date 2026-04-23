@@ -28,7 +28,7 @@ else:
         )
     from openai import AsyncOpenAI
 
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.base import EmbeddingResponse, LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.openai_responses import (
     consume_sdk_stream,
     convert_messages,
@@ -1083,6 +1083,24 @@ class OpenAICompatProvider(LLMProvider):
             )
         except Exception as e:
             return self._handle_error(e, spec=self._spec, api_base=self.api_base)
+
+    async def embed(
+        self,
+        input: str | list[str],
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> EmbeddingResponse:
+        model_name = model or self.default_model
+        if self._spec and self._spec.strip_model_prefix:
+            model_name = model_name.split("/")[-1]
+
+        try:
+            response = await self._client.embeddings.create(input=input, model=model_name)
+            result = LLMProvider._extract_embedding_response(response)
+            return result.copy_with(model=result.model or model_name, dimensions=dimensions)
+        except Exception as e:
+            return self._handle_embedding_error(e, model=model_name)
+
 
     def get_default_model(self) -> str:
         return self.default_model

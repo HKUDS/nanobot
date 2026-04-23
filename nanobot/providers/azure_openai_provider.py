@@ -13,7 +13,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from nanobot.providers.base import LLMProvider, LLMResponse
+from nanobot.providers.base import EmbeddingResponse, LLMProvider, LLMResponse
 from nanobot.providers.openai_responses import (
     consume_sdk_stream,
     convert_messages,
@@ -178,6 +178,20 @@ class AzureOpenAIProvider(LLMProvider):
             )
         except Exception as e:
             return self._handle_error(e)
+
+    async def embed(
+        self,
+        input: str | list[str],
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> EmbeddingResponse:
+        deployment = model or self.default_model
+        try:
+            response = await self._client.embeddings.create(input=input, model=deployment)
+            result = LLMProvider._extract_embedding_response(response)
+            return result.copy_with(model=result.model or deployment, dimensions=dimensions)
+        except Exception as e:
+            return self._handle_embedding_error(e, model=deployment)
 
     def get_default_model(self) -> str:
         return self.default_model

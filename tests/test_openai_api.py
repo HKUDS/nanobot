@@ -17,6 +17,7 @@ from nanobot.api.server import (
     create_app,
     handle_chat_completions,
 )
+from nanobot.providers.base import EmbeddingResponse
 
 try:
     from aiohttp.test_utils import TestClient, TestServer
@@ -131,6 +132,141 @@ async def test_model_mismatch_returns_400() -> None:
     assert resp.status == 400
     body = json.loads(resp.body)
     assert "test-model" in body["error"]["message"]
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_embeddings_endpoint_allows_requested_model_and_truncates_dimensions(aiohttp_client, mock_agent) -> None:
+    class FakeEmbeddingProvider:
+        def __init__(self):
+            self.calls: list[dict[str, object]] = []
+
+        async def embed(self, input, model=None, dimensions=None):
+            self.calls.append({"input": input, "model": model, "dimensions": dimensions})
+            return EmbeddingResponse(
+                embeddings=[[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
+                model=model or "test-model",
+                usage={"prompt_tokens": 2, "total_tokens": 2},
+            )
+
+    provider = FakeEmbeddingProvider()
+    mock_agent.provider = provider
+
+    app = create_app(mock_agent, model_name="test-model")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/embeddings",
+        json={"input": ["alpha", "beta"], "model": "embedding-model", "dimensions": 2},
+    )
+
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["object"] == "list"
+    assert body["model"] == "embedding-model"
+    assert body["data"][0]["embedding"] == [0.1, 0.2]
+    assert body["data"][1]["embedding"] == [0.4, 0.5]
+    assert provider.calls == [{"input": ["alpha", "beta"], "model": "embedding-model", "dimensions": 2}]
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_embeddings_endpoint_requires_model(aiohttp_client, mock_agent) -> None:
+    class FakeEmbeddingProvider:
+        async def embed(self, input, model=None, dimensions=None):
+            raise AssertionError("embed should not be called without a model")
+
+    mock_agent.provider = FakeEmbeddingProvider()
+
+    app = create_app(mock_agent, model_name="test-model")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/embeddings",
+        json={"input": "alpha"},
+    )
+
+    assert resp.status == 400
+    body = await resp.json()
+    assert "model" in body["error"]["message"].lower()
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_embeddings_endpoint_propagates_provider_errors(aiohttp_client, mock_agent) -> None:
+    class FakeEmbeddingProvider:
+        async def embed(self, input, model=None, dimensions=None):
+            return EmbeddingResponse(
+                embeddings=[],
+                model=model or "test-model",
+                content="Error: upstream rejected the embedding request",
+                error_status_code=429,
+                error_type="rate_limit_error",
+                error_retry_after_s=3.0,
+            )
+
+    mock_agent.provider = FakeEmbeddingProvider()
+
+    app = create_app(mock_agent, model_name="test-model")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/embeddings",
+        json={"input": "alpha", "model": "embedding-model"},
+    )
+
+    assert resp.status == 429
+    assert resp.headers.get("Retry-After") == "3"
+    body = await resp.json()
+    assert "upstream rejected" in body["error"]["message"].lower()
+    assert body["error"]["type"] == "rate_limit_error"
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_embeddings_endpoint_rejects_invalid_input_shape(aiohttp_client, mock_agent) -> None:
+    class FakeEmbeddingProvider:
+        async def embed(self, input, model=None, dimensions=None):
+            raise AssertionError("embed should not be called for invalid input")
+
+    mock_agent.provider = FakeEmbeddingProvider()
+
+    app = create_app(mock_agent, model_name="test-model")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/embeddings",
+        json={"input": 123, "model": "embedding-model"},
+    )
+
+    assert resp.status == 400
+    body = await resp.json()
+    assert "string or a list of strings" in body["error"]["message"].lower()
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_embeddings_endpoint_defaults_bare_429_to_rate_limit_error(aiohttp_client, mock_agent) -> None:
+    class FakeEmbeddingProvider:
+        async def embed(self, input, model=None, dimensions=None):
+            return EmbeddingResponse(
+                embeddings=[],
+                model=model or "test-model",
+                content="Error: upstream rejected the embedding request",
+                error_status_code=429,
+                error_retry_after_s=3.0,
+            )
+
+    mock_agent.provider = FakeEmbeddingProvider()
+
+    app = create_app(mock_agent, model_name="test-model")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/embeddings",
+        json={"input": "alpha", "model": "embedding-model"},
+    )
+
+    assert resp.status == 429
+    assert resp.headers.get("Retry-After") == "3"
+    body = await resp.json()
+    assert "upstream rejected" in body["error"]["message"].lower()
+    assert body["error"]["type"] == "rate_limit_error"
 
 
 @pytest.mark.asyncio
