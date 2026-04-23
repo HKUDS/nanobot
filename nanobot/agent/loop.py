@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import inspect
 import json
 import os
 import time
@@ -40,6 +39,12 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.document import extract_documents
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
+from nanobot.utils.progress_events import (
+    build_tool_event_finish_payloads,
+    build_tool_event_start_payload,
+    invoke_on_progress,
+    on_progress_accepts_tool_events,
+)
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
@@ -104,8 +109,8 @@ class _LoopHook(AgentHook):
                 if thought:
                     await self._on_progress(thought)
             tool_hint = self._loop._strip_think(self._loop._tool_hint(context.tool_calls))
-            tool_events = [self._loop._tool_event_start_payload(tc) for tc in context.tool_calls]
-            await self._loop._invoke_on_progress(
+            tool_events = [build_tool_event_start_payload(tc) for tc in context.tool_calls]
+            await invoke_on_progress(
                 self._on_progress,
                 tool_hint,
                 tool_hint=True,
@@ -121,11 +126,11 @@ class _LoopHook(AgentHook):
             self._on_progress
             and context.tool_calls
             and context.tool_events
-            and self._loop._on_progress_accepts_tool_events(self._on_progress)
+            and on_progress_accepts_tool_events(self._on_progress)
         ):
-            tool_events = self._loop._tool_event_finish_payloads(context)
+            tool_events = build_tool_event_finish_payloads(context)
             if tool_events:
-                await self._loop._invoke_on_progress(
+                await invoke_on_progress(
                     self._on_progress,
                     "",
                     tool_hint=False,
@@ -395,81 +400,6 @@ class AgentLoop:
                 pass
         sub_cancelled = await self.subagents.cancel_by_session(key)
         return cancelled + sub_cancelled
-
-    @staticmethod
-    def _on_progress_accepts_tool_events(cb: Callable[..., Any]) -> bool:
-        try:
-            sig = inspect.signature(cb)
-        except (TypeError, ValueError):
-            return False
-        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            return True
-        return "tool_events" in sig.parameters
-
-    @staticmethod
-    async def _invoke_on_progress(
-        on_progress: Callable[..., Awaitable[None]],
-        content: str,
-        *,
-        tool_hint: bool = False,
-        tool_events: list[dict[str, Any]] | None = None,
-    ) -> None:
-        if tool_events and AgentLoop._on_progress_accepts_tool_events(on_progress):
-            await on_progress(content, tool_hint=tool_hint, tool_events=tool_events)
-        else:
-            await on_progress(content, tool_hint=tool_hint)
-
-    @staticmethod
-    def _tool_event_start_payload(tool_call: Any) -> dict[str, Any]:
-        return {
-            "version": 1,
-            "phase": "start",
-            "call_id": str(getattr(tool_call, "id", "") or ""),
-            "name": getattr(tool_call, "name", ""),
-            "arguments": getattr(tool_call, "arguments", {}) or {},
-            "result": None,
-            "error": None,
-            "files": [],
-            "embeds": [],
-        }
-
-    @staticmethod
-    def _tool_event_result_extras(result: Any) -> tuple[list[Any], list[Any]]:
-        if not isinstance(result, dict):
-            return [], []
-        files = result.get("files") if isinstance(result.get("files"), list) else []
-        embeds = result.get("embeds") if isinstance(result.get("embeds"), list) else []
-        return files, embeds
-
-    @classmethod
-    def _tool_event_finish_payloads(cls, context: AgentHookContext) -> list[dict[str, Any]]:
-        payloads: list[dict[str, Any]] = []
-        count = min(len(context.tool_calls), len(context.tool_results), len(context.tool_events))
-        for idx in range(count):
-            tool_call = context.tool_calls[idx]
-            result = context.tool_results[idx]
-            event = context.tool_events[idx] if isinstance(context.tool_events[idx], dict) else {}
-            status = event.get("status")
-            phase = "end" if status == "ok" else "error"
-            files, embeds = cls._tool_event_result_extras(result)
-            payload = {
-                "version": 1,
-                "phase": phase,
-                "call_id": str(getattr(tool_call, "id", "") or ""),
-                "name": getattr(tool_call, "name", ""),
-                "arguments": getattr(tool_call, "arguments", {}) or {},
-                "result": result if phase == "end" else None,
-                "error": None,
-                "files": files,
-                "embeds": embeds,
-            }
-            if phase == "error":
-                if isinstance(result, str) and result.strip():
-                    payload["error"] = result.strip()
-                else:
-                    payload["error"] = str(event.get("detail") or "Tool execution failed")
-            payloads.append(payload)
-        return payloads
 
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
