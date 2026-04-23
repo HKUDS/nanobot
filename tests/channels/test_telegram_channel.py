@@ -1619,6 +1619,41 @@ def test_build_keyboard_respects_inline_keyboards_flag() -> None:
     assert rows[0][0].callback_data == "Yes"
 
 
+def test_safe_callback_data_truncates_at_utf8_boundary() -> None:
+    # Telegram's 64-byte callback_data cap is a hard API limit; silent 400s were the bug.
+    short = "Yes"
+    assert TelegramChannel._safe_callback_data(short) == short
+
+    long_ascii = "a" * 100
+    out = TelegramChannel._safe_callback_data(long_ascii)
+    assert len(out.encode("utf-8")) <= 64
+    assert long_ascii.startswith(out)
+
+    # Multibyte labels must not split a codepoint mid-byte.
+    long_cjk = "同意并继续下一步，我已阅读并同意了服务条款以及隐私政策"
+    assert len(long_cjk.encode("utf-8")) > 64
+    out = TelegramChannel._safe_callback_data(long_cjk)
+    assert len(out.encode("utf-8")) <= 64
+    assert long_cjk.startswith(out)
+    out.encode("utf-8").decode("utf-8")  # must round-trip cleanly
+
+
+def test_build_keyboard_uses_safe_callback_data_for_long_labels() -> None:
+    # Pins the integration so a long-label payload survives ``send_message`` instead of 400ing.
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", inline_keyboards=True),
+        MessageBus(),
+    )
+    long_label = "Approve and continue to the next step with the updated terms of service"
+    assert len(long_label.encode("utf-8")) > 64
+
+    markup = channel._build_keyboard([[long_label]])
+    btn = markup.inline_keyboard[0][0]
+    assert btn.text == long_label  # display preserved
+    assert len(btn.callback_data.encode("utf-8")) <= 64
+    assert long_label.startswith(btn.callback_data)
+
+
 def test_buttons_as_text_format_preserves_rows_and_labels() -> None:
     # Canonical shape: one row per line, labels bracketed. Layout survives the fallback.
     assert TelegramChannel._buttons_as_text([["Yes", "No"], ["Cancel"]]) == "[Yes] [No]\n[Cancel]"

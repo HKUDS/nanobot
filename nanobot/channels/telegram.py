@@ -1205,10 +1205,18 @@ class TelegramChannel(BaseChannel):
         if not buttons or not self.config.inline_keyboards:
             return None
         keyboard = [
-            [InlineKeyboardButton(label, callback_data=label) for label in row]
+            [InlineKeyboardButton(label, callback_data=self._safe_callback_data(label)) for label in row]
             for row in buttons
         ]
         return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def _safe_callback_data(label: str) -> str:
+        # Telegram caps callback_data at 64 bytes UTF-8; truncate at a char boundary so the keyboard still sends.
+        encoded = label.encode("utf-8")
+        if len(encoded) <= 64:
+            return label
+        return encoded[:64].decode("utf-8", errors="ignore")
 
     @staticmethod
     def _buttons_as_text(buttons: list[list[str]]) -> str:
