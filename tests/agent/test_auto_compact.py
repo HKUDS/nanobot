@@ -19,6 +19,8 @@ def _make_loop(
     tmp_path: Path,
     session_ttl_minutes: int = 15,
     session_history_max_messages: int | None = None,
+    session_history_max_tokens: int | None = None,
+    session_file_max_messages: int | None = None,
 ) -> AgentLoop:
     """Create a minimal AgentLoop for testing."""
     bus = MessageBus()
@@ -35,6 +37,8 @@ def _make_loop(
         context_window_tokens=128_000,
         session_ttl_minutes=session_ttl_minutes,
         session_history_max_messages=session_history_max_messages,
+        session_history_max_tokens=session_history_max_tokens,
+        session_file_max_messages=session_file_max_messages,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
     return loop
@@ -82,11 +86,28 @@ class TestSessionTTLConfig:
         defaults = AgentDefaults()
         assert defaults.session_history_max_messages == 120
 
+    def test_default_session_history_token_budget_auto(self):
+        defaults = AgentDefaults()
+        assert defaults.session_history_max_tokens == 0
+
+    def test_default_session_file_cap(self):
+        defaults = AgentDefaults()
+        assert defaults.session_file_max_messages == 2000
+
     def test_serializes_session_history_window(self):
         """Config should expose sessionHistoryMaxMessages in JSON output."""
         defaults = AgentDefaults(session_history_max_messages=64)
         data = defaults.model_dump(mode="json", by_alias=True)
         assert data["sessionHistoryMaxMessages"] == 64
+
+    def test_serializes_history_token_budget_and_file_cap(self):
+        defaults = AgentDefaults(
+            session_history_max_tokens=2048,
+            session_file_max_messages=1024,
+        )
+        data = defaults.model_dump(mode="json", by_alias=True)
+        assert data["sessionHistoryMaxTokens"] == 2048
+        assert data["sessionFileMaxMessages"] == 1024
 
 
 class TestAgentLoopTTLParam:
@@ -107,6 +128,14 @@ class TestAgentLoopTTLParam:
         loop = _make_loop(tmp_path, session_history_max_messages=42)
         assert loop.session_history_max_messages == 42
 
+    def test_loop_stores_history_token_budget(self, tmp_path):
+        loop = _make_loop(tmp_path, session_history_max_tokens=2048)
+        assert loop.session_history_max_tokens == 2048
+
+    def test_loop_stores_session_file_cap(self, tmp_path):
+        loop = _make_loop(tmp_path, session_file_max_messages=512)
+        assert loop.session_file_max_messages == 512
+
     @pytest.mark.asyncio
     async def test_process_message_reads_history_with_configured_cap(self, tmp_path):
         """_process_message should use session_history_max_messages, not unlimited history."""
@@ -124,7 +153,50 @@ class TestAgentLoopTTLParam:
             content="hello",
         )
         await loop._process_message(msg)
-        session.get_history.assert_called_once_with(max_messages=7)
+        session.get_history.assert_called_once()
+        kwargs = session.get_history.call_args.kwargs
+        assert kwargs["max_messages"] == 7
+        assert isinstance(kwargs.get("max_tokens"), int)
+
+    @pytest.mark.asyncio
+    async def test_process_message_reads_history_with_token_budget(self, tmp_path):
+        loop = _make_loop(
+            tmp_path,
+            session_history_max_messages=7,
+            session_history_max_tokens=333,
+        )
+        session = loop.sessions.get_or_create("cli:direct")
+        session.get_history = MagicMock(return_value=[])
+        loop.context.build_messages = MagicMock(return_value=[])
+        loop._run_agent_loop = AsyncMock(return_value=("ok", [], [], "stop", False))
+        loop._save_turn = MagicMock()
+
+        msg = InboundMessage(
+            channel="cli",
+            sender_id="u1",
+            chat_id="direct",
+            content="hello",
+        )
+        await loop._process_message(msg)
+        session.get_history.assert_called_once_with(max_messages=7, max_tokens=333)
+
+    @pytest.mark.asyncio
+    async def test_session_file_cap_archives_and_trims_old_messages(self, tmp_path):
+        loop = _make_loop(tmp_path, session_file_max_messages=6)
+        loop.context.memory.raw_archive = MagicMock()
+
+        for i in range(4):
+            msg = InboundMessage(
+                channel="cli",
+                sender_id="u1",
+                chat_id="direct",
+                content=f"hello {i}",
+            )
+            await loop._process_message(msg)
+
+        session = loop.sessions.get_or_create("cli:direct")
+        assert len(session.messages) <= 6
+        assert loop.context.memory.raw_archive.called
 
 
 class TestAutoCompact:

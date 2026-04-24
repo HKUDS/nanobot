@@ -718,7 +718,9 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
   "agents": {
     "defaults": {
       "idleCompactAfterMinutes": 15,
-      "sessionHistoryMaxMessages": 120
+      "sessionHistoryMaxMessages": 120,
+      "sessionHistoryMaxTokens": 0,
+      "sessionFileMaxMessages": 2000
     }
   }
 }
@@ -728,6 +730,8 @@ When a user is idle for longer than a configured threshold, nanobot **proactivel
 |--------|---------|-------------|
 | `agents.defaults.idleCompactAfterMinutes` | `0` (disabled) | Minutes of idle time before auto-compaction starts. Set to `0` to disable. Recommended: `15` — close to a typical LLM KV cache expiry window, so stale sessions get compacted before the user returns. |
 | `agents.defaults.sessionHistoryMaxMessages` | `120` | Per-turn max number of session messages included in prompt replay. Set to `0` for unlimited history. |
+| `agents.defaults.sessionHistoryMaxTokens` | `0` (auto) | Per-turn token budget for replay history. `0` auto-derives a budget from context window and output reserve; set a positive number to force a fixed token cap. |
+| `agents.defaults.sessionFileMaxMessages` | `2000` | Hard cap for on-disk `sessions/*.jsonl` message count. When exceeded, old prefixes are raw-archived into `memory/history.jsonl` and trimmed from the session file. Set to `0` to disable. |
 
 `sessionTtlMinutes` remains accepted as a legacy alias for backward compatibility, but `idleCompactAfterMinutes` is the preferred config key going forward.
 

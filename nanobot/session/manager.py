@@ -12,6 +12,7 @@ from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
 from nanobot.utils.helpers import (
+    estimate_message_tokens,
     ensure_dir,
     find_legal_message_start,
     image_placeholder_text,
@@ -41,8 +42,17 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
-    def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a legal tool-call boundary."""
+    def get_history(
+        self,
+        max_messages: int = 500,
+        *,
+        max_tokens: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Return unconsolidated messages for LLM input.
+
+        History is sliced by message count first (``max_messages``), then by
+        token budget from the tail (``max_tokens``) when provided.
+        """
         unconsolidated = self.messages[self.last_consolidated:]
         sliced = unconsolidated[-max_messages:]
 
@@ -76,6 +86,29 @@ class Session:
                 if key in message:
                     entry[key] = message[key]
             out.append(entry)
+
+        if max_tokens > 0 and out:
+            kept: list[dict[str, Any]] = []
+            used = 0
+            for message in reversed(out):
+                tokens = estimate_message_tokens(message)
+                if kept and used + tokens > max_tokens:
+                    break
+                kept.append(message)
+                used += tokens
+            kept.reverse()
+
+            # Keep history aligned to the first visible user turn.
+            for i, message in enumerate(kept):
+                if message.get("role") == "user":
+                    kept = kept[i:]
+                    break
+
+            # And keep a legal tool-call boundary at the front.
+            start = find_legal_message_start(kept)
+            if start:
+                kept = kept[start:]
+            out = kept
         return out
 
     def clear(self) -> None:

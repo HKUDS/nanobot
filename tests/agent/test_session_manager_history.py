@@ -269,3 +269,26 @@ def test_get_history_ignores_media_kwarg_on_non_user_rows():
     # List content is passed through verbatim — the synthesizer only
     # rewrites plain-string content.
     assert history[0]["content"] == [{"type": "text", "text": "structured"}]
+
+
+def test_get_history_respects_max_tokens(monkeypatch):
+    session = Session(key="test:token-cap")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"},
+            {"role": "assistant", "content": "a2"},
+            {"role": "user", "content": "u3"},
+            {"role": "assistant", "content": "a3"},
+        ]
+    )
+
+    token_map = {"u1": 50, "a1": 50, "u2": 50, "a2": 50, "u3": 50, "a3": 50}
+    monkeypatch.setattr(
+        "nanobot.session.manager.estimate_message_tokens",
+        lambda message: token_map.get(message.get("content"), 0),
+    )
+
+    history = session.get_history(max_messages=500, max_tokens=120)
+    assert [m["content"] for m in history] == ["u3", "a3"]
