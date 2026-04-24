@@ -77,6 +77,9 @@ msteams = [
     "PyJWT>=2.0,<3.0",
     "cryptography>=41.0",
 ]
+camera = [
+    "opencv-python-headless>=4.8.0",
+]
 
 matrix = [
     "matrix-nio[e2e]>=0.25.2; sys_platform != 'win32'",

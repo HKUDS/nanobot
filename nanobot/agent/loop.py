@@ -20,6 +20,7 @@ from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tools.camera import CameraTool
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -274,6 +275,8 @@ class AgentLoop:
             model=self.model,
         )
         self._register_default_tools()
+        if _tc.camera.enable:
+            self.tools.register(CameraTool(capture_timeout=_tc.camera.timeout))
         if _tc.my.enable:
             self.tools.register(MyTool(loop=self, modify_allowed=_tc.my.allow_set))
         self._runtime_vars: dict[str, Any] = {}
