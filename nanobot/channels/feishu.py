@@ -704,16 +704,23 @@ class FeishuChannel(BaseChannel):
 
         # ── Reject formulas containing unescaped quotes ──────────────────────
         # Build set of formula positions to skip (avoids mutating content mid-iteration)
-        QUOTES = ('"', '"', "'", "'")
+        # Note: Formulas with ^ or * are valid LaTeX but should still be skipped if they have quotes.
+        # The key insight: if someone writes "$x^2" they likely mean LaTeX; but if they write
+        # "$hello "world" test" the quotes indicate text, not a formula.
+        # We only check for quotes to detect text-vs-formula ambiguity.
+        QUOTES = ('"', '"', "'", "'", '“', '”','‘','’','，')
         skip_ranges: set[tuple[int, int]] = set()
         for m in self._INLINE_MATH_RE.finditer(content):
-            if any(p in m.group(1) for p in QUOTES):
+            formula = m.group(1)
+            # Skip if formula contains any quote characters
+            if any(p in formula for p in QUOTES):
                 skip_ranges.add((m.start(), m.end()))
-                logger.debug("[FeishuFormatter] Skipping inline LaTeX render for formula with unescaped quotes: {}", m.group(1)[:50])
+                logger.debug("[FeishuFormatter] Skipping inline LaTeX render for formula with unescaped quotes: {}", formula[:50])
         for m in self._DISPLAY_MATH_RE.finditer(content):
-            if any(p in m.group(1) for p in QUOTES):
+            formula = m.group(1)
+            if any(p in formula for p in QUOTES):
                 skip_ranges.add((m.start(), m.end()))
-                logger.debug("[FeishuFormatter] Skipping display math render for formula with unescaped quotes: {}", m.group(1)[:50])
+                logger.debug("[FeishuFormatter] Skipping display math render for formula with unescaped quotes: {}", formula[:50])
         elements: list[dict] = []
         last_end = 0
 
@@ -816,10 +823,12 @@ class FeishuChannel(BaseChannel):
         r"(?<!\$)\$(?!\$)"                    # Closing $ (not preceded/followed by $)
     )
     # Regex to check if text contains LaTeX indicators (Greek letters, \sum, \prod, brackets)
+    # Also: ^ and * are direct math symbols indicating a real formula
     _LATEX_INDICATOR_RE = re.compile(
         r'\\[a-zA-Z]+|'                        # LaTeX commands like \alpha, \sum, \frac
         r'[α-ωΑ-Ω]|'                           # Greek letters (Unicode)
-        r'[()[]{}\\]'                           # Brackets
+        r'[()[]{}\\]|'                         # Brackets
+        r'[\^*]'                               # Superscript and multiplication symbols
     )
 
     # Markdown formatting patterns that should be stripped from plain-text
@@ -1492,7 +1501,12 @@ class FeishuChannel(BaseChannel):
             return None
 
     def _stream_update_text_sync(self, card_id: str, content: str, sequence: int) -> bool:
-        """Stream-update the markdown element on a CardKit card (typewriter effect)."""
+        """Stream-update the markdown element on a CardKit card (typewriter effect).
+
+        NOTE: This method only updates the markdown element. For LaTeX rendering,
+        the content is sent as-is (CardKit streaming cards don't support image elements).
+        LaTeX is properly rendered in the final flush via _build_card_elements.
+        """
         from lark_oapi.api.cardkit.v1 import (
             ContentCardElementRequest,
             ContentCardElementRequestBody,
@@ -1594,6 +1608,15 @@ class FeishuChannel(BaseChannel):
                 buf.latex_buf = ""
             if not buf or not buf.text:
                 return
+
+            # Apply LaTeX rendering to final content before sending
+            final_content = buf.text
+            if getattr(self.config, 'latex_rendering', False):
+                formatter = _FeishuFormatter(self.config)
+                elements = formatter._math_to_img_elements(buf.text)
+                if elements and len(elements) == 1 and elements[0].get('tag') == 'markdown':
+                    final_content = elements[0]['content']
+
             # Try to finalize via streaming card; if that fails (e.g.
             # streaming mode was closed by Feishu due to timeout), fall
             # back to sending a regular interactive card.
@@ -1603,7 +1626,7 @@ class FeishuChannel(BaseChannel):
                     None,
                     self._stream_update_text_sync,
                     buf.card_id,
-                    buf.text,
+                    final_content,   # rendered content
                     buf.sequence,
                 )
                 if ok:
@@ -1620,7 +1643,7 @@ class FeishuChannel(BaseChannel):
                     buf.card_id,
                 )
             for chunk in self._split_elements_by_table_limit(
-                self._build_card_elements(buf.text)
+                self._build_card_elements(final_content)
             ):
                 card = json.dumps(
                     {"config": {"wide_screen_mode": True}, "elements": chunk},
