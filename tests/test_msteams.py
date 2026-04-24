@@ -371,7 +371,7 @@ async def test_get_access_token_uses_configured_tenant(make_channel):
 
 
 @pytest.mark.asyncio
-async def test_send_replies_to_activity_when_reply_in_thread_enabled(make_channel):
+async def test_send_posts_to_conversation_with_reply_to_id_when_reply_in_thread_enabled(make_channel):
     ch = make_channel(replyInThread=True)
     fake_http = FakeHttpClient()
     ch._http = fake_http
@@ -387,7 +387,7 @@ async def test_send_replies_to_activity_when_reply_in_thread_enabled(make_channe
 
     assert len(fake_http.calls) == 1
     url, kwargs = fake_http.calls[0]
-    assert url == "https://smba.trafficmanager.net/amer/v3/conversations/conv-123/activities/activity-1"
+    assert url == "https://smba.trafficmanager.net/amer/v3/conversations/conv-123/activities"
     assert kwargs["headers"]["Authorization"] == "Bearer tok"
     assert kwargs["json"]["text"] == "Reply text"
     assert kwargs["json"]["replyToId"] == "activity-1"
