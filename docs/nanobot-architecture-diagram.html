@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>nanobot 架构图</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: "JetBrains Mono", monospace;
+        background: #020617;
+        color: #e2e8f0;
+        background-image:
+          radial-gradient(circle at 20% 20%, rgba(34, 211, 238, 0.06), transparent 35%),
+          radial-gradient(circle at 80% 10%, rgba(167, 139, 250, 0.05), transparent 30%),
+          radial-gradient(circle at 50% 90%, rgba(52, 211, 153, 0.05), transparent 35%);
+      }
+      .container {
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 28px 24px 20px;
+      }
+      .header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      .pulse-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: #22d3ee;
+        box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.8);
+        animation: pulse 1.8s infinite;
+      }
+      @keyframes pulse {
+        0% {
+          box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.8);
+        }
+        70% {
+          box-shadow: 0 0 0 12px rgba(34, 211, 238, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(34, 211, 238, 0);
+        }
+      }
+      h1 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 700;
+        color: #f8fafc;
+      }
+      .subtitle {
+        margin: 0 0 14px 0;
+        color: #94a3b8;
+        font-size: 12px;
+      }
+      .diagram-wrap {
+        border: 1px solid #1e293b;
+        border-radius: 14px;
+        padding: 14px;
+        background: rgba(15, 23, 42, 0.45);
+      }
+      svg {
+        width: 100%;
+        height: auto;
+        display: block;
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+      .card {
+        border: 1px solid #1e293b;
+        border-radius: 10px;
+        padding: 12px;
+        background: rgba(15, 23, 42, 0.55);
+      }
+      .card-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .card-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+      }
+      .dot-cyan {
+        background: #22d3ee;
+      }
+      .dot-emerald {
+        background: #34d399;
+      }
+      .dot-violet {
+        background: #a78bfa;
+      }
+      .card h3 {
+        margin: 0;
+        font-size: 12px;
+        color: #f8fafc;
+      }
+      .card ul {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        font-size: 10px;
+        line-height: 1.6;
+        color: #cbd5e1;
+      }
+      .footer {
+        margin-top: 12px;
+        font-size: 10px;
+        color: #64748b;
+      }
+      @media (max-width: 980px) {
+        .cards {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div class="pulse-dot"></div>
+        <h1>nanobot Architecture Diagram</h1>
+      </div>
+      <p class="subtitle">Unified agent runtime across CLI, API, WebSocket/WebUI, and multi-channel connectors</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 1200 860" xmlns="http://www.w3.org/2000/svg" aria-label="nanobot architecture diagram">
+          <defs>
+            <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5" />
+            </pattern>
+            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#64748b" />
+            </marker>
+            <marker id="arrowhead-sec" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+              <polygon points="0 0, 10 3.5, 0 7" fill="#fb7185" />
+            </marker>
+          </defs>
+
+          <rect x="0" y="0" width="1200" height="860" fill="#020617" />
+          <rect x="0" y="0" width="1200" height="860" fill="url(#grid)" opacity="0.28" />
+
+          <g stroke-linecap="round" fill="none">
+            <path d="M330 180 L420 265" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrowhead)" />
+            <path d="M330 280 L420 160" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrowhead)" />
+            <path d="M330 380 L420 400" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrowhead)" />
+            <path d="M330 480 L610 160" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrowhead)" />
+
+            <path d="M505 190 L505 320" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrowhead)" />
+            <path d="M695 190 L695 320" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrowhead)" />
+            <path d="M600 300 L600 320" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrowhead)" />
+            <path d="M560 340 L560 360" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrowhead)" />
+
+            <path d="M520 440 L500 490" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrowhead)" />
+            <path d="M680 440 L690 490" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrowhead)" />
+            <path d="M500 520 L860 190" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)" />
+            <path d="M690 520 L860 300" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)" />
+            <path d="M500 620 L860 410" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowhead)" />
+
+            <path
+              d="M690 590 L690 450"
+              stroke="#fb7185"
+              stroke-width="1.5"
+              stroke-dasharray="5,4"
+              marker-end="url(#arrowhead-sec)"
+            />
+            <path
+              d="M780 265 L860 190"
+              stroke="#fb7185"
+              stroke-width="1.5"
+              stroke-dasharray="5,4"
+              marker-end="url(#arrowhead-sec)"
+            />
+          </g>
+
+          <rect x="40" y="40" width="1120" height="640" rx="12" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="8,4" />
+          <text x="60" y="66" fill="#fbbf24" font-size="10" font-weight="600">Nanobot Runtime Boundary</text>
+
+          <rect x="70" y="100" width="280" height="540" rx="10" fill="none" stroke="#fb7185" stroke-width="1.2" stroke-dasharray="4,4" />
+          <text x="88" y="122" fill="#fb7185" font-size="9" font-weight="600">Entry Surface / User Channels</text>
+
+          <rect x="390" y="100" width="420" height="540" rx="10" fill="none" stroke="#34d399" stroke-width="1.2" stroke-dasharray="4,4" />
+          <text x="408" y="122" fill="#34d399" font-size="9" font-weight="600">Core Agent Runtime</text>
+
+          <rect x="840" y="100" width="280" height="540" rx="10" fill="none" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="4,4" />
+          <text x="858" y="122" fill="#94a3b8" font-size="9" font-weight="600">External Integrations</text>
+
+          <g>
+            <rect x="90" y="150" width="240" height="60" rx="6" fill="#0f172a" />
+            <rect x="90" y="150" width="240" height="60" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5" />
+            <text x="210" y="173" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">WebUI (React + Vite)</text>
+            <text x="210" y="190" fill="#94a3b8" font-size="9" text-anchor="middle">NanobotClient + WS Multiplexing</text>
+          </g>
+
+          <g>
+            <rect x="90" y="250" width="240" height="60" rx="6" fill="#0f172a" />
+            <rect x="90" y="250" width="240" height="60" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5" />
+            <text x="210" y="273" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">Chat Platforms</text>
+            <text x="210" y="290" fill="#94a3b8" font-size="9" text-anchor="middle">Telegram / Feishu / Slack / WeChat ...</text>
+          </g>
+
+          <g>
+            <rect x="90" y="350" width="240" height="60" rx="6" fill="#0f172a" />
+            <rect x="90" y="350" width="240" height="60" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5" />
+            <text x="210" y="373" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">CLI / SDK Entrypoint</text>
+            <text x="210" y="390" fill="#94a3b8" font-size="9" text-anchor="middle">nanobot agent / Nanobot.from_config()</text>
+          </g>
+
+          <g>
+            <rect x="90" y="450" width="240" height="60" rx="6" fill="#0f172a" />
+            <rect x="90" y="450" width="240" height="60" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5" />
+            <text x="210" y="473" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">OpenAI-Compatible Clients</text>
+            <text x="210" y="490" fill="#94a3b8" font-size="9" text-anchor="middle">POST /v1/chat/completions</text>
+          </g>
+
+          <g>
+            <rect x="420" y="130" width="170" height="60" rx="6" fill="#0f172a" />
+            <rect x="420" y="130" width="170" height="60" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5" />
+            <text x="505" y="153" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">Gateway + Channels</text>
+            <text x="505" y="170" fill="#94a3b8" font-size="9" text-anchor="middle">ChannelManager / BaseChannel</text>
+          </g>
+
+          <g>
+            <rect x="610" y="130" width="170" height="60" rx="6" fill="#0f172a" />
+            <rect x="610" y="130" width="170" height="60" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5" />
+            <text x="695" y="153" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">API Server</text>
+            <text x="695" y="170" fill="#94a3b8" font-size="9" text-anchor="middle">aiohttp + SSE / multipart</text>
+          </g>
+
+          <g>
+            <rect x="420" y="230" width="360" height="70" rx="6" fill="#0f172a" />
+            <rect x="420" y="230" width="360" height="70" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5" />
+            <text x="600" y="255" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">WebSocketChannel</text>
+            <text x="600" y="273" fill="#94a3b8" font-size="9" text-anchor="middle">ws stream + /webui/bootstrap + /api/sessions + media signing</text>
+          </g>
+
+          <g>
+            <rect x="430" y="320" width="340" height="20" rx="4" fill="#0f172a" />
+            <rect x="430" y="320" width="340" height="20" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1" />
+            <text x="600" y="334" fill="#fb923c" font-size="7" text-anchor="middle">MessageBus (Inbound / Outbound Queues)</text>
+          </g>
+
+          <g>
+            <rect x="420" y="360" width="360" height="80" rx="6" fill="#0f172a" />
+            <rect x="420" y="360" width="360" height="80" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5" />
+            <text x="600" y="386" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">AgentLoop</text>
+            <text x="600" y="404" fill="#94a3b8" font-size="9" text-anchor="middle">session routing / command dispatch / checkpoint & recovery</text>
+            <text x="600" y="420" fill="#94a3b8" font-size="9" text-anchor="middle">process_direct + run task orchestration</text>
+          </g>
+
+          <g>
+            <rect x="420" y="490" width="170" height="60" rx="6" fill="#0f172a" />
+            <rect x="420" y="490" width="170" height="60" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5" />
+            <text x="505" y="513" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">AgentRunner</text>
+            <text x="505" y="530" fill="#94a3b8" font-size="9" text-anchor="middle">LLM loop + tool-call lifecycle</text>
+          </g>
+
+          <g>
+            <rect x="610" y="490" width="170" height="60" rx="6" fill="#0f172a" />
+            <rect x="610" y="490" width="170" height="60" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5" />
+            <text x="695" y="513" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">ToolRegistry + Tools</text>
+            <text x="695" y="530" fill="#94a3b8" font-size="9" text-anchor="middle">filesystem / exec / web / mcp / spawn</text>
+          </g>
+
+          <g>
+            <rect x="420" y="590" width="170" height="60" rx="6" fill="#0f172a" />
+            <rect x="420" y="590" width="170" height="60" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5" />
+            <text x="505" y="613" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">SessionManager</text>
+            <text x="505" y="630" fill="#94a3b8" font-size="9" text-anchor="middle">JSONL history + atomic persistence</text>
+          </g>
+
+          <g>
+            <rect x="610" y="590" width="170" height="60" rx="6" fill="#0f172a" />
+            <rect x="610" y="590" width="170" height="60" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5" />
+            <text x="695" y="613" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">Memory / Cron / Heartbeat</text>
+            <text x="695" y="630" fill="#94a3b8" font-size="9" text-anchor="middle">Dream jobs + periodic automation</text>
+          </g>
+
+          <g>
+            <rect x="860" y="150" width="240" height="80" rx="6" fill="#0f172a" />
+            <rect x="860" y="150" width="240" height="80" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5" />
+            <text x="980" y="176" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">LLM Providers</text>
+            <text x="980" y="194" fill="#94a3b8" font-size="9" text-anchor="middle">OpenAI / Anthropic / OpenRouter / Azure</text>
+            <text x="980" y="210" fill="#94a3b8" font-size="9" text-anchor="middle">provider registry + routing policy</text>
+          </g>
+
+          <g>
+            <rect x="860" y="270" width="240" height="60" rx="6" fill="#0f172a" />
+            <rect x="860" y="270" width="240" height="60" rx="6" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5" />
+            <text x="980" y="293" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">MCP Servers</text>
+            <text x="980" y="310" fill="#94a3b8" font-size="9" text-anchor="middle">stdio / sse / streamableHttp tools</text>
+          </g>
+
+          <g>
+            <rect x="860" y="370" width="240" height="80" rx="6" fill="#0f172a" />
+            <rect x="860" y="370" width="240" height="80" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5" />
+            <text x="980" y="396" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">Workspace State</text>
+            <text x="980" y="414" fill="#94a3b8" font-size="9" text-anchor="middle">files / memory / sessions / cron jobs</text>
+            <text x="980" y="430" fill="#94a3b8" font-size="9" text-anchor="middle">tool read/write boundaries</text>
+          </g>
+
+          <g>
+            <rect x="860" y="490" width="240" height="60" rx="6" fill="#0f172a" />
+            <rect x="860" y="490" width="240" height="60" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5" />
+            <text x="980" y="513" fill="#ffffff" font-size="12" font-weight="600" text-anchor="middle">Bridge Runtime (Node)</text>
+            <text x="980" y="530" fill="#94a3b8" font-size="9" text-anchor="middle">WhatsApp bridge + channel plugins</text>
+          </g>
+
+          <g>
+            <rect x="60" y="710" width="1080" height="120" rx="10" fill="#0b1220" stroke="#334155" stroke-width="1" />
+            <text x="80" y="734" fill="#e2e8f0" font-size="10" font-weight="600">Legend</text>
+
+            <rect x="80" y="748" width="132" height="18" rx="4" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1" />
+            <text x="146" y="760" fill="#cbd5e1" font-size="7" text-anchor="middle">Frontend</text>
+
+            <rect x="224" y="748" width="132" height="18" rx="4" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1" />
+            <text x="290" y="760" fill="#cbd5e1" font-size="7" text-anchor="middle">Backend</text>
+
+            <rect x="368" y="748" width="132" height="18" rx="4" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1" />
+            <text x="434" y="760" fill="#cbd5e1" font-size="7" text-anchor="middle">Database / State</text>
+
+            <rect x="512" y="748" width="132" height="18" rx="4" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1" />
+            <text x="578" y="760" fill="#cbd5e1" font-size="7" text-anchor="middle">Cloud / Providers</text>
+
+            <rect x="656" y="748" width="132" height="18" rx="4" fill="rgba(251, 146, 60, 0.3)" stroke="#fb923c" stroke-width="1" />
+            <text x="722" y="760" fill="#cbd5e1" font-size="7" text-anchor="middle">Message Bus</text>
+
+            <rect x="800" y="748" width="132" height="18" rx="4" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1" />
+            <text x="866" y="760" fill="#cbd5e1" font-size="7" text-anchor="middle">External / Generic</text>
+
+            <line x1="90" y1="790" x2="200" y2="790" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrowhead)" />
+            <text x="206" y="793" fill="#94a3b8" font-size="7">Data / control flow</text>
+
+            <line x1="360" y1="790" x2="470" y2="790" stroke="#fb7185" stroke-width="1.6" stroke-dasharray="5,4" marker-end="url(#arrowhead-sec)" />
+            <text x="476" y="793" fill="#94a3b8" font-size="7">Auth / policy / security-sensitive flow</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-dot dot-cyan"></div>
+            <h3>Entry Modes</h3>
+          </div>
+          <ul>
+            <li>• CLI (`nanobot agent`) and Python SDK</li>
+            <li>• OpenAI-compatible HTTP API (`serve`)</li>
+            <li>• WebSocket/WebUI and multi-chat channels (`gateway`)</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-dot dot-emerald"></div>
+            <h3>Core Runtime</h3>
+          </div>
+          <ul>
+            <li>• `AgentLoop` orchestrates sessions and dispatch</li>
+            <li>• `AgentRunner` executes model/tool iterative loop</li>
+            <li>• Tool layer supports filesystem, exec, web, MCP, spawn</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-dot dot-violet"></div>
+            <h3>State & Automation</h3>
+          </div>
+          <ul>
+            <li>• Session history in JSONL with checkpoint recovery</li>
+            <li>• Memory + Dream consolidation pipeline</li>
+            <li>• Cron and heartbeat drive long-running agent behavior</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="footer">Generated for nanobot repository • standalone HTML/SVG • updated 2026-04-24</div>
+    </div>
+  </body>
+</html>
+
