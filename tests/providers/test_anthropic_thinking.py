@@ -65,7 +65,21 @@ def test_none_does_not_enable_thinking() -> None:
     assert kw["temperature"] == 0.7
 
 
-def test_opus_4_7_omits_temperature() -> None:
+def test_opus_4_7_omits_temperature_adaptive() -> None:
     kw = _build(_make_provider("claude-opus-4-7"), "adaptive")
     assert "temperature" not in kw
     assert kw["thinking"] == {"type": "adaptive"}
+
+
+def test_opus_4_7_omits_temperature_enabled() -> None:
+    """Enabled thinking (high) must also omit temperature for opus-4-7."""
+    kw = _build(_make_provider("claude-opus-4-7"), "high", max_tokens=4096)
+    assert "temperature" not in kw
+    assert kw["thinking"]["type"] == "enabled"
+
+
+def test_opus_4_7_omits_temperature_none() -> None:
+    """Without thinking, opus-4-7 must still omit temperature (API rejects it)."""
+    kw = _build(_make_provider("claude-opus-4-7"), None)
+    assert "temperature" not in kw
+    assert "thinking" not in kw
