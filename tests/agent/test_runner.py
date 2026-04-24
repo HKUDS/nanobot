@@ -541,6 +541,89 @@ async def test_runner_uses_specific_message_after_empty_finalization_retry():
 
 
 @pytest.mark.asyncio
+async def test_runner_falls_back_to_short_tool_result_when_model_never_finalizes():
+    """Short action-style tool results are better than the generic empty placeholder."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, tools=None, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content=None,
+                tool_calls=[ToolCallRequest(
+                    id="cron_1",
+                    name="cron",
+                    arguments={"action": "add", "message": "remind me", "every_seconds": 60},
+                )],
+                usage={},
+            )
+        return LLMResponse(content=None, tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="Created job 'remind me' (id: job_1)")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "set a reminder"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=4,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "Created job 'remind me' (id: job_1)"
+    assert result.stop_reason == "tool_result_fallback"
+    assert result.messages[-1]["role"] == "assistant"
+    assert result.messages[-1]["content"] == "Created job 'remind me' (id: job_1)"
+
+
+@pytest.mark.asyncio
+async def test_runner_does_not_fallback_to_noisy_read_tool_output():
+    """Verbose retrieval tools should keep the existing placeholder fallback."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(**kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content=None,
+                tool_calls=[ToolCallRequest(
+                    id="read_1",
+                    name="read_file",
+                    arguments={"path": "notes.txt"},
+                )],
+                usage={},
+            )
+        return LLMResponse(content=None, tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="small but raw file contents")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "read notes"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=4,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == EMPTY_FINAL_RESPONSE_MESSAGE
+    assert result.stop_reason == "empty_final_response"
+
+
+@pytest.mark.asyncio
 async def test_runner_empty_response_does_not_break_tool_chain():
     """An empty intermediate response must not kill an ongoing tool chain.
 

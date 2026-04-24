@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 import inspect
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, ToolCallRequest
 from nanobot.utils.helpers import (
@@ -22,6 +21,7 @@ from nanobot.utils.helpers import (
     maybe_persist_tool_result,
     truncate_text,
 )
+from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     build_finalization_retry_message,
@@ -45,6 +45,8 @@ _COMPACTABLE_TOOLS = frozenset({
     "web_search", "web_fetch", "list_dir",
 })
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
+_MAX_TOOL_RESULT_FALLBACK_CHARS = 280
+_MAX_TOOL_RESULT_FALLBACK_LINES = 4
 
 
 
@@ -95,6 +97,50 @@ class AgentRunner:
 
     def __init__(self, provider: LLMProvider):
         self.provider = provider
+
+    @staticmethod
+    def _tool_result_fallback_content(messages: list[dict[str, Any]]) -> str | None:
+        """Use short action-style tool results when the model never finalizes."""
+        trailing_tools: list[dict[str, Any]] = []
+        idx = len(messages) - 1
+        while idx >= 0 and messages[idx].get("role") == "tool":
+            trailing_tools.append(messages[idx])
+            idx -= 1
+        if not trailing_tools:
+            return None
+        if idx < 0:
+            return None
+        assistant = messages[idx]
+        if assistant.get("role") != "assistant" or not assistant.get("tool_calls"):
+            return None
+
+        trailing_tools.reverse()
+        rendered: list[tuple[str, str]] = []
+        for message in trailing_tools:
+            tool_name = str(message.get("name") or "").strip()
+            content = message.get("content")
+            if (
+                not tool_name
+                or tool_name in _COMPACTABLE_TOOLS
+                or tool_name == "spawn"
+                or not isinstance(content, str)
+            ):
+                return None
+            content = content.strip()
+            if (
+                not content
+                or content.startswith("Error:")
+                or len(content) > _MAX_TOOL_RESULT_FALLBACK_CHARS
+                or content.count("\n") > _MAX_TOOL_RESULT_FALLBACK_LINES
+            ):
+                return None
+            rendered.append((tool_name, content))
+
+        if len(rendered) == 1:
+            return rendered[0][1]
+        return "Completed tool steps:\n" + "\n".join(
+            f"- {tool_name}: {content}" for tool_name, content in rendered
+        )
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -467,6 +513,39 @@ class AgentRunner:
                     continue
                 break
             if is_blank_text(clean):
+                fallback_content = self._tool_result_fallback_content(messages)
+                if fallback_content is not None:
+                    final_content = fallback_content
+                    stop_reason = "tool_result_fallback"
+                    assistant_message = build_assistant_message(final_content)
+                    should_continue, injection_cycles = await self._try_drain_injections(
+                        spec, messages, assistant_message, injection_cycles,
+                        phase="after tool-result fallback",
+                        iteration=iteration,
+                    )
+                    if should_continue:
+                        had_injections = True
+                        context.final_content = final_content
+                        context.stop_reason = stop_reason
+                        await hook.after_iteration(context)
+                        continue
+                    messages.append(assistant_message)
+                    await self._emit_checkpoint(
+                        spec,
+                        {
+                            "phase": "final_response",
+                            "iteration": iteration,
+                            "model": spec.model,
+                            "assistant_message": assistant_message,
+                            "completed_tool_results": [],
+                            "pending_tool_calls": [],
+                        },
+                    )
+                    context.final_content = final_content
+                    context.stop_reason = stop_reason
+                    await hook.after_iteration(context)
+                    break
+
                 final_content = EMPTY_FINAL_RESPONSE_MESSAGE
                 stop_reason = "empty_final_response"
                 error = final_content
@@ -653,7 +732,7 @@ class AgentRunner:
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None]:
-        _HINT = "\n\n[Analyze the error above and try a different approach.]"
+        _hint = "\n\n[Analyze the error above and try a different approach.]"
         lookup_error = repeated_external_lookup_error(
             tool_call.name,
             tool_call.arguments,
@@ -666,8 +745,8 @@ class AgentRunner:
                 "detail": "repeated external lookup blocked",
             }
             if spec.fail_on_tool_error:
-                return lookup_error + _HINT, event, RuntimeError(lookup_error)
-            return lookup_error + _HINT, event, None
+                return lookup_error + _hint, event, RuntimeError(lookup_error)
+            return lookup_error + _hint, event, None
         prepare_call = getattr(spec.tools, "prepare_call", None)
         tool, params, prep_error = None, tool_call.arguments, None
         if callable(prepare_call):
@@ -683,7 +762,7 @@ class AgentRunner:
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
-            return prep_error + _HINT, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
+            return prep_error + _hint, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -708,8 +787,8 @@ class AgentRunner:
                 "detail": result.replace("\n", " ").strip()[:120],
             }
             if spec.fail_on_tool_error:
-                return result + _HINT, event, RuntimeError(result)
-            return result + _HINT, event, None
+                return result + _hint, event, RuntimeError(result)
+            return result + _hint, event, None
 
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()
@@ -984,4 +1063,3 @@ class AgentRunner:
         if current:
             batches.append(current)
         return batches
-
