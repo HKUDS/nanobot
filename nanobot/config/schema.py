@@ -90,6 +90,10 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
+    session_history_max_messages: int = Field(
+        default=120,
+        ge=0,
+    )  # Per-turn session history window for prompt replay (0 = unlimited)
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
 
