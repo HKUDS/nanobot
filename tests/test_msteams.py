@@ -1,4 +1,5 @@
 import json
+import time
 
 import pytest
 
@@ -549,6 +550,38 @@ async def test_start_logs_install_hint_when_pyjwt_missing(make_channel, monkeypa
     await ch.start()
 
     assert errors == ["PyJWT not installed. Run: pip install nanobot-ai[msteams]"]
+
+
+def test_save_refs_prunes_webchat_and_stale_refs(make_channel):
+    ch = make_channel()
+    now = time.time()
+    ch._conversation_refs = {
+        "teams-good": ConversationRef(
+            service_url="https://smba.trafficmanager.net/amer/",
+            conversation_id="teams-good",
+            conversation_type="personal",
+            updated_at=now,
+        ),
+        "webchat-bad": ConversationRef(
+            service_url="https://webchat.botframework.com/",
+            conversation_id="webchat-bad",
+            conversation_type=None,
+            updated_at=now,
+        ),
+        "teams-stale": ConversationRef(
+            service_url="https://smba.trafficmanager.net/amer/",
+            conversation_id="teams-stale",
+            conversation_type="personal",
+            updated_at=now - (31 * 24 * 60 * 60),
+        ),
+    }
+
+    ch._save_refs()
+
+    assert set(ch._conversation_refs) == {"teams-good"}
+    saved = json.loads(ch._refs_path.read_text(encoding="utf-8"))
+    assert set(saved) == {"teams-good"}
+    assert saved["teams-good"]["updated_at"] == pytest.approx(now)
 
 
 def test_msteams_default_config_includes_restart_notify_fields():
