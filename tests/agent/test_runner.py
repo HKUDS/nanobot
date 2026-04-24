@@ -1743,18 +1743,6 @@ def test_governance_repairs_orphans_after_snip():
     _drop_orphan_tool_results pass must clean up the resulting orphans."""
     from nanobot.agent.runner import AgentRunner
 
-    messages = [
-        {"role": "system", "content": "system"},
-        {"role": "user", "content": "old msg"},
-        {"role": "assistant", "content": None,
-         "tool_calls": [{"id": "tc_old", "type": "function",
-                         "function": {"name": "search", "arguments": "{}"}}]},
-        {"role": "tool", "tool_call_id": "tc_old", "name": "search",
-         "content": "old result"},
-        {"role": "assistant", "content": "old answer"},
-        {"role": "user", "content": "new msg"},
-    ]
-
     # Simulate snipping that keeps only the tail: drop the assistant with
     # tool_calls but keep its tool result (orphan).
     snipped = [
@@ -1790,6 +1778,75 @@ def test_governance_fallback_still_repairs_orphans():
     repaired = AgentRunner._backfill_missing_tool_results(repaired)
     # Orphan tool result should be gone.
     assert not any(m.get("tool_call_id") == "orphan_tc" for m in repaired)
+
+
+@pytest.mark.asyncio
+async def test_runner_warns_once_when_context_is_trimmed(monkeypatch):
+    """When history is compacted/snipped to fit budget, emit one visible warning."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner, _CONTEXT_TRIM_WARNING
+
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="done", tool_calls=[], usage={}))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    progress = AsyncMock()
+
+    monkeypatch.setattr("nanobot.agent.runner.estimate_prompt_tokens_chain", lambda *args, **kwargs: (1000, "test"))
+    monkeypatch.setattr("nanobot.agent.runner.estimate_message_tokens", lambda _message: 60)
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "older user"},
+            {"role": "assistant", "content": "older assistant"},
+            {"role": "user", "content": "newer user"},
+            {"role": "assistant", "content": "newer assistant"},
+            {"role": "user", "content": "latest user"},
+        ],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=4000,
+        context_block_limit=180,
+        progress_callback=progress,
+    ))
+
+    assert result.final_content == "done"
+    progress.assert_awaited_once_with(_CONTEXT_TRIM_WARNING)
+
+
+@pytest.mark.asyncio
+async def test_runner_does_not_warn_when_context_fits(monkeypatch):
+    """No warning should be emitted when governance leaves history unchanged."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="done", tool_calls=[], usage={}))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    progress = AsyncMock()
+
+    monkeypatch.setattr("nanobot.agent.runner.estimate_prompt_tokens_chain", lambda *args, **kwargs: (80, "test"))
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "hello"},
+        ],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        context_window_tokens=4000,
+        context_block_limit=180,
+        progress_callback=progress,
+    ))
+
+    assert result.final_content == "done"
+    progress.assert_not_awaited()
 # ── Mid-turn injection tests ──────────────────────────────────────────────
 
 
