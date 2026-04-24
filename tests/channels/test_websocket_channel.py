@@ -191,6 +191,39 @@ async def test_send_delivers_json_message_with_media_and_reply() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_stages_external_media_as_signed_url(monkeypatch, tmp_path) -> None:
+    bus = MagicMock()
+    media_root = tmp_path / "media"
+    ws_media = media_root / "websocket"
+    ws_media.mkdir(parents=True)
+    external = tmp_path / "clip.mp4"
+    external.write_bytes(b"video")
+
+    def fake_media_dir(channel: str | None = None):
+        return ws_media if channel == "websocket" else media_root
+
+    monkeypatch.setattr("nanobot.channels.websocket.get_media_dir", fake_media_dir)
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="chat-1",
+            content="video",
+            media=[str(external)],
+        )
+    )
+
+    payload = json.loads(mock_ws.send.call_args[0][0])
+    assert payload["media"] == [str(external)]
+    assert payload["media_urls"][0]["name"] == "clip.mp4"
+    assert payload["media_urls"][0]["url"].startswith("/api/media/")
+    assert any(p.name.endswith("-clip.mp4") for p in ws_media.iterdir())
+
+
+@pytest.mark.asyncio
 async def test_send_missing_connection_is_noop_without_error() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)

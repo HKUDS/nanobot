@@ -22,6 +22,14 @@ export interface UIImage {
   name?: string;
 }
 
+export type UIMediaKind = "image" | "video" | "file";
+
+export interface UIMediaAttachment {
+  kind: UIMediaKind;
+  url?: string;
+  name?: string;
+}
+
 export interface UIMessage {
   id: string;
   role: Role;
@@ -34,6 +42,8 @@ export interface UIMessage {
   traces?: string[];
   /** User turn: optimistic blob URLs for preview. Replay: placeholder chips. */
   images?: UIImage[];
+  /** Signed or local UI-renderable media attachments. */
+  media?: UIMediaAttachment[];
 }
 
 export interface ChatSummary {
@@ -71,6 +81,7 @@ export type InboundEvent =
       text: string;
       reply_to?: string;
       media?: string[];
+      media_urls?: Array<{ url: string; name?: string }>;
       /** Present when the frame is an agent breadcrumb (e.g. tool hint,
        * generic progress line) rather than a conversational reply. */
       kind?: "tool_hint" | "progress";

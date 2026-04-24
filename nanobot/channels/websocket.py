@@ -13,6 +13,7 @@ import json
 import mimetypes
 import re
 import secrets
+import shutil
 import ssl
 import time
 import uuid
@@ -33,6 +34,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.utils.helpers import safe_filename
 from nanobot.utils.media_decode import (
     FileSizeExceeded,
     save_base64_data_url,
@@ -716,6 +718,33 @@ class WebSocketChannel(BaseChannel):
         ).digest()[:16]
         return f"/api/media/{_b64url_encode(mac)}/{payload}"
 
+    def _sign_or_stage_media_path(self, path: Path) -> dict[str, str] | None:
+        """Return a signed media URL payload for *path*.
+
+        Persisted inbound media already lives under ``get_media_dir`` and can
+        be signed directly. Outbound bot-generated files may live anywhere on
+        disk; copy those into the websocket media bucket first so the browser
+        can fetch them through the existing signed media route without
+        exposing arbitrary filesystem paths.
+        """
+        signed = self._sign_media_path(path)
+        if signed is not None:
+            return {"url": signed, "name": path.name}
+        try:
+            if not path.is_file():
+                return None
+            media_dir = get_media_dir("websocket")
+            safe_name = safe_filename(path.name) or "attachment"
+            staged = media_dir / f"{uuid.uuid4().hex[:12]}-{safe_name}"
+            shutil.copyfile(path, staged)
+        except OSError as exc:
+            logger.warning("websocket: failed to stage outbound media {}: {}", path, exc)
+            return None
+        signed = self._sign_media_path(staged)
+        if signed is None:
+            return None
+        return {"url": signed, "name": path.name}
+
     def _handle_media_fetch(self, sig: str, payload: str) -> Response:
         """Serve a single media file previously signed via
         :meth:`_sign_media_path`. Validates the signature, decodes the
@@ -1124,6 +1153,13 @@ class WebSocketChannel(BaseChannel):
         }
         if msg.media:
             payload["media"] = msg.media
+            urls: list[dict[str, str]] = []
+            for entry in msg.media:
+                signed = self._sign_or_stage_media_path(Path(entry))
+                if signed is not None:
+                    urls.append(signed)
+            if urls:
+                payload["media_urls"] = urls
         if msg.reply_to:
             payload["reply_to"] = msg.reply_to
         # Mark intermediate agent breadcrumbs (tool-call hints, generic
