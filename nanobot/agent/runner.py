@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 import inspect
+import os
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,7 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.providers.base import LLMProvider, ToolCallRequest
+from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.helpers import (
     build_assistant_message,
     estimate_message_tokens,
@@ -74,6 +75,7 @@ class AgentRunSpec:
     retry_wait_callback: Any | None = None
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
+    llm_timeout_s: float | None = None
 
 
 @dataclass(slots=True)
@@ -570,6 +572,19 @@ class AgentRunner:
         hook: AgentHook,
         context: AgentHookContext,
     ):
+        timeout_s: float | None = spec.llm_timeout_s
+        if timeout_s is None:
+            # Default to a finite timeout to avoid per-session lock starvation when an LLM
+            # request hangs indefinitely (e.g. gateway/network stall).
+            # Set NANOBOT_LLM_TIMEOUT_S=0 to disable.
+            raw = os.environ.get("NANOBOT_LLM_TIMEOUT_S", "300").strip()
+            try:
+                timeout_s = float(raw)
+            except (TypeError, ValueError):
+                timeout_s = 300.0
+        if timeout_s is not None and timeout_s <= 0:
+            timeout_s = None
+
         kwargs = self._build_request_kwargs(
             spec,
             messages,
@@ -579,11 +594,23 @@ class AgentRunner:
             async def _stream(delta: str) -> None:
                 await hook.on_stream(context, delta)
 
-            return await self.provider.chat_stream_with_retry(
+            coro = self.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream,
             )
-        return await self.provider.chat_with_retry(**kwargs)
+        else:
+            coro = self.provider.chat_with_retry(**kwargs)
+
+        if timeout_s is None:
+            return await coro
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout_s)
+        except asyncio.TimeoutError:
+            return LLMResponse(
+                content=f"Error calling LLM: timed out after {timeout_s:g}s",
+                finish_reason="error",
+                error_kind="timeout",
+            )
 
     async def _request_finalization_retry(
         self,
@@ -984,4 +1011,3 @@ class AgentRunner:
         if current:
             batches.append(current)
         return batches
-
