@@ -220,7 +220,6 @@ class MSTeamsChannel(BaseChannel):
         token = await self._get_access_token()
         base_url = f"{ref.service_url.rstrip('/')}/v3/conversations/{ref.conversation_id}/activities"
         use_thread_reply = self.config.reply_in_thread and bool(ref.activity_id)
-        url = f"{base_url}/{ref.activity_id}" if use_thread_reply else base_url
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -233,7 +232,7 @@ class MSTeamsChannel(BaseChannel):
             payload["replyToId"] = ref.activity_id
 
         try:
-            resp = await self._http.post(url, headers=headers, json=payload)
+            resp = await self._http.post(base_url, headers=headers, json=payload)
             resp.raise_for_status()
             logger.info("MSTeams message sent to {}", ref.conversation_id)
         except Exception as e:
