@@ -593,6 +593,7 @@ def serve(
         unified_session=runtime_config.agents.defaults.unified_session,
         disabled_skills=runtime_config.agents.defaults.disabled_skills,
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
+        session_history_max_messages=runtime_config.agents.defaults.session_history_max_messages,
         tools_config=runtime_config.tools,
     )
 
@@ -697,6 +698,7 @@ def _run_gateway(
         unified_session=config.agents.defaults.unified_session,
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        session_history_max_messages=config.agents.defaults.session_history_max_messages,
         tools_config=config.tools,
     )
 
@@ -1016,6 +1018,7 @@ def agent(
         unified_session=config.agents.defaults.unified_session,
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        session_history_max_messages=config.agents.defaults.session_history_max_messages,
         tools_config=config.tools,
     )
     restart_notice = consume_restart_notice_from_env()

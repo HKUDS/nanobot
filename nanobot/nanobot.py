@@ -84,6 +84,7 @@ class Nanobot:
             unified_session=defaults.unified_session,
             disabled_skills=defaults.disabled_skills,
             session_ttl_minutes=defaults.session_ttl_minutes,
+            session_history_max_messages=defaults.session_history_max_messages,
             tools_config=config.tools,
         )
         return cls(loop)
