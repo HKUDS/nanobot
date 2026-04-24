@@ -63,3 +63,9 @@ def test_none_does_not_enable_thinking() -> None:
     kw = _build(_make_provider(), None)
     assert "thinking" not in kw
     assert kw["temperature"] == 0.7
+
+
+def test_opus_4_7_omits_temperature() -> None:
+    kw = _build(_make_provider("claude-opus-4-7"), "adaptive")
+    assert "temperature" not in kw
+    assert kw["thinking"] == {"type": "adaptive"}
