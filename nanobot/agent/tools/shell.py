@@ -17,6 +17,18 @@ from nanobot.config.paths import get_media_dir
 
 _IS_WINDOWS = sys.platform == "win32"
 
+_UNIX_DEFAULT_ENV_KEYS = frozenset({"HOME", "LANG", "TERM"})
+_WINDOWS_DEFAULT_ENV_KEYS = frozenset({
+    "SYSTEMROOT", "COMSPEC", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+    "TEMP", "TMP", "PATHEXT", "PATH", "APPDATA", "LOCALAPPDATA",
+    "ProgramData", "ProgramFiles", "ProgramFiles(x86)", "ProgramW6432",
+})
+
+
+def get_default_exec_env_keys() -> frozenset[str]:
+    """Return env var names always forwarded to exec subprocesses."""
+    return _WINDOWS_DEFAULT_ENV_KEYS if _IS_WINDOWS else _UNIX_DEFAULT_ENV_KEYS
+
 
 @tool_parameters(
     tool_parameters_schema(
