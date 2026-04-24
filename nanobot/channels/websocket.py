@@ -218,12 +218,14 @@ def _parse_envelope(raw: str) -> dict[str, Any] | None:
     return data
 
 
-# Per-message image limits. The server-side guard is a touch looser than the
+# Per-message media limits. The server-side guard is a touch looser than the
 # client's ``Worker`` normalization target (6 MB) — tolerate client slop, but
 # still cap total ingress at ``_MAX_IMAGES_PER_MESSAGE * _MAX_IMAGE_BYTES``
 # which fits comfortably inside ``max_message_bytes``.
 _MAX_IMAGES_PER_MESSAGE = 4
 _MAX_IMAGE_BYTES = 8 * 1024 * 1024
+_MAX_VIDEOS_PER_MESSAGE = 1
+_MAX_VIDEO_BYTES = 20 * 1024 * 1024
 
 # Image MIME whitelist — matches the Composer's ``accept`` list. SVG is
 # explicitly excluded to avoid the XSS surface inside embedded scripts.
@@ -233,6 +235,14 @@ _IMAGE_MIME_ALLOWED: frozenset[str] = frozenset({
     "image/webp",
     "image/gif",
 })
+
+_VIDEO_MIME_ALLOWED: frozenset[str] = frozenset({
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+})
+
+_UPLOAD_MIME_ALLOWED: frozenset[str] = _IMAGE_MIME_ALLOWED | _VIDEO_MIME_ALLOWED
 
 _DATA_URL_MIME_RE = re.compile(r"^data:([^;]+);base64,", re.DOTALL)
 
@@ -339,6 +349,9 @@ _MEDIA_ALLOWED_MIMES: frozenset[str] = frozenset({
     "image/jpeg",
     "image/webp",
     "image/gif",
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
 })
 
 
@@ -945,14 +958,25 @@ class WebSocketChannel(BaseChannel):
         Returns ``(paths, None)`` on success or ``([], reason)`` on the first
         failure — the caller is expected to surface ``reason`` to the client
         and skip publishing so no half-formed message ever reaches the agent.
-        On failure, any images already written to disk earlier in the same
+        On failure, any files already written to disk earlier in the same
         call are unlinked so partial ingress doesn't leak orphan files.
         ``reason`` is a short, stable token suitable for UI localization.
 
         Shape: ``list[{"data_url": str, "name"?: str | None}]``.
         """
-        if len(media) > _MAX_IMAGES_PER_MESSAGE:
+        image_count = 0
+        video_count = 0
+        for item in media:
+            mime = _extract_data_url_mime(item.get("data_url", "")) if isinstance(item, dict) else None
+            if mime in _VIDEO_MIME_ALLOWED:
+                video_count += 1
+            elif mime in _IMAGE_MIME_ALLOWED:
+                image_count += 1
+        if image_count > _MAX_IMAGES_PER_MESSAGE:
             return [], "too_many_images"
+        if video_count > _MAX_VIDEOS_PER_MESSAGE:
+            return [], "too_many_videos"
+
         media_dir = get_media_dir("websocket")
         paths: list[str] = []
 
@@ -975,11 +999,13 @@ class WebSocketChannel(BaseChannel):
             mime = _extract_data_url_mime(data_url)
             if mime is None:
                 return _abort("decode")
-            if mime not in _IMAGE_MIME_ALLOWED:
+            if mime not in _UPLOAD_MIME_ALLOWED:
                 return _abort("mime")
+            is_video = mime in _VIDEO_MIME_ALLOWED
+            max_bytes = _MAX_VIDEO_BYTES if is_video else _MAX_IMAGE_BYTES
             try:
                 saved = save_base64_data_url(
-                    data_url, media_dir, max_bytes=_MAX_IMAGE_BYTES,
+                    data_url, media_dir, max_bytes=max_bytes,
                 )
             except FileSizeExceeded:
                 return _abort("size")
