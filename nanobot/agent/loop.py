@@ -183,6 +183,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
+        session_history_max_messages: int | None = None,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
@@ -210,6 +211,11 @@ class AgentLoop:
             max_tool_result_chars
             if max_tool_result_chars is not None
             else defaults.max_tool_result_chars
+        )
+        self.session_history_max_messages = (
+            session_history_max_messages
+            if session_history_max_messages is not None
+            else defaults.session_history_max_messages
         )
         self.provider_retry_mode = provider_retry_mode
         self.web_config = web_config or WebToolsConfig()
@@ -786,7 +792,7 @@ class AgentLoop:
             if is_subagent and self._persist_subagent_followup(session, msg):
                 self.sessions.save(session)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=0)
+            history = session.get_history(max_messages=self.session_history_max_messages)
             current_role = "assistant" if is_subagent else "user"
 
             # Subagent content is already in `history` above; passing it again
@@ -848,7 +854,7 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=0)
+        history = session.get_history(max_messages=self.session_history_max_messages)
 
         initial_messages = self.context.build_messages(
             history=history,

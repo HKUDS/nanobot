@@ -15,7 +15,11 @@ from nanobot.command import CommandContext
 from nanobot.providers.base import LLMResponse
 
 
-def _make_loop(tmp_path: Path, session_ttl_minutes: int = 15) -> AgentLoop:
+def _make_loop(
+    tmp_path: Path,
+    session_ttl_minutes: int = 15,
+    session_history_max_messages: int | None = None,
+) -> AgentLoop:
     """Create a minimal AgentLoop for testing."""
     bus = MessageBus()
     provider = MagicMock()
@@ -30,6 +34,7 @@ def _make_loop(tmp_path: Path, session_ttl_minutes: int = 15) -> AgentLoop:
         model="test-model",
         context_window_tokens=128_000,
         session_ttl_minutes=session_ttl_minutes,
+        session_history_max_messages=session_history_max_messages,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
     return loop
@@ -72,6 +77,17 @@ class TestSessionTTLConfig:
         assert data["idleCompactAfterMinutes"] == 30
         assert "sessionTtlMinutes" not in data
 
+    def test_default_session_history_window(self):
+        """Session history replay should be capped by default."""
+        defaults = AgentDefaults()
+        assert defaults.session_history_max_messages == 120
+
+    def test_serializes_session_history_window(self):
+        """Config should expose sessionHistoryMaxMessages in JSON output."""
+        defaults = AgentDefaults(session_history_max_messages=64)
+        data = defaults.model_dump(mode="json", by_alias=True)
+        assert data["sessionHistoryMaxMessages"] == 64
+
 
 class TestAgentLoopTTLParam:
     """Test that AutoCompact receives and stores session_ttl_minutes."""
@@ -85,6 +101,30 @@ class TestAgentLoopTTLParam:
         """AutoCompact default TTL should be 0 (disabled)."""
         loop = _make_loop(tmp_path, session_ttl_minutes=0)
         assert loop.auto_compact._ttl == 0
+
+    def test_loop_stores_history_window(self, tmp_path):
+        """AgentLoop should store configured session history max_messages."""
+        loop = _make_loop(tmp_path, session_history_max_messages=42)
+        assert loop.session_history_max_messages == 42
+
+    @pytest.mark.asyncio
+    async def test_process_message_reads_history_with_configured_cap(self, tmp_path):
+        """_process_message should use session_history_max_messages, not unlimited history."""
+        loop = _make_loop(tmp_path, session_history_max_messages=7)
+        session = loop.sessions.get_or_create("cli:direct")
+        session.get_history = MagicMock(return_value=[])
+        loop.context.build_messages = MagicMock(return_value=[])
+        loop._run_agent_loop = AsyncMock(return_value=("ok", [], [], "stop", False))
+        loop._save_turn = MagicMock()
+
+        msg = InboundMessage(
+            channel="cli",
+            sender_id="u1",
+            chat_id="direct",
+            content="hello",
+        )
+        await loop._process_message(msg)
+        session.get_history.assert_called_once_with(max_messages=7)
 
 
 class TestAutoCompact:
