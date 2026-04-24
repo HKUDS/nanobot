@@ -312,10 +312,12 @@ class MSTeamsChannel(BaseChannel):
         """Extract the user-authored text from a Teams activity."""
         text = str(activity.get("text") or "")
         text = self._strip_possible_bot_mention(text)
+        text = self._normalize_html_whitespace(text)
 
         channel_data = activity.get("channelData") or {}
         reply_to_id = str(activity.get("replyToId") or "").strip()
         normalized_preview = html.unescape(text).replace("&rsquo", "’").strip()
+        normalized_preview = normalized_preview.replace("\xa0", " ")
         normalized_preview = normalized_preview.replace("\r\n", "\n").replace("\r", "\n")
         preview_lines = [line.strip() for line in normalized_preview.split("\n")]
         while preview_lines and not preview_lines[0]:
@@ -335,9 +337,15 @@ class MSTeamsChannel(BaseChannel):
         cleaned = re.sub(r"(?:\r?\n){3,}", "\n\n", cleaned)
         return cleaned.strip()
 
+    def _normalize_html_whitespace(self, text: str) -> str:
+        """Normalize common HTML whitespace/entities from Teams into plain text spacing."""
+        normalized = html.unescape(text).replace("&rsquo", "’")
+        normalized = normalized.replace("\xa0", " ")
+        return normalized
+
     def _normalize_teams_reply_quote(self, text: str) -> str:
         """Normalize Teams quoted replies into a compact structured form."""
-        cleaned = html.unescape(text).replace("&rsquo", "’").strip()
+        cleaned = self._normalize_html_whitespace(text).strip()
         if not cleaned:
             return ""
 
