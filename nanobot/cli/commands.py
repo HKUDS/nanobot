@@ -698,6 +698,7 @@ def _run_gateway(
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         tools_config=config.tools,
+        metrics_enabled=config.gateway.metrics_enabled,
     )
 
     # Set cron callback (needs agent)

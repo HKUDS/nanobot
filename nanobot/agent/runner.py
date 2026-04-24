@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.utils import metrics as turn_metrics
 from nanobot.utils.prompt_templates import render_template
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, ToolCallRequest
@@ -685,10 +686,11 @@ class AgentRunner:
             }
             return prep_error + _HINT, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
         try:
-            if tool is not None:
-                result = await tool.execute(**params)
-            else:
-                result = await spec.tools.execute(tool_call.name, params)
+            with turn_metrics.tool_timer(tool_call.name):
+                if tool is not None:
+                    result = await tool.execute(**params)
+                else:
+                    result = await spec.tools.execute(tool_call.name, params)
         except asyncio.CancelledError:
             raise
         except BaseException as exc:

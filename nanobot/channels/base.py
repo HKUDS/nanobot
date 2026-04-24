@@ -10,6 +10,7 @@ from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.utils import metrics as turn_metrics
 
 
 class BaseChannel(ABC):
@@ -58,7 +59,8 @@ class BaseChannel(ABC):
                     api_base=self.transcription_api_base or None,
                     language=self.transcription_language or None,
                 )
-            return await provider.transcribe(file_path)
+            with turn_metrics.stage_timer("stt"):
+                return await provider.transcribe(file_path)
         except Exception as e:
             logger.warning("{}: audio transcription failed: {}", self.name, e)
             return ""
