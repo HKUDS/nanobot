@@ -27,9 +27,9 @@ from nanobot.agent.tools.notebook import NotebookEditTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.shell import ExecTool
-from nanobot.agent.tools.self import MyTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
+from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
@@ -281,6 +281,26 @@ class AgentLoop:
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
+    def _add_task_to_active(self, session_key: str, task: asyncio.Task) -> None:
+        """Add a task to _active_tasks (called from main loop).
+
+        Args:
+            session_key: The session key.
+            task: The task to add.
+        """
+        self._active_tasks.setdefault(session_key, []).append(task)
+
+    def _remove_task_from_active(self, task: asyncio.Task, session_key: str) -> None:
+        """Remove a completed task from _active_tasks (called from done callback).
+
+        Args:
+            task: The completed task.
+            session_key: The session key.
+        """
+        tasks = self._active_tasks.get(session_key)
+        if tasks and task in tasks:
+            tasks.remove(task)
+
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         allowed_dir = (
@@ -530,8 +550,6 @@ class AgentLoop:
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
-            # Push final content through stream so streaming channels (e.g. Feishu)
-            # update the card instead of leaving it empty.
             if on_stream and on_stream_end:
                 await on_stream(result.final_content or "")
                 await on_stream_end(resuming=False)
@@ -549,9 +567,10 @@ class AgentLoop:
             try:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
             except asyncio.TimeoutError:
+                active_keys = list(self._pending_queues.keys())
                 self.auto_compact.check_expired(
                     self._schedule_background,
-                    active_session_keys=self._pending_queues.keys(),
+                    active_session_keys=active_keys,
                 )
                 continue
             except asyncio.CancelledError:
@@ -592,26 +611,22 @@ class AgentLoop:
                     )
                 try:
                     self._pending_queues[effective_key].put_nowait(pending_msg)
-                except asyncio.QueueFull:
-                    logger.warning(
-                        "Pending queue full for session {}, falling back to queued task",
-                        effective_key,
-                    )
-                else:
                     logger.info(
                         "Routed follow-up message to pending queue for session {}",
                         effective_key,
                     )
                     continue
+                except asyncio.QueueFull:
+                    logger.warning(
+                        "Pending queue full for session {}, falling back to queued task",
+                        effective_key,
+                    )
             # Compute the effective session key before dispatching
             # This ensures /stop command can find tasks correctly when unified session is enabled
             task = asyncio.create_task(self._dispatch(msg))
-            self._active_tasks.setdefault(effective_key, []).append(task)
+            self._add_task_to_active(effective_key, task)
             task.add_done_callback(
-                lambda t, k=effective_key: self._active_tasks.get(k, [])
-                and self._active_tasks[k].remove(t)
-                if t in self._active_tasks.get(k, [])
-                else None
+                lambda t, k=effective_key: self._remove_task_from_active(t, k)
             )
 
     async def _dispatch(self, msg: InboundMessage) -> None:
