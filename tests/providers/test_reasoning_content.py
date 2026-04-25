@@ -52,7 +52,33 @@ def test_parse_dict_reasoning_content_none_when_absent() -> None:
     assert result.reasoning_content is None
 
 
-# ── _parse_chunks: streaming dict branch ─────────────────────────────────
+def test_parse_dict_content_not_fallback_to_reasoning_when_reasoning_content_exists() -> None:
+    """When reasoning_content exists, reasoning should NOT fall back to content.
+
+    Regression test for issue #3443: providers like MiMo that return
+    reasoning_content should NOT have reasoning leaked into content.
+    """
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    response = {
+        "choices": [{
+            "message": {
+                "content": None,
+                "reasoning": "Let me think step by step... The answer is 42.",
+                "reasoning_content": "Let me think step by step... The answer is 42.",
+            },
+            "finish_reason": "stop",
+        }],
+    }
+
+    result = provider._parse(response)
+
+    assert result.content is None
+    assert result.reasoning_content == "Let me think step by step... The answer is 42."
+
+
+# ── _parse_chunks: streaming ──────────────────────────────────────────────
 
 
 def test_parse_chunks_dict_accumulates_reasoning_content() -> None:

@@ -15,7 +15,10 @@ from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 
 
 def test_parse_dict_stepfun_reasoning_fallback() -> None:
-    """When content is None and reasoning exists, content falls back to reasoning."""
+    """When content is None and reasoning exists WITHOUT reasoning_content (StepFun case), content falls back to reasoning.
+
+    StepFun Plan API returns the actual response in 'reasoning' field without 'reasoning_content'.
+    """
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -32,12 +35,15 @@ def test_parse_dict_stepfun_reasoning_fallback() -> None:
     result = provider._parse(response)
 
     assert result.content == "Let me think... The answer is 42."
-    # reasoning_content should also be populated from reasoning
     assert result.reasoning_content == "Let me think... The answer is 42."
 
 
 def test_parse_dict_stepfun_reasoning_priority() -> None:
-    """reasoning_content field takes priority over reasoning when both present."""
+    """When reasoning_content exists, it takes priority - reasoning is NOT content (issue #3443 fix).
+
+    Providers like MiMo return both reasoning_content (chain-of-thought) and reasoning.
+    The reasoning field should NOT be used as content.
+    """
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -54,8 +60,7 @@ def test_parse_dict_stepfun_reasoning_priority() -> None:
 
     result = provider._parse(response)
 
-    assert result.content == "informal thinking"
-    # reasoning_content uses the dedicated field, not reasoning
+    assert result.content is None
     assert result.reasoning_content == "formal reasoning content"
 
 
@@ -73,7 +78,7 @@ def _make_sdk_message(content, reasoning=None, reasoning_content=None):
 
 
 def test_parse_sdk_stepfun_reasoning_fallback() -> None:
-    """SDK branch: content falls back to msg.reasoning when content is None."""
+    """SDK branch: content falls back to msg.reasoning when content is None and reasoning_content is absent."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -88,7 +93,7 @@ def test_parse_sdk_stepfun_reasoning_fallback() -> None:
 
 
 def test_parse_sdk_stepfun_reasoning_priority() -> None:
-    """reasoning_content field takes priority over reasoning in SDK branch."""
+    """SDK branch: when reasoning_content exists, reasoning is NOT content (issue #3443 fix)."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
 
@@ -102,7 +107,7 @@ def test_parse_sdk_stepfun_reasoning_priority() -> None:
 
     result = provider._parse(response)
 
-    assert result.content == "thinking process"
+    assert result.content is None
     assert result.reasoning_content == "formal reasoning"
 
 
