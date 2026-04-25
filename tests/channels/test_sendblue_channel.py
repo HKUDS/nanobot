@@ -272,7 +272,7 @@ async def test_onboarding_first_message_starts_flow(tmp_path):
     handled = await onboarding.handle(_inbound("hey what's up"))
 
     assert handled is True
-    assert ch._client.posts[-1]["json"]["content"] == "What's your name?"
+    assert ch._client.posts[-1]["json"]["content"] == "Hey, nice to meet you! What's your name?"
     assert (tmp_path / "onboarding.json").exists()
     assert onboarding.load()["step"] == "ask_user_name"
 
@@ -282,7 +282,7 @@ async def test_onboarding_no_digest_persists_profile_files(tmp_path):
     runtime, ch = _onboarding_runtime(tmp_path)
     onboarding = _SendblueOnboarding(runtime)
 
-    for text in ["hey", "Ron", "no", "no"]:
+    for text in ["hey", "Ron", "no"]:
         await onboarding.handle(_inbound(text))
 
     state = onboarding.load()
@@ -297,17 +297,17 @@ async def test_onboarding_no_digest_persists_profile_files(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_onboarding_keeps_muffs_for_natural_no_response(tmp_path):
+async def test_onboarding_goes_from_name_to_capabilities(tmp_path):
     runtime, ch = _onboarding_runtime(tmp_path)
     onboarding = _SendblueOnboarding(runtime)
 
-    for text in ["hey", "Ron", "No I like muffs"]:
+    for text in ["hey", "Ron"]:
         await onboarding.handle(_inbound(text))
 
     state = onboarding.load()
     assert state["step"] == "offer_digest"
     assert state["assistant_name"] == "Muffs"
-    assert "Muffs it is" in ch._client.posts[-1]["json"]["content"]
+    assert "I'm Muffs, your fun personal AI assistant" in ch._client.posts[-1]["json"]["content"]
 
 
 @pytest.mark.asyncio
@@ -315,7 +315,7 @@ async def test_onboarding_digest_creates_profile_cron_job(tmp_path):
     runtime, _ch = _onboarding_runtime(tmp_path)
     onboarding = _SendblueOnboarding(runtime)
 
-    for text in ["hello", "Rachel", "Kitty", "yes", "tech news, finance, Bible verse", "9am", "EST"]:
+    for text in ["hello", "Rachel", "yes", "tech news, finance, Bible verse", "9am", "EST"]:
         await onboarding.handle(_inbound(text))
 
     jobs = runtime.cron.list_jobs(include_disabled=True)
@@ -328,14 +328,14 @@ async def test_onboarding_digest_creates_profile_cron_job(tmp_path):
     assert digest.payload.channel == "sendblue"
     assert digest.payload.to == "+15551111111"
     assert "tech news, finance, Bible verse" in digest.payload.message
-    assert "Assistant name: Kitty" in digest.payload.message
+    assert "Assistant name: Muffs" in digest.payload.message
 
 
 @pytest.mark.asyncio
 async def test_onboarding_completed_routes_back_to_normal_chat(tmp_path):
     runtime, _ch = _onboarding_runtime(tmp_path)
     onboarding = _SendblueOnboarding(runtime)
-    for text in ["hello", "Ron", "no", "no"]:
+    for text in ["hello", "Ron", "no"]:
         await onboarding.handle(_inbound(text))
 
     handled = await onboarding.handle(_inbound("what can you do?"))
@@ -347,14 +347,14 @@ async def test_onboarding_completed_routes_back_to_normal_chat(tmp_path):
 async def test_onboarding_command_restarts_completed_profile(tmp_path):
     runtime, ch = _onboarding_runtime(tmp_path)
     onboarding = _SendblueOnboarding(runtime)
-    for text in ["hello", "Ron", "no", "no"]:
+    for text in ["hello", "Ron", "no"]:
         await onboarding.handle(_inbound(text))
 
     handled = await onboarding.handle(_inbound("/onboard"))
 
     assert handled is True
     assert onboarding.load()["step"] == "ask_user_name"
-    assert ch._client.posts[-1]["json"]["content"] == "What's your name?"
+    assert ch._client.posts[-1]["json"]["content"] == "Hey, nice to meet you! What's your name?"
 
 
 @pytest.mark.asyncio
@@ -364,12 +364,12 @@ async def test_onboarding_two_profiles_are_separate(tmp_path):
     onboard_a = _SendblueOnboarding(runtime_a)
     onboard_b = _SendblueOnboarding(runtime_b)
 
-    for text in ["hi", "Ron", "Muffs", "no"]:
+    for text in ["hi", "Ron", "no"]:
         await onboard_a.handle(_inbound(text, phone="+15551111111"))
-    for text in ["hi", "Rachel", "Kitty", "no"]:
+    for text in ["hi", "Rachel", "no"]:
         await onboard_b.handle(_inbound(text, phone="+15552222222"))
 
     assert "User name: Ron" in (tmp_path / "a" / "USER.md").read_text(encoding="utf-8")
     assert "Assistant display name: Muffs" in (tmp_path / "a" / "SOUL.md").read_text(encoding="utf-8")
     assert "User name: Rachel" in (tmp_path / "b" / "USER.md").read_text(encoding="utf-8")
-    assert "Assistant display name: Kitty" in (tmp_path / "b" / "SOUL.md").read_text(encoding="utf-8")
+    assert "Assistant display name: Muffs" in (tmp_path / "b" / "SOUL.md").read_text(encoding="utf-8")

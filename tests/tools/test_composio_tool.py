@@ -134,6 +134,37 @@ async def test_composio_connect_uses_tool_router_link(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_composio_connect_sends_instruction_and_link_separately(monkeypatch):
+    _Client.posts = []
+    _Client.gets = []
+    monkeypatch.setattr("nanobot.agent.tools.composio.httpx.AsyncClient", _Client)
+    sent = []
+
+    async def send_callback(msg):
+        sent.append(msg)
+
+    tool = ComposioConnectTool(
+        ComposioToolConfig(
+            enabled=True,
+            apiKey="cmp-key",
+            userId="ron",
+            toolRouterSessionId="trs_123",
+            notifyOnConnect=False,
+        ),
+        send_callback=send_callback,
+    )
+    tool.set_context("sendblue", "+15551111111")
+
+    result = await tool.execute(toolkit="github")
+
+    assert "was sent to the user" in result
+    assert [msg.content for msg in sent] == [
+        "I've generated an auth link for github. Please click the link below to complete the setup:",
+        "https://auth.composio.dev/connect?token=lt_123",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_tool_router_mcp_url_is_profile_scoped(monkeypatch, tmp_path):
     _Client.posts = []
     monkeypatch.setattr("nanobot.agent.tools.composio.httpx.AsyncClient", _Client)

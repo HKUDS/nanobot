@@ -59,8 +59,9 @@ class ComposioConnectTool(Tool):
         return (
             "Generate a Composio Connect authentication link for the current user/profile. "
             "Use when the user asks to connect a tool such as Gmail, Google Calendar, Notion, GitHub, Slack, etc. "
-            "Send the returned redirect URL to the user. After the user authenticates, connected MCP tools become "
-            "available for this same profile. If no auth config is mapped, find or create a Composio managed auth "
+            "When a chat channel is active, this tool sends two messages itself: a short setup instruction, then the "
+            "raw auth URL as a separate message. After the user authenticates, connected MCP tools become available "
+            "for this same profile. If no auth config is mapped, find or create a Composio managed auth "
             f"config for the requested toolkit. Configured toolkit overrides: {configured}."
         )
 
@@ -129,6 +130,8 @@ class ComposioConnectTool(Tool):
         if not redirect_url:
             return f"Error: Composio did not return a redirect_url. Response: {data}"
 
+        sent = await self._send_auth_link(toolkit_key or auth_id, redirect_url)
+
         if (
             wait_for_connection
             and self.config.notify_on_connect
@@ -140,6 +143,11 @@ class ComposioConnectTool(Tool):
             asyncio.create_task(self._watch_connection(account_id, toolkit_key or auth_id))
 
         expiry = f"\nThis link expires at {expires_at}." if expires_at else ""
+        if sent:
+            return (
+                f"Composio auth link for {toolkit_key or auth_id} was sent to the user as a separate setup message "
+                f"and link message.{expiry}"
+            )
         return (
             f"Composio auth link for {toolkit_key or auth_id}:\n{redirect_url}"
             f"{expiry}\nAfter the user opens it and finishes auth, the connected tools are available for user_id "
@@ -184,6 +192,8 @@ class ComposioConnectTool(Tool):
         if not redirect_url:
             return f"Error: Composio Tool Router did not return a redirect_url. Response: {data}"
 
+        sent = await self._send_auth_link(toolkit, redirect_url)
+
         if (
             wait_for_connection
             and self.config.notify_on_connect
@@ -195,11 +205,25 @@ class ComposioConnectTool(Tool):
             asyncio.create_task(self._watch_connection(account_id, toolkit))
 
         expiry = f"\nThis link expires at {expires_at}." if expires_at else ""
+        if sent:
+            return (
+                f"Composio auth link for {toolkit} was sent to the user as a separate setup message "
+                f"and link message.{expiry}"
+            )
         return (
             f"Composio auth link for {toolkit}:\n{redirect_url}"
             f"{expiry}\nAfter the user opens it and finishes auth, the connected tools are available for user_id "
             f"{self.config.user_id}."
         )
+
+    async def _send_auth_link(self, label: str, redirect_url: str) -> bool:
+        if not self._send_callback or not self._default_channel.get() or not self._default_chat_id.get():
+            return False
+        await self._notify(
+            f"I've generated an auth link for {label}. Please click the link below to complete the setup:"
+        )
+        await self._notify(redirect_url)
+        return True
 
     async def _resolve_auth_config_id(self, toolkit: str) -> str:
         async with httpx.AsyncClient(timeout=30) as client:

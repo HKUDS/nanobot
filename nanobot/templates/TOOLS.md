@@ -34,3 +34,12 @@ This file documents non-obvious constraints and usage patterns.
 ## cron — Scheduled Reminders
 
 - Please refer to cron skill for usage.
+
+## Composio Tool Router
+
+- When using Composio Tool Router MCP tools, always call `COMPOSIO_SEARCH_TOOLS` before `COMPOSIO_MULTI_EXECUTE_TOOL` for each new workflow.
+- Never invent Composio tool slugs or argument fields. Only execute tool slugs returned by `COMPOSIO_SEARCH_TOOLS` or confirmed by `COMPOSIO_GET_TOOL_SCHEMAS`.
+- If `COMPOSIO_MULTI_EXECUTE_TOOL` returns `Tool ... not found`, search again with a more direct query and retry with a returned slug. Do not tell the user the tool is unavailable until search confirms no matching tool exists.
+- For Google Calendar create/update/delete requests, search for the exact operation first, such as `create Google Calendar event`, `update Google Calendar event`, or `delete Google Calendar event`.
+- If search says a toolkit has no active connection, use `composio_connect` to create the auth link for that user before executing the action. In chat channels, `composio_connect` sends a setup instruction and the raw auth URL as two separate messages.
+- Preserve the `session_id` returned by Composio meta tools in later Composio meta tool calls for the same workflow.

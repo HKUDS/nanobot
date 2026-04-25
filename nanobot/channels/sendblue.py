@@ -37,6 +37,8 @@ _READ_TIMEOUT_SECONDS = 5
 _ONBOARDING_FILE = "onboarding.json"
 _MUFFS_START = "<!-- muffs-onboarding:start -->"
 _MUFFS_END = "<!-- muffs-onboarding:end -->"
+_COMPOSIO_ROUTER_START = "<!-- composio-tool-router:start -->"
+_COMPOSIO_ROUTER_END = "<!-- composio-tool-router:end -->"
 _ONBOARDING_COMPLETE = "complete"
 _MORNING_DIGEST_ID = "morning-digest"
 
@@ -116,6 +118,15 @@ def _replace_marked_section(existing: str, section: str) -> str:
     return f"{existing.rstrip()}\n\n{block}\n" if existing.strip() else f"{block}\n"
 
 
+def _replace_named_marked_section(existing: str, section: str, *, start: str, end: str) -> str:
+    block = f"{start}\n{section.strip()}\n{end}"
+    if start in existing and end in existing:
+        before, rest = existing.split(start, 1)
+        _, after = rest.split(end, 1)
+        return f"{before.rstrip()}\n\n{block}\n{after.lstrip()}".rstrip() + "\n"
+    return f"{existing.rstrip()}\n\n{block}\n" if existing.strip() else f"{block}\n"
+
+
 def _clean_answer(text: str, *, default: str = "") -> str:
     value = " ".join((text or "").strip().split())
     return value or default
@@ -130,35 +141,6 @@ def _is_no(text: str) -> bool:
     if normalized in {"n", "no", "nah", "nope", "skip", "not now"}:
         return True
     return normalized.startswith(("no ", "nah ", "nope "))
-
-
-def _assistant_name_from_answer(text: str, current: str = "Muffs") -> str:
-    """Extract an assistant rename answer, keeping current for natural no/keep responses."""
-    value = _clean_answer(text)
-    if not value:
-        return current
-    lowered = value.lower()
-    current_lower = current.lower()
-    if _is_no(value):
-        return current
-    keep_words = ("keep", "like", "love", "prefer", "stick with", "stay with")
-    if current_lower in lowered and any(word in lowered for word in keep_words):
-        return current
-    prefixes = (
-        "call you ",
-        "call yourself ",
-        "you can be ",
-        "your name is ",
-        "name should be ",
-        "change it to ",
-        "rename to ",
-    )
-    for prefix in prefixes:
-        if lowered.startswith(prefix):
-            return _clean_answer(value[len(prefix):], default=current)
-    if len(value.split()) > 4:
-        return current
-    return value
 
 
 def _parse_digest_time(text: str) -> tuple[int, int, str]:
@@ -242,7 +224,7 @@ class _SendblueOnboarding:
         if lowered == "/onboard":
             state = self._initial_state()
             self.save(state)
-            await self._send(msg.chat_id, "What's your name?")
+            await self._send(msg.chat_id, "Hey, nice to meet you! What's your name?")
             return True
         if lowered in {"/skip", "skip onboarding"}:
             state = {**self._initial_state(), "step": _ONBOARDING_COMPLETE, "user_name": "there", "assistant_name": "Muffs"}
@@ -260,27 +242,33 @@ class _SendblueOnboarding:
         if not state:
             state = self._initial_state()
             self.save(state)
-            await self._send(msg.chat_id, "What's your name?")
+            await self._send(msg.chat_id, "Hey, nice to meet you! What's your name?")
             return True
 
         step = state.get("step", "ask_user_name")
         if step == "ask_user_name":
             state["user_name"] = text or "there"
-            state["step"] = "ask_assistant_name"
-            self.save(state)
-            await self._send(
-                msg.chat_id,
-                "I'm Muffs, your personal fun assistant. Do you want to call me anything else?",
-            )
-            return True
-
-        if step == "ask_assistant_name":
-            state["assistant_name"] = _assistant_name_from_answer(text, state.get("assistant_name") or "Muffs")
             state["step"] = "offer_digest"
             self.save(state)
             await self._send(
                 msg.chat_id,
-                f"{state['assistant_name']} it is. Let me give you a quick feel for what I can do.\n\n"
+                "I'm Muffs, your fun personal AI assistant. Let me give you a quick feel for what I can do.\n\n"
+                "- I can watch your inbox or calendar once you connect them.\n"
+                "- I can help plan and organize your day.\n"
+                "- I can set reminders for basically anything.\n"
+                "- I can research, answer questions, and keep track of useful context.\n\n"
+                "Want me to set up a morning briefing/digest? I can research your interests and surface anything worth knowing every day before work.",
+            )
+            return True
+
+        if step == "ask_assistant_name":
+            # Legacy in-flight onboarding states from older builds skipped
+            # through here; assistant renaming is no longer part of onboarding.
+            state["step"] = "offer_digest"
+            self.save(state)
+            await self._send(
+                msg.chat_id,
+                "I'm Muffs, your fun personal AI assistant. Let me give you a quick feel for what I can do.\n\n"
                 "- I can watch your inbox or calendar once you connect them.\n"
                 "- I can help plan and organize your day.\n"
                 "- I can set reminders for basically anything.\n"
@@ -341,7 +329,7 @@ class _SendblueOnboarding:
 
         state["step"] = "ask_user_name"
         self.save(state)
-        await self._send(msg.chat_id, "What's your name?")
+        await self._send(msg.chat_id, "Hey, nice to meet you! What's your name?")
         return True
 
     def _initial_state(self) -> dict[str, Any]:
@@ -570,6 +558,7 @@ class _ProfileRuntime:
             return
         self._running = True
         sync_workspace_templates(self.workspace)
+        self._write_composio_tool_router_notes()
         await self._prepare_profile_config()
         self.provider = self._make_provider()
         self.agent = self._make_agent()
@@ -582,6 +571,29 @@ class _ProfileRuntime:
             asyncio.create_task(self._dispatch_outbound()),
         ]
         logger.info("Sendblue profile '{}' started at {}", self.profile_id, self.workspace)
+
+    def _write_composio_tool_router_notes(self) -> None:
+        if not self.root_config.tools.composio.enabled:
+            return
+        section = """## Composio Tool Router
+
+- When using Composio Tool Router MCP tools, always call `COMPOSIO_SEARCH_TOOLS` before `COMPOSIO_MULTI_EXECUTE_TOOL` for each new workflow.
+- Never invent Composio tool slugs or argument fields. Only execute tool slugs returned by `COMPOSIO_SEARCH_TOOLS` or confirmed by `COMPOSIO_GET_TOOL_SCHEMAS`.
+- If `COMPOSIO_MULTI_EXECUTE_TOOL` returns `Tool ... not found`, search again with a more direct query and retry with a returned slug. Do not tell the user the tool is unavailable until search confirms no matching tool exists.
+- For Google Calendar create/update/delete requests, search for the exact operation first, such as `create Google Calendar event`, `update Google Calendar event`, or `delete Google Calendar event`.
+- If search says a toolkit has no active connection, use `composio_connect` to create the auth link for that user before executing the action. In chat channels, `composio_connect` sends a setup instruction and the raw auth URL as two separate messages.
+- Preserve the `session_id` returned by Composio meta tools in later Composio meta tool calls for the same workflow."""
+        path = self.workspace / "TOOLS.md"
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        path.write_text(
+            _replace_named_marked_section(
+                existing,
+                section,
+                start=_COMPOSIO_ROUTER_START,
+                end=_COMPOSIO_ROUTER_END,
+            ),
+            encoding="utf-8",
+        )
 
     def _configure_dream(self) -> None:
         dream_cfg = self.root_config.agents.defaults.dream
@@ -689,6 +701,8 @@ class _ProfileRuntime:
                 continue
             except asyncio.CancelledError:
                 break
+            if msg.metadata.get("_tool_hint"):
+                continue
             target = msg.chat_id or self.profile.phone
             self._stop_typing(target)
             await self.channel._send_outbound(msg, default_number=target)
