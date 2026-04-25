@@ -306,6 +306,22 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_ping(ctx: CommandContext) -> OutboundMessage:
+    """Reply with Pong and bot uptime — a quick liveness health check."""
+    import time
+
+    elapsed = int(time.time() - ctx.loop._start_time)
+    hours, rem = divmod(elapsed, 3600)
+    minutes, seconds = divmod(rem, 60)
+    uptime = f"{hours}h {minutes}m {seconds}s" if hours else f"{minutes}m {seconds}s"
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=f"🏓 Pong! Uptime: {uptime}",
+        metadata=dict(ctx.msg.metadata or {}),
+    )
+
+
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
     return OutboundMessage(
@@ -324,6 +340,7 @@ def build_help_text() -> str:
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",
+        "/ping — Check if the bot is alive",
         "/dream — Manually trigger Dream consolidation",
         "/dream-log — Show what the last Dream changed",
         "/dream-restore — Revert memory to a previous state",
@@ -339,6 +356,7 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
+    router.exact("/ping", cmd_ping)
     router.exact("/dream", cmd_dream)
     router.exact("/dream-log", cmd_dream_log)
     router.prefix("/dream-log ", cmd_dream_log)
