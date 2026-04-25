@@ -20,7 +20,7 @@ _BLOCKED_NETWORKS = [
     ipaddress.ip_network("fe80::/10"),         # link-local v6
 ]
 
-_URL_RE = re.compile(r"https?://[^\s\"'`;|<>]+", re.IGNORECASE)
+_URL_RE = re.compile(r"[a-z][a-z0-9+.\-]*://[^\s\"'`;|<>]+", re.IGNORECASE)
 
 _allowed_networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
 
@@ -110,11 +110,50 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
     return True, ""
 
 
+def _url_targets_internal(url: str) -> bool:
+    """Return True if ``url`` references an internal/private resource.
+
+    Scheme-agnostic: curl / wget support many schemes (file://, gopher://,
+    ftp://, dict://, ...) and several are known SSRF vectors. The check looks
+    at the host, not the scheme.
+    """
+    try:
+        p = urlparse(url)
+    except Exception:
+        return False
+
+    # file:// reads the local filesystem (or an NFS host); treat as internal.
+    if (p.scheme or "").lower() == "file":
+        return True
+
+    hostname = p.hostname
+    if not hostname:
+        return False
+
+    try:
+        addr = ipaddress.ip_address(hostname)
+        return _is_private(addr)
+    except ValueError:
+        pass
+
+    try:
+        infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+    except socket.gaierror:
+        return False
+
+    for info in infos:
+        try:
+            addr = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if _is_private(addr):
+            return True
+    return False
+
+
 def contains_internal_url(command: str) -> bool:
     """Return True if the command string contains a URL targeting an internal/private address."""
     for m in _URL_RE.finditer(command):
-        url = m.group(0)
-        ok, _ = validate_url_target(url)
-        if not ok:
+        if _url_targets_internal(m.group(0)):
             return True
     return False
