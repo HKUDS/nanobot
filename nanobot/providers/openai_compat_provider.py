@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
+import httpx
 import json_repair
 from loguru import logger
 
@@ -159,6 +160,39 @@ _RESPONSES_FAILURE_THRESHOLD = 3
 _RESPONSES_PROBE_INTERVAL_S = 300  # 5 minutes
 
 
+def _is_local_endpoint(
+    spec: "ProviderSpec | None",
+    api_base: str | None,
+) -> bool:
+    """Return True when the endpoint is a local or LAN model server.
+
+    Matches either the provider spec's ``is_local`` flag or common private-
+    network patterns in the base URL (localhost, 127.x, 192.168.x, 10.x,
+    172.16-31.x, Docker ``host.docker.internal``).
+    """
+    if spec and spec.is_local:
+        return True
+    if not api_base:
+        return False
+    host = api_base.strip().lower().rstrip("/")
+    private_patterns = (
+        "localhost",
+        "127.",
+        "192.168.",
+        "10.",
+        "host.docker.internal",
+        "[::1]",
+    )
+    if any(p in host for p in private_patterns):
+        return True
+    # 172.16.0.0 – 172.31.255.255
+    import re
+    m = re.search(r"172\.(\d+)\." , host)
+    if m and 16 <= int(m.group(1)) <= 31:
+        return True
+    return False
+
+
 def _is_direct_openai_base(api_base: str | None) -> bool:
     """Return True for direct OpenAI endpoints, not generic OpenAI-compatible gateways."""
     if not api_base:
@@ -208,11 +242,27 @@ class OpenAICompatProvider(LLMProvider):
         if extra_headers:
             default_headers.update(extra_headers)
 
+        # Local model servers (Ollama, llama.cpp, vLLM) often close idle
+        # HTTP connections before the client-side keepalive expires.  When
+        # two LLM calls happen seconds apart (e.g. heartbeat _decide then
+        # process_direct), the second call may grab a now-dead pooled
+        # connection, causing a transient APIConnectionError on every first
+        # attempt.  Disabling keepalive for local endpoints avoids this by
+        # opening a fresh connection for each request, which is cheap on a
+        # LAN.  Cloud providers benefit from keepalive, so we leave the
+        # default pool settings for them.
+        http_client: httpx.AsyncClient | None = None
+        if _is_local_endpoint(spec, effective_base):
+            http_client = httpx.AsyncClient(
+                limits=httpx.Limits(keepalive_expiry=0),
+            )
+
         self._client = AsyncOpenAI(
             api_key=api_key or "no-key",
             base_url=effective_base,
             default_headers=default_headers,
             max_retries=0,
+            http_client=http_client,
         )
 
         # Responses API circuit breaker: skip after repeated failures,
