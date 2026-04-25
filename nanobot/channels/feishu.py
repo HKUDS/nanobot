@@ -1457,13 +1457,13 @@ class FeishuChannel(BaseChannel):
                 else:
                     key = await loop.run_in_executor(None, self._upload_file_sync, file_path)
                     if key:
-                        # Use msg_type "audio" for audio, "video" for video, "file" for documents.
+                        # Feishu's OpenAPI names video messages "media".
+                        # Use "audio" for audio, "media" for video, "file" for documents.
                         # Feishu requires these specific msg_types for inline playback.
-                        # Note: "media" is only valid as a tag inside "post" messages, not as a standalone msg_type.
                         if ext in self._AUDIO_EXTS:
                             media_type = "audio"
                         elif ext in self._VIDEO_EXTS:
-                            media_type = "video"
+                            media_type = "media"
                         else:
                             media_type = "file"
                         await loop.run_in_executor(

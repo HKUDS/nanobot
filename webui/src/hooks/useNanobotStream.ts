@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useClient } from "@/providers/ClientProvider";
+import { toMediaAttachment } from "@/lib/media";
 import type { StreamError } from "@/lib/nanobot-client";
 import type {
   InboundEvent,
@@ -148,6 +149,10 @@ export function useNanobotStream(
           return;
         }
 
+        const media = ev.media_urls?.length
+          ? ev.media_urls.map((m) => toMediaAttachment(m))
+          : ev.media?.map((url) => toMediaAttachment({ url }));
+
         // A complete (non-streamed) assistant message. If a stream was in
         // flight, drop the placeholder so we don't render the text twice.
         const activeId = buffer.current?.messageId;
@@ -162,6 +167,7 @@ export function useNanobotStream(
               role: "assistant",
               content: ev.text,
               createdAt: Date.now(),
+              ...(media && media.length > 0 ? { media } : {}),
             },
           ];
         });

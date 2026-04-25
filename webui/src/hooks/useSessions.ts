@@ -9,6 +9,7 @@ import {
   listSessions,
 } from "@/lib/api";
 import { deriveTitle } from "@/lib/format";
+import { toMediaAttachment } from "@/lib/media";
 import type { ChatSummary, UIMessage } from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
@@ -123,17 +124,16 @@ export function useSessionHistory(key: string | null): {
         const ui: UIMessage[] = body.messages.flatMap((m, idx) => {
           if (m.role !== "user" && m.role !== "assistant") return [];
           if (typeof m.content !== "string") return [];
-          // Hydrate signed media URLs into the bubble's ``images`` slot so
-          // historical user turns render real previews (the live-send path
-          // uses data URLs; both shapes converge on the same ``UIImage``).
+          // Hydrate signed media URLs into generic UI attachments. Image-only
+          // user turns still populate the legacy ``images`` slot so the
+          // existing optimistic-send and lightbox paths remain unchanged.
+          const media =
+            Array.isArray(m.media_urls) && m.media_urls.length > 0
+              ? m.media_urls.map((mu) => toMediaAttachment(mu))
+              : undefined;
           const images =
-            m.role === "user" &&
-            Array.isArray(m.media_urls) &&
-            m.media_urls.length > 0
-              ? m.media_urls.map((mu) => ({
-                  url: mu.url,
-                  name: mu.name,
-                }))
+            m.role === "user" && media?.every((item) => item.kind === "image")
+              ? media.map((item) => ({ url: item.url, name: item.name }))
               : undefined;
           return [
             {
@@ -142,6 +142,7 @@ export function useSessionHistory(key: string | null): {
               content: m.content,
               createdAt: m.timestamp ? Date.parse(m.timestamp) : Date.now(),
               ...(images ? { images } : {}),
+              ...(media ? { media } : {}),
             },
           ];
         });
