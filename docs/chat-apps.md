@@ -645,7 +645,8 @@ Create or reuse a Microsoft Teams / Azure bot app registration. Set the bot mess
       "validateInboundAuth": true,
       "refTtlDays": 30,
       "pruneWebChatRefs": true,
-      "pruneNonPersonalRefs": true
+      "pruneNonPersonalRefs": true,
+      "refTouchIntervalS": 300
     }
   }
 }
@@ -657,6 +658,7 @@ Create or reuse a Microsoft Teams / Azure bot app registration. Set the bot mess
 > - `refTtlDays` (default `30`) controls how old stored conversation refs can be before they are pruned.
 > - `pruneWebChatRefs` (default `true`) drops refs with `webchat.botframework.com` service URLs.
 > - `pruneNonPersonalRefs` (default `true`) drops refs whose `conversation_type` is not `personal`.
+> - `refTouchIntervalS` (default `300`) throttles how often successful sends refresh `updated_at` for active refs.
 
 **4. Run**
 
