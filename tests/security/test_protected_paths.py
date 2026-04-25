@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import stat
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +11,7 @@ import pytest
 from nanobot.security.protected_paths import (
     PROTECTED_FILES,
     harden,
+    is_hardened,
     is_protected,
     writable,
 )
@@ -44,8 +44,18 @@ def test_harden_sets_readonly_mode(tmp_path: Path):
     p = tmp_path / "history.jsonl"
     p.write_text("content", encoding="utf-8")
     harden(p)
-    mode = stat.S_IMODE(p.stat().st_mode)
-    assert mode == 0o444
+    assert is_hardened(p)
+
+
+def test_is_hardened_false_for_writable_file(tmp_path: Path):
+    p = tmp_path / "history.jsonl"
+    p.write_text("x", encoding="utf-8")
+    # default mode is writable
+    assert not is_hardened(p)
+
+
+def test_is_hardened_false_for_missing_file(tmp_path: Path):
+    assert not is_hardened(tmp_path / "absent.jsonl")
 
 
 def test_harden_missing_file_is_noop(tmp_path: Path):
@@ -71,7 +81,7 @@ def test_writable_allows_internal_write_then_rehardens(tmp_path: Path):
     p = tmp_path / "history.jsonl"
     p.write_text("initial", encoding="utf-8")
     harden(p)
-    assert stat.S_IMODE(p.stat().st_mode) == 0o444
+    assert is_hardened(p)
 
     with writable(p):
         # inside: mode must be writable (check portably — Windows reads 0o644 back as 0o666)
@@ -80,7 +90,7 @@ def test_writable_allows_internal_write_then_rehardens(tmp_path: Path):
             f.write("\nmore")
 
     # after: re-hardened
-    assert stat.S_IMODE(p.stat().st_mode) == 0o444
+    assert is_hardened(p)
     assert p.read_text(encoding="utf-8") == "initial\nmore"
 
 
@@ -90,7 +100,7 @@ def test_writable_creates_new_file_and_hardens_it(tmp_path: Path):
     with writable(p):
         p.write_text("fresh", encoding="utf-8")
     assert p.exists()
-    assert stat.S_IMODE(p.stat().st_mode) == 0o444
+    assert is_hardened(p)
 
 
 def test_writable_rehardens_even_on_exception(tmp_path: Path):
@@ -102,7 +112,7 @@ def test_writable_rehardens_even_on_exception(tmp_path: Path):
         with writable(p):
             raise RuntimeError("boom")
 
-    assert stat.S_IMODE(p.stat().st_mode) == 0o444
+    assert is_hardened(p)
 
 
 # ---------------------------------------------------------------------------

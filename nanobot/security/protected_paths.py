@@ -20,6 +20,7 @@ write guard) and is left to a follow-up.
 from __future__ import annotations
 
 import os
+import stat
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -35,6 +36,20 @@ _WRITABLE_MODE = 0o644
 def is_protected(path: Path | str) -> bool:
     """Return True if ``path``'s basename matches a protected file name."""
     return Path(path).name in PROTECTED_FILES
+
+
+def is_hardened(path: Path) -> bool:
+    """Return True if ``path`` exists and is set to the protected (read-only) mode.
+
+    Public assertion helper: callers (tests, diagnostics) can check whether a
+    file is currently in the hardened state without poking ``stat.S_IMODE`` and
+    encoding the magic ``0o444`` value at every call site. Returns ``False`` if
+    the path does not exist or cannot be stat'd.
+    """
+    try:
+        return stat.S_IMODE(path.stat().st_mode) == _PROTECTED_MODE
+    except OSError:
+        return False
 
 
 def harden(path: Path) -> None:
