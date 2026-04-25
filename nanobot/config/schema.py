@@ -213,12 +213,22 @@ class MyToolConfig(Base):
     allow_set: bool = False  # let `my` modify loop state (read-only if False)
 
 
+class ComposioToolConfig(Base):
+    """Composio hosted MCP configuration."""
+
+    enabled: bool = False
+    api_key: str = ""  # Composio project API key
+    mcp_server_id: str = ""  # Composio MCP server/config ID
+    base_url: str = "https://backend.composio.dev/v3/mcp"
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     my: MyToolConfig = Field(default_factory=MyToolConfig)
+    composio: ComposioToolConfig = Field(default_factory=ComposioToolConfig)
     restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)

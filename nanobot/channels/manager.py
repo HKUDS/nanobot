@@ -86,6 +86,8 @@ class ChannelManager:
                     if static_path is not None:
                         kwargs["static_dist_path"] = static_path
                 channel = cls(section, self.bus, **kwargs)
+                if hasattr(channel, "set_root_config"):
+                    channel.set_root_config(self.config)
                 channel.transcription_provider = transcription_provider
                 channel.transcription_api_key = transcription_key
                 channel.transcription_api_base = transcription_base

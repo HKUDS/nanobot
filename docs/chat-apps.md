@@ -17,6 +17,73 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 | **Wecom** | Bot ID + Bot Secret |
 | **Microsoft Teams** | App ID + App Password + public HTTPS endpoint |
 | **Mochat** | Claw token (auto-setup available) |
+| **Sendblue iMessage** | Sendblue API keys + public HTTPS webhook |
+
+<details>
+<summary><b>Sendblue iMessage</b></summary>
+
+The Sendblue channel receives inbound iMessage/SMS webhooks and replies through
+Sendblue's send-message API. It is designed for a small trusted user set and can
+run multiple isolated user profiles behind one Sendblue number.
+
+```json
+{
+  "channels": {
+    "sendblue": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 18791,
+      "webhookPath": "/sendblue/webhook",
+      "webhookSecret": "${SENDBLUE_WEBHOOK_SECRET}",
+      "apiKeyId": "${SENDBLUE_API_KEY_ID}",
+      "apiSecretKey": "${SENDBLUE_API_SECRET_KEY}",
+      "fromNumber": "+15125550100",
+      "typingIndicators": true,
+      "allowFrom": ["+1YOUR_PHONE", "+1GF_PHONE"],
+      "profiles": {
+        "ron": {
+          "phone": "+1YOUR_PHONE",
+          "workspace": "~/.nanobot/profiles/ron",
+          "composioUserId": "ron"
+        },
+        "gf": {
+          "phone": "+1GF_PHONE",
+          "workspace": "~/.nanobot/profiles/gf",
+          "composioUserId": "gf"
+        }
+      }
+    }
+  },
+  "tools": {
+    "composio": {
+      "enabled": true,
+      "apiKey": "${COMPOSIO_API_KEY}",
+      "mcpServerId": "YOUR_COMPOSIO_MCP_SERVER_ID"
+    }
+  }
+}
+```
+
+Point the Sendblue receive webhook at:
+
+```text
+https://your-domain.com/sendblue/webhook?secret=YOUR_WEBHOOK_SECRET
+```
+
+Run this behind HTTPS with a reverse proxy such as Caddy or Nginx:
+
+```text
+your-domain.com {
+  reverse_proxy /sendblue/webhook 127.0.0.1:18791
+}
+```
+
+Each configured profile gets its own workspace, sessions, Dream memory files,
+cron store, and MCP connection set. When `tools.composio.enabled` is true,
+nanobot creates a profile-specific Composio MCP URL using that profile's
+`composioUserId`, so OAuth-heavy tools stay separated per phone number.
+
+</details>
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>

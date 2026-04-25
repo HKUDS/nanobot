@@ -689,6 +689,33 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
+### Composio MCP
+
+For hosted OAuth-heavy tools, you can let nanobot generate profile-specific
+Composio MCP connections. This is used by the Sendblue channel's per-user
+profiles, where each phone number can map to a separate Composio `user_id`.
+
+```json
+{
+  "tools": {
+    "composio": {
+      "enabled": true,
+      "apiKey": "${COMPOSIO_API_KEY}",
+      "mcpServerId": "YOUR_COMPOSIO_MCP_SERVER_ID"
+    }
+  }
+}
+```
+
+The generated MCP endpoint is:
+
+```text
+https://backend.composio.dev/v3/mcp/{mcpServerId}?user_id={composioUserId}
+```
+
+`apiKey` is sent as the `x-api-key` header. Keep it in an environment file
+rather than committing it to `config.json`.
+
 
 
 
