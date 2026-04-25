@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from nanobot.channels.websocket import WebSocketChannel
+from nanobot.config.schema import Config
 from nanobot.session.manager import Session, SessionManager
 
 _PORT = 29900
@@ -72,6 +73,45 @@ def _seed_many(workspace: Path, keys: list[str]) -> SessionManager:
         s.add_message("user", f"hi from {k}")
         sm.save(s)
     return sm
+
+
+class _Headers(dict):
+    def get(self, key: str, default: Any = None) -> Any:
+        return super().get(key, default)
+
+
+class _Request:
+    def __init__(self, path: str = "/", headers: dict[str, str] | None = None) -> None:
+        self.path = path
+        self.headers = _Headers(headers or {})
+
+
+def test_profile_header_maps_to_separate_webui_session_manager(
+    bus: MagicMock,
+    tmp_path: Path,
+) -> None:
+    ch = _ch(
+        bus,
+        profiles={
+            "ron": {
+                "profileId": "you",
+                "workspace": str(tmp_path / "you"),
+                "composioUserId": "you",
+            },
+            "gf": {
+                "profileId": "gf",
+                "workspace": str(tmp_path / "gf"),
+                "composioUserId": "gf",
+            },
+        },
+    )
+    ch.set_root_config(Config())
+
+    assert ch._profile_from_request(_Request(headers={"X-WebAuth-User": "ron"})) == "you"
+    assert ch._profile_from_request(_Request(headers={"X-WebAuth-User": "gf"})) == "gf"
+    assert ch._profile_from_request(_Request(headers={"X-WebAuth-User": "someone"})) is None
+    assert ch._session_manager_for_profile("you") is ch._profile_runtimes["you"].sessions
+    assert ch._session_manager_for_profile("gf") is ch._profile_runtimes["gf"].sessions
 
 
 @pytest.mark.asyncio

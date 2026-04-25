@@ -28,9 +28,15 @@ export async function fetchBootstrap(
  * matters because some WS servers dispatch handshakes based on the literal
  * path, not a normalised form.
  */
-export function deriveWsUrl(wsPath: string, token: string): string {
+export function deriveWsUrl(
+  wsPath: string,
+  token: string,
+  profileId?: string | null,
+): string {
   const path = wsPath && wsPath.startsWith("/") ? wsPath : `/${wsPath || ""}`;
-  const query = `?token=${encodeURIComponent(token)}`;
+  const params = new URLSearchParams({ token });
+  if (profileId) params.set("profile", profileId);
+  const query = `?${params.toString()}`;
   if (typeof window === "undefined") {
     return `ws://127.0.0.1:8765${path}${query}`;
   }

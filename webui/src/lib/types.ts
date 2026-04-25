@@ -62,6 +62,7 @@ export interface BootstrapResponse {
   ws_path: string;
   expires_in: number;
   model_name?: string | null;
+  profile_id?: string | null;
 }
 
 export type ConnectionStatus =
@@ -73,7 +74,7 @@ export type ConnectionStatus =
   | "error";
 
 export type InboundEvent =
-  | { event: "ready"; chat_id: string; client_id: string }
+  | { event: "ready"; chat_id: string; client_id: string; profile_id?: string | null }
   | { event: "attached"; chat_id: string }
   | {
       event: "message";

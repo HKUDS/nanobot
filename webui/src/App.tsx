@@ -47,13 +47,17 @@ export default function App() {
       try {
         const boot = await fetchBootstrap();
         if (cancelled) return;
-        const url = deriveWsUrl(boot.ws_path, boot.token);
+        const url = deriveWsUrl(boot.ws_path, boot.token, boot.profile_id);
         const client = new NanobotClient({
           url,
           onReauth: async () => {
             try {
               const refreshed = await fetchBootstrap();
-              return deriveWsUrl(refreshed.ws_path, refreshed.token);
+              return deriveWsUrl(
+                refreshed.ws_path,
+                refreshed.token,
+                refreshed.profile_id,
+              );
             } catch {
               return null;
             }

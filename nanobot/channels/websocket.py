@@ -29,19 +29,28 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
+from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.composio import (
+    extract_tool_router_mcp_url,
+    extract_tool_router_session_id,
+    get_or_create_tool_router_session,
+)
+from nanobot.bus.events import InboundMessage
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
-from nanobot.config.schema import Base
+from nanobot.config.schema import Base, Config, MCPServerConfig
+from nanobot.session.manager import SessionManager
 from nanobot.utils.helpers import safe_filename
+from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.utils.media_decode import (
     FileSizeExceeded,
     save_base64_data_url,
 )
 
 if TYPE_CHECKING:
-    from nanobot.session.manager import SessionManager
+    pass
 
 
 def _strip_trailing_slash(path: str) -> str:
@@ -94,6 +103,9 @@ class WebSocketConfig(Base):
     ping_timeout_s: float = Field(default=20.0, ge=5.0, le=300.0)
     ssl_certfile: str = ""
     ssl_keyfile: str = ""
+    profile_header: str = "X-WebAuth-User"
+    profile_default: str = ""
+    profiles: dict[str, "WebSocketProfileConfig"] = Field(default_factory=dict)
 
     @field_validator("path")
     @classmethod
@@ -119,6 +131,18 @@ class WebSocketConfig(Base):
         if _normalize_config_path(self.token_issue_path) == _normalize_config_path(self.path):
             raise ValueError("token_issue_path must differ from path (the WebSocket upgrade path)")
         return self
+
+
+class WebSocketProfileConfig(Base):
+    """One authenticated Web UI profile.
+
+    The dictionary key is normally the Caddy/basic-auth username. ``profile_id``
+    is the stable nanobot profile id used for logs and token binding.
+    """
+
+    profile_id: str = ""
+    workspace: str = ""
+    composio_user_id: str = ""
 
 
 def _http_json_response(data: dict[str, Any], *, status: int = 200) -> Response:
@@ -371,6 +395,184 @@ def _issue_route_secret_matches(headers: Any, configured_secret: str) -> bool:
     return hmac.compare_digest(header_token.strip(), configured_secret)
 
 
+_COMPOSIO_ROUTER_START = "<!-- composio-tool-router:start -->"
+_COMPOSIO_ROUTER_END = "<!-- composio-tool-router:end -->"
+
+
+def _replace_marked_section(existing: str, section: str) -> str:
+    block = f"{_COMPOSIO_ROUTER_START}\n{section.rstrip()}\n{_COMPOSIO_ROUTER_END}\n"
+    start = existing.find(_COMPOSIO_ROUTER_START)
+    end = existing.find(_COMPOSIO_ROUTER_END)
+    if start != -1 and end != -1 and end > start:
+        end += len(_COMPOSIO_ROUTER_END)
+        suffix = existing[end:]
+        if suffix.startswith("\n"):
+            suffix = suffix[1:]
+        return f"{existing[:start]}{block}{suffix}"
+    if existing and not existing.endswith("\n"):
+        existing += "\n"
+    return f"{existing}{block}"
+
+
+def _profile_workspace(profile_id: str, profile: WebSocketProfileConfig) -> Path:
+    if profile.workspace:
+        return Path(profile.workspace).expanduser()
+    return Path.home() / ".nanobot" / "profiles" / profile_id
+
+
+class _WebSocketProfileRuntime:
+    """Owns one isolated AgentLoop/workspace for an authenticated Web UI user."""
+
+    def __init__(
+        self,
+        *,
+        profile_id: str,
+        profile: WebSocketProfileConfig,
+        root_config: Config,
+        channel: "WebSocketChannel",
+    ) -> None:
+        self.profile_id = profile_id
+        self.profile = profile
+        self.root_config = root_config
+        self.channel = channel
+        self.workspace = _profile_workspace(profile_id, profile)
+        self.sessions = SessionManager(self.workspace)
+        self.bus = MessageBus()
+        self.provider = None
+        self.agent: AgentLoop | None = None
+        self._tasks: list[asyncio.Task] = []
+        self._prepared_config: Config | None = None
+        self._running = False
+
+    async def _profile_config(self) -> Config:
+        cfg = self.root_config.model_copy(deep=True)
+        cfg.agents.defaults.workspace = str(self.workspace)
+        composio = cfg.tools.composio
+        composio.user_id = self.profile.composio_user_id or self.profile_id
+        if composio.enabled and composio.api_key and composio.mode == "toolRouter":
+            router_url = ""
+            try:
+                router_session = await get_or_create_tool_router_session(
+                    composio,
+                    workspace=self.workspace,
+                )
+                composio.tool_router_session_id = extract_tool_router_session_id(router_session)
+                router_url = extract_tool_router_mcp_url(router_session)
+            except Exception as exc:
+                logger.warning(
+                    "WebSocket Composio Tool Router setup failed for profile '{}': {}",
+                    self.profile_id,
+                    exc,
+                )
+            if router_url:
+                cfg.tools.mcp_servers = dict(cfg.tools.mcp_servers)
+                cfg.tools.mcp_servers["composio"] = MCPServerConfig(
+                    type="streamableHttp",
+                    url=router_url,
+                    headers={"x-api-key": composio.api_key},
+                )
+        elif composio.enabled and composio.api_key and composio.mcp_server_id:
+            base = composio.base_url.rstrip("/")
+            server_id = composio.mcp_server_id.strip("/")
+            cfg.tools.mcp_servers = dict(cfg.tools.mcp_servers)
+            cfg.tools.mcp_servers["composio"] = MCPServerConfig(
+                type="streamableHttp",
+                url=f"{base}/{server_id}?user_id={composio.user_id}",
+                headers={"x-api-key": composio.api_key},
+            )
+        return cfg
+
+    def _make_provider(self, cfg: Config):
+        from nanobot.nanobot import _make_provider
+
+        return _make_provider(cfg)
+
+    def _make_agent(self, cfg: Config) -> AgentLoop:
+        defaults = cfg.agents.defaults
+        return AgentLoop(
+            bus=self.bus,
+            provider=self.provider,
+            workspace=self.workspace,
+            model=defaults.model,
+            max_iterations=defaults.max_tool_iterations,
+            context_window_tokens=defaults.context_window_tokens,
+            context_block_limit=defaults.context_block_limit,
+            max_tool_result_chars=defaults.max_tool_result_chars,
+            provider_retry_mode=defaults.provider_retry_mode,
+            web_config=cfg.tools.web,
+            exec_config=cfg.tools.exec,
+            restrict_to_workspace=cfg.tools.restrict_to_workspace,
+            session_manager=self.sessions,
+            mcp_servers=cfg.tools.mcp_servers,
+            channels_config=cfg.channels,
+            timezone=defaults.timezone,
+            unified_session=False,
+            disabled_skills=defaults.disabled_skills,
+            session_ttl_minutes=defaults.session_ttl_minutes,
+            tools_config=cfg.tools,
+        )
+
+    def _write_composio_tool_router_notes(self) -> None:
+        if not self.root_config.tools.composio.enabled:
+            return
+        section = """## Composio Tool Router
+
+- When using Composio Tool Router MCP tools, always call `COMPOSIO_SEARCH_TOOLS` before `COMPOSIO_MULTI_EXECUTE_TOOL` for each new workflow.
+- Never invent Composio tool slugs or argument fields. Only execute tool slugs returned by `COMPOSIO_SEARCH_TOOLS` or confirmed by `COMPOSIO_GET_TOOL_SCHEMAS`.
+- If `COMPOSIO_MULTI_EXECUTE_TOOL` returns `Tool ... not found`, search again with a more direct query and retry with a returned slug. Do not tell the user the tool is unavailable until search confirms no matching tool exists.
+- For Google Calendar create/update/delete requests, search for the exact operation first, such as `create Google Calendar event`, `update Google Calendar event`, or `delete Google Calendar event`.
+- If search says a toolkit has no active connection, use `composio_connect` to create the auth link for that user before executing the action. In chat channels, `composio_connect` sends a setup instruction and the raw auth URL as two separate messages.
+- Preserve the `session_id` returned by Composio meta tools in later Composio meta tool calls for the same workflow."""
+        path = self.workspace / "TOOLS.md"
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        path.write_text(_replace_marked_section(existing, section), encoding="utf-8")
+
+    async def start(self) -> None:
+        if self._running:
+            return
+        self._running = True
+        sync_workspace_templates(self.workspace)
+        self._write_composio_tool_router_notes()
+        self._prepared_config = await self._profile_config()
+        self.provider = self._make_provider(self._prepared_config)
+        self.agent = self._make_agent(self._prepared_config)
+        await self.agent._connect_mcp()
+        self._tasks = [
+            asyncio.create_task(self.agent.run()),
+            asyncio.create_task(self._dispatch_outbound()),
+        ]
+        logger.info("WebSocket profile '{}' started at {}", self.profile_id, self.workspace)
+
+    async def publish_inbound(self, msg: InboundMessage) -> None:
+        await self.start()
+        await self.bus.publish_inbound(msg)
+
+    async def _dispatch_outbound(self) -> None:
+        while self._running:
+            try:
+                msg = await asyncio.wait_for(self.bus.consume_outbound(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                break
+            if msg.metadata.get("_stream_delta") or msg.metadata.get("_stream_end"):
+                await self.channel.send_delta(msg.chat_id, msg.content, msg.metadata)
+                continue
+            await self.channel.send(msg)
+
+    async def stop(self) -> None:
+        self._running = False
+        for task in self._tasks:
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks.clear()
+        if self.agent is not None:
+            await self.agent.close_mcp()
+            self.agent.stop()
+        self.sessions.flush_all()
+
+
 class WebSocketChannel(BaseChannel):
     """Run a local WebSocket server; forward text/JSON messages to the message bus."""
 
@@ -397,11 +599,16 @@ class WebSocketChannel(BaseChannel):
         self._conn_default: dict[Any, str] = {}
         # Single-use tokens consumed at WebSocket handshake.
         self._issued_tokens: dict[str, float] = {}
+        self._issued_token_profiles: dict[str, str] = {}
         # Multi-use tokens for the embedded webui's REST surface; checked but not consumed.
         self._api_tokens: dict[str, float] = {}
+        self._api_token_profiles: dict[str, str] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
         self._session_manager = session_manager
+        self._root_config: Config | None = None
+        self._profile_runtimes: dict[str, _WebSocketProfileRuntime] = {}
+        self._profile_aliases: dict[str, str] = {}
         self._static_dist_path: Path | None = (
             static_dist_path.resolve() if static_dist_path is not None else None
         )
@@ -446,8 +653,58 @@ class WebSocketChannel(BaseChannel):
     def default_config(cls) -> dict[str, Any]:
         return WebSocketConfig().model_dump(by_alias=True)
 
+    def set_root_config(self, config: Config) -> None:
+        self._root_config = config
+        self._profile_aliases.clear()
+        self._profile_runtimes.clear()
+        for auth_user, profile in self.config.profiles.items():
+            profile_id = profile.profile_id or auth_user
+            self._profile_aliases[auth_user] = profile_id
+            self._profile_aliases[profile_id] = profile_id
+            self._profile_runtimes[profile_id] = _WebSocketProfileRuntime(
+                profile_id=profile_id,
+                profile=profile,
+                root_config=config,
+                channel=self,
+            )
+
     def _expected_path(self) -> str:
         return _normalize_config_path(self.config.path)
+
+    def _profile_from_request(
+        self,
+        request: WsRequest,
+        query: dict[str, list[str]] | None = None,
+    ) -> str | None:
+        if not self.config.profiles:
+            return ""
+
+        query = query or _parse_query(request.path)
+        candidate = (_query_first(query, "profile") or "").strip()
+        if not candidate:
+            header_name = self.config.profile_header.strip() or "X-WebAuth-User"
+            candidate = (
+                request.headers.get(header_name)
+                or request.headers.get(header_name.lower())
+                or request.headers.get("X-WebAuth-User")
+                or request.headers.get("x-webauth-user")
+                or request.headers.get("Remote-User")
+                or request.headers.get("remote-user")
+                or request.headers.get("X-Forwarded-User")
+                or request.headers.get("x-forwarded-user")
+                or ""
+            ).strip()
+        if not candidate:
+            candidate = self.config.profile_default.strip()
+        if not candidate:
+            return None
+        return self._profile_aliases.get(candidate)
+
+    def _session_manager_for_profile(self, profile_id: str | None) -> SessionManager | None:
+        if profile_id:
+            runtime = self._profile_runtimes.get(profile_id)
+            return runtime.sessions if runtime is not None else None
+        return self._session_manager
 
     def _build_ssl_context(self) -> ssl.SSLContext | None:
         cert = self.config.ssl_certfile.strip()
@@ -470,6 +727,7 @@ class WebSocketChannel(BaseChannel):
         for token_key, expiry in list(self._issued_tokens.items()):
             if now > expiry:
                 self._issued_tokens.pop(token_key, None)
+                self._issued_token_profiles.pop(token_key, None)
 
     def _take_issued_token_if_valid(self, token_value: str | None) -> bool:
         """Validate and consume one issued token (single use per connection attempt).
@@ -481,11 +739,22 @@ class WebSocketChannel(BaseChannel):
             return False
         self._purge_expired_issued_tokens()
         expiry = self._issued_tokens.pop(token_value, None)
+        self._issued_token_profiles.pop(token_value, None)
         if expiry is None:
             return False
         if time.monotonic() > expiry:
             return False
         return True
+
+    def _take_issued_token_profile(self, token_value: str | None) -> str | None:
+        if not token_value:
+            return None
+        self._purge_expired_issued_tokens()
+        expiry = self._issued_tokens.pop(token_value, None)
+        profile_id = self._issued_token_profiles.pop(token_value, "")
+        if expiry is None or time.monotonic() > expiry:
+            return None
+        return profile_id
 
     def _handle_token_issue_http(self, connection: Any, request: Any) -> Any:
         secret = self.config.token_issue_secret.strip()
@@ -525,7 +794,7 @@ class WebSocketChannel(BaseChannel):
 
         # 2. WebUI bootstrap: localhost-only, mints tokens for the embedded UI.
         if got == "/webui/bootstrap":
-            return self._handle_webui_bootstrap(connection)
+            return self._handle_webui_bootstrap(connection, request, query)
 
         # 3. REST surface for the embedded UI.
         if got == "/api/sessions":
@@ -572,29 +841,42 @@ class WebSocketChannel(BaseChannel):
 
     # -- HTTP route handlers ------------------------------------------------
 
-    def _check_api_token(self, request: WsRequest) -> bool:
-        """Validate a request against the API token pool (multi-use, TTL-bound)."""
+    def _api_profile_id(self, request: WsRequest) -> str | None:
+        """Validate API token and return its bound profile id, if any."""
         self._purge_expired_api_tokens()
         token = _bearer_token(request.headers) or _query_first(
             _parse_query(request.path), "token"
         )
         if not token:
-            return False
+            return None
         expiry = self._api_tokens.get(token)
         if expiry is None or time.monotonic() > expiry:
             self._api_tokens.pop(token, None)
-            return False
-        return True
+            self._api_token_profiles.pop(token, None)
+            return None
+        return self._api_token_profiles.get(token, "")
+
+    def _check_api_token(self, request: WsRequest) -> bool:
+        return self._api_profile_id(request) is not None
 
     def _purge_expired_api_tokens(self) -> None:
         now = time.monotonic()
         for token_key, expiry in list(self._api_tokens.items()):
             if now > expiry:
                 self._api_tokens.pop(token_key, None)
+                self._api_token_profiles.pop(token_key, None)
 
-    def _handle_webui_bootstrap(self, connection: Any) -> Response:
+    def _handle_webui_bootstrap(
+        self,
+        connection: Any,
+        request: WsRequest,
+        query: dict[str, list[str]],
+    ) -> Response:
         if not _is_localhost(connection):
             return _http_error(403, "webui bootstrap is localhost-only")
+        profile_id = self._profile_from_request(request, query)
+        if profile_id is None:
+            return _http_error(403, "profile not authorized")
         # Cap outstanding tokens to avoid runaway growth from a misbehaving client.
         self._purge_expired_issued_tokens()
         self._purge_expired_api_tokens()
@@ -612,22 +894,27 @@ class WebSocketChannel(BaseChannel):
         # Same string registered in both pools: the WS handshake consumes one copy
         # while the REST surface keeps validating the other until TTL expiry.
         self._issued_tokens[token] = expiry
+        self._issued_token_profiles[token] = profile_id
         self._api_tokens[token] = expiry
+        self._api_token_profiles[token] = profile_id
         return _http_json_response(
             {
                 "token": token,
                 "ws_path": self._expected_path(),
                 "expires_in": self.config.token_ttl_s,
                 "model_name": _read_webui_model_name(),
+                "profile_id": profile_id or None,
             }
         )
 
     def _handle_sessions_list(self, request: WsRequest) -> Response:
-        if not self._check_api_token(request):
+        profile_id = self._api_profile_id(request)
+        if profile_id is None:
             return _http_error(401, "Unauthorized")
-        if self._session_manager is None:
+        session_manager = self._session_manager_for_profile(profile_id)
+        if session_manager is None:
             return _http_error(503, "session manager unavailable")
-        sessions = self._session_manager.list_sessions()
+        sessions = session_manager.list_sessions()
         # The webui is only meaningful for websocket-channel chats — CLI /
         # Slack / Lark / Discord sessions can't be resumed from the browser,
         # so leaking them into the sidebar is just noise. Filter to the
@@ -645,9 +932,11 @@ class WebSocketChannel(BaseChannel):
         return key.startswith("websocket:")
 
     def _handle_session_messages(self, request: WsRequest, key: str) -> Response:
-        if not self._check_api_token(request):
+        profile_id = self._api_profile_id(request)
+        if profile_id is None:
             return _http_error(401, "Unauthorized")
-        if self._session_manager is None:
+        session_manager = self._session_manager_for_profile(profile_id)
+        if session_manager is None:
             return _http_error(503, "session manager unavailable")
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
@@ -657,7 +946,7 @@ class WebSocketChannel(BaseChannel):
         # caller probe arbitrary CLI / Slack / Lark history by handcrafted URL.
         if not self._is_webui_session_key(decoded_key):
             return _http_error(404, "session not found")
-        data = self._session_manager.read_session_file(decoded_key)
+        data = session_manager.read_session_file(decoded_key)
         if data is None:
             return _http_error(404, "session not found")
         # Decorate persisted user messages with signed media URLs so the
@@ -794,9 +1083,11 @@ class WebSocketChannel(BaseChannel):
         )
 
     def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
-        if not self._check_api_token(request):
+        profile_id = self._api_profile_id(request)
+        if profile_id is None:
             return _http_error(401, "Unauthorized")
-        if self._session_manager is None:
+        session_manager = self._session_manager_for_profile(profile_id)
+        if session_manager is None:
             return _http_error(503, "session manager unavailable")
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
@@ -806,7 +1097,7 @@ class WebSocketChannel(BaseChannel):
         # JSONL, so keep the blast radius narrow and explicit.
         if not self._is_webui_session_key(decoded_key):
             return _http_error(404, "session not found")
-        deleted = self._session_manager.delete_session(decoded_key)
+        deleted = session_manager.delete_session(decoded_key)
         return _http_json_response({"deleted": bool(deleted)})
 
     def _serve_static(self, request_path: str) -> Response | None:
@@ -856,21 +1147,28 @@ class WebSocketChannel(BaseChannel):
     def _authorize_websocket_handshake(self, connection: Any, query: dict[str, list[str]]) -> Any:
         supplied = _query_first(query, "token")
         static_token = self.config.token.strip()
+        requested_profile = (self._profile_aliases.get((_query_first(query, "profile") or "").strip()) or "")
 
         if static_token:
             if supplied and hmac.compare_digest(supplied, static_token):
                 return None
-            if supplied and self._take_issued_token_if_valid(supplied):
+            issued_profile = self._take_issued_token_profile(supplied)
+            if issued_profile is not None:
+                if issued_profile and requested_profile and issued_profile != requested_profile:
+                    return connection.respond(401, "Unauthorized")
                 return None
             return connection.respond(401, "Unauthorized")
 
         if self.config.websocket_requires_token:
-            if supplied and self._take_issued_token_if_valid(supplied):
+            issued_profile = self._take_issued_token_profile(supplied)
+            if issued_profile is not None:
+                if issued_profile and requested_profile and issued_profile != requested_profile:
+                    return connection.respond(401, "Unauthorized")
                 return None
             return connection.respond(401, "Unauthorized")
 
         if supplied:
-            self._take_issued_token_if_valid(supplied)
+            self._take_issued_token_profile(supplied)
         return None
 
     async def start(self) -> None:
@@ -926,6 +1224,9 @@ class WebSocketChannel(BaseChannel):
         request = connection.request
         path_part = request.path if request else "/"
         _, query = _parse_request_path(path_part)
+        profile_id = ""
+        if request is not None:
+            profile_id = self._profile_from_request(request, query) or ""
         client_id_raw = _query_first(query, "client_id")
         client_id = client_id_raw.strip() if client_id_raw else ""
         if not client_id:
@@ -943,6 +1244,7 @@ class WebSocketChannel(BaseChannel):
                         "event": "ready",
                         "chat_id": default_chat_id,
                         "client_id": client_id,
+                        "profile_id": profile_id or None,
                     },
                     ensure_ascii=False,
                 )
@@ -961,7 +1263,7 @@ class WebSocketChannel(BaseChannel):
 
                 envelope = _parse_envelope(raw)
                 if envelope is not None:
-                    await self._dispatch_envelope(connection, client_id, envelope)
+                    await self._dispatch_envelope(connection, client_id, envelope, profile_id)
                     continue
 
                 content = _parse_inbound_payload(raw)
@@ -972,6 +1274,7 @@ class WebSocketChannel(BaseChannel):
                     chat_id=default_chat_id,
                     content=content,
                     metadata={"remote": getattr(connection, "remote_address", None)},
+                    profile_id=profile_id,
                 )
         except Exception as e:
             logger.debug("websocket connection ended: {}", e)
@@ -1051,6 +1354,7 @@ class WebSocketChannel(BaseChannel):
         connection: Any,
         client_id: str,
         envelope: dict[str, Any],
+        profile_id: str = "",
     ) -> None:
         """Route one typed inbound envelope (``new_chat`` / ``attach`` / ``message``)."""
         t = envelope.get("type")
@@ -1107,9 +1411,48 @@ class WebSocketChannel(BaseChannel):
                 content=content,
                 media=media_paths or None,
                 metadata={"remote": getattr(connection, "remote_address", None)},
+                profile_id=profile_id,
             )
             return
         await self._send_event(connection, "error", detail=f"unknown type: {t!r}")
+
+    async def _handle_message(
+        self,
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        media: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_key: str | None = None,
+        profile_id: str = "",
+    ) -> None:
+        if profile_id:
+            runtime = self._profile_runtimes.get(profile_id)
+            if runtime is None:
+                logger.warning("websocket: unknown profile '{}'", profile_id)
+                return
+            meta = metadata or {}
+            if self.supports_streaming:
+                meta = {**meta, "_wants_stream": True}
+            msg = InboundMessage(
+                channel=self.name,
+                sender_id=str(sender_id),
+                chat_id=str(chat_id),
+                content=content,
+                media=media or [],
+                metadata=meta,
+                session_key_override=session_key,
+            )
+            await runtime.publish_inbound(msg)
+            return
+        await super()._handle_message(
+            sender_id=sender_id,
+            chat_id=chat_id,
+            content=content,
+            media=media,
+            metadata=metadata,
+            session_key=session_key,
+        )
 
     async def stop(self) -> None:
         if not self._running:
@@ -1123,11 +1466,18 @@ class WebSocketChannel(BaseChannel):
             except Exception as e:
                 logger.warning("websocket: server task error during shutdown: {}", e)
             self._server_task = None
+        if self._profile_runtimes:
+            await asyncio.gather(
+                *(runtime.stop() for runtime in self._profile_runtimes.values()),
+                return_exceptions=True,
+            )
         self._subs.clear()
         self._conn_chats.clear()
         self._conn_default.clear()
         self._issued_tokens.clear()
+        self._issued_token_profiles.clear()
         self._api_tokens.clear()
+        self._api_token_profiles.clear()
 
     async def _safe_send_to(self, connection: Any, raw: str, *, label: str = "") -> None:
         """Send a raw frame to one connection, cleaning up on ConnectionClosed."""
