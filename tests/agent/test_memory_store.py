@@ -2,13 +2,13 @@
 
 import json
 import os
-import stat
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.security.protected_paths import is_hardened
 
 
 @pytest.fixture
@@ -323,13 +323,11 @@ class TestProtectedFileHardening:
 
     def test_history_file_is_readonly_after_first_write(self, store):
         store.append_history("event 1")
-        mode = stat.S_IMODE(store.history_file.stat().st_mode)
-        assert mode == 0o444
+        assert is_hardened(store.history_file)
 
     def test_dream_cursor_is_readonly_after_set(self, store):
         store.set_last_dream_cursor(42)
-        mode = stat.S_IMODE(store._dream_cursor_file.stat().st_mode)
-        assert mode == 0o444
+        assert is_hardened(store.memory_dir / ".dream_cursor")
 
     def test_direct_external_write_to_history_is_blocked(self, store):
         """Simulate what a bypassed shell command (``tee``/``>``) would do."""
@@ -344,7 +342,7 @@ class TestProtectedFileHardening:
     def test_direct_external_write_to_dream_cursor_is_blocked(self, store):
         store.set_last_dream_cursor(7)
         with pytest.raises(PermissionError):
-            fd = os.open(store._dream_cursor_file, os.O_WRONLY | os.O_TRUNC)
+            fd = os.open(store.memory_dir / ".dream_cursor", os.O_WRONLY | os.O_TRUNC)
             try:
                 os.write(fd, b"99999")
             finally:
@@ -359,7 +357,7 @@ class TestProtectedFileHardening:
         assert len(entries) == 3
         assert [e["content"] for e in entries] == ["first", "second", "third"]
         # and the file remains hardened between writes
-        assert stat.S_IMODE(store.history_file.stat().st_mode) == 0o444
+        assert is_hardened(store.history_file)
 
     def test_compact_history_preserves_hardening(self, store):
         """compact_history overwrites via _write_entries — must also re-harden."""
@@ -367,7 +365,7 @@ class TestProtectedFileHardening:
         for i in range(5):
             store.append_history(f"event {i}")
         store.compact_history()
-        assert stat.S_IMODE(store.history_file.stat().st_mode) == 0o444
+        assert is_hardened(store.history_file)
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 2
 
@@ -382,4 +380,4 @@ class TestProtectedFileHardening:
         assert os.access(legacy_history, os.W_OK)
 
         MemoryStore(tmp_path)
-        assert stat.S_IMODE(legacy_history.stat().st_mode) == 0o444
+        assert is_hardened(legacy_history)
