@@ -313,7 +313,8 @@ Uses **WebSocket** long connection — no public IP required.
       "doneEmoji": "DONE",
       "toolHintPrefix": "🔧",
       "streaming": true,
-      "domain": "feishu"
+      "domain": "feishu",
+      "latex_rendering": false
     }
   }
 }
