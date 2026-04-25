@@ -709,8 +709,8 @@ class OpenAICompatProvider(LLMProvider):
             finish_reason = str(choice0.get("finish_reason") or "stop")
 
             raw_tool_calls: list[Any] = []
-            # StepFun Plan: fallback to reasoning field when content is empty
-            if not content and msg0.get("reasoning"):
+            # StepFun: fallback to reasoning field when content is empty
+            if not content and msg0.get("reasoning") and self._spec and self._spec.reasoning_as_content:
                 content = self._extract_text_content(msg0.get("reasoning"))
             reasoning_content = msg0.get("reasoning_content")
             if not reasoning_content and msg0.get("reasoning"):
@@ -770,7 +770,7 @@ class OpenAICompatProvider(LLMProvider):
                     finish_reason = ch.finish_reason
             if not content and m.content:
                 content = m.content
-            if not content and getattr(m, "reasoning", None):
+            if not content and getattr(m, "reasoning", None) and self._spec and self._spec.reasoning_as_content:
                 content = m.reasoning
 
         tool_calls = []
