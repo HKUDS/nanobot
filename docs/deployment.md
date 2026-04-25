@@ -95,17 +95,17 @@ If you edit the `.service` file itself, run `systemctl --user daemon-reload` bef
 
 ## macOS LaunchAgent
 
-On macOS, run the gateway as a `launchd` user agent so it starts automatically after login and restarts if it exits unexpectedly.
+Use a LaunchAgent when you want `nanobot gateway` to stay online after you log in, without keeping a terminal open.
 
-**1. Find the nanobot binary path:**
+**1. Get the absolute `nanobot` path:**
 
 ```bash
 which nanobot   # e.g. /Users/youruser/.local/bin/nanobot
 ```
 
-Use this absolute `nanobot` path in `ProgramArguments` so the console script keeps the Python environment from your install method.
+Use that exact path in the plist. It keeps the Python environment from your install method.
 
-**2. Create the LaunchAgent plist** at `~/Library/LaunchAgents/ai.nanobot.gateway.plist` (replace paths if needed):
+**2. Create `~/Library/LaunchAgents/ai.nanobot.gateway.plist`:**
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -140,14 +140,6 @@ Use this absolute `nanobot` path in `ProgramArguments` so the console script kee
 
   <key>StandardErrorPath</key>
   <string>/Users/youruser/.nanobot/logs/gateway.error.log</string>
-
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key>
-    <string>/Users/youruser/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <key>PYTHONUNBUFFERED</key>
-    <string>1</string>
-  </dict>
 </dict>
 </plist>
 ```
@@ -155,7 +147,7 @@ Use this absolute `nanobot` path in `ProgramArguments` so the console script kee
 **3. Load and start it:**
 
 ```bash
-mkdir -p ~/.nanobot/logs
+mkdir -p ~/Library/LaunchAgents ~/.nanobot/logs
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.nanobot.gateway.plist
 launchctl enable gui/$(id -u)/ai.nanobot.gateway
 launchctl kickstart -k gui/$(id -u)/ai.nanobot.gateway
@@ -165,11 +157,10 @@ launchctl kickstart -k gui/$(id -u)/ai.nanobot.gateway
 
 ```bash
 launchctl list | grep ai.nanobot.gateway
-launchctl kickstart -k gui/$(id -u)/ai.nanobot.gateway
+launchctl kickstart -k gui/$(id -u)/ai.nanobot.gateway   # restart
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/ai.nanobot.gateway.plist
-log stream --process nanobot
 ```
 
-If you edit the plist itself, run `launchctl bootout ...` and `launchctl bootstrap ...` again so `launchd` reloads the updated definition.
+After editing the plist, run `launchctl bootout ...` and `launchctl bootstrap ...` again.
 
-> **Note:** if `launchctl kickstart` fails with an "address already in use" error, you probably still have a manually started `nanobot gateway` process running on the same port. Stop the manual process first, then kickstart the LaunchAgent again.
+> **Note:** if startup fails with "address already in use", stop the manually started `nanobot gateway` process first.
