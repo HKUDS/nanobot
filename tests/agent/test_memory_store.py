@@ -1,11 +1,14 @@
 """Tests for the restructured MemoryStore — pure file I/O layer."""
 
 import json
+import os
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.security.protected_paths import is_hardened
 
 
 @pytest.fixture
@@ -313,3 +316,68 @@ class TestLegacyHistoryMigration:
         assert entries[0]["timestamp"] == "2026-04-01 10:00"
         assert "Broken" in entries[0]["content"]
         assert "migration." in entries[0]["content"]
+
+
+class TestProtectedFileHardening:
+    """history.jsonl and .dream_cursor are kept read-only at the OS level."""
+
+    def test_history_file_is_readonly_after_first_write(self, store):
+        store.append_history("event 1")
+        assert is_hardened(store.history_file)
+
+    def test_dream_cursor_is_readonly_after_set(self, store):
+        store.set_last_dream_cursor(42)
+        assert is_hardened(store.memory_dir / ".dream_cursor")
+
+    def test_direct_external_write_to_history_is_blocked(self, store):
+        """Simulate what a bypassed shell command (``tee``/``>``) would do."""
+        store.append_history("legit entry")
+        with pytest.raises(PermissionError):
+            fd = os.open(store.history_file, os.O_WRONLY | os.O_APPEND)
+            try:
+                os.write(fd, b"PWNED\n")
+            finally:
+                os.close(fd)
+
+    def test_direct_external_write_to_dream_cursor_is_blocked(self, store):
+        store.set_last_dream_cursor(7)
+        with pytest.raises(PermissionError):
+            fd = os.open(store.memory_dir / ".dream_cursor", os.O_WRONLY | os.O_TRUNC)
+            try:
+                os.write(fd, b"99999")
+            finally:
+                os.close(fd)
+
+    def test_internal_append_still_works_after_hardening(self, store):
+        """MemoryStore's own writes keep working via the writable() context."""
+        store.append_history("first")
+        store.append_history("second")
+        store.append_history("third")
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 3
+        assert [e["content"] for e in entries] == ["first", "second", "third"]
+        # and the file remains hardened between writes
+        assert is_hardened(store.history_file)
+
+    def test_compact_history_preserves_hardening(self, store):
+        """compact_history overwrites via _write_entries — must also re-harden."""
+        store.max_history_entries = 2
+        for i in range(5):
+            store.append_history(f"event {i}")
+        store.compact_history()
+        assert is_hardened(store.history_file)
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert len(entries) == 2
+
+    def test_hardening_applies_on_existing_installation(self, tmp_path: Path):
+        """Upgrading over a pre-existing 0o644 history.jsonl hardens it on init."""
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        legacy_history = memory_dir / "history.jsonl"
+        legacy_history.write_text('{"cursor": 1, "timestamp": "x", "content": "y"}\n', encoding="utf-8")
+        os.chmod(legacy_history, 0o644)
+        # Windows maps any writable mode to 0o666 on read-back; check writability portably.
+        assert os.access(legacy_history, os.W_OK)
+
+        MemoryStore(tmp_path)
+        assert is_hardened(legacy_history)
