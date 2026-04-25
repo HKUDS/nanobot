@@ -130,10 +130,44 @@ describe("useSessions", () => {
       { url: "/api/media/sig-1/payload-1", name: "snap.png" },
       { url: "/api/media/sig-2/payload-2", name: "diag.jpg" },
     ]);
+    expect(first.media).toEqual([
+      { kind: "image", url: "/api/media/sig-1/payload-1", name: "snap.png" },
+      { kind: "image", url: "/api/media/sig-2/payload-2", name: "diag.jpg" },
+    ]);
     expect(second.role).toBe("assistant");
     expect(second.images).toBeUndefined();
     expect(third.role).toBe("user");
     expect(third.images).toBeUndefined();
+  });
+
+  it("hydrates historical assistant video media_urls into media attachments", async () => {
+    vi.mocked(api.fetchSessionMessages).mockResolvedValue({
+      key: "websocket:chat-video",
+      created_at: "2026-04-20T10:00:00Z",
+      updated_at: "2026-04-20T10:05:00Z",
+      messages: [
+        {
+          role: "assistant",
+          content: "clip ready",
+          timestamp: "2026-04-20T10:00:01Z",
+          media_urls: [
+            { url: "/api/media/sig-v/payload-v", name: "clip.mp4" },
+          ],
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:chat-video"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.messages[0].role).toBe("assistant");
+    expect(result.current.messages[0].images).toBeUndefined();
+    expect(result.current.messages[0].media).toEqual([
+      { kind: "video", url: "/api/media/sig-v/payload-v", name: "clip.mp4" },
+    ]);
   });
 
   it("keeps the session in the list when delete fails", async () => {

@@ -15,7 +15,7 @@ from nanobot.bus.events import OutboundMessage
         chat_id=StringSchema("Optional: target chat/user ID"),
         media=ArraySchema(
             StringSchema(""),
-            description="Optional: list of file paths to attach (images, audio, documents)",
+            description="Optional: list of file paths to attach (images, video, audio, documents)",
         ),
         buttons=ArraySchema(
             ArraySchema(StringSchema("Button label")),

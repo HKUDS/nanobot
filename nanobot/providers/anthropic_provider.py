@@ -436,6 +436,10 @@ class AnthropicProvider(LLMProvider):
         max_tokens = max(1, max_tokens)
         thinking_enabled = bool(reasoning_effort)
 
+        # claude-opus-4-7 deprecated the `temperature` parameter entirely — the
+        # API returns 400 if it is present, on any code path.
+        omit_temperature = "opus-4-7" in model_name
+
         kwargs: dict[str, Any] = {
             "model": model_name,
             "messages": anthropic_msgs,
@@ -450,14 +454,16 @@ class AnthropicProvider(LLMProvider):
             # Supported on claude-sonnet-4-6 and claude-opus-4-6.
             # Also auto-enables interleaved thinking between tool calls.
             kwargs["thinking"] = {"type": "adaptive"}
-            kwargs["temperature"] = 1.0
+            if not omit_temperature:
+                kwargs["temperature"] = 1.0
         elif thinking_enabled:
             budget_map = {"low": 1024, "medium": 4096, "high": max(8192, max_tokens)}
             budget = budget_map.get(reasoning_effort.lower(), 4096)
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
             kwargs["max_tokens"] = max(max_tokens, budget + 4096)
-            kwargs["temperature"] = 1.0
-        else:
+            if not omit_temperature:
+                kwargs["temperature"] = 1.0
+        elif not omit_temperature:
             kwargs["temperature"] = temperature
 
         if anthropic_tools:

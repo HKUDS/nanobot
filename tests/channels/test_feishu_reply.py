@@ -202,7 +202,7 @@ def test_reply_message_sync_returns_false_on_exception() -> None:
     ("filename", "expected_msg_type"),
     [
         ("voice.opus", "audio"),
-        ("clip.mp4", "video"),
+        ("clip.mp4", "media"),
         ("report.pdf", "file"),
     ],
 )
