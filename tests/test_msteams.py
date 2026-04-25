@@ -1,4 +1,5 @@
 import json
+import time
 
 import pytest
 
@@ -260,6 +261,17 @@ def test_sanitize_inbound_text_keeps_normal_inline_message(make_channel):
     assert ch._sanitize_inbound_text(activity) == "normal inline message"
 
 
+def test_sanitize_inbound_text_normalizes_nbsp_entities(make_channel):
+    ch = make_channel()
+
+    activity = {
+        "text": "Hello&nbsp;from&nbsp;Teams",
+        "channelData": {},
+    }
+
+    assert ch._sanitize_inbound_text(activity) == "Hello from Teams"
+
+
 def test_sanitize_inbound_text_normalizes_reply_wrapper_without_reply_metadata(make_channel):
     ch = make_channel()
 
@@ -371,7 +383,7 @@ async def test_get_access_token_uses_configured_tenant(make_channel):
 
 
 @pytest.mark.asyncio
-async def test_send_replies_to_activity_when_reply_in_thread_enabled(make_channel):
+async def test_send_posts_to_conversation_with_reply_to_id_when_reply_in_thread_enabled(make_channel):
     ch = make_channel(replyInThread=True)
     fake_http = FakeHttpClient()
     ch._http = fake_http
@@ -387,7 +399,7 @@ async def test_send_replies_to_activity_when_reply_in_thread_enabled(make_channe
 
     assert len(fake_http.calls) == 1
     url, kwargs = fake_http.calls[0]
-    assert url == "https://smba.trafficmanager.net/amer/v3/conversations/conv-123/activities/activity-1"
+    assert url == "https://smba.trafficmanager.net/amer/v3/conversations/conv-123/activities"
     assert kwargs["headers"]["Authorization"] == "Bearer tok"
     assert kwargs["json"]["text"] == "Reply text"
     assert kwargs["json"]["replyToId"] == "activity-1"
@@ -549,6 +561,38 @@ async def test_start_logs_install_hint_when_pyjwt_missing(make_channel, monkeypa
     await ch.start()
 
     assert errors == ["PyJWT not installed. Run: pip install nanobot-ai[msteams]"]
+
+
+def test_save_refs_prunes_webchat_and_stale_refs(make_channel):
+    ch = make_channel()
+    now = time.time()
+    ch._conversation_refs = {
+        "teams-good": ConversationRef(
+            service_url="https://smba.trafficmanager.net/amer/",
+            conversation_id="teams-good",
+            conversation_type="personal",
+            updated_at=now,
+        ),
+        "webchat-bad": ConversationRef(
+            service_url="https://webchat.botframework.com/",
+            conversation_id="webchat-bad",
+            conversation_type=None,
+            updated_at=now,
+        ),
+        "teams-stale": ConversationRef(
+            service_url="https://smba.trafficmanager.net/amer/",
+            conversation_id="teams-stale",
+            conversation_type="personal",
+            updated_at=now - (31 * 24 * 60 * 60),
+        ),
+    }
+
+    ch._save_refs()
+
+    assert set(ch._conversation_refs) == {"teams-good"}
+    saved = json.loads(ch._refs_path.read_text(encoding="utf-8"))
+    assert set(saved) == {"teams-good"}
+    assert saved["teams-good"]["updated_at"] == pytest.approx(now)
 
 
 def test_msteams_default_config_includes_restart_notify_fields():

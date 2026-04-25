@@ -212,12 +212,16 @@ async def _print_interactive_response(
 
 def _print_cli_progress_line(text: str, thinking: ThinkingSpinner | None) -> None:
     """Print a CLI progress line, pausing the spinner if needed."""
+    if not text.strip():
+        return
     with thinking.pause() if thinking else nullcontext():
         console.print(f"  [dim]↳ {text}[/dim]")
 
 
 async def _print_interactive_progress_line(text: str, thinking: ThinkingSpinner | None) -> None:
     """Print an interactive progress line, pausing the spinner if needed."""
+    if not text.strip():
+        return
     with thinking.pause() if thinking else nullcontext():
         await _print_interactive_line(text)
 
