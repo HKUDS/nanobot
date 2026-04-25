@@ -60,6 +60,7 @@ dependencies = [
     "openpyxl>=3.1.0,<4.0.0",
     "python-pptx>=1.0.0,<2.0.0",
     "filelock>=3.25.2",
+    "opentelemetry-api>=1.20.0",
 ]
 
 [project.optional-dependencies]
@@ -88,6 +89,11 @@ discord = [
 ]
 langsmith = [
     "langsmith>=0.1.0",
+]
+observability = [
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
+    "opentelemetry-processor-baggage>=0.50b0",
 ]
 pdf = [
     "pymupdf>=1.25.0",

@@ -668,56 +668,70 @@ class AgentRunner:
             if spec.fail_on_tool_error:
                 return lookup_error + _HINT, event, RuntimeError(lookup_error)
             return lookup_error + _HINT, event, None
-        prepare_call = getattr(spec.tools, "prepare_call", None)
-        tool, params, prep_error = None, tool_call.arguments, None
-        if callable(prepare_call):
+        from opentelemetry.trace import StatusCode
+        from nanobot.observability.tracer import set_tool_attributes, set_tool_result
+
+        with self.provider.tracer.start_as_current_span(f"tool:{tool_call.name}") as span:
+            set_tool_attributes(span, name=tool_call.name, arguments=tool_call.arguments)
             try:
-                prepared = prepare_call(tool_call.name, tool_call.arguments)
-                if isinstance(prepared, tuple) and len(prepared) == 3:
-                    tool, params, prep_error = prepared
-            except Exception:
-                pass
-        if prep_error:
-            event = {
-                "name": tool_call.name,
-                "status": "error",
-                "detail": prep_error.split(": ", 1)[-1][:120],
-            }
-            return prep_error + _HINT, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
-        try:
-            if tool is not None:
-                result = await tool.execute(**params)
-            else:
-                result = await spec.tools.execute(tool_call.name, params)
-        except asyncio.CancelledError:
-            raise
-        except BaseException as exc:
-            event = {
-                "name": tool_call.name,
-                "status": "error",
-                "detail": str(exc),
-            }
-            if spec.fail_on_tool_error:
-                return f"Error: {type(exc).__name__}: {exc}", event, exc
-            return f"Error: {type(exc).__name__}: {exc}", event, None
+                prepare_call = getattr(spec.tools, "prepare_call", None)
+                tool, params, prep_error = None, tool_call.arguments, None
+                if callable(prepare_call):
+                    try:
+                        prepared = prepare_call(tool_call.name, tool_call.arguments)
+                        if isinstance(prepared, tuple) and len(prepared) == 3:
+                            tool, params, prep_error = prepared
+                    except Exception:
+                        pass
+                if prep_error:
+                    event = {
+                        "name": tool_call.name,
+                        "status": "error",
+                        "detail": prep_error.split(": ", 1)[-1][:120],
+                    }
+                    span.set_status(StatusCode.ERROR, prep_error)
+                    return prep_error + _HINT, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
+                try:
+                    if tool is not None:
+                        result = await tool.execute(**params)
+                    else:
+                        result = await spec.tools.execute(tool_call.name, params)
+                except asyncio.CancelledError:
+                    raise
+                except BaseException as exc:
+                    event = {
+                        "name": tool_call.name,
+                        "status": "error",
+                        "detail": str(exc),
+                    }
+                    span.set_status(StatusCode.ERROR, str(exc))
+                    if spec.fail_on_tool_error:
+                        return f"Error: {type(exc).__name__}: {exc}", event, exc
+                    return f"Error: {type(exc).__name__}: {exc}", event, None
 
-        if isinstance(result, str) and result.startswith("Error"):
-            event = {
-                "name": tool_call.name,
-                "status": "error",
-                "detail": result.replace("\n", " ").strip()[:120],
-            }
-            if spec.fail_on_tool_error:
-                return result + _HINT, event, RuntimeError(result)
-            return result + _HINT, event, None
+                if isinstance(result, str) and result.startswith("Error"):
+                    event = {
+                        "name": tool_call.name,
+                        "status": "error",
+                        "detail": result.replace("\n", " ").strip()[:120],
+                    }
+                    span.set_status(StatusCode.ERROR, result[:256])
+                    set_tool_result(span, result=result)
+                    if spec.fail_on_tool_error:
+                        return result + _HINT, event, RuntimeError(result)
+                    return result + _HINT, event, None
 
-        detail = "" if result is None else str(result)
-        detail = detail.replace("\n", " ").strip()
-        if not detail:
-            detail = "(empty)"
-        elif len(detail) > 120:
-            detail = detail[:120] + "..."
-        return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
+                detail = "" if result is None else str(result)
+                detail = detail.replace("\n", " ").strip()
+                if not detail:
+                    detail = "(empty)"
+                elif len(detail) > 120:
+                    detail = detail[:120] + "..."
+                set_tool_result(span, result=str(result) if result is not None else "")
+                return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
+            except BaseException:
+                span.set_status(StatusCode.ERROR, "unexpected error")
+                raise
 
     async def _emit_checkpoint(
         self,
