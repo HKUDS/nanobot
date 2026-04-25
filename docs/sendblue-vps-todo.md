@@ -22,11 +22,10 @@ Use this checklist to move the Sendblue iMessage deployment from smoke-test work
 
 ## Composio Tools
 
-- [ ] Create or select the Composio MCP server/toolkit.
 - [ ] Add `COMPOSIO_API_KEY` to `/etc/nanobot/nanobot.env`.
-- [ ] Add `tools.composio.enabled`, `apiKey`, and `mcpServerId` to `~/.nanobot/config.json`.
-- [ ] Verify the `you` profile uses `composioUserId: "you"` and gets a profile-specific MCP URL.
-- [ ] Text the agent to connect the first real tool account and confirm it creates/reuses a Composio auth config and sends a Connect Link for user id `you`.
+- [ ] Add `tools.composio.enabled`, `mode: "toolRouter"`, `apiKey`, and optional `toolkits` to `~/.nanobot/config.json`.
+- [ ] Verify the `you` profile uses `composioUserId: "you"` and gets a profile-specific Tool Router MCP URL.
+- [ ] Text the agent to connect the first real tool account and confirm it sends a Tool Router Connect Link for user id `you`.
 - [ ] Test an iMessage request that requires a Composio tool and confirm auth-link/tool behavior works.
 
 ## Multi-User Isolation

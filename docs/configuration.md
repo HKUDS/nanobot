@@ -689,47 +689,61 @@ Use `enabledTools` to register only a subset of tools from an MCP server:
 
 MCP tools are automatically discovered and registered on startup. The LLM can use them alongside built-in tools — no extra configuration needed.
 
-### Composio MCP
+### Composio Tool Router
 
 For hosted OAuth-heavy tools, you can let nanobot generate profile-specific
-Composio MCP connections. This is used by the Sendblue channel's per-user
-profiles, where each phone number can map to a separate Composio `user_id`.
+Composio Tool Router MCP connections. This is used by the Sendblue channel's
+per-user profiles, where each phone number can map to a separate Composio
+`user_id`.
 
 ```json
 {
   "tools": {
     "composio": {
       "enabled": true,
+      "mode": "toolRouter",
       "apiKey": "${COMPOSIO_API_KEY}",
-      "mcpServerId": "YOUR_COMPOSIO_MCP_SERVER_ID"
+      "toolkits": ["gmail", "google_calendar", "github", "slack"]
     }
   }
 }
 ```
 
-The generated MCP endpoint is:
+In `toolRouter` mode, nanobot creates one profile-scoped Tool Router session
+with `POST /api/v3/tool_router/session` and connects to the returned MCP URL:
 
 ```text
-https://backend.composio.dev/v3/mcp/{mcpServerId}?user_id={composioUserId}
+https://app.composio.dev/tool_router/v3/{session_id}/mcp
 ```
 
 `apiKey` is sent as the `x-api-key` header. Keep it in an environment file
 rather than committing it to `config.json`.
 
+`toolkits` is optional. Omit it to let Composio's Tool Router search across all
+available toolkits while exposing only the router tools to the model. Set it to
+an allow-list when you want to keep the available app surface smaller. Multi-word
+toolkit names can use spaces, hyphens, or underscores; nanobot normalizes them
+to Composio slugs such as `google_calendar`.
+
 When Composio is enabled, nanobot also registers a `composio_connect` tool. The
-agent can use it in chat to create a profile-specific Connect Link via
-`POST /api/v3/connected_accounts/link`. For example, if a Sendblue user asks to
-connect Google Calendar, the agent can generate an auth link for that user's
-`composioUserId` and send it back in iMessage. When the link is completed, the
-tool can notify the same chat that the account is connected.
+agent can use it in chat to create a profile-specific Connect Link. In
+`toolRouter` mode this uses `POST /api/v3/tool_router/session/{session_id}/link`.
+For example, if a Sendblue user asks to connect Google Calendar, the agent can
+generate an auth link for that user's `composioUserId` and send it back in
+iMessage. When the link is completed, the tool can notify the same chat that
+the account is connected.
 
-By default, nanobot looks up an existing Composio-managed auth config for the
-requested toolkit and creates one if none exists. `authConfigs` is still
+For legacy static MCP behavior, set `"mode": "mcp"` and provide
+`mcpServerId`. That path connects to:
+
+```text
+https://backend.composio.dev/v3/mcp/{mcpServerId}?user_id={composioUserId}
+```
+
+In legacy `mcp` mode, nanobot looks up an existing Composio-managed auth config
+for the requested toolkit and creates one if none exists. `authConfigs` is still
 available as an optional override when you want to pin a toolkit to a specific
-Composio auth config ID. Use underscore names for multi-word tools, for example
-`google_calendar`.
-
-
+Composio auth config ID.
 
 
 ## Security

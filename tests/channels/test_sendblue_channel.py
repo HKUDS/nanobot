@@ -223,7 +223,8 @@ async def test_unknown_sender_is_not_routed(tmp_path):
     assert ch._client.posts == []
 
 
-def test_composio_mcp_url_is_profile_specific():
+@pytest.mark.asyncio
+async def test_composio_mcp_url_is_profile_specific():
     set_config_path(Path("/tmp/nanobot-sendblue-test/config.json"))
     cfg = Config.model_validate({
         "providers": {"custom": {"apiKey": "sk-test", "apiBase": "https://llm.example/v1"}},
@@ -231,6 +232,7 @@ def test_composio_mcp_url_is_profile_specific():
         "tools": {
             "composio": {
                 "enabled": True,
+                "mode": "mcp",
                 "apiKey": "cmp-key",
                 "mcpServerId": "srv_123",
             }
@@ -254,7 +256,7 @@ def test_composio_mcp_url_is_profile_specific():
     runtime.root_config = cfg
     runtime.workspace = Path("/tmp/ron")
 
-    profile_cfg = runtime._profile_config()
+    profile_cfg = await runtime._profile_config()
 
     server = profile_cfg.tools.mcp_servers["composio"]
     assert server.url == "https://backend.composio.dev/v3/mcp/srv_123?user_id=ron"
@@ -292,6 +294,20 @@ async def test_onboarding_no_digest_persists_profile_files(tmp_path):
     assert "Assistant display name: Muffs" in (tmp_path / "SOUL.md").read_text(encoding="utf-8")
     assert "Morning digest is disabled" in (tmp_path / "memory" / "MEMORY.md").read_text(encoding="utf-8")
     assert "By the way" in ch._client.posts[-1]["json"]["content"]
+
+
+@pytest.mark.asyncio
+async def test_onboarding_keeps_muffs_for_natural_no_response(tmp_path):
+    runtime, ch = _onboarding_runtime(tmp_path)
+    onboarding = _SendblueOnboarding(runtime)
+
+    for text in ["hey", "Ron", "No I like muffs"]:
+        await onboarding.handle(_inbound(text))
+
+    state = onboarding.load()
+    assert state["step"] == "offer_digest"
+    assert state["assistant_name"] == "Muffs"
+    assert "Muffs it is" in ch._client.posts[-1]["json"]["content"]
 
 
 @pytest.mark.asyncio

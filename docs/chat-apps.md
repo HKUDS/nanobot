@@ -80,8 +80,9 @@ your-domain.com {
 
 Each configured profile gets its own workspace, sessions, Dream memory files,
 cron store, and MCP connection set. When `tools.composio.enabled` is true,
-nanobot creates a profile-specific Composio MCP URL using that profile's
-`composioUserId`, so OAuth-heavy tools stay separated per phone number.
+nanobot creates a profile-specific Composio Tool Router session using that
+profile's `composioUserId`, so OAuth-heavy tools stay separated per phone
+number without loading every Composio action schema into the model context.
 
 On first text from an allowed profile, Sendblue starts a Muffs onboarding flow
 before normal chat. It asks for the user's name, assistant name preference, and
@@ -91,9 +92,9 @@ when requested. Text `/onboard` to restart this profile onboarding or `/skip`
 to finish with defaults.
 
 The agent also gets a `composio_connect` tool. In chat, users can ask to connect
-Gmail, Google Calendar, or another configured toolkit. The agent generates the
-Composio Connect Link for that profile's `composioUserId`, sends it back over
-iMessage, and can text the user when the connection becomes active.
+Gmail, Google Calendar, or another toolkit. In Tool Router mode, the agent
+generates the Composio Connect Link from that profile's router session, sends it
+back over iMessage, and can text the user when the connection becomes active.
 
 </details>
 

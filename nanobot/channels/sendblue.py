@@ -16,6 +16,11 @@ from loguru import logger
 from pydantic import Field
 
 from nanobot.agent.loop import AgentLoop
+from nanobot.agent.tools.composio import (
+    extract_tool_router_mcp_url,
+    extract_tool_router_session_id,
+    get_or_create_tool_router_session,
+)
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -121,7 +126,39 @@ def _is_yes(text: str) -> bool:
 
 
 def _is_no(text: str) -> bool:
-    return _clean_answer(text).lower() in {"n", "no", "nah", "nope", "skip", "not now"}
+    normalized = _clean_answer(text).lower()
+    if normalized in {"n", "no", "nah", "nope", "skip", "not now"}:
+        return True
+    return normalized.startswith(("no ", "nah ", "nope "))
+
+
+def _assistant_name_from_answer(text: str, current: str = "Muffs") -> str:
+    """Extract an assistant rename answer, keeping current for natural no/keep responses."""
+    value = _clean_answer(text)
+    if not value:
+        return current
+    lowered = value.lower()
+    current_lower = current.lower()
+    if _is_no(value):
+        return current
+    keep_words = ("keep", "like", "love", "prefer", "stick with", "stay with")
+    if current_lower in lowered and any(word in lowered for word in keep_words):
+        return current
+    prefixes = (
+        "call you ",
+        "call yourself ",
+        "you can be ",
+        "your name is ",
+        "name should be ",
+        "change it to ",
+        "rename to ",
+    )
+    for prefix in prefixes:
+        if lowered.startswith(prefix):
+            return _clean_answer(value[len(prefix):], default=current)
+    if len(value.split()) > 4:
+        return current
+    return value
 
 
 def _parse_digest_time(text: str) -> tuple[int, int, str]:
@@ -238,8 +275,7 @@ class _SendblueOnboarding:
             return True
 
         if step == "ask_assistant_name":
-            if text and not _is_no(text):
-                state["assistant_name"] = text
+            state["assistant_name"] = _assistant_name_from_answer(text, state.get("assistant_name") or "Muffs")
             state["step"] = "offer_digest"
             self.save(state)
             await self._send(
@@ -454,12 +490,30 @@ class _ProfileRuntime:
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._running = False
 
-    def _profile_config(self) -> Config:
+    async def _prepare_profile_config(self) -> None:
+        self._prepared_config = await self._profile_config()
+
+    async def _profile_config(self) -> Config:
         cfg = self.root_config.model_copy(deep=True)
         cfg.agents.defaults.workspace = str(self.workspace)
         composio = cfg.tools.composio
         composio.user_id = self.profile.composio_user_id or self.profile_id
-        if composio.enabled and composio.api_key and composio.mcp_server_id:
+        if composio.enabled and composio.api_key and composio.mode == "toolRouter":
+            router_url = ""
+            try:
+                router_session = await get_or_create_tool_router_session(composio, workspace=self.workspace)
+                composio.tool_router_session_id = extract_tool_router_session_id(router_session)
+                router_url = extract_tool_router_mcp_url(router_session)
+            except Exception as exc:
+                logger.warning("Composio Tool Router setup failed for profile '{}': {}", self.profile_id, exc)
+            if router_url:
+                cfg.tools.mcp_servers = dict(cfg.tools.mcp_servers)
+                cfg.tools.mcp_servers["composio"] = MCPServerConfig(
+                    type="streamableHttp",
+                    url=router_url,
+                    headers={"x-api-key": composio.api_key},
+                )
+        elif composio.enabled and composio.api_key and composio.mcp_server_id:
             base = composio.base_url.rstrip("/")
             server_id = composio.mcp_server_id.strip("/")
             cfg.tools.mcp_servers = dict(cfg.tools.mcp_servers)
@@ -473,10 +527,19 @@ class _ProfileRuntime:
     def _make_provider(self):
         from nanobot.nanobot import _make_provider
 
-        return _make_provider(self._profile_config())
+        cfg = getattr(self, "_prepared_config", None)
+        if cfg is None:
+            cfg = self.root_config.model_copy(deep=True)
+            cfg.agents.defaults.workspace = str(self.workspace)
+            cfg.tools.composio.user_id = self.profile.composio_user_id or self.profile_id
+        return _make_provider(cfg)
 
     def _make_agent(self) -> AgentLoop:
-        cfg = self._profile_config()
+        cfg = getattr(self, "_prepared_config", None)
+        if cfg is None:
+            cfg = self.root_config.model_copy(deep=True)
+            cfg.agents.defaults.workspace = str(self.workspace)
+            cfg.tools.composio.user_id = self.profile.composio_user_id or self.profile_id
         defaults = cfg.agents.defaults
         return AgentLoop(
             bus=self.bus,
@@ -507,6 +570,9 @@ class _ProfileRuntime:
             return
         self._running = True
         sync_workspace_templates(self.workspace)
+        await self._prepare_profile_config()
+        self.provider = self._make_provider()
+        self.agent = self._make_agent()
         self._configure_dream()
         self._configure_cron_callback()
         await self.cron.start()

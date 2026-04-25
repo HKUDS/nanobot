@@ -217,11 +217,16 @@ class ComposioToolConfig(Base):
     """Composio hosted MCP configuration."""
 
     enabled: bool = False
+    mode: Literal["mcp", "toolRouter"] = "toolRouter"
     api_key: str = ""  # Composio project API key
     mcp_server_id: str = ""  # Composio MCP server/config ID
     base_url: str = "https://backend.composio.dev/v3/mcp"
     api_base: str = "https://backend.composio.dev/api/v3"
+    tool_router_api_base: str = "https://backend.composio.dev/api/v3"
     user_id: str = ""  # Runtime profile user id; Sendblue fills this per sender.
+    tool_router_session_id: str = ""  # Runtime Tool Router session id; Sendblue fills this per sender.
+    toolkits: list[str] = Field(default_factory=list)
+    disabled_toolkits: list[str] = Field(default_factory=list)
     auth_configs: dict[str, str] = Field(default_factory=dict)  # Optional toolkit slug/name -> auth config id overrides.
     auto_create_auth_configs: bool = True
     callback_url: str = ""

@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from nanobot.agent.tools.composio import ComposioConnectTool
+from nanobot.agent.tools.composio import ComposioConnectTool, get_or_create_tool_router_mcp_url
 from nanobot.config.schema import ComposioToolConfig
 
 
@@ -40,6 +40,11 @@ class _Client:
             return _Response(data={
                 "toolkit": {"slug": json["toolkit"]["slug"]},
                 "auth_config": {"id": "authcfg_created"},
+            })
+        if url.endswith("/tool_router/session"):
+            return _Response(data={
+                "session_id": "trs_123",
+                "mcp": {"type": "http", "url": "https://app.composio.dev/tool_router/v3/trs_123/mcp"},
             })
         return _Response(data={
             "redirect_url": "https://auth.composio.dev/connect?token=lt_123",
@@ -103,3 +108,65 @@ async def test_composio_connect_creates_missing_managed_auth_config(monkeypatch)
         "auth_config_id": "authcfg_created",
         "user_id": "ron",
     }
+
+
+@pytest.mark.asyncio
+async def test_composio_connect_uses_tool_router_link(monkeypatch):
+    _Client.posts = []
+    _Client.gets = []
+    monkeypatch.setattr("nanobot.agent.tools.composio.httpx.AsyncClient", _Client)
+    tool = ComposioConnectTool(ComposioToolConfig(
+        enabled=True,
+        apiKey="cmp-key",
+        userId="ron",
+        toolRouterSessionId="trs_123",
+        notifyOnConnect=False,
+    ))
+
+    result = await tool.execute(toolkit="github")
+
+    assert "https://auth.composio.dev/connect?token=lt_123" in result
+    assert _Client.gets == []
+    link_post = _Client.posts[0]
+    assert link_post["url"] == "https://backend.composio.dev/api/v3/tool_router/session/trs_123/link"
+    assert link_post["headers"]["x-api-key"] == "cmp-key"
+    assert link_post["json"] == {"toolkit": "github"}
+
+
+@pytest.mark.asyncio
+async def test_tool_router_mcp_url_is_profile_scoped(monkeypatch, tmp_path):
+    _Client.posts = []
+    monkeypatch.setattr("nanobot.agent.tools.composio.httpx.AsyncClient", _Client)
+
+    url = await get_or_create_tool_router_mcp_url(
+        ComposioToolConfig(
+            enabled=True,
+            apiKey="cmp-key",
+            userId="ron",
+            toolkits=["gmail", "google calendar"],
+        ),
+        workspace=tmp_path,
+    )
+
+    assert url == "https://app.composio.dev/tool_router/v3/trs_123/mcp"
+    post = _Client.posts[0]
+    assert post["url"] == "https://backend.composio.dev/api/v3/tool_router/session"
+    assert post["headers"]["x-api-key"] == "cmp-key"
+    assert post["json"] == {
+        "user_id": "ron",
+        "toolkits": {"enabled": ["gmail", "google_calendar"]},
+    }
+    assert (tmp_path / "composio-tool-router-session.json").exists()
+
+    _Client.posts = []
+    cached_url = await get_or_create_tool_router_mcp_url(
+        ComposioToolConfig(
+            enabled=True,
+            apiKey="cmp-key",
+            userId="ron",
+            toolkits=["gmail", "google calendar"],
+        ),
+        workspace=tmp_path,
+    )
+    assert cached_url == url
+    assert _Client.posts == []
