@@ -14,12 +14,14 @@ async function request<T>(
   token: string,
   init?: RequestInit,
 ): Promise<T> {
-  const res = await fetch(url, {
+  // Pass the nanobot token via ``?token=`` rather than ``Authorization: Bearer``.
+  // When nanobot is fronted by a reverse proxy doing HTTP Basic Auth (e.g. Caddy
+  // ``basicauth``), an explicit ``Authorization: Bearer`` header overrides the
+  // browser's cached Basic creds, the proxy answers 401 + WWW-Authenticate: Basic,
+  // and the browser pops the sign-in dialog on every API call.
+  const sep = url.includes("?") ? "&" : "?";
+  const res = await fetch(`${url}${sep}token=${encodeURIComponent(token)}`, {
     ...(init ?? {}),
-    headers: {
-      ...(init?.headers ?? {}),
-      Authorization: `Bearer ${token}`,
-    },
     credentials: "same-origin",
   });
   if (!res.ok) {

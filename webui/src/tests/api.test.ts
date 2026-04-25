@@ -17,21 +17,20 @@ describe("webui API helpers", () => {
     await fetchSessionMessages("tok", "websocket:chat-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/messages",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+      "/api/sessions/websocket%3Achat-1/messages?token=tok",
+      expect.objectContaining({ credentials: "same-origin" }),
     );
+    const init = (fetch as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0][1] as RequestInit;
+    expect(init.headers).toBeUndefined();
   });
 
   it("percent-encodes websocket keys when deleting a session", async () => {
     await deleteSession("tok", "websocket:chat-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/delete",
-      expect.objectContaining({
-        headers: { Authorization: "Bearer tok" },
-      }),
+      "/api/sessions/websocket%3Achat-1/delete?token=tok",
+      expect.objectContaining({ credentials: "same-origin" }),
     );
   });
 });
