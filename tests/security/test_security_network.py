@@ -7,7 +7,12 @@ from unittest.mock import patch
 
 import pytest
 
-from nanobot.security.network import configure_ssrf_whitelist, contains_internal_url, validate_url_target
+from nanobot.security.network import (
+    configure_ssrf_whitelist,
+    contains_internal_url,
+    validate_resolved_url,
+    validate_url_target,
+)
 
 
 def _fake_resolve(host: str, results: list[str]):
@@ -132,6 +137,38 @@ def test_whitelist_does_not_affect_other_blocked():
             assert not ok
     finally:
         configure_ssrf_whitelist([])
+
+
+def test_validate_resolved_url_fails_closed_on_dns_failure():
+    """Unresolvable redirect host must be rejected (fail-closed), not allowed."""
+    def _always_fail(hostname, port, family=0, type_=0):
+        raise socket.gaierror(f"cannot resolve {hostname}")
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _always_fail):
+        ok, err = validate_resolved_url("https://nx.invalid/path")
+        assert not ok, "DNS failure on redirect target must fail closed"
+        assert "resolve" in err.lower()
+
+
+def test_validate_resolved_url_allows_public_redirect():
+    """A redirect target that resolves to a public IP is still allowed."""
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo",
+        _fake_resolve("example.com", ["93.184.216.34"]),
+    ):
+        ok, err = validate_resolved_url("https://example.com/page")
+        assert ok, f"Public redirect should be allowed, got: {err}"
+
+
+def test_validate_resolved_url_blocks_private_redirect():
+    """A redirect target that resolves to a private IP must be blocked."""
+    with patch(
+        "nanobot.security.network.socket.getaddrinfo",
+        _fake_resolve("evil.com", ["10.0.0.1"]),
+    ):
+        ok, err = validate_resolved_url("http://evil.com/admin")
+        assert not ok
+        assert "private" in err.lower()
 
 
 def test_whitelist_invalid_cidr_ignored():

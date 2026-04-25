@@ -98,7 +98,9 @@ def validate_resolved_url(url: str) -> tuple[bool, str]:
         try:
             infos = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         except socket.gaierror:
-            return True, ""
+            # Fail closed: an unresolvable redirect host must not be treated
+            # as safe (matches validate_url_target's DNS-failure behavior).
+            return False, f"Cannot resolve redirect hostname: {hostname}"
         for info in infos:
             try:
                 addr = ipaddress.ip_address(info[4][0])
