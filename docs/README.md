@@ -19,6 +19,7 @@ Start here for setup, everyday usage, and deployment.
 | In-chat commands | [`chat-commands.md`](./chat-commands.md) | Slash commands and periodic task behavior |
 | OpenAI-compatible API | [`openai-api.md`](./openai-api.md) | Local API endpoints, request format, and file uploads |
 | Deployment | [`deployment.md`](./deployment.md) | Docker and Linux service setup |
+| Sendblue VPS TODO | [`sendblue-vps-todo.md`](./sendblue-vps-todo.md) | Remaining rollout tasks for Sendblue, Composio, and VPS hardening |
 
 ## Advanced Docs
 
@@ -31,4 +32,3 @@ Use these when you want deeper customization, integration, or extension details.
 | Channel plugin guide | [`channel-plugin-guide.md`](./channel-plugin-guide.md) | Build and test custom chat channel plugins |
 | WebSocket channel | [`websocket.md`](./websocket.md) | Real-time WebSocket access and protocol details |
 | Custom tools | [`my-tool.md`](./my-tool.md) | Inspect and tune runtime state with the `my` tool |
-

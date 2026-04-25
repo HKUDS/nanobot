@@ -83,6 +83,18 @@ cron store, and MCP connection set. When `tools.composio.enabled` is true,
 nanobot creates a profile-specific Composio MCP URL using that profile's
 `composioUserId`, so OAuth-heavy tools stay separated per phone number.
 
+On first text from an allowed profile, Sendblue starts a Muffs onboarding flow
+before normal chat. It asks for the user's name, assistant name preference, and
+optional morning digest settings, then writes profile-local `SOUL.md`,
+`USER.md`, `memory/MEMORY.md`, and a profile-local `morning-digest` cron job
+when requested. Text `/onboard` to restart this profile onboarding or `/skip`
+to finish with defaults.
+
+The agent also gets a `composio_connect` tool. In chat, users can ask to connect
+Gmail, Google Calendar, or another configured toolkit. The agent generates the
+Composio Connect Link for that profile's `composioUserId`, sends it back over
+iMessage, and can text the user when the connection becomes active.
+
 </details>
 
 <details>

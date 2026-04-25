@@ -716,6 +716,19 @@ https://backend.composio.dev/v3/mcp/{mcpServerId}?user_id={composioUserId}
 `apiKey` is sent as the `x-api-key` header. Keep it in an environment file
 rather than committing it to `config.json`.
 
+When Composio is enabled, nanobot also registers a `composio_connect` tool. The
+agent can use it in chat to create a profile-specific Connect Link via
+`POST /api/v3/connected_accounts/link`. For example, if a Sendblue user asks to
+connect Google Calendar, the agent can generate an auth link for that user's
+`composioUserId` and send it back in iMessage. When the link is completed, the
+tool can notify the same chat that the account is connected.
+
+By default, nanobot looks up an existing Composio-managed auth config for the
+requested toolkit and creates one if none exists. `authConfigs` is still
+available as an optional override when you want to pin a toolkit to a specific
+Composio auth config ID. Use underscore names for multi-word tools, for example
+`google_calendar`.
+
 
 
 

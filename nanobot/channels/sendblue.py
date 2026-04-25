@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import OrderedDict
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
+from zoneinfo import ZoneInfo, available_timezones
 
 import httpx
 from loguru import logger
@@ -20,13 +22,18 @@ from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_runtime_subdir
 from nanobot.config.schema import Base, Config, MCPServerConfig
 from nanobot.cron.service import CronService
-from nanobot.cron.types import CronJob, CronPayload
+from nanobot.cron.types import CronJob, CronPayload, CronSchedule
 from nanobot.session.manager import SessionManager
 from nanobot.utils.helpers import split_message, sync_workspace_templates
 
 SENDBLUE_MAX_MESSAGE_LEN = 18_500  # Sendblue limit is 18,996; keep headroom.
 _DEDUP_MAX = 5000
 _READ_TIMEOUT_SECONDS = 5
+_ONBOARDING_FILE = "onboarding.json"
+_MUFFS_START = "<!-- muffs-onboarding:start -->"
+_MUFFS_END = "<!-- muffs-onboarding:end -->"
+_ONBOARDING_COMPLETE = "complete"
+_MORNING_DIGEST_ID = "morning-digest"
 
 
 class SendblueProfileConfig(Base):
@@ -95,6 +102,330 @@ def _save_dedupe(items: OrderedDict[str, None]) -> None:
     path.write_text(json.dumps(list(items.keys())[-_DEDUP_MAX:]), encoding="utf-8")
 
 
+def _replace_marked_section(existing: str, section: str) -> str:
+    block = f"{_MUFFS_START}\n{section.strip()}\n{_MUFFS_END}"
+    if _MUFFS_START in existing and _MUFFS_END in existing:
+        before, rest = existing.split(_MUFFS_START, 1)
+        _, after = rest.split(_MUFFS_END, 1)
+        return f"{before.rstrip()}\n\n{block}\n{after.lstrip()}".rstrip() + "\n"
+    return f"{existing.rstrip()}\n\n{block}\n" if existing.strip() else f"{block}\n"
+
+
+def _clean_answer(text: str, *, default: str = "") -> str:
+    value = " ".join((text or "").strip().split())
+    return value or default
+
+
+def _is_yes(text: str) -> bool:
+    return _clean_answer(text).lower() in {"y", "yes", "yeah", "yep", "sure", "ok", "okay", "please", "do it"}
+
+
+def _is_no(text: str) -> bool:
+    return _clean_answer(text).lower() in {"n", "no", "nah", "nope", "skip", "not now"}
+
+
+def _parse_digest_time(text: str) -> tuple[int, int, str]:
+    raw = _clean_answer(text, default="9am").lower().replace(".", "")
+    import re
+
+    match = re.search(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", raw)
+    if not match:
+        return 9, 0, "9:00 AM"
+    hour = int(match.group(1))
+    minute = int(match.group(2) or "0")
+    suffix = match.group(3)
+    if suffix == "pm" and hour != 12:
+        hour += 12
+    if suffix == "am" and hour == 12:
+        hour = 0
+    hour = max(0, min(hour, 23))
+    minute = max(0, min(minute, 59))
+    hour_12 = hour % 12 or 12
+    display = f"{hour_12}:{minute:02d} {'AM' if hour < 12 else 'PM'}"
+    return hour, minute, display
+
+
+def _normalize_timezone(text: str, default_tz: str) -> str:
+    value = _clean_answer(text)
+    aliases = {
+        "est": "America/New_York",
+        "edt": "America/New_York",
+        "eastern": "America/New_York",
+        "eastern time": "America/New_York",
+        "cst": "America/Chicago",
+        "central": "America/Chicago",
+        "mst": "America/Denver",
+        "mountain": "America/Denver",
+        "pst": "America/Los_Angeles",
+        "pdt": "America/Los_Angeles",
+        "pacific": "America/Los_Angeles",
+    }
+    key = value.lower()
+    tz = aliases.get(key, value or default_tz)
+    try:
+        ZoneInfo(tz)
+        return tz
+    except Exception:
+        close = next(
+            (item for item in available_timezones() if item.lower().endswith("/" + key.replace(" ", "_"))),
+            "",
+        )
+        return close or default_tz
+
+
+class _SendblueOnboarding:
+    """Deterministic per-profile onboarding flow for Sendblue users."""
+
+    def __init__(self, runtime: "_ProfileRuntime") -> None:
+        self.runtime = runtime
+        self.path = runtime.workspace / _ONBOARDING_FILE
+
+    def load(self) -> dict[str, Any]:
+        if not self.path.exists():
+            return {}
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            logger.warning("Sendblue onboarding: failed to read {}", self.path)
+            return {}
+
+    def save(self, state: dict[str, Any]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    def is_complete(self) -> bool:
+        return self.load().get("step") == _ONBOARDING_COMPLETE
+
+    async def handle(self, msg: InboundMessage) -> bool:
+        text = _clean_answer(msg.content)
+        lowered = text.lower()
+        state = self.load()
+
+        if lowered == "/onboard":
+            state = self._initial_state()
+            self.save(state)
+            await self._send(msg.chat_id, "What's your name?")
+            return True
+        if lowered in {"/skip", "skip onboarding"}:
+            state = {**self._initial_state(), "step": _ONBOARDING_COMPLETE, "user_name": "there", "assistant_name": "Muffs"}
+            self._persist_profile_files(state)
+            self.save(state)
+            await self._send(msg.chat_id, self._tool_connection_offer())
+            return True
+        if lowered == "/cancel" and state.get("step") != _ONBOARDING_COMPLETE:
+            await self._send(msg.chat_id, "Onboarding is still needed before normal chat. Text /skip to use defaults.")
+            return True
+
+        if state.get("step") == _ONBOARDING_COMPLETE:
+            return False
+
+        if not state:
+            state = self._initial_state()
+            self.save(state)
+            await self._send(msg.chat_id, "What's your name?")
+            return True
+
+        step = state.get("step", "ask_user_name")
+        if step == "ask_user_name":
+            state["user_name"] = text or "there"
+            state["step"] = "ask_assistant_name"
+            self.save(state)
+            await self._send(
+                msg.chat_id,
+                "I'm Muffs, your personal fun assistant. Do you want to call me anything else?",
+            )
+            return True
+
+        if step == "ask_assistant_name":
+            if text and not _is_no(text):
+                state["assistant_name"] = text
+            state["step"] = "offer_digest"
+            self.save(state)
+            await self._send(
+                msg.chat_id,
+                f"{state['assistant_name']} it is. Let me give you a quick feel for what I can do.\n\n"
+                "- I can watch your inbox or calendar once you connect them.\n"
+                "- I can help plan and organize your day.\n"
+                "- I can set reminders for basically anything.\n"
+                "- I can research, answer questions, and keep track of useful context.\n\n"
+                "Want me to set up a morning briefing/digest? I can research your interests and surface anything worth knowing every day before work.",
+            )
+            return True
+
+        if step == "offer_digest":
+            if _is_yes(text):
+                state["step"] = "ask_digest_topics"
+                self.save(state)
+                await self._send(
+                    msg.chat_id,
+                    "What topics do you want covered? It can be anything: tech news, finance, sports, research, interesting fact of the day, a Bible verse, a devotional, or whatever else.",
+                )
+                return True
+            state["digest_enabled"] = False
+            state["step"] = _ONBOARDING_COMPLETE
+            self._persist_profile_files(state)
+            self.save(state)
+            await self._send(msg.chat_id, "All set. " + self._tool_connection_offer())
+            return True
+
+        if step == "ask_digest_topics":
+            state["digest_enabled"] = True
+            state["digest_topics"] = text or "useful news, schedule, and interesting things worth knowing"
+            state["step"] = "ask_digest_time"
+            self.save(state)
+            await self._send(msg.chat_id, "What time do you want it delivered each morning?")
+            return True
+
+        if step == "ask_digest_time":
+            hour, minute, display = _parse_digest_time(text)
+            state["digest_hour"] = hour
+            state["digest_minute"] = minute
+            state["digest_time_display"] = display
+            state["step"] = "ask_timezone"
+            self.save(state)
+            await self._send(msg.chat_id, "What timezone should I use? For example: EST, America/New_York, or Pacific.")
+            return True
+
+        if step == "ask_timezone":
+            tz = _normalize_timezone(text, self.runtime.root_config.agents.defaults.timezone)
+            state["timezone"] = tz
+            state["step"] = _ONBOARDING_COMPLETE
+            self._persist_profile_files(state)
+            self._upsert_digest_job(state, msg.chat_id)
+            self.save(state)
+            topics = state.get("digest_topics", "")
+            await self._send(
+                msg.chat_id,
+                f"Ok, all set. Your digest will cover {topics} and will hit your messages every morning at "
+                f"{state.get('digest_time_display', '9:00 AM')} {tz}. First one is tomorrow.\n\n"
+                + self._tool_connection_offer(),
+            )
+            return True
+
+        state["step"] = "ask_user_name"
+        self.save(state)
+        await self._send(msg.chat_id, "What's your name?")
+        return True
+
+    def _initial_state(self) -> dict[str, Any]:
+        return {
+            "version": 1,
+            "step": "ask_user_name",
+            "assistant_name": "Muffs",
+            "started_at": datetime.now().isoformat(),
+        }
+
+    async def _send(self, chat_id: str, content: str) -> None:
+        await self.runtime.channel._send_outbound(
+            OutboundMessage(channel="sendblue", chat_id=chat_id, content=content),
+            default_number=chat_id,
+        )
+
+    def _tool_connection_offer(self) -> str:
+        return (
+            "By the way, if you ever want to connect Gmail, Calendar, Notion, GitHub, or something else, "
+            "I can pull those into your digest or use them generally. Just tell me what you want to connect."
+        )
+
+    def _persist_profile_files(self, state: dict[str, Any]) -> None:
+        self.runtime.workspace.mkdir(parents=True, exist_ok=True)
+        self._write_soul(state)
+        self._write_user(state)
+        self._write_memory(state)
+
+    def _write_soul(self, state: dict[str, Any]) -> None:
+        assistant_name = state.get("assistant_name") or "Muffs"
+        section = f"""# Muffs Personality
+
+- Assistant display name: {assistant_name}
+- Default identity: a personal, fun assistant inspired by Muffs, the user's cat.
+- Be warm, practical, direct, and a little playful without being long-winded.
+- Help the user plan their day, remember commitments, answer questions, research useful information, and connect tools when asked.
+- When the user asks to connect Gmail, Calendar, Notion, GitHub, or another app, use Composio connection tools to generate an auth link."""
+        path = self.runtime.workspace / "SOUL.md"
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        path.write_text(_replace_marked_section(existing, section), encoding="utf-8")
+
+    def _write_user(self, state: dict[str, Any]) -> None:
+        topics = state.get("digest_topics") or "not configured"
+        digest = "enabled" if state.get("digest_enabled") else "disabled"
+        section = f"""# Sendblue Profile
+
+- User name: {state.get("user_name") or "there"}
+- Assistant name preference: {state.get("assistant_name") or "Muffs"}
+- Timezone: {state.get("timezone") or self.runtime.root_config.agents.defaults.timezone}
+- Morning digest: {digest}
+- Digest topics: {topics}
+- Communication style: casual, concise, useful, and friendly."""
+        path = self.runtime.workspace / "USER.md"
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        path.write_text(_replace_marked_section(existing, section), encoding="utf-8")
+
+    def _write_memory(self, state: dict[str, Any]) -> None:
+        memory_dir = self.runtime.workspace / "memory"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        path = memory_dir / "MEMORY.md"
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        digest = "enabled" if state.get("digest_enabled") else "disabled"
+        section = f"""# Muffs Onboarding Facts
+
+- User's name is {state.get("user_name") or "there"}.
+- Assistant display name is {state.get("assistant_name") or "Muffs"}.
+- User timezone is {state.get("timezone") or self.runtime.root_config.agents.defaults.timezone}.
+- Morning digest is {digest}.
+- Digest topics: {state.get("digest_topics") or "not configured"}."""
+        path.write_text(_replace_marked_section(existing, section), encoding="utf-8")
+
+    def _upsert_digest_job(self, state: dict[str, Any], chat_id: str) -> None:
+        if not state.get("digest_enabled"):
+            return
+        hour = int(state.get("digest_hour", 9))
+        minute = int(state.get("digest_minute", 0))
+        tz = state.get("timezone") or self.runtime.root_config.agents.defaults.timezone
+        message = (
+            f"Create a concise morning briefing for {state.get('user_name') or 'the user'}.\n"
+            f"Assistant name: {state.get('assistant_name') or 'Muffs'}.\n"
+            f"Topics to cover: {state.get('digest_topics')}.\n"
+            "Use connected Composio tools such as calendar or Gmail if available. "
+            "If those tools are not connected, rely on available research/web context and briefly mention that Gmail or Calendar can be connected later. "
+            "Keep it useful, skimmable, and ready to send as an iMessage."
+        )
+        schedule = CronSchedule(kind="cron", expr=f"{minute} {hour} * * *", tz=tz)
+        existing = next(
+            (job for job in self.runtime.cron.list_jobs(include_disabled=True) if job.id == _MORNING_DIGEST_ID or job.name == _MORNING_DIGEST_ID),
+            None,
+        )
+        if existing:
+            self.runtime.cron.update_job(
+                existing.id,
+                name=_MORNING_DIGEST_ID,
+                schedule=schedule,
+                message=message,
+                deliver=True,
+                channel="sendblue",
+                to=chat_id,
+            )
+            return
+        job = CronJob(
+            id=_MORNING_DIGEST_ID,
+            name=_MORNING_DIGEST_ID,
+            schedule=schedule,
+            payload=CronPayload(kind="agent_turn", message=message, deliver=True, channel="sendblue", to=chat_id),
+        )
+        # Use the public update path when possible, but keep the stable id for
+        # repeatable per-profile updates and easy inspection on disk.
+        store = self.runtime.cron._load_store()
+        now = int(datetime.now().timestamp() * 1000)
+        job.created_at_ms = now
+        job.updated_at_ms = now
+        store.jobs = [item for item in store.jobs if item.id != _MORNING_DIGEST_ID and item.name != _MORNING_DIGEST_ID]
+        store.jobs.append(job)
+        self.runtime.cron._recompute_next_runs()
+        self.runtime.cron._save_store()
+        self.runtime.cron._arm_timer()
+
+
 class _ProfileRuntime:
     """Owns one isolated AgentLoop/workspace for a Sendblue user."""
 
@@ -116,6 +447,7 @@ class _ProfileRuntime:
         self.workspace = _profile_workspace(profile_id, profile)
         self.sessions = SessionManager(self.workspace)
         self.cron = CronService(self.workspace / "cron" / "jobs.json")
+        self.onboarding = _SendblueOnboarding(self)
         self.provider = self._make_provider()
         self.agent = self._make_agent()
         self._tasks: list[asyncio.Task] = []
@@ -126,14 +458,14 @@ class _ProfileRuntime:
         cfg = self.root_config.model_copy(deep=True)
         cfg.agents.defaults.workspace = str(self.workspace)
         composio = cfg.tools.composio
+        composio.user_id = self.profile.composio_user_id or self.profile_id
         if composio.enabled and composio.api_key and composio.mcp_server_id:
-            user_id = self.profile.composio_user_id or self.profile_id
             base = composio.base_url.rstrip("/")
             server_id = composio.mcp_server_id.strip("/")
             cfg.tools.mcp_servers = dict(cfg.tools.mcp_servers)
             cfg.tools.mcp_servers["composio"] = MCPServerConfig(
                 type="streamableHttp",
-                url=f"{base}/{server_id}?user_id={user_id}",
+                url=f"{base}/{server_id}?user_id={composio.user_id}",
                 headers={"x-api-key": composio.api_key},
             )
         return cfg
@@ -250,6 +582,14 @@ class _ProfileRuntime:
 
     async def publish_inbound(self, msg: InboundMessage) -> None:
         await self.start()
+        if self.channel_config.typing_indicators:
+            self._start_typing(msg.chat_id)
+        await self.bus.publish_inbound(msg)
+
+    async def handle_inbound(self, msg: InboundMessage) -> None:
+        await self.start()
+        if await self.onboarding.handle(msg):
+            return
         if self.channel_config.typing_indicators:
             self._start_typing(msg.chat_id)
         await self.bus.publish_inbound(msg)
@@ -562,7 +902,10 @@ class SendblueChannel(BaseChannel):
             metadata={"sendblue": payload},
             session_key_override=f"sendblue:{sender}",
         )
-        await profile.publish_inbound(msg)
+        if hasattr(profile, "handle_inbound"):
+            await profile.handle_inbound(msg)
+        else:
+            await profile.publish_inbound(msg)
 
     async def _write_response(
         self,

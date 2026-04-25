@@ -220,6 +220,14 @@ class ComposioToolConfig(Base):
     api_key: str = ""  # Composio project API key
     mcp_server_id: str = ""  # Composio MCP server/config ID
     base_url: str = "https://backend.composio.dev/v3/mcp"
+    api_base: str = "https://backend.composio.dev/api/v3"
+    user_id: str = ""  # Runtime profile user id; Sendblue fills this per sender.
+    auth_configs: dict[str, str] = Field(default_factory=dict)  # Optional toolkit slug/name -> auth config id overrides.
+    auto_create_auth_configs: bool = True
+    callback_url: str = ""
+    notify_on_connect: bool = True
+    connection_poll_seconds: float = Field(default=5.0, ge=1.0)
+    connection_poll_timeout_seconds: float = Field(default=600.0, ge=1.0)
 
 
 class ToolsConfig(Base):
