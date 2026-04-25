@@ -103,11 +103,7 @@ On macOS, run the gateway as a `launchd` user agent so it starts automatically a
 which nanobot   # e.g. /Users/youruser/.local/bin/nanobot
 ```
 
-If you installed nanobot with `uv tool`, you may also want the Python path for `ProgramArguments`:
-
-```bash
-which python
-```
+Use this absolute `nanobot` path in `ProgramArguments` so the console script keeps the Python environment from your install method.
 
 **2. Create the LaunchAgent plist** at `~/Library/LaunchAgents/ai.nanobot.gateway.plist` (replace paths if needed):
 
@@ -121,7 +117,6 @@ which python
 
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/youruser/.local/share/uv/tools/nanobot-ai/bin/python</string>
     <string>/Users/youruser/.local/bin/nanobot</string>
     <string>gateway</string>
     <string>--workspace</string>
