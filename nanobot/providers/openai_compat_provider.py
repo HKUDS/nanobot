@@ -384,6 +384,47 @@ class OpenAICompatProvider(LLMProvider):
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
         return self._enforce_role_alternation(sanitized)
 
+    def _drop_deepseek_incomplete_reasoning_history(
+        self,
+        messages: list[dict[str, Any]],
+        reasoning_effort: str | None,
+    ) -> list[dict[str, Any]]:
+        if (
+            not self._spec
+            or self._spec.name != "deepseek"
+            or not reasoning_effort
+            or reasoning_effort.lower() == "none"
+        ):
+            return messages
+
+        bad_idx = None
+        for idx, msg in enumerate(messages):
+            if (
+                msg.get("role") == "assistant"
+                and msg.get("tool_calls")
+                and not msg.get("reasoning_content")
+            ):
+                bad_idx = idx
+        if bad_idx is None:
+            return messages
+
+        keep_from = None
+        for idx in range(bad_idx + 1, len(messages)):
+            if messages[idx].get("role") == "user":
+                keep_from = idx
+                break
+
+        if keep_from is None:
+            trimmed = messages[:bad_idx]
+        else:
+            prefix = [msg for msg in messages[:keep_from] if msg.get("role") == "system"]
+            trimmed = prefix + messages[keep_from:]
+        logger.warning(
+            "Dropped {} DeepSeek thinking history message(s) with incomplete reasoning_content",
+            len(messages) - len(trimmed),
+        )
+        return trimmed
+
     # ------------------------------------------------------------------
     # Build kwargs
     # ------------------------------------------------------------------
@@ -424,6 +465,10 @@ class OpenAICompatProvider(LLMProvider):
         if spec and spec.strip_model_prefix:
             model_name = model_name.split("/")[-1]
 
+        messages = self._drop_deepseek_incomplete_reasoning_history(
+            messages,
+            reasoning_effort,
+        )
         kwargs: dict[str, Any] = {
             "model": model_name,
             "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),

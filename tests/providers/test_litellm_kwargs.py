@@ -585,6 +585,81 @@ def test_openai_compat_preserves_message_level_reasoning_fields() -> None:
     assert sanitized[1]["tool_calls"][0]["extra_content"] == {"google": {"thought_signature": "sig"}}
 
 
+def _deepseek_kwargs(messages: list[dict]) -> dict:
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider(
+            api_key="sk-test",
+            default_model="deepseek-v4-flash",
+            spec=find_by_name("deepseek"),
+        )
+
+    return provider._build_kwargs(
+        messages=messages,
+        tools=None,
+        model="deepseek-v4-flash",
+        max_tokens=1024,
+        temperature=0.7,
+        reasoning_effort="high",
+        tool_choice=None,
+    )
+
+
+def _tool_call(call_id: str) -> dict:
+    return {
+        "id": call_id,
+        "type": "function",
+        "function": {"name": "my", "arguments": "{}"},
+    }
+
+
+def test_deepseek_thinking_drops_tool_history_missing_reasoning_content() -> None:
+    kwargs = _deepseek_kwargs([
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "can we use wechat?"},
+        {"role": "assistant", "content": "", "tool_calls": [_tool_call("call_bad")]},
+        {"role": "tool", "tool_call_id": "call_bad", "name": "my", "content": "channels"},
+        {"role": "user", "content": "continue"},
+    ])
+
+    assert kwargs["messages"] == [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "continue"},
+    ]
+
+
+def test_deepseek_thinking_keeps_tool_history_with_reasoning_content() -> None:
+    kwargs = _deepseek_kwargs([
+        {"role": "user", "content": "can we use wechat?"},
+        {
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": "I should inspect supported channels.",
+            "tool_calls": [_tool_call("call_good")],
+        },
+        {"role": "tool", "tool_call_id": "call_good", "name": "my", "content": "channels"},
+        {"role": "user", "content": "continue"},
+    ])
+
+    assistant = kwargs["messages"][1]
+    assert assistant["role"] == "assistant"
+    assert assistant["reasoning_content"] == "I should inspect supported channels."
+    assert kwargs["messages"][2]["role"] == "tool"
+
+
+def test_deepseek_thinking_drops_current_bad_tool_turn_without_followup_user() -> None:
+    kwargs = _deepseek_kwargs([
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "can we use wechat?"},
+        {"role": "assistant", "content": "", "tool_calls": [_tool_call("call_bad")]},
+        {"role": "tool", "tool_call_id": "call_bad", "name": "my", "content": "channels"},
+    ])
+
+    assert kwargs["messages"] == [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "can we use wechat?"},
+    ]
+
+
 def test_openai_compat_keeps_tool_calls_after_consecutive_assistant_messages() -> None:
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider()
