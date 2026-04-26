@@ -1,4 +1,5 @@
 import asyncio
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1224,6 +1225,27 @@ async def test_send_adds_formatted_body_for_markdown() -> None:
     assert "<h1>Headline</h1>" in str(content["formatted_body"])
     assert "<table>" in str(content["formatted_body"])
     assert "<li>[x] done</li>" in str(content["formatted_body"])
+
+
+@pytest.mark.asyncio
+async def test_send_compacts_loose_list_paragraphs() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    markdown_text = "1. First item\n\n2. Second item"
+    await channel.send(
+        OutboundMessage(channel="matrix", chat_id="!room:matrix.org", content=markdown_text)
+    )
+
+    formatted_body = str(client.room_send_calls[0]["content"]["formatted_body"])
+    normalized = re.sub(r"\s+", " ", formatted_body)
+
+    assert "<li><p>" not in formatted_body
+    assert "<p>First item</p>" not in formatted_body
+    assert "<p>Second item</p>" not in formatted_body
+    assert "<li>First item</li>" in normalized
+    assert "<li>Second item</li>" in normalized
 
 
 @pytest.mark.asyncio
