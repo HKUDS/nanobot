@@ -228,18 +228,52 @@ async def test_download_dingtalk_file(tmp_path, monkeypatch) -> None:
         "nanobot.config.paths.get_media_dir",
         lambda channel_name=None: tmp_path / channel_name if channel_name else tmp_path,
     )
+    monkeypatch.setattr(dingtalk_module.time, "time", lambda: 1712345678.901)
 
     result = await channel._download_dingtalk_file("code123", "test.xlsx", "user1")
 
     assert result is not None
-    assert result.endswith("test.xlsx")
-    assert (tmp_path / "dingtalk" / "user1" / "test.xlsx").read_bytes() == file_content
+    assert result.endswith("test_1712345678901.xlsx")
+    assert (tmp_path / "dingtalk" / "user1" / "test_1712345678901.xlsx").read_bytes() == file_content
 
     # Verify API calls
     assert channel._http.calls[0]["method"] == "POST"
     assert "messageFiles/download" in channel._http.calls[0]["url"]
     assert channel._http.calls[0]["json"]["downloadCode"] == "code123"
     assert channel._http.calls[1]["method"] == "GET"
+
+
+@pytest.mark.asyncio
+async def test_download_dingtalk_file_infers_extension_from_content_type(tmp_path, monkeypatch) -> None:
+    channel = DingTalkChannel(
+        DingTalkConfig(client_id="app", client_secret="secret", allow_from=["*"]),
+        MessageBus(),
+    )
+
+    async def fake_get_token():
+        return "test-token"
+
+    monkeypatch.setattr(channel, "_get_access_token", fake_get_token)
+
+    file_content = b"fake jpeg content"
+    channel._http = _FakeHttp(responses=[
+        _FakeResponse(200, {"downloadUrl": "https://example.com/tmpfile"}),
+        _FakeResponse(200),
+    ])
+    channel._http._responses[1].content = file_content
+    channel._http._responses[1].headers = {"content-type": "image/jpeg"}
+
+    monkeypatch.setattr(
+        "nanobot.config.paths.get_media_dir",
+        lambda channel_name=None: tmp_path / channel_name if channel_name else tmp_path,
+    )
+    monkeypatch.setattr(dingtalk_module.time, "time", lambda: 1712345678.902)
+
+    result = await channel._download_dingtalk_file("code123", "file", "user1")
+
+    assert result is not None
+    assert result.endswith("file_1712345678902.jpg")
+    assert (tmp_path / "dingtalk" / "user1" / "file_1712345678902.jpg").read_bytes() == file_content
 
 
 def test_normalize_upload_payload_zips_html_attachment() -> None:
