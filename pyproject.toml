@@ -104,6 +104,10 @@ dev = [
 [project.scripts]
 nanobot = "nanobot.cli.commands:app"
 
+[project.entry-points."nanobot.agents"]
+# Agent plugins are discovered via this entry point group.
+# Built-in agents are loaded via pkgutil automatically.
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
