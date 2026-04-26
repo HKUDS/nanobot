@@ -218,7 +218,7 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
 
     loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
 
-    async def track_consolidate(messages):
+    async def track_consolidate(messages, session=None):
         order.append("consolidate")
         return True
     loop.consolidator.archive = track_consolidate  # type: ignore[method-assign]

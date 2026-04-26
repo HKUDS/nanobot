@@ -447,6 +447,11 @@ class Consolidator:
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
+        # Post-archive hook (opt-in). Wired by AgentLoop when MGP is enabled
+        # so the produced summary can be mirrored to the MGP gateway. Stays
+        # None by default — Consolidator itself never imports mgp_client.
+        # Signature: (session, summary) -> None. Exceptions are caught here.
+        self.on_archive: Callable[[Session, str], None] | None = None
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
@@ -516,8 +521,17 @@ class Consolidator:
         except Exception:
             return truncate_text(text, budget * 4)
 
-    async def archive(self, messages: list[dict]) -> str | None:
+    async def archive(
+        self,
+        messages: list[dict],
+        session: Session | None = None,
+    ) -> str | None:
         """Summarize messages via LLM and append to history.jsonl.
+
+        When ``session`` is provided and ``self.on_archive`` is wired, the
+        produced summary is handed off to the hook (typically forwarded to
+        an MGP gateway by AgentLoop). The hook runs synchronously inline —
+        keep it cheap, or have it dispatch its own background task.
 
         Returns the summary text on success, None if nothing to archive.
         """
@@ -545,6 +559,11 @@ class Consolidator:
                 raise RuntimeError(f"LLM returned error: {response.content}")
             summary = response.content or "[no summary]"
             self.store.append_history(summary, max_chars=_ARCHIVE_SUMMARY_MAX_CHARS)
+            if session is not None and self.on_archive is not None:
+                try:
+                    self.on_archive(session, summary)
+                except Exception:
+                    logger.exception("Consolidator on_archive hook failed (ignored)")
             return summary
         except Exception:
             logger.warning("Consolidation LLM call failed, raw-dumping to history")
@@ -620,7 +639,7 @@ class Consolidator:
                     source,
                     len(chunk),
                 )
-                summary = await self.archive(chunk)
+                summary = await self.archive(chunk, session=session)
                 # Advance the cursor either way: on success the chunk was
                 # summarized; on failure archive() already raw-archived it as
                 # a breadcrumb. Re-archiving the same chunk on the next call
@@ -707,6 +726,12 @@ class Dream:
         self.annotate_line_ages = annotate_line_ages
         self._runner = AgentRunner(provider)
         self._tools = self._build_tools()
+        # Post Phase-1 hook (opt-in). Wired by AgentLoop when MGP is enabled
+        # so the LLM-extracted [USER]/[MEMORY]/[SOUL] analysis can be mirrored
+        # to the MGP gateway. Stays None by default — Dream itself never
+        # imports mgp_client.
+        # Signature: (analysis: str) -> None. Exceptions are caught here.
+        self.on_phase1_analysis: Callable[[str], None] | None = None
 
     # -- tool registry -------------------------------------------------------
 
@@ -883,6 +908,12 @@ class Dream:
         except Exception:
             logger.exception("Dream Phase 1 failed")
             return False
+
+        if analysis and self.on_phase1_analysis is not None:
+            try:
+                self.on_phase1_analysis(analysis)
+            except Exception:
+                logger.exception("Dream on_phase1_analysis hook failed (ignored)")
 
         # Phase 2: Delegate to AgentRunner with read_file / edit_file
         existing_skills = self._list_existing_skills()

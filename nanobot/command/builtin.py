@@ -101,7 +101,7 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
     if snapshot:
-        loop._schedule_background(loop.consolidator.archive(snapshot))
+        loop._schedule_background(loop.consolidator.archive(snapshot, session=session))
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
@@ -316,6 +316,64 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_mgp_status(ctx: CommandContext) -> OutboundMessage:
+    """Show MGP sidecar status: gateway, toggles, last recall, last 32 commits."""
+    loop = ctx.loop
+    msg = ctx.msg
+    sidecar = getattr(loop, "mgp_sidecar", None)
+    md = {**dict(msg.metadata or {}), "render_as": "text"}
+
+    if sidecar is None:
+        return OutboundMessage(
+            channel=msg.channel, chat_id=msg.chat_id, metadata=md,
+            content=(
+                "MGP sidecar disabled. Set `agents.defaults.mgp.enabled: true` and run "
+                "an `mgp-gateway`. See `nanobot/agent/mgp/README.md`."
+            ),
+        )
+
+    cfg = sidecar.config
+    commit_flags = (
+        f"consolidator={'on' if cfg.enable_consolidator_commit else 'off'}, "
+        f"dream={'on' if cfg.enable_dream_commit else 'off'}"
+    )
+    lines = [
+        "## MGP Sidecar",
+        f"- gateway: `{cfg.gateway_url}` (fail_open=`{cfg.fail_open}`)",
+        f"- commits: {commit_flags}",
+    ]
+
+    r = sidecar.last_recall
+    if r is None:
+        lines.append("- last recall: (none)")
+    elif r.degraded:
+        lines.append(
+            f"- last recall: `{sidecar.last_recall_query}` "
+            f"degraded `{r.error_code}` — {r.error_message}"
+        )
+    else:
+        latency = sidecar.last_recall_latency_ms
+        lat = f", {latency:.0f}ms" if latency is not None else ""
+        lines.append(
+            f"- last recall: `{sidecar.last_recall_query}` "
+            f"hits={len(r.results)}{lat}"
+        )
+
+    commits = sidecar.last_commits
+    if not commits:
+        lines.append("- last commits: (none)")
+    else:
+        written = sum(1 for c in commits if c.written)
+        failed = sum(1 for c in commits if not c.executed)
+        tail = f"; last error `{commits[-1].error_code}`" if failed and not commits[-1].executed else ""
+        lines.append(f"- last commits: {len(commits)} (written={written}, failed={failed}){tail}")
+
+    return OutboundMessage(
+        channel=msg.channel, chat_id=msg.chat_id, metadata=md,
+        content="\n".join(lines),
+    )
+
+
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
     lines = [
@@ -327,6 +385,7 @@ def build_help_text() -> str:
         "/dream — Manually trigger Dream consolidation",
         "/dream-log — Show what the last Dream changed",
         "/dream-restore — Revert memory to a previous state",
+        "/mgp-status — Show MGP sidecar status (when enabled)",
         "/help — Show available commands",
     ]
     return "\n".join(lines)
@@ -344,4 +403,5 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
+    router.exact("/mgp-status", cmd_mgp_status)
     router.exact("/help", cmd_help)
