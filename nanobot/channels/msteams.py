@@ -70,6 +70,7 @@ class ConversationRef:
     activity_id: str | None = None
     conversation_type: str | None = None
     tenant_id: str | None = None
+    updated_at: float | None = None
 
 
 class MSTeamsChannel(BaseChannel):
@@ -220,7 +221,6 @@ class MSTeamsChannel(BaseChannel):
         token = await self._get_access_token()
         base_url = f"{ref.service_url.rstrip('/')}/v3/conversations/{ref.conversation_id}/activities"
         use_thread_reply = self.config.reply_in_thread and bool(ref.activity_id)
-        url = f"{base_url}/{ref.activity_id}" if use_thread_reply else base_url
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -233,7 +233,7 @@ class MSTeamsChannel(BaseChannel):
             payload["replyToId"] = ref.activity_id
 
         try:
-            resp = await self._http.post(url, headers=headers, json=payload)
+            resp = await self._http.post(base_url, headers=headers, json=payload)
             resp.raise_for_status()
             logger.info("MSTeams message sent to {}", ref.conversation_id)
         except Exception as e:
@@ -289,7 +289,9 @@ class MSTeamsChannel(BaseChannel):
             activity_id=activity_id or None,
             conversation_type=conversation_type or None,
             tenant_id=str((channel_data.get("tenant") or {}).get("id") or "") or None,
+            updated_at=time.time(),
         )
+
         self._save_refs()
 
         await self._handle_message(
@@ -310,10 +312,12 @@ class MSTeamsChannel(BaseChannel):
         """Extract the user-authored text from a Teams activity."""
         text = str(activity.get("text") or "")
         text = self._strip_possible_bot_mention(text)
+        text = self._normalize_html_whitespace(text)
 
         channel_data = activity.get("channelData") or {}
         reply_to_id = str(activity.get("replyToId") or "").strip()
         normalized_preview = html.unescape(text).replace("&rsquo", "’").strip()
+        normalized_preview = normalized_preview.replace("\xa0", " ")
         normalized_preview = normalized_preview.replace("\r\n", "\n").replace("\r", "\n")
         preview_lines = [line.strip() for line in normalized_preview.split("\n")]
         while preview_lines and not preview_lines[0]:
@@ -333,9 +337,15 @@ class MSTeamsChannel(BaseChannel):
         cleaned = re.sub(r"(?:\r?\n){3,}", "\n\n", cleaned)
         return cleaned.strip()
 
+    def _normalize_html_whitespace(self, text: str) -> str:
+        """Normalize common HTML whitespace/entities from Teams into plain text spacing."""
+        normalized = html.unescape(text).replace("&rsquo", "’")
+        normalized = normalized.replace("\xa0", " ")
+        return normalized
+
     def _normalize_teams_reply_quote(self, text: str) -> str:
         """Normalize Teams quoted replies into a compact structured form."""
-        cleaned = html.unescape(text).replace("&rsquo", "’").strip()
+        cleaned = self._normalize_html_whitespace(text).strip()
         if not cleaned:
             return ""
 
@@ -494,6 +504,14 @@ class MSTeamsChannel(BaseChannel):
     def _save_refs(self) -> None:
         """Persist conversation references."""
         try:
+            stale_keys = [
+                key
+                for key, ref in self._conversation_refs.items()
+                if self._is_stale_or_unsupported_ref(ref)
+            ]
+            for key in stale_keys:
+                self._conversation_refs.pop(key, None)
+
             data = {
                 key: {
                     "service_url": ref.service_url,
@@ -502,12 +520,28 @@ class MSTeamsChannel(BaseChannel):
                     "activity_id": ref.activity_id,
                     "conversation_type": ref.conversation_type,
                     "tenant_id": ref.tenant_id,
+                    "updated_at": ref.updated_at,
                 }
                 for key, ref in self._conversation_refs.items()
             }
             self._refs_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as e:
             logger.warning("Failed to save MSTeams conversation refs: {}", e)
+
+    def _is_stale_or_unsupported_ref(self, ref: ConversationRef) -> bool:
+        """Reject unsupported refs and prune old refs."""
+        service_url = (ref.service_url or "").strip().lower()
+        conversation_type = (ref.conversation_type or "").strip().lower()
+        updated_at = ref.updated_at or 0.0
+        max_age_seconds = 30 * 24 * 60 * 60
+
+        if "webchat.botframework.com" in service_url:
+            return True
+        if conversation_type and conversation_type != "personal":
+            return True
+        if updated_at and updated_at < time.time() - max_age_seconds:
+            return True
+        return False
 
     async def _get_access_token(self) -> str:
         """Fetch an access token for Bot Framework / Azure Bot auth."""
