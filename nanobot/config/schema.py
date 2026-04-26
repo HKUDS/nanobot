@@ -65,6 +65,13 @@ class DreamConfig(Base):
         return f"every {hours}h"
 
 
+class FallbackTarget(Base):
+    """Explicit fallback target for runtime provider/model failover."""
+
+    model: str
+    provider: str = "auto"
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -80,6 +87,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 200
     max_tool_result_chars: int = 16_000
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
+    fallbacks: list[FallbackTarget] = Field(default_factory=list)
     reasoning_effort: str | None = None  # low / medium / high / adaptive - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
