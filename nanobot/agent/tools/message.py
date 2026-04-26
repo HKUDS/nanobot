@@ -42,6 +42,10 @@ class MessageTool(Tool):
             default=default_message_id,
         )
         self._sent_in_turn_var: ContextVar[bool] = ContextVar("message_sent_in_turn", default=False)
+        self._record_channel_delivery_var: ContextVar[bool] = ContextVar(
+            "message_record_channel_delivery",
+            default=False,
+        )
 
     def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
         """Set the current message context."""
@@ -56,6 +60,14 @@ class MessageTool(Tool):
     def start_turn(self) -> None:
         """Reset per-turn send tracking."""
         self._sent_in_turn = False
+
+    def set_record_channel_delivery(self, active: bool):
+        """Mark tool-sent messages as proactive channel deliveries."""
+        return self._record_channel_delivery_var.set(active)
+
+    def reset_record_channel_delivery(self, token) -> None:
+        """Restore previous proactive delivery recording state."""
+        self._record_channel_delivery_var.reset(token)
 
     @property
     def _sent_in_turn(self) -> bool:
@@ -117,15 +129,19 @@ class MessageTool(Tool):
         if not self._send_callback:
             return "Error: Message sending not configured"
 
+        metadata = {
+            "message_id": message_id,
+        } if message_id else {}
+        if self._record_channel_delivery_var.get():
+            metadata["_record_channel_delivery"] = True
+
         msg = OutboundMessage(
             channel=channel,
             chat_id=chat_id,
             content=content,
             media=media or [],
             buttons=buttons or [],
-            metadata={
-                "message_id": message_id,
-            } if message_id else {},
+            metadata=metadata,
         )
 
         try:

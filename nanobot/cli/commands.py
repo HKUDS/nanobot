@@ -716,8 +716,20 @@ def _run_gateway(
             else f"{channel}:{chat_id}"
         )
 
-    async def _deliver_to_channel(msg: OutboundMessage, *, record: bool = True) -> None:
+    async def _deliver_to_channel(msg: OutboundMessage, *, record: bool = False) -> None:
         """Publish a user-visible message and mirror it into that channel's session."""
+        metadata = dict(msg.metadata or {})
+        record = record or bool(metadata.pop("_record_channel_delivery", False))
+        if metadata != (msg.metadata or {}):
+            msg = OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=msg.content,
+                reply_to=msg.reply_to,
+                media=msg.media,
+                metadata=metadata,
+                buttons=msg.buttons,
+            )
         if (
             record
             and msg.channel != "cli"
@@ -762,6 +774,10 @@ def _run_gateway(
         async def _silent(*_args, **_kwargs):
             pass
 
+        message_record_token = None
+        if isinstance(message_tool, MessageTool):
+            message_record_token = message_tool.set_record_channel_delivery(True)
+
         try:
             resp = await agent.process_direct(
                 reminder_note,
@@ -773,10 +789,11 @@ def _run_gateway(
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
                 cron_tool.reset_cron_context(cron_token)
+            if isinstance(message_tool, MessageTool) and message_record_token is not None:
+                message_tool.reset_record_channel_delivery(message_record_token)
 
         response = resp.content if resp else ""
 
-        message_tool = agent.tools.get("message")
         if job.payload.deliver and isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
             return response
 
@@ -790,7 +807,8 @@ def _run_gateway(
                         channel=job.payload.channel or "cli",
                         chat_id=job.payload.to,
                         content=response,
-                    )
+                    ),
+                    record=True,
                 )
         return response
 
@@ -853,7 +871,10 @@ def _run_gateway(
         if channel == "cli":
             return  # No external channel available to deliver to
 
-        await _deliver_to_channel(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+        await _deliver_to_channel(
+            OutboundMessage(channel=channel, chat_id=chat_id, content=response),
+            record=True,
+        )
 
     hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(
