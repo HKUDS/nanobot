@@ -41,17 +41,28 @@ class MessageTool(Tool):
             "message_default_message_id",
             default=default_message_id,
         )
+        self._default_metadata: ContextVar[dict[str, Any]] = ContextVar(
+            "message_default_metadata",
+            default={},
+        )
         self._sent_in_turn_var: ContextVar[bool] = ContextVar("message_sent_in_turn", default=False)
         self._record_channel_delivery_var: ContextVar[bool] = ContextVar(
             "message_record_channel_delivery",
             default=False,
         )
 
-    def set_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def set_context(
+        self,
+        channel: str,
+        chat_id: str,
+        message_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         """Set the current message context."""
         self._default_channel.set(channel)
         self._default_chat_id.set(chat_id)
         self._default_message_id.set(message_id)
+        self._default_metadata.set(metadata or {})
 
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
@@ -118,7 +129,8 @@ class MessageTool(Tool):
         # some channels (e.g. Feishu) use it to determine the target
         # conversation via their Reply API, which would route the message
         # to the wrong chat entirely.
-        if channel == default_channel and chat_id == default_chat_id:
+        same_target = channel == default_channel and chat_id == default_chat_id
+        if same_target:
             message_id = message_id or self._default_message_id.get()
         else:
             message_id = None
@@ -129,9 +141,9 @@ class MessageTool(Tool):
         if not self._send_callback:
             return "Error: Message sending not configured"
 
-        metadata = {
-            "message_id": message_id,
-        } if message_id else {}
+        metadata = dict(self._default_metadata.get()) if same_target else {}
+        if message_id:
+            metadata["message_id"] = message_id
         if self._record_channel_delivery_var.get():
             metadata["_record_channel_delivery"] = True
 

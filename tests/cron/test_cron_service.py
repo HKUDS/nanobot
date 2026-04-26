@@ -43,6 +43,28 @@ def test_add_job_accepts_valid_timezone(tmp_path) -> None:
     assert job.state.next_run_at_ms is not None
 
 
+def test_add_job_preserves_channel_meta_and_session_key(tmp_path) -> None:
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    meta = {"slack": {"thread_ts": "1234567890.123456", "channel_type": "channel"}}
+    job = service.add_job(
+        name="thread test",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+        deliver=True,
+        channel="slack",
+        to="C123",
+        channel_meta=meta,
+        session_key="slack:C123:1234567890.123456",
+    )
+    assert job.payload.channel_meta == meta
+    assert job.payload.session_key == "slack:C123:1234567890.123456"
+
+    reloaded = service.get_job(job.id)
+    assert reloaded is not None
+    assert reloaded.payload.channel_meta == meta
+    assert reloaded.payload.session_key == "slack:C123:1234567890.123456"
+
+
 @pytest.mark.asyncio
 async def test_execute_job_records_run_history(tmp_path) -> None:
     store_path = tmp_path / "cron" / "jobs.json"
