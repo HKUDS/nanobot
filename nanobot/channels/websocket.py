@@ -54,6 +54,14 @@ def _normalize_config_path(path: str) -> str:
     return _strip_trailing_slash(path)
 
 
+def _append_buttons_as_text(text: str, buttons: list[list[str]]) -> str:
+    labels = [label for row in buttons for label in row if label]
+    if not labels:
+        return text
+    fallback = "\n".join(f"{index}. {label}" for index, label in enumerate(labels, 1))
+    return f"{text}\n\n{fallback}" if text else fallback
+
+
 class WebSocketConfig(Base):
     """WebSocket server channel configuration.
 
@@ -531,6 +539,12 @@ class WebSocketChannel(BaseChannel):
         if got == "/api/sessions":
             return self._handle_sessions_list(request)
 
+        if got == "/api/settings":
+            return self._handle_settings(request)
+
+        if got == "/api/settings/update":
+            return self._handle_settings_update(request)
+
         m = re.match(r"^/api/sessions/([^/]+)/messages$", got)
         if m:
             return self._handle_session_messages(request, m.group(1))
@@ -638,6 +652,75 @@ class WebSocketChannel(BaseChannel):
             if isinstance(s.get("key"), str) and s["key"].startswith("websocket:")
         ]
         return _http_json_response({"sessions": cleaned})
+
+    def _settings_payload(self, *, requires_restart: bool = False) -> dict[str, Any]:
+        from nanobot.config.loader import get_config_path, load_config
+        from nanobot.providers.registry import PROVIDERS, find_by_name
+
+        config = load_config()
+        defaults = config.agents.defaults
+        provider_name = config.get_provider_name(defaults.model) or defaults.provider
+        provider = config.get_provider(defaults.model)
+        selected_provider = provider_name
+        if defaults.provider != "auto":
+            spec = find_by_name(defaults.provider)
+            selected_provider = spec.name if spec else provider_name
+        return {
+            "agent": {
+                "model": defaults.model,
+                "provider": selected_provider,
+                "resolved_provider": provider_name,
+                "has_api_key": bool(provider and provider.api_key),
+            },
+            "providers": [
+                {"name": "auto", "label": "Auto"}
+            ] + [
+                {"name": spec.name, "label": spec.label}
+                for spec in PROVIDERS
+            ],
+            "runtime": {
+                "config_path": str(get_config_path().expanduser()),
+            },
+            "requires_restart": requires_restart,
+        }
+
+    def _handle_settings(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        return _http_json_response(self._settings_payload())
+
+    def _handle_settings_update(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        from nanobot.config.loader import load_config, save_config
+        from nanobot.providers.registry import find_by_name
+
+        query = _parse_query(request.path)
+        config = load_config()
+        defaults = config.agents.defaults
+        changed = False
+
+        model = _query_first(query, "model")
+        if model is not None:
+            model = model.strip()
+            if not model:
+                return _http_error(400, "model is required")
+            if defaults.model != model:
+                defaults.model = model
+                changed = True
+
+        provider = _query_first(query, "provider")
+        if provider is not None:
+            provider = provider.strip() or "auto"
+            if provider != "auto" and find_by_name(provider) is None:
+                return _http_error(400, "unknown provider")
+            if defaults.provider != provider:
+                defaults.provider = provider
+                changed = True
+
+        if changed:
+            save_config(config)
+        return _http_json_response(self._settings_payload(requires_restart=changed))
 
     @staticmethod
     def _is_webui_session_key(key: str) -> bool:
@@ -1146,11 +1229,17 @@ class WebSocketChannel(BaseChannel):
         if not conns:
             logger.warning("websocket: no active subscribers for chat_id={}", msg.chat_id)
             return
+        text = msg.content
+        if msg.buttons:
+            text = _append_buttons_as_text(text, msg.buttons)
         payload: dict[str, Any] = {
             "event": "message",
             "chat_id": msg.chat_id,
-            "text": msg.content,
+            "text": text,
         }
+        if msg.buttons:
+            payload["buttons"] = msg.buttons
+            payload["button_prompt"] = msg.content
         if msg.media:
             payload["media"] = msg.media
             urls: list[dict[str, str]] = []

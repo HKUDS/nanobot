@@ -38,6 +38,8 @@ class SlackConfig(Base):
     reply_in_thread: bool = True
     react_emoji: str = "eyes"
     done_emoji: str = "white_check_mark"
+    include_thread_context: bool = True
+    thread_context_limit: int = 20
     allow_from: list[str] = Field(default_factory=list)
     group_policy: str = "mention"
     group_allow_from: list[str] = Field(default_factory=list)
@@ -66,6 +68,7 @@ class SlackChannel(BaseChannel):
         self._socket_client: SocketModeClient | None = None
         self._bot_user_id: str | None = None
         self._target_cache: dict[str, str] = {}
+        self._thread_context_attempted: set[str] = set()
 
     async def start(self) -> None:
         """Start the Slack Socket Mode client."""
@@ -327,9 +330,11 @@ class SlackChannel(BaseChannel):
 
         text = self._strip_bot_mention(text)
 
-        thread_ts = event.get("thread_ts")
+        event_ts = event.get("ts")
+        raw_thread_ts = event.get("thread_ts")
+        thread_ts = raw_thread_ts
         if self.config.reply_in_thread and not thread_ts:
-            thread_ts = event.get("ts")
+            thread_ts = event_ts
         # Add :eyes: reaction to the triggering message (best-effort)
         try:
             if self._web_client and event.get("ts"):
@@ -343,12 +348,20 @@ class SlackChannel(BaseChannel):
 
         # Thread-scoped session key for channel/group messages
         session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts and channel_type != "im" else None
+        content = await self._with_thread_context(
+            text,
+            chat_id=chat_id,
+            channel_type=channel_type,
+            thread_ts=thread_ts,
+            raw_thread_ts=raw_thread_ts,
+            current_ts=event_ts,
+        )
 
         try:
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
-                content=text,
+                content=content,
                 metadata={
                     "slack": {
                         "event": event,
@@ -360,6 +373,66 @@ class SlackChannel(BaseChannel):
             )
         except Exception:
             logger.exception("Error handling Slack message from {}", sender_id)
+
+    async def _with_thread_context(
+        self,
+        text: str,
+        *,
+        chat_id: str,
+        channel_type: str,
+        thread_ts: str | None,
+        raw_thread_ts: str | None,
+        current_ts: str | None,
+    ) -> str:
+        """Include thread history the first time the bot is pulled into a Slack thread."""
+        if (
+            not self.config.include_thread_context
+            or not self._web_client
+            or channel_type == "im"
+            or not raw_thread_ts
+            or not thread_ts
+            or current_ts == thread_ts
+        ):
+            return text
+
+        key = f"{chat_id}:{thread_ts}"
+        if key in self._thread_context_attempted:
+            return text
+        self._thread_context_attempted.add(key)
+
+        try:
+            response = await self._web_client.conversations_replies(
+                channel=chat_id,
+                ts=thread_ts,
+                limit=max(1, self.config.thread_context_limit),
+            )
+        except Exception as e:
+            logger.warning("Slack thread context unavailable for {}: {}", key, e)
+            return text
+
+        lines = self._format_thread_context(
+            response.get("messages", []),
+            current_ts=current_ts,
+        )
+        if not lines:
+            return text
+        return "Slack thread context before this mention:\n" + "\n".join(lines) + f"\n\nCurrent message:\n{text}"
+
+    def _format_thread_context(self, messages: list[dict[str, Any]], *, current_ts: str | None) -> list[str]:
+        lines: list[str] = []
+        for item in messages:
+            if item.get("ts") == current_ts:
+                continue
+            if item.get("subtype"):
+                continue
+            sender = str(item.get("user") or item.get("bot_id") or "unknown")
+            if self._bot_user_id and sender == self._bot_user_id:
+                continue
+            text = str(item.get("text") or "").strip()
+            if not text:
+                continue
+            lines.append(f"- <@{sender}>: {self._strip_bot_mention(text)}")
+        return lines
 
     async def _update_react_emoji(self, chat_id: str, ts: str | None) -> None:
         """Remove the in-progress reaction and optionally add a done reaction."""

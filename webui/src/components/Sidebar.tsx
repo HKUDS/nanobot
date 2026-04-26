@@ -1,9 +1,8 @@
-import { Moon, PanelLeftClose, Plus, RefreshCcw, Sun } from "lucide-react";
+import { Moon, PanelLeftClose, RefreshCcw, Settings, SquarePen, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ChatList } from "@/components/ChatList";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import type { ChatSummary } from "@/lib/types";
@@ -19,48 +18,60 @@ interface SidebarProps {
   onRefresh: () => void;
   onRequestDelete: (key: string, label: string) => void;
   onCollapse: () => void;
+  activeView?: "chat" | "settings";
+  onOpenSettings: () => void;
 }
 
 export function Sidebar(props: SidebarProps) {
   const { t } = useTranslation();
   return (
     <aside className="flex h-full w-full flex-col border-r border-sidebar-border/70 bg-sidebar text-sidebar-foreground">
-      <div className="flex items-center justify-between px-2 py-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t("sidebar.collapse")}
-          onClick={props.onCollapse}
-          className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
-        >
-          <PanelLeftClose className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t("sidebar.toggleTheme")}
-          onClick={props.onToggleTheme}
-          className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
-        >
-          {props.theme === "dark" ? (
-            <Sun className="h-3.5 w-3.5" />
-          ) : (
-            <Moon className="h-3.5 w-3.5" />
-          )}
-        </Button>
+      <div className="flex items-center justify-between px-3 pb-2 pt-3">
+        <picture className="block min-w-0">
+          <source srcSet="/brand/nanobot_logo.webp" type="image/webp" />
+          <img
+            src="/brand/nanobot_logo.png"
+            alt="nanobot"
+            className="h-7 w-auto select-none object-contain"
+            draggable={false}
+          />
+        </picture>
+        <div className="flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t("sidebar.toggleTheme")}
+            onClick={props.onToggleTheme}
+            className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
+            {props.theme === "dark" ? (
+              <Sun className="h-3.5 w-3.5" />
+            ) : (
+              <Moon className="h-3.5 w-3.5" />
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t("sidebar.collapse")}
+            onClick={props.onCollapse}
+            className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          >
+            <PanelLeftClose className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
-      <div className="px-2 pb-2.5">
+      <div className="px-2 pb-2">
         <Button
           onClick={props.onNewChat}
-          className="h-8.5 w-full justify-start gap-2 rounded-lg border border-sidebar-border/80 bg-card/25 px-3 text-[13px] font-medium text-sidebar-foreground shadow-none hover:bg-sidebar-accent/80"
-          variant="outline"
+          className="h-9 w-full justify-start gap-2 rounded-full px-3 text-[13px] font-medium text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          variant="ghost"
         >
-          <Plus className="h-3.5 w-3.5" />
+          <SquarePen className="h-3.5 w-3.5" />
           {t("sidebar.newChat")}
         </Button>
       </div>
-      <Separator className="bg-sidebar-border/70" />
-      <div className="flex items-center justify-between px-2.5 py-2 text-[11px] font-medium text-muted-foreground">
+      <div className="flex items-center justify-between px-3 pb-1.5 pt-2.5 text-[11px] font-medium text-muted-foreground">
         <span>{t("sidebar.recent")}</span>
         <Button
           variant="ghost"
@@ -81,10 +92,17 @@ export function Sidebar(props: SidebarProps) {
           onRequestDelete={props.onRequestDelete}
         />
       </div>
-      <Separator className="bg-sidebar-border/70" />
+      <Separator className="bg-sidebar-border/50" />
       <div className="flex items-center justify-between gap-2 px-2.5 py-2 text-xs">
         <ConnectionBadge />
-        <LanguageSwitcher />
+        <Button
+          onClick={props.onOpenSettings}
+          className="h-7 gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          variant={props.activeView === "settings" ? "secondary" : "ghost"}
+        >
+          <Settings className="h-3.5 w-3.5" />
+          Settings
+        </Button>
       </div>
     </aside>
   );

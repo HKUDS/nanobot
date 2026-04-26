@@ -136,9 +136,10 @@ class ExecTool(Tool):
 
         if self.path_append:
             if _IS_WINDOWS:
-                env["PATH"] = env.get("PATH", "") + ";" + self.path_append
+                env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
             else:
-                command = f'export PATH="$PATH:{self.path_append}"; {command}'
+                env["NANOBOT_PATH_APPEND"] = self.path_append
+                command = f'export PATH="$PATH{os.pathsep}$NANOBOT_PATH_APPEND"; {command}'
 
         try:
             process = await self._spawn(command, cwd, env)
@@ -298,8 +299,8 @@ class ExecTool(Tool):
                     continue
 
                 media_path = get_media_dir().resolve()
-                if (p.is_absolute() 
-                    and cwd_path not in p.parents 
+                if (p.is_absolute()
+                    and cwd_path not in p.parents
                     and p != cwd_path
                     and media_path not in p.parents
                     and p != media_path

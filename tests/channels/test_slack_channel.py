@@ -20,9 +20,11 @@ class _FakeAsyncWebClient:
         self.reactions_add_calls: list[dict[str, object | None]] = []
         self.reactions_remove_calls: list[dict[str, object | None]] = []
         self.conversations_list_calls: list[dict[str, object | None]] = []
+        self.conversations_replies_calls: list[dict[str, object | None]] = []
         self.users_list_calls: list[dict[str, object | None]] = []
         self.conversations_open_calls: list[dict[str, object | None]] = []
         self._conversations_pages: list[dict[str, object]] = []
+        self._conversations_replies_response: dict[str, object] = {"messages": []}
         self._users_pages: list[dict[str, object]] = []
         self._open_dm_response: dict[str, object] = {"channel": {"id": "D_OPENED"}}
 
@@ -91,6 +93,10 @@ class _FakeAsyncWebClient:
         if self._conversations_pages:
             return self._conversations_pages.pop(0)
         return {"channels": [], "response_metadata": {"next_cursor": ""}}
+
+    async def conversations_replies(self, **kwargs):
+        self.conversations_replies_calls.append(kwargs)
+        return self._conversations_replies_response
 
     async def users_list(self, **kwargs):
         self.users_list_calls.append(kwargs)
@@ -316,3 +322,47 @@ async def test_send_raises_when_named_target_cannot_be_resolved() -> None:
                 content="hello",
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_with_thread_context_fetches_root_once() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    channel._bot_user_id = "UBOT"
+    fake_web = _FakeAsyncWebClient()
+    fake_web._conversations_replies_response = {
+        "messages": [
+            {"ts": "111.000", "user": "UROOT", "text": "drink water"},
+            {"ts": "112.000", "user": "U2", "text": "good idea"},
+            {"ts": "113.000", "user": "U3", "text": "<@UBOT> what did you see?"},
+        ]
+    }
+    channel._web_client = fake_web
+
+    content = await channel._with_thread_context(
+        "what did you see?",
+        chat_id="C123",
+        channel_type="channel",
+        thread_ts="111.000",
+        raw_thread_ts="111.000",
+        current_ts="113.000",
+    )
+
+    assert fake_web.conversations_replies_calls == [
+        {"channel": "C123", "ts": "111.000", "limit": 20}
+    ]
+    assert "Slack thread context before this mention:" in content
+    assert "- <@UROOT>: drink water" in content
+    assert "- <@U2>: good idea" in content
+    assert "U3" not in content
+    assert content.endswith("Current message:\nwhat did you see?")
+
+    second = await channel._with_thread_context(
+        "again",
+        chat_id="C123",
+        channel_type="channel",
+        thread_ts="111.000",
+        raw_thread_ts="111.000",
+        current_ts="114.000",
+    )
+    assert second == "again"
+    assert len(fake_web.conversations_replies_calls) == 1

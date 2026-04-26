@@ -44,6 +44,8 @@ export interface UIMessage {
   images?: UIImage[];
   /** Signed or local UI-renderable media attachments. */
   media?: UIMediaAttachment[];
+  /** Optional answer choices for a pending ask_user question. */
+  buttons?: string[][];
 }
 
 export interface ChatSummary {
@@ -64,6 +66,28 @@ export interface BootstrapResponse {
   model_name?: string | null;
 }
 
+export interface SettingsPayload {
+  agent: {
+    model: string;
+    provider: string;
+    resolved_provider: string | null;
+    has_api_key: boolean;
+  };
+  providers: Array<{
+    name: string;
+    label: string;
+  }>;
+  runtime: {
+    config_path: string;
+  };
+  requires_restart: boolean;
+}
+
+export interface SettingsUpdate {
+  model?: string;
+  provider?: string;
+}
+
 export type ConnectionStatus =
   | "idle"
   | "connecting"
@@ -82,6 +106,9 @@ export type InboundEvent =
       reply_to?: string;
       media?: string[];
       media_urls?: Array<{ url: string; name?: string }>;
+      buttons?: string[][];
+      /** Original prompt before the websocket text fallback appends buttons. */
+      button_prompt?: string;
       /** Present when the frame is an agent breadcrumb (e.g. tool hint,
        * generic progress line) rather than a conversational reply. */
       kind?: "tool_hint" | "progress";

@@ -282,6 +282,10 @@ PRs welcome! The codebase is intentionally small and readable. 🤗
 - **More integrations** — Calendar and more
 - **Self-improvement** — Learn from feedback and mistakes
 
+## Contact
+
+This project was started by [Xubin Ren](https://github.com/re-bin) as a personal open-source project and continues to be maintained in an individual capacity using personal resources, with contributions from the open-source community. Feel free to contact [xubinrencs@gmail.com](mailto:xubinrencs@gmail.com) for questions, ideas, or collaboration.
+
 ### Contributors
 
 <a href="https://github.com/HKUDS/nanobot/graphs/contributors">

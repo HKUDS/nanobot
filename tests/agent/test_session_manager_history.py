@@ -194,6 +194,46 @@ def test_get_history_preserves_reasoning_content():
     ]
 
 
+def test_get_history_exposes_turn_timestamps_to_model():
+    session = Session(key="test:timestamps")
+    session.messages.append({
+        "role": "user",
+        "content": "10 点提醒是昨天发生的",
+        "timestamp": "2026-04-26T22:00:00",
+    })
+    session.messages.append({
+        "role": "assistant",
+        "content": "记下来了",
+        "timestamp": "2026-04-26T22:00:05",
+    })
+
+    history = session.get_history(max_messages=500, include_timestamps=True)
+
+    assert history == [
+        {
+            "role": "user",
+            "content": "[Message Time: 2026-04-26T22:00:00]\n10 点提醒是昨天发生的",
+        },
+        {
+            "role": "assistant",
+            "content": "[Message Time: 2026-04-26T22:00:05]\n记下来了",
+        },
+    ]
+
+
+def test_get_history_does_not_annotate_tool_results_with_timestamps():
+    session = Session(key="test:tool-timestamps")
+    session.messages.append({"role": "user", "content": "run tool"})
+    session.messages.extend(_tool_turn("ts", 0))
+    session.messages[-1]["timestamp"] = "2026-04-26T22:00:10"
+
+    history = session.get_history(max_messages=500, include_timestamps=True)
+
+    tool_result = history[-1]
+    assert tool_result["role"] == "tool"
+    assert tool_result["content"] == "ok"
+
+
 # --- Window cuts mid-group: assistant present but some tool results orphaned ---
 
 def test_window_cuts_mid_tool_group():

@@ -96,6 +96,11 @@ class SubagentManager:
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
+    def set_provider(self, provider: LLMProvider, model: str) -> None:
+        self.provider = provider
+        self.model = model
+        self.runner.provider = provider
+
     async def spawn(
         self,
         task: str,

@@ -205,3 +205,37 @@ async def test_ask_user_keeps_buttons_for_telegram(tmp_path):
     assert response is not None
     assert response.content == "Install the optional package?"
     assert response.buttons == [["Install", "Skip"]]
+
+
+@pytest.mark.asyncio
+async def test_ask_user_keeps_buttons_for_websocket(tmp_path):
+    async def chat_with_retry(**kwargs):
+        return LLMResponse(
+            content="",
+            finish_reason="tool_calls",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_ask",
+                    name="ask_user",
+                    arguments={
+                        "question": "Install the optional package?",
+                        "options": ["Install", "Skip"],
+                    },
+                )
+            ],
+        )
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=_make_provider(chat_with_retry),
+        workspace=tmp_path,
+        model="test-model",
+    )
+
+    response = await loop._process_message(
+        InboundMessage(channel="websocket", sender_id="user", chat_id="123", content="set it up")
+    )
+
+    assert response is not None
+    assert response.content == "Install the optional package?"
+    assert response.buttons == [["Install", "Skip"]]

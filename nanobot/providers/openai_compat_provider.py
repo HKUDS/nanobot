@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import hashlib
 import importlib.util
+import json
 import os
 import secrets
 import string
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
+import httpx
 import json_repair
 from loguru import logger
 
@@ -159,6 +162,37 @@ _RESPONSES_FAILURE_THRESHOLD = 3
 _RESPONSES_PROBE_INTERVAL_S = 300  # 5 minutes
 
 
+def _is_local_endpoint(
+    spec: "ProviderSpec | None",
+    api_base: str | None,
+) -> bool:
+    """Return True when the endpoint is a local or LAN model server.
+
+    Matches either the provider spec's ``is_local`` flag or common private-
+    network patterns in the base URL (localhost, 127.x, 192.168.x, 10.x,
+    172.16-31.x, Docker ``host.docker.internal``).
+    """
+    if spec and spec.is_local:
+        return True
+    if not api_base:
+        return False
+    raw = api_base.strip().lower()
+    parsed = urlparse(raw if "://" in raw else f"//{raw}")
+    try:
+        host = parsed.hostname
+    except ValueError:
+        return False
+    if host in {"localhost", "host.docker.internal"}:
+        return True
+    if not host:
+        return False
+    try:
+        addr = ip_address(host)
+    except ValueError:
+        return False
+    return addr.is_loopback or addr.is_private
+
+
 def _is_direct_openai_base(api_base: str | None) -> bool:
     """Return True for direct OpenAI endpoints, not generic OpenAI-compatible gateways."""
     if not api_base:
@@ -208,11 +242,27 @@ class OpenAICompatProvider(LLMProvider):
         if extra_headers:
             default_headers.update(extra_headers)
 
+        # Local model servers (Ollama, llama.cpp, vLLM) often close idle
+        # HTTP connections before the client-side keepalive expires.  When
+        # two LLM calls happen seconds apart (e.g. heartbeat _decide then
+        # process_direct), the second call may grab a now-dead pooled
+        # connection, causing a transient APIConnectionError on every first
+        # attempt.  Disabling keepalive for local endpoints avoids this by
+        # opening a fresh connection for each request, which is cheap on a
+        # LAN.  Cloud providers benefit from keepalive, so we leave the
+        # default pool settings for them.
+        http_client: httpx.AsyncClient | None = None
+        if _is_local_endpoint(spec, effective_base):
+            http_client = httpx.AsyncClient(
+                limits=httpx.Limits(keepalive_expiry=0),
+            )
+
         self._client = AsyncOpenAI(
             api_key=api_key or "no-key",
             base_url=effective_base,
             default_headers=default_headers,
             max_retries=0,
+            http_client=http_client,
         )
 
         # Responses API circuit breaker: skip after repeated failures,
@@ -334,6 +384,47 @@ class OpenAICompatProvider(LLMProvider):
                 clean["tool_call_id"] = map_id(clean["tool_call_id"])
         return self._enforce_role_alternation(sanitized)
 
+    def _drop_deepseek_incomplete_reasoning_history(
+        self,
+        messages: list[dict[str, Any]],
+        reasoning_effort: str | None,
+    ) -> list[dict[str, Any]]:
+        if (
+            not self._spec
+            or self._spec.name != "deepseek"
+            or not reasoning_effort
+            or reasoning_effort.lower() == "none"
+        ):
+            return messages
+
+        bad_idx = None
+        for idx, msg in enumerate(messages):
+            if (
+                msg.get("role") == "assistant"
+                and msg.get("tool_calls")
+                and not msg.get("reasoning_content")
+            ):
+                bad_idx = idx
+        if bad_idx is None:
+            return messages
+
+        keep_from = None
+        for idx in range(bad_idx + 1, len(messages)):
+            if messages[idx].get("role") == "user":
+                keep_from = idx
+                break
+
+        if keep_from is None:
+            trimmed = messages[:bad_idx]
+        else:
+            prefix = [msg for msg in messages[:keep_from] if msg.get("role") == "system"]
+            trimmed = prefix + messages[keep_from:]
+        logger.warning(
+            "Dropped {} DeepSeek thinking history message(s) with incomplete reasoning_content",
+            len(messages) - len(trimmed),
+        )
+        return trimmed
+
     # ------------------------------------------------------------------
     # Build kwargs
     # ------------------------------------------------------------------
@@ -374,6 +465,10 @@ class OpenAICompatProvider(LLMProvider):
         if spec and spec.strip_model_prefix:
             model_name = model_name.split("/")[-1]
 
+        messages = self._drop_deepseek_incomplete_reasoning_history(
+            messages,
+            reasoning_effort,
+        )
         kwargs: dict[str, Any] = {
             "model": model_name,
             "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
@@ -709,8 +804,8 @@ class OpenAICompatProvider(LLMProvider):
             finish_reason = str(choice0.get("finish_reason") or "stop")
 
             raw_tool_calls: list[Any] = []
-            # StepFun Plan: fallback to reasoning field when content is empty
-            if not content and msg0.get("reasoning"):
+            # StepFun: fallback to reasoning field when content is empty
+            if not content and msg0.get("reasoning") and self._spec and self._spec.reasoning_as_content:
                 content = self._extract_text_content(msg0.get("reasoning"))
             reasoning_content = msg0.get("reasoning_content")
             if not reasoning_content and msg0.get("reasoning"):
@@ -770,7 +865,7 @@ class OpenAICompatProvider(LLMProvider):
                     finish_reason = ch.finish_reason
             if not content and m.content:
                 content = m.content
-            if not content and getattr(m, "reasoning", None):
+            if not content and getattr(m, "reasoning", None) and self._spec and self._spec.reasoning_as_content:
                 content = m.reasoning
 
         tool_calls = []

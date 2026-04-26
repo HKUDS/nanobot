@@ -71,6 +71,11 @@ class ProviderSpec:
     # "reasoning_split" — {"reasoning_split": true/false}  (MiniMax)
     thinking_style: str = ""
 
+    # When True, treat the "reasoning" response field as formal content
+    # when "content" is empty.  Only set this for providers (e.g. StepFun)
+    # whose API returns the actual answer in "reasoning" instead of "content".
+    reasoning_as_content: bool = False
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
@@ -325,6 +330,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Step Fun",
         backend="openai_compat",
         default_api_base="https://api.stepfun.com/v1",
+        reasoning_as_content=True,
     ),
     # Xiaomi MIMO (小米): OpenAI-compatible API
     ProviderSpec(

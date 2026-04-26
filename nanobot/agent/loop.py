@@ -42,6 +42,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
+from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.document import extract_documents
 from nanobot.utils.helpers import image_placeholder_text
@@ -75,6 +76,8 @@ class _LoopHook(AgentHook):
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_key: str | None = None,
     ) -> None:
         super().__init__(reraise=True)
         self._loop = agent_loop
@@ -84,6 +87,8 @@ class _LoopHook(AgentHook):
         self._channel = channel
         self._chat_id = chat_id
         self._message_id = message_id
+        self._metadata = metadata or {}
+        self._session_key = session_key
         self._stream_buf = ""
 
     def wants_streaming(self) -> bool:
@@ -126,7 +131,13 @@ class _LoopHook(AgentHook):
         for tc in context.tool_calls:
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
-        self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
+        self._loop._set_tool_context(
+            self._channel,
+            self._chat_id,
+            self._message_id,
+            self._metadata,
+            session_key=self._session_key,
+        )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         if (
@@ -190,10 +201,13 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
+        consolidation_ratio: float = 0.5,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
+        provider_snapshot_loader: Callable[[], ProviderSnapshot] | None = None,
+        provider_signature: tuple[object, ...] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
 
@@ -202,6 +216,8 @@ class AgentLoop:
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
+        self._provider_snapshot_loader = provider_snapshot_loader
+        self._provider_signature = provider_signature
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = (
@@ -269,6 +285,7 @@ class AgentLoop:
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
+            consolidation_ratio=consolidation_ratio,
         )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
@@ -287,6 +304,36 @@ class AgentLoop:
         self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+
+    def _apply_provider_snapshot(self, snapshot: ProviderSnapshot) -> None:
+        """Swap model/provider for future turns without disturbing an active one."""
+        provider = snapshot.provider
+        model = snapshot.model
+        context_window_tokens = snapshot.context_window_tokens
+        if self.provider is provider and self.model == model:
+            return
+        old_model = self.model
+        self.provider = provider
+        self.model = model
+        self.context_window_tokens = context_window_tokens
+        self.runner.provider = provider
+        self.subagents.set_provider(provider, model)
+        self.consolidator.set_provider(provider, model, context_window_tokens)
+        self.dream.set_provider(provider, model)
+        self._provider_signature = snapshot.signature
+        logger.info("Runtime model switched for next turn: {} -> {}", old_model, model)
+
+    def _refresh_provider_snapshot(self) -> None:
+        if self._provider_snapshot_loader is None:
+            return
+        try:
+            snapshot = self._provider_snapshot_loader()
+        except Exception:
+            logger.exception("Failed to refresh provider config")
+            return
+        if snapshot.signature == self._provider_signature:
+            return
+        self._apply_provider_snapshot(snapshot)
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -350,18 +397,24 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def _set_tool_context(
+        self, channel: str, chat_id: str,
+        message_id: str | None = None, metadata: dict | None = None,
+        session_key: str | None = None,
+    ) -> None:
         """Update context for all tools that need routing info."""
-        # Compute the effective session key (accounts for unified sessions)
-        # so that subagent results route to the correct pending queue.
         effective_key = UNIFIED_SESSION_KEY if self._unified_session else f"{channel}:{chat_id}"
         for name in ("message", "spawn", "cron", "my"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     if name == "spawn":
                         tool.set_context(channel, chat_id, effective_key=effective_key)
+                    elif name == "cron":
+                        tool.set_context(channel, chat_id, metadata=metadata, session_key=session_key)
+                    elif name == "message":
+                        tool.set_context(channel, chat_id, message_id, metadata=metadata)
                     else:
-                        tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                        tool.set_context(channel, chat_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -427,6 +480,8 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_key: str | None = None,
         pending_queue: asyncio.Queue | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
@@ -446,6 +501,8 @@ class AgentLoop:
             channel=channel,
             chat_id=chat_id,
             message_id=message_id,
+            metadata=metadata,
+            session_key=session_key,
         )
         hook: AgentHook = (
             CompositeHook([loop_hook] + self._extra_hooks) if self._extra_hooks else loop_hook
@@ -766,6 +823,7 @@ class AgentLoop:
         pending_queue: asyncio.Queue | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        self._refresh_provider_snapshot()
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (
@@ -793,8 +851,11 @@ class AgentLoop:
             is_subagent = msg.sender_id == "subagent"
             if is_subagent and self._persist_subagent_followup(session, msg):
                 self.sessions.save(session)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=0)
+            self._set_tool_context(
+                channel, chat_id, msg.metadata.get("message_id"),
+                msg.metadata, session_key=key,
+            )
+            history = session.get_history(max_messages=0, include_timestamps=True)
             current_role = "assistant" if is_subagent else "user"
 
             # Subagent content is already in `history` above; passing it again
@@ -810,6 +871,8 @@ class AgentLoop:
             final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
+                metadata=msg.metadata,
+                session_key=key,
                 pending_queue=pending_queue,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -858,12 +921,15 @@ class AgentLoop:
             session_summary=pending,
         )
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        self._set_tool_context(
+            msg.channel, msg.chat_id, msg.metadata.get("message_id"),
+            msg.metadata, session_key=key,
+        )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=0)
+        history = session.get_history(max_messages=0, include_timestamps=True)
 
         pending_ask_id = pending_ask_user_id(history)
         if pending_ask_id:
@@ -940,6 +1006,8 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
+            metadata=msg.metadata,
+            session_key=key,
             pending_queue=pending_queue,
         )
 

@@ -6,7 +6,7 @@ from typing import Any
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 
-BUTTON_CHANNELS = frozenset({"telegram"})
+STRUCTURED_BUTTON_CHANNELS = frozenset({"telegram", "websocket"})
 
 
 class AskUserInterrupt(BaseException):
@@ -130,7 +130,7 @@ def ask_user_outbound(
 ) -> tuple[str | None, list[list[str]]]:
     if not options:
         return content, []
-    if channel in BUTTON_CHANNELS:
+    if channel in STRUCTURED_BUTTON_CHANNELS:
         return content, [options]
     option_text = "\n".join(f"{index}. {option}" for index, option in enumerate(options, 1))
     return f"{content}\n\n{option_text}" if content else option_text, []

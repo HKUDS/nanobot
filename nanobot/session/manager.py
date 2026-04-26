@@ -30,6 +30,18 @@ class Session:
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
 
+    @staticmethod
+    def _annotate_message_time(message: dict[str, Any], content: Any) -> Any:
+        """Expose persisted turn timestamps to the model for relative-date reasoning."""
+        timestamp = message.get("timestamp")
+        if (
+            not timestamp
+            or message.get("role") not in {"user", "assistant"}
+            or not isinstance(content, str)
+        ):
+            return content
+        return f"[Message Time: {timestamp}]\n{content}"
+
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
@@ -41,15 +53,24 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
-    def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
+    def get_history(
+        self,
+        max_messages: int = 500,
+        *,
+        include_timestamps: bool = False,
+    ) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input, aligned to a legal tool-call boundary."""
         unconsolidated = self.messages[self.last_consolidated:]
         sliced = unconsolidated[-max_messages:]
 
-        # Avoid starting mid-turn when possible.
+        # Avoid starting mid-turn when possible, except for proactive
+        # assistant deliveries that the user may be replying to.
         for i, message in enumerate(sliced):
             if message.get("role") == "user":
-                sliced = sliced[i:]
+                start = i
+                if i > 0 and sliced[i - 1].get("_channel_delivery"):
+                    start = i - 1
+                sliced = sliced[start:]
                 break
 
         # Drop orphan tool results at the front.
@@ -71,6 +92,8 @@ class Session:
                     image_placeholder_text(p) for p in media if isinstance(p, str) and p
                 )
                 content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+            if include_timestamps:
+                content = self._annotate_message_time(message, content)
             entry: dict[str, Any] = {"role": message["role"], "content": content}
             for key in ("tool_calls", "tool_call_id", "name", "reasoning_content"):
                 if key in message:
