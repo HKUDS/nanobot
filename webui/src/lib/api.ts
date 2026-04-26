@@ -57,6 +57,16 @@ export async function listSessions(
   }));
 }
 
+/** Signed image URL attached to a historical user message. The server
+ * emits these in place of raw on-disk paths so the client can render
+ * previews without learning where media lives on disk. Each URL is a
+ * self-authenticating ``/api/media/...`` route (see backend
+ * ``_sign_media_path``) safe to drop into an ``<img src>`` attribute. */
+export interface SessionMediaUrl {
+  url: string;
+  name?: string;
+}
+
 export async function fetchSessionMessages(
   token: string,
   key: string,
@@ -72,6 +82,9 @@ export async function fetchSessionMessages(
     tool_calls?: unknown;
     tool_call_id?: string;
     name?: string;
+    /** Present on ``user`` turns that attached images. Paths have already
+     * been stripped server-side; only the signed fetch URLs survive. */
+    media_urls?: SessionMediaUrl[];
   }>;
 }> {
   return request(

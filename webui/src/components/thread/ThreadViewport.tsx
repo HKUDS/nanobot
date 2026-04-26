@@ -70,10 +70,12 @@ export function ThreadViewport({
         {hasMessages ? (
           <div className="mx-auto flex min-h-full w-full max-w-[64rem] flex-col">
             <div className="flex-1 px-4 pb-20 pt-4">
-              <ThreadMessages messages={messages} />
+              <div className="mx-auto w-full max-w-[49.5rem]">
+                <ThreadMessages messages={messages} />
+              </div>
             </div>
 
-            <div className="sticky bottom-0 z-10 mt-auto">
+            <div className="sticky bottom-0 z-10 mt-auto bg-background">
               <div className="px-4 pb-3">
                 {composer}
               </div>

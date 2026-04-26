@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 import weakref
+import tiktoken
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator
@@ -13,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 from loguru import logger
 
 from nanobot.utils.prompt_templates import render_template
-from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, strip_think
+from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, strip_think, truncate_text
 
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.registry import ToolRegistry
@@ -50,6 +51,7 @@ class MemoryStore:
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
         self._corruption_logged = False  # rate-limit non-int cursor warning
+        self._oversize_logged = False  # rate-limit oversized-entry warning
         self._git = GitStore(workspace, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md",
         ])
@@ -221,7 +223,7 @@ class MemoryStore:
 
     # -- history.jsonl — append-only, JSONL format ---------------------------
 
-    def append_history(self, entry: str) -> int:
+    def append_history(self, entry: str, *, max_chars: int | None = None) -> int:
         """Append *entry* to history.jsonl and return its auto-incrementing cursor.
 
         Entries are passed through `strip_think` to drop template-level leaks
@@ -230,10 +232,26 @@ class MemoryStore:
         the record is persisted with an empty string rather than falling back
         to the raw leak — otherwise `strip_think`'s guarantees would be
         undone by history replay / consolidation downstream.
+
+        A defensive cap (*max_chars*, default ``_HISTORY_ENTRY_HARD_CAP``) is
+        applied as a final safety net: individual callers should cap their own
+        content more tightly; this default only exists to catch unintentional
+        large writes (e.g. an LLM echoing its input back as a "summary").
         """
+        limit = max_chars if max_chars is not None else _HISTORY_ENTRY_HARD_CAP
         cursor = self._next_cursor()
         ts = datetime.now().strftime("%Y-%m-%d %H:%M")
         raw = entry.rstrip()
+        if len(raw) > limit:
+            if not self._oversize_logged:
+                self._oversize_logged = True
+                logger.warning(
+                    "history entry exceeds {} chars ({}); truncating. "
+                    "Usually means a caller forgot its own cap; "
+                    "further occurrences suppressed.",
+                    limit, len(raw),
+                )
+            raw = truncate_text(raw, limit)
         content = strip_think(raw)
         if raw and not content:
             logger.debug(
@@ -373,11 +391,13 @@ class MemoryStore:
             )
         return "\n".join(lines)
 
-    def raw_archive(self, messages: list[dict]) -> None:
+    def raw_archive(self, messages: list[dict], *, max_chars: int | None = None) -> None:
         """Fallback: dump raw messages to history.jsonl without LLM summarization."""
+        limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
+        formatted = truncate_text(self._format_messages(messages), limit)
         self.append_history(
             f"[RAW] {len(messages)} messages\n"
-            f"{self._format_messages(messages)}"
+            f"{formatted}"
         )
         logger.warning(
             "Memory consolidation degraded: raw-archived {} messages", len(messages)
@@ -390,11 +410,18 @@ class MemoryStore:
 # ---------------------------------------------------------------------------
 
 
+# Individual history.jsonl writers cap their own payloads tightly; the
+# _HISTORY_ENTRY_HARD_CAP at append_history() is a belt-and-suspenders default
+# that catches any new caller that forgot to set its own cap.
+_RAW_ARCHIVE_MAX_CHARS = 16_000       # fallback dump (LLM failed)
+_ARCHIVE_SUMMARY_MAX_CHARS = 8_000    # LLM-produced consolidation summary
+_HISTORY_ENTRY_HARD_CAP = 64_000      # emergency cap in append_history
+
+
 class Consolidator:
     """Lightweight consolidation: summarizes evicted messages into history.jsonl."""
 
     _MAX_CONSOLIDATION_ROUNDS = 5
-    _MAX_CHUNK_MESSAGES = 60  # hard cap per consolidation round
 
     _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
 
@@ -447,22 +474,6 @@ class Consolidator:
 
         return last_boundary
 
-    def _cap_consolidation_boundary(
-        self,
-        session: Session,
-        end_idx: int,
-    ) -> int | None:
-        """Clamp the chunk size without breaking the user-turn boundary."""
-        start = session.last_consolidated
-        if end_idx - start <= self._MAX_CHUNK_MESSAGES:
-            return end_idx
-
-        capped_end = start + self._MAX_CHUNK_MESSAGES
-        for idx in range(capped_end, start, -1):
-            if session.messages[idx].get("role") == "user":
-                return idx
-        return None
-
     def estimate_session_prompt_tokens(
         self,
         session: Session,
@@ -486,6 +497,25 @@ class Consolidator:
             self._get_tool_definitions(),
         )
 
+    @property
+    def _input_token_budget(self) -> int:
+        """Available input token budget for consolidation LLM."""
+        return self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
+
+    def _truncate_to_token_budget(self, text: str) -> str:
+        """Truncate text so it fits within the consolidation LLM's token budget."""
+        budget = self._input_token_budget
+        if budget <= 0:
+            return truncate_text(text, _RAW_ARCHIVE_MAX_CHARS)
+        try:
+            enc = tiktoken.get_encoding("cl100k_base")
+            tokens = enc.encode(text)
+            if len(tokens) <= budget:
+                return text
+            return enc.decode(tokens[:budget]) + "\n... (truncated)"
+        except Exception:
+            return truncate_text(text, budget * 4)
+
     async def archive(self, messages: list[dict]) -> str | None:
         """Summarize messages via LLM and append to history.jsonl.
 
@@ -495,6 +525,7 @@ class Consolidator:
             return None
         try:
             formatted = MemoryStore._format_messages(messages)
+            formatted = self._truncate_to_token_budget(formatted)
             response = await self.provider.chat_with_retry(
                 model=self.model,
                 messages=[
@@ -513,7 +544,7 @@ class Consolidator:
             if response.finish_reason == "error":
                 raise RuntimeError(f"LLM returned error: {response.content}")
             summary = response.content or "[no summary]"
-            self.store.append_history(summary)
+            self.store.append_history(summary, max_chars=_ARCHIVE_SUMMARY_MAX_CHARS)
             return summary
         except Exception:
             logger.warning("Consolidation LLM call failed, raw-dumping to history")
@@ -536,7 +567,7 @@ class Consolidator:
 
         lock = self.get_lock(session.key)
         async with lock:
-            budget = self.context_window_tokens - self.max_completion_tokens - self._SAFETY_BUFFER
+            budget = self._input_token_budget
             target = budget // 2
             try:
                 estimated, source = self.estimate_session_prompt_tokens(
@@ -575,14 +606,6 @@ class Consolidator:
                     break
 
                 end_idx = boundary[0]
-                end_idx = self._cap_consolidation_boundary(session, end_idx)
-                if end_idx is None:
-                    logger.debug(
-                        "Token consolidation: no capped boundary for {} (round {})",
-                        session.key,
-                        round_num,
-                    )
-                    break
 
                 chunk = session.messages[session.last_consolidated:end_idx]
                 if not chunk:
@@ -598,12 +621,18 @@ class Consolidator:
                     len(chunk),
                 )
                 summary = await self.archive(chunk)
+                # Advance the cursor either way: on success the chunk was
+                # summarized; on failure archive() already raw-archived it as
+                # a breadcrumb. Re-archiving the same chunk on the next call
+                # would just emit duplicate [RAW] entries.
                 if summary:
                     last_summary = summary
-                else:
-                    break
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
+                if not summary:
+                    # LLM is degraded — stop hammering it this call;
+                    # the next invocation can retry a fresh chunk.
+                    break
 
                 try:
                     estimated, source = self.estimate_session_prompt_tokens(
@@ -646,6 +675,15 @@ class Dream:
     Phase 2 delegates to AgentRunner with read_file / edit_file tools so the
     LLM can make targeted, incremental edits instead of replacing entire files.
     """
+
+    # Caps on prompt-bound inputs so Dream's LLM calls never exceed the model's
+    # context window just because a file (or a legacy large history entry) grew
+    # unexpectedly. Each file still appears in full via read_file when the agent
+    # needs it in Phase 2 — these caps only bound the Phase 1/2 prompt preview.
+    _MEMORY_FILE_MAX_CHARS = 32_000
+    _SOUL_FILE_MAX_CHARS = 16_000
+    _USER_FILE_MAX_CHARS = 16_000
+    _HISTORY_ENTRY_PREVIEW_MAX_CHARS = 4_000
 
     def __init__(
         self,
@@ -785,21 +823,31 @@ class Dream:
             len(entries), last_cursor, batch[-1]["cursor"], len(batch),
         )
 
-        # Build history text for LLM
+        # Build history text for LLM — cap each entry so a legacy oversized
+        # record (e.g. pre-#3412 raw_archive dump) can't blow up the prompt.
         history_text = "\n".join(
-            f"[{e['timestamp']}] {e['content']}" for e in batch
+            f"[{e['timestamp']}] "
+            f"{truncate_text(e['content'], self._HISTORY_ENTRY_PREVIEW_MAX_CHARS)}"
+            for e in batch
         )
 
-        # Current file contents + per-line age annotations (MEMORY.md only)
+        # Current file contents + per-line age annotations (MEMORY.md only).
+        # Each file is capped in the *prompt preview* only; Phase 2 still sees
+        # the full file via the read_file tool.
         current_date = datetime.now().strftime("%Y-%m-%d")
         raw_memory = self.store.read_memory() or "(empty)"
-        current_memory = (
+        annotated_memory = (
             self._annotate_with_ages(raw_memory)
             if self.annotate_line_ages
             else raw_memory
         )
-        current_soul = self.store.read_soul() or "(empty)"
-        current_user = self.store.read_user() or "(empty)"
+        current_memory = truncate_text(annotated_memory, self._MEMORY_FILE_MAX_CHARS)
+        current_soul = truncate_text(
+            self.store.read_soul() or "(empty)", self._SOUL_FILE_MAX_CHARS,
+        )
+        current_user = truncate_text(
+            self.store.read_user() or "(empty)", self._USER_FILE_MAX_CHARS,
+        )
 
         file_context = (
             f"## Current Date\n{current_date}\n\n"

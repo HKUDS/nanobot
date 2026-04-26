@@ -64,7 +64,19 @@
       "placeholderOpening": "Membuka obrolan baru…",
       "inputAria": "Input pesan",
       "sendHint": "Enter untuk kirim · Shift+Enter untuk baris baru",
-      "send": "Kirim pesan"
+      "send": "Kirim pesan",
+      "attachImage": "Lampirkan gambar",
+      "encoding": "Memproses…",
+      "remove": "Hapus lampiran",
+      "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "imageRejected": {
+        "unsupported_type": "Tipe file tidak didukung",
+        "too_many_images": "Maksimal {{max}} gambar per pesan",
+        "magic_mismatch": "File ini tampaknya bukan gambar asli",
+        "decode_failed": "Tidak dapat mendekode gambar ini",
+        "too_large": "Gambar terlalu besar — coba yang lebih kecil",
+        "io": "Tidak dapat membaca file ini"
+      }
     },
     "scrollToBottom": "Gulir ke bawah"
   },
@@ -72,12 +84,29 @@
     "streaming": "sedang mengalir",
     "assistantTyping": "Asisten sedang mengetik",
     "toolSingle": "Menggunakan sebuah alat",
-    "toolMany": "Menggunakan {{count}} alat"
+    "toolMany": "Menggunakan {{count}} alat",
+    "imageAttachment": "Lampiran gambar"
+  },
+  "lightbox": {
+    "title": "Pratinjau gambar",
+    "open": "Lihat gambar",
+    "prev": "Gambar sebelumnya",
+    "next": "Gambar berikutnya",
+    "close": "Tutup pratinjau"
   },
   "code": {
     "fallbackLanguage": "kode",
     "copyAria": "Salin kode",
     "copy": "Salin",
     "copied": "Tersalin"
+  },
+  "common": {
+    "dismiss": "Tutup"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "Pesan terlalu besar",
+      "body": "Server menolak pesan terakhir karena melebihi batas ukuran. Hapus beberapa gambar atau gunakan berkas yang lebih kecil, lalu coba lagi."
+    }
   }
 }

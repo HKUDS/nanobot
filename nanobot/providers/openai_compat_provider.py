@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import hashlib
 import importlib.util
+import json
 import os
 import secrets
 import string
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
+import httpx
 import json_repair
 from loguru import logger
 
@@ -57,6 +60,15 @@ _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.6",
     "k2.6-code-preview",
 })
+
+# Maps ProviderSpec.thinking_style → extra_body builder.
+# Each builder takes a bool (thinking_enabled) and returns the dict to
+# merge into extra_body, keeping the style→wire-format mapping in one place.
+_THINKING_STYLE_MAP: dict[str, Any] = {
+    "thinking_type": lambda on: {"thinking": {"type": "enabled" if on else "disabled"}},
+    "enable_thinking": lambda on: {"enable_thinking": on},
+    "reasoning_split": lambda on: {"reasoning_split": on},
+}
 
 
 def _is_kimi_thinking_model(model_name: str) -> bool:
@@ -150,6 +162,37 @@ _RESPONSES_FAILURE_THRESHOLD = 3
 _RESPONSES_PROBE_INTERVAL_S = 300  # 5 minutes
 
 
+def _is_local_endpoint(
+    spec: "ProviderSpec | None",
+    api_base: str | None,
+) -> bool:
+    """Return True when the endpoint is a local or LAN model server.
+
+    Matches either the provider spec's ``is_local`` flag or common private-
+    network patterns in the base URL (localhost, 127.x, 192.168.x, 10.x,
+    172.16-31.x, Docker ``host.docker.internal``).
+    """
+    if spec and spec.is_local:
+        return True
+    if not api_base:
+        return False
+    raw = api_base.strip().lower()
+    parsed = urlparse(raw if "://" in raw else f"//{raw}")
+    try:
+        host = parsed.hostname
+    except ValueError:
+        return False
+    if host in {"localhost", "host.docker.internal"}:
+        return True
+    if not host:
+        return False
+    try:
+        addr = ip_address(host)
+    except ValueError:
+        return False
+    return addr.is_loopback or addr.is_private
+
+
 def _is_direct_openai_base(api_base: str | None) -> bool:
     """Return True for direct OpenAI endpoints, not generic OpenAI-compatible gateways."""
     if not api_base:
@@ -199,11 +242,27 @@ class OpenAICompatProvider(LLMProvider):
         if extra_headers:
             default_headers.update(extra_headers)
 
+        # Local model servers (Ollama, llama.cpp, vLLM) often close idle
+        # HTTP connections before the client-side keepalive expires.  When
+        # two LLM calls happen seconds apart (e.g. heartbeat _decide then
+        # process_direct), the second call may grab a now-dead pooled
+        # connection, causing a transient APIConnectionError on every first
+        # attempt.  Disabling keepalive for local endpoints avoids this by
+        # opening a fresh connection for each request, which is cheap on a
+        # LAN.  Cloud providers benefit from keepalive, so we leave the
+        # default pool settings for them.
+        http_client: httpx.AsyncClient | None = None
+        if _is_local_endpoint(spec, effective_base):
+            http_client = httpx.AsyncClient(
+                limits=httpx.Limits(keepalive_expiry=0),
+            )
+
         self._client = AsyncOpenAI(
             api_key=api_key or "no-key",
             base_url=effective_base,
             default_headers=default_headers,
             max_retries=0,
+            http_client=http_client,
         )
 
         # Responses API circuit breaker: skip after repeated failures,
@@ -407,20 +466,11 @@ class OpenAICompatProvider(LLMProvider):
         # Provider-specific thinking parameters.
         # Only sent when reasoning_effort is explicitly configured so that
         # the provider default is preserved otherwise.
-        if spec and reasoning_effort is not None:
+        # The mapping is driven by ProviderSpec.thinking_style so that adding
+        # a new provider never requires touching this function.
+        if spec and spec.thinking_style and reasoning_effort is not None:
             thinking_enabled = semantic_effort != "minimal"
-            extra: dict[str, Any] | None = None
-            if spec.name == "dashscope":
-                extra = {"enable_thinking": thinking_enabled}
-            elif spec.name == "minimax":
-                extra = {"reasoning_split": thinking_enabled}
-            elif spec.name in (
-                "volcengine", "volcengine_coding_plan",
-                "byteplus", "byteplus_coding_plan",
-            ):
-                extra = {
-                    "thinking": {"type": "enabled" if thinking_enabled else "disabled"}
-                }
+            extra = _THINKING_STYLE_MAP.get(spec.thinking_style, lambda _: None)(thinking_enabled)
             if extra:
                 kwargs.setdefault("extra_body", {}).update(extra)
 
@@ -437,6 +487,26 @@ class OpenAICompatProvider(LLMProvider):
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
+
+        # Backfill reasoning_content on legacy assistant messages.
+        # DeepSeek V4 (and potentially others) rejects thinking-mode
+        # requests that contain assistant messages without reasoning_content
+        # — even on turns that had no tool calls. This happens when a
+        # session was started with a non-thinking model or without
+        # reasoning_effort, then the user switches thinking mode on
+        # mid-session. Injecting an empty string satisfies the API
+        # without altering semantics (the model treats it as "no
+        # thinking happened on that turn").
+        thinking_active = (
+            (spec and spec.thinking_style and reasoning_effort is not None
+             and semantic_effort != "minimal")
+            or (reasoning_effort is not None and _is_kimi_thinking_model(model_name)
+                and semantic_effort != "minimal")
+        )
+        if thinking_active:
+            for msg in kwargs["messages"]:
+                if msg.get("role") == "assistant" and "reasoning_content" not in msg:
+                    msg["reasoning_content"] = ""
 
         return kwargs
 

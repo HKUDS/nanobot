@@ -40,4 +40,28 @@ describe("MessageBubble", () => {
     fireEvent.click(toggle);
     expect(screen.queryByText('weather("get")')).not.toBeInTheDocument();
   });
+
+  it("renders video media as an inline player", () => {
+    const message: UIMessage = {
+      id: "a1",
+      role: "assistant",
+      content: "here is the clip",
+      createdAt: Date.now(),
+      media: [
+        {
+          kind: "video",
+          url: "/api/media/sig/payload",
+          name: "demo.mp4",
+        },
+      ],
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+
+    expect(screen.getByText("here is the clip")).toBeInTheDocument();
+    const video = screen.getByLabelText(/video attachment/i);
+    expect(video.tagName).toBe("VIDEO");
+    expect(video).toHaveAttribute("src", "/api/media/sig/payload");
+    expect(container.querySelector("video[controls]")).toBeInTheDocument();
+  });
 });

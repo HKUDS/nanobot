@@ -167,7 +167,9 @@ class AnthropicProvider(LLMProvider):
             "type": "tool_result",
             "tool_use_id": msg.get("tool_call_id", ""),
         }
-        if isinstance(content, (str, list)):
+        if isinstance(content, list):
+            block["content"] = AnthropicProvider._convert_user_content(content)
+        elif isinstance(content, str):
             block["content"] = content
         else:
             block["content"] = str(content) if content else ""
@@ -208,7 +210,8 @@ class AnthropicProvider(LLMProvider):
 
         return blocks or [{"type": "text", "text": ""}]
 
-    def _convert_user_content(self, content: Any) -> Any:
+    @staticmethod
+    def _convert_user_content(content: Any) -> Any:
         """Convert user message content, translating image_url blocks."""
         if isinstance(content, str) or content is None:
             return content or "(empty)"
@@ -221,7 +224,7 @@ class AnthropicProvider(LLMProvider):
                 result.append({"type": "text", "text": str(item)})
                 continue
             if item.get("type") == "image_url":
-                converted = self._convert_image_block(item)
+                converted = AnthropicProvider._convert_image_block(item)
                 if converted:
                     result.append(converted)
                 continue
@@ -433,6 +436,10 @@ class AnthropicProvider(LLMProvider):
         max_tokens = max(1, max_tokens)
         thinking_enabled = bool(reasoning_effort)
 
+        # claude-opus-4-7 deprecated the `temperature` parameter entirely — the
+        # API returns 400 if it is present, on any code path.
+        omit_temperature = "opus-4-7" in model_name
+
         kwargs: dict[str, Any] = {
             "model": model_name,
             "messages": anthropic_msgs,
@@ -447,14 +454,16 @@ class AnthropicProvider(LLMProvider):
             # Supported on claude-sonnet-4-6 and claude-opus-4-6.
             # Also auto-enables interleaved thinking between tool calls.
             kwargs["thinking"] = {"type": "adaptive"}
-            kwargs["temperature"] = 1.0
+            if not omit_temperature:
+                kwargs["temperature"] = 1.0
         elif thinking_enabled:
             budget_map = {"low": 1024, "medium": 4096, "high": max(8192, max_tokens)}
             budget = budget_map.get(reasoning_effort.lower(), 4096)
             kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
             kwargs["max_tokens"] = max(max_tokens, budget + 4096)
-            kwargs["temperature"] = 1.0
-        else:
+            if not omit_temperature:
+                kwargs["temperature"] = 1.0
+        elif not omit_temperature:
             kwargs["temperature"] = temperature
 
         if anthropic_tools:

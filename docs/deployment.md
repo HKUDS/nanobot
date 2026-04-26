@@ -92,3 +92,75 @@ If you edit the `.service` file itself, run `systemctl --user daemon-reload` bef
 > ```bash
 > loginctl enable-linger $USER
 > ```
+
+## macOS LaunchAgent
+
+Use a LaunchAgent when you want `nanobot gateway` to stay online after you log in, without keeping a terminal open.
+
+**1. Get the absolute `nanobot` path:**
+
+```bash
+which nanobot   # e.g. /Users/youruser/.local/bin/nanobot
+```
+
+Use that exact path in the plist. It keeps the Python environment from your install method.
+
+**2. Create `~/Library/LaunchAgents/ai.nanobot.gateway.plist`:**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.nanobot.gateway</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/youruser/.local/bin/nanobot</string>
+    <string>gateway</string>
+    <string>--workspace</string>
+    <string>/Users/youruser/.nanobot/workspace</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/youruser/.nanobot/workspace</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/youruser/.nanobot/logs/gateway.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/youruser/.nanobot/logs/gateway.error.log</string>
+</dict>
+</plist>
+```
+
+**3. Load and start it:**
+
+```bash
+mkdir -p ~/Library/LaunchAgents ~/.nanobot/logs
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.nanobot.gateway.plist
+launchctl enable gui/$(id -u)/ai.nanobot.gateway
+launchctl kickstart -k gui/$(id -u)/ai.nanobot.gateway
+```
+
+**Common operations:**
+
+```bash
+launchctl list | grep ai.nanobot.gateway
+launchctl kickstart -k gui/$(id -u)/ai.nanobot.gateway   # restart
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/ai.nanobot.gateway.plist
+```
+
+After editing the plist, run `launchctl bootout ...` and `launchctl bootstrap ...` again.
+
+> **Note:** if startup fails with "address already in use", stop the manually started `nanobot gateway` process first.

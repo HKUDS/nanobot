@@ -7,26 +7,6 @@ from loguru import logger
 
 from nanobot.utils.helpers import detect_image_mime
 
-try:
-    from pypdf import PdfReader
-except ImportError:
-    PdfReader = None  # type: ignore
-
-try:
-    from docx import Document as DocxDocument
-except ImportError:
-    DocxDocument = None  # type: ignore
-
-try:
-    from openpyxl import load_workbook
-except ImportError:
-    load_workbook = None  # type: ignore
-
-try:
-    from pptx import Presentation as PptxPresentation
-except ImportError:
-    PptxPresentation = None  # type: ignore
-
 
 # Supported file extensions for text extraction
 SUPPORTED_EXTENSIONS: set[str] = {
@@ -78,22 +58,16 @@ def extract_text(path: Path) -> str | None:
 
     ext = path.suffix.lower()
 
-    # Document formats
+    # Document formats -- each branch lazily imports its parser so that
+    # startup does not pay the ~25 MB cost of loading openpyxl /
+    # python-docx / python-pptx / pypdf up front (see issue #3422).
     if ext == ".pdf":
-        if PdfReader is None:
-            return "[error: pypdf not installed]"
         return _extract_pdf(path)
     elif ext == ".docx":
-        if DocxDocument is None:
-            return "[error: python-docx not installed]"
         return _extract_docx(path)
     elif ext == ".xlsx":
-        if load_workbook is None:
-            return "[error: openpyxl not installed]"
         return _extract_xlsx(path)
     elif ext == ".pptx":
-        if PptxPresentation is None:
-            return "[error: python-pptx not installed]"
         return _extract_pptx(path)
     elif _is_text_extension(ext):
         return _extract_text_file(path)
@@ -107,6 +81,10 @@ def extract_text(path: Path) -> str | None:
 
 def _extract_pdf(path: Path) -> str:
     """Extract text from PDF using pypdf."""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return "[error: pypdf not installed]"
     try:
         reader = PdfReader(path)
         pages: list[str] = []
@@ -122,6 +100,10 @@ def _extract_pdf(path: Path) -> str:
 def _extract_docx(path: Path) -> str:
     """Extract text from DOCX using python-docx."""
     try:
+        from docx import Document as DocxDocument
+    except ImportError:
+        return "[error: python-docx not installed]"
+    try:
         doc = DocxDocument(path)
         paragraphs: list[str] = [p.text for p in doc.paragraphs if p.text.strip()]
         return _truncate("\n\n".join(paragraphs), _MAX_TEXT_LENGTH)
@@ -132,6 +114,10 @@ def _extract_docx(path: Path) -> str:
 
 def _extract_xlsx(path: Path) -> str:
     """Extract text from XLSX using openpyxl."""
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return "[error: openpyxl not installed]"
     try:
         wb = load_workbook(path, read_only=True, data_only=True)
         try:
@@ -155,6 +141,10 @@ def _extract_xlsx(path: Path) -> str:
 
 def _extract_pptx(path: Path) -> str:
     """Extract text from PPTX using python-pptx."""
+    try:
+        from pptx import Presentation as PptxPresentation
+    except ImportError:
+        return "[error: python-pptx not installed]"
     try:
         prs = PptxPresentation(path)
         slides: list[str] = []

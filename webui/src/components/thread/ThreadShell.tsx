@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
+import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
 import { useNanobotStream } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
@@ -47,10 +48,14 @@ export function ThreadShell({
     if (!chatId) return historical;
     return messageCacheRef.current.get(chatId) ?? historical;
   }, [chatId, historical]);
-  const { messages, isStreaming, send, setMessages } = useNanobotStream(
-    chatId,
-    initial,
-  );
+  const {
+    messages,
+    isStreaming,
+    send,
+    setMessages,
+    streamError,
+    dismissStreamError,
+  } = useNanobotStream(chatId, initial);
   const showHeroComposer = messages.length === 0 && !loading;
 
   useEffect(() => {
@@ -140,31 +145,39 @@ export function ThreadShell({
         isStreaming={isStreaming}
         emptyState={emptyState}
         composer={
-          session ? (
-            <ThreadComposer
-              onSend={send}
-              disabled={!chatId}
-              placeholder={
-                showHeroComposer
-                  ? t("thread.composer.placeholderHero")
-                  : t("thread.composer.placeholderThread")
-              }
-              modelLabel={toModelBadgeLabel(modelName)}
-              variant={showHeroComposer ? "hero" : "thread"}
-            />
-          ) : (
-            <ThreadComposer
-              onSend={handleWelcomeSend}
-              disabled={booting}
-              placeholder={
-                booting
-                  ? t("thread.composer.placeholderOpening")
-                  : t("thread.composer.placeholderHero")
-              }
-              modelLabel={toModelBadgeLabel(modelName)}
-              variant="hero"
-            />
-          )
+          <>
+            {streamError ? (
+              <StreamErrorNotice
+                error={streamError}
+                onDismiss={dismissStreamError}
+              />
+            ) : null}
+            {session ? (
+              <ThreadComposer
+                onSend={send}
+                disabled={!chatId}
+                placeholder={
+                  showHeroComposer
+                    ? t("thread.composer.placeholderHero")
+                    : t("thread.composer.placeholderThread")
+                }
+                modelLabel={toModelBadgeLabel(modelName)}
+                variant={showHeroComposer ? "hero" : "thread"}
+              />
+            ) : (
+              <ThreadComposer
+                onSend={handleWelcomeSend}
+                disabled={booting}
+                placeholder={
+                  booting
+                    ? t("thread.composer.placeholderOpening")
+                    : t("thread.composer.placeholderHero")
+                }
+                modelLabel={toModelBadgeLabel(modelName)}
+                variant="hero"
+              />
+            )}
+          </>
         }
       />
     </section>

@@ -252,6 +252,35 @@ async def test_runner_returns_max_iterations_fallback():
     assert result.messages[-1]["role"] == "assistant"
     assert result.messages[-1]["content"] == result.final_content
 
+
+@pytest.mark.asyncio
+async def test_runner_times_out_hung_llm_request():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+
+    async def chat_with_retry(**kwargs):
+        await asyncio.sleep(3600)
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    runner = AgentRunner(provider)
+    started = time.monotonic()
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        llm_timeout_s=0.05,
+    ))
+
+    assert (time.monotonic() - started) < 1.0
+    assert result.stop_reason == "error"
+    assert "timed out" in (result.final_content or "").lower()
+
 @pytest.mark.asyncio
 async def test_runner_returns_structured_tool_error():
     from nanobot.agent.runner import AgentRunSpec, AgentRunner

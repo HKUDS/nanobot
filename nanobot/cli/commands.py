@@ -212,12 +212,16 @@ async def _print_interactive_response(
 
 def _print_cli_progress_line(text: str, thinking: ThinkingSpinner | None) -> None:
     """Print a CLI progress line, pausing the spinner if needed."""
+    if not text.strip():
+        return
     with thinking.pause() if thinking else nullcontext():
         console.print(f"  [dim]↳ {text}[/dim]")
 
 
 async def _print_interactive_progress_line(text: str, thinking: ThinkingSpinner | None) -> None:
     """Print an interactive progress line, pausing the spinner if needed."""
+    if not text.strip():
+        return
     with thinking.pause() if thinking else nullcontext():
         await _print_interactive_line(text)
 
@@ -1048,7 +1052,7 @@ def agent(
     # Shared reference for progress callbacks
     _thinking: ThinkingSpinner | None = None
 
-    async def _cli_progress(content: str, *, tool_hint: bool = False) -> None:
+    async def _cli_progress(content: str, *, tool_hint: bool = False, **_kwargs: Any) -> None:
         ch = agent_loop.channels_config
         if ch and tool_hint and not ch.send_tool_hints:
             return

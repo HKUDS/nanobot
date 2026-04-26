@@ -6,11 +6,21 @@ import { ThreadShell } from "@/components/thread/ThreadShell";
 import { ClientProvider } from "@/providers/ClientProvider";
 
 function makeClient() {
+  const errorHandlers = new Set<(err: { kind: string }) => void>();
   return {
     status: "open" as const,
     defaultChatId: null as string | null,
     onStatus: () => () => {},
     onChat: () => () => {},
+    onError: (handler: (err: { kind: string }) => void) => {
+      errorHandlers.add(handler);
+      return () => {
+        errorHandlers.delete(handler);
+      };
+    },
+    _emitError(err: { kind: string }) {
+      for (const h of errorHandlers) h(err);
+    },
     sendMessage: vi.fn(),
     newChat: vi.fn(),
     attach: vi.fn(),
@@ -88,6 +98,7 @@ describe("ThreadShell", () => {
       expect(client.sendMessage).toHaveBeenCalledWith(
         "chat-a",
         "persist me across tabs",
+        undefined,
       ),
     );
     expect(screen.getByText("persist me across tabs")).toBeInTheDocument();
@@ -151,6 +162,7 @@ describe("ThreadShell", () => {
       expect(client.sendMessage).toHaveBeenCalledWith(
         "chat-a",
         "delete me cleanly",
+        undefined,
       ),
     );
     expect(screen.getByText("delete me cleanly")).toBeInTheDocument();
@@ -239,6 +251,84 @@ describe("ThreadShell", () => {
     const input = screen.getByPlaceholderText("What's on your mind?");
     expect(input.className).toContain("min-h-[96px]");
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
+  });
+
+  it("surfaces a dismissible banner when the stream reports message_too_big", async () => {
+    const client = makeClient();
+    const onNewChat = vi.fn().mockResolvedValue("chat-a");
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-a")}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={onNewChat}
+        />,
+      ),
+    );
+
+    // No banner yet: only appears once the client emits a matching error.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+
+    await act(async () => {
+      client._emitError({ kind: "message_too_big" });
+    });
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Message too large");
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
+  it("clears the stream error banner when the user switches to another chat", async () => {
+    const client = makeClient();
+    const onNewChat = vi.fn().mockResolvedValue("chat-a");
+
+    const { rerender } = render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-a")}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={onNewChat}
+        />,
+      ),
+    );
+
+    await act(async () => {
+      client._emitError({ kind: "message_too_big" });
+    });
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    // Switch to a different chat. The banner was about the *previous* send
+    // in chat-a; it must not leak into chat-b's view.
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-b")}
+            title="Chat chat-b"
+            onToggleSidebar={() => {}}
+            onGoHome={() => {}}
+            onNewChat={onNewChat}
+          />,
+        ),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
   });
 
   it("clears the previous thread immediately while the next session loads", async () => {
