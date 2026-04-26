@@ -470,6 +470,25 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
     assert kwargs["default_headers"]["x-session-affinity"] == "sticky-session"
 
 
+def test_make_provider_uses_custom_responses_backend():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "custom_responses", "model": "gpt-4.1"}},
+            "providers": {
+                "custom_responses": {
+                    "apiKey": "test-key",
+                    "apiBase": "https://example.com/v1",
+                }
+            },
+        }
+    )
+
+    with patch("nanobot.providers.custom_responses_provider.AsyncOpenAI"):
+        provider = _make_provider(config)
+
+    assert provider.__class__.__name__ == "CustomResponsesProvider"
+
+
 @pytest.fixture
 def mock_agent_runtime(tmp_path):
     """Mock agent command dependencies for focused CLI tests."""

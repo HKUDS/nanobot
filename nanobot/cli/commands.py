@@ -441,6 +441,15 @@ def _make_provider(config: Config):
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
         provider = OpenAICodexProvider(default_model=model)
+    elif backend == "custom_responses":
+        from nanobot.providers.custom_responses_provider import CustomResponsesProvider
+
+        provider = CustomResponsesProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+        )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 

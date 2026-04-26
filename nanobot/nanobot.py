@@ -146,6 +146,20 @@ def _make_provider(config: Any) -> Any:
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 
         provider = GitHubCopilotProvider(default_model=model)
+    elif backend == "custom_responses":
+        from importlib import import_module
+
+        CustomResponsesProvider = getattr(
+            import_module("nanobot.providers.custom_responses_provider"),
+            "CustomResponsesProvider",
+        )
+
+        provider = CustomResponsesProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+        )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
