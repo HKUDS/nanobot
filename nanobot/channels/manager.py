@@ -172,6 +172,7 @@ class ChannelManager:
                 channel=notice.channel,
                 chat_id=notice.chat_id,
                 content=format_restart_completed_message(notice.started_at_raw),
+                metadata=dict(notice.metadata or {}),
             ),
         ))
 
