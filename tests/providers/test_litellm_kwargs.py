@@ -929,6 +929,57 @@ def test_backfill_does_not_touch_messages_when_thinking_off() -> None:
                 assert "reasoning_content" not in msg
 
 
+def test_deepseek_coerces_list_content_to_string() -> None:
+    """DeepSeek chat endpoint expects message.content to be a string."""
+    spec = find_by_name("deepseek")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        p = OpenAICompatProvider(api_key="k", default_model="deepseek-chat", spec=spec)
+
+    kw = p._build_kwargs(
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "hello "},
+                {"type": "text", "text": "world"},
+            ],
+        }],
+        tools=None,
+        model="deepseek-chat",
+        max_tokens=1024,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    assert isinstance(kw["messages"][0]["content"], str)
+    assert "hello" in kw["messages"][0]["content"]
+    assert "world" in kw["messages"][0]["content"]
+
+
+def test_non_deepseek_keeps_list_content() -> None:
+    """Only DeepSeek should force string content; OpenAI-compatible providers keep blocks."""
+    spec = find_by_name("openai")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        p = OpenAICompatProvider(api_key="k", default_model="gpt-4o", spec=spec)
+
+    kw = p._build_kwargs(
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "hello"},
+            ],
+        }],
+        tools=None,
+        model="gpt-4o",
+        max_tokens=1024,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    assert isinstance(kw["messages"][0]["content"], list)
+
+
 def test_openai_no_thinking_extra_body() -> None:
     """Non-thinking providers should never get extra_body for thinking."""
     kw = _build_kwargs_for("openai", "gpt-4o", reasoning_effort="medium")
