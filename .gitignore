@@ -42,6 +42,24 @@ build/
 pip-wheel-metadata/
 share/python-wheels/
 
+# Frontend (Node.js / npm / yarn / pnpm)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# Frontend bundler & framework caches
+.vite/
+.turbo/
+.next/
+.nuxt/
+.parcel-cache/
+.svelte-kit/
+storybook-static/
+.eslintcache
+
 # Test & coverage
 .coverage
 .coverage.*
