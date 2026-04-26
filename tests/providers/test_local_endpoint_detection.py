@@ -2,8 +2,6 @@
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from nanobot.providers.openai_compat_provider import (
     OpenAICompatProvider,
     _is_local_endpoint,
@@ -73,6 +71,15 @@ class TestIsLocalEndpoint:
 
     def test_trailing_slash(self):
         assert _is_local_endpoint(None, "http://192.168.1.1:8080/v1/") is True
+
+    def test_public_hostname_containing_localhost_is_not_local(self):
+        assert _is_local_endpoint(None, "https://notlocalhost.example/v1") is False
+
+    def test_public_hostname_containing_private_ip_prefix_is_not_local(self):
+        assert _is_local_endpoint(None, "https://api10.example.com/v1") is False
+
+    def test_url_without_scheme(self):
+        assert _is_local_endpoint(None, "192.168.1.1:8080/v1") is True
 
 
 class TestLocalKeepaliveConfig:

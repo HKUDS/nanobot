@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import hashlib
 import importlib.util
+import json
 import os
 import secrets
 import string
 import time
 import uuid
 from collections.abc import Awaitable, Callable
+from ipaddress import ip_address
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import httpx
 import json_repair
@@ -174,23 +176,21 @@ def _is_local_endpoint(
         return True
     if not api_base:
         return False
-    host = api_base.strip().lower().rstrip("/")
-    private_patterns = (
-        "localhost",
-        "127.",
-        "192.168.",
-        "10.",
-        "host.docker.internal",
-        "[::1]",
-    )
-    if any(p in host for p in private_patterns):
+    raw = api_base.strip().lower()
+    parsed = urlparse(raw if "://" in raw else f"//{raw}")
+    try:
+        host = parsed.hostname
+    except ValueError:
+        return False
+    if host in {"localhost", "host.docker.internal"}:
         return True
-    # 172.16.0.0 – 172.31.255.255
-    import re
-    m = re.search(r"172\.(\d+)\." , host)
-    if m and 16 <= int(m.group(1)) <= 31:
-        return True
-    return False
+    if not host:
+        return False
+    try:
+        addr = ip_address(host)
+    except ValueError:
+        return False
+    return addr.is_loopback or addr.is_private
 
 
 def _is_direct_openai_base(api_base: str | None) -> bool:
