@@ -20,7 +20,11 @@ class TestHeartbeatContextBridge:
 
         # Simulate what on_heartbeat_notify does
         target_session = session_mgr.get_or_create(target_key)
-        target_session.add_message("assistant", "3 new emails — invoice, meeting, proposal.")
+        target_session.add_message(
+            "assistant",
+            "3 new emails — invoice, meeting, proposal.",
+            _channel_delivery=True,
+        )
         session_mgr.save(target_session)
 
         # Reload and verify
@@ -45,7 +49,11 @@ class TestHeartbeatContextBridge:
 
         # Step 1: heartbeat injects assistant message
         session = session_mgr.get_or_create(target_key)
-        session.add_message("assistant", "If you want, I can mark that email as read.")
+        session.add_message(
+            "assistant",
+            "If you want, I can mark that email as read.",
+            _channel_delivery=True,
+        )
         session_mgr.save(session)
 
         # Step 2: user replies "Sure"
@@ -76,7 +84,11 @@ class TestHeartbeatContextBridge:
 
         # Heartbeat injects
         session = session_mgr.get_or_create(target_key)
-        session.add_message("assistant", "You have a meeting in 30 minutes.")
+        session.add_message(
+            "assistant",
+            "You have a meeting in 30 minutes.",
+            _channel_delivery=True,
+        )
         session_mgr.save(session)
 
         # Verify
@@ -86,17 +98,23 @@ class TestHeartbeatContextBridge:
         assert roles == ["user", "assistant", "user", "assistant"]
         assert "meeting in 30 minutes" in history[-1]["content"]
 
-    def test_injection_to_empty_session(self, tmp_path):
-        """Injecting into a brand-new session (no prior messages) works."""
+    def test_reply_after_injection_to_empty_session_keeps_context(self, tmp_path):
+        """A user replying to the first delivered message still sees that context."""
         session_mgr = SessionManager(tmp_path / "sessions")
         target_key = "telegram:99999"
 
         session = session_mgr.get_or_create(target_key)
-        session.add_message("assistant", "Weather alert: sandstorm expected at 4pm.")
+        session.add_message(
+            "assistant",
+            "Weather alert: sandstorm expected at 4pm.",
+            _channel_delivery=True,
+        )
+        session.add_message("user", "Sure")
         session_mgr.save(session)
 
         reloaded = session_mgr.get_or_create(target_key)
         history = reloaded.get_history(max_messages=0)
-        assert len(history) == 1
+        assert len(history) == 2
         assert history[0]["role"] == "assistant"
         assert "sandstorm" in history[0]["content"]
+        assert history[1] == {"role": "user", "content": "Sure"}

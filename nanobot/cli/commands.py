@@ -656,6 +656,8 @@ def _run_gateway(
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.tools.cron import CronTool
+    from nanobot.agent.tools.message import MessageTool
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
@@ -704,6 +706,34 @@ def _run_gateway(
         tools_config=config.tools,
     )
 
+    from nanobot.agent.loop import UNIFIED_SESSION_KEY
+    from nanobot.bus.events import OutboundMessage
+
+    def _channel_session_key(channel: str, chat_id: str) -> str:
+        return (
+            UNIFIED_SESSION_KEY
+            if config.agents.defaults.unified_session
+            else f"{channel}:{chat_id}"
+        )
+
+    async def _deliver_to_channel(msg: OutboundMessage, *, record: bool = True) -> None:
+        """Publish a user-visible message and mirror it into that channel's session."""
+        if (
+            record
+            and msg.channel != "cli"
+            and msg.content.strip()
+            and hasattr(session_manager, "get_or_create")
+            and hasattr(session_manager, "save")
+        ):
+            session = session_manager.get_or_create(_channel_session_key(msg.channel, msg.chat_id))
+            session.add_message("assistant", msg.content, _channel_delivery=True)
+            session_manager.save(session)
+        await bus.publish_outbound(msg)
+
+    message_tool = getattr(agent, "tools", {}).get("message")
+    if isinstance(message_tool, MessageTool):
+        message_tool.set_send_callback(_deliver_to_channel)
+
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
@@ -716,8 +746,6 @@ def _run_gateway(
                 logger.exception("Dream cron job failed")
             return None
 
-        from nanobot.agent.tools.cron import CronTool
-        from nanobot.agent.tools.message import MessageTool
         from nanobot.utils.evaluator import evaluate_response
 
         reminder_note = (
@@ -757,12 +785,13 @@ def _run_gateway(
                 response, reminder_note, provider, agent.model,
             )
             if should_notify:
-                from nanobot.bus.events import OutboundMessage
-                await bus.publish_outbound(OutboundMessage(
-                    channel=job.payload.channel or "cli",
-                    chat_id=job.payload.to,
-                    content=response,
-                ))
+                await _deliver_to_channel(
+                    OutboundMessage(
+                        channel=job.payload.channel or "cli",
+                        chat_id=job.payload.to,
+                        content=response,
+                    )
+                )
         return response
 
     cron.on_job = on_cron_job
@@ -820,24 +849,11 @@ def _run_gateway(
         lands in a session that has no context about the heartbeat message
         and the agent cannot follow through.
         """
-        from nanobot.bus.events import OutboundMessage
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
             return  # No external channel available to deliver to
 
-        # Inject the delivered message into the channel session so that
-        # user replies have conversational context.
-        from nanobot.agent.loop import UNIFIED_SESSION_KEY
-        target_key = (
-            UNIFIED_SESSION_KEY
-            if config.agents.defaults.unified_session
-            else f"{channel}:{chat_id}"
-        )
-        target_session = agent.sessions.get_or_create(target_key)
-        target_session.add_message("assistant", response)
-        agent.sessions.save(target_session)
-
-        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+        await _deliver_to_channel(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
     hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(

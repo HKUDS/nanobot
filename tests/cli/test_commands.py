@@ -942,7 +942,27 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: provider)
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
-    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
+
+    class _FakeSession:
+        def __init__(self) -> None:
+            self.messages = []
+
+        def add_message(self, role: str, content: str, **kwargs) -> None:
+            self.messages.append({"role": role, "content": content, **kwargs})
+
+    class _FakeSessionManager:
+        def __init__(self, _workspace: Path) -> None:
+            self.session = _FakeSession()
+            seen["session_manager"] = self
+
+        def get_or_create(self, key: str) -> _FakeSession:
+            seen["session_key"] = key
+            return self.session
+
+        def save(self, session: _FakeSession) -> None:
+            seen["saved_session"] = session
+
+    monkeypatch.setattr("nanobot.session.manager.SessionManager", _FakeSessionManager)
 
     class _FakeCron:
         def __init__(self, _store_path: Path) -> None:
@@ -1030,6 +1050,16 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
             content="Time to stretch.",
         )
     )
+    assert seen["session_key"] == "telegram:user-1"
+    saved_session = seen["saved_session"]
+    assert isinstance(saved_session, _FakeSession)
+    assert saved_session.messages == [
+        {
+            "role": "assistant",
+            "content": "Time to stretch.",
+            "_channel_delivery": True,
+        }
+    ]
 
 
 def test_gateway_cron_job_suppresses_intermediate_progress(
