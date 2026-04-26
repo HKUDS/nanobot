@@ -304,10 +304,29 @@ class LLMProvider(ABC):
                 return cls._is_retryable_429_response(response)
             if status in cls._RETRYABLE_STATUS_CODES or status >= 500:
                 return True
+            # Check for payment required (402) - API key in arrearage
+            if status == 402:
+                logger.warning("API key payment required - your account is in arrearage. Please check your subscription status.")
+                return False
 
         kind = (response.error_kind or "").strip().lower()
         if kind in cls._TRANSIENT_ERROR_KINDS:
             return True
+
+        # Check for payment-related error messages in content
+        content = (response.content or "").lower()
+        payment_error_markers = [
+            "payment required",
+            "account in arrearage",
+            "insufficient funds",
+            "billing issue",
+            "subscription expired",
+            "quota exceeded",
+            "out of credits"
+        ]
+        if any(marker in content for marker in payment_error_markers):
+            logger.warning("API key payment required - your account is in arrearage. Please check your subscription status.")
+            return False
 
         return cls._is_transient_error(response.content)
 
