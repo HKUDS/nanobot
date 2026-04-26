@@ -282,11 +282,11 @@ nanobot gateway
 <details>
 <summary><b>SimpleX (via WebSocket bridge)</b></summary>
 
-There is **no built-in SimpleX channel** yet. The recommended setup is:
+There is a built-in **`simplex` login helper** that launches the bridge for you. The recommended setup is still:
 
 1. nanobot's existing **WebSocket** channel
-2. one **SimpleX sender script** and one **SimpleX receiver script** in your local `bin/`
-3. a small **bridge process** that forwards inbound text to nanobot and shells out to your sender script for replies
+2. the local **`simplex-chat` CLI**
+3. a small **bridge process** that forwards inbound text to nanobot and shells out to `simplex-chat` for replies
 
 **1. Configure nanobot**
 
@@ -303,12 +303,13 @@ There is **no built-in SimpleX channel** yet. The recommended setup is:
       "streaming": false
     },
     "simplex": {
-      "enabled": true,
+      "enabled": false,
       "clientId": "YOUR_CLIENT_ID",
       "chatId": "simplex:YOUR_CONTACT_KEY",
       "contact": "YOUR_SIMPLEX_DISPLAY_NAME",
-      "sendCmd": "/path/to/simplex-notify.sh",
-      "receiveCmd": "/path/to/simplex-receive.sh",
+      "simplexCmd": "simplex-chat",
+      "simplexTimeout": 3,
+      "stateFile": "",
       "pollInterval": 2.0,
       "receiveLimit": 20,
       "bootstrap": "latest",
@@ -332,20 +333,12 @@ nanobot gateway
 **3. Start the SimpleX bridge**
 
 ```bash
-python bridge/simplex_bridge.py --config ~/.nanobot/config.json
+nanobot channels login simplex
 ```
 
-You can still override any field from CLI (for debugging), but normal usage should live in `config.json`.
+This uses the same packaged bridge entrypoint as `python bridge/simplex_bridge.py --config ~/.nanobot/config.json`. Keep `enabled: false` when you want to launch the bridge manually with the login command.
 
-Your sender script only needs to accept the outgoing reply text as its first argument.
-Your receiver script should accept:
-
-- arg 1: contact/display name
-- arg 2: limit (how many latest messages to poll)
-
-and print inbound messages, one per line (or JSON lines with `{"id": ..., "text": ...}`).
-
-The bridge then forwards them into nanobot as:
+The bridge forwards inbound SimpleX messages into nanobot as:
 
 ```json
 {"type":"message","chat_id":"simplex:YOUR_CONTACT_KEY","content":"..."}
