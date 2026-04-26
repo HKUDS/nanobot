@@ -1067,9 +1067,11 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
     assert seen["provider"] is provider
     assert seen["model"] == "test-model"
     assert seen["task_context"] == (
-        "[Scheduled Task] Timer finished.\n\n"
-        "Task 'stretch' has been triggered.\n"
-        "Scheduled instruction: Remind me to stretch."
+        "The scheduled time has arrived. Deliver this reminder to the user now, "
+        "as a brief and natural message in their language. Speak directly to them — "
+        "do not narrate progress, summarize, include user IDs, or add status reports "
+        "like 'Done' or 'Reminded'.\n\n"
+        "Reminder: Remind me to stretch."
     )
     bus.publish_outbound.assert_awaited_once_with(
         OutboundMessage(

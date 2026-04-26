@@ -714,9 +714,11 @@ def _run_gateway(
         from nanobot.utils.evaluator import evaluate_response
 
         reminder_note = (
-            "[Scheduled Task] Timer finished.\n\n"
-            f"Task '{job.name}' has been triggered.\n"
-            f"Scheduled instruction: {job.payload.message}"
+            "The scheduled time has arrived. Deliver this reminder to the user now, "
+            "as a brief and natural message in their language. Speak directly to them — "
+            "do not narrate progress, summarize, include user IDs, or add status reports "
+            "like 'Done' or 'Reminded'.\n\n"
+            f"Reminder: {job.payload.message}"
         )
 
         cron_tool = agent.tools.get("cron")
