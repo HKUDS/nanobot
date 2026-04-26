@@ -403,7 +403,16 @@ class AgentLoop:
         session_key: str | None = None,
     ) -> None:
         """Update context for all tools that need routing info."""
-        effective_key = UNIFIED_SESSION_KEY if self._unified_session else f"{channel}:{chat_id}"
+        # When the caller threads a thread-scoped session_key (e.g. slack with
+        # reply_in_thread: true), honor it so spawn announces route back to
+        # the originating thread session. Falls back to unified mode or
+        # channel:chat_id for callers that don't have a thread-scoped key.
+        if session_key is not None:
+            effective_key = session_key
+        elif self._unified_session:
+            effective_key = UNIFIED_SESSION_KEY
+        else:
+            effective_key = f"{channel}:{chat_id}"
         for name in ("message", "spawn", "cron", "my"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
@@ -830,7 +839,10 @@ class AgentLoop:
                 msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
             )
             logger.info("Processing system message from {}", msg.sender_id)
-            key = f"{channel}:{chat_id}"
+            # Honor session_key_override so subagent announces from threaded
+            # callers route to the originating thread session, not the
+            # channel-level session derived from chat_id.
+            key = msg.session_key_override or f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             if self._restore_runtime_checkpoint(session):
                 self.sessions.save(session)
@@ -885,11 +897,20 @@ class AgentLoop:
                 options,
                 channel,
             )
+            # Reconstruct channel-specific metadata from session.key so the
+            # outbound reply lands in the originating thread (not the channel
+            # top-level). The announce InboundMessage carries only
+            # injected_event metadata; we recover thread_ts from the session
+            # key, which slack writes as "slack:<chat_id>:<thread_ts>".
+            outbound_metadata: dict[str, Any] = {}
+            if channel == "slack" and key.startswith("slack:") and key.count(":") >= 2:
+                outbound_metadata["slack"] = {"thread_ts": key.split(":", 2)[2]}
             return OutboundMessage(
                 channel=channel,
                 chat_id=chat_id,
                 content=content,
                 buttons=buttons,
+                metadata=outbound_metadata,
             )
 
         # Extract document text from media at the processing boundary so all
