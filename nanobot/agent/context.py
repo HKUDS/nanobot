@@ -65,6 +65,50 @@ class ContextBuilder:
 
         return "\n\n---\n\n".join(parts)
 
+    def get_context_parts(
+        self,
+        channel: str | None = None,
+        chat_id: str | None = None,
+    ) -> dict[str, str]:
+        """Return individual context part strings for breakdown analysis.
+
+        Used by ``calculate_context_breakdown`` to count tokens per part.
+        Mirrors the logic in ``build_system_prompt`` but returns raw parts
+        instead of the joined output.
+        """
+        always_skills = self.skills.get_always_skills()
+        always_content = ""
+        if always_skills:
+            ac = self.skills.load_skills_for_context(always_skills)
+            always_content = ac or ""
+
+        # Memory: skip if user hasn't customized the template
+        raw_memory = self.memory.get_memory_context()
+        memory = ""
+        if raw_memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
+            memory = raw_memory
+
+        # Skills summary: exclude always-skills to avoid double-counting
+        skills_summary = self.skills.build_skills_summary(exclude=set(always_skills)) or ""
+
+        recent_history = ""
+        entries = self.memory.read_unprocessed_history(since_cursor=self.memory.get_last_dream_cursor())
+        if entries:
+            capped = entries[-self._MAX_RECENT_HISTORY:]
+            recent_history = "\n".join(f"- [{e['timestamp']}] {e['content']}" for e in capped)
+
+        return {
+            "identity": self._get_identity(channel=channel),
+            "bootstrap": self._load_bootstrap_files(),
+            "memory": memory,
+            "always_skills": always_content,
+            "skills_summary": skills_summary,
+            "recent_history": recent_history,
+            "runtime_context": self._build_runtime_context(
+                channel=channel, chat_id=chat_id, timezone=self.timezone, session_summary=None,
+            ),
+        }
+
     def _get_identity(self, channel: str | None = None) -> str:
         """Get the core identity section."""
         workspace_path = str(self.workspace.expanduser().resolve())

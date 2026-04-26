@@ -8,10 +8,20 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import tiktoken
 from loguru import logger
+
+# Lazy-initialised tiktoken encoding — shared by all token-counting helpers.
+_tiktoken_enc: tiktoken.Encoding | None = None
+
+
+def _get_tiktoken_enc() -> tiktoken.Encoding:
+    global _tiktoken_enc
+    if _tiktoken_enc is None:
+        _tiktoken_enc = tiktoken.get_encoding("cl100k_base")
+    return _tiktoken_enc
 
 
 def strip_think(text: str) -> str:
@@ -429,6 +439,130 @@ def estimate_prompt_tokens_chain(
     return 0, "none"
 
 
+def _count_tokens(text: str) -> int:
+    """Estimate token count for a text string via tiktoken."""
+    if not text:
+        return 0
+    try:
+        return len(_get_tiktoken_enc().encode(text))
+    except Exception:
+        return len(text) // 4
+
+
+def _fmt_tokens(count: int) -> str:
+    """Format token count for display (e.g. 1200 -> '1.2k', 2000 -> '2k')."""
+    if count >= 1000:
+        value = count / 1000
+        return f"{value:.0f}k" if value == int(value) else f"{value:.1f}k"
+    return str(count)
+
+
+class _TokenParts(TypedDict):
+    identity: int
+    bootstrap: int
+    memory: int
+    always_skills: int
+    skills_summary: int
+    recent_history: int
+    system_prompt_total: int
+    history_messages: int
+    tools_definitions: int
+    runtime_context: int
+
+
+class _HistoryStats(TypedDict):
+    total_messages: int
+    user_messages: int
+    assistant_messages: int
+    tool_messages: int
+
+
+class ContextBreakdown(TypedDict):
+    tokens: _TokenParts
+    total_tokens: int
+    history_stats: _HistoryStats
+    tools_stats: dict[str, int]
+    tool_names: list[str]
+
+
+def calculate_context_breakdown(
+    context_builder: Any,
+    session: Any,
+    loop: Any,
+    channel: str | None = None,
+    chat_id: str | None = None,
+) -> ContextBreakdown:
+    """Calculate token breakdown of context parts.
+
+    Uses the public ``get_context_parts`` API so that internal ContextBuilder
+    refactors do not silently break the breakdown.
+    """
+    ctx_parts = context_builder.get_context_parts(channel=channel, chat_id=chat_id)
+
+    identity_t = _count_tokens(ctx_parts["identity"])
+    bootstrap_t = _count_tokens(ctx_parts["bootstrap"])
+    memory_t = _count_tokens(ctx_parts["memory"])
+    always_skills_t = _count_tokens(ctx_parts["always_skills"])
+    skills_summary_t = _count_tokens(ctx_parts["skills_summary"])
+    recent_history_t = _count_tokens(ctx_parts["recent_history"])
+    runtime_t = _count_tokens(ctx_parts["runtime_context"])
+
+    tokens: _TokenParts = {  # type: ignore[typeddict-item]
+        "identity": identity_t,
+        "bootstrap": bootstrap_t,
+        "memory": memory_t,
+        "always_skills": always_skills_t,
+        "skills_summary": skills_summary_t,
+        "recent_history": recent_history_t,
+        "system_prompt_total": identity_t + bootstrap_t + memory_t + always_skills_t + skills_summary_t + recent_history_t,
+        "history_messages": 0,
+        "tools_definitions": 0,
+        "runtime_context": runtime_t,
+    }
+
+    # History messages
+    history = session.get_history(max_messages=0)
+    tokens["history_messages"] = _count_tokens(json.dumps(history, ensure_ascii=False))
+
+    user_count = assistant_count = tool_count = 0
+    for m in history:
+        role = m.get("role")
+        if role == "user":
+            user_count += 1
+        elif role == "assistant":
+            assistant_count += 1
+        elif role == "tool":
+            tool_count += 1
+
+    # Tool definitions
+    tools = loop.tools.get_definitions()
+    tokens["tools_definitions"] = _count_tokens(json.dumps(tools, ensure_ascii=False))
+
+    tool_names: list[str] = []
+    for tool in tools:
+        if "function" in tool and isinstance(tool["function"], dict):
+            name = tool["function"].get("name")
+        else:
+            name = tool.get("name")
+        if name:
+            tool_names.append(name)
+
+    total_tokens = tokens["system_prompt_total"] + tokens["history_messages"] + tokens["tools_definitions"] + tokens["runtime_context"]
+
+    return {
+        "tokens": tokens,
+        "total_tokens": total_tokens,
+        "history_stats": {
+            "total_messages": len(history),
+            "user_messages": user_count,
+            "assistant_messages": assistant_count,
+            "tool_messages": tool_count,
+        },
+        "tools_stats": {"total_tools": len(tools)},
+        "tool_names": tool_names,
+    }
+
+
 def build_status_content(
     *,
     version: str,
@@ -441,6 +575,7 @@ def build_status_content(
     search_usage_text: str | None = None,
     active_task_count: int = 0,
     max_completion_tokens: int = 8192,
+    context_breakdown: ContextBreakdown | None = None,
 ) -> str:
     """Build a human-readable runtime status snapshot.
 
@@ -482,6 +617,67 @@ def build_status_content(
     ]
     if search_usage_text:
         lines.append(search_usage_text)
+
+    # Context breakdown section (if provided)
+    if context_breakdown:
+        tokens = context_breakdown["tokens"]
+        total = context_breakdown["total_tokens"]
+
+        def _pct(count: int) -> int:
+            return int((count / total) * 100) if total > 0 else 0
+
+        def _bar(pct_val: int) -> str:
+            filled = min(max(pct_val, 0) // 10, 10)
+            return "\u2588" * filled + "\u2591" * (10 - filled)
+
+        lines.append("")
+        lines.append("\U0001f4cb Context Breakdown (Estimated)")
+        lines.append("")
+
+        # System Prompt
+        sp = tokens["system_prompt_total"]
+        lines.append(f"System Prompt  {_fmt_tokens(sp):>5}  {_bar(_pct(sp))}  {_pct(sp):>3}%")
+        sub_items = [
+            ("Identity", tokens["identity"]),
+            ("Bootstrap", tokens["bootstrap"]),
+            ("Memory", tokens["memory"]),
+            ("Active Skills", tokens["always_skills"]),
+            ("Skills Index", tokens["skills_summary"]),
+            ("Memory Log", tokens["recent_history"]),
+        ]
+        for i, (name, val) in enumerate(sub_items):
+            junction = "\u2514\u2500" if i == len(sub_items) - 1 else "\u251c\u2500"
+            lines.append(f"  {junction} {name:13} {_fmt_tokens(val):>5}")
+        lines.append("")
+
+        # Conversation
+        ht = tokens["history_messages"]
+        hist_stats = context_breakdown["history_stats"]
+        lines.append(f"Conversation   {_fmt_tokens(ht):>5}  {_bar(_pct(ht))}  {_pct(ht):>3}%")
+        detail = f"{hist_stats['user_messages']}U / {hist_stats['assistant_messages']}A"
+        tool_msgs = hist_stats.get("tool_messages", 0)
+        if tool_msgs:
+            detail += f" / {tool_msgs}T"
+        lines.append(f"  \u2514\u2500 {hist_stats['total_messages']} msgs ({detail})")
+        lines.append("")
+
+        # Tools
+        tt = tokens["tools_definitions"]
+        tools_stats = context_breakdown["tools_stats"]
+        lines.append(f"Tools          {_fmt_tokens(tt):>5}  {_bar(_pct(tt))}  {_pct(tt):>3}%")
+        tool_names = context_breakdown.get("tool_names", [])
+        if len(tool_names) > 3:
+            lines.append(f"  \u2514\u2500 {', '.join(tool_names[:3])} +{len(tool_names) - 3} more")
+        elif tool_names:
+            lines.append(f"  \u2514\u2500 {', '.join(tool_names)}")
+        else:
+            lines.append(f"  \u2514\u2500 {tools_stats['total_tools']} loaded")
+        lines.append("")
+
+        # Runtime
+        rt = tokens["runtime_context"]
+        lines.append(f"Runtime        {_fmt_tokens(rt):>5}  {_bar(_pct(rt))}  {_pct(rt):>3}%")
+
     return "\n".join(lines)
 
 
