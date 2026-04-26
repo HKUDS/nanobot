@@ -1,6 +1,6 @@
 """Tests for Feishu reaction add/remove and auto-cleanup on stream end."""
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -160,6 +160,24 @@ class TestRemoveReactionAsync:
 
 
 class TestStreamEndReactionCleanup:
+    @pytest.mark.asyncio
+    async def test_stream_buffers_are_scoped_by_message_id(self):
+        ch = _make_channel()
+        ch._create_streaming_card_sync = MagicMock(return_value=None)
+
+        await ch.send_delta(
+            "oc_chat1", "first",
+            metadata={"message_id": "om_first"},
+        )
+        await ch.send_delta(
+            "oc_chat1", "second",
+            metadata={"message_id": "om_second"},
+        )
+
+        assert ch._stream_bufs["om_first"].text == "first"
+        assert ch._stream_bufs["om_second"].text == "second"
+        assert "oc_chat1" not in ch._stream_bufs
+
     @pytest.mark.asyncio
     async def test_removes_reaction_on_stream_end(self):
         ch = _make_channel()

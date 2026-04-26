@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from lark_oapi.api.im.v1.model import MentionEvent, P2ImMessageReceiveV1
+from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
 from loguru import logger
 from pydantic import Field
 
@@ -21,8 +22,6 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
-
-from lark_oapi.core.const import FEISHU_DOMAIN, LARK_DOMAIN
 
 FEISHU_AVAILABLE = importlib.util.find_spec("lark_oapi") is not None
 
@@ -622,6 +621,12 @@ class FeishuChannel(BaseChannel):
         # Trim cache to prevent unbounded growth
         if len(self._reaction_ids) > 500:
             self._reaction_ids.pop(next(iter(self._reaction_ids)))
+
+    @staticmethod
+    def _stream_key(chat_id: str, metadata: dict[str, Any] | None = None) -> str:
+        """Scope streaming buffers to the inbound message when available."""
+        meta = metadata or {}
+        return meta.get("message_id") or chat_id
 
     # Regex to match markdown tables (header + separator + data rows)
     _TABLE_RE = re.compile(
@@ -1349,6 +1354,7 @@ class FeishuChannel(BaseChannel):
         if not self._client:
             return
         meta = metadata or {}
+        stream_key = self._stream_key(chat_id, meta)
         loop = asyncio.get_running_loop()
         rid_type = "chat_id" if chat_id.startswith("oc_") else "open_id"
 
@@ -1363,7 +1369,7 @@ class FeishuChannel(BaseChannel):
                 if self.config.done_emoji:
                     await self._add_reaction(message_id, self.config.done_emoji)
 
-            buf = self._stream_bufs.pop(chat_id, None)
+            buf = self._stream_bufs.pop(stream_key, None)
             if not buf or not buf.text:
                 return
             # Try to finalize via streaming card; if that fails (e.g.
@@ -1417,10 +1423,10 @@ class FeishuChannel(BaseChannel):
             return
 
         # --- accumulate delta ---
-        buf = self._stream_bufs.get(chat_id)
+        buf = self._stream_bufs.get(stream_key)
         if buf is None:
             buf = _FeishuStreamBuf()
-            self._stream_bufs[chat_id] = buf
+            self._stream_bufs[stream_key] = buf
         buf.text += delta
         if not buf.text.strip():
             return
@@ -1469,7 +1475,7 @@ class FeishuChannel(BaseChannel):
                 hint = (msg.content or "").strip()
                 if not hint:
                     return
-                buf = self._stream_bufs.get(msg.chat_id)
+                buf = self._stream_bufs.get(self._stream_key(msg.chat_id, msg.metadata))
                 if buf and buf.card_id:
                     # Delegate to send_delta so tool hints get the same
                     # throttling (and card creation) as regular text deltas.
