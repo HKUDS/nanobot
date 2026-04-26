@@ -573,3 +573,79 @@ async def test_list_jobs_during_on_job_does_not_cause_stale_reload(tmp_path) -> 
         next_run = j["state"]["nextRunAtMs"]
         assert next_run is not None
         assert next_run > now_ms, f"Job '{j['name']}' next_run should be in the future"
+
+
+# ── at grace window tests ──
+
+
+def test_at_job_slightly_expired_is_scheduled(tmp_path) -> None:
+    """An at job whose at_ms is a few seconds in the past should still be scheduled."""
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    now = int(time.time() * 1000)
+    job = service.add_job(
+        name="slightly-expired",
+        schedule=CronSchedule(kind="at", at_ms=now - 5_000),
+        message="hello",
+    )
+    assert job.state.next_run_at_ms is not None
+
+
+def test_at_job_long_expired_not_scheduled(tmp_path) -> None:
+    """An at job whose at_ms is far in the past should NOT be scheduled."""
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    now = int(time.time() * 1000)
+    job = service.add_job(
+        name="long-expired",
+        schedule=CronSchedule(kind="at", at_ms=now - 3_600_000),
+        message="hello",
+    )
+    assert job.state.next_run_at_ms is None
+
+
+def test_at_grace_window_boundary_exact(tmp_path) -> None:
+    """at_ms exactly 10 minutes ago should be accepted; 10min+1ms should be rejected."""
+    from nanobot.cron.service import _AT_GRACE_WINDOW_MS, _compute_next_run
+
+    now = int(time.time() * 1000)
+
+    result_at_boundary = _compute_next_run(
+        CronSchedule(kind="at", at_ms=now - _AT_GRACE_WINDOW_MS), now
+    )
+    assert result_at_boundary is not None
+
+    result_past_boundary = _compute_next_run(
+        CronSchedule(kind="at", at_ms=now - _AT_GRACE_WINDOW_MS - 1), now
+    )
+    assert result_past_boundary is None
+
+
+def test_enable_job_slightly_expired_at_is_scheduled(tmp_path) -> None:
+    """Re-enabling a slightly expired at job should schedule it via the grace window."""
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    now = int(time.time() * 1000)
+    job = service.add_job(
+        name="enable-grace",
+        schedule=CronSchedule(kind="at", at_ms=now - 5_000),
+        message="hello",
+    )
+    service.enable_job(job.id, enabled=False)
+    updated = service.enable_job(job.id, enabled=True)
+    assert updated is not None
+    assert updated.state.next_run_at_ms is not None
+
+
+def test_update_job_slightly_expired_at_is_scheduled(tmp_path) -> None:
+    """Updating schedule to a slightly expired at_ms should schedule via the grace window."""
+    service = CronService(tmp_path / "cron" / "jobs.json")
+    now = int(time.time() * 1000)
+    job = service.add_job(
+        name="update-grace",
+        schedule=CronSchedule(kind="every", every_ms=60_000),
+        message="hello",
+    )
+    result = service.update_job(
+        job.id,
+        schedule=CronSchedule(kind="at", at_ms=now - 5_000),
+    )
+    assert isinstance(result, CronJob)
+    assert result.state.next_run_at_ms is not None
