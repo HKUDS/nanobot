@@ -79,6 +79,9 @@ export class WhatsAppClient {
     const { state, saveCreds } = await useMultiFileAuthState(this.options.authDir);
     const { version } = await fetchLatestBaileysVersion();
 
+    // Record startup time — messages older than this will be ignored
+    const startupTimestamp = Math.floor(Date.now() / 1000);
+
     console.log(`Using Baileys version: ${version.join('.')}`);
 
     // Create socket following OpenClaw's pattern
@@ -144,6 +147,10 @@ export class WhatsAppClient {
       for (const msg of messages) {
         if (msg.key.fromMe) continue;
         if (msg.key.remoteJid === 'status@broadcast') continue;
+
+        // Drop messages older than startup time (avoid replaying history on reconnect)
+        const msgTimestamp = msg.messageTimestamp as number;
+        if (msgTimestamp && msgTimestamp < startupTimestamp) continue;
 
         const unwrapped = baileysExtractMessageContent(msg.message);
         if (!unwrapped) continue;
