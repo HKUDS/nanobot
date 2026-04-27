@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import AsyncExitStack
+import re
 from typing import Any
 
 import httpx
@@ -9,6 +10,30 @@ from loguru import logger
 
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
+
+
+def _sanitize_tool_name(name: str) -> str:
+    """Sanitize MCP-derived names to conform to provider tool naming requirements.
+
+    Anthropic requires: ^[a-zA-Z0-9_-]{1,128}
+    OpenAI requires: ^[a-zA-Z0-9_\\.-]+
+
+    This function normalizes names to match the stricter Anthropic pattern (which
+    is also valid for OpenAI) by:
+    - Replacing spaces and other invalid chars with underscores
+    - Collapsing multiple underscores/hyphens to single underscore
+    - Stripping leading/trailing underscores/hyphens
+    - Truncating to 100 chars (leaving room for mcp_ prefix and server name)
+    """
+    # Replace any character that's not alphanumeric, underscore, or hyphen with underscore
+    sanitized = re.sub(r"[^a-zA-Z0-9_-]", "_", name)
+    # Collapse multiple underscores/hyphens to single underscore
+    sanitized = re.sub(r"[_-]{2,}", "_", sanitized)
+    # Strip leading/trailing underscores and hyphens
+    sanitized = sanitized.strip("_-")
+    # Truncate to 100 characters (leaving room for mcp_ prefix and server name)
+    # The full name is mcp_{server_name}_{sanitized}, so we need to be conservative
+    return sanitized[:100] if sanitized else "unnamed"
 
 
 def _extract_nullable_branch(options: Any) -> tuple[dict[str, Any], bool] | None:
@@ -78,7 +103,8 @@ class MCPToolWrapper(Tool):
     def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
         self._session = session
         self._original_name = tool_def.name
-        self._name = f"mcp_{server_name}_{tool_def.name}"
+        sanitized_name = _sanitize_tool_name(tool_def.name)
+        self._name = f"mcp_{server_name}_{sanitized_name}"
         self._description = tool_def.description or tool_def.name
         raw_schema = tool_def.inputSchema or {"type": "object", "properties": {}}
         self._parameters = _normalize_schema_for_openai(raw_schema)
@@ -139,7 +165,8 @@ class MCPResourceWrapper(Tool):
     def __init__(self, session, server_name: str, resource_def, resource_timeout: int = 30):
         self._session = session
         self._uri = resource_def.uri
-        self._name = f"mcp_{server_name}_resource_{resource_def.name}"
+        sanitized_name = _sanitize_tool_name(resource_def.name)
+        self._name = f"mcp_{server_name}_resource_{sanitized_name}"
         desc = resource_def.description or resource_def.name
         self._description = f"[MCP Resource] {desc}\nURI: {self._uri}"
         self._parameters: dict[str, Any] = {
@@ -210,7 +237,8 @@ class MCPPromptWrapper(Tool):
     def __init__(self, session, server_name: str, prompt_def, prompt_timeout: int = 30):
         self._session = session
         self._prompt_name = prompt_def.name
-        self._name = f"mcp_{server_name}_prompt_{prompt_def.name}"
+        sanitized_name = _sanitize_tool_name(prompt_def.name)
+        self._name = f"mcp_{server_name}_prompt_{sanitized_name}"
         desc = prompt_def.description or prompt_def.name
         self._description = (
             f"[MCP Prompt] {desc}\n"
