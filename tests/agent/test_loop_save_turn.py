@@ -660,3 +660,63 @@ def test_subagent_followup_skips_empty_content() -> None:
 
     assert loop._persist_subagent_followup(session, msg) is False
     assert session.messages == []
+
+
+def test_set_tool_context_passes_thread_session_key_to_spawn(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+
+    loop._set_tool_context(
+        "slack",
+        "C123",
+        metadata={"slack": {"thread_ts": "1700.42", "channel_type": "channel"}},
+        session_key="slack:C123:1700.42",
+    )
+
+    spawn_tool = loop.tools.get("spawn")
+    assert spawn_tool is not None
+    assert spawn_tool._session_key.get() == "slack:C123:1700.42"
+
+
+@pytest.mark.asyncio
+async def test_system_subagent_followup_uses_thread_session_and_slack_metadata(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    thread_session = loop.sessions.get_or_create("slack:C123:1700.42")
+    thread_session.add_message("user", "thread question")
+    loop.sessions.save(thread_session)
+
+    seen: dict[str, list[dict]] = {}
+
+    async def fake_run_agent_loop(initial_messages, **_kwargs):
+        seen["initial_messages"] = initial_messages
+        return (
+            "done",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "done"}],
+            "stop",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+
+    outbound = await loop._process_message(
+        InboundMessage(
+            channel="system",
+            sender_id="subagent",
+            chat_id="slack:C123",
+            content="subagent result",
+            session_key_override="slack:C123:1700.42",
+            metadata={"subagent_task_id": "sub-1"},
+        )
+    )
+
+    assert outbound is not None
+    assert outbound.channel == "slack"
+    assert outbound.chat_id == "C123"
+    assert outbound.metadata == {"slack": {"thread_ts": "1700.42"}}
+    assert "thread question" in seen["initial_messages"][1]["content"]
+
+    loop.sessions.invalidate("slack:C123:1700.42")
+    persisted = loop.sessions.get_or_create("slack:C123:1700.42")
+    assert any(m.get("subagent_task_id") == "sub-1" for m in persisted.messages)
