@@ -66,6 +66,9 @@ dependencies = [
 api = [
     "aiohttp>=3.9.0,<4.0.0",
 ]
+web = [
+    "aiohttp>=3.9.0,<4.0.0",
+]
 wecom = [
     "wecom-aibot-sdk-python>=0.1.5",
 ]
@@ -117,6 +120,7 @@ include = [
     "nanobot/templates/**/*.md",
     "nanobot/skills/**/*.md",
     "nanobot/skills/**/*.sh",
+    "nanobot/channels/web_static/**",
 ]
 
 [tool.hatch.build.targets.wheel]
