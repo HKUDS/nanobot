@@ -22,6 +22,61 @@ class DummyProvider(LLMProvider):
         return "test-model"
 
 
+def test_has_active_tasks_skips_empty_active_section() -> None:
+    content = """
+# HEARTBEAT
+
+## Active Tasks
+
+<!-- Add tasks here when heartbeat should run. -->
+
+## Notes
+- [ ] archived note outside the active section
+"""
+
+    assert not HeartbeatService._has_active_tasks(content)
+
+
+def test_has_active_tasks_detects_unchecked_task_in_active_section() -> None:
+    content = """
+# HEARTBEAT
+
+## Active Tasks
+
+- [ ] check production alerts
+
+## Notes
+- no active tasks
+"""
+
+    assert HeartbeatService._has_active_tasks(content)
+
+
+def test_has_active_tasks_keeps_ambiguous_content_for_llm_decision() -> None:
+    content = """
+## Active Tasks
+- [x] already handled
+No active tasks right now.
+"""
+
+    assert HeartbeatService._has_active_tasks(content)
+
+
+def test_has_active_tasks_supports_legacy_task_without_heading() -> None:
+    assert HeartbeatService._has_active_tasks("- [ ] check deployments")
+
+
+def test_has_active_tasks_skips_template_without_heading() -> None:
+    content = """
+# HEARTBEAT
+
+<!-- Nothing to do right now. -->
+## Notes
+"""
+
+    assert not HeartbeatService._has_active_tasks(content)
+
+
 @pytest.mark.asyncio
 async def test_start_is_idempotent(tmp_path) -> None:
     provider = DummyProvider([])
@@ -121,6 +176,84 @@ async def test_trigger_now_returns_none_when_decision_is_skip(tmp_path) -> None:
     )
 
     assert await service.trigger_now() is None
+
+
+@pytest.mark.asyncio
+async def test_tick_skips_llm_when_active_tasks_section_is_empty(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text(
+        """
+# HEARTBEAT
+
+## Active Tasks
+
+<!-- Add tasks here when heartbeat should run. -->
+""",
+        encoding="utf-8",
+    )
+
+    provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "run", "tasks": "should not run"},
+                )
+            ],
+        )
+    ])
+
+    executed: list[str] = []
+
+    async def _on_execute(tasks: str) -> str:
+        executed.append(tasks)
+        return "done"
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+    )
+
+    await service._tick()
+
+    assert provider.calls == 0
+    assert executed == []
+
+
+@pytest.mark.asyncio
+async def test_trigger_now_skips_llm_when_active_tasks_section_is_empty(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text(
+        """
+## Active Tasks
+<!-- No active tasks. -->
+### Later
+""",
+        encoding="utf-8",
+    )
+
+    provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "run", "tasks": "should not run"},
+                )
+            ],
+        )
+    ])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+    )
+
+    assert await service.trigger_now() is None
+    assert provider.calls == 0
 
 
 @pytest.mark.asyncio
@@ -286,4 +419,3 @@ async def test_decide_prompt_includes_current_time(tmp_path) -> None:
     user_msg = captured_messages[1]
     assert user_msg["role"] == "user"
     assert "Current Time:" in user_msg["content"]
-
