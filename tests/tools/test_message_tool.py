@@ -111,6 +111,26 @@ async def test_message_tool_resolves_relative_media_paths() -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_tool_resolves_relative_media_paths_from_active_workspace(tmp_path) -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    workspace = tmp_path / "workspace"
+    tool = MessageTool(send_callback=_send, workspace=workspace)
+
+    await tool.execute(
+        content="see attached",
+        channel="telegram",
+        chat_id="1",
+        media=["output/image.png"],
+    )
+
+    assert sent[0].media == [str(workspace / "output/image.png")]
+
+
+@pytest.mark.asyncio
 async def test_message_tool_passes_through_absolute_media_paths() -> None:
     sent: list[OutboundMessage] = []
 

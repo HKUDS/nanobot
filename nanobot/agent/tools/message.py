@@ -2,6 +2,7 @@
 
 import os
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool, tool_parameters
@@ -35,8 +36,10 @@ class MessageTool(Tool):
         default_channel: str = "",
         default_chat_id: str = "",
         default_message_id: str | None = None,
+        workspace: str | Path | None = None,
     ):
         self._send_callback = send_callback
+        self._workspace = Path(workspace).expanduser() if workspace is not None else get_workspace_path()
         self._default_channel: ContextVar[str] = ContextVar("message_default_channel", default=default_channel)
         self._default_chat_id: ContextVar[str] = ContextVar("message_default_chat_id", default=default_chat_id)
         self._default_message_id: ContextVar[str | None] = ContextVar(
@@ -149,7 +152,7 @@ class MessageTool(Tool):
                 if p.startswith(("http://", "https://")) or os.path.isabs(p):
                     resolved.append(p)
                 else:
-                    resolved.append(str(get_workspace_path() / p))
+                    resolved.append(str(self._workspace / p))
             media = resolved
 
         metadata = dict(self._default_metadata.get()) if same_target else {}
