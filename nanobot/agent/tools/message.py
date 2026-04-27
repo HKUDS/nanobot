@@ -1,11 +1,13 @@
 """Message tool for sending messages to users."""
 
+import os
 from contextvars import ContextVar
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 from nanobot.bus.events import OutboundMessage
+from nanobot.config.paths import get_workspace_path
 
 
 @tool_parameters(
@@ -140,6 +142,15 @@ class MessageTool(Tool):
 
         if not self._send_callback:
             return "Error: Message sending not configured"
+
+        if media:
+            resolved = []
+            for p in media:
+                if p.startswith(("http://", "https://")) or os.path.isabs(p):
+                    resolved.append(p)
+                else:
+                    resolved.append(str(get_workspace_path() / p))
+            media = resolved
 
         metadata = dict(self._default_metadata.get()) if same_target else {}
         if message_id:
