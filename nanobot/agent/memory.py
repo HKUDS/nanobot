@@ -730,8 +730,9 @@ class Dream:
 
     def _build_tools(self) -> ToolRegistry:
         """Build a minimal tool registry for the Dream agent."""
-        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR, SkillsLoader
         from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
+        from nanobot.agent.tools.skills import ManageSkillTool
 
         tools = ToolRegistry()
         workspace = self.store.workspace
@@ -748,6 +749,7 @@ class Dream:
         skills_dir = workspace / "skills"
         skills_dir.mkdir(parents=True, exist_ok=True)
         tools.register(WriteFileTool(workspace=workspace, allowed_dir=skills_dir))
+        tools.register(ManageSkillTool(loader=SkillsLoader(workspace)))
         return tools
 
     # -- skill listing --------------------------------------------------------

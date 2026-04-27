@@ -297,6 +297,59 @@ def test_disabled_skills_excluded_from_build_skills_summary(tmp_path: Path) -> N
     assert "beta" in summary
 
 
+def _valid_skill_md(name: str, desc: str = "A test skill.") -> str:
+    return "\n".join(
+        [
+            "---",
+            f"name: {name}",
+            f"description: {desc}",
+            "---",
+            "",
+            "# Body",
+        ]
+    )
+
+
+def test_create_update_delete_workspace_skill(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    loader.create_workspace_skill("my-skill", _valid_skill_md("my-skill"))
+    p = workspace / "skills" / "my-skill" / "SKILL.md"
+    assert p.is_file()
+    loaded = loader.load_skill("my-skill")
+    assert loaded and "# Body" in loaded
+    loc = loader.resolve_skill_location("my-skill")
+    assert loc and loc["source"] == "workspace"
+    loader.update_workspace_skill("my-skill", _valid_skill_md("my-skill", desc="Updated."))
+    assert "Updated." in p.read_text(encoding="utf-8")
+    loader.delete_workspace_skill("my-skill")
+    assert not p.parent.exists()
+
+
+def test_workspace_skill_crud_rejects_builtin_only(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    (workspace / "skills").mkdir(parents=True)
+    builtin = tmp_path / "builtin"
+    _write_skill(builtin, "builtin-only", body="# B")
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    with pytest.raises(PermissionError):
+        loader.update_workspace_skill("builtin-only", _valid_skill_md("builtin-only"))
+    with pytest.raises(PermissionError):
+        loader.delete_workspace_skill("builtin-only")
+
+
+def test_create_rejects_duplicate(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    builtin = tmp_path / "builtin"
+    builtin.mkdir()
+    loader = SkillsLoader(workspace, builtin_skills_dir=builtin)
+    loader.create_workspace_skill("dup", _valid_skill_md("dup"))
+    with pytest.raises(ValueError, match="already exists"):
+        loader.create_workspace_skill("dup", _valid_skill_md("dup"))
+
+
 def test_disabled_skills_excluded_from_get_always_skills(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     ws_skills = workspace / "skills"

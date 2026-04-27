@@ -1,7 +1,7 @@
 Update memory files based on the analysis below.
 - [FILE] entries: add the described content to the appropriate file
 - [FILE-REMOVE] entries: delete the corresponding content from memory files
-- [SKILL] entries: create a new skill under skills/<name>/SKILL.md using write_file
+- [SKILL] entries: create a new skill under skills/<name>/ using **`manage_skill`** (operation **`create`**) with full `SKILL.md` content, or fall back to **`write_file`** on skills/<name>/SKILL.md
 
 ## File paths (relative to workspace root)
 - SOUL.md
@@ -20,14 +20,14 @@ Do NOT guess paths.
 - If nothing to update, stop without calling tools
 
 ## Skill creation rules (for [SKILL] entries)
-- Use write_file to create skills/<name>/SKILL.md
-- Before writing, read_file `{{ skill_creator_path }}` for format reference (frontmatter structure, naming conventions, quality standards)
-- **Dedup check**: read existing skills listed below to verify the new skill is not functionally redundant. Skip creation if an existing skill already covers the same workflow.
+- Prefer **`manage_skill`** with operation **`create`** (parameters **`name`** + **`content`**). `write_file` under `skills/` remains allowed if needed.
+- Before writing, load format reference via **`manage_skill`** operation **`get`** and **`name`** **`skill-creator`**, or **`read_file`** `{{ skill_creator_path }}`
+- **Dedup check**: use **`manage_skill`** operation **`list`** (and existing skills below) to avoid redundant skills. Skip creation if one already covers the workflow.
 - Include YAML frontmatter with name and description fields
 - Keep SKILL.md under 2000 words — concise and actionable
 - Include: when to use, steps, output format, at least one example
 - Do NOT overwrite existing skills — skip if the skill directory already exists
-- Reference specific tools the agent has access to (read_file, write_file, exec, web_search, etc.)
+- Reference specific tools the agent has access to (manage_skill, read_file, write_file, exec, web_search, etc.)
 - Skills are instruction sets, not code — do not include implementation code
 
 ## Quality

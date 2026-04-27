@@ -6,6 +6,7 @@ import re
 import shutil
 from pathlib import Path
 
+from nanobot.agent.skill_validation import validate_skill_directory_name, validate_skill_md_content
 import yaml
 
 # Default builtin skills directory (relative to this file)
@@ -112,8 +113,8 @@ class SkillsLoader:
         """
         Build a summary of all skills (name, description, path, availability).
 
-        This is used for progressive loading - the agent can read the full
-        skill content using read_file when needed.
+        This is used for progressive loading - the agent should load the full
+        SKILL.md via ``manage_skill(operation=\"get\")``, not ``read_file``.
 
         Args:
             exclude: Set of skill names to omit from the summary.
@@ -157,6 +158,17 @@ class SkillsLoader:
         if meta and meta.get("description"):
             return meta["description"]
         return name  # Fallback to skill name
+
+    def describe_skill(self, name: str) -> str:
+        """Public alias for skill list UIs and tools."""
+        return self._get_skill_description(name)
+
+    def skill_availability(self, name: str) -> tuple[bool, str]:
+        """Return (requirements_met, missing_requirements_text)."""
+        meta = self._get_skill_meta(name)
+        if self._check_requirements(meta):
+            return True, ""
+        return False, self._get_missing_requirements(meta)
 
     def _strip_frontmatter(self, content: str) -> str:
         """Remove YAML frontmatter from markdown content."""
@@ -240,3 +252,73 @@ class SkillsLoader:
         for key, value in parsed.items():
             metadata[str(key)] = value
         return metadata
+
+    def resolve_skill_location(self, name: str) -> dict[str, str] | None:
+        """Return ``name``, ``source`` (workspace|builtin), ``path``, ``skill_dir`` for SKILL.md, or ``None``."""
+        ws_file = self.workspace_skills / name / "SKILL.md"
+        if ws_file.is_file():
+            return {
+                "name": name,
+                "source": "workspace",
+                "path": str(ws_file.resolve()),
+                "skill_dir": str(ws_file.parent.resolve()),
+            }
+        if self.builtin_skills and self.builtin_skills.exists():
+            bi_file = self.builtin_skills / name / "SKILL.md"
+            if bi_file.is_file():
+                return {
+                    "name": name,
+                    "source": "builtin",
+                    "path": str(bi_file.resolve()),
+                    "skill_dir": str(bi_file.parent.resolve()),
+                }
+        return None
+
+    def create_workspace_skill(self, name: str, content: str) -> None:
+        """Create ``workspace/skills/<name>/SKILL.md`` (fails if directory or file already exists)."""
+        err = validate_skill_directory_name(name)
+        if err:
+            raise ValueError(err)
+        skill_dir = self.workspace_skills / name
+        if skill_dir.exists():
+            raise ValueError(f"Skill '{name}' already exists under workspace skills")
+        v_errs = validate_skill_md_content(content, folder_name=name)
+        if v_errs:
+            raise ValueError("; ".join(v_errs))
+        self.workspace_skills.mkdir(parents=True, exist_ok=True)
+        skill_dir.mkdir(parents=False)
+        (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
+
+    def update_workspace_skill(self, name: str, content: str) -> None:
+        """Overwrite workspace ``SKILL.md`` only; builtin-only skills are read-only."""
+        err = validate_skill_directory_name(name)
+        if err:
+            raise ValueError(err)
+        ws_file = self.workspace_skills / name / "SKILL.md"
+        if ws_file.is_file():
+            v_errs = validate_skill_md_content(content, folder_name=name)
+            if v_errs:
+                raise ValueError("; ".join(v_errs))
+            ws_file.write_text(content, encoding="utf-8")
+            return
+        if self.resolve_skill_location(name) is not None:
+            raise PermissionError(
+                f"Skill '{name}' is built-in (read-only). Copy it to workspace/skills/ first or use a new name."
+            )
+        raise ValueError(f"Skill '{name}' not found")
+
+    def delete_workspace_skill(self, name: str) -> None:
+        """Remove ``workspace/skills/<name>`` recursively; builtin-only skills cannot be deleted."""
+        err = validate_skill_directory_name(name)
+        if err:
+            raise ValueError(err)
+        skill_dir = self.workspace_skills / name
+        ws_md = skill_dir / "SKILL.md"
+        if ws_md.is_file():
+            shutil.rmtree(skill_dir)
+            return
+        if self.builtin_skills and (self.builtin_skills / name / "SKILL.md").is_file():
+            raise PermissionError(
+                f"Skill '{name}' is built-in (read-only); only workspace skills can be deleted."
+            )
+        raise ValueError(f"Skill '{name}' not found")
