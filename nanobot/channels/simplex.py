@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Literal
@@ -81,23 +80,11 @@ class SimplexChannel(BaseChannel):
         return [sys.executable, str(script_path), "--config", str(config_path)], _bridge_cwd(script_path)
 
     async def login(self, force: bool = False) -> bool:
-        """Launch the bridge in the foreground."""
+        """SimpleX does not provide an interactive login flow."""
         if force:
-            logger.info("SimpleX bridge login ignores --force and starts a fresh bridge process")
-
-        try:
-            command, cwd = self._bridge_command()
-        except RuntimeError as e:
-            logger.error("{}", e)
-            return False
-
-        logger.info("Starting SimpleX bridge...")
-        try:
-            subprocess.run(command, check=True, cwd=cwd)
-        except (FileNotFoundError, subprocess.CalledProcessError) as e:
-            logger.error("SimpleX bridge failed: {}", e)
-            return False
-        return True
+            logger.info("SimpleX login does not support --force")
+        logger.error("SimpleX has no login flow. Enable channels.simplex and run `nanobot gateway`.")
+        return False
 
     async def start(self) -> None:
         """Run the bridge as a managed subprocess for gateway mode."""

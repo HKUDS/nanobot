@@ -282,7 +282,7 @@ nanobot gateway
 <details>
 <summary><b>SimpleX (via WebSocket bridge)</b></summary>
 
-There is a built-in **`simplex` login helper** that launches the bridge for you. The recommended setup is still:
+SimpleX is run as a **gateway-managed bridge process**. The setup is:
 
 1. nanobot's existing **WebSocket** channel
 2. the local **`simplex-chat` CLI**
@@ -303,7 +303,7 @@ There is a built-in **`simplex` login helper** that launches the bridge for you.
       "streaming": false
     },
     "simplex": {
-      "enabled": false,
+      "enabled": true,
       "clientId": "YOUR_CLIENT_ID",
       "chatId": "simplex:YOUR_CONTACT_KEY",
       "contact": "YOUR_SIMPLEX_DISPLAY_NAME",
@@ -330,13 +330,13 @@ There is a built-in **`simplex` login helper** that launches the bridge for you.
 nanobot gateway
 ```
 
-**3. Start the SimpleX bridge**
+SimpleX inbound polling uses only the local CLI command:
 
 ```bash
-nanobot channels login simplex
+simplex-chat -e "/tail @YOUR_SIMPLEX_DISPLAY_NAME 20" -t 3
 ```
 
-This uses the same packaged bridge entrypoint as `python bridge/simplex_bridge.py --config ~/.nanobot/config.json`. Keep `enabled: false` when you want to launch the bridge manually with the login command.
+There is no interactive `login` step for SimpleX once your CLI profile is configured.
 
 The bridge forwards inbound SimpleX messages into nanobot as:
 
