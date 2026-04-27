@@ -120,6 +120,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://openrouter.ai/api/v1",
         supports_prompt_caching=True,
     ),
+    # Hugging Face Inference Providers: OpenAI-compatible router for chat models.
+    ProviderSpec(
+        name="huggingface",
+        keywords=("huggingface", "hugging-face"),
+        env_key="HF_TOKEN",
+        display_name="Hugging Face",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_key_prefix="hf_",
+        detect_by_base_keyword="huggingface",
+        default_api_base="https://router.huggingface.co/v1",
+    ),
     # AiHubMix: global gateway, OpenAI-compatible interface.
     # strip_model_prefix=True: doesn't understand "anthropic/claude-3",
     # strips to bare "claude-3".
