@@ -13,6 +13,7 @@ from nanobot.agent.tools.mcp import (
     MCPResourceWrapper,
     MCPToolWrapper,
     _normalize_windows_stdio_command,
+    _sanitize_name,
     connect_mcp_servers,
 )
 from nanobot.agent.tools.registry import ToolRegistry
@@ -798,3 +799,114 @@ async def test_connect_registers_resources_and_prompts(
     assert "mcp_test_tool_a" in registry.tool_names
     assert "mcp_test_resource_res_b" in registry.tool_names
     assert "mcp_test_prompt_prompt_c" in registry.tool_names
+
+
+# ---------------------------------------------------------------------------
+# _sanitize_name tests
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_name_replaces_spaces() -> None:
+    assert _sanitize_name("PostgreSQL System Information") == "PostgreSQL_System_Information"
+
+
+def test_sanitize_name_replaces_special_characters() -> None:
+    assert _sanitize_name("foo.bar@baz!") == "foo_bar_baz_"
+
+
+def test_sanitize_name_collapses_consecutive_underscores() -> None:
+    assert _sanitize_name("a   b") == "a_b"
+
+
+def test_sanitize_name_preserves_valid_characters() -> None:
+    assert _sanitize_name("my-tool_v2") == "my-tool_v2"
+
+
+def test_sanitize_name_noop_for_already_clean_names() -> None:
+    assert _sanitize_name("mcp_server_tool") == "mcp_server_tool"
+
+
+# ---------------------------------------------------------------------------
+# Wrapper sanitization tests
+# ---------------------------------------------------------------------------
+
+
+def test_tool_wrapper_sanitizes_name() -> None:
+    tool_def = SimpleNamespace(
+        name="My Tool",
+        description="tool with spaces",
+        inputSchema={"type": "object", "properties": {}},
+    )
+    wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "srv", tool_def)
+    assert wrapper.name == "mcp_srv_My_Tool"
+
+
+def test_resource_wrapper_sanitizes_name() -> None:
+    resource_def = SimpleNamespace(
+        name="PostgreSQL System Information",
+        uri="file:///pg/info",
+        description="PG info",
+    )
+    wrapper = MCPResourceWrapper(None, "srv", resource_def)
+    assert wrapper.name == "mcp_srv_resource_PostgreSQL_System_Information"
+
+
+def test_prompt_wrapper_sanitizes_name() -> None:
+    prompt_def = SimpleNamespace(
+        name="design-schema",
+        description="Design schema",
+        arguments=None,
+    )
+    # Hyphens are allowed, so this should pass through unchanged
+    wrapper = MCPPromptWrapper(None, "my server", prompt_def)
+    assert wrapper.name == "mcp_my_server_prompt_design-schema"
+
+
+def test_tool_wrapper_preserves_original_name_for_mcp_call() -> None:
+    tool_def = SimpleNamespace(
+        name="My Tool",
+        description="tool with spaces",
+        inputSchema={"type": "object", "properties": {}},
+    )
+    wrapper = MCPToolWrapper(SimpleNamespace(call_tool=None), "srv", tool_def)
+    # The sanitized API-facing name differs from the original MCP name
+    assert wrapper.name == "mcp_srv_My_Tool"
+    assert wrapper._original_name == "My Tool"
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_sanitizes_resource_names(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
+        tool_names=[],
+        resource_names=["PostgreSQL System Information"],
+        prompt_names=[],
+    )
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake")},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert "mcp_test_resource_PostgreSQL_System_Information" in registry.tool_names
+
+
+@pytest.mark.asyncio
+async def test_connect_mcp_servers_enabled_tools_matches_sanitized_name(
+    fake_mcp_runtime: dict[str, object | None],
+) -> None:
+    fake_mcp_runtime["session"] = _make_fake_session_with_capabilities(
+        tool_names=["My Tool", "other"],
+    )
+    registry = ToolRegistry()
+    stacks = await connect_mcp_servers(
+        {"test": MCPServerConfig(command="fake", enabled_tools=["mcp_test_My_Tool"])},
+        registry,
+    )
+    for stack in stacks.values():
+        await stack.aclose()
+
+    assert registry.tool_names == ["mcp_test_My_Tool"]
