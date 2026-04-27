@@ -60,6 +60,10 @@ _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.6",
     "k2.6-code-preview",
 })
+_OPENAI_COMPAT_CONNECT_TIMEOUT_S = 10.0
+_OPENAI_COMPAT_READ_TIMEOUT_S = 120.0
+_OPENAI_COMPAT_WRITE_TIMEOUT_S = 120.0
+_OPENAI_COMPAT_POOL_TIMEOUT_S = 10.0
 
 # Maps ProviderSpec.thinking_style → extra_body builder.
 # Each builder takes a bool (thinking_enabled) and returns the dict to
@@ -88,6 +92,16 @@ def _is_kimi_thinking_model(model_name: str) -> bool:
     if "/" in name and name.rsplit("/", 1)[1] in _KIMI_THINKING_MODELS:
         return True
     return False
+
+
+def _openai_compat_timeout() -> httpx.Timeout:
+    """Return the bounded HTTP timeout used for OpenAI-compatible providers."""
+    return httpx.Timeout(
+        connect=_OPENAI_COMPAT_CONNECT_TIMEOUT_S,
+        read=_OPENAI_COMPAT_READ_TIMEOUT_S,
+        write=_OPENAI_COMPAT_WRITE_TIMEOUT_S,
+        pool=_OPENAI_COMPAT_POOL_TIMEOUT_S,
+    )
 
 
 def _short_tool_id() -> str:
@@ -251,10 +265,12 @@ class OpenAICompatProvider(LLMProvider):
         # opening a fresh connection for each request, which is cheap on a
         # LAN.  Cloud providers benefit from keepalive, so we leave the
         # default pool settings for them.
+        timeout = _openai_compat_timeout()
         http_client: httpx.AsyncClient | None = None
         if _is_local_endpoint(spec, effective_base):
             http_client = httpx.AsyncClient(
                 limits=httpx.Limits(keepalive_expiry=0),
+                timeout=timeout,
             )
 
         self._client = AsyncOpenAI(
@@ -262,6 +278,7 @@ class OpenAICompatProvider(LLMProvider):
             base_url=effective_base,
             default_headers=default_headers,
             max_retries=0,
+            timeout=timeout,
             http_client=http_client,
         )
 
