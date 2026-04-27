@@ -202,6 +202,7 @@ class AgentLoop:
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
+        max_messages: int = 0,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
@@ -259,6 +260,7 @@ class AgentLoop:
             disabled_skills=disabled_skills,
         )
         self._unified_session = unified_session
+        self._max_messages = max_messages if max_messages > 0 else 0
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
@@ -884,10 +886,13 @@ class AgentLoop:
                 channel, chat_id, msg.metadata.get("message_id"),
                 msg.metadata, session_key=key,
             )
-            history = session.get_history(
-                max_tokens=self._replay_token_budget(),
-                include_timestamps=True,
-            )
+            _hist_kwargs: dict[str, Any] = {
+                "max_tokens": self._replay_token_budget(),
+                "include_timestamps": True,
+            }
+            if self._max_messages > 0:
+                _hist_kwargs["max_messages"] = self._max_messages
+            history = session.get_history(**_hist_kwargs)
             current_role = "assistant" if is_subagent else "user"
 
             # Subagent content is already in `history` above; passing it again
@@ -971,10 +976,13 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(
-            max_tokens=self._replay_token_budget(),
-            include_timestamps=True,
-        )
+        _hist_kwargs: dict[str, Any] = {
+            "max_tokens": self._replay_token_budget(),
+            "include_timestamps": True,
+        }
+        if self._max_messages > 0:
+            _hist_kwargs["max_messages"] = self._max_messages
+        history = session.get_history(**_hist_kwargs)
 
         pending_ask_id = pending_ask_user_id(history)
         if pending_ask_id:
