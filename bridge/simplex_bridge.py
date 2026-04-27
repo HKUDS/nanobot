@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
+
 import websockets
 
 from nanobot.utils.simplex_bridge import default_simplex_state_path, extract_simplex_reply_text
@@ -203,24 +204,54 @@ def _extract_contact_text(contact: str, line: str) -> str | None:
     # To avoid self-echo loops, accept only the inbound contact marker.
     prefix = f"{contact}> "
     if line.startswith(prefix):
-        return line[len(prefix) :].strip()
+        return line[len(prefix) :]
     return None
 
 
 def _parse_tail_output(contact: str, raw_stdout: str) -> list[tuple[str, str]]:
     """Extract `(token, text)` pairs from simplex-chat /tail output for *contact*."""
     rows: list[tuple[str, str]] = []
+    current_token: str | None = None
+    current_lines: list[str] | None = None
+
+    def flush_current() -> None:
+        nonlocal current_token, current_lines
+        if current_token is None or current_lines is None:
+            return
+        text = "\n".join(current_lines).strip()
+        if text:
+            rows.append((current_token, text))
+        current_token = None
+        current_lines = None
+
     for raw_line in raw_stdout.splitlines():
-        line = raw_line.strip()
-        if not line:
+        line = raw_line.rstrip("\r")
+        stripped_line = line.strip()
+        if not stripped_line:
+            if current_lines is not None:
+                current_lines.append("")
             continue
 
-        text = _extract_contact_text(contact, line)
+        line_no_ts = _strip_leading_time_prefix(stripped_line)
+        text = _extract_contact_text(contact, stripped_line)
         if text is None:
-            line_no_ts = _strip_leading_time_prefix(line)
             text = _extract_contact_text(contact, line_no_ts)
-        if text:
-            rows.append((_message_token(raw_line), text))
+
+        if text is not None:
+            flush_current()
+            current_token = _message_token(raw_line)
+            current_lines = [text]
+            continue
+
+        outbound_prefix = f"@{contact}> "
+        if stripped_line.startswith(outbound_prefix) or line_no_ts.startswith(outbound_prefix):
+            flush_current()
+            continue
+
+        if current_lines is not None:
+            current_lines.append(line_no_ts)
+
+    flush_current()
     return rows
 
 
