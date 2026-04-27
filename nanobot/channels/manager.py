@@ -357,36 +357,45 @@ class ChannelManager:
         """Send gateway lifecycle notification (on_start / on_stop) if configured."""
         from nanobot.bus.events import OutboundMessage
 
-        # Safety check: ensure config has gateway attribute
-        if not hasattr(self.config, "gateway"):
-            return
-
-        cfg = getattr(self.config.gateway, event, None)
-        if not cfg:
-            return
-
-        # Pick the first non-internal enabled channel as the notification target
-        target_channel = None
-        target_chat_id = None
+        # Check for channel-specific lifecycle notifications (e.g., feishu.notification.on_start_message)
         for name, channel in self.channels.items():
             if name in {"cli", "system"}:
                 continue
+            
+            # Get channel-specific config from notification sub-config
+            notification_cfg = getattr(channel.config, "notification", None)
+            channel_msg = None
+            target_chat_ids = []
+            
+            if notification_cfg:
+                # Map event to message field (on_start -> on_start_message, on_stop -> on_stop_message)
+                msg_field = f"{event}_message"
+                channel_msg = getattr(notification_cfg, msg_field, None)
+                target_chat_ids = getattr(notification_cfg, "chat_id_list", [])
+            
+            if not channel_msg:
+                # Fallback to legacy gateway-level config
+                if hasattr(self.config, "gateway"):
+                    channel_msg = getattr(self.config.gateway, event, None)
+            
+            if not channel_msg:
+                continue
+
             target_channel = channel
-            target_chat_id = getattr(channel.config, "notify_chat_id", None) or channel.name
-            break
-
-        if not target_channel:
-            return
-
-        try:
-            # Wait for channels to initialize their clients before sending lifecycle notification
-            await asyncio.sleep(3)
-            msg = OutboundMessage(
-                channel=target_channel.name,
-                chat_id=target_chat_id,
-                content=cfg,
-                metadata={"_lifecycle_notification": True},
-            )
-            await self._send_with_retry(target_channel, msg)
-        except Exception as e:
-            logger.warning("Gateway {} notification failed: {}", event, e)
+            # Use first chat_id from list, or fallback to channel name
+            target_chat_id = target_chat_ids[0] if target_chat_ids else channel.name
+            
+            try:
+                # Wait for channels to initialize their clients before sending lifecycle notification
+                await asyncio.sleep(3)
+                msg = OutboundMessage(
+                    channel=target_channel.name,
+                    chat_id=target_chat_id,
+                    content=channel_msg,
+                    metadata={"_lifecycle_notification": True},
+                )
+                await self._send_with_retry(target_channel, msg)
+                # Only send to the first channel with a configured message
+                break
+            except Exception as e:
+                logger.warning("Gateway {} notification failed: {}", event, e)

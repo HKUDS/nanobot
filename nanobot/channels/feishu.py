@@ -241,6 +241,14 @@ def _extract_post_text(content_json: dict) -> str:
     return text
 
 
+class FeishuNotificationConfig(Base):
+    """Configuration for Feishu lifecycle notifications."""
+
+    chat_id_list: list[str] = Field(default_factory=list)  # Target chat IDs for lifecycle notifications
+    on_start_message: str | None = None  # Notification message sent after gateway starts
+    on_stop_message: str | None = None  # Notification message sent before gateway stops
+
+
 class FeishuConfig(Base):
     """Feishu/Lark channel configuration using WebSocket long connection."""
 
@@ -257,7 +265,7 @@ class FeishuConfig(Base):
     reply_to_message: bool = False  # If True, bot replies quote the user's original message
     streaming: bool = True
     domain: Literal["feishu", "lark"] = "feishu"  # Set to "lark" for international Lark
-    notify_chat_id: str | None = None  # Target for lifecycle notifications (e.g., on_start)
+    notification: FeishuNotificationConfig = Field(default_factory=FeishuNotificationConfig)
 
 
 _STREAM_ELEMENT_ID = "streaming_md"
