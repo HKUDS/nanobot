@@ -157,6 +157,18 @@ class TestRestartCommand:
         assert response.metadata == {"render_as": "text"}
 
     @pytest.mark.asyncio
+    async def test_ping_returns_pong_with_uptime(self):
+        loop, _bus = _make_loop()
+        loop._start_time = time.time() - 90  # 1m 30s uptime
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/ping")
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "Pong" in response.content
+        assert "1m 30s" in response.content
+
+    @pytest.mark.asyncio
     async def test_status_reports_runtime_info(self):
         loop, _bus = _make_loop()
         session = MagicMock()
