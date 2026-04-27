@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>nanobot - Setup</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #1f2937;
+      --border: #30363d;
+      --accent: #4a9eff;
+      --accent-dim: rgba(74,158,255,0.15);
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --ok: #3fb950;
+      --radius: 10px;
+    }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .wizard { width: 100%; max-width: 520px; }
+    .header { text-align: center; margin-bottom: 32px; }
+    .header h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+    .header p { color: var(--muted); margin-top: 6px; font-size: 14px; }
+
+    .steps { display: flex; align-items: center; justify-content: center; margin-bottom: 28px; }
+    .step-dot {
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 2px solid var(--border); background: var(--surface);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      transition: all 0.2s; z-index: 1;
+    }
+    .step-dot.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+    .step-dot.done { border-color: var(--ok); background: rgba(63,185,80,0.15); color: var(--ok); }
+    .step-line { flex: 1; height: 2px; background: var(--border); max-width: 80px; }
+    .step-line.done { background: var(--ok); }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+    }
+    .card-title { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+    .card-sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; line-height: 1.5; }
+
+    .field { margin-bottom: 18px; }
+    label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; color: var(--muted); }
+    input, select {
+      width: 100%; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); font-size: 14px; padding: 9px 12px;
+      outline: none; transition: border-color 0.15s;
+    }
+    input:focus, select:focus { border-color: var(--accent); }
+    select option { background: var(--surface2); }
+    .hint { font-size: 12px; color: var(--muted); margin-top: 5px; }
+
+    .btn-row { display: flex; gap: 10px; margin-top: 24px; justify-content: flex-end; }
+    .btn {
+      padding: 9px 20px; border-radius: 6px; font-size: 14px; font-weight: 500;
+      cursor: pointer; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--text); transition: background 0.15s;
+    }
+    .btn:hover { background: #2d3748; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .btn.primary:hover { background: #3a8ae5; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn.ghost { background: transparent; }
+
+    .provider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+    .provider-card {
+      border: 2px solid var(--border); border-radius: 8px;
+      padding: 14px 12px; cursor: pointer; text-align: center;
+      background: var(--surface); transition: all 0.15s;
+    }
+    .provider-card:hover { border-color: var(--muted); }
+    .provider-card.selected { border-color: var(--accent); background: var(--accent-dim); }
+    .provider-card .pname { font-weight: 600; font-size: 14px; margin-top: 4px; }
+    .provider-card .pmodel { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .provider-emoji { font-size: 24px; }
+
+    .alert {
+      background: rgba(74,158,255,0.12); border: 1px solid rgba(74,158,255,0.3);
+      border-radius: 6px; padding: 12px 14px; font-size: 13px; color: var(--accent); margin-bottom: 18px;
+    }
+    .alert.success { background: rgba(63,185,80,0.1); border-color: rgba(63,185,80,0.3); color: var(--ok); }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      width: 18px; height: 18px; border: 2px solid var(--border);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block; vertical-align: middle; margin-right: 8px;
+    }
+
+    .step-panel { display: none; }
+    .step-panel.active { display: block; }
+
+    .welcome-features {
+      list-style: none; margin: 16px 0; display: flex; flex-direction: column; gap: 8px;
+    }
+    .welcome-features li {
+      display: flex; align-items: center; gap: 10px; font-size: 14px; color: var(--muted);
+    }
+    .welcome-features li::before { content: "\2713"; color: var(--ok); font-weight: 700; font-size: 13px; }
+    .done-icon { text-align: center; font-size: 56px; margin: 8px 0 16px; }
+  </style>
+</head>
+<body>
+<div class="wizard">
+  <div class="header">
+    <h1>nanobot</h1>
+    <p>Initial setup - configure your AI assistant</p>
+  </div>
+
+  <div class="steps">
+    <div class="step-dot active" id="dot1">1</div>
+    <div class="step-line" id="line1"></div>
+    <div class="step-dot" id="dot2">2</div>
+    <div class="step-line" id="line2"></div>
+    <div class="step-dot" id="dot3">3</div>
+  </div>
+
+  <div class="card">
+    <!-- Step 1: Welcome -->
+    <div class="step-panel active" id="panel1">
+      <div class="card-title">Welcome to nanobot</div>
+      <div class="card-sub">A private AI assistant running entirely on your device.</div>
+      <ul class="welcome-features">
+        <li>Supports Claude, GPT, Gemini, DeepSeek, Ollama and more</li>
+        <li>Connect via Telegram, Discord, WhatsApp and other channels</li>
+        <li>Execute tasks: file operations, web search, code execution</li>
+        <li>All data stored locally, fully private</li>
+      </ul>
+      <div class="btn-row">
+        <button class="btn primary" id="btn-get-started">Get Started</button>
+      </div>
+    </div>
+
+    <!-- Step 2: Model Selection -->
+    <div class="step-panel" id="panel2">
+      <div class="card-title">Choose AI Provider</div>
+      <div class="card-sub">Select your LLM provider and enter the API key.</div>
+
+      <div class="provider-grid">
+        <div class="provider-card selected" id="p-anthropic" data-provider="anthropic">
+          <div class="provider-emoji">A</div>
+          <div class="pname">Anthropic</div>
+          <div class="pmodel">Claude Sonnet 4</div>
+        </div>
+        <div class="provider-card" id="p-openai" data-provider="openai">
+          <div class="provider-emoji">O</div>
+          <div class="pname">OpenAI</div>
+          <div class="pmodel">GPT-4o</div>
+        </div>
+        <div class="provider-card" id="p-deepseek" data-provider="deepseek">
+          <div class="provider-emoji">D</div>
+          <div class="pname">DeepSeek</div>
+          <div class="pmodel">DeepSeek V3</div>
+        </div>
+        <div class="provider-card" id="p-gemini" data-provider="gemini">
+          <div class="provider-emoji">G</div>
+          <div class="pname">Google Gemini</div>
+          <div class="pmodel">Gemini 2.5 Pro</div>
+        </div>
+        <div class="provider-card" id="p-openrouter" data-provider="openrouter">
+          <div class="provider-emoji">R</div>
+          <div class="pname">OpenRouter</div>
+          <div class="pmodel">Multi-provider</div>
+        </div>
+        <div class="provider-card" id="p-ollama" data-provider="ollama">
+          <div class="provider-emoji">L</div>
+          <div class="pname">Ollama</div>
+          <div class="pmodel">Local models</div>
+        </div>
+      </div>
+
+      <div class="field" id="apiKeyField">
+        <label id="apiKeyLabel">Anthropic API Key</label>
+        <input type="password" id="apiKey" placeholder="sk-ant-..." />
+        <div class="hint" id="apiKeyHint">Get your key from console.anthropic.com</div>
+      </div>
+
+      <div class="field" id="ollamaUrlField" style="display:none">
+        <label>Ollama Server URL</label>
+        <input type="text" id="ollamaUrl" value="http://localhost:11434" />
+        <div class="hint">Make sure Ollama is running locally</div>
+      </div>
+
+      <div class="field" id="ollamaModelField" style="display:none">
+        <label>Model Name</label>
+        <input type="text" id="ollamaModel" placeholder="llama3.2, qwen2.5, etc." />
+      </div>
+
+      <div class="btn-row">
+        <button class="btn ghost" id="btn-back">Back</button>
+        <button class="btn primary" id="btn-save">Save & Start</button>
+      </div>
+    </div>
+
+    <!-- Step 3: Done -->
+    <div class="step-panel" id="panel3">
+      <div id="savingState">
+        <div class="card-title">Saving configuration...</div>
+        <div class="card-sub"><span class="spinner"></span>Please wait...</div>
+      </div>
+      <div id="doneState" style="display:none">
+        <div class="done-icon">&#10003;</div>
+        <div class="card-title" style="text-align:center">Setup Complete!</div>
+        <div class="card-sub" style="text-align:center;margin-top:8px">
+          nanobot gateway is starting. Opening chat interface...
+        </div>
+        <div class="alert success" style="margin-top:16px">
+          Configuration saved to ~/.nanobot/config.json
+        </div>
+        <div class="btn-row" style="justify-content:center">
+          <button class="btn primary" id="btn-open-chat">Open Chat</button>
+        </div>
+      </div>
+      <div id="errorState" style="display:none">
+        <div class="done-icon">!</div>
+        <div class="card-title" style="text-align:center">Save Failed</div>
+        <div class="alert" id="errorMsg" style="margin-top:16px"></div>
+        <div class="btn-row" style="justify-content:center">
+          <button class="btn" id="btn-retry">Retry</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  var tauriInvoke = null;
+  try {
+    if (window.__TAURI__ && window.__TAURI__.core) {
+      tauriInvoke = window.__TAURI__.core.invoke;
+    }
+  } catch(e) {}
+
+  var PROVIDERS = {
+    anthropic: {
+      label: 'Anthropic API Key', hint: 'Get your key from console.anthropic.com',
+      placeholder: 'sk-ant-...', model: 'anthropic/claude-sonnet-4-20250514',
+    },
+    openai: {
+      label: 'OpenAI API Key', hint: 'Get your key from platform.openai.com',
+      placeholder: 'sk-...', model: 'openai/gpt-4o',
+    },
+    deepseek: {
+      label: 'DeepSeek API Key', hint: 'Get your key from platform.deepseek.com',
+      placeholder: 'sk-...', model: 'deepseek/deepseek-chat',
+    },
+    gemini: {
+      label: 'Google AI API Key', hint: 'Get your key from aistudio.google.com',
+      placeholder: 'AIza...', model: 'gemini/gemini-2.5-pro',
+    },
+    openrouter: {
+      label: 'OpenRouter API Key', hint: 'Get your key from openrouter.ai/keys',
+      placeholder: 'sk-or-...', model: 'openrouter/anthropic/claude-sonnet-4-20250514',
+    },
+    ollama: { label: null, model: null },
+  };
+
+  var currentProvider = 'anthropic';
+  var step = 1;
+
+  function goStep(n) {
+    document.getElementById('panel' + step).classList.remove('active');
+    updateDots(n);
+    step = n;
+    document.getElementById('panel' + step).classList.add('active');
+  }
+
+  function updateDots(n) {
+    for (var i = 1; i <= 3; i++) {
+      var dot = document.getElementById('dot' + i);
+      dot.className = 'step-dot' + (i < n ? ' done' : i === n ? ' active' : '');
+      if (i < 3) {
+        document.getElementById('line' + i).className = 'step-line' + (i < n ? ' done' : '');
+      }
+    }
+  }
+
+  function selectProvider(p) {
+    currentProvider = p;
+    document.querySelectorAll('.provider-card').forEach(function(c) { c.classList.remove('selected'); });
+    document.getElementById('p-' + p).classList.add('selected');
+
+    var apiKeyField = document.getElementById('apiKeyField');
+    var ollamaUrlField = document.getElementById('ollamaUrlField');
+    var ollamaModelField = document.getElementById('ollamaModelField');
+
+    if (p === 'ollama') {
+      apiKeyField.style.display = 'none';
+      ollamaUrlField.style.display = 'block';
+      ollamaModelField.style.display = 'block';
+    } else {
+      apiKeyField.style.display = 'block';
+      ollamaUrlField.style.display = 'none';
+      ollamaModelField.style.display = 'none';
+      var cfg = PROVIDERS[p];
+      document.getElementById('apiKeyLabel').textContent = cfg.label;
+      document.getElementById('apiKeyHint').textContent = cfg.hint;
+      document.getElementById('apiKey').placeholder = cfg.placeholder;
+      document.getElementById('apiKey').value = '';
+    }
+  }
+
+  function validateAndSave() {
+    if (currentProvider === 'ollama') {
+      var url = document.getElementById('ollamaUrl').value.trim();
+      var model = document.getElementById('ollamaModel').value.trim();
+      if (!url || !model) { alert('Please fill in Ollama server URL and model name'); return; }
+    } else {
+      var key = document.getElementById('apiKey').value.trim();
+      if (!key) { alert('Please enter your API key'); return; }
+    }
+    goStep(3);
+    saveConfig();
+  }
+
+  function buildConfig() {
+    var config = {
+      agents: { defaults: {} },
+      providers: {},
+      channels: { desktop: { enabled: true, allowFrom: ['*'] } },
+    };
+
+    if (currentProvider === 'ollama') {
+      var url = document.getElementById('ollamaUrl').value.trim();
+      var model = document.getElementById('ollamaModel').value.trim();
+      config.agents.defaults.model = 'ollama/' + model;
+      config.providers.ollama = { apiBase: url };
+    } else {
+      var p = PROVIDERS[currentProvider];
+      var key = document.getElementById('apiKey').value.trim();
+      config.agents.defaults.model = p.model;
+      config.providers[currentProvider] = { apiKey: key };
+    }
+
+    return config;
+  }
+
+  function saveConfig() {
+    document.getElementById('savingState').style.display = 'block';
+    document.getElementById('doneState').style.display = 'none';
+    document.getElementById('errorState').style.display = 'none';
+
+    var config = buildConfig();
+    var json = JSON.stringify(config, null, 2);
+
+    var doSave;
+    if (tauriInvoke) {
+      doSave = tauriInvoke('write_config', { json: json });
+    } else {
+      console.log('Config to save:', json);
+      doSave = new Promise(function(r) { setTimeout(r, 800); });
+    }
+
+    doSave.then(function() {
+      document.getElementById('savingState').style.display = 'none';
+      document.getElementById('doneState').style.display = 'block';
+      setTimeout(openControlUI, 3000);
+    }).catch(function(e) {
+      document.getElementById('savingState').style.display = 'none';
+      document.getElementById('errorState').style.display = 'block';
+      document.getElementById('errorMsg').textContent = String(e);
+    });
+  }
+
+  function openControlUI() {
+    if (tauriInvoke) {
+      tauriInvoke('open_control_ui').catch(function(){});
+    }
+  }
+
+  // Wire up all buttons via addEventListener (no inline onclick - CSP safe)
+  document.getElementById('btn-get-started').addEventListener('click', function() { goStep(2); });
+  document.getElementById('btn-back').addEventListener('click', function() { goStep(1); });
+  document.getElementById('btn-save').addEventListener('click', function() { validateAndSave(); });
+  document.getElementById('btn-open-chat').addEventListener('click', function() { openControlUI(); });
+  document.getElementById('btn-retry').addEventListener('click', function() { goStep(2); });
+
+  // Provider card clicks
+  document.querySelectorAll('.provider-card').forEach(function(card) {
+    card.addEventListener('click', function() {
+      var p = card.getAttribute('data-provider');
+      if (p) selectProvider(p);
+    });
+  });
+})();
+</script>
+</body>
+</html>
