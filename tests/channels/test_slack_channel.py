@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 import pytest
 
 # Check optional Slack dependencies before running tests
@@ -10,7 +13,7 @@ except ImportError:
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.slack import SlackChannel, SlackConfig
+from nanobot.channels.slack import SLACK_MAX_MESSAGE_LEN, SlackChannel, SlackConfig
 
 
 class _FakeAsyncWebClient:
@@ -34,14 +37,16 @@ class _FakeAsyncWebClient:
         channel: str,
         text: str,
         thread_ts: str | None = None,
+        blocks: list[dict[str, object]] | None = None,
     ) -> None:
-        self.chat_post_calls.append(
-            {
-                "channel": channel,
-                "text": text,
-                "thread_ts": thread_ts,
-            }
-        )
+        call: dict[str, object | None] = {
+            "channel": channel,
+            "text": text,
+            "thread_ts": thread_ts,
+        }
+        if blocks is not None:
+            call["blocks"] = blocks
+        self.chat_post_calls.append(call)
 
     async def files_upload_v2(
         self,
@@ -153,6 +158,61 @@ async def test_send_omits_thread_for_dm_messages() -> None:
     assert fake_web.chat_post_calls[0]["thread_ts"] is None
     assert len(fake_web.file_upload_calls) == 1
     assert fake_web.file_upload_calls[0]["thread_ts"] is None
+
+
+@pytest.mark.asyncio
+async def test_send_splits_long_messages() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="C123",
+            content="x" * (SLACK_MAX_MESSAGE_LEN + 10),
+        )
+    )
+
+    assert len(fake_web.chat_post_calls) == 2
+    assert all(len(str(call["text"])) <= SLACK_MAX_MESSAGE_LEN for call in fake_web.chat_post_calls)
+
+
+@pytest.mark.asyncio
+async def test_send_renders_buttons_on_last_message_chunk() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True), MessageBus())
+    fake_web = _FakeAsyncWebClient()
+    channel._web_client = fake_web
+
+    await channel.send(
+        OutboundMessage(
+            channel="slack",
+            chat_id="C123",
+            content="Choose one",
+            buttons=[["Yes", "No"]],
+        )
+    )
+
+    assert len(fake_web.chat_post_calls) == 1
+    blocks = fake_web.chat_post_calls[0]["blocks"]
+    assert isinstance(blocks, list)
+    assert blocks[-1] == {
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "Yes"},
+                "value": "Yes",
+                "action_id": "ask_user_Yes",
+            },
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "No"},
+                "value": "No",
+                "action_id": "ask_user_No",
+            },
+        ],
+    }
 
 
 @pytest.mark.asyncio
@@ -333,6 +393,7 @@ async def test_with_thread_context_fetches_root_once() -> None:
         "messages": [
             {"ts": "111.000", "user": "UROOT", "text": "drink water"},
             {"ts": "112.000", "user": "U2", "text": "good idea"},
+            {"ts": "112.500", "user": "UBOT", "text": "I'll remind you."},
             {"ts": "113.000", "user": "U3", "text": "<@UBOT> what did you see?"},
         ]
     }
@@ -353,6 +414,7 @@ async def test_with_thread_context_fetches_root_once() -> None:
     assert "Slack thread context before this mention:" in content
     assert "- <@UROOT>: drink water" in content
     assert "- <@U2>: good idea" in content
+    assert "- bot: I'll remind you." in content
     assert "U3" not in content
     assert content.endswith("Current message:\nwhat did you see?")
 
@@ -366,3 +428,38 @@ async def test_with_thread_context_fetches_root_once() -> None:
     )
     assert second == "again"
     assert len(fake_web.conversations_replies_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_slack_slash_command_skips_thread_context() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True, allow_from=[]), MessageBus())
+    channel._bot_user_id = "UBOT"
+    channel._with_thread_context = AsyncMock(return_value="wrapped")  # type: ignore[method-assign]
+    channel._handle_message = AsyncMock()  # type: ignore[method-assign]
+    client = SimpleNamespace(send_socket_mode_response=AsyncMock())
+    req = SimpleNamespace(
+        type="events_api",
+        envelope_id="env-1",
+        payload={
+            "event": {
+                "type": "app_mention",
+                "user": "U1",
+                "channel": "C123",
+                "text": "<@UBOT> /restart",
+                "thread_ts": "111.000",
+                "ts": "112.000",
+            }
+        },
+    )
+
+    await channel._on_socket_request(client, req)
+
+    channel._with_thread_context.assert_not_awaited()
+    channel._handle_message.assert_awaited_once()
+    assert channel._handle_message.await_args.kwargs["content"] == "/restart"
+
+
+def test_slack_channel_uses_channel_aware_allow_policy() -> None:
+    channel = SlackChannel(SlackConfig(enabled=True, allow_from=[]), MessageBus())
+    assert channel.is_allowed("U1") is True
+    assert channel._is_allowed("U1", "C123", "channel") is True

@@ -434,10 +434,12 @@ Uses **Socket Mode** — no public URL required.
 
 **2. Configure the app**
 - **Socket Mode**: Toggle ON → Generate an **App-Level Token** with `connections:write` scope → copy it (`xapp-...`)
-- **OAuth & Permissions**: Add bot scopes: `chat:write`, `reactions:write`, `app_mentions:read`, `channels:history`, `groups:history`, `im:history`, `mpim:history`
+- **OAuth & Permissions**: Add bot scopes: `chat:write`, `reactions:write`, `app_mentions:read`, `files:write`, `channels:history`, `groups:history`, `im:history`, `mpim:history`
 - **Event Subscriptions**: Toggle ON → Subscribe to bot events: `message.im`, `message.channels`, `app_mention` → Save Changes
 - **App Home**: Scroll to **Show Tabs** → Enable **Messages Tab** → Check **"Allow users to send Slash commands and messages from the messages tab"**
 - **Install App**: Click **Install to Workspace** → Authorize → copy the **Bot Token** (`xoxb-...`)
+
+> `files:write` is required for images, videos, and other file uploads. If you add it later, reinstall the Slack app to the workspace and restart nanobot so it uses the updated bot token.
 
 **3. Configure nanobot**
 

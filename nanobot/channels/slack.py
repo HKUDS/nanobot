@@ -16,6 +16,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
+from nanobot.utils.helpers import split_message
 
 
 class SlackDMConfig(Base):
@@ -46,6 +47,9 @@ class SlackConfig(Base):
     dm: SlackDMConfig = Field(default_factory=SlackDMConfig)
 
 
+SLACK_MAX_MESSAGE_LEN = 39_000  # Slack API allows ~40k; leave margin
+
+
 class SlackChannel(BaseChannel):
     """Slack channel using Socket Mode."""
 
@@ -58,6 +62,8 @@ class SlackChannel(BaseChannel):
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return SlackConfig().model_dump(by_alias=True)
+
+    _THREAD_CONTEXT_CACHE_LIMIT = 10_000
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
@@ -131,14 +137,17 @@ class SlackChannel(BaseChannel):
                 else None
             )
 
-            # Slack rejects empty text payloads. Keep media-only messages media-only,
-            # but send a single blank message when the bot has no text or files to send.
             if msg.content or not (msg.media or []):
-                await self._web_client.chat_postMessage(
-                    channel=target_chat_id,
-                    text=self._to_mrkdwn(msg.content) if msg.content else " ",
-                    thread_ts=thread_ts_param,
-                )
+                mrkdwn = self._to_mrkdwn(msg.content) if msg.content else " "
+                buttons = getattr(msg, "buttons", None) or []
+                chunks = split_message(mrkdwn, SLACK_MAX_MESSAGE_LEN)
+                for index, chunk in enumerate(chunks):
+                    kwargs: dict[str, Any] = dict(
+                        channel=target_chat_id, text=chunk, thread_ts=thread_ts_param,
+                    )
+                    if buttons and index == len(chunks) - 1:
+                        kwargs["blocks"] = self._build_button_blocks(chunk, buttons)
+                    await self._web_client.chat_postMessage(**kwargs)
 
             for media_path in msg.media or []:
                 try:
@@ -276,6 +285,9 @@ class SlackChannel(BaseChannel):
         req: SocketModeRequest,
     ) -> None:
         """Handle incoming Socket Mode requests."""
+        if req.type == "interactive":
+            await self._on_block_action(client, req)
+            return
         if req.type != "events_api":
             return
 
@@ -375,6 +387,37 @@ class SlackChannel(BaseChannel):
         except Exception:
             logger.exception("Error handling Slack message from {}", sender_id)
 
+    async def _on_block_action(self, client: SocketModeClient, req: SocketModeRequest) -> None:
+        """Handle button clicks from ask_user blocks."""
+        await client.send_socket_mode_response(SocketModeResponse(envelope_id=req.envelope_id))
+        payload = req.payload or {}
+        actions = payload.get("actions") or []
+        if not actions:
+            return
+        value = str(actions[0].get("value") or "")
+        user_info = payload.get("user") or {}
+        sender_id = str(user_info.get("id") or "")
+        channel_info = payload.get("channel") or {}
+        chat_id = str(channel_info.get("id") or "")
+        if not sender_id or not chat_id or not value:
+            return
+        message_info = payload.get("message") or {}
+        thread_ts = message_info.get("thread_ts") or message_info.get("ts")
+        channel_type = self._infer_channel_type(chat_id)
+        if not self._is_allowed(sender_id, chat_id, channel_type):
+            return
+        session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts else None
+        try:
+            await self._handle_message(
+                sender_id=sender_id,
+                chat_id=chat_id,
+                content=value,
+                metadata={"slack": {"thread_ts": thread_ts, "channel_type": channel_type}},
+                session_key=session_key,
+            )
+        except Exception:
+            logger.exception("Error handling Slack button click from {}", sender_id)
+
     async def _with_thread_context(
         self,
         text: str,
@@ -399,6 +442,8 @@ class SlackChannel(BaseChannel):
         key = f"{chat_id}:{thread_ts}"
         if key in self._thread_context_attempted:
             return text
+        if len(self._thread_context_attempted) >= self._THREAD_CONTEXT_CACHE_LIMIT:
+            self._thread_context_attempted.clear()
         self._thread_context_attempted.add(key)
 
         try:
@@ -427,13 +472,35 @@ class SlackChannel(BaseChannel):
             if item.get("subtype"):
                 continue
             sender = str(item.get("user") or item.get("bot_id") or "unknown")
-            if self._bot_user_id and sender == self._bot_user_id:
-                continue
+            is_bot = self._bot_user_id is not None and sender == self._bot_user_id
+            label = "bot" if is_bot else f"<@{sender}>"
             text = str(item.get("text") or "").strip()
             if not text:
                 continue
-            lines.append(f"- <@{sender}>: {self._strip_bot_mention(text)}")
+            text = self._strip_bot_mention(text)
+            if len(text) > 500:
+                text = text[:500] + "…"
+            lines.append(f"- {label}: {text}")
         return lines
+
+    @staticmethod
+    def _build_button_blocks(text: str, buttons: list[list[str]]) -> list[dict[str, Any]]:
+        """Build Slack Block Kit blocks with action buttons for ask_user choices."""
+        blocks: list[dict[str, Any]] = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": text[:3000]}},
+        ]
+        elements = []
+        for row in buttons:
+            for label in row:
+                elements.append({
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": label[:75]},
+                    "value": label[:75],
+                    "action_id": f"ask_user_{label[:50]}",
+                })
+        if elements:
+            blocks.append({"type": "actions", "elements": elements[:25]})
+        return blocks
 
     async def _update_react_emoji(self, chat_id: str, ts: str | None) -> None:
         """Remove the in-progress reaction and optionally add a done reaction."""
@@ -480,6 +547,19 @@ class SlackChannel(BaseChannel):
         if self.config.group_policy == "allowlist":
             return chat_id in self.config.group_allow_from
         return False
+
+    def is_allowed(self, sender_id: str) -> bool:
+        # Slack needs channel-aware policy checks, so _on_socket_request and
+        # _on_block_action call _is_allowed before handing off to BaseChannel.
+        return True
+
+    @staticmethod
+    def _infer_channel_type(chat_id: str) -> str:
+        if chat_id.startswith("D"):
+            return "im"
+        if chat_id.startswith("G"):
+            return "group"
+        return "channel"
 
     def _strip_bot_mention(self, text: str) -> str:
         if not text or not self._bot_user_id:
