@@ -195,6 +195,7 @@ if DISCORD_AVAILABLE:
                 ("stop", "Stop the current task", "/stop"),
                 ("restart", "Restart the bot", "/restart"),
                 ("status", "Show bot status", "/status"),
+                ("history", "Show recent conversation messages", "/history"),
             )
 
             for name, description, command_text in commands:

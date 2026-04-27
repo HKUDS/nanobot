@@ -283,6 +283,41 @@ class TestRestartCommand:
         assert "message 0" not in response.content  # too old
 
     @pytest.mark.asyncio
+    async def test_history_clamps_count_and_extracts_text_blocks(self):
+        loop, _bus = _make_loop()
+        session = MagicMock()
+        session.get_history.return_value = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "visible text"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}},
+                ],
+            },
+            *({"role": "assistant", "content": f"reply {i}"} for i in range(60)),
+        ]
+        loop.sessions.get_or_create.return_value = session
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history 999")
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert "Last 50 message(s)" in response.content
+        assert "visible text" not in response.content
+        assert "reply 59" in response.content
+        assert "reply 9" not in response.content
+
+    @pytest.mark.asyncio
+    async def test_history_invalid_count_returns_usage(self):
+        loop, _bus = _make_loop()
+
+        msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/history nope")
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        assert response.content.startswith("Usage: /history [count]")
+
+    @pytest.mark.asyncio
     async def test_history_empty_session(self):
         loop, _bus = _make_loop()
         session = MagicMock()
