@@ -21,6 +21,7 @@ from nanobot.utils.helpers import (
     estimate_prompt_tokens_chain,
     find_legal_message_start,
     maybe_persist_tool_result,
+    strip_think,
     truncate_text,
 )
 from nanobot.utils.prompt_templates import render_template
@@ -607,13 +608,41 @@ class AgentRunner:
             messages,
             tools=spec.tools.get_definitions(),
         )
-        if hook.wants_streaming():
+        wants_streaming = hook.wants_streaming()
+        wants_progress_streaming = (
+            not wants_streaming
+            and spec.progress_callback is not None
+            and getattr(self.provider, "stream_progress_via_chat_stream", False) is True
+        )
+
+        if wants_streaming:
             async def _stream(delta: str) -> None:
+                if delta:
+                    context.streamed_content = True
                 await hook.on_stream(context, delta)
 
             coro = self.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream,
+            )
+        elif wants_progress_streaming:
+            stream_buf = ""
+
+            async def _stream_progress(delta: str) -> None:
+                nonlocal stream_buf
+                if not delta:
+                    return
+                prev_clean = strip_think(stream_buf)
+                stream_buf += delta
+                new_clean = strip_think(stream_buf)
+                incremental = new_clean[len(prev_clean):]
+                if incremental:
+                    context.streamed_content = True
+                    await spec.progress_callback(incremental)
+
+            coro = self.provider.chat_stream_with_retry(
+                **kwargs,
+                on_content_delta=_stream_progress,
             )
         else:
             coro = self.provider.chat_with_retry(**kwargs)

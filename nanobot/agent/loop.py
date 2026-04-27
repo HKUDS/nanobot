@@ -114,7 +114,7 @@ class _LoopHook(AgentHook):
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if self._on_progress:
-            if not self._on_stream:
+            if not self._on_stream and not context.streamed_content:
                 thought = self._loop._strip_think(
                     context.response.content if context.response else None
                 )
