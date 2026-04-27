@@ -137,7 +137,7 @@ class TestToolEventProgress:
         """Providers that opt in can stream content deltas through _progress messages."""
         bus = MessageBus()
         provider = MagicMock()
-        provider.stream_progress_via_chat_stream = True
+        provider.supports_progress_deltas = True
         provider.get_default_model.return_value = "openai-codex/gpt-5.5"
 
         async def chat_stream_with_retry(*, on_content_delta, **kwargs):
@@ -175,7 +175,7 @@ class TestToolEventProgress:
     ) -> None:
         """If content was already streamed as progress, tool setup should not repeat it."""
         loop = _make_loop(tmp_path)
-        loop.provider.stream_progress_via_chat_stream = True
+        loop.provider.supports_progress_deltas = True
         tool_call = ToolCallRequest(id="call1", name="custom_tool", arguments={"path": "foo.txt"})
         calls = iter([
             LLMResponse(content="I will inspect it.", tool_calls=[tool_call]),

@@ -43,7 +43,7 @@ def test_explicit_provider_import_still_works(monkeypatch) -> None:
     assert "nanobot.providers.anthropic_provider" in sys.modules
 
 
-def test_openai_codex_opts_into_progress_streaming() -> None:
+def test_openai_codex_supports_progress_deltas() -> None:
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
-    assert OpenAICodexProvider.stream_progress_via_chat_stream is True
+    assert OpenAICodexProvider.supports_progress_deltas is True

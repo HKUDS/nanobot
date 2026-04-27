@@ -612,7 +612,7 @@ class AgentRunner:
         wants_progress_streaming = (
             not wants_streaming
             and spec.progress_callback is not None
-            and getattr(self.provider, "stream_progress_via_chat_stream", False) is True
+            and getattr(self.provider, "supports_progress_deltas", False) is True
         )
 
         if wants_streaming:
