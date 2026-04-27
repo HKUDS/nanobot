@@ -1,6 +1,6 @@
 """Tests for ChannelManager delta coalescing to reduce streaming latency."""
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -8,7 +8,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
-from nanobot.config.schema import Config
+from nanobot.config.schema import ChannelsConfig, Config
 
 
 class MockChannel(BaseChannel):
@@ -296,6 +296,100 @@ class TestDispatchOutboundWithCoalescing:
         # Should have pending regular message
         assert len(pending) == 1
         assert pending[0].content == "Final"
+
+
+class TestProgressFiltering:
+    """Progress filtering should honor per-channel config overrides."""
+
+    def test_progress_visibility_uses_global_defaults(self, manager):
+        manager.config.channels = ChannelsConfig.model_validate({
+            "sendProgress": True,
+            "sendToolHints": False,
+        })
+
+        assert manager._should_send_progress("mock", tool_hint=False) is True
+        assert manager._should_send_progress("mock", tool_hint=True) is False
+
+    def test_progress_visibility_uses_channel_overrides(self, manager):
+        manager.config.channels = ChannelsConfig.model_validate({
+            "sendProgress": True,
+            "sendToolHints": False,
+            "mock": {
+                "sendProgress": False,
+                "sendToolHints": True,
+            },
+        })
+
+        assert manager._should_send_progress("mock", tool_hint=False) is False
+        assert manager._should_send_progress("mock", tool_hint=True) is True
+        assert manager._should_send_progress("other", tool_hint=False) is True
+        assert manager._should_send_progress("other", tool_hint=True) is False
+
+    @pytest.mark.asyncio
+    async def test_channel_override_can_drop_progress_message(self, manager, bus):
+        manager.config.channels = ChannelsConfig.model_validate({
+            "sendProgress": True,
+            "mock": {"sendProgress": False},
+        })
+        await bus.publish_outbound(OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="thinking",
+            metadata={"_progress": True},
+        ))
+        await bus.publish_outbound(OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="final answer",
+            metadata={},
+        ))
+
+        task = asyncio.create_task(manager._dispatch_outbound())
+        try:
+            for _ in range(30):
+                if manager.channels["mock"]._send_mock.await_count >= 1:
+                    break
+                await asyncio.sleep(0.05)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        send_mock = manager.channels["mock"]._send_mock
+        assert send_mock.await_count == 1
+        assert send_mock.await_args_list[0].args[0].content == "final answer"
+
+    @pytest.mark.asyncio
+    async def test_channel_override_can_enable_tool_hints(self, manager, bus):
+        manager.config.channels = ChannelsConfig.model_validate({
+            "sendToolHints": False,
+            "mock": {"sendToolHints": True},
+        })
+        await bus.publish_outbound(OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="read_file(foo.py)",
+            metadata={"_progress": True, "_tool_hint": True},
+        ))
+
+        task = asyncio.create_task(manager._dispatch_outbound())
+        try:
+            for _ in range(30):
+                if manager.channels["mock"]._send_mock.await_count >= 1:
+                    break
+                await asyncio.sleep(0.05)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        send_mock = manager.channels["mock"]._send_mock
+        assert send_mock.await_count == 1
+        assert send_mock.await_args_list[0].args[0].content == "read_file(foo.py)"
 
 
 class TestRetryWaitFiltering:

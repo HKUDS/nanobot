@@ -454,6 +454,26 @@ Global settings that apply to all channels. Configure under the `channels` secti
 | `transcriptionProvider` | `"groq"` | Voice transcription backend: `"groq"` (free tier, default) or `"openai"`. API key is auto-resolved from the matching provider config. |
 | `transcriptionLanguage` | `null` | Optional ISO-639-1 language hint for audio transcription, e.g. `"en"`, `"ko"`, `"ja"`. |
 
+`sendProgress` and `sendToolHints` can also be overridden per channel. The
+global values stay as defaults for channels that do not set their own value:
+
+```json
+{
+  "channels": {
+    "sendProgress": true,
+    "sendToolHints": false,
+    "telegram": {
+      "enabled": true,
+      "sendProgress": false
+    },
+    "websocket": {
+      "enabled": true,
+      "sendToolHints": true
+    }
+  }
+}
+```
+
 ### Retry Behavior
 
 Retry is intentionally simple.

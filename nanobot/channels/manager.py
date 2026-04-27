@@ -27,6 +27,24 @@ def _default_webui_dist() -> Path | None:
     candidate = Path(web_pkg.__file__).resolve().parent / "dist"
     return candidate if candidate.is_dir() else None
 
+
+def _snake_to_camel(value: str) -> str:
+    head, *tail = value.split("_")
+    return head + "".join(part.capitalize() for part in tail)
+
+
+def _coerce_optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return None
+
+
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
 
@@ -131,6 +149,28 @@ class ChannelManager:
                     f'Set ["*"] to allow everyone, or add specific user IDs.'
                 )
 
+    def _should_send_progress(self, channel_name: str, *, tool_hint: bool = False) -> bool:
+        """Resolve progress visibility, allowing per-channel overrides."""
+        key = "send_tool_hints" if tool_hint else "send_progress"
+        default = getattr(self.config.channels, key)
+        override = self._channel_bool_override(channel_name, key)
+        return default if override is None else override
+
+    def _channel_bool_override(self, channel_name: str, key: str) -> bool | None:
+        section = getattr(self.config.channels, channel_name, None)
+        if section is None:
+            return None
+
+        camel_key = _snake_to_camel(key)
+        if isinstance(section, dict):
+            value = section.get(key, section.get(camel_key))
+            return _coerce_optional_bool(value)
+
+        value = getattr(section, key, None)
+        if value is None:
+            value = getattr(section, camel_key, None)
+        return _coerce_optional_bool(value)
+
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
         try:
@@ -216,9 +256,13 @@ class ChannelManager:
                     )
 
                 if msg.metadata.get("_progress"):
-                    if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
+                    if msg.metadata.get("_tool_hint") and not self._should_send_progress(
+                        msg.channel, tool_hint=True,
+                    ):
                         continue
-                    if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
+                    if not msg.metadata.get("_tool_hint") and not self._should_send_progress(
+                        msg.channel, tool_hint=False,
+                    ):
                         continue
 
                 if msg.metadata.get("_retry_wait"):
