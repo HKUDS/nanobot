@@ -348,7 +348,8 @@ class SlackChannel(BaseChannel):
 
         # Thread-scoped session key for channel/group messages
         session_key = f"slack:{chat_id}:{thread_ts}" if thread_ts and channel_type != "im" else None
-        content = await self._with_thread_context(
+        is_slash = text.strip().startswith("/")
+        content = text if is_slash else await self._with_thread_context(
             text,
             chat_id=chat_id,
             channel_type=channel_type,
