@@ -66,6 +66,37 @@ def test_add_job_preserves_channel_meta_and_session_key(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_channel_meta_and_session_key_survive_store_reload(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    service = CronService(store_path)
+    await service.start()
+    meta = {"slack": {"thread_ts": "1234567890.123456", "channel_type": "channel"}}
+    try:
+        job = service.add_job(
+            name="thread test",
+            schedule=CronSchedule(kind="every", every_ms=60_000),
+            message="hello",
+            deliver=True,
+            channel="slack",
+            to="C123",
+            channel_meta=meta,
+            session_key="slack:C123:1234567890.123456",
+        )
+    finally:
+        service.stop()
+
+    raw = json.loads(store_path.read_text(encoding="utf-8"))
+    payload = raw["jobs"][0]["payload"]
+    assert payload["channelMeta"] == meta
+    assert payload["sessionKey"] == "slack:C123:1234567890.123456"
+
+    reloaded = CronService(store_path).get_job(job.id)
+    assert reloaded is not None
+    assert reloaded.payload.channel_meta == meta
+    assert reloaded.payload.session_key == "slack:C123:1234567890.123456"
+
+
+@pytest.mark.asyncio
 async def test_execute_job_records_run_history(tmp_path) -> None:
     store_path = tmp_path / "cron" / "jobs.json"
     service = CronService(store_path, on_job=lambda _: asyncio.sleep(0))

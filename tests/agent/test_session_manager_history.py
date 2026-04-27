@@ -194,7 +194,13 @@ def test_get_history_preserves_reasoning_content():
     ]
 
 
-def test_get_history_exposes_turn_timestamps_to_model():
+def test_get_history_annotates_user_turns_but_not_assistant_turns():
+    """Only user turns carry the timestamp prefix.
+
+    Annotating assistant turns trains the model (via in-context examples) to
+    start its own replies with ``[Message Time: ...]``. User-side stamps are
+    enough to pin adjacent assistant replies for relative-time reasoning.
+    """
     session = Session(key="test:timestamps")
     session.messages.append({
         "role": "user",
@@ -216,7 +222,42 @@ def test_get_history_exposes_turn_timestamps_to_model():
         },
         {
             "role": "assistant",
-            "content": "[Message Time: 2026-04-26T22:00:05]\n记下来了",
+            "content": "记下来了",
+        },
+    ]
+
+
+def test_get_history_annotates_proactive_assistant_deliveries_with_timestamps():
+    """Cron / heartbeat assistant pushes still carry a timestamp prefix.
+
+    These proactive deliveries can sit hours away from the next user reply,
+    so the model needs to know when they fired. They are rare enough that
+    they don't act as in-context demonstrations encouraging the model to
+    prefix its own normal replies with ``[Message Time: ...]``.
+    """
+    session = Session(key="test:proactive-timestamps")
+    session.messages.append({
+        "role": "assistant",
+        "content": "记得喝水",
+        "timestamp": "2026-04-26T15:00:00",
+        "_channel_delivery": True,
+    })
+    session.messages.append({
+        "role": "user",
+        "content": "好",
+        "timestamp": "2026-04-26T18:00:00",
+    })
+
+    history = session.get_history(max_messages=500, include_timestamps=True)
+
+    assert history == [
+        {
+            "role": "assistant",
+            "content": "[Message Time: 2026-04-26T15:00:00]\n记得喝水",
+        },
+        {
+            "role": "user",
+            "content": "[Message Time: 2026-04-26T18:00:00]\n好",
         },
     ]
 
@@ -309,3 +350,66 @@ def test_get_history_ignores_media_kwarg_on_non_user_rows():
     # List content is passed through verbatim — the synthesizer only
     # rewrites plain-string content.
     assert history[0]["content"] == [{"type": "text", "text": "structured"}]
+
+
+def test_get_history_respects_max_tokens(monkeypatch):
+    session = Session(key="test:token-cap")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"},
+            {"role": "assistant", "content": "a2"},
+            {"role": "user", "content": "u3"},
+            {"role": "assistant", "content": "a3"},
+        ]
+    )
+
+    token_map = {"u1": 50, "a1": 50, "u2": 50, "a2": 50, "u3": 50, "a3": 50}
+    monkeypatch.setattr(
+        "nanobot.session.manager.estimate_message_tokens",
+        lambda message: token_map.get(message.get("content"), 0),
+    )
+
+    history = session.get_history(max_messages=500, max_tokens=120)
+    assert [m["content"] for m in history] == ["u3", "a3"]
+
+
+def test_get_history_recovers_user_when_token_slice_would_be_assistant_only(monkeypatch):
+    session = Session(key="test:assistant-only-slice")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "u2"},
+            {"role": "assistant", "content": "a2"},
+        ]
+    )
+    token_map = {"u1": 100, "a1": 100, "u2": 100, "a2": 100}
+    monkeypatch.setattr(
+        "nanobot.session.manager.estimate_message_tokens",
+        lambda message: token_map.get(message.get("content"), 0),
+    )
+
+    history = session.get_history(max_messages=500, max_tokens=100)
+    assert [m["content"] for m in history] == ["u2", "a2"]
+
+
+def test_retain_recent_legal_suffix_hard_cap_with_long_non_user_chain():
+    session = Session(key="test:hard-cap-chain")
+    session.messages.append({"role": "user", "content": "u0"})
+    session.messages.append(
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
+            ],
+        }
+    )
+    for i in range(12):
+        session.messages.append({"role": "assistant", "content": f"a{i}"})
+
+    session.retain_recent_legal_suffix(6)
+
+    assert len(session.messages) <= 6

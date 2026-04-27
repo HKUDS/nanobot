@@ -188,6 +188,17 @@ def test_identity_has_no_behavioral_instructions(tmp_path) -> None:
     assert "Execution Rules" not in identity
 
 
+def test_system_prompt_does_not_warn_about_message_time_markers(tmp_path) -> None:
+    """Parroting is prevented by not annotating assistant turns in history;
+    no prompt-level warning about ``[Message Time: ...]`` is needed."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt = builder.build_system_prompt()
+
+    assert "Message Time" not in prompt
+
+
 def test_default_soul_template_contains_execution_rules() -> None:
     """Default SOUL.md template must contain execution rules with act/plan layering."""
     soul = (pkg_files("nanobot") / "templates" / "SOUL.md").read_text(encoding="utf-8")

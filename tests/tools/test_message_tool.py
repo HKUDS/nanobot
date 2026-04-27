@@ -1,7 +1,10 @@
+import os
+
 import pytest
 
 from nanobot.agent.tools.message import MessageTool
 from nanobot.bus.events import OutboundMessage
+from nanobot.config.paths import get_workspace_path
 
 
 @pytest.mark.asyncio
@@ -85,3 +88,117 @@ async def test_message_tool_does_not_inherit_metadata_for_cross_target() -> None
     await tool.execute(content="channel reply", channel="slack", chat_id="C999")
 
     assert sent[0].metadata == {}
+
+
+@pytest.mark.asyncio
+async def test_message_tool_resolves_relative_media_paths() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+
+    await tool.execute(
+        content="see attached",
+        channel="telegram",
+        chat_id="1",
+        media=["output/image.png"],
+    )
+
+    expected = str(get_workspace_path() / "output/image.png")
+    assert sent[0].media == [expected]
+
+
+@pytest.mark.asyncio
+async def test_message_tool_resolves_relative_media_paths_from_active_workspace(tmp_path) -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    workspace = tmp_path / "workspace"
+    tool = MessageTool(send_callback=_send, workspace=workspace)
+
+    await tool.execute(
+        content="see attached",
+        channel="telegram",
+        chat_id="1",
+        media=["output/image.png"],
+    )
+
+    assert sent[0].media == [str(workspace / "output/image.png")]
+
+
+@pytest.mark.asyncio
+async def test_message_tool_passes_through_absolute_media_paths() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+
+    abs_path = os.path.abspath(os.path.join(os.sep, "tmp", "abs_image.png"))
+
+    await tool.execute(
+        content="see attached",
+        channel="telegram",
+        chat_id="1",
+        media=[abs_path],
+    )
+
+    assert sent[0].media == [abs_path]
+
+
+@pytest.mark.asyncio
+async def test_message_tool_passes_through_url_media_paths() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+
+    url = "https://example.com/image.png"
+
+    await tool.execute(
+        content="see attached",
+        channel="telegram",
+        chat_id="1",
+        media=[url],
+    )
+
+    assert sent[0].media == [url]
+
+
+@pytest.mark.asyncio
+async def test_message_tool_resolves_mixed_media_paths() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+
+    abs_path = os.path.abspath(os.path.join(os.sep, "tmp", "absolute.png"))
+
+    await tool.execute(
+        content="see attached",
+        channel="telegram",
+        chat_id="1",
+        media=[
+            "output/relative.png",
+            abs_path,
+            "https://example.com/url.png",
+            "http://example.com/http.png",
+        ],
+    )
+
+    expected_relative = str(get_workspace_path() / "output/relative.png")
+    assert sent[0].media == [
+        expected_relative,
+        abs_path,
+        "https://example.com/url.png",
+        "http://example.com/http.png",
+    ]

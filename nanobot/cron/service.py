@@ -109,6 +109,12 @@ class CronService:
                             deliver=j["payload"].get("deliver", False),
                             channel=j["payload"].get("channel"),
                             to=j["payload"].get("to"),
+                            channel_meta=(
+                                j["payload"].get("channelMeta")
+                                or j["payload"].get("channel_meta")
+                                or {}
+                            ),
+                            session_key=j["payload"].get("sessionKey") or j["payload"].get("session_key"),
                         ),
                         state=CronJobState(
                             next_run_at_ms=j.get("state", {}).get("nextRunAtMs"),
@@ -210,6 +216,8 @@ class CronService:
                         "deliver": j.payload.deliver,
                         "channel": j.payload.channel,
                         "to": j.payload.to,
+                        "channelMeta": j.payload.channel_meta,
+                        "sessionKey": j.payload.session_key,
                     },
                     "state": {
                         "nextRunAtMs": j.state.next_run_at_ms,

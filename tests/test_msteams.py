@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 import nanobot.channels.msteams as msteams_module
 from nanobot.bus.events import OutboundMessage
-from nanobot.channels.msteams import ConversationRef, MSTeamsChannel, MSTeamsConfig
+from nanobot.channels.msteams import ConversationRef, MSTeamsChannel
 
 
 class DummyBus:
@@ -116,6 +116,258 @@ async def test_handle_activity_personal_message_publishes_and_stores_ref(make_ch
     saved = json.loads((tmp_path / "state" / "msteams_conversations.json").read_text(encoding="utf-8"))
     assert saved["conv-123"]["conversation_id"] == "conv-123"
     assert saved["conv-123"]["tenant_id"] == "tenant-id"
+    saved_meta = json.loads(
+        (tmp_path / "state" / msteams_module.MSTEAMS_REF_META_FILENAME).read_text(encoding="utf-8"),
+    )
+    assert float(saved_meta["conv-123"]["updated_at"]) > 0
+
+
+def test_init_prunes_stale_and_unsupported_conversation_refs(make_channel, tmp_path, monkeypatch):
+    now = 1_800_000_000.0
+    monkeypatch.setattr(msteams_module.time, "time", lambda: now)
+
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    refs_path = state_dir / "msteams_conversations.json"
+    refs_meta_path = state_dir / msteams_module.MSTEAMS_REF_META_FILENAME
+    refs_path.write_text(
+        json.dumps(
+            {
+                "conv-valid": {
+                    "service_url": "https://smba.trafficmanager.net/amer/",
+                    "conversation_id": "conv-valid",
+                    "conversation_type": "personal",
+                },
+                "conv-webchat": {
+                    "service_url": "https://webchat.botframework.com/",
+                    "conversation_id": "conv-webchat",
+                    "conversation_type": "personal",
+                },
+                "conv-group": {
+                    "service_url": "https://smba.trafficmanager.net/amer/",
+                    "conversation_id": "conv-group",
+                    "conversation_type": "channel",
+                },
+                "conv-stale": {
+                    "service_url": "https://smba.trafficmanager.net/amer/",
+                    "conversation_id": "conv-stale",
+                    "conversation_type": "personal",
+                },
+                "conv-missing-ts": {
+                    "service_url": "https://smba.trafficmanager.net/amer/",
+                    "conversation_id": "conv-missing-ts",
+                    "conversation_type": "personal",
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    refs_meta_path.write_text(
+        json.dumps(
+            {
+                "conv-valid": {"updated_at": now - 60},
+                "conv-webchat": {"updated_at": now - 60},
+                "conv-group": {"updated_at": now - 60},
+                "conv-stale": {"updated_at": now - msteams_module.MSTEAMS_REF_TTL_S - 1},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    ch = make_channel()
+
+    assert set(ch._conversation_refs.keys()) == {"conv-valid", "conv-missing-ts"}
+    assert ch._conversation_refs["conv-valid"].conversation_id == "conv-valid"
+    assert ch._conversation_refs["conv-missing-ts"].conversation_id == "conv-missing-ts"
+
+    persisted = json.loads(refs_path.read_text(encoding="utf-8"))
+    assert set(persisted.keys()) == {"conv-valid", "conv-missing-ts"}
+
+
+def test_save_prunes_unsupported_conversation_refs(make_channel, tmp_path, monkeypatch):
+    now = 1_800_000_000.0
+    monkeypatch.setattr(msteams_module.time, "time", lambda: now)
+
+    ch = make_channel()
+    ch._conversation_refs = {
+        "conv-valid": ConversationRef(
+            service_url="https://smba.trafficmanager.net/amer/",
+            conversation_id="conv-valid",
+            conversation_type="personal",
+            updated_at=now,
+        ),
+        "conv-webchat": ConversationRef(
+            service_url="https://webchat.botframework.com/",
+            conversation_id="conv-webchat",
+            conversation_type="personal",
+            updated_at=now,
+        ),
+        "conv-group": ConversationRef(
+            service_url="https://smba.trafficmanager.net/amer/",
+            conversation_id="conv-group",
+            conversation_type="groupChat",
+            updated_at=now,
+        ),
+    }
+
+    ch._save_refs()
+
+    assert set(ch._conversation_refs.keys()) == {"conv-valid"}
+
+    saved = json.loads((tmp_path / "state" / "msteams_conversations.json").read_text(encoding="utf-8"))
+    assert set(saved.keys()) == {"conv-valid"}
+    saved_meta = json.loads(
+        (tmp_path / "state" / msteams_module.MSTEAMS_REF_META_FILENAME).read_text(encoding="utf-8"),
+    )
+    assert set(saved_meta.keys()) == {"conv-valid"}
+
+
+def test_init_respects_prune_toggle_flags(make_channel, tmp_path, monkeypatch):
+    now = 1_800_000_000.0
+    monkeypatch.setattr(msteams_module.time, "time", lambda: now)
+
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    refs_path = state_dir / "msteams_conversations.json"
+    refs_path.write_text(
+        json.dumps(
+            {
+                "conv-webchat": {
+                    "service_url": "https://webchat.botframework.com/",
+                    "conversation_id": "conv-webchat",
+                    "conversation_type": "personal",
+                    "updated_at": now - 60,
+                },
+                "conv-group": {
+                    "service_url": "https://smba.trafficmanager.net/amer/",
+                    "conversation_id": "conv-group",
+                    "conversation_type": "channel",
+                    "updated_at": now - 60,
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    ch = make_channel(pruneWebChatRefs=False, pruneNonPersonalRefs=False)
+
+    assert set(ch._conversation_refs.keys()) == {"conv-webchat", "conv-group"}
+    persisted = json.loads(refs_path.read_text(encoding="utf-8"))
+    assert set(persisted.keys()) == {"conv-webchat", "conv-group"}
+
+
+def test_init_respects_custom_ref_ttl_days(make_channel, tmp_path, monkeypatch):
+    now = 1_800_000_000.0
+    monkeypatch.setattr(msteams_module.time, "time", lambda: now)
+
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    refs_path = state_dir / "msteams_conversations.json"
+    refs_meta_path = state_dir / msteams_module.MSTEAMS_REF_META_FILENAME
+    refs_path.write_text(
+        json.dumps(
+            {
+                "conv-fresh": {
+                    "service_url": "https://smba.trafficmanager.net/amer/",
+                    "conversation_id": "conv-fresh",
+                    "conversation_type": "personal",
+                },
+                "conv-old": {
+                    "service_url": "https://smba.trafficmanager.net/amer/",
+                    "conversation_id": "conv-old",
+                    "conversation_type": "personal",
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    refs_meta_path.write_text(
+        json.dumps(
+            {
+                "conv-fresh": {"updated_at": now - 12 * 60 * 60},
+                "conv-old": {"updated_at": now - 10 * 24 * 60 * 60},
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    ch = make_channel(refTtlDays=1)
+
+    assert set(ch._conversation_refs.keys()) == {"conv-fresh"}
+    persisted = json.loads(refs_path.read_text(encoding="utf-8"))
+    assert set(persisted.keys()) == {"conv-fresh"}
+
+
+def test_init_without_meta_keeps_legacy_refs_alive(make_channel, tmp_path, monkeypatch):
+    now = 1_800_000_000.0
+    monkeypatch.setattr(msteams_module.time, "time", lambda: now)
+
+    state_dir = tmp_path / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    refs_path = state_dir / "msteams_conversations.json"
+    refs_path.write_text(
+        json.dumps(
+            {
+                "conv-legacy": {
+                    "service_url": "https://smba.trafficmanager.net/amer/",
+                    "conversation_id": "conv-legacy",
+                    "conversation_type": "personal",
+                }
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    ch = make_channel(refTtlDays=1)
+
+    assert set(ch._conversation_refs.keys()) == {"conv-legacy"}
+    assert ch._conversation_refs["conv-legacy"].updated_at == now
+    assert not (state_dir / msteams_module.MSTEAMS_REF_META_FILENAME).exists()
+
+
+def test_save_uses_atomic_replace_and_keeps_existing_file_on_replace_error(make_channel, tmp_path, monkeypatch):
+    ch = make_channel()
+    refs_path = tmp_path / "state" / "msteams_conversations.json"
+    refs_path.write_text(
+        json.dumps(
+            {
+                "conv-old": {
+                    "service_url": "https://smba.trafficmanager.net/amer/",
+                    "conversation_id": "conv-old",
+                    "conversation_type": "personal",
+                    "updated_at": 1_700_000_000.0,
+                }
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    ch._conversation_refs = {
+        "conv-new": ConversationRef(
+            service_url="https://smba.trafficmanager.net/amer/",
+            conversation_id="conv-new",
+            conversation_type="personal",
+            updated_at=1_800_000_000.0,
+        )
+    }
+
+    def _raise_replace(_src, _dst):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(msteams_module.os, "replace", _raise_replace)
+    ch._save_refs()
+
+    persisted = json.loads(refs_path.read_text(encoding="utf-8"))
+    assert set(persisted.keys()) == {"conv-old"}
+    tmp_files = list((tmp_path / "state").glob("msteams_conversations.json.*.tmp"))
+    assert tmp_files == []
 
 
 @pytest.mark.asyncio
@@ -406,6 +658,33 @@ async def test_send_posts_to_conversation_with_reply_to_id_when_reply_in_thread_
 
 
 @pytest.mark.asyncio
+async def test_send_success_refreshes_updated_at_and_persists_meta(make_channel, tmp_path, monkeypatch):
+    now = {"value": 1_800_000_000.0}
+    monkeypatch.setattr(msteams_module.time, "time", lambda: now["value"])
+
+    ch = make_channel(refTouchIntervalS=0)
+    fake_http = FakeHttpClient()
+    ch._http = fake_http
+    ch._token = "tok"
+    ch._token_expires_at = 9_999_999_999
+    ch._conversation_refs["conv-123"] = ConversationRef(
+        service_url="https://smba.trafficmanager.net/amer/",
+        conversation_id="conv-123",
+        activity_id="activity-1",
+        updated_at=now["value"] - 100,
+    )
+
+    now["value"] += 5
+    await ch.send(OutboundMessage(channel="msteams", chat_id="conv-123", content="Reply text"))
+
+    assert ch._conversation_refs["conv-123"].updated_at == now["value"]
+    saved_meta = json.loads(
+        (tmp_path / "state" / msteams_module.MSTEAMS_REF_META_FILENAME).read_text(encoding="utf-8"),
+    )
+    assert saved_meta["conv-123"]["updated_at"] == now["value"]
+
+
+@pytest.mark.asyncio
 async def test_send_posts_to_conversation_when_thread_reply_disabled(make_channel):
     ch = make_channel(replyInThread=False)
     fake_http = FakeHttpClient()
@@ -592,15 +871,18 @@ def test_save_refs_prunes_webchat_and_stale_refs(make_channel):
     assert set(ch._conversation_refs) == {"teams-good"}
     saved = json.loads(ch._refs_path.read_text(encoding="utf-8"))
     assert set(saved) == {"teams-good"}
-    assert saved["teams-good"]["updated_at"] == pytest.approx(now)
+    saved_meta = json.loads(ch._refs_meta_path.read_text(encoding="utf-8"))
+    assert saved_meta["teams-good"]["updated_at"] == pytest.approx(now)
 
 
 def test_msteams_default_config_includes_restart_notify_fields():
     cfg = MSTeamsChannel.default_config()
 
     assert cfg["validateInboundAuth"] is True
+    assert cfg["refTtlDays"] == msteams_module.MSTEAMS_REF_TTL_DAYS
+    assert cfg["pruneWebChatRefs"] is True
+    assert cfg["pruneNonPersonalRefs"] is True
+    assert cfg["refTouchIntervalS"] == msteams_module.MSTEAMS_REF_TOUCH_INTERVAL_S
     assert "restartNotifyEnabled" not in cfg
     assert "restartNotifyPreMessage" not in cfg
     assert "restartNotifyPostMessage" not in cfg
-
-

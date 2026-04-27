@@ -349,6 +349,61 @@ async def test_process_message_does_not_duplicate_early_persisted_user_message(t
 
 
 @pytest.mark.asyncio
+async def test_process_message_uses_context_chat_id_for_runtime_prompt(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.context.build_messages = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "runtime + hello"},
+        ]
+    )
+    loop._run_agent_loop = AsyncMock(return_value=(  # type: ignore[method-assign]
+        "done",
+        [],
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "runtime + hello"},
+            {"role": "assistant", "content": "done"},
+        ],
+        "stop",
+        False,
+    ))
+
+    result = await loop._process_message(
+        InboundMessage(
+            channel="discord",
+            sender_id="u1",
+            chat_id="thread-777",
+            content="hello",
+            metadata={"context_chat_id": "parent-456"},
+            session_key_override="discord:parent-456:thread:thread-777",
+        )
+    )
+
+    assert result is not None
+    assert result.chat_id == "thread-777"
+    assert loop.context.build_messages.call_args.kwargs["chat_id"] == "parent-456"
+    assert loop._run_agent_loop.call_args.kwargs["chat_id"] == "thread-777"
+
+
+def test_set_tool_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    spawn_tool = loop.tools.get("spawn")
+    assert spawn_tool is not None
+
+    loop._set_tool_context(
+        "discord",
+        "thread-777",
+        session_key="discord:parent-456:thread:thread-777",
+    )
+
+    assert spawn_tool._origin_channel.get() == "discord"  # type: ignore[attr-defined]
+    assert spawn_tool._origin_chat_id.get() == "thread-777"  # type: ignore[attr-defined]
+    assert spawn_tool._session_key.get() == "discord:parent-456:thread:thread-777"  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
 async def test_next_turn_after_crash_closes_pending_user_turn_before_new_input(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
     loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
@@ -537,8 +592,12 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     non_system = [m for m in seen["initial_messages"] if m.get("role") != "system"]
     assert "question" in non_system[0]["content"]
     assert "working" in non_system[1]["content"]
+    # User turns carry the timestamp prefix so the model can reason about
+    # relative time. Assistant turns do NOT, otherwise the model treats those
+    # past replies as in-context examples and starts its own outputs with
+    # ``[Message Time: ...]`` (which then leaks back to the user).
     assert "[Message Time:" in non_system[0]["content"]
-    assert "[Message Time:" in non_system[1]["content"]
+    assert "[Message Time:" not in non_system[1]["content"]
     assert non_system[2]["content"].count("subagent result") == 1
     assert "Current Time:" in non_system[2]["content"]
 
@@ -660,3 +719,63 @@ def test_subagent_followup_skips_empty_content() -> None:
 
     assert loop._persist_subagent_followup(session, msg) is False
     assert session.messages == []
+
+
+def test_set_tool_context_passes_thread_session_key_to_spawn(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+
+    loop._set_tool_context(
+        "slack",
+        "C123",
+        metadata={"slack": {"thread_ts": "1700.42", "channel_type": "channel"}},
+        session_key="slack:C123:1700.42",
+    )
+
+    spawn_tool = loop.tools.get("spawn")
+    assert spawn_tool is not None
+    assert spawn_tool._session_key.get() == "slack:C123:1700.42"
+
+
+@pytest.mark.asyncio
+async def test_system_subagent_followup_uses_thread_session_and_slack_metadata(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    thread_session = loop.sessions.get_or_create("slack:C123:1700.42")
+    thread_session.add_message("user", "thread question")
+    loop.sessions.save(thread_session)
+
+    seen: dict[str, list[dict]] = {}
+
+    async def fake_run_agent_loop(initial_messages, **_kwargs):
+        seen["initial_messages"] = initial_messages
+        return (
+            "done",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "done"}],
+            "stop",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+
+    outbound = await loop._process_message(
+        InboundMessage(
+            channel="system",
+            sender_id="subagent",
+            chat_id="slack:C123",
+            content="subagent result",
+            session_key_override="slack:C123:1700.42",
+            metadata={"subagent_task_id": "sub-1"},
+        )
+    )
+
+    assert outbound is not None
+    assert outbound.channel == "slack"
+    assert outbound.chat_id == "C123"
+    assert outbound.metadata == {"slack": {"thread_ts": "1700.42"}}
+    assert "thread question" in seen["initial_messages"][1]["content"]
+
+    loop.sessions.invalidate("slack:C123:1700.42")
+    persisted = loop.sessions.get_or_create("slack:C123:1700.42")
+    assert any(m.get("subagent_task_id") == "sub-1" for m in persisted.messages)
