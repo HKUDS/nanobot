@@ -75,6 +75,7 @@ class _LoopHook(AgentHook):
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        on_turn_saved: Callable[[list[dict]], None] | None = None,
     ) -> None:
         super().__init__(reraise=True)
         self._loop = agent_loop
@@ -84,6 +85,7 @@ class _LoopHook(AgentHook):
         self._channel = channel
         self._chat_id = chat_id
         self._message_id = message_id
+        self._on_turn_saved = on_turn_saved
         self._stream_buf = ""
 
     def wants_streaming(self) -> bool:
@@ -129,6 +131,8 @@ class _LoopHook(AgentHook):
         self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
 
     async def after_iteration(self, context: AgentHookContext) -> None:
+        if self._on_turn_saved and context.tool_calls:
+            self._on_turn_saved(context.messages)
         if (
             self._on_progress
             and context.tool_calls
@@ -430,6 +434,7 @@ class AgentLoop:
         chat_id: str = "direct",
         message_id: str | None = None,
         pending_queue: asyncio.Queue | None = None,
+        on_turn_saved: Callable[[list[dict]], None] | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -437,6 +442,10 @@ class AgentLoop:
         *on_stream_end(resuming)*: called when a streaming session finishes.
         ``resuming=True`` means tool calls follow (spinner should restart);
         ``resuming=False`` means this is the final response.
+
+        *on_turn_saved*, when provided, is called with the full message list
+        after each tool-call iteration so the caller can persist intermediate
+        state (e.g. /stop, crash).
 
         Returns (final_content, tools_used, messages, stop_reason, had_injections).
         """
@@ -448,6 +457,7 @@ class AgentLoop:
             channel=channel,
             chat_id=chat_id,
             message_id=message_id,
+            on_turn_saved=on_turn_saved,
         )
         hook: AgentHook = (
             CompositeHook([loop_hook] + self._extra_hooks) if self._extra_hooks else loop_hook
@@ -809,12 +819,20 @@ class AgentLoop:
                 session_summary=pending,
                 current_role=current_role,
             )
+            save_offset = [1 + len(history)]
+
+            def _incremental_save(msgs: list[dict]) -> None:
+                self._save_turn(session, msgs, save_offset[0])
+                save_offset[0] = len(msgs)
+                self.sessions.save(session)
+
             final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
                 pending_queue=pending_queue,
+                on_turn_saved=_incremental_save,
             )
-            self._save_turn(session, all_msgs, 1 + len(history))
+            self._save_turn(session, all_msgs, save_offset[0])
             self._clear_runtime_checkpoint(session)
             self.sessions.save(session)
             self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
@@ -932,6 +950,13 @@ class AgentLoop:
             self.sessions.save(session)
             user_persisted_early = True
 
+        save_offset = [1 + len(history) + (1 if user_persisted_early else 0)]
+
+        def _incremental_save(msgs: list[dict]) -> None:
+            self._save_turn(session, msgs, save_offset[0])
+            save_offset[0] = len(msgs)
+            self.sessions.save(session)
+
         final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
@@ -943,14 +968,13 @@ class AgentLoop:
             chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
             pending_queue=pending_queue,
+            on_turn_saved=_incremental_save,
         )
 
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
-        # Skip the already-persisted user message when saving the turn
-        save_skip = 1 + len(history) + (1 if user_persisted_early else 0)
-        self._save_turn(session, all_msgs, save_skip)
+        self._save_turn(session, all_msgs, save_offset[0])
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
