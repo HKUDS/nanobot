@@ -190,7 +190,6 @@ nanobot agent
 
 - Want different LLM providers, web search, MCP, security settings, or more config options? See [Configuration](./docs/configuration.md)
 - Want to run nanobot in chat apps like Telegram, Discord, WeChat or Feishu? See [Chat Apps](./docs/chat-apps.md)
-- Using Slack? Add `files:write` if you want nanobot to upload images, videos, or files.
 - Want Docker or Linux service deployment? See [Deployment](./docs/deployment.md)
 
 ## 🧪 WebUI (Development)
