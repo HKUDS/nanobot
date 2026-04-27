@@ -792,6 +792,14 @@ def _run_gateway(
         return "cli", "direct"
 
     # Create heartbeat service
+    heartbeat_preamble = (
+        "[Your response will be delivered directly to the user's messaging app. "
+        "Output ONLY the final user-facing message. Never reference internal "
+        "files (HEARTBEAT.md, AWARENESS.md, etc.), your instructions, or your "
+        "decision process. If nothing needs reporting, respond with just "
+        "'All clear.' and nothing else.]\n\n"
+    )
+
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
@@ -800,7 +808,7 @@ def _run_gateway(
             pass
 
         resp = await agent.process_direct(
-            tasks,
+            heartbeat_preamble + tasks,
             session_key="heartbeat",
             channel=channel,
             chat_id=chat_id,

@@ -56,7 +56,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
         pass
     if ctx_est <= 0:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
-    
+
     # Fetch web search provider usage (best-effort, never blocks the response)
     search_usage_text: str | None = None
     try:
@@ -310,6 +310,66 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+_HISTORY_DEFAULT_COUNT = 10
+_HISTORY_MAX_COUNT = 50
+_HISTORY_MAX_CONTENT_CHARS = 200
+
+
+def _format_history_message(msg: dict) -> str | None:
+    """Format a single history message for display. Returns None to skip."""
+    role = msg.get("role")
+    if role not in ("user", "assistant"):
+        return None
+    content = msg.get("content") or ""
+    if isinstance(content, list):
+        parts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+        content = " ".join(parts)
+    content = str(content).strip()
+    if not content:
+        return None
+    if len(content) > _HISTORY_MAX_CONTENT_CHARS:
+        content = content[:_HISTORY_MAX_CONTENT_CHARS] + "…"
+    label = "👤 You" if role == "user" else "🤖 Bot"
+    return f"{label}: {content}"
+
+
+async def cmd_history(ctx: CommandContext) -> OutboundMessage:
+    """Show the last N messages of the current session (default 10, max 50).
+
+    Usage: /history [count]
+    """
+    count = _HISTORY_DEFAULT_COUNT
+    if ctx.args.strip():
+        try:
+            count = max(1, min(int(ctx.args.strip()), _HISTORY_MAX_COUNT))
+        except ValueError:
+            return OutboundMessage(
+                channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+                content="Usage: /history [count] — e.g. /history 5 (default: 10, max: 50)",
+                metadata=dict(ctx.msg.metadata or {}),
+            )
+
+    session = ctx.session or ctx.loop.sessions.get_or_create(ctx.key)
+    history = session.get_history(max_messages=0)
+    visible = [_format_history_message(m) for m in history]
+    visible = [m for m in visible if m is not None]
+    recent = visible[-count:]
+
+    if not recent:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="No conversation history yet.",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    header = f"Last {len(recent)} message(s):\n"
+    return OutboundMessage(
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+        content=header + "\n".join(recent),
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
+
+
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
     return OutboundMessage(
@@ -328,6 +388,7 @@ def build_help_text() -> str:
         "/stop — Stop the current task",
         "/restart — Restart the bot",
         "/status — Show bot status",
+        "/history [n] — Show the last N conversation messages (default 10)",
         "/dream — Manually trigger Dream consolidation",
         "/dream-log — Show what the last Dream changed",
         "/dream-restore — Revert memory to a previous state",
@@ -343,6 +404,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
+    router.exact("/history", cmd_history)
+    router.prefix("/history ", cmd_history)
     router.exact("/dream", cmd_dream)
     router.exact("/dream-log", cmd_dream_log)
     router.prefix("/dream-log ", cmd_dream_log)

@@ -60,6 +60,7 @@ _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.6",
     "k2.6-code-preview",
 })
+_OPENAI_COMPAT_REQUEST_TIMEOUT_S = 120.0
 
 # Maps ProviderSpec.thinking_style → extra_body builder.
 # Each builder takes a bool (thinking_enabled) and returns the dict to
@@ -88,6 +89,26 @@ def _is_kimi_thinking_model(model_name: str) -> bool:
     if "/" in name and name.rsplit("/", 1)[1] in _KIMI_THINKING_MODELS:
         return True
     return False
+
+
+def _openai_compat_timeout_s() -> float:
+    """Return the bounded request timeout used for OpenAI-compatible providers."""
+    return _float_env("NANOBOT_OPENAI_COMPAT_TIMEOUT_S", _OPENAI_COMPAT_REQUEST_TIMEOUT_S)
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("Ignoring invalid {}={!r}; using {}", name, raw, default)
+        return default
+    if value <= 0:
+        logger.warning("Ignoring non-positive {}={!r}; using {}", name, raw, default)
+        return default
+    return value
 
 
 def _short_tool_id() -> str:
@@ -251,10 +272,12 @@ class OpenAICompatProvider(LLMProvider):
         # opening a fresh connection for each request, which is cheap on a
         # LAN.  Cloud providers benefit from keepalive, so we leave the
         # default pool settings for them.
+        timeout_s = _openai_compat_timeout_s()
         http_client: httpx.AsyncClient | None = None
         if _is_local_endpoint(spec, effective_base):
             http_client = httpx.AsyncClient(
                 limits=httpx.Limits(keepalive_expiry=0),
+                timeout=timeout_s,
             )
 
         self._client = AsyncOpenAI(
@@ -262,6 +285,7 @@ class OpenAICompatProvider(LLMProvider):
             base_url=effective_base,
             default_headers=default_headers,
             max_retries=0,
+            timeout=timeout_s,
             http_client=http_client,
         )
 
