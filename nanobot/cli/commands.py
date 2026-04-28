@@ -1,8 +1,11 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import json
 import os
+import re
 import select
+import shutil
 import signal
 import sys
 from contextlib import nullcontext
@@ -33,6 +36,15 @@ from rich.table import Table
 from rich.text import Text
 
 from nanobot import __logo__, __version__
+from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
+from nanobot.config.paths import get_workspace_path, is_default_workspace
+from nanobot.config.schema import Config
+from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.restart import (
+    consume_restart_notice_from_env,
+    format_restart_completed_message,
+    should_show_cli_restart_notice,
+)
 
 
 class SafeFileHistory(FileHistory):
@@ -46,15 +58,7 @@ class SafeFileHistory(FileHistory):
     def store_string(self, string: str) -> None:
         safe = string.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
         super().store_string(safe)
-from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
-from nanobot.config.paths import get_workspace_path, is_default_workspace
-from nanobot.config.schema import Config
-from nanobot.utils.helpers import sync_workspace_templates
-from nanobot.utils.restart import (
-    consume_restart_notice_from_env,
-    format_restart_completed_message,
-    should_show_cli_restart_notice,
-)
+
 
 app = typer.Typer(
     name="nanobot",
@@ -105,11 +109,25 @@ def _flush_pending_tty_input() -> None:
 def _restore_terminal() -> None:
     """Restore terminal to its original state (echo, line buffering, etc.)."""
     if _SAVED_TERM_ATTRS is None:
+        try:
+            if sys.stdout.isatty():
+                # Restore a visible cursor even if prompt_toolkit exited mid-render.
+                sys.stdout.write("\x1b[?25h\x1b[0m")
+                sys.stdout.flush()
+        except Exception:
+            pass
         return
     try:
         import termios
 
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
+    except Exception:
+        pass
+    try:
+        if sys.stdout.isatty():
+            # Make sure the cursor is visible and text attributes are reset.
+            sys.stdout.write("\x1b[?25h\x1b[0m")
+            sys.stdout.flush()
     except Exception:
         pass
 
@@ -180,10 +198,9 @@ def _response_renderable(content: str, render_markdown: bool, metadata: dict | N
 
 async def _print_interactive_line(text: str) -> None:
     """Print async interactive updates with prompt_toolkit-safe Rich styling."""
+
     def _write() -> None:
-        ansi = _render_interactive_ansi(
-            lambda c: c.print(f"  [dim]↳ {text}[/dim]")
-        )
+        ansi = _render_interactive_ansi(lambda c: c.print(f"  [dim]↳ {text}[/dim]"))
         print_formatted_text(ANSI(ansi), end="")
 
     await run_in_terminal(_write)
@@ -195,6 +212,7 @@ async def _print_interactive_response(
     metadata: dict | None = None,
 ) -> None:
     """Print async interactive replies with prompt_toolkit-safe Rich styling."""
+
     def _write() -> None:
         content = response or ""
         ansi = _render_interactive_ansi(
@@ -258,9 +276,7 @@ def version_callback(value: bool):
 
 @app.callback()
 def main(
-    version: bool = typer.Option(
-        None, "--version", "-v", callback=version_callback, is_eager=True
-    ),
+    version: bool = typer.Option(None, "--version", "-v", callback=version_callback, is_eager=True),
 ):
     """nanobot - Personal AI Assistant."""
     pass
@@ -407,6 +423,752 @@ def _onboard_plugins(config_path: Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def _get_agenthifive_skill_source() -> Path:
+    """Return the bundled AgentHiFive skill directory."""
+    return Path(__file__).resolve().parents[2] / "skills" / "agenthifive"
+
+
+def _build_agenthifive_mcp_defaults(
+    *,
+    mcp_command: str,
+    mcp_path: str | None,
+    base_url: str,
+    download_dir: str | None,
+    agent_id: str | None,
+    private_key_path: str | None,
+    private_key: str | None,
+    token_audience: str | None,
+    bearer_token: str | None,
+) -> dict[str, Any]:
+    """Build the default MCP server config for AgentHiFive."""
+    if mcp_path:
+        command = "node"
+        args = [mcp_path]
+    else:
+        command = mcp_command
+        args = []
+
+    env = {"AGENTHIFIVE_BASE_URL": base_url}
+    if download_dir:
+        env["AGENTHIFIVE_DOWNLOAD_DIR"] = download_dir
+    if bearer_token:
+        env["AGENTHIFIVE_BEARER_TOKEN"] = bearer_token
+    else:
+        if agent_id:
+            env["AGENTHIFIVE_AGENT_ID"] = agent_id
+        if private_key_path:
+            env["AGENTHIFIVE_PRIVATE_KEY_PATH"] = private_key_path
+        if private_key:
+            env["AGENTHIFIVE_PRIVATE_KEY"] = private_key
+        if token_audience:
+            env["AGENTHIFIVE_TOKEN_AUDIENCE"] = token_audience
+
+    return {
+        "type": "stdio",
+        "command": command,
+        "args": args,
+        "env": env,
+        "toolTimeout": 30,
+        "enabledTools": ["*"],
+    }
+
+
+_ENV_PLACEHOLDER_PATTERN = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+
+
+def _agenthifive_placeholder_env_name(value: str | None) -> str | None:
+    """Return the referenced env var for a ${NAME} placeholder."""
+    if not value:
+        return None
+
+    match = _ENV_PLACEHOLDER_PATTERN.fullmatch(value.strip())
+    return match.group(1) if match else None
+
+
+def _agenthifive_has_configured_value(value: str | None) -> bool:
+    """Whether a setup value is already available literally or via env placeholder."""
+    if value is None:
+        return False
+
+    env_name = _agenthifive_placeholder_env_name(value)
+    if env_name:
+        return bool(os.environ.get(env_name))
+
+    return bool(value.strip())
+
+
+def _prompt_agenthifive_value(
+    prompt_text: str,
+    *,
+    hide_input: bool = False,
+    default: str | None = None,
+) -> str:
+    """Prompt until a non-empty value is provided."""
+    while True:
+        resolved = typer.prompt(
+            prompt_text,
+            hide_input=hide_input,
+            default=default,
+            show_default=default is not None,
+        ).strip()
+        if resolved:
+            return resolved
+        console.print("[yellow]Value cannot be empty.[/yellow]")
+
+
+def _resolve_agenthifive_setup_value(
+    value: str | None,
+    *,
+    prompt_text: str,
+    hide_input: bool = False,
+    prompt_default: str | None = None,
+) -> str | None:
+    """Resolve a setup value, prompting only when an env placeholder is unset."""
+    if value is None:
+        return None
+
+    env_name = _agenthifive_placeholder_env_name(value)
+    if not env_name:
+        return value
+
+    if os.environ.get(env_name):
+        return value
+
+    return _prompt_agenthifive_value(
+        prompt_text,
+        hide_input=hide_input,
+        default=prompt_default,
+    )
+
+
+def _generate_agenthifive_jwk_pair() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Generate a fresh ES256 JWK pair for AgentHiFive agent auth."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from jwt.algorithms import ECAlgorithm
+
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    private_jwk = json.loads(ECAlgorithm.to_jwk(private_key))
+    public_jwk = json.loads(ECAlgorithm.to_jwk(private_key.public_key()))
+    return private_jwk, public_jwk
+
+
+def _bootstrap_agenthifive_public_key(
+    *,
+    base_url: str,
+    bootstrap_secret: str,
+    public_key: dict[str, Any],
+) -> str:
+    """Register a public key with AgentHiFive and return the assigned agent ID."""
+    import httpx
+
+    base_url = base_url.strip().rstrip("/")
+    try:
+        response = httpx.post(
+            f"{base_url}/v1/agents/bootstrap",
+            json={"bootstrapSecret": bootstrap_secret, "publicKey": public_key},
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            timeout=15.0,
+            follow_redirects=True,
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text.strip() or exc.response.reason_phrase
+        raise RuntimeError(
+            f"AgentHiFive bootstrap failed: {exc.response.status_code} {detail}"
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise RuntimeError(f"AgentHiFive bootstrap request failed: {exc}") from exc
+
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise RuntimeError("AgentHiFive bootstrap returned invalid JSON") from exc
+
+    agent_id = str(body.get("agentId", "")).strip()
+    if not agent_id:
+        raise RuntimeError("AgentHiFive bootstrap response did not include agentId")
+    return agent_id
+
+
+def _prepare_agenthifive_bootstrap_key_path(
+    value: str | None,
+    *,
+    force: bool,
+) -> str:
+    """Resolve where the generated private JWK should be saved."""
+    default_path = "~/.nanobot/agenthifive-agent.jwk"
+    candidate = value
+
+    while True:
+        resolved = (
+            _resolve_agenthifive_setup_value(
+                candidate,
+                prompt_text="Path to save the AgentHiFive private JWK",
+                prompt_default=default_path,
+            )
+            or default_path
+        )
+        expanded = Path(resolved).expanduser()
+        if force or not expanded.exists():
+            return str(expanded)
+        if typer.confirm(
+            f"Private JWK already exists at {expanded}. Overwrite it?",
+            default=False,
+        ):
+            return str(expanded)
+        candidate = None
+
+
+def _write_agenthifive_private_jwk(path_value: str, private_jwk: dict[str, Any]) -> None:
+    """Persist the generated private JWK locally with restrictive permissions."""
+    target = Path(path_value).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(private_jwk, indent=2), encoding="utf-8")
+    try:
+        target.chmod(0o600)
+    except OSError:
+        pass
+
+
+def _run_setup_channels(
+    *,
+    config_path: Path,
+    channel_name: str | None = None,
+) -> None:
+    """Run the existing channel configuration UI and save changes if any."""
+    from nanobot.cli import onboard
+    from nanobot.config.loader import load_config, save_config, set_config_path
+
+    resolved_config_path = config_path.expanduser().resolve()
+    set_config_path(resolved_config_path)
+    config = load_config(resolved_config_path)
+    original_dump = config.model_dump(by_alias=True)
+
+    try:
+        onboard._get_questionary()
+    except RuntimeError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        console.print(
+            "Install project dependencies and rerun [cyan]nanobot setup-agenthifive[/cyan] "
+            "or [cyan]nanobot onboard --wizard[/cyan]."
+        )
+        raise typer.Exit(1) from exc
+
+    if channel_name:
+        channels = onboard._get_channel_names()
+        if channel_name not in channels:
+            available = ", ".join(sorted(channels))
+            console.print(f"[red]Unknown channel:[/red] {channel_name}")
+            console.print(f"Available channels: {available}")
+            raise typer.Exit(1)
+        onboard._configure_channel(config, channel_name)
+    else:
+        onboard._configure_channels(config)
+
+    if config.model_dump(by_alias=True) != original_dump:
+        save_config(config, resolved_config_path)
+        console.print(f"[green]✓[/green] Saved channel configuration to {resolved_config_path}")
+    else:
+        console.print("[dim]No channel changes were saved.[/dim]")
+
+
+_AGENTHIFIVE_SETUP_MENU = {
+    "1": "first-time",
+    "2": "reconnect",
+    "3": "channels",
+    "first-time": "first-time",
+    "setup": "first-time",
+    "reconnect": "reconnect",
+    "channels": "channels",
+    "configure-channels": "channels",
+}
+
+
+def _prompt_agenthifive_setup_mode() -> str:
+    """Prompt for the high-level AgentHiFive setup flow."""
+    console.print("\n[bold]AgentHiFive Setup[/bold]")
+    console.print("  [bold]1.[/bold] First-time setup")
+    console.print("  [bold]2.[/bold] Reconnect to vault")
+    console.print("  [bold]3.[/bold] Configure channels")
+
+    while True:
+        choice = typer.prompt("Choose an option", default="1").strip().lower()
+        if mode := _AGENTHIFIVE_SETUP_MENU.get(choice):
+            return mode
+        console.print("[yellow]Choose 1, 2, or 3.[/yellow]")
+
+
+def _setup_agenthifive_should_show_menu(
+    *,
+    base_url: str,
+    bootstrap_secret: str | None,
+    agent_id: str,
+    private_key_path: str,
+    private_key: str | None,
+    token_audience: str | None,
+    bearer_token: str | None,
+    setup_channels: bool,
+) -> bool:
+    """Whether setup-agenthifive should prompt with the top-level menu."""
+    return sys.stdin.isatty() and not any(
+        [
+            setup_channels,
+            bootstrap_secret is not None,
+            private_key is not None,
+            token_audience is not None,
+            bearer_token is not None,
+            base_url != "${AGENTHIFIVE_BASE_URL}",
+            agent_id != "${AGENTHIFIVE_AGENT_ID}",
+            private_key_path != "${AGENTHIFIVE_PRIVATE_KEY_PATH}",
+        ]
+    )
+
+
+def _discover_agenthifive_channel_connections(
+    config_path: Path,
+) -> tuple[dict[str, list[dict[str, Any]]] | None, str | None]:
+    """Best-effort discovery of healthy Telegram/Slack connections from AgentHiFive."""
+    from agenthifive_nanobot.auth import build_runtime_config_from_mcp_server
+    from agenthifive_nanobot.vault_client import VaultClient
+    from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
+
+    resolved_config_path = config_path.expanduser().resolve()
+    set_config_path(resolved_config_path)
+
+    try:
+        resolved_cfg = resolve_config_env_vars(load_config(resolved_config_path))
+        server = resolved_cfg.tools.mcp_servers.get("agenthifive")
+        if server is None:
+            return None, None
+        runtime = build_runtime_config_from_mcp_server(server)
+    except Exception as exc:
+        return None, str(exc)
+
+    async def _fetch() -> list[dict[str, Any]]:
+        client = VaultClient(
+            base_url=runtime.base_url,
+            auth=runtime.auth,
+            timeout=runtime.timeout,
+        )
+        await client.start()
+        return await client.list_connections()
+
+    try:
+        connections = asyncio.run(_fetch())
+    except Exception as exc:
+        return None, str(exc)
+
+    result: dict[str, list[dict[str, Any]]] = {}
+    for raw in connections:
+        service = str(raw.get("service", "")).strip().lower()
+        status = str(raw.get("status", "healthy")).strip().lower()
+        if service not in {"telegram", "slack"}:
+            continue
+        if status and status != "healthy":
+            continue
+        result.setdefault(service, []).append(raw)
+    return result, None
+
+
+def _run_agenthifive_channel_setup(config_path: Path) -> None:
+    """Configure vault-managed AgentHiFive channels without entering generic onboard."""
+    from nanobot.channels.agenthifive import AgentHiFiveConfig
+    from nanobot.config.loader import load_config, save_config, set_config_path
+
+    resolved_config_path = config_path.expanduser().resolve()
+    set_config_path(resolved_config_path)
+    config = load_config(resolved_config_path)
+    original_dump = config.model_dump(by_alias=True)
+
+    existing_raw = getattr(config.channels, "agenthifive", None) or {}
+    channel_cfg = (
+        AgentHiFiveConfig.model_validate(existing_raw) if existing_raw else AgentHiFiveConfig()
+    )
+
+    def _channel_dict(name: str) -> dict[str, Any]:
+        raw = getattr(config.channels, name, None) or {}
+        return dict(raw)
+
+    def _native_enabled(name: str) -> bool:
+        return bool(_channel_dict(name).get("enabled"))
+
+    def _disable_native(name: str) -> None:
+        raw = _channel_dict(name)
+        if raw:
+            raw["enabled"] = False
+            setattr(config.channels, name, raw)
+
+    console.print("\n[bold]AgentHiFive Channels[/bold]")
+    console.print(
+        "[dim]Normal setup leaves NanoBot allowlists empty so AgentHiFive remains the source of truth.[/dim]"
+    )
+
+    detected, detect_error = _discover_agenthifive_channel_connections(resolved_config_path)
+    if detect_error:
+        console.print(
+            f"[yellow]Could not inspect current AgentHiFive connections:[/yellow] {detect_error}"
+        )
+        console.print("[dim]Continuing with manual channel selection.[/dim]")
+    elif detected is not None and detected:
+        console.print("[green]✓[/green] Detected healthy AgentHiFive channel connections:")
+        for service in ("telegram", "slack"):
+            connections = detected.get(service, [])
+            if not connections:
+                continue
+            display = service.capitalize()
+            provider_cfg = getattr(channel_cfg.providers, service)
+            state = "enabled" if provider_cfg.enabled else "disabled"
+            console.print(f"  - {display} [dim]({state})[/dim]")
+            for conn in connections:
+                label = str(conn.get("label", "")).strip()
+                if label:
+                    console.print(f"    {label}")
+                else:
+                    console.print(f"    {display} connection")
+    elif detected == {}:
+        console.print(
+            "[dim]No healthy Telegram or Slack connections were detected in AgentHiFive.[/dim]"
+        )
+        if not typer.confirm(
+            "Configure channels anyway before connecting them in AgentHiFive?",
+            default=False,
+        ):
+            console.print("[dim]Leaving AgentHiFive channel settings unchanged.[/dim]")
+            return
+
+    if channel_cfg.providers.telegram.allow_from or channel_cfg.providers.slack.allow_from:
+        console.print(
+            "[dim]Existing local NanoBot channel restrictions will be kept. Clear them manually later if you want AH5-only access control.[/dim]"
+        )
+
+    services_to_offer = [
+        s for s in ("telegram", "slack") if detected is None or s in detected or detected == {}
+    ]
+    if detected and not detected.get("slack") and channel_cfg.providers.slack.enabled:
+        console.print(
+            "[dim]Keeping existing AgentHiFive Slack settings unchanged because no healthy Slack connection was detected.[/dim]"
+        )
+    if detected and not detected.get("telegram") and channel_cfg.providers.telegram.enabled:
+        console.print(
+            "[dim]Keeping existing AgentHiFive Telegram settings unchanged because no healthy Telegram connection was detected.[/dim]"
+        )
+
+    toggle_labels = {
+        "telegram": "Telegram",
+        "slack": "Slack",
+    }
+    toggle_map = {str(index): service for index, service in enumerate(services_to_offer, start=1)}
+
+    def _toggle_service(service: str) -> None:
+        provider_cfg = getattr(channel_cfg.providers, service)
+        next_enabled = not provider_cfg.enabled
+        if next_enabled and _native_enabled(service) and not provider_cfg.enabled:
+            label = toggle_labels[service]
+            console.print(f"\n{label} is currently configured with native NanoBot credentials.")
+            console.print(
+                f"[dim]Migrating keeps those credentials on disk but disables the native {label} channel.[/dim]"
+            )
+            if not typer.confirm(
+                f"Switch {label} to AgentHiFive-managed messaging?",
+                default=True,
+            ):
+                return
+            _disable_native(service)
+        provider_cfg.enabled = next_enabled
+
+    if services_to_offer:
+        while True:
+            console.print("\n[bold]Channel Toggles[/bold]")
+            for index, service in enumerate(services_to_offer, start=1):
+                provider_cfg = getattr(channel_cfg.providers, service)
+                state = "ON" if provider_cfg.enabled else "OFF"
+                console.print(f"  [bold]{index}.[/bold] {toggle_labels[service]}: {state}")
+            console.print("[dim]Press Enter to save, or type a number to toggle a channel.[/dim]")
+
+            choice = typer.prompt("Toggle channel", default="").strip().lower()
+            if choice == "":
+                break
+            service = toggle_map.get(choice)
+            if service is None:
+                valid = ", ".join(toggle_map)
+                console.print(f"[yellow]Choose {valid}, or press Enter to save.[/yellow]")
+                continue
+            _toggle_service(service)
+
+    channel_cfg.providers.telegram.reply_to_message = True
+    channel_cfg.providers.slack.reply_in_thread = True
+
+    telegram_enabled = channel_cfg.providers.telegram.enabled
+    slack_enabled = channel_cfg.providers.slack.enabled
+
+    channel_cfg.enabled = telegram_enabled or slack_enabled
+    setattr(
+        config.channels,
+        "agenthifive",
+        channel_cfg.model_dump(by_alias=True, exclude_none=True),
+    )
+
+    if config.model_dump(by_alias=True) != original_dump:
+        save_config(config, resolved_config_path)
+        console.print(
+            f"[green]✓[/green] Saved AgentHiFive channel configuration to {resolved_config_path}"
+        )
+    else:
+        console.print("[dim]No AgentHiFive channel changes were saved.[/dim]")
+
+    enabled_names: list[str] = []
+    if channel_cfg.providers.telegram.enabled:
+        enabled_names.append("Telegram")
+    if channel_cfg.providers.slack.enabled:
+        enabled_names.append("Slack")
+    if enabled_names:
+        console.print(f"[green]✓[/green] Enabled: {', '.join(enabled_names)}")
+    else:
+        console.print("[dim]AgentHiFive inbound channels are disabled.[/dim]")
+
+
+@app.command("setup-agenthifive")
+def setup_agenthifive(
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    mcp_command: str = typer.Option(
+        "agenthifive-mcp",
+        "--mcp-command",
+        help="Executable name to run the AgentHiFive MCP server when --mcp-path is not used",
+    ),
+    mcp_path: str | None = typer.Option(
+        None,
+        "--mcp-path",
+        help="Absolute path to agenthifive-mcp/dist/index.js; uses `node <path>` when provided",
+    ),
+    base_url: str = typer.Option(
+        "${AGENTHIFIVE_BASE_URL}",
+        "--base-url",
+        help="AgentHiFive base URL stored in config (env interpolation supported)",
+    ),
+    bootstrap_secret: str | None = typer.Option(
+        None,
+        "--bootstrap-secret",
+        help="One-time AgentHiFive bootstrap secret (ah5b_...) for first-run setup",
+    ),
+    agent_id: str = typer.Option(
+        "${AGENTHIFIVE_AGENT_ID}",
+        "--agent-id",
+        help="AgentHiFive agent ID for runtime token minting (env interpolation supported)",
+    ),
+    private_key_path: str = typer.Option(
+        "${AGENTHIFIVE_PRIVATE_KEY_PATH}",
+        "--private-key-path",
+        help="Path to the AgentHiFive JWK file (env interpolation supported)",
+    ),
+    private_key: str | None = typer.Option(
+        None,
+        "--private-key",
+        help="Inline AgentHiFive JWK JSON/base64 (dev/advanced use)",
+    ),
+    token_audience: str | None = typer.Option(
+        None,
+        "--token-audience",
+        help="Optional token audience override for AgentHiFive agent auth",
+    ),
+    bearer_token: str | None = typer.Option(
+        None,
+        "--bearer-token",
+        help="AgentHiFive bearer token fallback for manual testing (not recommended for long-running use)",
+    ),
+    setup_channels: bool = typer.Option(
+        False,
+        "--setup-channels",
+        help="Open the AgentHiFive channel setup wizard",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite the existing AgentHiFive MCP config and bundled skill",
+    ),
+):
+    """Install the AgentHiFive skill and wire its MCP server into config."""
+    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+    from nanobot.config.schema import Config, MCPServerConfig
+
+    if config:
+        config_path = Path(config).expanduser().resolve()
+        set_config_path(config_path)
+        console.print(f"[dim]Using config: {config_path}[/dim]")
+    else:
+        config_path = get_config_path()
+
+    loaded = load_config(config_path) if config_path.exists() else Config()
+    if workspace:
+        loaded.agents.defaults.workspace = workspace
+
+    mode = "channels" if setup_channels else None
+    if mode is None and _setup_agenthifive_should_show_menu(
+        base_url=base_url,
+        bootstrap_secret=bootstrap_secret,
+        agent_id=agent_id,
+        private_key_path=private_key_path,
+        private_key=private_key,
+        token_audience=token_audience,
+        bearer_token=bearer_token,
+        setup_channels=setup_channels,
+    ):
+        mode = _prompt_agenthifive_setup_mode()
+    if mode == "channels":
+        if not config_path.exists():
+            save_config(loaded, config_path)
+            console.print(f"[green]✓[/green] Created config at {config_path}")
+        console.print("\nLaunching AgentHiFive channel setup...")
+        _run_agenthifive_channel_setup(config_path=config_path)
+        console.print("\nNext steps:")
+        console.print(f"  1. Restart gateway: [cyan]nanobot gateway --config {config_path}[/cyan]")
+        console.print("  2. Connect the matching service in AgentHiFive if it is not connected yet")
+        console.print("  3. Message NanoBot through the AgentHiFive channel you enabled")
+        return
+
+    base_url = _resolve_agenthifive_setup_value(
+        base_url,
+        prompt_text="AgentHiFive base URL",
+    )
+    bootstrapped_agent = False
+    if bearer_token is not None:
+        bearer_token = _resolve_agenthifive_setup_value(
+            bearer_token,
+            prompt_text="AgentHiFive bearer token",
+            hide_input=True,
+        )
+    else:
+        wants_existing_agent_auth = (
+            private_key is not None
+            or _agenthifive_has_configured_value(agent_id)
+            or _agenthifive_has_configured_value(private_key_path)
+        )
+        should_bootstrap = bootstrap_secret is not None or not wants_existing_agent_auth
+        if mode == "reconnect" and bootstrap_secret is None and bearer_token is None:
+            should_bootstrap = typer.confirm(
+                "Reconnect by bootstrapping a fresh AgentHiFive key pair?",
+                default=True,
+            )
+
+        if should_bootstrap:
+            bootstrap_secret = _resolve_agenthifive_setup_value(
+                bootstrap_secret or "${AGENTHIFIVE_BOOTSTRAP_SECRET}",
+                prompt_text="AgentHiFive bootstrap secret",
+                hide_input=True,
+            )
+            private_key_path = _prepare_agenthifive_bootstrap_key_path(
+                private_key_path,
+                force=force,
+            )
+
+            try:
+                private_jwk, public_jwk = _generate_agenthifive_jwk_pair()
+                agent_id = _bootstrap_agenthifive_public_key(
+                    base_url=base_url,
+                    bootstrap_secret=bootstrap_secret,
+                    public_key=public_jwk,
+                )
+            except RuntimeError as exc:
+                console.print(f"[red]Error:[/red] {exc}")
+                raise typer.Exit(1) from exc
+
+            _write_agenthifive_private_jwk(private_key_path, private_jwk)
+            private_key = None
+            bootstrapped_agent = True
+            console.print(
+                f"[green]✓[/green] Bootstrapped AgentHiFive agent [cyan]{agent_id}[/cyan]"
+            )
+            console.print(
+                f"[green]✓[/green] Saved private JWK to [cyan]{Path(private_key_path).expanduser()}[/cyan]"
+            )
+        else:
+            agent_id = _resolve_agenthifive_setup_value(
+                agent_id,
+                prompt_text="AgentHiFive agent ID",
+            )
+            if private_key is None:
+                private_key_path = _resolve_agenthifive_setup_value(
+                    private_key_path,
+                    prompt_text="Path to AgentHiFive private JWK",
+                )
+
+    workspace_path = get_workspace_path(str(loaded.workspace_path))
+    download_dir = str(config_path.parent / "media" / "agenthifive")
+    skill_source = _get_agenthifive_skill_source()
+    skill_target = workspace_path / "skills" / "agenthifive"
+    skill_target.parent.mkdir(parents=True, exist_ok=True)
+
+    if skill_target.exists() and force:
+        shutil.rmtree(skill_target)
+    if not skill_target.exists():
+        shutil.copytree(skill_source, skill_target)
+        console.print(f"[green]✓[/green] Installed AgentHiFive skill to {skill_target}")
+    else:
+        console.print(f"[dim]AgentHiFive skill already present at {skill_target}[/dim]")
+
+    defaults = _build_agenthifive_mcp_defaults(
+        mcp_command=mcp_command,
+        mcp_path=mcp_path,
+        base_url=base_url,
+        download_dir=download_dir,
+        agent_id=agent_id,
+        private_key_path=private_key_path,
+        private_key=private_key,
+        token_audience=token_audience,
+        bearer_token=bearer_token,
+    )
+    existing = loaded.tools.mcp_servers.get("agenthifive")
+
+    if force or existing is None:
+        loaded.tools.mcp_servers["agenthifive"] = MCPServerConfig.model_validate(defaults)
+    else:
+        merged = _merge_missing_defaults(existing.model_dump(mode="json", by_alias=True), defaults)
+        loaded.tools.mcp_servers["agenthifive"] = MCPServerConfig.model_validate(merged)
+
+    save_config(loaded, config_path)
+
+    console.print(f"[green]✓[/green] Saved AgentHiFive MCP config to {config_path}")
+    console.print("\nNext steps:")
+    if bearer_token:
+        if _agenthifive_placeholder_env_name(base_url) or _agenthifive_placeholder_env_name(
+            bearer_token
+        ):
+            console.print(
+                "  1. Export [cyan]AGENTHIFIVE_BASE_URL[/cyan] and [cyan]AGENTHIFIVE_BEARER_TOKEN[/cyan]"
+            )
+        else:
+            console.print("  1. AgentHiFive config is already stored in NanoBot's config file")
+    else:
+        if (
+            _agenthifive_placeholder_env_name(base_url)
+            or _agenthifive_placeholder_env_name(agent_id)
+            or _agenthifive_placeholder_env_name(private_key_path)
+        ):
+            console.print(
+                "  1. Export [cyan]AGENTHIFIVE_BASE_URL[/cyan], [cyan]AGENTHIFIVE_AGENT_ID[/cyan], "
+                "and [cyan]AGENTHIFIVE_PRIVATE_KEY_PATH[/cyan]"
+            )
+        elif bootstrapped_agent:
+            console.print("  1. AgentHiFive bootstrap is complete; no extra auth export is needed")
+        else:
+            console.print("  1. AgentHiFive config is already stored in NanoBot's config file")
+    if mcp_path:
+        console.print(f"  2. Start gateway: [cyan]nanobot gateway --config {config_path}[/cyan]")
+    else:
+        console.print(
+            f"  2. Ensure [cyan]{mcp_command}[/cyan] is on PATH, then run "
+            f"[cyan]nanobot gateway --config {config_path}[/cyan]"
+        )
+    console.print(
+        "  3. In chat, ask NanoBot to list your AgentHiFive connections or perform a protected action"
+    )
+    console.print(
+        "  4. If you want NanoBot to listen through AgentHiFive-managed channels, rerun "
+        f"[cyan]nanobot setup-agenthifive --config {config_path}[/cyan] and choose "
+        "[cyan]Configure channels[/cyan]"
+    )
+
+
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config.
 
@@ -451,6 +1213,7 @@ def _make_provider(config: Config):
         )
     elif backend == "github_copilot":
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+
         provider = GitHubCopilotProvider(default_model=model)
     elif backend == "anthropic":
         from nanobot.providers.anthropic_provider import AnthropicProvider
@@ -545,7 +1308,9 @@ def _migrate_cron_store(config: "Config") -> None:
 def serve(
     port: int | None = typer.Option(None, "--port", "-p", help="API server port"),
     host: str | None = typer.Option(None, "--host", "-H", help="Bind address"),
-    timeout: float | None = typer.Option(None, "--timeout", "-t", help="Per-request timeout (seconds)"),
+    timeout: float | None = typer.Option(
+        None, "--timeout", "-t", help="Per-request timeout (seconds)"
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show nanobot runtime logs"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -558,6 +1323,7 @@ def serve(
         raise typer.Exit(1)
 
     from loguru import logger
+
     from nanobot.agent.loop import AgentLoop
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
@@ -683,6 +1449,24 @@ def _run_gateway(
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
+    # AgentHiFive adapter (optional — starts approval poller if configured)
+    ah5_adapter = None
+    ah5_hooks = []
+    ah5_server = config.tools.mcp_servers.get("agenthifive")
+    if ah5_server:
+        try:
+            from agenthifive_nanobot.adapter import AgentHiFiveAdapter
+
+            ah5_adapter = AgentHiFiveAdapter.from_mcp_server_config(
+                bus=bus, server_config=ah5_server
+            )
+            ah5_hooks = [ah5_adapter.hook]
+            console.print("[green]✓[/green] AgentHiFive adapter enabled (approval poller + hook)")
+        except ValueError as exc:
+            console.print(f"[yellow]Warning:[/yellow] AgentHiFive adapter disabled: {exc}")
+        except ImportError:
+            pass  # agenthifive_nanobot not installed — skip silently
+
     agent = AgentLoop(
         bus=bus,
         provider=provider,
@@ -706,6 +1490,7 @@ def _run_gateway(
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         tools_config=config.tools,
+        hooks=ah5_hooks,
     )
 
     from nanobot.agent.loop import UNIFIED_SESSION_KEY
@@ -801,7 +1586,10 @@ def _run_gateway(
 
         if job.payload.deliver and job.payload.to and response:
             should_notify = await evaluate_response(
-                response, reminder_note, provider, agent.model,
+                response,
+                reminder_note,
+                provider,
+                agent.model,
             )
             if should_notify:
                 await _deliver_to_channel(
@@ -951,12 +1739,15 @@ def _run_gateway(
     agent.dream.max_iterations = dream_cfg.max_iterations
     agent.dream.annotate_line_ages = dream_cfg.annotate_line_ages
     from nanobot.cron.types import CronJob, CronPayload
-    cron.register_system_job(CronJob(
-        id="dream",
-        name="dream",
-        schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
-        payload=CronPayload(kind="system_event"),
-    ))
+
+    cron.register_system_job(
+        CronJob(
+            id="dream",
+            name="dream",
+            schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
+            payload=CronPayload(kind="system_event"),
+        )
+    )
     console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
 
     async def _open_browser_when_ready() -> None:
@@ -988,6 +1779,8 @@ def _run_gateway(
         try:
             await cron.start()
             await heartbeat.start()
+            if ah5_adapter:
+                await ah5_adapter.start()
             tasks = [
                 agent.run(),
                 channels.start_all(),
@@ -1004,6 +1797,8 @@ def _run_gateway(
             console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
             console.print(traceback.format_exc())
         finally:
+            if ah5_adapter:
+                await ah5_adapter.stop()
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
@@ -1030,8 +1825,12 @@ def agent(
     session_id: str = typer.Option("cli:direct", "--session", "-s", help="Session ID"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
-    markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
-    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"),
+    markdown: bool = typer.Option(
+        True, "--markdown/--no-markdown", help="Render assistant output as Markdown"
+    ),
+    logs: bool = typer.Option(
+        False, "--logs/--no-logs", help="Show nanobot runtime logs during chat"
+    ),
 ):
     """Interact with the agent directly."""
     from loguru import logger
@@ -1105,7 +1904,8 @@ def agent(
         async def run_once():
             renderer = StreamRenderer(render_markdown=markdown)
             response = await agent_loop.process_direct(
-                message, session_id,
+                message,
+                session_id,
                 on_progress=_cli_progress,
                 on_stream=renderer.on_delta,
                 on_stream_end=renderer.on_end,
@@ -1123,8 +1923,12 @@ def agent(
     else:
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
+
         _init_prompt_session()
-        console.print(f"{__logo__} Interactive mode [bold blue]({config.agents.defaults.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
+        console.print(
+            f"{__logo__} Interactive mode [bold blue]({config.agents.defaults.model})[/bold blue] "
+            f"(type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n"
+        )
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)
@@ -1140,11 +1944,11 @@ def agent(
         signal.signal(signal.SIGINT, _handle_signal)
         signal.signal(signal.SIGTERM, _handle_signal)
         # SIGHUP is not available on Windows
-        if hasattr(signal, 'SIGHUP'):
+        if hasattr(signal, "SIGHUP"):
             signal.signal(signal.SIGHUP, _handle_signal)
         # Ignore SIGPIPE to prevent silent process termination when writing to closed pipes
         # SIGPIPE is not available on Windows
-        if hasattr(signal, 'SIGPIPE'):
+        if hasattr(signal, "SIGPIPE"):
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive():
@@ -1223,13 +2027,15 @@ def agent(
                         turn_response.clear()
                         renderer = StreamRenderer(render_markdown=markdown)
 
-                        await bus.publish_inbound(InboundMessage(
-                            channel=cli_channel,
-                            sender_id="user",
-                            chat_id=cli_chat_id,
-                            content=user_input,
-                            metadata={"_wants_stream": True},
-                        ))
+                        await bus.publish_inbound(
+                            InboundMessage(
+                                channel=cli_channel,
+                                sender_id="user",
+                                chat_id=cli_chat_id,
+                                content=user_input,
+                                metadata={"_wants_stream": True},
+                            )
+                        )
 
                         await turn_done.wait()
 
@@ -1239,7 +2045,9 @@ def agent(
                                 if renderer:
                                     await renderer.close()
                                 _print_agent_response(
-                                    content, render_markdown=markdown, metadata=meta,
+                                    content,
+                                    render_markdown=markdown,
+                                    metadata=meta,
                                 )
                         elif renderer and not renderer.streamed:
                             await renderer.close()
@@ -1263,6 +2071,23 @@ def agent(
 # ============================================================================
 # Channel Commands
 # ============================================================================
+
+
+@app.command("setup-channels")
+def setup_channels(
+    channel_name: str | None = typer.Argument(
+        None,
+        help="Optional channel name to configure directly (e.g. telegram)",
+    ),
+    config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Configure NanoBot chat channels like Telegram, Discord, or Slack."""
+    from nanobot.config.loader import get_config_path
+
+    resolved_config_path = (
+        Path(config_path).expanduser().resolve() if config_path else get_config_path()
+    )
+    _run_setup_channels(config_path=resolved_config_path, channel_name=channel_name)
 
 
 channels_app = typer.Typer(help="Manage channels")
@@ -1367,7 +2192,9 @@ def _get_bridge_dir() -> Path:
 @channels_app.command("login")
 def channels_login(
     channel_name: str = typer.Argument(..., help="Channel name (e.g. weixin, whatsapp)"),
-    force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Force re-authentication even if already logged in"
+    ),
     config_path: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Authenticate with a channel via QR code or other interactive login."""
@@ -1457,8 +2284,12 @@ def status():
 
     console.print(f"{__logo__} nanobot Status\n")
 
-    console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
-    console.print(f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}")
+    console.print(
+        f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}"
+    )
+    console.print(
+        f"Workspace: {workspace} {'[green]✓[/green]' if workspace.exists() else '[red]✗[/red]'}"
+    )
 
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
@@ -1480,7 +2311,9 @@ def status():
                     console.print(f"{spec.label}: [dim]not set[/dim]")
             else:
                 has_key = bool(p.api_key)
-                console.print(f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}")
+                console.print(
+                    f"{spec.label}: {'[green]✓[/green]' if has_key else '[dim]not set[/dim]'}"
+                )
 
 
 # ============================================================================
@@ -1504,7 +2337,9 @@ def _register_login(name: str):
 
 @provider_app.command("login")
 def provider_login(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    provider: str = typer.Argument(
+        ..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"
+    ),
 ):
     """Authenticate with an OAuth provider."""
     from nanobot.providers.registry import PROVIDERS
@@ -1544,7 +2379,9 @@ def _login_openai_codex() -> None:
         if not (token and token.access):
             console.print("[red]✗ Authentication failed[/red]")
             raise typer.Exit(1)
-        console.print(f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]")
+        console.print(
+            f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]"
+        )
     except ImportError:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         raise typer.Exit(1)
