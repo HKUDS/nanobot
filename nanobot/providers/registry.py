@@ -415,6 +415,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://qianfan.baidubce.com/v2"
     ),
+    # === nanobot Auth Server (gateway, auto-configured by `nanobot auth`) ===
+    ProviderSpec(
+        name="nanobot",
+        keywords=(),
+        env_key="NANOBOT_AUTH_TOKEN",
+        display_name="nanobot",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_key_prefix="nb_",
+    ),
 )
 
 

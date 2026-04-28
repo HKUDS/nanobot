@@ -1450,6 +1450,24 @@ def status():
 
 
 # ============================================================================
+# Auth
+# ============================================================================
+
+
+@app.command()
+def auth(
+    auth_key: str | None = typer.Option(None, "--auth-key", help="Authenticate with a pre-generated key"),
+    server_url: str | None = typer.Option(None, "--server", help="Auth server URL"),
+    status: bool = typer.Option(False, "--status", help="Show authentication status"),
+    logout: bool = typer.Option(False, "--logout", help="Log out"),
+):
+    """Authenticate with nanobot auth server."""
+    from nanobot.cli.auth import cmd_auth
+
+    cmd_auth(auth_key=auth_key, server_url=server_url, status=status, logout=logout)
+
+
+# ============================================================================
 # OAuth Login
 # ============================================================================
 
