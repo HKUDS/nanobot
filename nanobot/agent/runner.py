@@ -762,6 +762,17 @@ class AgentRunner:
                 "status": "error",
                 "detail": result.replace("\n", " ").strip()[:120],
             }
+
+            # check the outside workspace error and break loop
+            if self._is_workspace_violation(result):
+                logger.warning(
+                    "Tool {} blocked by workspace/safety guard; aborting turn: {}",
+                    tool_call.name,
+                    result.replace("\n", " ").strip()[:200],
+                )
+                event["detail"] = ("workspace_violation: "
+                                   + result.replace("\n", " ").strip())[:160]
+                return result, event, RuntimeError(result)
             if spec.fail_on_tool_error:
                 return result + hint, event, RuntimeError(result)
             return result + hint, event, None
@@ -773,6 +784,24 @@ class AgentRunner:
         elif len(detail) > 120:
             detail = detail[:120] + "..."
         return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
+
+    # Markers identifying tool results that represent a workspace / safety boundary rejection.
+    _WORKSPACE_BLOCK_MARKERS: tuple[str, ...] = (
+        "blocked by safety guard",
+        "outside the configured workspace",
+        "outside allowed directory",
+        "working_dir is outside",
+        "working_dir could not be resolved",
+        "path traversal detected",
+        "path outside working dir",
+    )
+
+    @classmethod
+    def _is_workspace_violation(cls, text: str) -> bool:
+        if not text:
+            return False
+        lowered = text.lower()
+        return any(marker in lowered for marker in cls._WORKSPACE_BLOCK_MARKERS)
 
     async def _emit_checkpoint(
         self,
