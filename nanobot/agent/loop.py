@@ -202,7 +202,7 @@ class AgentLoop:
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
         consolidation_ratio: float = 0.5,
-        max_messages: int = 0,
+        max_messages: int = 120,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
@@ -260,7 +260,7 @@ class AgentLoop:
             disabled_skills=disabled_skills,
         )
         self._unified_session = unified_session
-        self._max_messages = max_messages if max_messages > 0 else 0
+        self._max_messages = max_messages if max_messages > 0 else 120
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stacks: dict[str, AsyncExitStack] = {}
@@ -887,11 +887,10 @@ class AgentLoop:
                 msg.metadata, session_key=key,
             )
             _hist_kwargs: dict[str, Any] = {
+                "max_messages": self._max_messages,
                 "max_tokens": self._replay_token_budget(),
                 "include_timestamps": True,
             }
-            if self._max_messages > 0:
-                _hist_kwargs["max_messages"] = self._max_messages
             history = session.get_history(**_hist_kwargs)
             current_role = "assistant" if is_subagent else "user"
 
@@ -977,11 +976,10 @@ class AgentLoop:
                 message_tool.start_turn()
 
         _hist_kwargs: dict[str, Any] = {
+            "max_messages": self._max_messages,
             "max_tokens": self._replay_token_budget(),
             "include_timestamps": True,
         }
-        if self._max_messages > 0:
-            _hist_kwargs["max_messages"] = self._max_messages
         history = session.get_history(**_hist_kwargs)
 
         pending_ask_id = pending_ask_user_id(history)

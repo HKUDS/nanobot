@@ -10,8 +10,8 @@ import pytest
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.config.schema import AgentDefaults
 from nanobot.command import CommandContext
+from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse
 
 
@@ -75,10 +75,9 @@ class TestSessionTTLConfig:
         assert data["idleCompactAfterMinutes"] == 30
         assert "sessionTtlMinutes" not in data
 
-    def test_session_history_and_file_cap_are_internal_constants(self):
-        """Session history/file cap should be internal constants, not config fields."""
-        from nanobot.session.manager import HISTORY_MAX_MESSAGES, FILE_MAX_MESSAGES
-        assert HISTORY_MAX_MESSAGES == 120
+    def test_session_file_cap_is_internal_constant(self):
+        """Session file cap should remain an internal constant, not a config field."""
+        from nanobot.session.manager import FILE_MAX_MESSAGES
         assert FILE_MAX_MESSAGES == 2000
 
 
@@ -265,7 +264,6 @@ class TestAutoCompact:
     async def test_auto_compact_empty_session(self, tmp_path):
         """_archive on empty session should not archive."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
-        session = loop.sessions.get_or_create("cli:test")
 
         archive_called = False
 
