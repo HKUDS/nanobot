@@ -1,16 +1,17 @@
 """Tests for Olostep web search provider."""
 
-from types import SimpleNamespace
+from __future__ import annotations
 
-import pytest
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import nanobot.agent.tools.web as web_mod
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.config.schema import WebSearchConfig
 
 
-@pytest.mark.asyncio
-async def test_olostep_search_formats_answer_and_sources(monkeypatch):
+def test_olostep_search_formats_answer_and_sources():
     calls: dict[str, str] = {}
 
     class MockAsyncOlostep:
@@ -31,11 +32,9 @@ async def test_olostep_search_formats_answer_and_sources(monkeypatch):
                 sources=[SimpleNamespace(title="Example Source", url="https://example.com")],
             )
 
-    monkeypatch.setattr(web_mod, "_OLOSTEP_AVAILABLE", True)
-    monkeypatch.setattr(web_mod, "AsyncOlostep", MockAsyncOlostep)
-
-    tool = WebSearchTool(config=WebSearchConfig(provider="olostep", olostep_api_key="olostep-key"))
-    result = await tool.execute(query="test query")
+    with patch.object(web_mod, "AsyncOlostep", MockAsyncOlostep):
+        tool = WebSearchTool(config=WebSearchConfig(provider="olostep", api_key="olostep-key"))
+        result = asyncio.run(tool.execute(query="test query"))
 
     assert calls["api_key"] == "olostep-key"
     assert calls["task"] == "test query"
@@ -44,26 +43,24 @@ async def test_olostep_search_formats_answer_and_sources(monkeypatch):
     assert "https://example.com" in result
 
 
-@pytest.mark.asyncio
-async def test_olostep_missing_key_returns_config_error(monkeypatch):
-    monkeypatch.delenv("OLOSTEP_API_KEY", raising=False)
+def test_olostep_missing_key_falls_back_to_duckduckgo():
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
 
-    tool = WebSearchTool(config=WebSearchConfig(provider="olostep", olostep_api_key=""))
-    result = await tool.execute(query="test query")
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "fallback"}]
 
-    assert (
-        result
-        == "Error: Olostep API key not configured. "
-        "Set it in ~/.nanobot/config.json under "
-        "tools.web.search.olostepApiKey and restart."
-    )
+    with patch.dict(web_mod.os.environ, {}, clear=False), patch("ddgs.DDGS", MockDDGS):
+        tool = WebSearchTool(config=WebSearchConfig(provider="olostep", api_key=""))
+        result = asyncio.run(tool.execute(query="test query"))
+
+    assert "Fallback" in result
 
 
-@pytest.mark.asyncio
-async def test_olostep_package_missing_returns_install_hint(monkeypatch):
-    monkeypatch.setattr(web_mod, "_OLOSTEP_AVAILABLE", False)
-
-    tool = WebSearchTool(config=WebSearchConfig(provider="olostep", olostep_api_key="olostep-key"))
-    result = await tool.execute(query="test query")
+def test_olostep_package_missing_returns_install_hint():
+    with patch.object(web_mod, "AsyncOlostep", None):
+        tool = WebSearchTool(config=WebSearchConfig(provider="olostep", api_key="olostep-key"))
+        result = asyncio.run(tool.execute(query="test query"))
 
     assert result == "Error: olostep package not installed. Run: pip install olostep"

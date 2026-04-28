@@ -18,14 +18,11 @@ from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_paramet
 from nanobot.utils.helpers import build_image_content_blocks
 
 try:
-    from olostep import AsyncOlostep, Olostep, Olostep_BaseError
+    from olostep import AsyncOlostep, Olostep_BaseError
 
-    _OLOSTEP_SYNC_CLIENT = Olostep
     _OLOSTEP_AVAILABLE = True
 except ImportError:
-    Olostep = None
     AsyncOlostep = None
-    _OLOSTEP_SYNC_CLIENT = None
 
     class Olostep_BaseError(Exception):
         """Fallback error type when olostep package is unavailable."""
@@ -109,19 +106,12 @@ class WebSearchTool(Tool):
         self,
         config: WebSearchConfig | None = None,
         proxy: str | None = None,
-        provider: str | None = None,
-        olostep_api_key: str | None = None,
     ):
         from nanobot.config.schema import WebSearchConfig
 
         self.config = config if config is not None else WebSearchConfig()
         self.proxy = proxy
-        self.provider = (provider or self.config.provider or "brave").strip().lower()
-        self.olostep_api_key = (
-            olostep_api_key
-            or self.config.olostep_api_key
-            or os.environ.get("OLOSTEP_API_KEY", "")
-        )
+        self.provider = (self.config.provider or "brave").strip().lower()
 
     def _effective_provider(self) -> str:
         """Resolve the backend that execute() will actually use."""
@@ -144,7 +134,8 @@ class WebSearchTool(Tool):
             api_key = self.config.api_key or os.environ.get("KAGI_API_KEY", "")
             return "kagi" if api_key else "duckduckgo"
         if provider == "olostep":
-            return "olostep"
+            api_key = self.config.api_key or os.environ.get("OLOSTEP_API_KEY", "")
+            return "olostep" if api_key else "duckduckgo"
         return provider
 
     @property
@@ -161,14 +152,6 @@ class WebSearchTool(Tool):
         n = min(max(count or self.config.max_results, 1), 10)
 
         if provider == "olostep":
-            if not self.olostep_api_key:
-                return (
-                    "Error: Olostep API key not configured. "
-                    "Set it in ~/.nanobot/config.json under "
-                    "tools.web.search.olostepApiKey and restart."
-                )
-            if not _OLOSTEP_AVAILABLE:
-                return "Error: olostep package not installed. Run: pip install olostep"
             return await self._search_olostep(query, n)
         if provider == "duckduckgo":
             return await self._search_duckduckgo(query, n)
@@ -188,31 +171,48 @@ class WebSearchTool(Tool):
     async def _search_olostep(self, query: str, n: int) -> str:
         if AsyncOlostep is None:
             return "Error: olostep package not installed. Run: pip install olostep"
+        api_key = self.config.api_key or os.environ.get("OLOSTEP_API_KEY", "")
+        if not api_key:
+            logger.warning("OLOSTEP_API_KEY not set, falling back to DuckDuckGo")
+            return await self._search_duckduckgo(query, n)
         try:
-            async with AsyncOlostep(api_key=self.olostep_api_key) as client:
+            async with AsyncOlostep(api_key=api_key) as client:
+                if self.proxy:
+                    transport = getattr(client, "_transport", None)
+                    http_client = getattr(transport, "_client", None)
+                    if transport is not None and isinstance(http_client, httpx.AsyncClient):
+                        await http_client.aclose()
+                        transport._client = httpx.AsyncClient(  # type: ignore[attr-defined]
+                            proxy=self.proxy,
+                            headers=dict(http_client.headers),
+                            timeout=http_client.timeout,
+                            limits=httpx.Limits(
+                                max_keepalive_connections=100,
+                                max_connections=200,
+                            ),
+                            http2=True,
+                        )
                 result = await client.answers.create(task=query)
 
-            answer_text = (getattr(result, "answer", "") or "").strip()
-            lines = [f"Answer: {answer_text}"] if answer_text else ["Answer:"]
-
             sources = getattr(result, "sources", None) or []
-            if sources:
-                lines.append("")
-                lines.append("Sources:")
-                for i, source in enumerate(sources[:n], 1):
-                    if isinstance(source, dict):
-                        title = source.get("title", "")
-                        url = source.get("url", "")
-                    else:
-                        title = getattr(source, "title", "")
-                        url = getattr(source, "url", "")
-                    if title and url:
-                        lines.append(f"{i}. {title} — {url}")
-                    elif url:
-                        lines.append(f"{i}. {url}")
-                    elif title:
-                        lines.append(f"{i}. {title}")
-            return "\n".join(lines)
+            source_lines = []
+            for i, source in enumerate(sources[:n], 1):
+                if isinstance(source, dict):
+                    title = source.get("title", "")
+                    url = source.get("url", "")
+                else:
+                    title = getattr(source, "title", "")
+                    url = getattr(source, "url", "")
+                if title and url:
+                    source_lines.append(f"{i}. {title} — {url}")
+                elif url:
+                    source_lines.append(f"{i}. {url}")
+                elif title:
+                    source_lines.append(f"{i}. {title}")
+
+            answer_text = getattr(result, "answer", "") or ""
+            items = [{"title": answer_text or "Olostep answer", "url": "", "content": "\n".join(source_lines)}]
+            return _format_results(query, items, n)
         except Olostep_BaseError as e:
             return f"Olostep search error: {type(e).__name__}: {e}"
         except Exception as e:
