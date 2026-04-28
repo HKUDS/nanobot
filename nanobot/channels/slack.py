@@ -140,7 +140,10 @@ class SlackChannel(BaseChannel):
             # only makes sense within the originating conversation.
             thread_ts_param = thread_ts if thread_ts and target_chat_id == origin_chat_id else None
 
-            if msg.content or not (msg.media or []):
+            is_progress = (msg.metadata or {}).get("_progress", False)
+            if is_progress and not msg.content:
+                pass  # skip empty progress messages (e.g. tool-event-only updates)
+            elif msg.content or not (msg.media or []):
                 mrkdwn = self._to_mrkdwn(msg.content) if msg.content else " "
                 buttons = getattr(msg, "buttons", None) or []
                 chunks = split_message(mrkdwn, SLACK_MAX_MESSAGE_LEN)

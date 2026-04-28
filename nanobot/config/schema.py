@@ -90,6 +90,10 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
+    max_messages: int = Field(
+        default=120,
+        ge=0,
+    )  # Max messages to replay from session history (0 = use default 120, respects token budget)
     consolidation_ratio: float = Field(
         default=0.5,
         ge=0.1,
@@ -123,6 +127,7 @@ class ProvidersConfig(Base):
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)
     openai: ProviderConfig = Field(default_factory=ProviderConfig)
     openrouter: ProviderConfig = Field(default_factory=ProviderConfig)
+    huggingface: ProviderConfig = Field(default_factory=ProviderConfig)
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
     zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
@@ -183,6 +188,12 @@ class WebSearchConfig(Base):
     timeout: int = 30  # Wall-clock timeout (seconds) for search operations
 
 
+class WebFetchConfig(Base):
+    """Web fetch tool configuration."""
+
+    use_jina_reader: bool = True
+
+
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
@@ -190,7 +201,9 @@ class WebToolsConfig(Base):
     proxy: str | None = (
         None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
     )
+    user_agent: str | None = None
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)
 
 
 class ExecToolConfig(Base):

@@ -313,6 +313,46 @@ async def test_runner_returns_structured_tool_error():
 
 
 @pytest.mark.asyncio
+async def test_runner_stops_on_workspace_violation_without_fail_on_tool_error():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="working",
+            tool_calls=[ToolCallRequest(id="call_1", name="read_file", arguments={"path": "/tmp/outside.md"})],
+        ),
+        LLMResponse(content="should not continue", tool_calls=[]),
+    ])
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(
+        side_effect=PermissionError("Path /tmp/outside.md is outside allowed directory /workspace")
+    )
+
+    runner = AgentRunner(provider)
+
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert provider.chat_with_retry.await_count == 1
+    assert result.stop_reason == "tool_error"
+    assert "outside allowed directory" in (result.error or "")
+    assert result.tool_events == [
+        {
+            "name": "read_file",
+            "status": "error",
+            "detail": "workspace_violation: Path /tmp/outside.md is outside allowed directory /workspace",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
 
