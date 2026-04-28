@@ -26,6 +26,28 @@ if TYPE_CHECKING:
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _guard_file_size(name: str, content: str, max_bytes: int) -> None:
+    """Raise ValueError if content exceeds max_bytes to prevent file corruption.
+
+    Dream Phase 2 passes the current file content raw into the model prompt and
+    uses edit_file to write back. When the local model (e.g. Gemma4) garbles the
+    edit_file parameters it can repeat existing content, causing exponential growth.
+    This guard aborts the write so the corruption is surfaced as an error rather
+    than silently destroying the file.
+    """
+    size = len(content.encode("utf-8"))
+    if size > max_bytes:
+        raise ValueError(
+            f"Refusing to write {name}: content is {size:,} bytes, "
+            f"exceeds hard limit of {max_bytes:,} bytes. "
+            "This likely indicates a Dream edit_file corruption loop."
+        )
+
+
+# ---------------------------------------------------------------------------
 # MemoryStore — pure file I/O layer
 # ---------------------------------------------------------------------------
 
@@ -205,6 +227,7 @@ class MemoryStore:
         return self.read_file(self.soul_file)
 
     def write_soul(self, content: str) -> None:
+        _guard_file_size("SOUL.md", content, max_bytes=50_000)
         self.soul_file.write_text(content, encoding="utf-8")
 
     # -- USER.md -------------------------------------------------------------
@@ -213,6 +236,7 @@ class MemoryStore:
         return self.read_file(self.user_file)
 
     def write_user(self, content: str) -> None:
+        _guard_file_size("USER.md", content, max_bytes=50_000)
         self.user_file.write_text(content, encoding="utf-8")
 
     # -- context injection (used by context.py) ------------------------------

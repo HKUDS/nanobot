@@ -106,15 +106,29 @@ class ContextBuilder:
 
         return _to_blocks(left) + _to_blocks(right)
 
+    # Character cap applied only to memory files (SOUL.md / USER.md) that
+    # Dream Phase 2 can corrupt via edit_file repetition loops.
+    _MEMORY_FILE_MAX_CHARS = 20_000
+    _MEMORY_FILES = {"SOUL.md", "USER.md"}
+
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
+        from loguru import logger
+
         parts = []
 
         for filename in self.BOOTSTRAP_FILES:
             file_path = self.workspace / filename
-            if file_path.exists():
-                content = file_path.read_text(encoding="utf-8")
-                parts.append(f"## {filename}\n\n{content}")
+            if not file_path.exists():
+                continue
+            content = file_path.read_text(encoding="utf-8")
+            if filename in self._MEMORY_FILES and len(content) > self._MEMORY_FILE_MAX_CHARS:
+                logger.warning(
+                    "Memory file {} is {:,} chars, truncating to {:,} to protect context window.",
+                    filename, len(content), self._MEMORY_FILE_MAX_CHARS,
+                )
+                content = content[: self._MEMORY_FILE_MAX_CHARS] + "\n\n[... truncated: file too large ...]"
+            parts.append(f"## {filename}\n\n{content}")
 
         return "\n\n".join(parts) if parts else ""
 
