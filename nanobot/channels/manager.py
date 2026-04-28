@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+from pydantic.alias_generators import to_camel
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -28,21 +29,8 @@ def _default_webui_dist() -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
-def _snake_to_camel(value: str) -> str:
-    head, *tail = value.split("_")
-    return head + "".join(part.capitalize() for part in tail)
-
-
 def _coerce_optional_bool(value: Any) -> bool | None:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "yes", "on"}:
-            return True
-        if normalized in {"false", "0", "no", "off"}:
-            return False
-    return None
+    return value if isinstance(value, bool) else None
 
 
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
@@ -161,7 +149,7 @@ class ChannelManager:
         if section is None:
             return None
 
-        camel_key = _snake_to_camel(key)
+        camel_key = to_camel(key)
         if isinstance(section, dict):
             value = section.get(key, section.get(camel_key))
             return _coerce_optional_bool(value)

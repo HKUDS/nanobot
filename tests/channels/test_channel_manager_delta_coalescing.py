@@ -325,6 +325,32 @@ class TestProgressFiltering:
         assert manager._should_send_progress("other", tool_hint=False) is True
         assert manager._should_send_progress("other", tool_hint=True) is False
 
+    def test_progress_visibility_uses_snake_case_channel_overrides(self, manager):
+        manager.config.channels = ChannelsConfig.model_validate({
+            "sendProgress": True,
+            "sendToolHints": False,
+            "mock": {
+                "send_progress": False,
+                "send_tool_hints": True,
+            },
+        })
+
+        assert manager._should_send_progress("mock", tool_hint=False) is False
+        assert manager._should_send_progress("mock", tool_hint=True) is True
+
+    def test_progress_visibility_ignores_non_bool_channel_overrides(self, manager):
+        manager.config.channels = ChannelsConfig.model_validate({
+            "sendProgress": True,
+            "sendToolHints": False,
+            "mock": {
+                "sendProgress": "false",
+                "sendToolHints": "true",
+            },
+        })
+
+        assert manager._should_send_progress("mock", tool_hint=False) is True
+        assert manager._should_send_progress("mock", tool_hint=True) is False
+
     @pytest.mark.asyncio
     async def test_channel_override_can_drop_progress_message(self, manager, bus):
         manager.config.channels = ChannelsConfig.model_validate({
