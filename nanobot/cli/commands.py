@@ -1427,6 +1427,8 @@ def status():
         from nanobot.providers.registry import PROVIDERS
 
         console.print(f"Model: {config.agents.defaults.model}")
+        if config.agents.defaults.fallback_models:
+            console.print(f"Fallbacks: {' -> '.join(config.agents.defaults.fallback_models)}")
 
         # Check API keys from registry
         for spec in PROVIDERS:

@@ -223,6 +223,50 @@ async def test_runner_streaming_hook_receives_deltas_and_end_signal():
 
 
 @pytest.mark.asyncio
+async def test_runner_accepts_provider_like_model_router():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.config.schema import FailoverConfig
+    from nanobot.providers.failover import ModelCandidate, ModelRouter
+
+    primary = MagicMock()
+    fallback = MagicMock()
+    primary.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="primary timeout",
+        finish_reason="error",
+        error_kind="timeout",
+    ))
+    fallback.chat_with_retry = AsyncMock(return_value=LLMResponse(content="fallback done"))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    router = ModelRouter(
+        primary_provider=primary,
+        primary_model="primary-model",
+        primary_provider_name="primary",
+        fallback_candidates=[
+            ModelCandidate(
+                model="fallback-model",
+                provider_name="fallback",
+                provider_factory=lambda: fallback,
+            )
+        ],
+        failover=FailoverConfig(cooldown_seconds=0),
+    )
+
+    result = await AgentRunner(router).run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "hello"}],
+        tools=tools,
+        model="primary-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert result.final_content == "fallback done"
+    primary.chat_with_retry.assert_awaited_once()
+    fallback.chat_with_retry.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_runner_returns_max_iterations_fallback():
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
 

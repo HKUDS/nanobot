@@ -5,6 +5,8 @@
 .env
 .web
 .orion
+r0/
+r0-*/
 
 # webui (monorepo frontend)
 webui/node_modules/

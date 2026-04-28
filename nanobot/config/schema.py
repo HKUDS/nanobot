@@ -65,6 +65,15 @@ class DreamConfig(Base):
         return f"every {hours}h"
 
 
+class FailoverConfig(Base):
+    """Cross-model failover behavior after provider-local retry is exhausted."""
+
+    enabled: bool = True
+    cooldown_seconds: float = Field(default=120.0, ge=0)
+    max_switches_per_turn: int = Field(default=0, ge=0)
+    failover_on_quota: bool = False
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -80,6 +89,8 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 200
     max_tool_result_chars: int = 16_000
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
+    fallback_models: list[str] = Field(default_factory=list)
+    failover: FailoverConfig = Field(default_factory=FailoverConfig)
     reasoning_effort: str | None = None  # low / medium / high / adaptive - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)

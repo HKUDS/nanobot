@@ -84,6 +84,29 @@ IMAP_PASSWORD=your-password-here
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
 | `qianfan` | LLM (Baidu Qianfan) | [cloud.baidu.com](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |
 
+### Model Failover
+
+Set `agents.defaults.fallbackModels` to let nanobot try another model after the active provider has exhausted its own retry policy and returned a transient final error. nanobot does not perform preflight network checks, does not mutate the session model, and does not switch for schema/auth/context-length/content-policy errors. Quota, billing, and payment errors do not fail over unless `failoverOnQuota` is enabled.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "anthropic/claude-opus-4-5",
+      "fallbackModels": ["openai/gpt-4.1-mini", "openrouter/anthropic/claude-sonnet-4-5"],
+      "failover": {
+        "enabled": true,
+        "cooldownSeconds": 120,
+        "maxSwitchesPerTurn": 0,
+        "failoverOnQuota": false
+      }
+    }
+  }
+}
+```
+
+Streaming responses are buffered until a candidate succeeds. If the primary model emits partial text and then fails, that partial text is discarded and only the successful fallback output is sent.
+
 
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>

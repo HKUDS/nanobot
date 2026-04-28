@@ -90,6 +90,11 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             max_completion_tokens=getattr(
                 getattr(loop.provider, "generation", None), "max_tokens", 8192
             ),
+            fallback_models=(
+                loop.provider.fallback_chain()
+                if callable(getattr(loop.provider, "fallback_chain", None))
+                else ()
+            ),
         ),
         metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
     )
