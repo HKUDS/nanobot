@@ -541,11 +541,39 @@ def _migrate_cron_store(config: "Config") -> None:
 # ============================================================================
 
 
+def _is_loopback_bind_host(host: str) -> bool:
+    """Recognize the full loopback range, not just the three common literals.
+
+    Accepts ``localhost``, the IPv4 ``127.0.0.0/8`` block, ``::1``, and
+    IPv4-mapped IPv6 forms. Hostnames other than ``localhost`` resolve to
+    False — DNS could legitimately point them anywhere.
+    """
+    import ipaddress
+
+    if not host:
+        return False
+    h = host.strip().lower()
+    if h == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
 @app.command()
 def serve(
     port: int | None = typer.Option(None, "--port", "-p", help="API server port"),
     host: str | None = typer.Option(None, "--host", "-H", help="Bind address"),
     timeout: float | None = typer.Option(None, "--timeout", "-t", help="Per-request timeout (seconds)"),
+    auth_token: str | None = typer.Option(
+        None,
+        "--auth-token",
+        help=(
+            "Bearer token required on /v1/* requests. Required when bind is "
+            "non-loopback. Reads api.authToken from config when omitted."
+        ),
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show nanobot runtime logs"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -573,6 +601,17 @@ def serve(
     host = host if host is not None else api_cfg.host
     port = port if port is not None else api_cfg.port
     timeout = timeout if timeout is not None else api_cfg.timeout
+    resolved_auth_token = (
+        auth_token if auth_token is not None else api_cfg.auth_token
+    ) or ""
+    resolved_auth_token = resolved_auth_token.strip()
+    if not _is_loopback_bind_host(host) and not resolved_auth_token:
+        console.print(
+            "[red]Error:[/red] API host {!r} is not loopback and no auth token "
+            "is set. Pass --auth-token=<secret> or set api.authToken in config "
+            "(or restrict --host to 127.0.0.1).".format(host)
+        )
+        raise typer.Exit(2)
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(runtime_config)
@@ -612,9 +651,16 @@ def serve(
             "[yellow]Warning:[/yellow] API is bound to all interfaces. "
             "Only do this behind a trusted network boundary, firewall, or reverse proxy."
         )
+    if resolved_auth_token:
+        console.print("  [cyan]Auth[/cyan]     : bearer token required on /v1/*")
     console.print()
 
-    api_app = create_app(agent_loop, model_name=model_name, request_timeout=timeout)
+    api_app = create_app(
+        agent_loop,
+        model_name=model_name,
+        request_timeout=timeout,
+        auth_token=resolved_auth_token,
+    )
 
     async def on_startup(_app):
         await agent_loop._connect_mcp()

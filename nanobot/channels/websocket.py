@@ -9,6 +9,7 @@ import email.utils
 import hashlib
 import hmac
 import http
+import ipaddress
 import json
 import mimetypes
 import re
@@ -83,6 +84,13 @@ class WebSocketConfig(Base):
     token_issue_secret: str = ""
     token_ttl_s: int = Field(default=300, ge=30, le=86_400)
     websocket_requires_token: bool = True
+    # Hard-disable the implicit ``/webui/bootstrap`` token mint. Set to True
+    # when nanobot is reachable through a proxy/tunnel: bootstrap was always
+    # meant for same-machine same-user use, and proxy hops can defeat the
+    # peer-IP / header heuristics. With bootstrap disabled, expose the WS
+    # path with an explicit ``token`` (static) or ``token_issue_path`` +
+    # ``token_issue_secret`` flow instead.
+    webui_bootstrap_disabled: bool = False
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
     streaming: bool = True
     # Default 36 MB, upper 40 MB: supports up to 4 images at ~6 MB each after
@@ -274,18 +282,67 @@ def _decode_api_key(raw_key: str) -> str | None:
     return key
 
 
-def _is_localhost(connection: Any) -> bool:
-    """Return True if *connection* originated from the loopback interface."""
+# Headers that betray a proxy hop. If any are present the request did not
+# originate from a true local user, even when the TCP peer happens to be
+# 127.0.0.1 because a reverse proxy or tunnel is forwarding traffic on the
+# same host. Treat their presence as proof-of-non-local.
+_PROXY_HOP_HEADERS = (
+    "X-Forwarded-For",
+    "X-Forwarded-Host",
+    "X-Forwarded-Proto",
+    "X-Real-IP",
+    "Forwarded",
+)
+
+
+def _has_proxy_hop_header(headers: Any) -> bool:
+    """Return True if *headers* carries any well-known proxy-hop header."""
+    if headers is None:
+        return False
+    for name in _PROXY_HOP_HEADERS:
+        if headers.get(name) or headers.get(name.lower()):
+            return True
+    return False
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Return True if *host* is a true loopback address.
+
+    Accepts ``localhost``, the full IPv4 ``127.0.0.0/8`` range, ``::1``, and
+    IPv4-mapped IPv6 forms like ``::ffff:127.0.0.5``. Hostnames other than
+    ``localhost`` resolve to False — DNS could legitimately point them
+    anywhere, so the conservative default is to treat them as public.
+    """
+    if not host:
+        return False
+    h = host.strip().lower()
+    if h == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_localhost(connection: Any, request: Any | None = None) -> bool:
+    """Return True if *connection* originated from the loopback interface.
+
+    When *request* is provided, also fail closed if any standard proxy-hop
+    header is present: a reverse proxy / tunnel running on the same host
+    will have a 127.0.0.1 TCP peer even though the real client is remote,
+    so trusting the peer alone is unsafe.
+    """
     addr = getattr(connection, "remote_address", None)
     if not addr:
         return False
     host = addr[0] if isinstance(addr, tuple) else addr
     if not isinstance(host, str):
         return False
-    # ``::ffff:127.0.0.1`` is loopback in IPv6-mapped form.
-    if host.startswith("::ffff:"):
-        host = host[7:]
-    return host in _LOCALHOSTS
+    if not _is_loopback_host(host):
+        return False
+    if request is not None and _has_proxy_hop_header(request.headers):
+        return False
+    return True
 
 
 def _http_response(
@@ -525,7 +582,7 @@ class WebSocketChannel(BaseChannel):
 
         # 2. WebUI bootstrap: localhost-only, mints tokens for the embedded UI.
         if got == "/webui/bootstrap":
-            return self._handle_webui_bootstrap(connection)
+            return self._handle_webui_bootstrap(connection, request)
 
         # 3. REST surface for the embedded UI.
         if got == "/api/sessions":
@@ -592,8 +649,28 @@ class WebSocketChannel(BaseChannel):
             if now > expiry:
                 self._api_tokens.pop(token_key, None)
 
-    def _handle_webui_bootstrap(self, connection: Any) -> Response:
-        if not _is_localhost(connection):
+    def _handle_webui_bootstrap(self, connection: Any, request: WsRequest) -> Response:
+        # Belt and suspenders: bootstrap is the most powerful unauthenticated
+        # route on the channel — a successful response mints a token that
+        # authorizes WS handshakes and the /api/sessions read/delete surface.
+        # Refuse unless every signal says the request is truly local:
+        #
+        #   1. Operator hasn't explicitly disabled the bootstrap (set when
+        #      running behind a proxy/tunnel that can defeat heuristics).
+        #   2. The channel is bound to a loopback address (so no external
+        #      caller can reach the route at all on a clean install).
+        #   3. The TCP peer is loopback (catches multi-bound deployments).
+        #   4. No standard proxy-hop header is present (catches the common
+        #      reverse-proxy / cloudflared / ngrok shape).
+        if self.config.webui_bootstrap_disabled:
+            return _http_error(403, "webui bootstrap is disabled")
+        if not _is_loopback_host(self.config.host):
+            return _http_error(
+                403,
+                "webui bootstrap requires a loopback bind; use a static token "
+                "or token_issue_path/token_issue_secret instead",
+            )
+        if not _is_localhost(connection, request):
             return _http_error(403, "webui bootstrap is localhost-only")
         # Cap outstanding tokens to avoid runaway growth from a misbehaving client.
         self._purge_expired_issued_tokens()
@@ -873,7 +950,38 @@ class WebSocketChannel(BaseChannel):
             self._take_issued_token_if_valid(supplied)
         return None
 
+    def _check_public_bind_safety(self) -> None:
+        """Refuse to start when the bind is non-loopback and no auth gate is set.
+
+        Catches two footguns:
+        - ``token_issue_path`` exposed without ``token_issue_secret`` lets any
+          public caller mint connection tokens.
+        - ``websocket_requires_token=False`` with no static ``token`` lets any
+          public caller open a chat session unauthenticated.
+        """
+        host = self.config.host.strip()
+        if not host or _is_loopback_host(host):
+            return
+        issue_path = self.config.token_issue_path.strip()
+        issue_secret = self.config.token_issue_secret.strip()
+        if issue_path and not issue_secret:
+            raise ValueError(
+                "websocket: refusing to start: host={!r} is not loopback and "
+                "token_issue_path is set without token_issue_secret. Set "
+                "token_issue_secret to a strong value, or restrict host to "
+                "127.0.0.1 / ::1.".format(host)
+            )
+        static_token = self.config.token.strip()
+        if not static_token and not self.config.websocket_requires_token:
+            raise ValueError(
+                "websocket: refusing to start: host={!r} is not loopback and "
+                "no token gate is configured. Set websocketRequiresToken=true "
+                "(with token_issue_path/token_issue_secret) or set a static "
+                "token, or restrict host to 127.0.0.1 / ::1.".format(host)
+            )
+
     async def start(self) -> None:
+        self._check_public_bind_safety()
         self._running = True
         self._stop_event = asyncio.Event()
 

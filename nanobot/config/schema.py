@@ -162,6 +162,11 @@ class ApiConfig(Base):
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 8900
     timeout: float = 120.0  # Per-request timeout in seconds.
+    # Bearer token required on /v1/* when the API is reachable beyond loopback.
+    # Empty disables auth (only safe when the bind is loopback or another
+    # trust boundary fronts the server). The CLI refuses non-loopback binds
+    # without a token to make the unsafe case loud.
+    auth_token: str = ""
 
 
 class GatewayConfig(Base):
