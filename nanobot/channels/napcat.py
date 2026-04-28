@@ -198,9 +198,9 @@ class NapcatChannel(BaseChannel):
 
         post_type = payload.get("post_type")
         if post_type == "message":
-            await self._on_message(payload)
+            asyncio.create_task(self._on_message(payload))
         elif post_type == "notice":
-            await self._on_notice(payload)
+            asyncio.create_task(self._on_notice(payload))  # avoid deadlock
 
     # ------------------------------------------------------------------
     # Inbound: messages
@@ -390,6 +390,7 @@ class NapcatChannel(BaseChannel):
                 {"group_id": group_id, "user_id": user_id, "no_cache": True},
             )
             data = resp.get("data", {})
+            # logger.debug("get_group_member_info: {}", resp)
             return data.get("card") or data.get("nickname") or str(user_id)
         except Exception as e:
             logger.warning("napcat: get_group_member_info failed: {}", e)
