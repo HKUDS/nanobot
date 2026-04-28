@@ -15,6 +15,7 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools.ask import AskUserInterrupt
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.utils.profiler import ProfilerTrace, profiler
 from nanobot.utils.helpers import (
     build_assistant_message,
     estimate_message_tokens,
@@ -91,6 +92,7 @@ class AgentRunResult:
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
+    profiler: ProfilerTrace | None = None
 
 
 class AgentRunner:
@@ -243,6 +245,7 @@ class AgentRunner:
         injection_cycles = 0
 
         for iteration in range(spec.max_iterations):
+            profiler.push("iteration_start")
             try:
                 # Keep the persisted conversation untouched. Context governance
                 # may repair or compact historical messages for the model, but
@@ -270,7 +273,9 @@ class AgentRunner:
                     messages_for_model = messages
             context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
+            profiler.push("llm_request")
             response = await self._request_model(spec, messages_for_model, hook, context)
+            profiler.pop()
             raw_usage = self._usage_dict(response.usage)
             context.response = response
             context.usage = dict(raw_usage)
@@ -307,12 +312,13 @@ class AgentRunner:
                 )
 
                 await hook.before_execute_tools(context)
-
+                profiler.push("tool_calls")
                 results, new_events, fatal_error = await self._execute_tools(
                     spec,
                     tool_calls,
                     external_lookup_counts,
                 )
+                profiler.pop()
                 tool_events.extend(new_events)
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
@@ -342,6 +348,7 @@ class AgentRunner:
                         if hook.wants_streaming():
                             await hook.on_stream_end(context, resuming=False)
                         await hook.after_iteration(context)
+                        profiler.pop(args={"finish_reason": response.finish_reason, "stop_reason": stop_reason})
                         break
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     final_content = error
@@ -357,7 +364,9 @@ class AgentRunner:
                     )
                     if should_continue:
                         had_injections = True
+                        profiler.pop(args={"finish_reason": response.finish_reason, "stop_reason": stop_reason})
                         continue
+                    profiler.pop(args={"finish_reason": response.finish_reason, "stop_reason": stop_reason})
                     break
                 await self._emit_checkpoint(
                     spec,
@@ -380,6 +389,7 @@ class AgentRunner:
                 if _drained:
                     had_injections = True
                 await hook.after_iteration(context)
+                profiler.pop(args={"finish_reason": response.finish_reason, "stop_reason": "tool_calls"})
                 continue
 
             if response.has_tool_calls:
@@ -403,6 +413,7 @@ class AgentRunner:
                     if hook.wants_streaming():
                         await hook.on_stream_end(context, resuming=False)
                     await hook.after_iteration(context)
+                    profiler.pop(args={"finish_reason": response.finish_reason, "stop_reason": "retry_empty_response"})
                     continue
                 logger.warning(
                     "Empty response on turn {} for {} after {} retries; attempting finalization",
@@ -438,8 +449,9 @@ class AgentRunner:
                         reasoning_content=response.reasoning_content,
                         thinking_blocks=response.thinking_blocks,
                     ))
-                    messages.append(build_length_recovery_message())
                     await hook.after_iteration(context)
+                    messages.append(build_length_recovery_message())
+                    profiler.pop(args={"finish_reason": response.finish_reason, "stop_reason": "length_recovery"})
                     continue
 
             assistant_message: dict[str, Any] | None = None
@@ -466,6 +478,7 @@ class AgentRunner:
 
             if should_continue:
                 await hook.after_iteration(context)
+                profiler.pop(args={"finish_reason": response.finish_reason, "stop_reason": "injected_continue"})
                 continue
 
             if response.finish_reason == "error":
@@ -483,7 +496,9 @@ class AgentRunner:
                 )
                 if should_continue:
                     had_injections = True
+                    profiler.pop(args={"finish_reason": response.finish_reason, "stop_reason": stop_reason})
                     continue
+                profiler.pop(args={"finish_reason": response.finish_reason, "stop_reason": stop_reason})
                 break
             if is_blank_text(clean):
                 final_content = EMPTY_FINAL_RESPONSE_MESSAGE
@@ -500,7 +515,9 @@ class AgentRunner:
                 )
                 if should_continue:
                     had_injections = True
+                    profiler.pop(args={"finish_reason": response.finish_reason, "stop_reason": stop_reason})
                     continue
+                profiler.pop(args={"finish_reason": response.finish_reason, "stop_reason": stop_reason})
                 break
 
             messages.append(assistant_message or build_assistant_message(
@@ -523,6 +540,7 @@ class AgentRunner:
             context.final_content = final_content
             context.stop_reason = stop_reason
             await hook.after_iteration(context)
+            profiler.pop(args={"finish_reason": response.finish_reason, "stop_reason": stop_reason})
             break
         else:
             stop_reason = "max_iterations"
@@ -558,6 +576,7 @@ class AgentRunner:
             error=error,
             tool_events=tool_events,
             had_injections=had_injections,
+            profiler=profiler.current(),
         )
 
     def _build_request_kwargs(
@@ -618,16 +637,24 @@ class AgentRunner:
         else:
             coro = self.provider.chat_with_retry(**kwargs)
 
+        profiler.push("llm_call", category="model")
         if timeout_s is None:
-            return await coro
-        try:
-            return await asyncio.wait_for(coro, timeout=timeout_s)
-        except asyncio.TimeoutError:
-            return LLMResponse(
-                content=f"Error calling LLM: timed out after {timeout_s:g}s",
-                finish_reason="error",
-                error_kind="timeout",
-            )
+            response = await coro
+        else:
+            try:
+                response = await asyncio.wait_for(coro, timeout=timeout_s)
+            except asyncio.TimeoutError:
+                response = LLMResponse(
+                    content=f"Error calling LLM: timed out after {timeout_s:g}s",
+                    finish_reason="error",
+                    error_kind="timeout",
+                )
+        profiler.pop(args={
+            "model": spec.model,
+            "messages": messages,
+            "response": response,
+        })
+        return response
 
     async def _request_finalization_retry(
         self,
@@ -669,6 +696,7 @@ class AgentRunner:
         tool_calls: list[ToolCallRequest],
         external_lookup_counts: dict[str, int],
     ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
+        profiler.push("execute_tools", category="tool")
         batches = self._partition_tool_batches(spec, tool_calls)
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
         for batch in batches:
@@ -697,6 +725,7 @@ class AgentRunner:
             events.append(event)
             if error is not None and fatal_error is None:
                 fatal_error = error
+        profiler.pop(args={"tool_count": len(tool_calls), "concurrent": spec.concurrent_tools})
         return results, events, fatal_error
 
     async def _run_tool(
@@ -705,6 +734,7 @@ class AgentRunner:
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None]:
+        profiler.push(tool_call.name, category="tool")
         hint = "\n\n[Analyze the error above and try a different approach.]"
         lookup_error = repeated_external_lookup_error(
             tool_call.name,
@@ -717,6 +747,7 @@ class AgentRunner:
                 "status": "error",
                 "detail": "repeated external lookup blocked",
             }
+            profiler.pop(status="error", args={"tool_call": tool_call, "error": lookup_error})
             if spec.fail_on_tool_error:
                 return lookup_error + hint, event, RuntimeError(lookup_error)
             return lookup_error + hint, event, None
@@ -735,6 +766,7 @@ class AgentRunner:
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
+            profiler.pop(status="error", args={"tool_call": tool_call, "error": prep_error})
             return prep_error + hint, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
         try:
             if tool is not None:
@@ -751,7 +783,9 @@ class AgentRunner:
             }
             if isinstance(exc, AskUserInterrupt):
                 event["status"] = "waiting"
+                profiler.pop(status="waiting", args={"tool_call": tool_call, "error": exc})
                 return "", event, exc
+            profiler.pop(status="error", args={"tool_call": tool_call, "error": exc})
             if spec.fail_on_tool_error:
                 return f"Error: {type(exc).__name__}: {exc}", event, exc
             return f"Error: {type(exc).__name__}: {exc}", event, None
@@ -762,6 +796,7 @@ class AgentRunner:
                 "status": "error",
                 "detail": result.replace("\n", " ").strip()[:120],
             }
+            profiler.pop(status="error", args={"tool_call": tool_call, "result": result})
             if spec.fail_on_tool_error:
                 return result + hint, event, RuntimeError(result)
             return result + hint, event, None
@@ -772,6 +807,7 @@ class AgentRunner:
             detail = "(empty)"
         elif len(detail) > 120:
             detail = detail[:120] + "..."
+        profiler.pop(status="ok", args={"tool_call": tool_call, "result": result})
         return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
 
     async def _emit_checkpoint(
