@@ -484,7 +484,7 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 
 nanobot supports multiple web search providers. Configure in `~/.nanobot/config.json` under `tools.web.search`.
 
-By default, web tools are enabled and web search uses `duckduckgo`, so search works out of the box without an API key.
+By default, web tools are enabled and web search uses `brave` when a Brave key is configured; otherwise it falls back to `duckduckgo`, so search still works out of the box without an API key.
 
 If you want to disable all built-in web tools entirely, set `tools.web.enable` to `false`. This removes both `web_search` and `web_fetch` from the tool list sent to the LLM.
 
@@ -504,6 +504,7 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
 | `tavily` | `apiKey` | `TAVILY_API_KEY` | No |
 | `jina` | `apiKey` | `JINA_API_KEY` | Free tier (10M tokens) |
 | `kagi` | `apiKey` | `KAGI_API_KEY` | No |
+| `olostep` | `apiKey` | `OLOSTEP_API_KEY` | No |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
 | `duckduckgo` (default) | — | — | Yes |
 
@@ -573,6 +574,22 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
   }
 }
 ```
+
+**Olostep:**
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "olostep",
+        "apiKey": "YOUR_OLOSTEP_API_KEY"
+      }
+    }
+  }
+}
+```
+
+You can also set `OLOSTEP_API_KEY` in the environment instead of storing it in config.
 
 **SearXNG** (self-hosted, no API key needed):
 ```json

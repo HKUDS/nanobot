@@ -170,7 +170,6 @@ class WebSearchConfig(Base):
 
     provider: str = "brave"  # brave, tavily, duckduckgo, searxng, jina, kagi, olostep
     api_key: str = ""
-    olostep_api_key: str | None = None
     base_url: str = ""  # SearXNG base URL
     max_results: int = 5
     timeout: int = 30  # Wall-clock timeout (seconds) for search operations
