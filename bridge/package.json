@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsc && node dist/index.js"
+    "dev": "tsc && node dist/index.js",
+    "test": "node --import tsx --test src/*.test.ts"
   },
   "dependencies": {
     "@whiskeysockets/baileys": "7.0.0-rc.9",
@@ -18,6 +19,7 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@types/ws": "^8.5.10",
+    "tsx": "^4.19.0",
     "typescript": "^5.4.0"
   },
   "engines": {
