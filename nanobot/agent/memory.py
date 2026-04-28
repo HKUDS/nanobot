@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import weakref
 import tiktoken
@@ -359,10 +360,18 @@ class MemoryStore:
             return None
 
     def _write_entries(self, entries: list[dict[str, Any]]) -> None:
-        """Overwrite history.jsonl with the given entries."""
-        with open(self.history_file, "w", encoding="utf-8") as f:
-            for entry in entries:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        """Overwrite history.jsonl with the given entries (atomic write)."""
+        tmp_path = self.history_file.with_suffix(self.history_file.suffix + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                for entry in entries:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.history_file)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
     # -- dream cursor --------------------------------------------------------
 
