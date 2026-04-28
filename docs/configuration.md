@@ -208,6 +208,25 @@ Connects directly to any OpenAI-compatible endpoint — llama.cpp, Together AI, 
 >
 > In short: **chat-completions-compatible endpoint → `custom`**; **Responses-compatible endpoint → `azure_openai`**.
 
+Some OpenAI-compatible gateways expose request-body extensions such as vLLM guided decoding or local sampling controls. Put those under `extraBody`; nanobot merges them into the chat-completions request body after its provider defaults:
+
+```json
+{
+  "providers": {
+    "custom": {
+      "apiKey": "your-api-key",
+      "apiBase": "https://api.your-provider.com/v1",
+      "extraBody": {
+        "repetition_penalty": 1.15,
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        }
+      }
+    }
+  }
+}
+```
+
 </details>
 
 <details>
