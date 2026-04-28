@@ -19,15 +19,12 @@ from nanobot.utils.helpers import build_image_content_blocks
 
 try:
     from olostep import AsyncOlostep, Olostep_BaseError
-
-    _OLOSTEP_AVAILABLE = True
 except ImportError:
     AsyncOlostep = None
 
     class Olostep_BaseError(Exception):
         """Fallback error type when olostep package is unavailable."""
-
-    _OLOSTEP_AVAILABLE = False
+        pass
 
 if TYPE_CHECKING:
     from nanobot.config.schema import WebSearchConfig
@@ -111,11 +108,10 @@ class WebSearchTool(Tool):
 
         self.config = config if config is not None else WebSearchConfig()
         self.proxy = proxy
-        self.provider = (self.config.provider or "brave").strip().lower()
 
     def _effective_provider(self) -> str:
         """Resolve the backend that execute() will actually use."""
-        provider = self.provider or "brave"
+        provider = (self.config.provider or "brave").strip().lower()
         if provider == "duckduckgo":
             return "duckduckgo"
         if provider == "brave":
@@ -148,7 +144,7 @@ class WebSearchTool(Tool):
         return self._effective_provider() == "duckduckgo"
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        provider = self.provider or "brave"
+        provider = (self.config.provider or "brave").strip().lower()
         n = min(max(count or self.config.max_results, 1), 10)
 
         if provider == "olostep":
