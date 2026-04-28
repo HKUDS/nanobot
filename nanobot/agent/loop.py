@@ -47,6 +47,7 @@ from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.document import extract_documents
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
+from nanobot.utils.profiler import profiler
 from nanobot.utils.progress_events import (
     build_tool_event_finish_payloads,
     build_tool_event_start_payload,
@@ -852,6 +853,7 @@ class AgentLoop:
         self._refresh_provider_snapshot()
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
+            profiler.push("prepare_before_agent_loop", category="mainloop")
             channel, chat_id = (
                 msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
             )
@@ -900,6 +902,8 @@ class AgentLoop:
                 session_summary=pending,
                 current_role=current_role,
             )
+            profiler.pop()
+            profiler.push("agent_loop", category="mainloop")
             final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
@@ -907,6 +911,8 @@ class AgentLoop:
                 session_key=key,
                 pending_queue=pending_queue,
             )
+            profiler.pop()
+            profiler.push("session_end", category="mainloop")
             self._save_turn(session, all_msgs, 1 + len(history))
             session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
             self._clear_runtime_checkpoint(session)
@@ -926,13 +932,17 @@ class AgentLoop:
             outbound_metadata: dict[str, Any] = {}
             if channel == "slack" and key.startswith("slack:") and key.count(":") >= 2:
                 outbound_metadata["slack"] = {"thread_ts": key.split(":", 2)[2]}
-            return OutboundMessage(
+            outbound = OutboundMessage(
                 channel=channel,
                 chat_id=chat_id,
                 content=content,
                 buttons=buttons,
                 metadata=outbound_metadata,
             )
+            profiler.pop()
+            return outbound
+
+        profiler.push("prepare_before_agent_loop")
 
         # Extract document text from media at the processing boundary so all
         # channels benefit without format-specific logic in ContextBuilder.
@@ -1041,6 +1051,8 @@ class AgentLoop:
             self.sessions.save(session)
             user_persisted_early = True
 
+        profiler.pop()
+        profiler.push("agent_loop")
         final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
@@ -1055,6 +1067,9 @@ class AgentLoop:
             session_key=key,
             pending_queue=pending_queue,
         )
+
+        profiler.pop()
+        profiler.push("session_end")
 
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
@@ -1089,13 +1104,15 @@ class AgentLoop:
         )
         if on_stream is not None and stop_reason not in {"ask_user", "error"}:
             meta["_streamed"] = True
-        return OutboundMessage(
+        outbound = OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
             metadata=meta,
             buttons=buttons,
         )
+        profiler.pop()
+        return outbound
 
     def _sanitize_persisted_blocks(
         self,

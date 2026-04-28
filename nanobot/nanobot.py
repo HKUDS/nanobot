@@ -9,6 +9,7 @@ from typing import Any
 from nanobot.agent.hook import AgentHook
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
+from nanobot.utils.profiler import ProfilerTrace, profiler
 
 
 @dataclass(slots=True)
@@ -18,6 +19,7 @@ class RunResult:
     content: str
     tools_used: list[str]
     messages: list[dict[str, Any]]
+    profiler: ProfilerTrace | None = None
 
 
 class Nanobot:
@@ -105,6 +107,7 @@ class Nanobot:
             hooks: Optional lifecycle hooks for this run.
         """
         prev = self._loop._extra_hooks
+        prof = profiler.start(session_key=session_key)
         if hooks is not None:
             self._loop._extra_hooks = list(hooks)
         try:
@@ -113,9 +116,10 @@ class Nanobot:
             )
         finally:
             self._loop._extra_hooks = prev
+            profiler.finish()
 
         content = (response.content if response else None) or ""
-        return RunResult(content=content, tools_used=[], messages=[])
+        return RunResult(content=content, tools_used=[], messages=[], profiler=prof)
 
 
 def _make_provider(config: Any) -> Any:
