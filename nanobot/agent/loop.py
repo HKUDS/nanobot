@@ -838,15 +838,14 @@ class AgentLoop:
             outbound_metadata: dict[str, Any] = {}
             if channel == "slack" and key.startswith("slack:") and key.count(":") >= 2:
                 outbound_metadata["slack"] = {"thread_ts": key.split(":", 2)[2]}
-            outbound = OutboundMessage(
+            profiler.pop()
+            return OutboundMessage(
                 channel=channel,
                 chat_id=chat_id,
                 content=content,
                 buttons=buttons,
                 metadata=outbound_metadata,
             )
-            profiler.pop()
-            return outbound
 
         profiler.push("prepare_before_agent_loop")
 
@@ -988,6 +987,7 @@ class AgentLoop:
         # came from MessageTool.
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             if not had_injections or stop_reason == "empty_final_response":
+                profiler.pop()
                 return None
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
@@ -1001,15 +1001,14 @@ class AgentLoop:
         )
         if on_stream is not None and stop_reason not in {"ask_user", "error"}:
             meta["_streamed"] = True
-        outbound = OutboundMessage(
+        profiler.pop()
+        return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
             metadata=meta,
             buttons=buttons,
         )
-        profiler.pop()
-        return outbound
 
     def _sanitize_persisted_blocks(
         self,
