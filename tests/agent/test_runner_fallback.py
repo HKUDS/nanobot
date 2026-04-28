@@ -6,7 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.providers.base import LLMResponse
 
 
@@ -22,6 +23,10 @@ def _make_provider(*, model_response: LLMResponse | None = None):
     if model_response is not None:
         p.chat_with_retry = AsyncMock(return_value=model_response)
     return p
+
+
+def _transient_error(content: str = "server unavailable") -> LLMResponse:
+    return LLMResponse(content=content, finish_reason="error", error_status_code=503)
 
 
 def _base_spec(**overrides) -> AgentRunSpec:
@@ -56,7 +61,7 @@ async def test_no_fallback_when_primary_succeeds():
 @pytest.mark.asyncio
 async def test_fallback_triggered_on_primary_error():
     """Primary fails -> first fallback succeeds."""
-    err = LLMResponse(content=None, finish_reason="error", usage={})
+    err = _transient_error()
     ok = LLMResponse(content="fallback-ok", tool_calls=[], usage={})
 
     primary = _make_provider(model_response=err)
@@ -76,12 +81,12 @@ async def test_fallback_triggered_on_primary_error():
 @pytest.mark.asyncio
 async def test_all_fallbacks_fail_returns_last_error():
     """Primary + all fallbacks fail -> return last error response."""
-    err = LLMResponse(content=None, finish_reason="error", usage={})
+    err = _transient_error()
 
     primary = _make_provider(model_response=err)
     fb1 = _make_provider(model_response=err)
     fb2 = _make_provider(model_response=LLMResponse(
-        content="last-error", finish_reason="error", usage={},
+        content="last-error", finish_reason="error", error_status_code=500, usage={},
     ))
 
     providers = {"fb-1": fb1, "fb-2": fb2}
@@ -110,7 +115,7 @@ async def test_empty_fallback_list_no_retry():
 @pytest.mark.asyncio
 async def test_cross_provider_fallback():
     """Fallback uses a different provider instance (cross-provider)."""
-    err = LLMResponse(content=None, finish_reason="error", usage={})
+    err = _transient_error()
     ok = LLMResponse(content="cross-provider-ok", tool_calls=[], usage={})
 
     primary = _make_provider(model_response=err)
@@ -132,7 +137,7 @@ async def test_cross_provider_fallback():
 @pytest.mark.asyncio
 async def test_fallback_skips_to_second_on_first_error():
     """First fallback also fails -> second fallback succeeds."""
-    err = LLMResponse(content=None, finish_reason="error", usage={})
+    err = _transient_error()
     ok = LLMResponse(content="second-fb-ok", tool_calls=[], usage={})
 
     primary = _make_provider(model_response=err)
@@ -158,7 +163,7 @@ async def test_fallback_reuses_same_provider_without_factory():
     async def chat_with_retry(*, messages, model, **kw):
         call_count["n"] += 1
         if call_count["n"] == 1:
-            return LLMResponse(content=None, finish_reason="error", usage={})
+            return _transient_error()
         return LLMResponse(content=f"ok-via-{model}", tool_calls=[], usage={})
 
     primary = MagicMock()
@@ -173,7 +178,7 @@ async def test_fallback_reuses_same_provider_without_factory():
 @pytest.mark.asyncio
 async def test_fallback_provider_cached():
     """Provider factory is called once per unique provider, not per attempt."""
-    err = LLMResponse(content=None, finish_reason="error", usage={})
+    err = _transient_error()
     ok = LLMResponse(content="cached-ok", tool_calls=[], usage={})
 
     primary = _make_provider(model_response=err)
@@ -188,3 +193,77 @@ async def test_fallback_provider_cached():
     result = await runner.run(_base_spec(fallback_models=["same-provider-model-a", "same-provider-model-b"]))
 
     assert result.final_content == "cached-ok"
+
+
+@pytest.mark.asyncio
+async def test_non_transient_error_does_not_fallback():
+    """Auth/config-style errors should surface instead of hiding bugs via fallback."""
+    primary = _make_provider(model_response=LLMResponse(
+        content="401 unauthorized",
+        finish_reason="error",
+        error_status_code=401,
+    ))
+    fallback = _make_provider(model_response=LLMResponse(content="fallback-ok"))
+    factory = MagicMock(return_value=fallback)
+
+    runner = AgentRunner(primary, provider_factory=factory)
+    result = await runner.run(_base_spec(fallback_models=["fb-model"]))
+
+    factory.assert_not_called()
+    assert result.error is not None
+
+
+@pytest.mark.asyncio
+async def test_quota_error_does_not_fallback_by_default():
+    """Quota/billing/payment 429s should not route by default."""
+    primary = _make_provider(model_response=LLMResponse(
+        content="insufficient quota",
+        finish_reason="error",
+        error_status_code=429,
+        error_code="insufficient_quota",
+    ))
+    fallback = _make_provider(model_response=LLMResponse(content="fallback-ok"))
+    factory = MagicMock(return_value=fallback)
+
+    runner = AgentRunner(primary, provider_factory=factory)
+    result = await runner.run(_base_spec(fallback_models=["fb-model"]))
+
+    factory.assert_not_called()
+    assert result.error is not None
+
+
+@pytest.mark.asyncio
+async def test_streaming_fallback_discards_failed_primary_deltas():
+    """Buffered streaming prevents primary partial output from leaking on fallback."""
+    streamed: list[str] = []
+
+    class StreamingHook(AgentHook):
+        def wants_streaming(self) -> bool:
+            return True
+
+        async def on_stream(self, context: AgentHookContext, delta: str) -> None:
+            streamed.append(delta)
+
+    async def primary_stream(*, on_content_delta, **kwargs):
+        await on_content_delta("bad partial")
+        return _transient_error()
+
+    async def fallback_stream(*, on_content_delta, **kwargs):
+        await on_content_delta("good")
+        await on_content_delta(" answer")
+        return LLMResponse(content="good answer", tool_calls=[], usage={})
+
+    primary = MagicMock()
+    primary.chat_stream_with_retry = primary_stream
+    fallback = MagicMock()
+    fallback.chat_stream_with_retry = fallback_stream
+    factory = MagicMock(return_value=fallback)
+
+    runner = AgentRunner(primary, provider_factory=factory)
+    result = await runner.run(_base_spec(
+        fallback_models=["fb-model"],
+        hook=StreamingHook(),
+    ))
+
+    assert result.final_content == "good answer"
+    assert streamed == ["good", " answer"]
