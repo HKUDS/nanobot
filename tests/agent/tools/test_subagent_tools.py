@@ -13,6 +13,42 @@ _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
 
 @pytest.mark.asyncio
+async def test_build_tool_registry_returns_standard_tools(tmp_path):
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.schema import ExecToolConfig, WebToolsConfig
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=5000,
+        exec_config=ExecToolConfig(enable=True),
+        web_config=WebToolsConfig(enable=True),
+    )
+    tools = mgr.build_tool_registry()
+    names = tools.tool_names
+    # Filesystem tools
+    assert "read_file" in names
+    assert "write_file" in names
+    assert "edit_file" in names
+    assert "list_dir" in names
+    # Search tools
+    assert "glob" in names
+    assert "grep" in names
+    # Shell + web (both enabled)
+    assert "exec" in names
+    assert "web_search" in names
+    assert "web_fetch" in names
+    # Must NOT include agent-level tools
+    assert "message" not in names
+    assert "spawn" not in names
+
+
+@pytest.mark.asyncio
 async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
     """allowed_env_keys from ExecToolConfig must be forwarded to the subagent's ExecTool."""
     from nanobot.agent.subagent import SubagentManager, SubagentStatus
@@ -52,6 +88,73 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
     )
 
     mgr.runner.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_step_returns_agent_run_result(tmp_path):
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=5000,
+    )
+
+    fake_result = SimpleNamespace(
+        stop_reason="completed",
+        final_content="step result",
+        error=None,
+        tool_events=[],
+        messages=[],
+        usage={},
+        had_injections=False,
+        tools_used=[],
+    )
+    mgr.runner.run = AsyncMock(return_value=fake_result)
+
+    # Create a dummy extra tool to verify injection
+    from nanobot.agent.tools.base import Tool, tool_parameters
+    from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
+
+    @tool_parameters(
+        tool_parameters_schema(
+            msg=StringSchema("test"),
+            required=["msg"],
+        )
+    )
+    class DummySignalTool(Tool):
+        @property
+        def name(self):
+            return "dummy_signal"
+        @property
+        def description(self):
+            return "test signal"
+        async def execute(self, msg="", **kwargs):
+            return "ok"
+
+    result = await mgr.run_step(
+        system_prompt="You are a test subagent.",
+        user_message="Do something.",
+        extra_tools=[DummySignalTool()],
+    )
+    assert result.final_content == "step result"
+
+    # Verify runner.run was called with correct spec
+    call_args = mgr.runner.run.call_args
+    spec = call_args[0][0]
+    assert spec.tools.has("dummy_signal")
+    assert spec.tools.has("read_file")
+    assert spec.fail_on_tool_error is False
+    # Verify system prompt and user message
+    assert spec.initial_messages[0]["role"] == "system"
+    assert spec.initial_messages[0]["content"] == "You are a test subagent."
+    assert spec.initial_messages[1]["role"] == "user"
+    assert spec.initial_messages[1]["content"] == "Do something."
 
 
 @pytest.mark.asyncio

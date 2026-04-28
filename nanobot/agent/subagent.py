@@ -6,13 +6,13 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.utils.prompt_templates import render_template
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.runner import AgentRunResult, AgentRunSpec, AgentRunner
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -23,6 +23,9 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ExecToolConfig, WebToolsConfig
 from nanobot.providers.base import LLMProvider
+
+if TYPE_CHECKING:
+    from nanobot.agent.tools.base import Tool
 
 
 @dataclass(slots=True)
@@ -96,6 +99,63 @@ class SubagentManager:
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
 
+    def build_tool_registry(self) -> ToolRegistry:
+        """Build the standard subagent tool registry (filesystem + search + web)."""
+        tools = ToolRegistry()
+        allowed_dir = self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
+        extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
+        tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
+        tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        tools.register(GlobTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        tools.register(GrepTool(workspace=self.workspace, allowed_dir=allowed_dir))
+        if self.exec_config.enable:
+            tools.register(ExecTool(
+                working_dir=str(self.workspace),
+                timeout=self.exec_config.timeout,
+                restrict_to_workspace=self.restrict_to_workspace,
+                sandbox=self.exec_config.sandbox,
+                path_append=self.exec_config.path_append,
+                allowed_env_keys=self.exec_config.allowed_env_keys,
+            ))
+        if self.web_config.enable:
+            tools.register(WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy))
+            tools.register(WebFetchTool(proxy=self.web_config.proxy))
+        return tools
+
+    async def run_step(
+        self,
+        system_prompt: str,
+        user_message: str,
+        extra_tools: list["Tool"] | None = None,
+    ) -> AgentRunResult:
+        """Run a single subagent step and return the result directly.
+
+        Unlike ``spawn``, this awaits completion and returns the
+        ``AgentRunResult`` — no message-bus announcement.
+        """
+        tools = self.build_tool_registry()
+        for t in (extra_tools or []):
+            tools.register(t)
+        # Deliberately lower than _run_subagent()'s 15: long-task steps must
+        # be short to encourage handoff() calls instead of doing everything.
+        return await self.runner.run(AgentRunSpec(
+            initial_messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            tools=tools,
+            model=self.model,
+            max_iterations=8,
+            max_iterations_message=(
+                "Tool budget exhausted. "
+                "Call handoff() or complete() earlier next time."
+            ),
+            max_tool_result_chars=self.max_tool_result_chars,
+            fail_on_tool_error=False,
+        ))
+
     async def spawn(
         self,
         task: str,
@@ -153,28 +213,7 @@ class SubagentManager:
             status.iteration = payload.get("iteration", status.iteration)
 
         try:
-            # Build subagent tools (no message tool, no spawn tool)
-            tools = ToolRegistry()
-            allowed_dir = self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
-            extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-            tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
-            tools.register(WriteFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(EditFileTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(ListDirTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(GlobTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            tools.register(GrepTool(workspace=self.workspace, allowed_dir=allowed_dir))
-            if self.exec_config.enable:
-                tools.register(ExecTool(
-                    working_dir=str(self.workspace),
-                    timeout=self.exec_config.timeout,
-                    restrict_to_workspace=self.restrict_to_workspace,
-                    sandbox=self.exec_config.sandbox,
-                    path_append=self.exec_config.path_append,
-                    allowed_env_keys=self.exec_config.allowed_env_keys,
-                ))
-            if self.web_config.enable:
-                tools.register(WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy))
-                tools.register(WebFetchTool(proxy=self.web_config.proxy))
+            tools = self.build_tool_registry()
             system_prompt = self._build_subagent_prompt()
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
