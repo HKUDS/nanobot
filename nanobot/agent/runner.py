@@ -447,8 +447,8 @@ class AgentRunner:
                         reasoning_content=response.reasoning_content,
                         thinking_blocks=response.thinking_blocks,
                     ))
-                    await hook.after_iteration(context)
                     messages.append(build_length_recovery_message())
+                    await hook.after_iteration(context)
                     profiler.pop(args={"finish_reason": response.finish_reason, "stop_reason": "length_recovery"})
                     continue
 
