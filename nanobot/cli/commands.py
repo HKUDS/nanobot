@@ -497,8 +497,7 @@ def _make_cli_provider_factory(config: Config):
     def factory(model_or_preset: str):
         preset = presets.get(model_or_preset)
         actual_model = preset.model if preset else model_or_preset
-        provider_name = config.get_provider_name(actual_model)
-        key = provider_name or actual_model
+        key = actual_model
         if key not in cache:
             cache[key] = _make_provider_for_model(config, actual_model, preset=preset)
         return cache[key]
