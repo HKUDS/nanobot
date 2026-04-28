@@ -484,7 +484,7 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 
 nanobot supports multiple web search providers. Configure in `~/.nanobot/config.json` under `tools.web.search`.
 
-By default, web tools are enabled and web search uses `brave` when a Brave key is configured; otherwise it falls back to `duckduckgo`, so search still works out of the box without an API key.
+By default, web tools are enabled and web search uses `duckduckgo`, so search works out of the box without an API key.
 
 If you want to disable all built-in web tools entirely, set `tools.web.enable` to `false`. This removes both `web_search` and `web_fetch` from the tool list sent to the LLM.
 

@@ -17,15 +17,6 @@ from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.utils.helpers import build_image_content_blocks
 
-try:
-    from olostep import AsyncOlostep, Olostep_BaseError
-except ImportError:
-    AsyncOlostep = None
-
-    class Olostep_BaseError(Exception):
-        """Fallback error type when olostep package is unavailable."""
-        pass
-
 if TYPE_CHECKING:
     from nanobot.config.schema import WebSearchConfig
 
@@ -99,11 +90,7 @@ class WebSearchTool(Tool):
         "Use web_fetch to read a specific page in full."
     )
 
-    def __init__(
-        self,
-        config: WebSearchConfig | None = None,
-        proxy: str | None = None,
-    ):
+    def __init__(self, config: WebSearchConfig | None = None, proxy: str | None = None):
         from nanobot.config.schema import WebSearchConfig
 
         self.config = config if config is not None else WebSearchConfig()
@@ -111,7 +98,7 @@ class WebSearchTool(Tool):
 
     def _effective_provider(self) -> str:
         """Resolve the backend that execute() will actually use."""
-        provider = self.config.provider.strip().lower()
+        provider = self.config.provider.strip().lower() or "brave"
         if provider == "duckduckgo":
             return "duckduckgo"
         if provider == "brave":
@@ -144,7 +131,7 @@ class WebSearchTool(Tool):
         return self._effective_provider() == "duckduckgo"
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        provider = self.config.provider.strip().lower()
+        provider = self.config.provider.strip().lower() or "brave"
         n = min(max(count or self.config.max_results, 1), 10)
 
         if provider == "olostep":
@@ -165,7 +152,9 @@ class WebSearchTool(Tool):
             return f"Error: unknown search provider '{provider}'"
 
     async def _search_olostep(self, query: str, n: int) -> str:
-        if AsyncOlostep is None:
+        try:
+            from olostep import AsyncOlostep, Olostep_BaseError
+        except ImportError:
             return "Error: olostep package not installed. Run: pip install olostep"
         api_key = self.config.api_key or os.environ.get("OLOSTEP_API_KEY", "")
         if not api_key:

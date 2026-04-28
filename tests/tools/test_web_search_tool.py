@@ -286,8 +286,6 @@ async def test_duckduckgo_timeout_returns_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_olostep_search_formats_answer_and_sources(monkeypatch):
     from types import SimpleNamespace
-    from unittest.mock import patch
-    import nanobot.agent.tools.web as web_mod
 
     calls: dict[str, str] = {}
 
@@ -309,9 +307,16 @@ async def test_olostep_search_formats_answer_and_sources(monkeypatch):
                 sources=[SimpleNamespace(title="Example Source", url="https://example.com")],
             )
 
-    with patch.object(web_mod, "AsyncOlostep", MockAsyncOlostep):
-        tool = _tool(provider="olostep", api_key="olostep-key")
-        result = await tool.execute(query="test query")
+    import sys
+    import types
+
+    fake_mod = types.ModuleType("olostep")
+    fake_mod.AsyncOlostep = MockAsyncOlostep
+    fake_mod.Olostep_BaseError = Exception
+    monkeypatch.setitem(sys.modules, "olostep", fake_mod)
+
+    tool = _tool(provider="olostep", api_key="olostep-key")
+    result = await tool.execute(query="test query")
 
     assert calls["api_key"] == "olostep-key"
     assert calls["task"] == "test query"
@@ -322,8 +327,9 @@ async def test_olostep_search_formats_answer_and_sources(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_olostep_missing_key_falls_back_to_duckduckgo(monkeypatch):
+    import sys
+    import types
     from unittest.mock import patch
-    import nanobot.agent.tools.web as web_mod
 
     class MockDDGS:
         def __init__(self, **kw):
@@ -331,6 +337,11 @@ async def test_olostep_missing_key_falls_back_to_duckduckgo(monkeypatch):
 
         def text(self, query, max_results=5):
             return [{"title": "Fallback", "href": "https://ddg.example", "body": "fallback"}]
+
+    fake_mod = types.ModuleType("olostep")
+    fake_mod.AsyncOlostep = object
+    fake_mod.Olostep_BaseError = Exception
+    monkeypatch.setitem(sys.modules, "olostep", fake_mod)
 
     monkeypatch.delenv("OLOSTEP_API_KEY", raising=False)
     with patch("ddgs.DDGS", MockDDGS):
@@ -342,11 +353,10 @@ async def test_olostep_missing_key_falls_back_to_duckduckgo(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_olostep_package_missing_returns_install_hint(monkeypatch):
-    from unittest.mock import patch
-    import nanobot.agent.tools.web as web_mod
-
-    with patch.object(web_mod, "AsyncOlostep", None):
-        tool = _tool(provider="olostep", api_key="olostep-key")
-        result = await tool.execute(query="test query")
+    import sys
+    monkeypatch.delitem(sys.modules, "olostep", raising=False)
+    monkeypatch.setitem(sys.modules, "olostep", None)
+    tool = _tool(provider="olostep", api_key="olostep-key")
+    result = await tool.execute(query="test query")
 
     assert result == "Error: olostep package not installed. Run: pip install olostep"
