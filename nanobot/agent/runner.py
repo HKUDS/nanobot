@@ -764,6 +764,15 @@ class AgentRunner:
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
+            if self._is_workspace_violation(prep_error):
+                logger.warning(
+                    "Tool {} blocked by workspace/safety guard during preparation; aborting turn: {}",
+                    tool_call.name,
+                    prep_error.replace("\n", " ").strip()[:200],
+                )
+                event["detail"] = ("workspace_violation: "
+                                   + prep_error.replace("\n", " ").strip())[:160]
+                return prep_error, event, RuntimeError(prep_error)
             return prep_error + hint, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
         try:
             if tool is not None:
@@ -781,6 +790,15 @@ class AgentRunner:
             if isinstance(exc, AskUserInterrupt):
                 event["status"] = "waiting"
                 return "", event, exc
+            if self._is_workspace_violation(str(exc)):
+                logger.warning(
+                    "Tool {} blocked by workspace/safety guard; aborting turn: {}",
+                    tool_call.name,
+                    str(exc).replace("\n", " ").strip()[:200],
+                )
+                event["detail"] = ("workspace_violation: "
+                                   + str(exc).replace("\n", " ").strip())[:160]
+                return f"Error: {type(exc).__name__}: {exc}", event, exc
             if spec.fail_on_tool_error:
                 return f"Error: {type(exc).__name__}: {exc}", event, exc
             return f"Error: {type(exc).__name__}: {exc}", event, None
