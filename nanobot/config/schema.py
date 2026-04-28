@@ -130,7 +130,11 @@ class ProvidersConfig(Base):
     huggingface: ProviderConfig = Field(default_factory=ProviderConfig)
     deepseek: ProviderConfig = Field(default_factory=ProviderConfig)
     groq: ProviderConfig = Field(default_factory=ProviderConfig)
-    zhipu: ProviderConfig = Field(default_factory=ProviderConfig)
+    zai_cn: ProviderConfig = Field(default_factory=ProviderConfig)  # Z.AI CN (China mainland)
+    zai_gb: ProviderConfig = Field(default_factory=ProviderConfig)  # Z.AI Global
+    zai_coding_cn: ProviderConfig = Field(default_factory=ProviderConfig)  # Z.AI Coding Plan CN
+    zai_coding_gb: ProviderConfig = Field(default_factory=ProviderConfig)  # Z.AI Coding Plan Global
+    zhipu: ProviderConfig = Field(default_factory=ProviderConfig)  # deprecated -> use zai_cn
     dashscope: ProviderConfig = Field(default_factory=ProviderConfig)
     vllm: ProviderConfig = Field(default_factory=ProviderConfig)
     ollama: ProviderConfig = Field(default_factory=ProviderConfig)  # Ollama local models
