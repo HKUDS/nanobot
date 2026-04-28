@@ -111,7 +111,7 @@ class WebSearchTool(Tool):
 
     def _effective_provider(self) -> str:
         """Resolve the backend that execute() will actually use."""
-        provider = (self.config.provider or "brave").strip().lower()
+        provider = self.config.provider.strip().lower()
         if provider == "duckduckgo":
             return "duckduckgo"
         if provider == "brave":
@@ -144,7 +144,7 @@ class WebSearchTool(Tool):
         return self._effective_provider() == "duckduckgo"
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
-        provider = (self.config.provider or "brave").strip().lower()
+        provider = self.config.provider.strip().lower()
         n = min(max(count or self.config.max_results, 1), 10)
 
         if provider == "olostep":
