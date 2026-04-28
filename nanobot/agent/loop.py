@@ -20,14 +20,21 @@ from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.tools.ask import (
+    AskUserTool,
+    ask_user_options_from_messages,
+    ask_user_outbound,
+    ask_user_tool_result_messages,
+    pending_ask_user_id,
+)
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.notebook import NotebookEditTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.search import GlobTool, GrepTool
-from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.self import MyTool
+from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
@@ -35,10 +42,17 @@ from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMProvider
+from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.document import extract_documents
 from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
+from nanobot.utils.progress_events import (
+    build_tool_event_finish_payloads,
+    build_tool_event_start_payload,
+    invoke_on_progress,
+    on_progress_accepts_tool_events,
+)
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 
 if TYPE_CHECKING:
@@ -62,6 +76,8 @@ class _LoopHook(AgentHook):
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_key: str | None = None,
     ) -> None:
         super().__init__(reraise=True)
         self._loop = agent_loop
@@ -71,6 +87,8 @@ class _LoopHook(AgentHook):
         self._channel = channel
         self._chat_id = chat_id
         self._message_id = message_id
+        self._metadata = metadata or {}
+        self._session_key = session_key
         self._stream_buf = ""
 
     def wants_streaming(self) -> bool:
@@ -96,20 +114,46 @@ class _LoopHook(AgentHook):
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if self._on_progress:
-            if not self._on_stream:
+            if not self._on_stream and not context.streamed_content:
                 thought = self._loop._strip_think(
                     context.response.content if context.response else None
                 )
                 if thought:
                     await self._on_progress(thought)
             tool_hint = self._loop._strip_think(self._loop._tool_hint(context.tool_calls))
-            await self._on_progress(tool_hint, tool_hint=True)
+            tool_events = [build_tool_event_start_payload(tc) for tc in context.tool_calls]
+            await invoke_on_progress(
+                self._on_progress,
+                tool_hint,
+                tool_hint=True,
+                tool_events=tool_events,
+            )
         for tc in context.tool_calls:
             args_str = json.dumps(tc.arguments, ensure_ascii=False)
             logger.info("Tool call: {}({})", tc.name, args_str[:200])
-        self._loop._set_tool_context(self._channel, self._chat_id, self._message_id)
+        self._loop._set_tool_context(
+            self._channel,
+            self._chat_id,
+            self._message_id,
+            self._metadata,
+            session_key=self._session_key,
+        )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
+        if (
+            self._on_progress
+            and context.tool_calls
+            and context.tool_events
+            and on_progress_accepts_tool_events(self._on_progress)
+        ):
+            tool_events = build_tool_event_finish_payloads(context)
+            if tool_events:
+                await invoke_on_progress(
+                    self._on_progress,
+                    "",
+                    tool_hint=False,
+                    tool_events=tool_events,
+                )
         u = context.usage or {}
         logger.debug(
             "LLM usage: prompt={} completion={} cached={}",
@@ -157,10 +201,13 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
+        consolidation_ratio: float = 0.5,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
+        provider_snapshot_loader: Callable[[], ProviderSnapshot] | None = None,
+        provider_signature: tuple[object, ...] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
 
@@ -169,6 +216,8 @@ class AgentLoop:
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
+        self._provider_snapshot_loader = provider_snapshot_loader
+        self._provider_signature = provider_signature
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = (
@@ -236,6 +285,7 @@ class AgentLoop:
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
+            consolidation_ratio=consolidation_ratio,
         )
         self.auto_compact = AutoCompact(
             sessions=self.sessions,
@@ -255,12 +305,43 @@ class AgentLoop:
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
+    def _apply_provider_snapshot(self, snapshot: ProviderSnapshot) -> None:
+        """Swap model/provider for future turns without disturbing an active one."""
+        provider = snapshot.provider
+        model = snapshot.model
+        context_window_tokens = snapshot.context_window_tokens
+        if self.provider is provider and self.model == model:
+            return
+        old_model = self.model
+        self.provider = provider
+        self.model = model
+        self.context_window_tokens = context_window_tokens
+        self.runner.provider = provider
+        self.subagents.set_provider(provider, model)
+        self.consolidator.set_provider(provider, model, context_window_tokens)
+        self.dream.set_provider(provider, model)
+        self._provider_signature = snapshot.signature
+        logger.info("Runtime model switched for next turn: {} -> {}", old_model, model)
+
+    def _refresh_provider_snapshot(self) -> None:
+        if self._provider_snapshot_loader is None:
+            return
+        try:
+            snapshot = self._provider_snapshot_loader()
+        except Exception:
+            logger.exception("Failed to refresh provider config")
+            return
+        if snapshot.signature == self._provider_signature:
+            return
+        self._apply_provider_snapshot(snapshot)
+
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
         allowed_dir = (
             self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
         )
         extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
+        self.tools.register(AskUserTool())
         self.tools.register(
             ReadFileTool(
                 workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read
@@ -287,7 +368,7 @@ class AgentLoop:
                 WebSearchTool(config=self.web_config.search, proxy=self.web_config.proxy)
             )
             self.tools.register(WebFetchTool(proxy=self.web_config.proxy))
-        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound, workspace=self.workspace))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(
@@ -316,18 +397,33 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def _set_tool_context(
+        self, channel: str, chat_id: str,
+        message_id: str | None = None, metadata: dict | None = None,
+        session_key: str | None = None,
+    ) -> None:
         """Update context for all tools that need routing info."""
-        # Compute the effective session key (accounts for unified sessions)
-        # so that subagent results route to the correct pending queue.
-        effective_key = UNIFIED_SESSION_KEY if self._unified_session else f"{channel}:{chat_id}"
+        # When the caller threads a thread-scoped session_key (e.g. slack with
+        # reply_in_thread: true), honor it so spawn announces route back to
+        # the originating thread session. Falls back to unified mode or
+        # channel:chat_id for callers that don't have a thread-scoped key.
+        if session_key is not None:
+            effective_key = session_key
+        elif self._unified_session:
+            effective_key = UNIFIED_SESSION_KEY
+        else:
+            effective_key = f"{channel}:{chat_id}"
         for name in ("message", "spawn", "cron", "my"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     if name == "spawn":
                         tool.set_context(channel, chat_id, effective_key=effective_key)
+                    elif name == "cron":
+                        tool.set_context(channel, chat_id, metadata=metadata, session_key=session_key)
+                    elif name == "message":
+                        tool.set_context(channel, chat_id, message_id, metadata=metadata)
                     else:
-                        tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                        tool.set_context(channel, chat_id)
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -339,17 +435,64 @@ class AgentLoop:
         return strip_think(text) or None
 
     @staticmethod
+    def _runtime_chat_id(msg: InboundMessage) -> str:
+        """Return the chat id shown in runtime metadata for the model."""
+        return str(msg.metadata.get("context_chat_id") or msg.chat_id)
+
+    @staticmethod
     def _tool_hint(tool_calls: list) -> str:
         """Format tool calls as concise hints with smart abbreviation."""
         from nanobot.utils.tool_hints import format_tool_hints
 
         return format_tool_hints(tool_calls)
 
+    async def _dispatch_command_inline(
+        self,
+        msg: InboundMessage,
+        key: str,
+        raw: str,
+        dispatch_fn: Callable[[CommandContext], Awaitable[OutboundMessage | None]],
+    ) -> None:
+        """Dispatch a command directly from the run() loop and publish the result."""
+        ctx = CommandContext(msg=msg, session=None, key=key, raw=raw, loop=self)
+        result = await dispatch_fn(ctx)
+        if result:
+            await self.bus.publish_outbound(result)
+        else:
+            logger.warning("Command '{}' matched but dispatch returned None", raw)
+
+    async def _cancel_active_tasks(self, key: str) -> int:
+        """Cancel and await all active tasks and subagents for *key*.
+
+        Returns the total number of cancelled tasks + subagents.
+        """
+        tasks = self._active_tasks.pop(key, [])
+        cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
+        for t in tasks:
+            try:
+                await t
+            except (asyncio.CancelledError, Exception):
+                pass
+        sub_cancelled = await self.subagents.cancel_by_session(key)
+        return cancelled + sub_cancelled
+
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
         if self._unified_session and not msg.session_key_override:
             return UNIFIED_SESSION_KEY
         return msg.session_key
+
+    def _replay_token_budget(self) -> int:
+        """Derive a token budget for session history replay from the context window."""
+        if self.context_window_tokens <= 0:
+            return 0
+        max_output = getattr(getattr(self.provider, "generation", None), "max_tokens", 4096)
+        try:
+            reserved_output = int(max_output)
+        except (TypeError, ValueError):
+            reserved_output = 4096
+        budget = self.context_window_tokens - max(1, reserved_output) - 1024
+        return budget if budget > 0 else max(128, self.context_window_tokens // 2)
 
     async def _run_agent_loop(
         self,
@@ -363,6 +506,8 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_key: str | None = None,
         pending_queue: asyncio.Queue | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
@@ -382,6 +527,8 @@ class AgentLoop:
             channel=channel,
             chat_id=chat_id,
             message_id=message_id,
+            metadata=metadata,
+            session_key=session_key,
         )
         hook: AgentHook = (
             CompositeHook([loop_hook] + self._extra_hooks) if self._extra_hooks else loop_hook
@@ -393,15 +540,18 @@ class AgentLoop:
             self._set_runtime_checkpoint(session, payload)
 
         async def _drain_pending(*, limit: int = _MAX_INJECTIONS_PER_TURN) -> list[dict[str, Any]]:
-            """Non-blocking drain of follow-up messages from the pending queue."""
+            """Drain follow-up messages from the pending queue.
+
+            When no messages are immediately available but sub-agents
+            spawned in this dispatch are still running, blocks until at
+            least one result arrives (or timeout).  This keeps the runner
+            loop alive so subsequent sub-agent completions are consumed
+            in-order rather than dispatched separately.
+            """
             if pending_queue is None:
                 return []
-            items: list[dict[str, Any]] = []
-            while len(items) < limit:
-                try:
-                    pending_msg = pending_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
+
+            def _to_user_message(pending_msg: InboundMessage) -> dict[str, Any]:
                 content = pending_msg.content
                 media = pending_msg.media if pending_msg.media else None
                 if media:
@@ -410,14 +560,43 @@ class AgentLoop:
                 user_content = self.context._build_user_content(content, media)
                 runtime_ctx = self.context._build_runtime_context(
                     pending_msg.channel,
-                    pending_msg.chat_id,
+                    self._runtime_chat_id(pending_msg),
                     self.context.timezone,
                 )
                 if isinstance(user_content, str):
                     merged: str | list[dict[str, Any]] = f"{runtime_ctx}\n\n{user_content}"
                 else:
                     merged = [{"type": "text", "text": runtime_ctx}] + user_content
-                items.append({"role": "user", "content": merged})
+                return {"role": "user", "content": merged}
+
+            items: list[dict[str, Any]] = []
+            while len(items) < limit:
+                try:
+                    items.append(_to_user_message(pending_queue.get_nowait()))
+                except asyncio.QueueEmpty:
+                    break
+
+            # Block if nothing drained but sub-agents spawned in this dispatch
+            # are still running.  Keeps the runner loop alive so subsequent
+            # completions are injected in-order rather than dispatched separately.
+            if (not items
+                    and session is not None
+                    and self.subagents.get_running_count_by_session(session.key) > 0):
+                try:
+                    msg = await asyncio.wait_for(pending_queue.get(), timeout=300)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Timeout waiting for sub-agent completion in session {}",
+                        session.key,
+                    )
+                    return items
+                items.append(_to_user_message(msg))
+                while len(items) < limit:
+                    try:
+                        items.append(_to_user_message(pending_queue.get_nowait()))
+                    except asyncio.QueueEmpty:
+                        break
+
             return items
 
         result = await self.runner.run(AgentRunSpec(
@@ -478,16 +657,24 @@ class AgentLoop:
 
             raw = msg.content.strip()
             if self.commands.is_priority(raw):
-                ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw=raw, loop=self)
-                result = await self.commands.dispatch_priority(ctx)
-                if result:
-                    await self.bus.publish_outbound(result)
+                await self._dispatch_command_inline(
+                    msg, msg.session_key, raw,
+                    self.commands.dispatch_priority,
+                )
                 continue
             effective_key = self._effective_session_key(msg)
             # If this session already has an active pending queue (i.e. a task
             # is processing this session), route the message there for mid-turn
             # injection instead of creating a competing task.
             if effective_key in self._pending_queues:
+                # Non-priority commands must not be queued for injection;
+                # dispatch them directly (same pattern as priority commands).
+                if self.commands.is_dispatchable_command(raw):
+                    await self._dispatch_command_inline(
+                        msg, effective_key, raw,
+                        self.commands.dispatch,
+                    )
+                    continue
                 pending_msg = msg
                 if effective_key != msg.session_key:
                     pending_msg = dataclasses.replace(
@@ -656,19 +843,23 @@ class AgentLoop:
         self,
         msg: InboundMessage,
         session_key: str | None = None,
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
         pending_queue: asyncio.Queue | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        self._refresh_provider_snapshot()
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (
                 msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id)
             )
             logger.info("Processing system message from {}", msg.sender_id)
-            key = f"{channel}:{chat_id}"
+            # Honor session_key_override so subagent announces from threaded
+            # callers route to the originating thread session, not the
+            # channel-level session derived from chat_id.
+            key = msg.session_key_override or f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             if self._restore_runtime_checkpoint(session):
                 self.sessions.save(session)
@@ -689,8 +880,14 @@ class AgentLoop:
             is_subagent = msg.sender_id == "subagent"
             if is_subagent and self._persist_subagent_followup(session, msg):
                 self.sessions.save(session)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
-            history = session.get_history(max_messages=0)
+            self._set_tool_context(
+                channel, chat_id, msg.metadata.get("message_id"),
+                msg.metadata, session_key=key,
+            )
+            history = session.get_history(
+                max_tokens=self._replay_token_budget(),
+                include_timestamps=True,
+            )
             current_role = "assistant" if is_subagent else "user"
 
             # Subagent content is already in `history` above; passing it again
@@ -703,18 +900,38 @@ class AgentLoop:
                 session_summary=pending,
                 current_role=current_role,
             )
-            final_content, _, all_msgs, _, _ = await self._run_agent_loop(
+            final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
+                metadata=msg.metadata,
+                session_key=key,
+                pending_queue=pending_queue,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
+            session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
             self._clear_runtime_checkpoint(session)
             self.sessions.save(session)
             self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
+            options = ask_user_options_from_messages(all_msgs) if stop_reason == "ask_user" else []
+            content, buttons = ask_user_outbound(
+                final_content or "Background task completed.",
+                options,
+                channel,
+            )
+            # Reconstruct channel-specific metadata from session.key so the
+            # outbound reply lands in the originating thread (not the channel
+            # top-level). The announce InboundMessage carries only
+            # injected_event metadata; we recover thread_ts from the session
+            # key, which slack writes as "slack:<chat_id>:<thread_ts>".
+            outbound_metadata: dict[str, Any] = {}
+            if channel == "slack" and key.startswith("slack:") and key.count(":") >= 2:
+                outbound_metadata["slack"] = {"thread_ts": key.split(":", 2)[2]}
             return OutboundMessage(
                 channel=channel,
                 chat_id=chat_id,
-                content=final_content or "Background task completed.",
+                content=content,
+                buttons=buttons,
+                metadata=outbound_metadata,
             )
 
         # Extract document text from media at the processing boundary so all
@@ -746,26 +963,48 @@ class AgentLoop:
             session_summary=pending,
         )
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        self._set_tool_context(
+            msg.channel, msg.chat_id, msg.metadata.get("message_id"),
+            msg.metadata, session_key=key,
+        )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=0)
-
-        initial_messages = self.context.build_messages(
-            history=history,
-            current_message=msg.content,
-            session_summary=pending,
-            media=msg.media if msg.media else None,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
+        history = session.get_history(
+            max_tokens=self._replay_token_budget(),
+            include_timestamps=True,
         )
 
-        async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
+        pending_ask_id = pending_ask_user_id(history)
+        if pending_ask_id:
+            initial_messages = ask_user_tool_result_messages(
+                self.context.build_system_prompt(channel=msg.channel),
+                history,
+                pending_ask_id,
+                msg.content,
+            )
+        else:
+            initial_messages = self.context.build_messages(
+                history=history,
+                current_message=msg.content,
+                session_summary=pending,
+                media=msg.media if msg.media else None,
+                channel=msg.channel,
+                chat_id=self._runtime_chat_id(msg),
+            )
+
+        async def _bus_progress(
+            content: str,
+            *,
+            tool_hint: bool = False,
+            tool_events: list[dict[str, Any]] | None = None,
+        ) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
             meta["_tool_hint"] = tool_hint
+            if tool_events:
+                meta["_tool_events"] = tool_events
             await self.bus.publish_outbound(
                 OutboundMessage(
                     channel=msg.channel,
@@ -787,15 +1026,17 @@ class AgentLoop:
                 )
             )
 
-        # Persist the triggering user message immediately, before running the
-        # agent loop. If the process is killed mid-turn (OOM, SIGKILL, self-
-        # restart, etc.), the existing runtime_checkpoint preserves the
-        # in-flight assistant/tool state but NOT the user message itself, so
-        # the user's prompt is silently lost on recovery. Saving it up front
-        # makes recovery possible from the session log alone.
+        # Persist the triggering user message up front so a mid-turn crash
+        # doesn't silently lose the prompt on recovery. ``media`` rides along
+        # as raw on-disk paths — sanitized image blocks are stripped from
+        # JSONL, and webui replay needs the paths to mint signed URLs.
         user_persisted_early = False
-        if isinstance(msg.content, str) and msg.content.strip():
-            session.add_message("user", msg.content)
+        media_paths = [p for p in (msg.media or []) if isinstance(p, str) and p]
+        has_text = isinstance(msg.content, str) and msg.content.strip()
+        if not pending_ask_id and (has_text or media_paths):
+            extra: dict[str, Any] = {"media": list(media_paths)} if media_paths else {}
+            text = msg.content if isinstance(msg.content, str) else ""
+            session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
             self.sessions.save(session)
             user_persisted_early = True
@@ -810,6 +1051,8 @@ class AgentLoop:
             channel=msg.channel,
             chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
+            metadata=msg.metadata,
+            session_key=key,
             pending_queue=pending_queue,
         )
 
@@ -819,6 +1062,7 @@ class AgentLoop:
         # Skip the already-persisted user message when saving the turn
         save_skip = 1 + len(history) + (1 if user_persisted_early else 0)
         self._save_turn(session, all_msgs, save_skip)
+        session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
@@ -838,13 +1082,19 @@ class AgentLoop:
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         meta = dict(msg.metadata or {})
-        if on_stream is not None and stop_reason != "error":
+        final_content, buttons = ask_user_outbound(
+            final_content,
+            ask_user_options_from_messages(all_msgs) if stop_reason == "ask_user" else [],
+            msg.channel,
+        )
+        if on_stream is not None and stop_reason not in {"ask_user", "error"}:
             meta["_streamed"] = True
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=final_content,
             metadata=meta,
+            buttons=buttons,
         )
 
     def _sanitize_persisted_blocks(
@@ -1064,7 +1314,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         media: list[str] | None = None,
-        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        on_progress: Callable[..., Awaitable[None]] | None = None,
         on_stream: Callable[[str], Awaitable[None]] | None = None,
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:

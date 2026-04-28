@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "nanobot に接続できませんでした",
-      "gatewayHint": "gateway（`nanobot web`）が起動しており、このページが同じマシン上で開かれていることを確認してください。"
+      "gatewayHint": "gateway（`nanobot gateway`）が起動しており、このページが同じマシン上で開かれていることを確認してください。"
     },
     "documentTitle": {
       "base": "nanobot",
@@ -64,7 +64,19 @@
       "placeholderOpening": "新しいチャットを開いています…",
       "inputAria": "メッセージ入力欄",
       "sendHint": "Enter で送信 · Shift+Enter で改行",
-      "send": "メッセージを送信"
+      "send": "メッセージを送信",
+      "attachImage": "画像を添付",
+      "encoding": "処理中…",
+      "remove": "添付を削除",
+      "normalizedSizeHint": "{{orig}} → {{current}}（自動圧縮）",
+      "imageRejected": {
+        "unsupported_type": "対応していないファイル形式です",
+        "too_many_images": "1 メッセージにつき最大 {{max}} 枚です",
+        "magic_mismatch": "画像ファイルではないようです",
+        "decode_failed": "この画像をデコードできません",
+        "too_large": "画像が大きすぎます。小さいものを選んでください",
+        "io": "このファイルを読み込めません"
+      }
     },
     "scrollToBottom": "一番下へスクロール"
   },
@@ -72,12 +84,29 @@
     "streaming": "生成中",
     "assistantTyping": "アシスタントが入力中",
     "toolSingle": "ツールを使用中",
-    "toolMany": "{{count}} 個のツールを使用"
+    "toolMany": "{{count}} 個のツールを使用",
+    "imageAttachment": "画像の添付"
+  },
+  "lightbox": {
+    "title": "画像プレビュー",
+    "open": "画像を表示",
+    "prev": "前の画像",
+    "next": "次の画像",
+    "close": "プレビューを閉じる"
   },
   "code": {
     "fallbackLanguage": "コード",
     "copyAria": "コードをコピー",
     "copy": "コピー",
     "copied": "コピーしました"
+  },
+  "common": {
+    "dismiss": "閉じる"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "メッセージが大きすぎます",
+      "body": "サイズ上限を超えたため、直前のメッセージはサーバーに拒否されました。画像を減らすか、より小さいファイルに差し替えて再送してください。"
+    }
   }
 }

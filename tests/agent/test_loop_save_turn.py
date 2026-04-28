@@ -234,6 +234,87 @@ async def test_process_message_persists_user_message_before_turn_completes(tmp_p
     assert persisted.updated_at >= persisted.created_at
 
 
+# 1x1 PNG used by the media-persistence tests. ``extract_documents`` runs
+# at the top of ``_process_message`` and filters ``msg.media`` down to
+# paths that magic-byte-sniff as images, so the test fixture needs real
+# bytes on disk (not just placeholder paths).
+_PNG_1X1 = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+    b"\x00\x00\x00\nIDATx\x9cc\x00\x00\x00\x02\x00\x01"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
+)
+
+
+@pytest.mark.asyncio
+async def test_process_message_persists_media_paths_on_user_turn(tmp_path: Path) -> None:
+    """User turns that attach images must record the media paths alongside
+    the text so the webui can rehydrate previews on session replay.
+
+    This is the producer half of the signed-media-URL round-trip: paths are
+    stored here, then :meth:`WebSocketChannel._augment_media_urls` maps them
+    onto signed URLs on the way out.
+    """
+    img_a = tmp_path / "uuid-1.png"
+    img_a.write_bytes(_PNG_1X1)
+    img_b = tmp_path / "uuid-2.png"
+    img_b.write_bytes(_PNG_1X1)
+
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("interrupt"))  # type: ignore[method-assign]
+
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u1",
+        chat_id="c-media",
+        content="look",
+        media=[str(img_a), str(img_b)],
+    )
+    with pytest.raises(RuntimeError, match="interrupt"):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate("websocket:c-media")
+    persisted = loop.sessions.get_or_create("websocket:c-media")
+    assert [m["role"] for m in persisted.messages] == ["user"]
+    assert persisted.messages[0]["content"] == "look"
+    assert persisted.messages[0]["media"] == [str(img_a), str(img_b)]
+
+
+@pytest.mark.asyncio
+async def test_process_message_persists_media_only_turn_without_text(tmp_path: Path) -> None:
+    """A turn with images but no text still persists (previously silent-dropped).
+
+    The old early-persist gate skipped messages without text, leaving pure
+    image turns un-checkpointed. They now materialise as an empty-content
+    user row with ``media`` attached.
+    """
+    img = tmp_path / "only.png"
+    img.write_bytes(_PNG_1X1)
+
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop._run_agent_loop = AsyncMock(side_effect=RuntimeError("boom"))  # type: ignore[method-assign]
+
+    msg = InboundMessage(
+        channel="websocket",
+        sender_id="u1",
+        chat_id="c-images-only",
+        content="",
+        media=[str(img)],
+    )
+    with pytest.raises(RuntimeError):
+        await loop._process_message(msg)
+
+    loop.sessions.invalidate("websocket:c-images-only")
+    persisted = loop.sessions.get_or_create("websocket:c-images-only")
+    assert len(persisted.messages) == 1
+    assert persisted.messages[0]["role"] == "user"
+    assert persisted.messages[0]["content"] == ""
+    assert persisted.messages[0]["media"] == [str(img)]
+
+
 @pytest.mark.asyncio
 async def test_process_message_does_not_duplicate_early_persisted_user_message(tmp_path: Path) -> None:
     loop = _make_full_loop(tmp_path)
@@ -265,6 +346,61 @@ async def test_process_message_does_not_duplicate_early_persisted_user_message(t
         {"role": "assistant", "content": "done"},
     ]
     assert AgentLoop._PENDING_USER_TURN_KEY not in session.metadata
+
+
+@pytest.mark.asyncio
+async def test_process_message_uses_context_chat_id_for_runtime_prompt(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    loop.context.build_messages = MagicMock(  # type: ignore[method-assign]
+        return_value=[
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "runtime + hello"},
+        ]
+    )
+    loop._run_agent_loop = AsyncMock(return_value=(  # type: ignore[method-assign]
+        "done",
+        [],
+        [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "runtime + hello"},
+            {"role": "assistant", "content": "done"},
+        ],
+        "stop",
+        False,
+    ))
+
+    result = await loop._process_message(
+        InboundMessage(
+            channel="discord",
+            sender_id="u1",
+            chat_id="thread-777",
+            content="hello",
+            metadata={"context_chat_id": "parent-456"},
+            session_key_override="discord:parent-456:thread:thread-777",
+        )
+    )
+
+    assert result is not None
+    assert result.chat_id == "thread-777"
+    assert loop.context.build_messages.call_args.kwargs["chat_id"] == "parent-456"
+    assert loop._run_agent_loop.call_args.kwargs["chat_id"] == "thread-777"
+
+
+def test_set_tool_context_uses_effective_key_for_spawn_tool(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    spawn_tool = loop.tools.get("spawn")
+    assert spawn_tool is not None
+
+    loop._set_tool_context(
+        "discord",
+        "thread-777",
+        session_key="discord:parent-456:thread:thread-777",
+    )
+
+    assert spawn_tool._origin_channel.get() == "discord"  # type: ignore[attr-defined]
+    assert spawn_tool._origin_chat_id.get() == "thread-777"  # type: ignore[attr-defined]
+    assert spawn_tool._session_key.get() == "discord:parent-456:thread:thread-777"  # type: ignore[attr-defined]
 
 
 @pytest.mark.asyncio
@@ -454,7 +590,14 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     )
 
     non_system = [m for m in seen["initial_messages"] if m.get("role") != "system"]
-    assert [m["content"] for m in non_system[:2]] == ["question", "working"]
+    assert "question" in non_system[0]["content"]
+    assert "working" in non_system[1]["content"]
+    # User turns carry the timestamp prefix so the model can reason about
+    # relative time. Assistant turns do NOT, otherwise the model treats those
+    # past replies as in-context examples and starts its own outputs with
+    # ``[Message Time: ...]`` (which then leaks back to the user).
+    assert "[Message Time:" in non_system[0]["content"]
+    assert "[Message Time:" not in non_system[1]["content"]
     assert non_system[2]["content"].count("subagent result") == 1
     assert "Current Time:" in non_system[2]["content"]
 
@@ -576,3 +719,63 @@ def test_subagent_followup_skips_empty_content() -> None:
 
     assert loop._persist_subagent_followup(session, msg) is False
     assert session.messages == []
+
+
+def test_set_tool_context_passes_thread_session_key_to_spawn(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+
+    loop._set_tool_context(
+        "slack",
+        "C123",
+        metadata={"slack": {"thread_ts": "1700.42", "channel_type": "channel"}},
+        session_key="slack:C123:1700.42",
+    )
+
+    spawn_tool = loop.tools.get("spawn")
+    assert spawn_tool is not None
+    assert spawn_tool._session_key.get() == "slack:C123:1700.42"
+
+
+@pytest.mark.asyncio
+async def test_system_subagent_followup_uses_thread_session_and_slack_metadata(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+    thread_session = loop.sessions.get_or_create("slack:C123:1700.42")
+    thread_session.add_message("user", "thread question")
+    loop.sessions.save(thread_session)
+
+    seen: dict[str, list[dict]] = {}
+
+    async def fake_run_agent_loop(initial_messages, **_kwargs):
+        seen["initial_messages"] = initial_messages
+        return (
+            "done",
+            [],
+            [*initial_messages, {"role": "assistant", "content": "done"}],
+            "stop",
+            False,
+        )
+
+    loop._run_agent_loop = fake_run_agent_loop  # type: ignore[method-assign]
+
+    outbound = await loop._process_message(
+        InboundMessage(
+            channel="system",
+            sender_id="subagent",
+            chat_id="slack:C123",
+            content="subagent result",
+            session_key_override="slack:C123:1700.42",
+            metadata={"subagent_task_id": "sub-1"},
+        )
+    )
+
+    assert outbound is not None
+    assert outbound.channel == "slack"
+    assert outbound.chat_id == "C123"
+    assert outbound.metadata == {"slack": {"thread_ts": "1700.42"}}
+    assert "thread question" in seen["initial_messages"][1]["content"]
+
+    loop.sessions.invalidate("slack:C123:1700.42")
+    persisted = loop.sessions.get_or_create("slack:C123:1700.42")
+    assert any(m.get("subagent_task_id") == "sub-1" for m in persisted.messages)

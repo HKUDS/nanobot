@@ -63,6 +63,7 @@ class ChannelManager:
         transcription_provider = self.config.channels.transcription_provider
         transcription_key = self._resolve_transcription_key(transcription_provider)
         transcription_base = self._resolve_transcription_base(transcription_provider)
+        transcription_language = self.config.channels.transcription_language
 
         for name, cls in discover_all().items():
             section = getattr(self.config.channels, name, None)
@@ -88,6 +89,7 @@ class ChannelManager:
                 channel.transcription_provider = transcription_provider
                 channel.transcription_api_key = transcription_key
                 channel.transcription_api_base = transcription_base
+                channel.transcription_language = transcription_language
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
@@ -170,6 +172,7 @@ class ChannelManager:
                 channel=notice.channel,
                 chat_id=notice.chat_id,
                 content=format_restart_completed_message(notice.started_at_raw),
+                metadata=dict(notice.metadata or {}),
             ),
         ))
 

@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "Couldn't reach nanobot",
-      "gatewayHint": "Make sure the gateway is running (`nanobot web`) and that this page is open on the same machine."
+      "gatewayHint": "Make sure the gateway is running (`nanobot gateway`) and that this page is open on the same machine."
     },
     "documentTitle": {
       "base": "nanobot",
@@ -64,7 +64,19 @@
       "placeholderOpening": "Opening a new chat…",
       "inputAria": "Message input",
       "sendHint": "Enter to send · Shift+Enter for newline",
-      "send": "Send message"
+      "send": "Send message",
+      "attachImage": "Attach image",
+      "encoding": "Encoding…",
+      "remove": "Remove attachment",
+      "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "imageRejected": {
+        "unsupported_type": "Unsupported file type",
+        "too_many_images": "Max {{max}} images per message",
+        "magic_mismatch": "File doesn't look like a real image",
+        "decode_failed": "Couldn't decode this image",
+        "too_large": "Image is too large — try a smaller one",
+        "io": "Couldn't read this file"
+      }
     },
     "scrollToBottom": "Scroll to bottom"
   },
@@ -72,12 +84,29 @@
     "streaming": "streaming",
     "assistantTyping": "Assistant is typing",
     "toolSingle": "Using a tool",
-    "toolMany": "Used {{count}} tools"
+    "toolMany": "Used {{count}} tools",
+    "imageAttachment": "Image attachment"
+  },
+  "lightbox": {
+    "title": "Image preview",
+    "open": "View image",
+    "prev": "Previous image",
+    "next": "Next image",
+    "close": "Close image preview"
   },
   "code": {
     "fallbackLanguage": "code",
     "copyAria": "Copy code",
     "copy": "Copy",
     "copied": "Copied"
+  },
+  "common": {
+    "dismiss": "Dismiss"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "Message too large",
+      "body": "The server rejected your last message because it exceeded the size limit. Remove some images or try smaller files, then send again."
+    }
   }
 }

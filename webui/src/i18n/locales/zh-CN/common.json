@@ -7,7 +7,7 @@
     },
     "error": {
       "title": "无法连接到 nanobot",
-      "gatewayHint": "请确认 gateway 已启动（`nanobot web`），并且当前页面与 gateway 运行在同一台机器上。"
+      "gatewayHint": "请确认 gateway 已启动（`nanobot gateway`），并且当前页面与 gateway 运行在同一台机器上。"
     },
     "documentTitle": {
       "base": "nanobot",
@@ -64,7 +64,19 @@
       "placeholderOpening": "正在打开新对话…",
       "inputAria": "消息输入框",
       "sendHint": "Enter 发送 · Shift+Enter 换行",
-      "send": "发送消息"
+      "send": "发送消息",
+      "attachImage": "添加图片",
+      "encoding": "处理中…",
+      "remove": "移除附件",
+      "normalizedSizeHint": "{{orig}} → {{current}}（已自动压缩）",
+      "imageRejected": {
+        "unsupported_type": "不支持的文件类型",
+        "too_many_images": "每条消息最多 {{max}} 张图片",
+        "magic_mismatch": "文件看起来不像真实的图片",
+        "decode_failed": "无法解码这张图片",
+        "too_large": "图片太大，请换一张小一点的",
+        "io": "无法读取该文件"
+      }
     },
     "scrollToBottom": "滚动到底部"
   },
@@ -72,12 +84,29 @@
     "streaming": "流式输出中",
     "assistantTyping": "助手正在输入",
     "toolSingle": "正在使用工具",
-    "toolMany": "已使用 {{count}} 个工具"
+    "toolMany": "已使用 {{count}} 个工具",
+    "imageAttachment": "图片附件"
+  },
+  "lightbox": {
+    "title": "图片预览",
+    "open": "查看图片",
+    "prev": "上一张",
+    "next": "下一张",
+    "close": "关闭预览"
   },
   "code": {
     "fallbackLanguage": "代码",
     "copyAria": "复制代码",
     "copy": "复制",
     "copied": "已复制"
+  },
+  "common": {
+    "dismiss": "关闭"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "消息过大",
+      "body": "服务端因超过大小限制拒收了上一条消息。可移除部分图片或使用更小的图片后重试。"
+    }
   }
 }

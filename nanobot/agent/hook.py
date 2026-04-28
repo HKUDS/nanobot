@@ -21,6 +21,7 @@ class AgentHookContext:
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
     tool_results: list[Any] = field(default_factory=list)
     tool_events: list[dict[str, str]] = field(default_factory=list)
+    streamed_content: bool = False
     final_content: str | None = None
     stop_reason: str | None = None
     error: str | None = None

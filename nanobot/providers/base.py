@@ -91,6 +91,8 @@ _SYNTHETIC_USER_CONTENT = "(conversation continued)"
 class LLMProvider(ABC):
     """Base class for LLM providers."""
 
+    supports_progress_deltas = False
+
     _CHAT_RETRY_DELAYS = (1, 2, 4)
     _PERSISTENT_MAX_DELAY = 60
     _PERSISTENT_IDENTICAL_ERROR_LIMIT = 10
@@ -108,6 +110,7 @@ class LLMProvider(ABC):
         "connection",
         "server error",
         "temporarily unavailable",
+        "速率限制",
     )
     _RETRYABLE_STATUS_CODES = frozenset({408, 409, 429})
     _TRANSIENT_ERROR_KINDS = frozenset({"timeout", "connection"})
@@ -154,6 +157,7 @@ class LLMProvider(ABC):
         "temporarily unavailable",
         "overloaded",
         "concurrency limit",
+        "速率限制",
     )
 
     _SENTINEL = object()

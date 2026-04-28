@@ -1,7 +1,8 @@
-"""Tests for ReadFileTool enhancements: description fix, read dedup, PDF support, device blacklist."""
+"""Tests for ReadFileTool enhancements: description fix, read dedup, PDF support, device blacklist, office docs."""
 
 import os
 import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -246,3 +247,123 @@ class TestReadFileLineEndingNormalization:
         result = await tool.execute(path=str(f))
         assert "\r" not in result
         assert "alpha" in result and "beta" in result and "gamma" in result
+
+
+# ---------------------------------------------------------------------------
+# Office document support (DOCX, XLSX, PPTX)
+# ---------------------------------------------------------------------------
+
+class TestReadOfficeDocuments:
+
+    @pytest.fixture()
+    def tool(self, tmp_path):
+        return ReadFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_docx_returns_extracted_text(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="Title\n\nParagraph 1"):
+            f = tmp_path / "test.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "Title" in result
+        assert "Paragraph 1" in result
+        assert "Error" not in result
+
+    @pytest.mark.asyncio
+    async def test_xlsx_returns_extracted_text(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="--- Sheet: Sheet1 ---\nName\tAge\nAlice\t30"):
+            f = tmp_path / "test.xlsx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "Sheet1" in result
+        assert "Alice" in result
+
+    @pytest.mark.asyncio
+    async def test_pptx_returns_extracted_text(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="--- Slide 1 ---\nWelcome\n--- Slide 2 ---\nContent"):
+            f = tmp_path / "test.pptx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "Welcome" in result
+        assert "Content" in result
+
+    @pytest.mark.asyncio
+    async def test_docx_missing_library(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="[error: python-docx not installed]"):
+            f = tmp_path / "test.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "Error" in result
+        assert "python-docx not installed" in result
+
+    @pytest.mark.asyncio
+    async def test_docx_corrupt_file(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="[error: failed to extract DOCX: bad zip]"):
+            f = tmp_path / "test.docx"
+            f.write_bytes(b"not-a-zip")
+            result = await tool.execute(path=str(f))
+        assert "Error" in result
+        assert "failed to extract DOCX" in result
+
+    @pytest.mark.asyncio
+    async def test_unsupported_extension(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value=None):
+            f = tmp_path / "test.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "Error" in result
+        assert "Unsupported" in result
+
+    @pytest.mark.asyncio
+    async def test_empty_document_returns_descriptive_message(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value=""):
+            f = tmp_path / "empty.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "no extractable text" in result
+
+
+class TestOfficeDocTruncation:
+
+    @pytest.fixture()
+    def tool(self, tmp_path):
+        return ReadFileTool(workspace=tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_large_document_truncated(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="x" * 200_000):
+            f = tmp_path / "large.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert len(result) <= ReadFileTool._MAX_CHARS + 100
+        assert "truncated at ~128K chars" in result
+
+    @pytest.mark.asyncio
+    async def test_small_document_not_truncated(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="Hello world"):
+            f = tmp_path / "small.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "truncated" not in result
+        assert "Hello world" in result
+
+    @pytest.mark.asyncio
+    async def test_error_response_not_truncated(self, tool, tmp_path):
+        with patch("nanobot.utils.document.extract_text", return_value="[error: failed to extract DOCX: something went wrong]"):
+            f = tmp_path / "bad.docx"
+            f.write_bytes(b"PK")
+            result = await tool.execute(path=str(f))
+        assert "Error" in result
+        assert "truncated" not in result
+
+
+class TestReadDescriptionUpdate:
+
+    def test_description_mentions_documents(self):
+        tool = ReadFileTool()
+        desc = tool.description.lower()
+        assert "document" in desc or "docx" in desc or "xlsx" in desc or "pptx" in desc
+
+    def test_description_no_longer_says_cannot_read(self):
+        tool = ReadFileTool()
+        assert "cannot read" not in tool.description.lower()

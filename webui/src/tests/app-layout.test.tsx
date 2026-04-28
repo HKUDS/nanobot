@@ -53,6 +53,7 @@ vi.mock("@/lib/nanobot-client", () => {
     defaultChatId: string | null = null;
     connect = connectSpy;
     onStatus = () => () => {};
+    onError = () => () => {};
     onChat = () => () => {};
     sendMessage = vi.fn();
     newChat = vi.fn();
@@ -145,4 +146,44 @@ describe("App layout", () => {
     expect(screen.queryByText('Delete “First chat”?')).not.toBeInTheDocument();
     expect(document.body.style.pointerEvents).not.toBe("none");
   }, 15_000);
+
+  it("opens the Cursor-style settings view from the sidebar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("/api/settings")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              agent: {
+                model: "openai/gpt-4o",
+                provider: "auto",
+                resolved_provider: "openai",
+                has_api_key: true,
+              },
+              providers: [
+                { name: "auto", label: "Auto" },
+                { name: "openai", label: "OpenAI" },
+              ],
+              runtime: {
+                config_path: "/tmp/config.json",
+              },
+              requires_restart: false,
+            }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(screen.getByText("AI")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("openai/gpt-4o")).toBeInTheDocument();
+  });
 });

@@ -183,3 +183,22 @@ def test_make_console_force_terminal_false_when_stdout_is_not_tty():
     with patch.object(sys.stdout, "isatty", return_value=False):
         console = stream_mod._make_console()
         assert console._force_terminal is False
+
+
+def test_render_interactive_ansi_force_terminal_follows_isatty():
+    """Mirror of _make_console: the capture console used to produce ANSI for
+    prompt_toolkit must also defer to sys.stdout.isatty(), otherwise cursor
+    escapes and spinner frames leak into piped output (#3265, #3370)."""
+    import sys
+    captured: dict = {}
+
+    def render_fn(c):
+        captured["console"] = c
+
+    with patch.object(sys.stdout, "isatty", return_value=True):
+        commands._render_interactive_ansi(render_fn)
+        assert captured["console"]._force_terminal is True
+
+    with patch.object(sys.stdout, "isatty", return_value=False):
+        commands._render_interactive_ansi(render_fn)
+        assert captured["console"]._force_terminal is False
