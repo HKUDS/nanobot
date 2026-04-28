@@ -32,7 +32,7 @@ class TestGatewayLifecycleNotification:
         # Mock the send method to capture outbound messages
         mock_channel.send = AsyncMock()
 
-# Create channel manager with mock channel
+    # Create channel manager with mock channel
         mock_config = MagicMock(spec=Config)
         mock_config.channels = MagicMock()
         mock_config.channels.send_max_retries = 0
