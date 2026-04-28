@@ -15,6 +15,7 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools.ask import AskUserInterrupt
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.failover import ModelCandidate, ModelRouter
 from nanobot.utils.helpers import (
     build_assistant_message,
     estimate_message_tokens,
@@ -615,24 +616,14 @@ class AgentRunner:
             messages,
             tools=spec.tools.get_definitions(),
         )
-        response = await self._call_provider(self.provider, kwargs, hook, context, timeout_s)
-
-        if response.finish_reason == "error" and spec.fallback_models:
-            for fb_model in spec.fallback_models:
-                logger.warning(
-                    "Primary model {} failed, trying fallback: {}",
-                    spec.model,
-                    fb_model,
-                )
-                fb_provider, resolved_model = self._resolve_fallback_provider(fb_model)
-                fb_kwargs = dict(kwargs, model=resolved_model)
-                response = await self._call_provider(
-                    fb_provider, fb_kwargs, hook, context, timeout_s,
-                )
-                if response.finish_reason != "error":
-                    break
-
-        return response
+        provider: LLMProvider = self.provider
+        request_timeout = timeout_s
+        if spec.fallback_models:
+            provider = self._build_model_router(spec, timeout_s)
+            # ModelRouter applies the same timeout per candidate, preserving
+            # fallback on primary timeouts instead of timing out the whole chain.
+            request_timeout = None
+        return await self._call_provider(provider, kwargs, hook, context, request_timeout)
 
     async def _call_provider(
         self,
@@ -679,6 +670,25 @@ class AgentRunner:
             self._fallback_providers[model] = provider
             return provider, provider.get_default_model()
         return self.provider, model
+
+    def _build_model_router(
+        self,
+        spec: AgentRunSpec,
+        timeout_s: float | None,
+    ) -> ModelRouter:
+        candidates = [
+            ModelCandidate(
+                label=model,
+                resolver=lambda m=model: self._resolve_fallback_provider(m),
+            )
+            for model in spec.fallback_models
+        ]
+        return ModelRouter(
+            primary_provider=self.provider,
+            primary_model=spec.model,
+            fallback_candidates=candidates,
+            per_candidate_timeout_s=timeout_s,
+        )
 
     async def _request_finalization_retry(
         self,
