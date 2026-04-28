@@ -546,6 +546,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
 | `tavily` | `apiKey` | `TAVILY_API_KEY` | No |
 | `jina` | `apiKey` | `JINA_API_KEY` | Free tier (10M tokens) |
 | `kagi` | `apiKey` | `KAGI_API_KEY` | No |
+| `olostep` | `apiKey` | `OLOSTEP_API_KEY` | No |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
 | `duckduckgo` (default) | — | — | Yes |
 
@@ -604,6 +605,22 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
   }
 }
 ```
+
+**Olostep:**
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "olostep",
+        "apiKey": "YOUR_OLOSTEP_API_KEY"
+      }
+    }
+  }
+}
+```
+
+You can also set `OLOSTEP_API_KEY` in the environment instead of storing it in config.
 
 **SearXNG** (self-hosted, no API key needed):
 ```json

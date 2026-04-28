@@ -294,3 +294,82 @@ async def test_duckduckgo_timeout_returns_error(monkeypatch):
     result = await tool.execute(query="test")
     gate.set()
     assert "Error" in result
+
+
+@pytest.mark.asyncio
+async def test_olostep_search_formats_answer_and_sources(monkeypatch):
+    from types import SimpleNamespace
+
+    calls: dict[str, str] = {}
+
+    class MockAsyncOlostep:
+        def __init__(self, api_key: str):
+            calls["api_key"] = api_key
+            self.answers = self
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def create(self, task: str):
+            calls["task"] = task
+            return SimpleNamespace(
+                answer="Mocked Olostep answer",
+                sources=[SimpleNamespace(title="Example Source", url="https://example.com")],
+            )
+
+    import sys
+    import types
+
+    fake_mod = types.ModuleType("olostep")
+    fake_mod.AsyncOlostep = MockAsyncOlostep
+    fake_mod.Olostep_BaseError = Exception
+    monkeypatch.setitem(sys.modules, "olostep", fake_mod)
+
+    tool = _tool(provider="olostep", api_key="olostep-key")
+    result = await tool.execute(query="test query")
+
+    assert calls["api_key"] == "olostep-key"
+    assert calls["task"] == "test query"
+    assert "Mocked Olostep answer" in result
+    assert "Example Source" in result
+    assert "https://example.com" in result
+
+
+@pytest.mark.asyncio
+async def test_olostep_missing_key_falls_back_to_duckduckgo(monkeypatch):
+    import sys
+    import types
+    from unittest.mock import patch
+
+    class MockDDGS:
+        def __init__(self, **kw):
+            pass
+
+        def text(self, query, max_results=5):
+            return [{"title": "Fallback", "href": "https://ddg.example", "body": "fallback"}]
+
+    fake_mod = types.ModuleType("olostep")
+    fake_mod.AsyncOlostep = object
+    fake_mod.Olostep_BaseError = Exception
+    monkeypatch.setitem(sys.modules, "olostep", fake_mod)
+
+    monkeypatch.delenv("OLOSTEP_API_KEY", raising=False)
+    with patch("ddgs.DDGS", MockDDGS):
+        tool = _tool(provider="olostep", api_key="")
+        result = await tool.execute(query="test query")
+
+    assert "Fallback" in result
+
+
+@pytest.mark.asyncio
+async def test_olostep_package_missing_returns_install_hint(monkeypatch):
+    import sys
+    monkeypatch.delitem(sys.modules, "olostep", raising=False)
+    monkeypatch.setitem(sys.modules, "olostep", None)
+    tool = _tool(provider="olostep", api_key="olostep-key")
+    result = await tool.execute(query="test query")
+
+    assert result == "Error: olostep package not installed. Run: pip install olostep"

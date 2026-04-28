@@ -119,6 +119,9 @@ class WebSearchTool(Tool):
         if provider == "kagi":
             api_key = self.config.api_key or os.environ.get("KAGI_API_KEY", "")
             return "kagi" if api_key else "duckduckgo"
+        if provider == "olostep":
+            api_key = self.config.api_key or os.environ.get("OLOSTEP_API_KEY", "")
+            return "olostep" if api_key else "duckduckgo"
         return provider
 
     @property
@@ -134,6 +137,8 @@ class WebSearchTool(Tool):
         provider = self.config.provider.strip().lower() or "brave"
         n = min(max(count or self.config.max_results, 1), 10)
 
+        if provider == "olostep":
+            return await self._search_olostep(query, n)
         if provider == "duckduckgo":
             return await self._search_duckduckgo(query, n)
         elif provider == "tavily":
@@ -148,6 +153,58 @@ class WebSearchTool(Tool):
             return await self._search_kagi(query, n)
         else:
             return f"Error: unknown search provider '{provider}'"
+
+    async def _search_olostep(self, query: str, n: int) -> str:
+        try:
+            from olostep import AsyncOlostep, Olostep_BaseError
+        except ImportError:
+            return "Error: olostep package not installed. Run: pip install olostep"
+        api_key = self.config.api_key or os.environ.get("OLOSTEP_API_KEY", "")
+        if not api_key:
+            logger.warning("OLOSTEP_API_KEY not set, falling back to DuckDuckGo")
+            return await self._search_duckduckgo(query, n)
+        try:
+            async with AsyncOlostep(api_key=api_key) as client:
+                if self.proxy:
+                    transport = getattr(client, "_transport", None)
+                    http_client = getattr(transport, "_client", None)
+                    if transport is not None and isinstance(http_client, httpx.AsyncClient):
+                        await http_client.aclose()
+                        transport._client = httpx.AsyncClient(  # type: ignore[attr-defined]
+                            proxy=self.proxy,
+                            headers=dict(http_client.headers),
+                            timeout=http_client.timeout,
+                            limits=httpx.Limits(
+                                max_keepalive_connections=100,
+                                max_connections=200,
+                            ),
+                            http2=True,
+                        )
+                result = await client.answers.create(task=query)
+
+            sources = getattr(result, "sources", None) or []
+            source_lines = []
+            for i, source in enumerate(sources[:n], 1):
+                if isinstance(source, dict):
+                    title = source.get("title", "")
+                    url = source.get("url", "")
+                else:
+                    title = getattr(source, "title", "")
+                    url = getattr(source, "url", "")
+                if title and url:
+                    source_lines.append(f"{i}. {title} — {url}")
+                elif url:
+                    source_lines.append(f"{i}. {url}")
+                elif title:
+                    source_lines.append(f"{i}. {title}")
+
+            answer_text = getattr(result, "answer", "") or ""
+            items = [{"title": answer_text or "Olostep answer", "url": "", "content": "\n".join(source_lines)}]
+            return _format_results(query, items, n)
+        except Olostep_BaseError as e:
+            return f"Olostep search error: {type(e).__name__}: {e}"
+        except Exception as e:
+            return f"Olostep search error: {type(e).__name__}: {e}"
 
     async def _search_brave(self, query: str, n: int) -> str:
         api_key = self.config.api_key or os.environ.get("BRAVE_API_KEY", "")
