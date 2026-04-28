@@ -524,11 +524,32 @@ def test_builtin_channel_default_config():
     assert "token" in cfg
 
 
+def test_mattermost_channel_default_config():
+    from nanobot.channels.mattermost import MattermostChannel
+    cfg = MattermostChannel.default_config()
+    assert isinstance(cfg, dict)
+    assert cfg["enabled"] is False
+    assert "serverUrl" in cfg
+    assert "token" in cfg
+
+
 def test_builtin_channel_init_from_dict():
     """Built-in channels accept a raw dict and convert to Pydantic internally."""
     from nanobot.channels.telegram import TelegramChannel
     bus = MessageBus()
     ch = TelegramChannel({"enabled": False, "token": "test-tok", "allowFrom": ["*"]}, bus)
+    assert ch.config.token == "test-tok"
+    assert ch.config.allow_from == ["*"]
+
+
+def test_mattermost_channel_init_from_dict():
+    from nanobot.channels.mattermost import MattermostChannel
+    bus = MessageBus()
+    ch = MattermostChannel(
+        {"enabled": False, "serverUrl": "https://mm.example.com", "token": "test-tok", "allowFrom": ["*"]},
+        bus,
+    )
+    assert ch.config.server_url == "https://mm.example.com"
     assert ch.config.token == "test-tok"
     assert ch.config.allow_from == ["*"]
 
