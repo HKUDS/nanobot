@@ -12,15 +12,13 @@ from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
 from nanobot.utils.helpers import (
-    estimate_message_tokens,
     ensure_dir,
+    estimate_message_tokens,
     find_legal_message_start,
     image_placeholder_text,
     safe_filename,
 )
 
-
-HISTORY_MAX_MESSAGES = 120
 FILE_MAX_MESSAGES = 2000
 
 
@@ -74,7 +72,7 @@ class Session:
 
     def get_history(
         self,
-        max_messages: int = HISTORY_MAX_MESSAGES,
+        max_messages: int = 120,
         *,
         max_tokens: int = 0,
         include_timestamps: bool = False,
@@ -85,6 +83,7 @@ class Session:
         token budget from the tail (``max_tokens``) when provided.
         """
         unconsolidated = self.messages[self.last_consolidated:]
+        max_messages = max_messages if max_messages > 0 else 120
         sliced = unconsolidated[-max_messages:]
 
         # Avoid starting mid-turn when possible, except for proactive

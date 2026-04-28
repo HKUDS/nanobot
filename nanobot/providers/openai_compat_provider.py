@@ -232,6 +232,25 @@ def _responses_circuit_key(
     return f"{model_name}:{effort}"
 
 
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge *override* into *base*, returning a new dict.
+
+    Nested dicts are merged key-by-key; all other types in *override*
+    replace the corresponding key in *base*.
+    """
+    merged = dict(base)
+    for key, value in override.items():
+        if (
+            key in merged
+            and isinstance(merged[key], dict)
+            and isinstance(value, dict)
+        ):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
 class OpenAICompatProvider(LLMProvider):
     """Unified provider for all OpenAI-compatible APIs.
 
@@ -246,11 +265,13 @@ class OpenAICompatProvider(LLMProvider):
         default_model: str = "gpt-4o",
         extra_headers: dict[str, str] | None = None,
         spec: ProviderSpec | None = None,
+        extra_body: dict[str, Any] | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
         self._spec = spec
+        self._extra_body = extra_body or {}
 
         if api_key and spec and spec.env_key:
             self._setup_env(api_key, api_base)
@@ -596,6 +617,15 @@ class OpenAICompatProvider(LLMProvider):
             for msg in kwargs["messages"]:
                 if msg.get("role") == "assistant" and "reasoning_content" not in msg:
                     msg["reasoning_content"] = ""
+
+        # Merge user-configured extra_body last so it can override or
+        # extend provider-specific defaults (e.g. chat_template_kwargs,
+        # guided_json, repetition_penalty).  Uses recursive merge so
+        # nested dicts like {"chat_template_kwargs": {"enable_thinking": false}}
+        # do not clobber sibling keys already set by thinking-style logic.
+        if self._extra_body:
+            existing = kwargs.get("extra_body", {})
+            kwargs["extra_body"] = _deep_merge(existing, self._extra_body)
 
         return kwargs
 

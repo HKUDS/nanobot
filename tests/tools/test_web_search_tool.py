@@ -7,8 +7,16 @@ from nanobot.agent.tools.web import WebSearchTool
 from nanobot.config.schema import WebSearchConfig
 
 
-def _tool(provider: str = "brave", api_key: str = "", base_url: str = "") -> WebSearchTool:
-    return WebSearchTool(config=WebSearchConfig(provider=provider, api_key=api_key, base_url=base_url))
+def _tool(
+    provider: str = "brave",
+    api_key: str = "",
+    base_url: str = "",
+    user_agent: str | None = None,
+) -> WebSearchTool:
+    return WebSearchTool(
+        config=WebSearchConfig(provider=provider, api_key=api_key, base_url=base_url),
+        user_agent=user_agent,
+    )
 
 
 def _response(status: int = 200, json: dict | None = None) -> httpx.Response:
@@ -42,12 +50,13 @@ async def test_brave_search(monkeypatch):
     async def mock_get(self, url, **kw):
         assert "brave" in url
         assert kw["headers"]["X-Subscription-Token"] == "brave-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
         return _response(json={
             "web": {"results": [{"title": "NanoBot", "url": "https://example.com", "description": "AI assistant"}]}
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
-    tool = _tool(provider="brave", api_key="brave-key")
+    tool = _tool(provider="brave", api_key="brave-key", user_agent="nanobot-search-test")
     result = await tool.execute(query="nanobot", count=1)
     assert "NanoBot" in result
     assert "https://example.com" in result
@@ -58,12 +67,13 @@ async def test_tavily_search(monkeypatch):
     async def mock_post(self, url, **kw):
         assert "tavily" in url
         assert kw["headers"]["Authorization"] == "Bearer tavily-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
         return _response(json={
             "results": [{"title": "OpenClaw", "url": "https://openclaw.io", "content": "Framework"}]
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
-    tool = _tool(provider="tavily", api_key="tavily-key")
+    tool = _tool(provider="tavily", api_key="tavily-key", user_agent="nanobot-search-test")
     result = await tool.execute(query="openclaw")
     assert "OpenClaw" in result
     assert "https://openclaw.io" in result
@@ -73,12 +83,13 @@ async def test_tavily_search(monkeypatch):
 async def test_searxng_search(monkeypatch):
     async def mock_get(self, url, **kw):
         assert "searx.example" in url
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
         return _response(json={
             "results": [{"title": "Result", "url": "https://example.com", "content": "SearXNG result"}]
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
-    tool = _tool(provider="searxng", base_url="https://searx.example")
+    tool = _tool(provider="searxng", base_url="https://searx.example", user_agent="nanobot-search-test")
     result = await tool.execute(query="test")
     assert "Result" in result
 
@@ -125,12 +136,13 @@ async def test_jina_search(monkeypatch):
     async def mock_get(self, url, **kw):
         assert "s.jina.ai" in str(url)
         assert kw["headers"]["Authorization"] == "Bearer jina-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
         return _response(json={
             "data": [{"title": "Jina Result", "url": "https://jina.ai", "content": "AI search"}]
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
-    tool = _tool(provider="jina", api_key="jina-key")
+    tool = _tool(provider="jina", api_key="jina-key", user_agent="nanobot-search-test")
     result = await tool.execute(query="test")
     assert "Jina Result" in result
     assert "https://jina.ai" in result
@@ -141,6 +153,7 @@ async def test_kagi_search(monkeypatch):
     async def mock_get(self, url, **kw):
         assert "kagi.com/api/v0/search" in url
         assert kw["headers"]["Authorization"] == "Bot kagi-key"
+        assert kw["headers"]["User-Agent"] == "nanobot-search-test"
         assert kw["params"] == {"q": "test", "limit": 2}
         return _response(json={
             "data": [
@@ -150,7 +163,7 @@ async def test_kagi_search(monkeypatch):
         })
 
     monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
-    tool = _tool(provider="kagi", api_key="kagi-key")
+    tool = _tool(provider="kagi", api_key="kagi-key", user_agent="nanobot-search-test")
     result = await tool.execute(query="test", count=2)
     assert "Kagi Result" in result
     assert "https://kagi.com" in result
