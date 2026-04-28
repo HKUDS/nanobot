@@ -208,6 +208,7 @@ class AgentLoop:
         tools_config: ToolsConfig | None = None,
         provider_snapshot_loader: Callable[[], ProviderSnapshot] | None = None,
         provider_signature: tuple[object, ...] | None = None,
+        token_optimization=None,
     ):
         from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
 
@@ -239,11 +240,12 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self._token_optimization = token_optimization
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills, token_optimization=token_optimization)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
@@ -1141,14 +1143,35 @@ class AgentLoop:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
 
+        topt = self._token_optimization if hasattr(self, '_token_optimization') else None
+
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
             if role == "tool":
+                # --- Token optimization: hide successful tool results ---
+                if topt and getattr(topt, "hide_successful_tool_results", False):
+                    if isinstance(content, str):
+                        stripped = content.strip()
+                        # Common success patterns
+                        if stripped in ('{"result":"ok"}', '{"result": "ok"}', 'OK', 'ok', '""'
+                                        ) or (stripped.startswith('{"result":"ok"') and len(stripped) < 30):
+                            entry["content"] = "✓"
+                            session.messages.append(entry)
+                            entry.setdefault("timestamp", datetime.now().isoformat())
+                            continue
+
                 if isinstance(content, str) and len(content) > self.max_tool_result_chars:
                     entry["content"] = truncate_text_fn(content, self.max_tool_result_chars)
+
+                # --- Token optimization: truncate tool results ---
+                if topt and isinstance(content, str):
+                    trunc = getattr(topt, "truncate_tool_results", 0)
+                    if trunc > 0 and len(content) > trunc:
+                        entry["content"] = truncate_text_fn(content, trunc)
+
                 elif isinstance(content, list):
                     filtered = self._sanitize_persisted_blocks(content, should_truncate_text=True)
                     if not filtered:

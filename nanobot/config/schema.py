@@ -65,6 +65,35 @@ class DreamConfig(Base):
         return f"every {hours}h"
 
 
+class TokenOptimizationConfig(Base):
+    """Token usage optimization settings.
+
+    These options reduce token consumption per request without sacrificing
+    task accuracy.  Inspired by the "caveman" approach — fewer tokens,
+    same quality.
+    """
+
+    # --- Output compression ---------------------------------------------------
+    output_style: Literal["terse", "normal", "verbose"] = "normal"
+    # terse:  model instructed to reply with maximum brevity (≈50-70% fewer output tokens)
+    # normal: no special instructions
+    # verbose: encourage detailed explanations
+
+    # --- Input compression ----------------------------------------------------
+    truncate_tool_results: int = 0
+    # Max chars to keep from each tool result (0 = unlimited / use max_tool_result_chars).
+    # When set, long tool outputs are truncated to this limit *after* the agent has
+    # processed them, so they don't bloat the next request's context.
+
+    compact_after_messages: int = 0
+    # Automatically compact conversation history after this many user-assistant
+    # turns (0 = disabled / rely on existing consolidation logic).
+
+    hide_successful_tool_results: bool = False
+    # Replace tool results that returned {"result":"ok"} or similar success
+    # responses with a short "✓" marker to save context space.
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -97,6 +126,7 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("consolidationRatio"),
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
+    token_optimization: TokenOptimizationConfig = Field(default_factory=TokenOptimizationConfig)
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
 

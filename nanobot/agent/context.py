@@ -22,11 +22,28 @@ class ContextBuilder:
     _MAX_HISTORY_CHARS = 32_000  # hard cap on recent history section size
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    _OUTPUT_STYLE_INSTRUCTIONS = {
+        "terse": (
+            "\n## Output Style — Terse\n"
+            "Be maximally concise. Drop filler words, hedging, and repetition.\n"
+            "Prefer short labels over full sentences. Use fragments, abbreviations, symbols.\n"
+            "Technical accuracy must remain 100%.\n"
+            "Examples:\n"
+            '  ❌ "The reason your component re-renders is that you are creating a new object reference on each render cycle."\n'
+            '  ✅ "New object ref each render → re-render. Wrap in useMemo."\n'
+        ),
+        "verbose": (
+            "\n## Output Style — Verbose\n"
+            "Provide detailed explanations with context, examples, and reasoning.\n"
+        ),
+    }
+
+    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None, token_optimization=None):
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+        self._token_optimization = token_optimization
 
     def build_system_prompt(
         self,
@@ -62,6 +79,13 @@ class ContextBuilder:
             )
             history_text = truncate_text(history_text, self._MAX_HISTORY_CHARS)
             parts.append("# Recent History\n\n" + history_text)
+
+        # Append output-style instruction when terse or verbose is selected.
+        if self._token_optimization:
+            style = getattr(self._token_optimization, "output_style", "normal")
+            extra = self._OUTPUT_STYLE_INSTRUCTIONS.get(style)
+            if extra:
+                parts.append(extra)
 
         return "\n\n---\n\n".join(parts)
 

@@ -86,6 +86,7 @@ class Nanobot:
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
             tools_config=config.tools,
+            token_optimization=defaults.token_optimization,
         )
         return cls(loop)
 
