@@ -24,6 +24,9 @@ class AgentHookContext:
     final_content: str | None = None
     stop_reason: str | None = None
     error: str | None = None
+    # Model routing: hook can override the model for this iteration.
+    # Set this in before_iteration() to switch models dynamically.
+    model: str | None = None
 
 
 class AgentHook:

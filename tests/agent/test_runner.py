@@ -178,6 +178,130 @@ async def test_runner_calls_hooks_in_order():
 
 
 @pytest.mark.asyncio
+async def test_runner_hook_can_override_model():
+    """Hook can dynamically switch models via context.model."""
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    captured_models: list[str] = []
+
+    async def chat_with_retry(*, model, **kwargs):
+        captured_models.append(model)
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    class ModelRouterHook(AgentHook):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        async def before_iteration(self, context: AgentHookContext) -> None:
+            # Switch model based on iteration
+            self.calls += 1
+            if context.iteration == 0:
+                context.model = "cheap-model"
+            else:
+                context.model = "expensive-model"
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "hi"}],
+        tools=tools,
+        model="default-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=ModelRouterHook(),
+    ))
+
+    assert result.final_content == "done"
+    assert captured_models == ["cheap-model"]
+
+
+@pytest.mark.asyncio
+async def test_runner_hook_model_routing_per_iteration():
+    """Hook can switch models between iterations."""
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    captured_models: list[str] = []
+    call_count = {"n": 0}
+
+    async def chat_with_retry(*, model, **kwargs):
+        call_count["n"] += 1
+        captured_models.append(model)
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content="need more",
+                tool_calls=[ToolCallRequest(id="tc1", name="read_file", arguments={})],
+            )
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="file content")
+
+    class IterationRouterHook(AgentHook):
+        async def before_iteration(self, context: AgentHookContext) -> None:
+            # First iteration: cheap model, subsequent: expensive
+            if context.iteration == 0:
+                context.model = "haiku"
+            else:
+                context.model = "opus"
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "read file"}],
+        tools=tools,
+        model="default",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=IterationRouterHook(),
+    ))
+
+    assert result.final_content == "done"
+    assert captured_models == ["haiku", "opus"]
+
+
+@pytest.mark.asyncio
+async def test_runner_hook_context_model_initialized_from_spec():
+    """context.model starts with spec.model before hook runs."""
+    from nanobot.agent.hook import AgentHook, AgentHookContext
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    captured_initial_model: list[str] = []
+
+    async def chat_with_retry(*, model, **kwargs):
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    class InspectHook(AgentHook):
+        async def before_iteration(self, context: AgentHookContext) -> None:
+            captured_initial_model.append(context.model)
+
+    runner = AgentRunner(provider)
+    await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "hi"}],
+        tools=tools,
+        model="original-model",
+        max_iterations=1,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=InspectHook(),
+    ))
+
+    assert captured_initial_model == ["original-model"]
+
+
+@pytest.mark.asyncio
 async def test_runner_streaming_hook_receives_deltas_and_end_signal():
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
