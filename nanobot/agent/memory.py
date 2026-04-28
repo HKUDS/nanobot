@@ -369,6 +369,19 @@ class MemoryStore:
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_path, self.history_file)
+            
+            # fsync the directory so the rename is durable.
+            # On Windows, opening a directory with O_RDONLY raises
+            # PermissionError — skip the dir sync there (NTFS
+            # journals metadata synchronously).
+            try:
+                fd = os.open(str(self.history_file.parent), os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            except PermissionError:
+                pass  # Windows — directory fsync not supported
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise
