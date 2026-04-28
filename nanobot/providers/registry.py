@@ -267,7 +267,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(
         name="gemini",
-        keywords=("gemini",),
+        keywords=("gemini", "gemma"),
         env_key="GEMINI_API_KEY",
         display_name="Gemini",
         backend="openai_compat",
