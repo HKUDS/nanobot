@@ -258,13 +258,16 @@ class WhatsAppChannel(BaseChannel):
             # Handle voice transcription if it's a voice message
             if content == "[Voice Message]":
                 if media_paths:
-                    logger.info("Transcribing voice message from {}...", sender_id)
-                    transcription = await self.transcribe_audio(media_paths[0])
-                    if transcription:
-                        content = transcription
-                        logger.info("Transcribed voice from {}: {}...", sender_id, transcription[:50])
+                    if self.transcription_available:
+                        logger.info("Transcribing voice message from {}...", sender_id)
+                        transcription = await self.transcribe_audio(media_paths[0])
+                        if transcription:
+                            content = transcription
+                            logger.info("Transcribed voice from {}: {}...", sender_id, transcription[:50])
+                        else:
+                            content = "[Voice Message: Transcription failed]"
                     else:
-                        content = "[Voice Message: Transcription failed]"
+                        content = "[Voice Message: ⚠️ voice transcription not configured]"
                 else:
                     content = "[Voice Message: Audio not available]"
 

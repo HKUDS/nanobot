@@ -898,11 +898,13 @@ class TelegramChannel(BaseChannel):
             await file.download_to_drive(str(file_path))
             path_str = str(file_path)
             if media_type in ("voice", "audio"):
-                transcription = await self.transcribe_audio(file_path)
-                if transcription:
-                    logger.info("Transcribed {}: {}...", media_type, transcription[:50])
-                    return [path_str], [f"[transcription: {transcription}]"]
-                return [path_str], [f"[{media_type}: {path_str}]"]
+                if self.transcription_available:
+                    transcription = await self.transcribe_audio(file_path)
+                    if transcription:
+                        logger.info("Transcribed {}: {}...", media_type, transcription[:50])
+                        return [path_str], [f"[transcription: {transcription}]"]
+                    return [path_str], [f"[{media_type}: transcription failed — {path_str}]"]
+                return [path_str], [f"[{media_type}: {path_str} — ⚠️ voice transcription not configured]"]
             return [path_str], [f"[{media_type}: {path_str}]"]
         except Exception as e:
             logger.warning("Failed to download message media: {}", e)

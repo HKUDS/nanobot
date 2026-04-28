@@ -15,6 +15,30 @@ class Base(BaseModel):
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
+class TranscriptionConfig(Base):
+    """Voice-to-text transcription configuration.
+
+    Supports cloud providers (Groq, OpenAI) and local Whisper-compatible
+    servers (whisper.cpp, faster-whisper, LocalAI, Ollama).
+
+    Local setup example (config.json)::
+
+        "transcription": {
+            "provider": "local",
+            "api_base": "http://localhost:8080/v1/audio/transcriptions",
+            "model": "large-v3"
+        }
+    """
+
+    enabled: bool = True
+    provider: str = "groq"  # groq, openai, local
+    model: str | None = None  # None = provider default (whisper-large-v3 for groq, whisper-1 for openai)
+    api_key: str | None = None  # None = falls back to provider section key; not required for local
+    api_base: str | None = None  # Required for local; override URL for cloud providers
+    language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # ISO-639-1 hint
+    max_duration_seconds: int = Field(default=300, ge=10)  # Reject very long audio
+
+
 class ChannelsConfig(Base):
     """Configuration for chat channels.
 
@@ -28,7 +52,9 @@ class ChannelsConfig(Base):
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
-    transcription_provider: str = "groq"  # Voice transcription backend: "groq" or "openai"
+    transcription: TranscriptionConfig = Field(default_factory=TranscriptionConfig)
+    # Legacy flat fields — kept for backward compat, mapped to TranscriptionConfig in manager
+    transcription_provider: str = "groq"  # Voice transcription backend: "groq", "openai", or "local"
     transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # Optional ISO-639-1 hint for audio transcription
 
 

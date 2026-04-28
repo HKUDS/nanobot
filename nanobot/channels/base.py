@@ -10,6 +10,7 @@ from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import TranscriptionConfig
 
 
 class BaseChannel(ABC):
@@ -22,10 +23,13 @@ class BaseChannel(ABC):
 
     name: str = "base"
     display_name: str = "Base"
+    # Legacy flat attributes — still set by ChannelManager for backward compat
     transcription_provider: str = "groq"
     transcription_api_key: str = ""
     transcription_api_base: str = ""
     transcription_language: str | None = None
+    # Typed config — set by ChannelManager when available
+    _transcription_config: TranscriptionConfig | None = None
 
     def __init__(self, config: Any, bus: MessageBus):
         """
@@ -39,25 +43,65 @@ class BaseChannel(ABC):
         self.bus = bus
         self._running = False
 
+    @property
+    def transcription_available(self) -> bool:
+        """Whether voice transcription is configured and ready."""
+        if self._transcription_config is not None:
+            if not self._transcription_config.enabled:
+                return False
+            from nanobot.providers.transcription import WhisperTranscriptionProvider
+            p = WhisperTranscriptionProvider(
+                self._transcription_config.provider,
+                api_key=self._transcription_config.api_key,
+                api_base=self._transcription_config.api_base,
+                model=self._transcription_config.model,
+            )
+            return p.is_available
+        # Fallback to legacy flat attributes
+        if self.transcription_provider == "local":
+            return bool(self.transcription_api_base)
+        return bool(self.transcription_api_key)
+
     async def transcribe_audio(self, file_path: str | Path) -> str:
-        """Transcribe an audio file via Whisper (OpenAI or Groq). Returns empty string on failure."""
-        if not self.transcription_api_key:
+        """Transcribe an audio file via Whisper.
+
+        Supports Groq, OpenAI, and any local OpenAI-compatible endpoint
+        (whisper.cpp, faster-whisper, LocalAI, etc.).
+
+        Returns transcribed text, or empty string on failure.
+        """
+        from nanobot.providers.transcription import WhisperTranscriptionProvider
+
+        if self._transcription_config is not None:
+            cfg = self._transcription_config
+            if not cfg.enabled:
+                return ""
+            provider = WhisperTranscriptionProvider(
+                cfg.provider,
+                api_key=cfg.api_key,
+                api_base=cfg.api_base,
+                model=cfg.model,
+                language=cfg.language,
+                max_duration_seconds=cfg.max_duration_seconds,
+            )
+        else:
+            # Legacy path — flat attributes
+            provider = WhisperTranscriptionProvider(
+                self.transcription_provider,
+                api_key=self.transcription_api_key or None,
+                api_base=self.transcription_api_base or None,
+                language=self.transcription_language,
+            )
+
+        if not provider.is_available:
+            logger.warning(
+                "{}: transcription unavailable — {}",
+                self.name,
+                provider.unavailable_reason,
+            )
             return ""
+
         try:
-            if self.transcription_provider == "openai":
-                from nanobot.providers.transcription import OpenAITranscriptionProvider
-                provider = OpenAITranscriptionProvider(
-                    api_key=self.transcription_api_key,
-                    api_base=self.transcription_api_base or None,
-                    language=self.transcription_language or None,
-                )
-            else:
-                from nanobot.providers.transcription import GroqTranscriptionProvider
-                provider = GroqTranscriptionProvider(
-                    api_key=self.transcription_api_key,
-                    api_base=self.transcription_api_base or None,
-                    language=self.transcription_language or None,
-                )
             return await provider.transcribe(file_path)
         except Exception as e:
             logger.warning("{}: audio transcription failed: {}", self.name, e)
