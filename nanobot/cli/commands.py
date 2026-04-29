@@ -723,6 +723,9 @@ def _run_gateway(
             f"Reminder: {job.payload.message}"
         )
 
+        async def _silent(*_args, **_kwargs) -> None:
+            pass
+
         cron_tool = agent.tools.get("cron")
         cron_token = None
         if isinstance(cron_tool, CronTool):
