@@ -84,6 +84,29 @@ def _is_system_directory(path: Path) -> bool:
         return False
 
 
+def _is_path_under(path: Path, base: Path) -> bool:
+    try:
+        path.resolve().relative_to(base.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def _is_symlink_or_points_outside(path: Path, base: Path) -> bool:
+    try:
+        if path.is_symlink():
+            return True
+        resolved = path.resolve()
+        base_resolved = base.resolve()
+        try:
+            resolved.relative_to(base_resolved)
+            return False
+        except ValueError:
+            return True
+    except OSError:
+        return True
+
+
 def _validate_project_path(path: str) -> tuple[Path | None, str | None]:
     try:
         p = Path(path)
@@ -103,6 +126,9 @@ def _validate_project_path(path: str) -> tuple[Path | None, str | None]:
         resolved = p.resolve()
     except OSError as e:
         return p, f"Cannot resolve path: {e}"
+    
+    if p.is_symlink():
+        return p, "Path is a symlink (not allowed)"
     
     if _is_system_root(resolved):
         return p, "Cannot scan system root directory"
@@ -133,17 +159,33 @@ def _count_directories(
         root_str = str(root)
         for dirpath, dirnames, filenames in os.walk(root):
             try:
+                current_dir = Path(dirpath)
+                if _is_symlink_or_points_outside(current_dir, root):
+                    dirnames[:] = []
+                    continue
+                
                 rel_depth = dirpath.count(os.sep) - root_str.count(os.sep)
                 if rel_depth >= max_depth:
                     dirnames[:] = []
                     continue
                 
-                dirnames[:] = [d for d in dirnames if d not in _IGNORE_DIRS and not d.startswith(".")]
+                safe_dirnames = []
+                for d in dirnames:
+                    dirpath_full = current_dir / d
+                    if not _is_symlink_or_points_outside(dirpath_full, root):
+                        safe_dirnames.append(d)
+                dirnames[:] = sorted(safe_dirnames)
                 
-                for dirname in sorted(dirnames):
+                for dirname in dirnames:
                     dirs.append((rel_depth + 1, dirname + "/"))
                 
-                total_files += len([f for f in filenames if not f.startswith(".")])
+                safe_filenames = []
+                for f in filenames:
+                    filepath = current_dir / f
+                    if not _is_symlink_or_points_outside(filepath, root):
+                        safe_filenames.append(f)
+                
+                total_files += len([f for f in safe_filenames if not f.startswith(".")])
             except OSError:
                 dirnames[:] = []
                 continue
@@ -153,10 +195,14 @@ def _count_directories(
     return dirs, total_files
 
 
-def _read_file_safe(path: Path, max_bytes: int) -> str:
+def _read_file_safe(path: Path, max_bytes: int, base: Path | None = None) -> str:
     try:
+        if base is not None and _is_symlink_or_points_outside(path, base):
+            return ""
+        
         if not path.is_file():
             return ""
+        
         try:
             stat_result = path.stat()
             if stat_result.st_size > max_bytes:
@@ -273,7 +319,7 @@ def _find_key_py_files(root: Path, max_count: int = 10) -> list[Path]:
             break
         try:
             f = root / name
-            if f.exists() and f.is_file() and name not in seen:
+            if f.exists() and f.is_file() and not _is_symlink_or_points_outside(f, root) and name not in seen:
                 files.append(f)
                 seen.add(name)
         except OSError:
@@ -287,7 +333,7 @@ def _find_key_py_files(root: Path, max_count: int = 10) -> list[Path]:
                     break
                 try:
                     fname = f.name
-                    if fname not in seen and not fname.startswith("__"):
+                    if fname not in seen and not fname.startswith("__") and not _is_symlink_or_points_outside(f, root):
                         files.append(f)
                         seen.add(fname)
                 except OSError:
@@ -299,7 +345,17 @@ def _find_key_py_files(root: Path, max_count: int = 10) -> list[Path]:
         try:
             for dirpath, dirnames, filenames in os.walk(root):
                 try:
-                    dirnames[:] = [d for d in dirnames if d not in _IGNORE_DIRS and not d.startswith(".")]
+                    current_dir = Path(dirpath)
+                    if _is_symlink_or_points_outside(current_dir, root):
+                        dirnames[:] = []
+                        continue
+                    
+                    safe_dirnames = []
+                    for d in dirnames:
+                        dirpath_full = current_dir / d
+                        if not _is_symlink_or_points_outside(dirpath_full, root):
+                            safe_dirnames.append(d)
+                    dirnames[:] = safe_dirnames
                     
                     for filename in sorted(filenames):
                         if len(files) >= max_count:
@@ -307,10 +363,11 @@ def _find_key_py_files(root: Path, max_count: int = 10) -> list[Path]:
                         if filename.endswith(".py") and not filename.startswith("__"):
                             try:
                                 f = Path(dirpath) / filename
-                                rel = str(f.relative_to(root))
-                                if rel not in seen:
-                                    files.append(f)
-                                    seen.add(rel)
+                                if not _is_symlink_or_points_outside(f, root):
+                                    rel = str(f.relative_to(root))
+                                    if rel not in seen:
+                                        files.append(f)
+                                        seen.add(rel)
                             except OSError:
                                 pass
                 except OSError:
@@ -337,78 +394,78 @@ def _generate_report(
     
     lines: list[str] = []
     
-    lines.append("# 项目分析报告")
+    lines.append("# Project Analysis Report")
     lines.append("")
-    lines.append(f"**分析路径**: `{path}`")
+    lines.append(f"**Analyzed Path**: `{path}`")
     lines.append("")
     
-    lines.append("## 项目简介")
+    lines.append("## Project Overview")
     lines.append("")
     if info["name"]:
-        lines.append(f"- **项目名称**: {info['name']}")
+        lines.append(f"- **Project Name**: {info['name']}")
     if info["version"]:
-        lines.append(f"- **版本**: {info['version']}")
+        lines.append(f"- **Version**: {info['version']}")
     if info["author"]:
-        lines.append(f"- **作者**: {info['author']}")
+        lines.append(f"- **Author**: {info['author']}")
     if info["description"]:
-        lines.append(f"- **描述**: {info['description']}")
-    lines.append(f"- **总文件数**: {total_files}")
+        lines.append(f"- **Description**: {info['description']}")
+    lines.append(f"- **Total Files**: {total_files}")
     lines.append("")
     
-    lines.append("## 目录结构")
+    lines.append("## Directory Structure")
     lines.append("")
     lines.append("```")
     for depth, name in dirs[:30]:
         indent = "  " * depth
         lines.append(f"{indent}{name}")
     if len(dirs) > 30:
-        lines.append(f"  ... (共 {len(dirs)} 个目录)")
+        lines.append(f"  ... ({len(dirs)} directories total)")
     lines.append("```")
     lines.append("")
     
-    lines.append("## 依赖信息")
+    lines.append("## Dependencies")
     lines.append("")
     if info["dependencies"]:
-        lines.append("### 主要依赖:")
+        lines.append("### Main Dependencies:")
         lines.append("")
         for dep in info["dependencies"][:20]:
             lines.append(f"- `{dep}`")
         if len(info["dependencies"]) > 20:
-            lines.append(f"... (共 {len(info['dependencies'])} 个依赖)")
+            lines.append(f"... ({len(info['dependencies'])} dependencies total)")
         lines.append("")
     else:
-        lines.append("未发现明确的依赖声明")
+        lines.append("No explicit dependency declarations found")
         lines.append("")
     
-    lines.append("## 运行方式")
+    lines.append("## How to Run")
     lines.append("")
     run_hints: list[str] = []
     
     if info["entry_points"]:
-        run_hints.append("**入口点**:")
+        run_hints.append("**Entry Points**:")
         for ep in info["entry_points"]:
             run_hints.append(f"- `{ep}`")
     
     if pyproject:
         if "[project.scripts]" in pyproject or "[tool.setuptools.scripts]" in pyproject:
-            run_hints.append("**可通过 pip 安装后运行**")
+            run_hints.append("**Runnable after pip install**")
     
     has_main = any("main.py" in str(f).lower() for f in py_files)
     if has_main:
-        run_hints.append("**直接运行**: `python main.py`")
+        run_hints.append("**Direct Run**: `python main.py`")
     
     has_pytest = any("pytest" in d.lower() for d in info["dependencies"])
     if has_pytest:
-        run_hints.append("**测试**: `pytest`")
+        run_hints.append("**Tests**: `pytest`")
     
     if run_hints:
         for hint in run_hints:
             lines.append(hint)
     else:
-        lines.append("未发现明确的运行入口，可能需要查看具体代码结构")
+        lines.append("No clear entry point found; review the code structure")
     lines.append("")
     
-    lines.append("## 核心模块")
+    lines.append("## Core Modules")
     lines.append("")
     if py_files:
         for f in py_files[:5]:
@@ -429,52 +486,52 @@ def _generate_report(
                 lines.append("```")
             lines.append("")
     else:
-        lines.append("未发现 Python 模块文件")
+        lines.append("No Python module files found")
         lines.append("")
     
-    lines.append("## 可优化点")
+    lines.append("## Suggested Improvements")
     lines.append("")
     optimizations: list[str] = []
     
     if not pyproject and not setup_py:
-        optimizations.append("- 缺少 `pyproject.toml` 或 `setup.py`，建议添加现代包配置")
+        optimizations.append("- Missing `pyproject.toml` or `setup.py`; consider adding modern package configuration")
     
     if not readme:
-        optimizations.append("- 缺少 README 文件，建议添加项目说明")
+        optimizations.append("- Missing README file; consider adding project documentation")
     
     if not requirements and not pyproject:
-        optimizations.append("- 缺少依赖声明文件，建议添加 `requirements.txt` 或在 `pyproject.toml` 中声明依赖")
+        optimizations.append("- Missing dependency declarations; consider adding `requirements.txt` or declaring dependencies in `pyproject.toml`")
     
     has_test_files = any("test" in str(f).lower() for f in py_files)
     if not has_test_files:
-        optimizations.append("- 建议添加测试文件")
+        optimizations.append("- Consider adding test files")
     
     if optimizations:
         for opt in optimizations:
             lines.append(opt)
     else:
-        lines.append("项目结构看起来较为规范")
+        lines.append("Project structure looks reasonably standard")
     lines.append("")
     
-    lines.append("## 潜在风险")
+    lines.append("## Potential Risks")
     lines.append("")
     risks: list[str] = []
     
     if pyproject:
         if "git+" in pyproject or "http://" in pyproject or "https://" in pyproject:
-            risks.append("- 发现直接的 URL 依赖，可能存在安全风险")
+            risks.append("- Direct URL dependencies found; may pose security risks")
     
     if requirements:
         if "git+" in requirements or "http://" in requirements or "https://" in requirements:
-            risks.append("- 发现直接的 URL 依赖，可能存在安全风险")
+            risks.append("- Direct URL dependencies found; may pose security risks")
         if not any("==" in line or ">=" in line or "~=" in line for line in requirements.splitlines()):
-            risks.append("- 依赖版本未锁定，可能导致兼容性问题")
+            risks.append("- Dependency versions not pinned; may cause compatibility issues")
     
     if risks:
         for risk in risks:
             lines.append(risk)
     else:
-        lines.append("未发现明显的安全风险")
+        lines.append("No obvious security risks identified")
     lines.append("")
     
     return "\n".join(lines)
@@ -501,7 +558,8 @@ class ProjectAnalyzerTool(Tool):
             "Returns a Markdown report with project overview, structure, dependencies, "
             "entry points, core modules, optimization suggestions, and potential risks. "
             "Requires an explicit, existing directory path. "
-            "Will NOT scan system directories, disk roots, or home directories."
+            "Will NOT scan system directories, disk roots, or home directories. "
+            "Will NOT follow symlinks pointing outside the project directory."
         )
 
     @property
@@ -525,7 +583,7 @@ class ProjectAnalyzerTool(Tool):
         try:
             for item in resolved.iterdir():
                 try:
-                    if item.is_file() and not item.is_symlink():
+                    if item.is_file() and not _is_symlink_or_points_outside(item, resolved):
                         key_files_found[item.name.lower()] = item
                 except OSError:
                     continue
@@ -535,20 +593,20 @@ class ProjectAnalyzerTool(Tool):
         readme_names = ["readme.md", "readme.rst", "readme.txt", "readme"]
         for name in readme_names:
             if name in key_files_found:
-                readme_content = _read_file_safe(key_files_found[name], _MAX_READ_BYTES)
+                readme_content = _read_file_safe(key_files_found[name], _MAX_READ_BYTES, resolved)
                 total_read_bytes += len(readme_content.encode("utf-8", errors="ignore"))
                 break
         
         if "pyproject.toml" in key_files_found:
-            pyproject_content = _read_file_safe(key_files_found["pyproject.toml"], _MAX_READ_BYTES)
+            pyproject_content = _read_file_safe(key_files_found["pyproject.toml"], _MAX_READ_BYTES, resolved)
             total_read_bytes += len(pyproject_content.encode("utf-8", errors="ignore"))
         
         if "requirements.txt" in key_files_found:
-            requirements_content = _read_file_safe(key_files_found["requirements.txt"], _MAX_READ_BYTES)
+            requirements_content = _read_file_safe(key_files_found["requirements.txt"], _MAX_READ_BYTES, resolved)
             total_read_bytes += len(requirements_content.encode("utf-8", errors="ignore"))
         
         if "setup.py" in key_files_found:
-            setup_py_content = _read_file_safe(key_files_found["setup.py"], _MAX_READ_BYTES)
+            setup_py_content = _read_file_safe(key_files_found["setup.py"], _MAX_READ_BYTES, resolved)
             total_read_bytes += len(setup_py_content.encode("utf-8", errors="ignore"))
         
         dirs, total_files = _count_directories(resolved, _MAX_DIR_DEPTH)
@@ -569,7 +627,7 @@ class ProjectAnalyzerTool(Tool):
             if remaining <= 0:
                 break
             
-            content = _read_file_safe(f, min(_MAX_READ_BYTES, remaining))
+            content = _read_file_safe(f, min(_MAX_READ_BYTES, remaining), resolved)
             py_file_contents[str(rel_path)] = content
             total_read_bytes += len(content.encode("utf-8", errors="ignore"))
         

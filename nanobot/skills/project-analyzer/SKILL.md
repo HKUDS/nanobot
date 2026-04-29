@@ -41,13 +41,13 @@ project_analyzer(path="/absolute/path/to/project")
 
 The `project_analyzer` tool returns a Markdown report containing:
 
-1. **项目简介** - Project name, version, description, author, file count
-2. **目录结构** - Directory tree structure
-3. **依赖信息** - Dependencies from pyproject.toml or requirements.txt
-4. **运行方式** - Entry points, scripts, or suggested run commands
-5. **核心模块** - Key Python files with preview content
-6. **可优化点** - Suggestions for improvement
-7. **潜在风险** - Security or compatibility concerns
+1. **Project Overview** - Project name, version, description, author, file count
+2. **Directory Structure** - Directory tree structure
+3. **Dependencies** - Dependencies from pyproject.toml or requirements.txt
+4. **How to Run** - Entry points, scripts, or suggested run commands
+5. **Core Modules** - Key Python files with preview content
+6. **Suggested Improvements** - Suggestions for improvement
+7. **Potential Risks** - Security or compatibility concerns
 
 ## Security Restrictions
 
@@ -55,5 +55,9 @@ The tool will reject paths that are:
 - System root directories (e.g., `C:\`, `/`)
 - User home root directories
 - System directories (e.g., `C:\Windows`, `/usr`)
+
+The tool will NOT follow:
+- Symlinks that point outside the project directory
+- Symlinks within the project directory
 
 Do not attempt to bypass these restrictions.
