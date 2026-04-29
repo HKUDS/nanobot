@@ -5,7 +5,7 @@ import json
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -74,6 +74,39 @@ class LLMResponse:
         if not self.has_tool_calls:
             return False
         return self.finish_reason in ("tool_calls", "stop")
+
+
+@dataclass
+class EmbeddingResponse:
+    """Response from an embeddings provider."""
+
+    embeddings: list[list[float]] = field(default_factory=list)
+    model: str = ""
+    usage: dict[str, int] = field(default_factory=dict)
+    content: str | None = None
+    error_status_code: int | None = None
+    error_kind: str | None = None
+    error_type: str | None = None
+    error_code: str | None = None
+    error_retry_after_s: float | None = None
+    error_should_retry: bool | None = None
+
+    def copy_with(
+        self,
+        *,
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> "EmbeddingResponse":
+        """Return a copy with an optional model override and vector truncation."""
+        embeddings = self.embeddings
+        if dimensions is not None and dimensions > 0:
+            embeddings = [vector[:dimensions] for vector in embeddings]
+
+        return replace(
+            self,
+            embeddings=embeddings,
+            model=self.model if model is None else model,
+        )
 
 
 @dataclass(frozen=True)
@@ -260,6 +293,150 @@ class LLMProvider(ABC):
             sanitized.append(clean)
         return sanitized
 
+    @staticmethod
+    def _extract_embedding_response(response: Any) -> EmbeddingResponse:
+        """Normalize an OpenAI-style embeddings response into a compact dataclass."""
+
+        def _maybe_mapping(value: Any) -> dict[str, Any] | None:
+            if isinstance(value, dict):
+                return value
+            model_dump = getattr(value, "model_dump", None)
+            if callable(model_dump):
+                dumped = model_dump()
+                if isinstance(dumped, dict):
+                    return dumped
+            return None
+
+        def _extract_usage(usage_obj: Any) -> dict[str, int]:
+            usage_map = _maybe_mapping(usage_obj)
+            if usage_map is not None:
+                result = {
+                    "prompt_tokens": int(usage_map.get("prompt_tokens") or 0),
+                    "total_tokens": int(usage_map.get("total_tokens") or usage_map.get("prompt_tokens") or 0),
+                }
+                completion_tokens = usage_map.get("completion_tokens")
+                if completion_tokens is not None:
+                    result["completion_tokens"] = int(completion_tokens or 0)
+                return result
+
+            if usage_obj is None:
+                return {}
+
+            prompt_tokens = int(getattr(usage_obj, "prompt_tokens", 0) or 0)
+            total_tokens = getattr(usage_obj, "total_tokens", None)
+            result = {
+                "prompt_tokens": prompt_tokens,
+                "total_tokens": int(total_tokens if total_tokens is not None else prompt_tokens),
+            }
+            completion_tokens = getattr(usage_obj, "completion_tokens", None)
+            if completion_tokens is not None:
+                result["completion_tokens"] = int(completion_tokens or 0)
+            return result
+
+        response_map = _maybe_mapping(response)
+        if response_map is not None:
+            data = response_map.get("data") or []
+            usage_obj = response_map.get("usage")
+            model_name = str(response_map.get("model") or "")
+        else:
+            data = getattr(response, "data", None) or []
+            usage_obj = getattr(response, "usage", None)
+            model_name = str(getattr(response, "model", "") or "")
+
+        embeddings: list[list[float]] = []
+        for item in data:
+            item_map = _maybe_mapping(item)
+            if item_map is not None:
+                embedding = item_map.get("embedding")
+            else:
+                embedding = getattr(item, "embedding", None)
+            if embedding is None:
+                continue
+            embeddings.append([float(value) for value in embedding])
+
+        return EmbeddingResponse(
+            embeddings=embeddings,
+            model=model_name,
+            usage=_extract_usage(usage_obj),
+        )
+
+    @classmethod
+    def _handle_embedding_error(cls, e: Exception, *, model: str = "") -> EmbeddingResponse:
+        """Normalize an embeddings exception into a structured response."""
+        response = getattr(e, "response", None)
+        headers = getattr(response, "headers", None)
+        payload = (
+            getattr(e, "body", None)
+            or getattr(e, "doc", None)
+            or getattr(response, "text", None)
+        )
+        if payload is None and response is not None:
+            response_json = getattr(response, "json", None)
+            if callable(response_json):
+                try:
+                    payload = response_json()
+                except Exception:
+                    payload = None
+
+        if isinstance(payload, dict):
+            try:
+                payload_text = json.dumps(payload, ensure_ascii=False)
+            except Exception:
+                payload_text = str(payload)
+        elif isinstance(payload, str):
+            payload_text = payload
+        elif payload is not None:
+            payload_text = str(payload)
+        else:
+            payload_text = ""
+
+        msg = f"Error: {payload_text.strip()[:500]}" if payload_text.strip() else f"Error calling embeddings: {e}"
+        retry_after = cls._extract_retry_after_from_headers(headers)
+        if retry_after is None:
+            retry_after = cls._extract_retry_after(msg)
+
+        status_code = getattr(e, "status_code", None)
+        if status_code is None and response is not None:
+            status_code = getattr(response, "status_code", None)
+
+        error_kind: str | None = None
+        error_name = e.__class__.__name__.lower()
+        if "timeout" in error_name:
+            error_kind = "timeout"
+        elif "connection" in error_name:
+            error_kind = "connection"
+
+        should_retry: bool | None = None
+        if headers is not None:
+            raw = headers.get("x-should-retry")
+            if isinstance(raw, str):
+                lowered = raw.strip().lower()
+                if lowered == "true":
+                    should_retry = True
+                elif lowered == "false":
+                    should_retry = False
+
+        error_type, error_code = cls._extract_error_type_code(payload)
+        if status_code is None:
+            if error_kind == "timeout":
+                status_code = 504
+            elif error_kind == "connection":
+                status_code = 502
+            else:
+                status_code = 500
+
+        return EmbeddingResponse(
+            embeddings=[],
+            model=model,
+            content=msg,
+            error_status_code=int(status_code),
+            error_kind=error_kind,
+            error_type=error_type,
+            error_code=error_code,
+            error_retry_after_s=retry_after,
+            error_should_retry=should_retry,
+        )
+
     @abstractmethod
     async def chat(
         self,
@@ -286,6 +463,19 @@ class LLMProvider(ABC):
             LLMResponse with content and/or tool calls.
         """
         pass
+
+    async def embed(
+        self,
+        input: str | list[str],
+        model: str | None = None,
+        dimensions: int | None = None,
+    ) -> EmbeddingResponse:
+        """Generate embeddings for one or more inputs.
+
+        Providers that do not support embeddings should keep the default
+        implementation, which raises ``NotImplementedError``.
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support embeddings")
 
     @classmethod
     def _is_transient_error(cls, content: str | None) -> bool:

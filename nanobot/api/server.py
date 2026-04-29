@@ -1,6 +1,6 @@
 """OpenAI-compatible HTTP API server for a fixed nanobot session.
 
-Provides /v1/chat/completions and /v1/models endpoints.
+Provides /v1/chat/completions, /v1/embeddings and /v1/models endpoints.
 All requests route to a single persistent API session.
 """
 
@@ -42,11 +42,19 @@ API_CHAT_ID = "default"
 # ---------------------------------------------------------------------------
 
 
-def _error_json(status: int, message: str, err_type: str = "invalid_request_error") -> web.Response:
-    return web.json_response(
+def _error_json(
+    status: int,
+    message: str,
+    err_type: str = "invalid_request_error",
+    headers: dict[str, str] | None = None,
+) -> web.Response:
+    response = web.json_response(
         {"error": {"message": message, "type": err_type, "code": status}},
         status=status,
     )
+    if headers:
+        response.headers.update(headers)
+    return response
 
 
 def _chat_completion_response(content: str, model: str) -> dict[str, Any]:
@@ -73,6 +81,49 @@ def _response_text(value: Any) -> str:
     if hasattr(value, "content"):
         return str(getattr(value, "content") or "")
     return str(value)
+
+
+def _embedding_response(vectors: list[list[float]], model: str, usage: dict[str, int]) -> dict[str, Any]:
+    """Format an OpenAI-compatible embedding response."""
+    normalized_usage = dict(usage)
+    normalized_usage["prompt_tokens"] = int(normalized_usage.get("prompt_tokens") or 0)
+    total_tokens = normalized_usage.get("total_tokens")
+    normalized_usage["total_tokens"] = int(total_tokens if total_tokens is not None else normalized_usage["prompt_tokens"])
+    completion_tokens = normalized_usage.get("completion_tokens")
+    if completion_tokens is not None:
+        normalized_usage["completion_tokens"] = int(completion_tokens or 0)
+
+    return {
+        "id": f"embeddings-{uuid.uuid4().hex[:12]}",
+        "object": "list",
+        "created": int(time.time()),
+        "model": model,
+        "data": [
+            {
+                "object": "embedding",
+                "embedding": vector,
+                "index": index,
+            }
+            for index, vector in enumerate(vectors)
+        ],
+        "usage": normalized_usage,
+    }
+
+
+def _validate_dimensions(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("dimensions must be a positive integer")
+    return value
+
+
+def _validate_embedding_input(value: Any) -> str | list[str]:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return value
+    raise ValueError("input must be a string or a list of strings")
 
 # ---------------------------------------------------------------------------
 # SSE helpers
@@ -330,6 +381,87 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
     return web.json_response(_chat_completion_response(response_text, model_name))
 
 
+async def handle_embeddings(request: web.Request) -> web.Response:
+    """POST /v1/embeddings — OpenAI-compatible embeddings endpoint."""
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_json(400, "Invalid JSON body")
+
+    if not isinstance(body, dict):
+        return _error_json(400, "Invalid JSON body")
+
+    if body.get("stream"):
+        return _error_json(400, "Streaming is not supported for embeddings")
+
+    input_data = body.get("input")
+    if input_data is None:
+        return _error_json(400, "Missing input field")
+    try:
+        input_data = _validate_embedding_input(input_data)
+    except ValueError as e:
+        return _error_json(400, str(e))
+
+    requested_model = body.get("model")
+    if not isinstance(requested_model, str) or not requested_model.strip():
+        return _error_json(400, "Missing model field")
+    embedding_model = requested_model.strip()
+
+    try:
+        dimensions = _validate_dimensions(body.get("dimensions"))
+    except ValueError as e:
+        return _error_json(400, str(e))
+
+    provider = request.app.get("provider")
+    if provider is None or not hasattr(provider, "embed"):
+        return _error_json(501, "Embeddings are not available for this server", err_type="not_implemented_error")
+
+    timeout_s: float = request.app.get("request_timeout", 120.0)
+    try:
+        embedding_response = await asyncio.wait_for(
+            provider.embed(input=input_data, model=embedding_model, dimensions=dimensions),
+            timeout=timeout_s,
+        )
+    except NotImplementedError:
+        return _error_json(501, "Embeddings are not supported by the configured provider", err_type="not_implemented_error")
+    except asyncio.TimeoutError:
+        return _error_json(504, f"Request timed out after {timeout_s}s")
+    except Exception:
+        logger.exception("Error generating embeddings")
+        return _error_json(500, "Internal server error", err_type="server_error")
+
+    if embedding_response.error_status_code is not None:
+        status = int(embedding_response.error_status_code)
+        err_type = (
+            embedding_response.error_type
+            or (
+                "rate_limit_error"
+                if status == 429
+                else "server_error"
+                if status >= 500 or embedding_response.error_kind in ("timeout", "connection")
+                else "invalid_request_error"
+            )
+        )
+        headers: dict[str, str] = {}
+        if embedding_response.error_retry_after_s is not None and embedding_response.error_retry_after_s > 0:
+            headers["Retry-After"] = f"{embedding_response.error_retry_after_s:g}"
+        return _error_json(
+            status,
+            embedding_response.content or "Embeddings request failed",
+            err_type=err_type,
+            headers=headers or None,
+        )
+
+    if dimensions is not None:
+        embedding_response = embedding_response.copy_with(dimensions=dimensions)
+
+    vectors = [list(vector) for vector in embedding_response.embeddings]
+
+    return web.json_response(
+        _embedding_response(vectors, embedding_response.model or embedding_model, embedding_response.usage)
+    )
+
+
 async def handle_models(request: web.Request) -> web.Response:
     """GET /v1/models"""
     model_name = request.app.get("model_name", "nanobot")
@@ -370,11 +502,13 @@ def create_app(
     """
     app = web.Application(client_max_size=20 * 1024 * 1024)  # 20MB for base64 images
     app["agent_loop"] = agent_loop
+    app["provider"] = getattr(agent_loop, "__dict__", {}).get("provider")
     app["model_name"] = model_name
     app["request_timeout"] = request_timeout
     app["session_locks"] = {}  # per-user locks, keyed by session_key
 
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
+    app.router.add_post("/v1/embeddings", handle_embeddings)
     app.router.add_get("/v1/models", handle_models)
     app.router.add_get("/health", handle_health)
     return app

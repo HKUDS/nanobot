@@ -15,6 +15,7 @@ By default, the API binds to `127.0.0.1:8900`. You can change this in `config.js
 - Single-message input: each request must contain exactly one `user` message
 - Fixed model: omit `model`, or pass the same model shown by `/v1/models`
 - Streaming: set `stream=true` to receive Server-Sent Events (`text/event-stream`) with OpenAI-compatible delta chunks, terminated by `data: [DONE]`; omit or set `stream=false` for a single JSON response
+- Embeddings: send a `model` with `POST /v1/embeddings`. If you also send `dimensions`, nanobot trims the returned vector locally so models that do not support short outputs still work.
 - **File uploads**: supports images, PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx) via JSON base64 or `multipart/form-data` (max 10MB per file)
 - API requests run in the synthetic `api` channel, so the `message` tool does **not** automatically deliver to Telegram/Discord/etc. To proactively send to another chat, call `message` with an explicit `channel` and `chat_id` for an enabled channel.
 
@@ -34,6 +35,7 @@ If `channel` points to a channel that is not enabled in your config, nanobot wil
 
 - `GET /health`
 - `GET /v1/models`
+- `POST /v1/embeddings`
 - `POST /v1/chat/completions`
 
 ## curl
@@ -44,6 +46,18 @@ curl http://127.0.0.1:8900/v1/chat/completions \
   -d '{
     "messages": [{"role": "user", "content": "hi"}],
     "session_id": "my-session"
+  }'
+```
+
+## Embeddings
+
+```bash
+curl http://127.0.0.1:8900/v1/embeddings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "embedding-model",
+    "input": "hello world",
+    "dimensions": 256
   }'
 ```
 
