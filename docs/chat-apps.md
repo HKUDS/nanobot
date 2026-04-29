@@ -313,7 +313,12 @@ Uses **WebSocket** long connection — no public IP required.
       "doneEmoji": "DONE",
       "toolHintPrefix": "🔧",
       "streaming": true,
-      "domain": "feishu"
+      "domain": "feishu",
+      "notification": {
+        "chat_id_list": ["oc_xxx"],
+        "on_start_message": "🚀 Nanobot 已启动",
+        "on_stop_message": "🛑 Nanobot 已停止"
+      }
     }
   }
 }
@@ -327,6 +332,11 @@ Uses **WebSocket** long connection — no public IP required.
 > `doneEmoji`: Optional emoji for "completed" status (e.g., `DONE`, `OK`, `HEART`). When set, bot adds this reaction after removing `reactEmoji`.
 > `toolHintPrefix`: Prefix for inline tool hints in streaming cards (default: `🔧`).
 > `domain`: `"feishu"` (default) for China (open.feishu.cn), `"lark"` for international Lark (open.larksuite.com).
+>
+> **Lifecycle notifications** (under `notification`):
+> - `chat_id_list`: List of chat IDs to receive lifecycle notifications. Find chat IDs in nanobot logs when the bot receives messages.
+> - `on_start_message`: Message sent to `chat_id_list` after the gateway starts successfully.
+> - `on_stop_message`: Message sent to `chat_id_list` before the gateway stops.
 
 **3. Run**
 
