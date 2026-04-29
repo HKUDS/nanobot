@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
-from pydantic.alias_generators import to_camel
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -29,12 +28,13 @@ def _default_webui_dist() -> Path | None:
     return candidate if candidate.is_dir() else None
 
 
-def _coerce_optional_bool(value: Any) -> bool | None:
-    return value if isinstance(value, bool) else None
-
-
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
+
+_BOOL_CAMEL_ALIASES: dict[str, str] = {
+    "send_progress": "sendProgress",
+    "send_tool_hints": "sendToolHints",
+}
 
 
 class ChannelManager:
@@ -96,6 +96,12 @@ class ChannelManager:
                 channel.transcription_api_key = transcription_key
                 channel.transcription_api_base = transcription_base
                 channel.transcription_language = transcription_language
+                channel.send_progress = self._resolve_bool_override(
+                    section, "send_progress", self.config.channels.send_progress,
+                )
+                channel.send_tool_hints = self._resolve_bool_override(
+                    section, "send_tool_hints", self.config.channels.send_tool_hints,
+                )
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
@@ -138,26 +144,29 @@ class ChannelManager:
                 )
 
     def _should_send_progress(self, channel_name: str, *, tool_hint: bool = False) -> bool:
-        """Resolve progress visibility, allowing per-channel overrides."""
-        key = "send_tool_hints" if tool_hint else "send_progress"
-        default = getattr(self.config.channels, key)
-        override = self._channel_bool_override(channel_name, key)
-        return default if override is None else override
+        """Return whether progress (or tool-hints) may be sent to *channel_name*."""
+        ch = self.channels.get(channel_name)
+        if ch is None:
+            logger.warning("Progress check for unknown channel: {}", channel_name)
+            return False
+        return ch.send_tool_hints if tool_hint else ch.send_progress
 
-    def _channel_bool_override(self, channel_name: str, key: str) -> bool | None:
-        section = getattr(self.config.channels, channel_name, None)
-        if section is None:
-            return None
+    def _resolve_bool_override(self, section: Any, key: str, default: bool) -> bool:
+        """Return *key* from *section* if it is a bool, otherwise *default*.
 
-        camel_key = to_camel(key)
+        For dict configs also checks the camelCase alias (e.g. ``sendProgress``
+        for ``send_progress``) so raw JSON/TOML configs work alongside
+        Pydantic models.
+        """
         if isinstance(section, dict):
-            value = section.get(key, section.get(camel_key))
-            return _coerce_optional_bool(value)
-
+            value = section.get(key)
+            if value is None:
+                camel = _BOOL_CAMEL_ALIASES.get(key)
+                if camel:
+                    value = section.get(camel)
+            return value if isinstance(value, bool) else default
         value = getattr(section, key, None)
-        if value is None:
-            value = getattr(section, camel_key, None)
-        return _coerce_optional_bool(value)
+        return value if isinstance(value, bool) else default
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""

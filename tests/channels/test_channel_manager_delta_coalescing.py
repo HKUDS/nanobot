@@ -8,7 +8,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
-from nanobot.config.schema import ChannelsConfig, Config
+from nanobot.config.schema import Config
 
 
 class MockChannel(BaseChannel):
@@ -299,64 +299,42 @@ class TestDispatchOutboundWithCoalescing:
 
 
 class TestProgressFiltering:
-    """Progress filtering should honor per-channel config overrides."""
+    """Progress filtering should honor per-channel settings."""
 
     def test_progress_visibility_uses_global_defaults(self, manager):
-        manager.config.channels = ChannelsConfig.model_validate({
-            "sendProgress": True,
-            "sendToolHints": False,
-        })
-
         assert manager._should_send_progress("mock", tool_hint=False) is True
         assert manager._should_send_progress("mock", tool_hint=True) is False
 
     def test_progress_visibility_uses_channel_overrides(self, manager):
-        manager.config.channels = ChannelsConfig.model_validate({
-            "sendProgress": True,
-            "sendToolHints": False,
-            "mock": {
-                "sendProgress": False,
-                "sendToolHints": True,
-            },
-        })
-
-        assert manager._should_send_progress("mock", tool_hint=False) is False
-        assert manager._should_send_progress("mock", tool_hint=True) is True
-        assert manager._should_send_progress("other", tool_hint=False) is True
-        assert manager._should_send_progress("other", tool_hint=True) is False
-
-    def test_progress_visibility_uses_snake_case_channel_overrides(self, manager):
-        manager.config.channels = ChannelsConfig.model_validate({
-            "sendProgress": True,
-            "sendToolHints": False,
-            "mock": {
-                "send_progress": False,
-                "send_tool_hints": True,
-            },
-        })
+        manager.channels["mock"].send_progress = False
+        manager.channels["mock"].send_tool_hints = True
 
         assert manager._should_send_progress("mock", tool_hint=False) is False
         assert manager._should_send_progress("mock", tool_hint=True) is True
 
-    def test_progress_visibility_ignores_non_bool_channel_overrides(self, manager):
-        manager.config.channels = ChannelsConfig.model_validate({
-            "sendProgress": True,
-            "sendToolHints": False,
-            "mock": {
-                "sendProgress": "false",
-                "sendToolHints": "true",
-            },
-        })
+    def test_progress_visibility_returns_false_for_missing_channel(self, manager):
+        assert manager._should_send_progress("nonexistent", tool_hint=False) is False
+        assert manager._should_send_progress("nonexistent", tool_hint=True) is False
 
-        assert manager._should_send_progress("mock", tool_hint=False) is True
-        assert manager._should_send_progress("mock", tool_hint=True) is False
+    def test_resolve_bool_override_dict(self, manager):
+        assert manager._resolve_bool_override({}, "send_progress", True) is True
+        assert manager._resolve_bool_override({"send_progress": False}, "send_progress", True) is False
+        assert manager._resolve_bool_override({"sendProgress": False}, "send_progress", True) is False
+        assert manager._resolve_bool_override({"send_progress": "false"}, "send_progress", True) is True
+
+    def test_resolve_bool_override_model(self, manager):
+        class FakeSection:
+            send_progress = False
+            send_tool_hints = True
+
+        assert manager._resolve_bool_override(FakeSection(), "send_progress", True) is False
+        assert manager._resolve_bool_override(FakeSection(), "send_tool_hints", False) is True
+        # Missing attribute falls back to default
+        assert manager._resolve_bool_override(FakeSection(), "unknown_key", True) is True
 
     @pytest.mark.asyncio
     async def test_channel_override_can_drop_progress_message(self, manager, bus):
-        manager.config.channels = ChannelsConfig.model_validate({
-            "sendProgress": True,
-            "mock": {"sendProgress": False},
-        })
+        manager.channels["mock"].send_progress = False
         await bus.publish_outbound(OutboundMessage(
             channel="mock",
             chat_id="chat1",
@@ -389,10 +367,7 @@ class TestProgressFiltering:
 
     @pytest.mark.asyncio
     async def test_channel_override_can_enable_tool_hints(self, manager, bus):
-        manager.config.channels = ChannelsConfig.model_validate({
-            "sendToolHints": False,
-            "mock": {"sendToolHints": True},
-        })
+        manager.channels["mock"].send_tool_hints = True
         await bus.publish_outbound(OutboundMessage(
             channel="mock",
             chat_id="chat1",
