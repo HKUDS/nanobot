@@ -876,6 +876,60 @@ class WeixinChannel(BaseChannel):
     # Outbound  (matches send.ts buildTextMessageReq + sendMessageWeixin)
     # ------------------------------------------------------------------
 
+    async def _refresh_context_token(self, user_id: str, *, retries: int = 2) -> str:
+        """Obtain a fresh context_token via the getconfig API.
+
+        Called when the cached token is missing or stale (e.g. after a gateway
+        restart or before a proactive / cron-triggered message).  Retries up to
+        *retries* times on network / server errors.
+        """
+        body: dict[str, Any] = {
+            "ilink_user_id": user_id,
+            "context_token": None,
+            "base_info": BASE_INFO,
+        }
+        for attempt in range(1, retries + 1):
+            try:
+                data = await self._api_post("ilink/bot/getconfig", body)
+                logger.debug(
+                    "WeChat: getconfig response for chat_id={}: ret={} errcode={} fields={}",
+                    user_id,
+                    data.get("ret"),
+                    data.get("errcode"),
+                    [k for k in data if k not in ("base_info",)],
+                )
+                token = str(data.get("context_token", "") or "")
+                if token:
+                    self._context_tokens[user_id] = token
+                    self._save_state()
+                    logger.info(
+                        "WeChat: refreshed context_token for chat_id={}",
+                        user_id,
+                    )
+                    return token
+                logger.warning(
+                    "WeChat: getconfig returned no context_token for chat_id={}",
+                    user_id,
+                )
+                return ""
+            except Exception as exc:
+                logger.warning(
+                    "WeChat: getconfig attempt {}/{} failed for chat_id={}: {}",
+                    attempt,
+                    retries,
+                    user_id,
+                    exc,
+                )
+                if attempt < retries:
+                    await asyncio.sleep(1 * attempt)
+
+        logger.warning(
+            "WeChat: failed to refresh context_token for chat_id={} after {} attempts",
+            user_id,
+            retries,
+        )
+        return ""
+
     async def _get_typing_ticket(self, user_id: str, context_token: str = "") -> str:
         """Get typing ticket with per-user refresh + failure backoff cache."""
         now = time.time()
@@ -955,11 +1009,13 @@ class WeixinChannel(BaseChannel):
         content = msg.content.strip()
         ctx_token = self._context_tokens.get(msg.chat_id, "")
         if not ctx_token:
-            logger.warning(
-                "WeChat: no context_token for chat_id={}, cannot send",
-                msg.chat_id,
-            )
-            return
+            ctx_token = await self._refresh_context_token(msg.chat_id)
+            if not ctx_token:
+                logger.warning(
+                    "WeChat: no context_token for chat_id={}, cannot send",
+                    msg.chat_id,
+                )
+                return
 
         typing_ticket = ""
         try:

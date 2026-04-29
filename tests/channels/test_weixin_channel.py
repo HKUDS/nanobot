@@ -1185,3 +1185,41 @@ async def test_send_media_network_error_does_not_double_api_calls() -> None:
     # _send_media_file called once, _send_text never called
     channel._send_media_file.assert_awaited_once()
     channel._send_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_without_context_token_still_delivers_message_via_getconfig_refresh() -> None:
+    """When context_token is missing (e.g. gateway restart or cron job),
+    send() should attempt to obtain a fresh context_token via the getconfig
+    API so the message is delivered instead of being silently dropped.
+
+    This is the cron-job regression: a scheduled task fires at 08:00 but the
+    user has not sent any message since yesterday, so the cached token is
+    gone / expired.  The bot must still be able to proactively send.
+    """
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._send_text = AsyncMock()
+
+    getconfig_calls: list[dict] = []
+
+    async def _mock_api_post(endpoint: str, body: dict | None = None) -> dict:
+        getconfig_calls.append({"endpoint": endpoint, "body": body})
+        if endpoint == "ilink/bot/getconfig":
+            return {
+                "ret": 0,
+                "typing_ticket": "ticket-refreshed",
+                "context_token": "ctx-refreshed",
+            }
+        return {"ret": 0}
+
+    channel._api_post = AsyncMock(side_effect=_mock_api_post)
+
+    msg = _make_outbound_msg(chat_id="wx-user", content="hello from cron")
+
+    await channel.send(msg)
+
+    channel._send_text.assert_awaited_once_with("wx-user", "hello from cron", "ctx-refreshed")
+    assert channel._context_tokens.get("wx-user") == "ctx-refreshed"
+    assert any(c["endpoint"] == "ilink/bot/getconfig" for c in getconfig_calls)
