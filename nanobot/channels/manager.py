@@ -11,7 +11,7 @@ from loguru import logger
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import Config
+from nanobot.config.schema import Config, TranscriptionConfig
 from nanobot.utils.restart import consume_restart_notice_from_env, format_restart_completed_message
 
 if TYPE_CHECKING:
@@ -60,10 +60,12 @@ class ChannelManager:
         """Initialize channels discovered via pkgutil scan + entry_points plugins."""
         from nanobot.channels.registry import discover_all
 
-        transcription_provider = self.config.channels.transcription_provider
-        transcription_key = self._resolve_transcription_key(transcription_provider)
-        transcription_base = self._resolve_transcription_base(transcription_provider)
-        transcription_language = self.config.channels.transcription_language
+        transcription_cfg = self._build_transcription_config()
+        # Legacy flat values for backward compat
+        transcription_provider = transcription_cfg.provider
+        transcription_key = transcription_cfg.api_key or ""
+        transcription_base = transcription_cfg.api_base or ""
+        transcription_language = transcription_cfg.language
 
         for name, cls in discover_all().items():
             section = getattr(self.config.channels, name, None)
@@ -86,6 +88,8 @@ class ChannelManager:
                     if static_path is not None:
                         kwargs["static_dist_path"] = static_path
                 channel = cls(section, self.bus, **kwargs)
+                channel._transcription_config = transcription_cfg
+                # Also set legacy flat attributes for any code that reads them directly
                 channel.transcription_provider = transcription_provider
                 channel.transcription_api_key = transcription_key
                 channel.transcription_api_base = transcription_base
@@ -96,24 +100,86 @@ class ChannelManager:
                 logger.warning("{} channel not available: {}", name, e)
 
         self._validate_allow_from()
+        self._warn_transcription_unconfigured(transcription_cfg)
 
-    def _resolve_transcription_key(self, provider: str) -> str:
-        """Pick the API key for the configured transcription provider."""
+    def _build_transcription_config(self) -> TranscriptionConfig:
+        """Build a resolved TranscriptionConfig, merging legacy flat fields and provider-section keys."""
+        channels_cfg = self.config.channels
+
+        # Start from the typed transcription block if present
+        tc = channels_cfg.transcription
+
+        # If the typed block has defaults but legacy flat fields were explicitly set,
+        # prefer the legacy values (backward compat)
+        provider = tc.provider
+        if channels_cfg.transcription_provider != "groq" and tc.provider == "groq":
+            # User set the legacy field to something non-default
+            provider = channels_cfg.transcription_provider
+
+        language = tc.language
+        if channels_cfg.transcription_language and not tc.language:
+            language = channels_cfg.transcription_language
+
+        # Resolve API key: transcription-specific > provider-section fallback
+        api_key = tc.api_key
+        if not api_key and provider != "local":
+            api_key = self._resolve_provider_key(provider)
+
+        # Resolve API base: transcription-specific > provider-section fallback
+        api_base = tc.api_base
+        if not api_base and provider != "local":
+            api_base = self._resolve_provider_base(provider)
+
+        return TranscriptionConfig(
+            enabled=tc.enabled,
+            provider=provider,
+            model=tc.model,
+            api_key=api_key,
+            api_base=api_base,
+            language=language,
+            max_duration_seconds=tc.max_duration_seconds,
+        )
+
+    def _resolve_provider_key(self, provider: str) -> str | None:
+        """Pick the API key from the providers section for the given transcription provider."""
         try:
             if provider == "openai":
                 return self.config.providers.openai.api_key
             return self.config.providers.groq.api_key
         except AttributeError:
-            return ""
+            return None
 
-    def _resolve_transcription_base(self, provider: str) -> str:
-        """Pick the API base URL for the configured transcription provider."""
+    def _resolve_provider_base(self, provider: str) -> str | None:
+        """Pick the API base URL from the providers section."""
         try:
             if provider == "openai":
-                return self.config.providers.openai.api_base or ""
-            return self.config.providers.groq.api_base or ""
+                return self.config.providers.openai.api_base or None
+            return self.config.providers.groq.api_base or None
         except AttributeError:
-            return ""
+            return None
+
+    def _warn_transcription_unconfigured(self, tc: TranscriptionConfig) -> None:
+        """Log a startup warning if voice-capable channels are enabled but transcription won't work."""
+        if not tc.enabled:
+            return
+        # Check if any voice-capable channel is enabled
+        voice_channels = {"telegram", "whatsapp", "discord"}
+        has_voice = any(name in voice_channels for name in self.channels)
+        if not has_voice:
+            return
+
+        from nanobot.providers.transcription import WhisperTranscriptionProvider
+        p = WhisperTranscriptionProvider(
+            tc.provider,
+            api_key=tc.api_key,
+            api_base=tc.api_base,
+            model=tc.model,
+        )
+        if not p.is_available:
+            logger.warning(
+                "Voice-capable channels enabled but transcription is not configured: {}",
+                p.unavailable_reason,
+            )
 
     def _validate_allow_from(self) -> None:
         for name, ch in self.channels.items():
