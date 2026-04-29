@@ -1059,85 +1059,108 @@ class AgentLoop:
             user_persisted_early = True
 
         if is_agent_workflow_enabled() and msg.channel != "system":
-            workflow_result = None
+            task_type = None
+            failed_stage = None
             try:
-                logger.info("Agent Workflow enabled: running multi-stage workflow for task")
-                workflow = AgentWorkflow(
-                    tools_registry=self.tools,
-                    skills_loader=self.skills,
-                    context_builder=self.context,
-                    llm_provider=self.provider,
-                    workspace=self.workspace,
-                    max_iterations=self.max_iterations,
-                )
-                workflow_history = [
-                    {"role": m["role"], "content": m["content"]}
-                    for m in initial_messages
-                    if m.get("role") in ["user", "assistant"] and m.get("content")
-                ]
-                workflow_result = await workflow.run(
-                    user_input=msg.content,
-                    conversation_history=workflow_history,
-                    on_progress=on_progress or _bus_progress,
-                )
-                if workflow_result.workflow_used and not workflow_result.fallback_used:
-                    final_content = workflow_result.content
-                    all_msgs = initial_messages + [{"role": "assistant", "content": final_content}]
-                    stop_reason = "workflow_completed"
-                    had_injections = False
-                    tools_used = []
-                    if workflow_result.stage_results.get("execution_results"):
-                        tools_used = [
-                            r.tool_name
-                            for r in workflow_result.stage_results["execution_results"]
-                            if r.success
-                        ]
-                    logger.info("Agent Workflow completed successfully. Tools used: {}", tools_used)
-                elif workflow_result.fallback_used:
-                    failed_stage = workflow_result.get_failed_stage_name()
-                    error_summary = workflow_result.get_error_summary()
-                    logger.warning(
-                        "Agent Workflow failed at stage [{}]: {}. Falling back to original loop.",
-                        failed_stage,
-                        error_summary,
-                    )
-                    final_content, tools_used, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
-                        initial_messages,
-                        on_progress=on_progress or _bus_progress,
-                        on_stream=on_stream,
-                        on_stream_end=on_stream_end,
-                        on_retry_wait=_on_retry_wait,
-                        session=session,
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        message_id=msg.metadata.get("message_id"),
-                        metadata=msg.metadata,
-                        session_key=key,
-                        pending_queue=pending_queue,
-                    )
+                from nanobot.agent.workflow.router import TaskRouter, TaskType
+                from nanobot.agent.workflow.validator import ResultValidator, ValidationStatus
+                from nanobot.agent.workflow.renderer import ReportRenderer
+                
+                logger.info("Agent Workflow enabled: analyzing task type")
+                
+                router = TaskRouter(llm_provider=self.provider, context_builder=self.context)
+                task_type = await router.route(msg.content, [])
+                
+                is_project_analysis = router.is_project_analysis_request(msg.content)
+                if is_project_analysis or task_type == TaskType.PROJECT_ANALYSIS:
+                    logger.info("Recognized as project analysis request: {}", msg.content[:80])
+                    
             except Exception as e:
-                stage_name = "unknown"
-                if workflow_result and workflow_result.failed_stage:
-                    stage_name = workflow_result.get_failed_stage_name()
+                failed_stage = "task_router"
                 error_summary = str(e)[:100]
                 logger.warning(
-                    "Agent Workflow failed at stage [{}]: {}. Falling back to original loop.",
-                    stage_name,
+                    "Agent Workflow failed at stage [{}]: {}. Proceeding with original loop.",
+                    failed_stage,
                     error_summary,
                 )
-                final_content, tools_used, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
-                    initial_messages,
-                    on_progress=on_progress or _bus_progress,
-                    on_stream=on_stream,
-                    on_stream_end=on_stream_end,
-                    on_retry_wait=_on_retry_wait,
-                    session=session,
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    message_id=msg.metadata.get("message_id"),
-                    metadata=msg.metadata,
-                    session_key=key,
-                    pending_queue=pending_queue,
+            
+            final_content, tools_used, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
+                initial_messages,
+                on_progress=on_progress or _bus_progress,
+                on_stream=on_stream,
+                on_stream_end=on_stream_end,
+                on_retry_wait=_on_retry_wait,
+                session=session,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                message_id=msg.metadata.get("message_id"),
+                metadata=msg.metadata,
+                session_key=key,
+                pending_queue=pending_queue,
+            )
+            
+            try:
+                from nanobot.agent.workflow.executor import ExecutionResult, ExecutionStatus
+                from nanobot.agent.workflow.planner import StepType
+                
+                validator = ResultValidator(llm_provider=self.provider)
+                renderer = ReportRenderer()
+                
+                execution_results = []
+                for i, msg_item in enumerate(all_msgs):
+                    if msg_item.get("role") == "tool":
+                        tool_name = msg_item.get("name", "unknown")
+                        content = msg_item.get("content", "")
+                        is_error = isinstance(content, str) and (
+                            content.startswith("Error") or 
+                            content.startswith("Traceback") or
+                            "error" in content.lower()
+                        )
+                        result = ExecutionResult(
+                            step_index=len(execution_results),
+                            step_type=StepType.TOOL_CALL,
+                            tool_name=tool_name,
+                            status=ExecutionStatus.FAILED if is_error else ExecutionStatus.SUCCESS,
+                            success=not is_error,
+                            output=content,
+                            error_message=content if is_error else "",
+                        )
+                        execution_results.append(result)
+                
+                validation_result = await validator.validate(
+                    user_input=msg.content,
+                    execution_results=execution_results,
+                    task_type=task_type or TaskType.UNKNOWN,
+                )
+                
+                if (validation_result.status == ValidationStatus.PARTIAL_SUCCESS or 
+                    validation_result.status == ValidationStatus.FAILURE):
+                    logger.info(
+                        "Validation status: {}, enhancing report with error details",
+                        validation_result.status.value,
+                    )
+                    
+                    enhanced_report = await renderer.render(
+                        user_input=msg.content,
+                        task_type=task_type or TaskType.UNKNOWN,
+                        plan=None,
+                        execution_results=execution_results,
+                        validation_result=validation_result,
+                    )
+                    
+                    if enhanced_report.content and (
+                        "错误" in enhanced_report.content or 
+                        "failed" in enhanced_report.content.lower()
+                    ):
+                        original_content = final_content or ""
+                        final_content = enhanced_report.content
+                        logger.info("Report enhanced with error details")
+                        
+            except Exception as e:
+                error_summary = str(e)[:100]
+                logger.warning(
+                    "Agent Workflow post-processing failed: {}. Using original result.",
+                    error_summary,
                 )
         else:
             final_content, tools_used, all_msgs, stop_reason, had_injections = await self._run_agent_loop(

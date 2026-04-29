@@ -119,13 +119,15 @@ class TaskRouter:
     LLM-based classification to determine the type of task being requested.
     """
     
-    def __init__(self, llm_provider: Any = None):
+    def __init__(self, llm_provider: Any = None, context_builder: Any = None):
         """Initialize the Task Router.
         
         Args:
             llm_provider: Optional LLM provider for advanced classification.
+            context_builder: Optional ContextBuilder for accessing workspace context and skills.
         """
         self.llm_provider = llm_provider
+        self.context_builder = context_builder
         self._keyword_patterns = self._compile_patterns()
     
     def _compile_patterns(self) -> Dict[TaskType, List[re.Pattern]]:
@@ -274,7 +276,8 @@ class TaskRouter:
         """Check if the input is a project analysis request.
         
         This is a convenience method for quickly identifying project analysis
-        requests without full routing.
+        requests without full routing. It can use context_builder to access
+        workspace context and skills for more accurate identification.
         
         Args:
             user_input: The user's input message.
@@ -294,6 +297,25 @@ class TaskRouter:
             kw.lower() in input_lower
             for kw in project_keywords
         )
+        
+        if self.context_builder:
+            try:
+                workspace = getattr(self.context_builder, 'workspace', None)
+                if workspace:
+                    common_project_files = [
+                        "pyproject.toml", "package.json", "Cargo.toml",
+                        "README.md", "README", "setup.py", "go.mod",
+                        "Gemfile", "composer.json", "requirements.txt",
+                    ]
+                    from pathlib import Path
+                    if isinstance(workspace, Path):
+                        for filename in common_project_files:
+                            if (workspace / filename).exists():
+                                if "what" in input_lower or "tell" in input_lower or "analyze" in input_lower:
+                                    has_project_keyword = True
+                                    break
+            except Exception as e:
+                logger.debug("Error checking workspace for project files: {}", e)
         
         if not has_project_keyword:
             return False
