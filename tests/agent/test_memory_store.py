@@ -148,14 +148,14 @@ class TestHistoryWithCursor:
         store.append_history("event 2")
         store.append_history("event 3")
         entries = store.read_unprocessed_history(since_cursor=0)
-        
+
         # Monitor temp file existence
         tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
         assert not tmp_path_obj.exists()  # Should not exist initially
-        
+
         # Call _write_entries
         store._write_entries(entries)
-        
+
         # Temp file should be cleaned up
         assert not tmp_path_obj.exists()
         # Original file should exist
@@ -166,26 +166,21 @@ class TestHistoryWithCursor:
         store = MemoryStore(tmp_path)
         store.append_history("event 1")
         entries = store.read_unprocessed_history(since_cursor=0)
-        
+
         tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
-        
+
         # Mock os.replace to raise an exception
-        original_replace = __import__('os').replace
-        
         def failing_replace(*args, **kwargs):
             raise RuntimeError("Simulated failure")
-        
+
         monkeypatch.setattr('os.replace', failing_replace)
-        
-        try:
+
+        with pytest.raises(RuntimeError):
             store._write_entries(entries)
-            assert False, "Should have raised"
-        except RuntimeError:
-            pass
-        
+
         # Temp file should be cleaned up
         assert not tmp_path_obj.exists()
-        
+
         # Original file should still exist (because replace failed)
         assert store.history_file.exists()
 
