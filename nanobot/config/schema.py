@@ -90,6 +90,7 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
+    session_scoped_history: bool = False  # Enable per-session history files (dual-write to history-{session_key}.jsonl)
     max_messages: int = Field(
         default=120,
         ge=0,

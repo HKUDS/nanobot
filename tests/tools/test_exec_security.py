@@ -87,10 +87,20 @@ async def test_exec_blocks_chained_internal_url():
         "sed -i 's/old/new/' history.jsonl",
         "echo x > .dream_cursor",
         "cp /tmp/x memory/.dream_cursor",
+        # Session-scoped history files (history-*.jsonl)
+        "echo '{}' > history-wecom_123.jsonl",
+        "echo '{}' > memory/history-wecom_456.jsonl",
+        "tee -a history-telegram_789.jsonl",
+        "cp /tmp/fake.jsonl history-slack_abc.jsonl",
+        "dd if=/dev/zero of=memory/history-discord_xyz.jsonl",
+        "sed -i 's/old/new/' history-wecom_123.jsonl",
+        # .cursor file
+        "echo x > .cursor",
+        "cp /tmp/x memory/.cursor",
     ],
 )
 def test_exec_blocks_writes_to_history_jsonl(command):
-    """Direct writes to history.jsonl / .dream_cursor must be blocked (#2989)."""
+    """Direct writes to history.jsonl / history-*.jsonl / .cursor / .dream_cursor must be blocked (#2989)."""
     tool = ExecTool()
     result = tool._guard_command(command, "/tmp")
     assert result is not None
@@ -107,10 +117,15 @@ def test_exec_blocks_writes_to_history_jsonl(command):
         "cp history.jsonl /tmp/history.backup",
         "ls memory/",
         "echo history.jsonl",
+        # Session-scoped history files - read access is allowed
+        "cat history-wecom_123.jsonl",
+        "grep pattern history-telegram_456.jsonl",
+        "tail -n 10 memory/history-slack_789.jsonl",
+        "cp history-discord_abc.jsonl /tmp/backup.jsonl",
     ],
 )
 def test_exec_allows_reads_of_history_jsonl(command):
-    """Read-only access to history.jsonl must still be allowed."""
+    """Read-only access to history.jsonl and history-*.jsonl must still be allowed."""
     tool = ExecTool()
     result = tool._guard_command(command, "/tmp")
     assert result is None

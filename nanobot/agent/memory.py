@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator
 from loguru import logger
 
 from nanobot.utils.prompt_templates import render_template
-from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, strip_think, truncate_text
+from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, safe_filename, strip_think, truncate_text
 
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.registry import ToolRegistry
@@ -39,9 +39,10 @@ class MemoryStore:
         r"^\[\d{4}-\d{2}-\d{2}[^\]]*\]\s+[A-Z][A-Z0-9_]*(?:\s+\[tools:\s*[^\]]+\])?:"
     )
 
-    def __init__(self, workspace: Path, max_history_entries: int = _DEFAULT_MAX_HISTORY):
+    def __init__(self, workspace: Path, max_history_entries: int = _DEFAULT_MAX_HISTORY, session_scoped_history: bool = False):
         self.workspace = workspace
         self.max_history_entries = max_history_entries
+        self.session_scoped_history = session_scoped_history
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "history.jsonl"
@@ -60,6 +61,11 @@ class MemoryStore:
     @property
     def git(self) -> GitStore:
         return self._git
+
+    def _session_history_file(self, session_key: str) -> Path:
+        """Get the history file path for a specific session."""
+        safe_key = safe_filename(session_key.replace(":", "_"))
+        return self.memory_dir / f"history-{safe_key}.jsonl"
 
     # -- generic helpers -----------------------------------------------------
 
@@ -223,7 +229,7 @@ class MemoryStore:
 
     # -- history.jsonl — append-only, JSONL format ---------------------------
 
-    def append_history(self, entry: str, *, max_chars: int | None = None) -> int:
+    def append_history(self, entry: str, *, session_key: str | None = None, max_chars: int | None = None) -> int:
         """Append *entry* to history.jsonl and return its auto-incrementing cursor.
 
         Entries are passed through `strip_think` to drop template-level leaks
@@ -237,6 +243,9 @@ class MemoryStore:
         applied as a final safety net: individual callers should cap their own
         content more tightly; this default only exists to catch unintentional
         large writes (e.g. an LLM echoing its input back as a "summary").
+
+        When `session_scoped_history=True` and `session_key` is provided,
+        the entry is also written to a session-specific file.
         """
         limit = max_chars if max_chars is not None else _HISTORY_ENTRY_HARD_CAP
         cursor = self._next_cursor()
@@ -263,6 +272,13 @@ class MemoryStore:
         with open(self.history_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
         self._cursor_file.write_text(str(cursor), encoding="utf-8")
+
+        # Dual-write to session-scoped history if enabled
+        if self.session_scoped_history and session_key:
+            session_file = self._session_history_file(session_key)
+            with open(session_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
         return cursor
 
     @staticmethod
@@ -321,6 +337,40 @@ class MemoryStore:
             return
         kept = entries[-self.max_history_entries:]
         self._write_entries(kept)
+
+    # -- session-scoped history helpers --------------------------------------
+
+    def read_session_history(self, session_key: str) -> list[dict[str, Any]]:
+        """Read all history entries for a specific session."""
+        session_file = self._session_history_file(session_key)
+        entries: list[dict[str, Any]] = []
+        try:
+            with open(session_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            entries.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+        except FileNotFoundError:
+            pass
+        return entries
+
+    def compact_session_history(self, session_key: str, min_cursor: int) -> None:
+        """Drop entries with cursor < min_cursor from session-scoped history.
+
+        This keeps session history in sync with global history compaction.
+        """
+        session_file = self._session_history_file(session_key)
+        if not session_file.exists():
+            return
+        entries = self.read_session_history(session_key)
+        kept = [e for e in entries if e.get("cursor", 0) >= min_cursor]
+        if len(kept) < len(entries):
+            with open(session_file, "w", encoding="utf-8") as f:
+                for entry in kept:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     # -- JSONL helpers -------------------------------------------------------
 
@@ -391,13 +441,14 @@ class MemoryStore:
             )
         return "\n".join(lines)
 
-    def raw_archive(self, messages: list[dict], *, max_chars: int | None = None) -> None:
+    def raw_archive(self, messages: list[dict], *, session_key: str | None = None, max_chars: int | None = None) -> None:
         """Fallback: dump raw messages to history.jsonl without LLM summarization."""
         limit = max_chars if max_chars is not None else _RAW_ARCHIVE_MAX_CHARS
         formatted = truncate_text(self._format_messages(messages), limit)
         self.append_history(
             f"[RAW] {len(messages)} messages\n"
-            f"{formatted}"
+            f"{formatted}",
+            session_key=session_key,
         )
         logger.warning(
             "Memory consolidation degraded: raw-archived {} messages", len(messages)
@@ -529,7 +580,7 @@ class Consolidator:
         except Exception:
             return truncate_text(text, budget * 4)
 
-    async def archive(self, messages: list[dict]) -> str | None:
+    async def archive(self, messages: list[dict], *, session_key: str | None = None) -> str | None:
         """Summarize messages via LLM and append to history.jsonl.
 
         Returns the summary text on success, None if nothing to archive.
@@ -557,11 +608,11 @@ class Consolidator:
             if response.finish_reason == "error":
                 raise RuntimeError(f"LLM returned error: {response.content}")
             summary = response.content or "[no summary]"
-            self.store.append_history(summary, max_chars=_ARCHIVE_SUMMARY_MAX_CHARS)
+            self.store.append_history(summary, session_key=session_key, max_chars=_ARCHIVE_SUMMARY_MAX_CHARS)
             return summary
         except Exception:
             logger.warning("Consolidation LLM call failed, raw-dumping to history")
-            self.store.raw_archive(messages)
+            self.store.raw_archive(messages, session_key=session_key)
             return None
 
     async def maybe_consolidate_by_tokens(
@@ -633,7 +684,7 @@ class Consolidator:
                     source,
                     len(chunk),
                 )
-                summary = await self.archive(chunk)
+                summary = await self.archive(chunk, session_key=session.key)
                 # Advance the cursor either way: on success the chunk was
                 # summarized; on failure archive() already raw-archived it as
                 # a breadcrumb. Re-archiving the same chunk on the next call

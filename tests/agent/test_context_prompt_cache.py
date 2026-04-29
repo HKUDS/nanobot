@@ -319,3 +319,53 @@ def test_customized_memory_md_is_injected(tmp_path) -> None:
 
     assert "# Memory\n\n## Long-term Memory" in prompt
     assert "User prefers dark mode" in prompt
+
+
+# --- Session-scoped history runtime context injection ---
+
+
+def test_session_scoped_history_not_injected_when_disabled(tmp_path) -> None:
+    """When session_scoped_history=False, runtime context should not contain it."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace, session_scoped_history=False)
+
+    ctx = ContextBuilder._build_runtime_context("wecom", "123", "UTC", session_scoped_history=False)
+    assert "SessionScopedHistory" not in ctx
+
+
+def test_session_scoped_history_injected_when_enabled(tmp_path) -> None:
+    """When session_scoped_history=True, runtime context should contain it."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace, session_scoped_history=True)
+
+    ctx = ContextBuilder._build_runtime_context("wecom", "123", "UTC", session_scoped_history=True)
+    assert "SessionScopedHistory: true" in ctx
+
+
+def test_session_scoped_history_appears_in_user_message(tmp_path) -> None:
+    """SessionScopedHistory should appear in the user message when enabled."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace, session_scoped_history=True)
+
+    messages = builder.build_messages([], "test message", channel="wecom", chat_id="123")
+    user_msg = messages[-1]["content"]
+
+    if isinstance(user_msg, str):
+        assert "SessionScopedHistory: true" in user_msg
+    else:
+        # Handle list content (e.g., with images)
+        text_parts = [p for p in user_msg if isinstance(p, dict) and p.get("type") == "text"]
+        assert any("SessionScopedHistory: true" in p.get("text", "") for p in text_parts)
+
+
+def test_session_scoped_history_position_in_runtime_context(tmp_path) -> None:
+    """SessionScopedHistory should appear after Chat ID."""
+    workspace = _make_workspace(tmp_path)
+
+    ctx = ContextBuilder._build_runtime_context("wecom", "123", "UTC", session_scoped_history=True)
+
+    # SessionScopedHistory should come after Chat ID
+    chat_id_pos = ctx.find("Chat ID: 123")
+    session_history_pos = ctx.find("SessionScopedHistory: true")
+    assert chat_id_pos > 0
+    assert session_history_pos > chat_id_pos

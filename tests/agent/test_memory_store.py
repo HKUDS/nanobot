@@ -356,3 +356,135 @@ class TestLegacyHistoryMigration:
         assert entries[0]["timestamp"] == "2026-04-01 10:00"
         assert "Broken" in entries[0]["content"]
         assert "migration." in entries[0]["content"]
+
+
+class TestSessionScopedHistory:
+    """Tests for session-scoped history files (dual-write mode)."""
+
+    def test_disabled_by_default(self, tmp_path):
+        """When session_scoped_history=False (default), only global file is written."""
+        store = MemoryStore(tmp_path, session_scoped_history=False)
+        cursor = store.append_history("test entry", session_key="wecom:123")
+
+        # Global file exists
+        assert store.history_file.exists()
+        # Session file does NOT exist
+        session_file = store._session_history_file("wecom:123")
+        assert not session_file.exists()
+
+    def test_dual_write_when_enabled(self, tmp_path):
+        """When session_scoped_history=True, both files are written."""
+        store = MemoryStore(tmp_path, session_scoped_history=True)
+        cursor = store.append_history("test entry", session_key="wecom:123")
+
+        # Both files exist
+        assert store.history_file.exists()
+        session_file = store._session_history_file("wecom:123")
+        assert session_file.exists()
+
+        # Both have the same entry
+        global_entries = store._read_entries()
+        session_entries = store.read_session_history("wecom:123")
+        assert len(global_entries) == 1
+        assert len(session_entries) == 1
+        assert global_entries[0]["content"] == "test entry"
+        assert session_entries[0]["content"] == "test entry"
+
+    def test_no_session_key_skips_session_file(self, tmp_path):
+        """When session_key is not provided, only global file is written."""
+        store = MemoryStore(tmp_path, session_scoped_history=True)
+        cursor = store.append_history("global only entry")
+
+        assert store.history_file.exists()
+        # No session files created
+        assert not list(store.memory_dir.glob("history-*.jsonl"))
+
+    def test_different_sessions_have_separate_files(self, tmp_path):
+        """Different sessions have separate history files."""
+        store = MemoryStore(tmp_path, session_scoped_history=True)
+
+        store.append_history("wecom entry", session_key="wecom:123")
+        store.append_history("telegram entry", session_key="telegram:456")
+
+        wecom_file = store._session_history_file("wecom:123")
+        telegram_file = store._session_history_file("telegram:456")
+
+        assert wecom_file.exists()
+        assert telegram_file.exists()
+
+        wecom_entries = store.read_session_history("wecom:123")
+        telegram_entries = store.read_session_history("telegram:456")
+
+        assert len(wecom_entries) == 1
+        assert len(telegram_entries) == 1
+        assert wecom_entries[0]["content"] == "wecom entry"
+        assert telegram_entries[0]["content"] == "telegram entry"
+
+    def test_global_file_has_all_entries(self, tmp_path):
+        """Global history file contains entries from all sessions."""
+        store = MemoryStore(tmp_path, session_scoped_history=True)
+
+        store.append_history("wecom entry", session_key="wecom:123")
+        store.append_history("telegram entry", session_key="telegram:456")
+
+        global_entries = store._read_entries()
+        assert len(global_entries) == 2
+
+    def test_read_session_history_returns_empty_for_missing_session(self, tmp_path):
+        """Reading history for a non-existent session returns empty list."""
+        store = MemoryStore(tmp_path, session_scoped_history=True)
+        entries = store.read_session_history("nonexistent:session")
+        assert entries == []
+
+    def test_compact_session_history_drops_old_entries(self, tmp_path):
+        """compact_session_history removes entries below min_cursor."""
+        store = MemoryStore(tmp_path, session_scoped_history=True)
+
+        c1 = store.append_history("entry 1", session_key="wecom:123")
+        c2 = store.append_history("entry 2", session_key="wecom:123")
+        c3 = store.append_history("entry 3", session_key="wecom:123")
+
+        # Compact to keep only entries with cursor >= c2
+        store.compact_session_history("wecom:123", min_cursor=c2)
+
+        session_entries = store.read_session_history("wecom:123")
+        assert len(session_entries) == 2
+        assert session_entries[0]["cursor"] == c2
+        assert session_entries[1]["cursor"] == c3
+
+    def test_compact_session_history_noop_for_missing_session(self, tmp_path):
+        """compact_session_history is a no-op for non-existent session."""
+        store = MemoryStore(tmp_path, session_scoped_history=True)
+        # Should not raise
+        store.compact_session_history("nonexistent:session", min_cursor=1)
+
+    def test_raw_archive_with_session_key(self, tmp_path):
+        """raw_archive respects session_key for dual-write."""
+        store = MemoryStore(tmp_path, session_scoped_history=True)
+
+        messages = [
+            {"role": "user", "content": "hello", "timestamp": "2026-04-27T10:00:00"},
+            {"role": "assistant", "content": "hi", "timestamp": "2026-04-27T10:00:05"},
+        ]
+        store.raw_archive(messages, session_key="wecom:123")
+
+        # Both files should have the entry
+        assert store.history_file.exists()
+        session_file = store._session_history_file("wecom:123")
+        assert session_file.exists()
+
+        session_entries = store.read_session_history("wecom:123")
+        assert len(session_entries) == 1
+        assert "[RAW]" in session_entries[0]["content"]
+
+    def test_session_file_path_sanitization(self, tmp_path):
+        """Session key is properly sanitized for use in filename."""
+        store = MemoryStore(tmp_path, session_scoped_history=True)
+
+        # Session key with colons should be converted to underscores
+        store.append_history("test", session_key="wecom:123:456")
+
+        # Should create file with sanitized name
+        session_file = store._session_history_file("wecom:123:456")
+        assert session_file.exists()
+        assert "wecom_123_456" in session_file.name

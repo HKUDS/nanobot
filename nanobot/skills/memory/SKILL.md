@@ -13,6 +13,13 @@ always: true
 - `memory/MEMORY.md` — Long-term facts (project context, important events). **Managed by Dream.** Do NOT edit.
 - `memory/history.jsonl` — append-only JSONL, not loaded into context. Prefer the built-in `grep` tool to search it.
 
+## Session History
+
+When `SessionScopedHistory: true` appears in the runtime context (at the start of each user message):
+- Each session has its own `memory/history-{channel}_{chat_id}.jsonl` file
+- Use `glob="*.jsonl"` to search across all history files (global + session-scoped)
+- Global `history.jsonl` still contains all entries (used by Dream for memory consolidation)
+
 ## Search Past Events
 
 `memory/history.jsonl` is JSONL format — each line is a JSON object with `cursor`, `timestamp`, `content`.

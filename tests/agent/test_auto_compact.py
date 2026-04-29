@@ -201,7 +201,7 @@ class TestAutoCompact:
         s2.add_message("user", "recent")
         loop.sessions.save(s2)
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             return "Summary."
 
         loop.consolidator.archive = _fake_archive
@@ -223,7 +223,7 @@ class TestAutoCompact:
 
         archived_messages = []
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             archived_messages.extend(messages)
             return "Summary."
 
@@ -246,7 +246,7 @@ class TestAutoCompact:
         _add_turns(session, 6, prefix="hello")
         loop.sessions.save(session)
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             return "User said hello."
 
         loop.consolidator.archive = _fake_archive
@@ -267,7 +267,7 @@ class TestAutoCompact:
 
         archive_called = False
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             nonlocal archive_called
             archive_called = True
             return "Summary."
@@ -292,7 +292,7 @@ class TestAutoCompact:
 
         archived_count = 0
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             nonlocal archived_count
             archived_count = len(messages)
             return "Summary."
@@ -335,7 +335,7 @@ class TestAutoCompactIdleDetection:
 
         archived_messages = []
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             archived_messages.extend(messages)
             return "Summary."
 
@@ -402,7 +402,7 @@ class TestAutoCompactIdleDetection:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             return "Summary."
 
         loop.consolidator.archive = _fake_archive
@@ -431,7 +431,7 @@ class TestAutoCompactSystemMessages:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             return "Summary."
 
         loop.consolidator.archive = _fake_archive
@@ -513,7 +513,7 @@ class TestAutoCompactEdgeCases:
 
         archived_messages = []
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             archived_messages.extend(messages)
             return "Summary."
 
@@ -609,7 +609,7 @@ class TestAutoCompactIntegration:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             return "Summary."
 
         loop.consolidator.archive = _fake_archive
@@ -670,7 +670,7 @@ class TestProactiveAutoCompact:
 
         archived_messages = []
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             archived_messages.extend(messages)
             return "User chatted about old things."
 
@@ -713,7 +713,7 @@ class TestProactiveAutoCompact:
         started = asyncio.Event()
         block_forever = asyncio.Event()
 
-        async def _slow_archive(messages):
+        async def _slow_archive(messages, **kwargs):
             nonlocal archive_count
             archive_count += 1
             started.set()
@@ -746,7 +746,7 @@ class TestProactiveAutoCompact:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        async def _failing_archive(messages):
+        async def _failing_archive(messages, **kwargs):
             raise RuntimeError("LLM down")
 
         loop.consolidator.archive = _failing_archive
@@ -768,7 +768,7 @@ class TestProactiveAutoCompact:
 
         archive_called = False
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             nonlocal archive_called
             archive_called = True
             return "Summary."
@@ -791,7 +791,7 @@ class TestProactiveAutoCompact:
 
         archive_count = 0
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             nonlocal archive_count
             archive_count += 1
             return "Summary."
@@ -818,7 +818,7 @@ class TestProactiveAutoCompact:
 
         archive_count = 0
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             nonlocal archive_count
             archive_count += 1
             return "Summary."
@@ -855,7 +855,7 @@ class TestProactiveAutoCompact:
 
         archive_count = 0
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             nonlocal archive_count
             archive_count += 1
             return "Summary."
@@ -884,7 +884,7 @@ class TestProactiveAutoCompact:
 
         archive_count = 0
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             nonlocal archive_count
             archive_count += 1
             return "Summary."
@@ -910,7 +910,7 @@ class TestProactiveAutoCompact:
 
         archive_count = 0
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             nonlocal archive_count
             archive_count += 1
             return "Summary."
@@ -937,7 +937,7 @@ class TestProactiveAutoCompact:
 
         archive_count = 0
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             nonlocal archive_count
             archive_count += 1
             return "Summary."
@@ -976,7 +976,7 @@ class TestSummaryPersistence:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             return "User said hello."
 
         loop.consolidator.archive = _fake_archive
@@ -1001,7 +1001,7 @@ class TestSummaryPersistence:
         session.updated_at = last_active
         loop.sessions.save(session)
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             return "User said hello."
 
         loop.consolidator.archive = _fake_archive
@@ -1034,7 +1034,7 @@ class TestSummaryPersistence:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             return "Summary."
 
         loop.consolidator.archive = _fake_archive
@@ -1065,7 +1065,7 @@ class TestSummaryPersistence:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
-        async def _fake_archive(messages):
+        async def _fake_archive(messages, **kwargs):
             return "Summary."
 
         loop.consolidator.archive = _fake_archive
