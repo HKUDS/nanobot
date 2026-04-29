@@ -190,6 +190,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
         session_ttl_minutes: int = 0,
+        session_cleanup_seconds: float = 0,
         consolidation_ratio: float = 0.5,
         hooks: list[AgentHook] | None = None,
         unified_session: bool = False,
@@ -276,6 +277,7 @@ class AgentLoop:
             sessions=self.sessions,
             consolidator=self.consolidator,
             session_ttl_minutes=session_ttl_minutes,
+            session_cleanup_seconds=session_cleanup_seconds,
         )
         self.dream = Dream(
             store=self.context.memory,
