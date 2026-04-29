@@ -26,6 +26,8 @@ from nanobot.channels.websocket import (
     _parse_query,
     _parse_request_path,
 )
+from nanobot.config.loader import load_config, save_config
+from nanobot.config.schema import Config
 
 # -- Shared helpers (aligned with test_websocket_integration.py) ---------------
 
@@ -178,6 +180,7 @@ async def test_send_delivers_json_message_with_media_and_reply() -> None:
         content="hello",
         reply_to="m1",
         media=["/tmp/a.png"],
+        buttons=[["Yes", "No"]],
     )
     await channel.send(msg)
 
@@ -185,9 +188,11 @@ async def test_send_delivers_json_message_with_media_and_reply() -> None:
     payload = json.loads(mock_ws.send.call_args[0][0])
     assert payload["event"] == "message"
     assert payload["chat_id"] == "chat-1"
-    assert payload["text"] == "hello"
+    assert payload["text"] == "hello\n\n1. Yes\n2. No"
+    assert payload["button_prompt"] == "hello"
     assert payload["reply_to"] == "m1"
     assert payload["media"] == ["/tmp/a.png"]
+    assert payload["buttons"] == [["Yes", "No"]]
 
 
 @pytest.mark.asyncio
@@ -434,6 +439,72 @@ async def test_http_route_issues_token_then_websocket_requires_it(bus: MagicMock
     finally:
         await channel.stop()
         await server_task
+
+
+@pytest.mark.asyncio
+async def test_settings_api_returns_safe_subset_and_updates_whitelist(
+    bus: MagicMock,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    port = 29891
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.agents.defaults.model = "openai/gpt-4o"
+    config.providers.openai.api_key = "secret-key"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    channel = _ch(bus, port=port)
+    channel._api_tokens["tok"] = time.monotonic() + 300
+
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+
+    try:
+        settings = await _http_get(
+            f"http://127.0.0.1:{port}/api/settings",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert settings.status_code == 200
+        body = settings.json()
+        assert body["agent"]["model"] == "openai/gpt-4o"
+        assert body["agent"]["provider"] == "openai"
+        assert {"name": "auto", "label": "Auto"} in body["providers"]
+        assert body["agent"]["has_api_key"] is True
+        assert "secret-key" not in settings.text
+
+        updated = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/update?model=openrouter/test"
+            "&provider=openrouter",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["requires_restart"] is True
+
+        saved = load_config(config_path)
+        assert saved.agents.defaults.model == "openrouter/test"
+        assert saved.agents.defaults.provider == "openrouter"
+    finally:
+        await channel.stop()
+        await server_task
+
+
+def test_settings_payload_normalizes_camel_case_provider(
+    bus: MagicMock,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    config_path = tmp_path / "config.json"
+    config = Config()
+    config.agents.defaults.provider = "minimaxAnthropic"
+    save_config(config, config_path)
+    monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
+
+    body = _ch(bus)._settings_payload()
+
+    assert body["agent"]["provider"] == "minimax_anthropic"
 
 
 @pytest.mark.asyncio

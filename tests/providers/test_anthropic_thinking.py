@@ -83,3 +83,10 @@ def test_opus_4_7_omits_temperature_none() -> None:
     kw = _build(_make_provider("claude-opus-4-7"), None)
     assert "temperature" not in kw
     assert "thinking" not in kw
+
+
+def test_reasoning_effort_string_none_does_not_enable_thinking() -> None:
+    """reasoning_effort='none' must not enable thinking — treated same as disabled."""
+    kw = _build(_make_provider(), "none")
+    assert "thinking" not in kw
+    assert kw["temperature"] == 0.7

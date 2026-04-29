@@ -9,6 +9,17 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+from nanobot.providers.registry import ProviderSpec
+
+_STEPFUN_SPEC = ProviderSpec(
+    name="stepfun",
+    keywords=("stepfun", "step"),
+    env_key="STEPFUN_API_KEY",
+    display_name="Step Fun",
+    backend="openai_compat",
+    default_api_base="https://api.stepfun.com/v1",
+    reasoning_as_content=True,
+)
 
 
 # ── _parse: dict branch ─────────────────────────────────────────────────────
@@ -17,7 +28,7 @@ from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 def test_parse_dict_stepfun_reasoning_fallback() -> None:
     """When content is None and reasoning exists, content falls back to reasoning."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = OpenAICompatProvider()
+        provider = OpenAICompatProvider(spec=_STEPFUN_SPEC)
 
     response = {
         "choices": [{
@@ -39,7 +50,7 @@ def test_parse_dict_stepfun_reasoning_fallback() -> None:
 def test_parse_dict_stepfun_reasoning_priority() -> None:
     """reasoning_content field takes priority over reasoning when both present."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = OpenAICompatProvider()
+        provider = OpenAICompatProvider(spec=_STEPFUN_SPEC)
 
     response = {
         "choices": [{
@@ -75,7 +86,7 @@ def _make_sdk_message(content, reasoning=None, reasoning_content=None):
 def test_parse_sdk_stepfun_reasoning_fallback() -> None:
     """SDK branch: content falls back to msg.reasoning when content is None."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = OpenAICompatProvider()
+        provider = OpenAICompatProvider(spec=_STEPFUN_SPEC)
 
     msg = _make_sdk_message(content=None, reasoning="After analysis: result is 4.")
     choice = SimpleNamespace(finish_reason="stop", message=msg)
@@ -90,7 +101,7 @@ def test_parse_sdk_stepfun_reasoning_fallback() -> None:
 def test_parse_sdk_stepfun_reasoning_priority() -> None:
     """reasoning_content field takes priority over reasoning in SDK branch."""
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = OpenAICompatProvider()
+        provider = OpenAICompatProvider(spec=_STEPFUN_SPEC)
 
     msg = _make_sdk_message(
         content=None,
@@ -244,3 +255,44 @@ def test_parse_chunks_sdk_reasoning_precedence() -> None:
     result = OpenAICompatProvider._parse_chunks(chunks)
 
     assert result.reasoning_content == "formal: "
+
+
+# ── Regression: non-StepFun providers must NOT promote reasoning to content ─
+
+
+def test_parse_dict_non_stepfun_no_reasoning_as_content() -> None:
+    """Providers without reasoning_as_content flag must not treat reasoning as content."""
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    response = {
+        "choices": [{
+            "message": {
+                "content": None,
+                "reasoning": "internal thought process that should NOT be shown to user",
+            },
+            "finish_reason": "stop",
+        }],
+    }
+
+    result = provider._parse(response)
+
+    # content stays None — reasoning is NOT promoted
+    assert result.content is None
+    # reasoning still goes to reasoning_content for display as thinking
+    assert result.reasoning_content == "internal thought process that should NOT be shown to user"
+
+
+def test_parse_sdk_non_stepfun_no_reasoning_as_content() -> None:
+    """SDK branch: providers without flag must not treat reasoning as content."""
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        provider = OpenAICompatProvider()
+
+    msg = _make_sdk_message(content=None, reasoning="internal monologue")
+    choice = SimpleNamespace(finish_reason="stop", message=msg)
+    response = SimpleNamespace(choices=[choice], usage=None)
+
+    result = provider._parse(response)
+
+    assert result.content is None
+    assert result.reasoning_content == "internal monologue"

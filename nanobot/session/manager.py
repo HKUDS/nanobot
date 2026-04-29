@@ -13,10 +13,13 @@ from loguru import logger
 from nanobot.config.paths import get_legacy_sessions_dir
 from nanobot.utils.helpers import (
     ensure_dir,
+    estimate_message_tokens,
     find_legal_message_start,
     image_placeholder_text,
     safe_filename,
 )
+
+FILE_MAX_MESSAGES = 2000
 
 
 @dataclass
@@ -30,6 +33,32 @@ class Session:
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
 
+    @staticmethod
+    def _annotate_message_time(message: dict[str, Any], content: Any) -> Any:
+        """Expose persisted turn timestamps to the model for relative-date reasoning.
+
+        Annotating *every* assistant turn trains the model (via in-context
+        demonstrations) to start its own replies with the same
+        ``[Message Time: ...]`` prefix, which leaks metadata back to the user.
+        We therefore only annotate:
+
+        * ``user`` turns — needed so the model can pin the conversation in time.
+        * proactive deliveries (``_channel_delivery=True``) — cron / heartbeat
+          assistant pushes that may sit hours away from the next user reply,
+          and are too infrequent to act as parroting demonstrations.
+        """
+        timestamp = message.get("timestamp")
+        if not timestamp or not isinstance(content, str):
+            return content
+        role = message.get("role")
+        if role == "user":
+            pass
+        elif role == "assistant" and message.get("_channel_delivery"):
+            pass
+        else:
+            return content
+        return f"[Message Time: {timestamp}]\n{content}"
+
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
         msg = {
@@ -41,15 +70,30 @@ class Session:
         self.messages.append(msg)
         self.updated_at = datetime.now()
 
-    def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
-        """Return unconsolidated messages for LLM input, aligned to a legal tool-call boundary."""
+    def get_history(
+        self,
+        max_messages: int = 120,
+        *,
+        max_tokens: int = 0,
+        include_timestamps: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return unconsolidated messages for LLM input.
+
+        History is sliced by message count first (``max_messages``), then by
+        token budget from the tail (``max_tokens``) when provided.
+        """
         unconsolidated = self.messages[self.last_consolidated:]
+        max_messages = max_messages if max_messages > 0 else 120
         sliced = unconsolidated[-max_messages:]
 
-        # Avoid starting mid-turn when possible.
+        # Avoid starting mid-turn when possible, except for proactive
+        # assistant deliveries that the user may be replying to.
         for i, message in enumerate(sliced):
             if message.get("role") == "user":
-                sliced = sliced[i:]
+                start = i
+                if i > 0 and sliced[i - 1].get("_channel_delivery"):
+                    start = i - 1
+                sliced = sliced[start:]
                 break
 
         # Drop orphan tool results at the front.
@@ -71,11 +115,45 @@ class Session:
                     image_placeholder_text(p) for p in media if isinstance(p, str) and p
                 )
                 content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
+            if include_timestamps:
+                content = self._annotate_message_time(message, content)
             entry: dict[str, Any] = {"role": message["role"], "content": content}
             for key in ("tool_calls", "tool_call_id", "name", "reasoning_content"):
                 if key in message:
                     entry[key] = message[key]
             out.append(entry)
+
+        if max_tokens > 0 and out:
+            kept: list[dict[str, Any]] = []
+            used = 0
+            for message in reversed(out):
+                tokens = estimate_message_tokens(message)
+                if kept and used + tokens > max_tokens:
+                    break
+                kept.append(message)
+                used += tokens
+            kept.reverse()
+
+            # Keep history aligned to the first visible user turn.
+            first_user = next((i for i, m in enumerate(kept) if m.get("role") == "user"), None)
+            if first_user is not None:
+                kept = kept[first_user:]
+            else:
+                # Tight token budgets can otherwise leave assistant-only tails.
+                # If a user turn exists in the unsliced output, recover the
+                # nearest one even if it slightly exceeds the token budget.
+                recovered_user = next(
+                    (i for i in range(len(out) - 1, -1, -1) if out[i].get("role") == "user"),
+                    None,
+                )
+                if recovered_user is not None:
+                    kept = out[recovered_user:]
+
+            # And keep a legal tool-call boundary at the front.
+            start = find_legal_message_start(kept)
+            if start:
+                kept = kept[start:]
+            out = kept
         return out
 
     def clear(self) -> None:
@@ -85,30 +163,76 @@ class Session:
         self.updated_at = datetime.now()
 
     def retain_recent_legal_suffix(self, max_messages: int) -> None:
-        """Keep a legal recent suffix, mirroring get_history boundary rules."""
+        """Keep a legal recent suffix constrained by a hard message cap."""
         if max_messages <= 0:
             self.clear()
             return
         if len(self.messages) <= max_messages:
             return
 
-        start_idx = max(0, len(self.messages) - max_messages)
+        retained = list(self.messages[-max_messages:])
 
-        # If the cutoff lands mid-turn, extend backward to the nearest user turn.
-        while start_idx > 0 and self.messages[start_idx].get("role") != "user":
-            start_idx -= 1
-
-        retained = self.messages[start_idx:]
+        # Prefer starting at a user turn when one exists within the tail.
+        first_user = next((i for i, m in enumerate(retained) if m.get("role") == "user"), None)
+        if first_user is not None:
+            retained = retained[first_user:]
+        else:
+            # If the tail is assistant/tool-only, anchor to the latest user in
+            # the full session and take a capped forward window from there.
+            latest_user = next(
+                (i for i in range(len(self.messages) - 1, -1, -1)
+                 if self.messages[i].get("role") == "user"),
+                None,
+            )
+            if latest_user is not None:
+                retained = list(self.messages[latest_user: latest_user + max_messages])
 
         # Mirror get_history(): avoid persisting orphan tool results at the front.
         start = find_legal_message_start(retained)
         if start:
             retained = retained[start:]
 
+        # Hard-cap guarantee: never keep more than max_messages.
+        if len(retained) > max_messages:
+            retained = retained[-max_messages:]
+            start = find_legal_message_start(retained)
+            if start:
+                retained = retained[start:]
+
         dropped = len(self.messages) - len(retained)
         self.messages = retained
         self.last_consolidated = max(0, self.last_consolidated - dropped)
         self.updated_at = datetime.now()
+
+    def enforce_file_cap(
+        self,
+        on_archive: Any = None,
+        limit: int = FILE_MAX_MESSAGES,
+    ) -> None:
+        """Bound session message growth by archiving and trimming old prefixes."""
+        if limit <= 0 or len(self.messages) <= limit:
+            return
+
+        before = list(self.messages)
+        before_last_consolidated = self.last_consolidated
+        before_count = len(before)
+        self.retain_recent_legal_suffix(limit)
+        dropped_count = before_count - len(self.messages)
+        if dropped_count <= 0:
+            return
+
+        dropped = before[:dropped_count]
+        already_consolidated = min(before_last_consolidated, dropped_count)
+        archive_chunk = dropped[already_consolidated:]
+        if archive_chunk and on_archive:
+            on_archive(archive_chunk)
+        logger.info(
+            "Session file cap hit for {}: dropped {}, raw-archived {}, kept {}",
+            self.key,
+            dropped_count,
+            len(archive_chunk),
+            len(self.messages),
+        )
 
 
 class SessionManager:

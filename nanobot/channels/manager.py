@@ -27,8 +27,14 @@ def _default_webui_dist() -> Path | None:
     candidate = Path(web_pkg.__file__).resolve().parent / "dist"
     return candidate if candidate.is_dir() else None
 
+
 # Retry delays for message sending (exponential backoff: 1s, 2s, 4s)
 _SEND_RETRY_DELAYS = (1, 2, 4)
+
+_BOOL_CAMEL_ALIASES: dict[str, str] = {
+    "send_progress": "sendProgress",
+    "send_tool_hints": "sendToolHints",
+}
 
 
 class ChannelManager:
@@ -90,6 +96,12 @@ class ChannelManager:
                 channel.transcription_api_key = transcription_key
                 channel.transcription_api_base = transcription_base
                 channel.transcription_language = transcription_language
+                channel.send_progress = self._resolve_bool_override(
+                    section, "send_progress", self.config.channels.send_progress,
+                )
+                channel.send_tool_hints = self._resolve_bool_override(
+                    section, "send_tool_hints", self.config.channels.send_tool_hints,
+                )
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
@@ -130,6 +142,31 @@ class ChannelManager:
                     f'Error: "{name}" has empty allowFrom (denies all). '
                     f'Set ["*"] to allow everyone, or add specific user IDs.'
                 )
+
+    def _should_send_progress(self, channel_name: str, *, tool_hint: bool = False) -> bool:
+        """Return whether progress (or tool-hints) may be sent to *channel_name*."""
+        ch = self.channels.get(channel_name)
+        if ch is None:
+            logger.warning("Progress check for unknown channel: {}", channel_name)
+            return False
+        return ch.send_tool_hints if tool_hint else ch.send_progress
+
+    def _resolve_bool_override(self, section: Any, key: str, default: bool) -> bool:
+        """Return *key* from *section* if it is a bool, otherwise *default*.
+
+        For dict configs also checks the camelCase alias (e.g. ``sendProgress``
+        for ``send_progress``) so raw JSON/TOML configs work alongside
+        Pydantic models.
+        """
+        if isinstance(section, dict):
+            value = section.get(key)
+            if value is None:
+                camel = _BOOL_CAMEL_ALIASES.get(key)
+                if camel:
+                    value = section.get(camel)
+            return value if isinstance(value, bool) else default
+        value = getattr(section, key, None)
+        return value if isinstance(value, bool) else default
 
     async def _start_channel(self, name: str, channel: BaseChannel) -> None:
         """Start a channel and log any exceptions."""
@@ -172,6 +209,7 @@ class ChannelManager:
                 channel=notice.channel,
                 chat_id=notice.chat_id,
                 content=format_restart_completed_message(notice.started_at_raw),
+                metadata=dict(notice.metadata or {}),
             ),
         ))
 
@@ -215,9 +253,13 @@ class ChannelManager:
                     )
 
                 if msg.metadata.get("_progress"):
-                    if msg.metadata.get("_tool_hint") and not self.config.channels.send_tool_hints:
+                    if msg.metadata.get("_tool_hint") and not self._should_send_progress(
+                        msg.channel, tool_hint=True,
+                    ):
                         continue
-                    if not msg.metadata.get("_tool_hint") and not self.config.channels.send_progress:
+                    if not msg.metadata.get("_tool_hint") and not self._should_send_progress(
+                        msg.channel, tool_hint=False,
+                    ):
                         continue
 
                 if msg.metadata.get("_retry_wait"):

@@ -41,3 +41,9 @@ def test_explicit_provider_import_still_works(monkeypatch) -> None:
 
     assert namespace["AnthropicProvider"].__name__ == "AnthropicProvider"
     assert "nanobot.providers.anthropic_provider" in sys.modules
+
+
+def test_openai_codex_supports_progress_deltas() -> None:
+    from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+
+    assert OpenAICodexProvider.supports_progress_deltas is True

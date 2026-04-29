@@ -96,8 +96,15 @@ class _FakeSentMessage:
 
 class _FakeChannel:
     # Channel double that records outbound payloads and typing activity.
-    def __init__(self, channel_id: int = 123) -> None:
+    def __init__(
+        self,
+        channel_id: int = 123,
+        parent_id: int | None = None,
+        parent: object | None = None,
+    ) -> None:
         self.id = channel_id
+        self.parent_id = parent_id
+        self.parent = parent
         self.sent_payloads: list[dict] = []
         self.sent_messages: list[_FakeSentMessage] = []
         self.trigger_typing_calls = 0
@@ -148,12 +155,14 @@ def _make_interaction(
     *,
     user_id: int = 123,
     channel_id: int | None = 456,
+    channel=None,
     guild_id: int | None = None,
     interaction_id: int = 999,
 ):
     return SimpleNamespace(
         user=SimpleNamespace(id=user_id),
         channel_id=channel_id,
+        channel=channel,
         guild_id=guild_id,
         id=interaction_id,
         command=SimpleNamespace(qualified_name="new"),
@@ -166,25 +175,39 @@ def _make_message(
     author_id: int = 123,
     author_bot: bool = False,
     channel_id: int = 456,
+    parent_channel_id: int | None = None,
     message_id: int = 789,
     content: str = "hello",
     guild_id: int | None = None,
     mentions: list[object] | None = None,
     attachments: list[object] | None = None,
     reply_to: int | None = None,
+    reply_author_id: int | None = None,
+    message_type=None,
 ):
     # Factory for incoming Discord message objects with optional guild/reply/attachments.
     guild = SimpleNamespace(id=guild_id) if guild_id is not None else None
-    reference = SimpleNamespace(message_id=reply_to) if reply_to is not None else None
+    referenced_message = (
+        SimpleNamespace(author=SimpleNamespace(id=reply_author_id))
+        if reply_author_id is not None
+        else None
+    )
+    reference = (
+        SimpleNamespace(message_id=reply_to, resolved=referenced_message)
+        if reply_to is not None
+        else None
+    )
     return SimpleNamespace(
         author=SimpleNamespace(id=author_id, bot=author_bot),
-        channel=_FakeChannel(channel_id),
+        channel=_FakeChannel(channel_id, parent_channel_id),
         content=content,
         guild=guild,
         mentions=mentions or [],
+        raw_mentions=[],
         attachments=attachments or [],
         reference=reference,
         id=message_id,
+        type=message_type or discord.MessageType.default,
     )
 
 
@@ -358,6 +381,147 @@ async def test_on_message_accepts_when_channel_in_allow_channels() -> None:
 
 
 @pytest.mark.asyncio
+async def test_on_message_accepts_thread_when_parent_channel_in_allow_channels() -> None:
+    # Discord threads have independent channel IDs, but inherit allowlist access
+    # from their parent channel.
+    channel = DiscordChannel(
+        DiscordConfig(
+            enabled=True,
+            allow_from=["*"],
+            allow_channels=["456"],
+            group_policy="mention",
+        ),
+        MessageBus(),
+    )
+    channel._bot_user_id = "999"
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+
+    await channel._on_message(
+        _make_message(
+            channel_id=777,
+            parent_channel_id=456,
+            guild_id=1,
+            mentions=[SimpleNamespace(id=999)],
+        )
+    )
+
+    assert len(handled) == 1
+    assert handled[0]["chat_id"] == "777"
+    assert handled[0]["metadata"]["context_chat_id"] == "456"
+    assert handled[0]["metadata"]["thread_id"] == "777"
+    assert handled[0]["session_key"] == "discord:456:thread:777"
+
+
+@pytest.mark.asyncio
+async def test_on_message_accepts_thread_reply_to_bot_under_allowed_parent() -> None:
+    channel = DiscordChannel(
+        DiscordConfig(
+            enabled=True,
+            allow_from=["*"],
+            allow_channels=["456"],
+            group_policy="mention",
+        ),
+        MessageBus(),
+    )
+    channel._bot_user_id = "999"
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+
+    await channel._on_message(
+        _make_message(
+            channel_id=777,
+            parent_channel_id=456,
+            guild_id=1,
+            content="follow up",
+            reply_to=111,
+            reply_author_id=999,
+        )
+    )
+
+    assert len(handled) == 1
+    assert handled[0]["chat_id"] == "777"
+    assert handled[0]["metadata"]["reply_to"] == "111"
+    assert handled[0]["metadata"]["context_chat_id"] == "456"
+    assert handled[0]["session_key"] == "discord:456:thread:777"
+
+
+@pytest.mark.asyncio
+async def test_on_message_ignores_thread_lifecycle_messages() -> None:
+    channel = DiscordChannel(
+        DiscordConfig(
+            enabled=True,
+            allow_from=["*"],
+            allow_channels=["456"],
+            group_policy="open",
+        ),
+        MessageBus(),
+    )
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+
+    await channel._on_message(
+        _make_message(
+            channel_id=777,
+            parent_channel_id=456,
+            guild_id=1,
+            content="",
+            message_type=discord.MessageType.thread_created,
+        )
+    )
+    await channel._on_message(
+        _make_message(
+            channel_id=777,
+            parent_channel_id=456,
+            guild_id=1,
+            content="",
+            message_type=discord.MessageType.thread_starter_message,
+        )
+    )
+    await channel._on_message(
+        _make_message(
+            channel_id=777,
+            parent_channel_id=456,
+            guild_id=1,
+            content="",
+            message_type=discord.MessageType.pins_add,
+        )
+    )
+
+    assert handled == []
+
+
+@pytest.mark.asyncio
+async def test_on_message_drops_thread_when_neither_thread_nor_parent_allowed() -> None:
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], allow_channels=["999"]),
+        MessageBus(),
+    )
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+
+    await channel._on_message(_make_message(channel_id=777, parent_channel_id=456))
+
+    assert handled == []
+
+
+@pytest.mark.asyncio
 async def test_on_message_drops_when_channel_not_in_allow_channels() -> None:
     # When allow_channels is set and incoming channel is not listed, drop silently.
     channel = DiscordChannel(
@@ -517,6 +681,24 @@ async def test_send_fetches_channel_when_not_cached() -> None:
     assert target.sent_payloads == [{"content": "hello"}]
 
 
+@pytest.mark.asyncio
+async def test_send_uses_seen_thread_channel_when_client_cannot_resolve_it() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=777, parent_id=456)
+    owner._known_channels["777"] = target
+    client.get_channel = lambda channel_id: None  # type: ignore[method-assign]
+
+    async def fetch_channel(channel_id: int):
+        raise RuntimeError("not found")
+
+    client.fetch_channel = fetch_channel  # type: ignore[method-assign]
+
+    await client.send_outbound(OutboundMessage(channel="discord", chat_id="777", content="hello"))
+
+    assert target.sent_payloads == [{"content": "hello"}]
+
+
 def test_supports_streaming_enabled_by_default() -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
 
@@ -597,6 +779,71 @@ async def test_slash_new_forwards_when_user_is_allowlisted() -> None:
 
 
 @pytest.mark.asyncio
+async def test_slash_new_accepts_thread_when_parent_channel_in_allow_channels() -> None:
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], allow_channels=["456"]),
+        MessageBus(),
+    )
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
+    thread = _FakeChannel(channel_id=777, parent_id=456)
+    interaction = _make_interaction(
+        user_id=123,
+        channel_id=777,
+        channel=thread,
+        guild_id=1,
+        interaction_id=321,
+    )
+
+    new_cmd = client.tree.get_command("new")
+    assert new_cmd is not None
+    await new_cmd.callback(interaction)
+
+    assert interaction.response.messages == [{"content": "Processing /new...", "ephemeral": True}]
+    assert len(handled) == 1
+    assert handled[0]["chat_id"] == "777"
+    assert handled[0]["metadata"]["context_chat_id"] == "456"
+    assert handled[0]["metadata"]["thread_id"] == "777"
+    assert handled[0]["session_key"] == "discord:456:thread:777"
+    assert channel._known_channels["777"] is thread
+
+
+@pytest.mark.asyncio
+async def test_slash_new_blocks_channel_not_in_allow_channels() -> None:
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], allow_channels=["999"]),
+        MessageBus(),
+    )
+    handled: list[dict] = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle  # type: ignore[method-assign]
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
+    interaction = _make_interaction(
+        user_id=123,
+        channel_id=777,
+        channel=_FakeChannel(channel_id=777, parent_id=456),
+        guild_id=1,
+    )
+
+    new_cmd = client.tree.get_command("new")
+    assert new_cmd is not None
+    await new_cmd.callback(interaction)
+
+    assert interaction.response.messages == [
+        {"content": "This channel is not allowed for this bot.", "ephemeral": True}
+    ]
+    assert handled == []
+
+
+@pytest.mark.asyncio
 async def test_slash_new_is_blocked_for_disallowed_user() -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["999"]), MessageBus())
     handled: list[dict] = []
@@ -618,7 +865,7 @@ async def test_slash_new_is_blocked_for_disallowed_user() -> None:
     assert handled == []
 
 
-@pytest.mark.parametrize("slash_name", ["stop", "restart", "status"])
+@pytest.mark.parametrize("slash_name", ["stop", "restart", "status", "history"])
 @pytest.mark.asyncio
 async def test_slash_commands_forward_via_handle_message(slash_name: str) -> None:
     channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
@@ -663,6 +910,45 @@ async def test_slash_help_returns_ephemeral_help_text() -> None:
 
     assert interaction.response.messages == [{"content": build_help_text(), "ephemeral": True}]
     assert handled == []
+
+
+@pytest.mark.asyncio
+async def test_slash_help_respects_allow_channels() -> None:
+    channel = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], allow_channels=["999"]),
+        MessageBus(),
+    )
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
+    interaction = _make_interaction(
+        channel_id=777,
+        channel=_FakeChannel(channel_id=777, parent_id=456),
+        guild_id=1,
+    )
+    interaction.command.qualified_name = "help"
+
+    help_cmd = client.tree.get_command("help")
+    assert help_cmd is not None
+    await help_cmd.callback(interaction)
+
+    assert interaction.response.messages == [
+        {"content": "This channel is not allowed for this bot.", "ephemeral": True}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_thread_delete_and_archive_remove_known_channel() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(channel, intents=discord.Intents.none())
+    thread = _FakeChannel(channel_id=777, parent_id=456)
+
+    channel._remember_channel(thread)
+    await client.on_thread_delete(thread)
+    assert "777" not in channel._known_channels
+
+    channel._remember_channel(thread)
+    archived_thread = SimpleNamespace(id=777, parent_id=456, archived=True)
+    await client.on_thread_update(thread, archived_thread)
+    assert "777" not in channel._known_channels
 
 
 @pytest.mark.asyncio

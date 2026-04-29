@@ -26,6 +26,8 @@ DEFAULT_ORIGINATOR = "nanobot"
 class OpenAICodexProvider(LLMProvider):
     """Use Codex OAuth to call the Responses API."""
 
+    supports_progress_deltas = True
+
     def __init__(self, default_model: str = "openai-codex/gpt-5.1-codex"):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
@@ -58,7 +60,7 @@ class OpenAICodexProvider(LLMProvider):
             "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": True,
         }
-        if reasoning_effort:
+        if reasoning_effort and reasoning_effort.lower() != "none":
             body["reasoning"] = {"effort": reasoning_effort}
         if tools:
             body["tools"] = convert_tools(tools)

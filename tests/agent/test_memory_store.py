@@ -141,6 +141,49 @@ class TestHistoryWithCursor:
         assert len(entries) == 2
         assert entries[0]["cursor"] in {4, 5}
 
+    def test_write_entries_uses_atomic_write(self, tmp_path):
+        """_write_entries uses temp file + os.replace for atomicity."""
+        store = MemoryStore(tmp_path)
+        store.append_history("event 1")
+        store.append_history("event 2")
+        store.append_history("event 3")
+        entries = store.read_unprocessed_history(since_cursor=0)
+
+        # Monitor temp file existence
+        tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
+        assert not tmp_path_obj.exists()  # Should not exist initially
+
+        # Call _write_entries
+        store._write_entries(entries)
+
+        # Temp file should be cleaned up
+        assert not tmp_path_obj.exists()
+        # Original file should exist
+        assert store.history_file.exists()
+
+    def test_write_entries_cleans_up_tmp_on_exception(self, tmp_path, monkeypatch):
+        """Exception during _write_entries cleans up the temp file."""
+        store = MemoryStore(tmp_path)
+        store.append_history("event 1")
+        entries = store.read_unprocessed_history(since_cursor=0)
+
+        tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
+
+        # Mock os.replace to raise an exception
+        def failing_replace(*args, **kwargs):
+            raise RuntimeError("Simulated failure")
+
+        monkeypatch.setattr('os.replace', failing_replace)
+
+        with pytest.raises(RuntimeError):
+            store._write_entries(entries)
+
+        # Temp file should be cleaned up
+        assert not tmp_path_obj.exists()
+
+        # Original file should still exist (because replace failed)
+        assert store.history_file.exists()
+
 
 class TestAppendHistoryHardCap:
     """append_history has a defensive cap that catches new callers who forgot

@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 import inspect
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.utils.prompt_templates import render_template
+from nanobot.agent.tools.ask import AskUserInterrupt
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.helpers import (
@@ -21,8 +21,10 @@ from nanobot.utils.helpers import (
     estimate_prompt_tokens_chain,
     find_legal_message_start,
     maybe_persist_tool_result,
+    strip_think,
     truncate_text,
 )
+from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.runtime import (
     EMPTY_FINAL_RESPONSE_MESSAGE,
     build_finalization_retry_message,
@@ -277,17 +279,22 @@ class AgentRunner:
             self._accumulate_usage(usage, raw_usage)
 
             if response.should_execute_tools:
+                tool_calls = list(response.tool_calls)
+                ask_index = next((i for i, tc in enumerate(tool_calls) if tc.name == "ask_user"), None)
+                if ask_index is not None:
+                    tool_calls = tool_calls[: ask_index + 1]
+                context.tool_calls = list(tool_calls)
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
 
                 assistant_message = build_assistant_message(
                     response.content or "",
-                    tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
+                    tool_calls=[tc.to_openai_tool_call() for tc in tool_calls],
                     reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
                 messages.append(assistant_message)
-                tools_used.extend(tc.name for tc in response.tool_calls)
+                tools_used.extend(tc.name for tc in tool_calls)
                 await self._emit_checkpoint(
                     spec,
                     {
@@ -296,7 +303,7 @@ class AgentRunner:
                         "model": spec.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
-                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
+                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in tool_calls],
                     },
                 )
 
@@ -304,14 +311,16 @@ class AgentRunner:
 
                 results, new_events, fatal_error = await self._execute_tools(
                     spec,
-                    response.tool_calls,
+                    tool_calls,
                     external_lookup_counts,
                 )
                 tool_events.extend(new_events)
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
                 completed_tool_results: list[dict[str, Any]] = []
-                for tool_call, result in zip(response.tool_calls, results):
+                for tool_call, result in zip(tool_calls, results):
+                    if isinstance(fatal_error, AskUserInterrupt) and tool_call.name == "ask_user":
+                        continue
                     tool_message = {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
@@ -326,6 +335,15 @@ class AgentRunner:
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
                 if fatal_error is not None:
+                    if isinstance(fatal_error, AskUserInterrupt):
+                        final_content = fatal_error.question
+                        stop_reason = "ask_user"
+                        context.final_content = final_content
+                        context.stop_reason = stop_reason
+                        if hook.wants_streaming():
+                            await hook.on_stream_end(context, resuming=False)
+                        await hook.after_iteration(context)
+                        break
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     final_content = error
                     stop_reason = "tool_error"
@@ -590,13 +608,41 @@ class AgentRunner:
             messages,
             tools=spec.tools.get_definitions(),
         )
-        if hook.wants_streaming():
+        wants_streaming = hook.wants_streaming()
+        wants_progress_streaming = (
+            not wants_streaming
+            and spec.progress_callback is not None
+            and getattr(self.provider, "supports_progress_deltas", False) is True
+        )
+
+        if wants_streaming:
             async def _stream(delta: str) -> None:
+                if delta:
+                    context.streamed_content = True
                 await hook.on_stream(context, delta)
 
             coro = self.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream,
+            )
+        elif wants_progress_streaming:
+            stream_buf = ""
+
+            async def _stream_progress(delta: str) -> None:
+                nonlocal stream_buf
+                if not delta:
+                    return
+                prev_clean = strip_think(stream_buf)
+                stream_buf += delta
+                new_clean = strip_think(stream_buf)
+                incremental = new_clean[len(prev_clean):]
+                if incremental:
+                    context.streamed_content = True
+                    await spec.progress_callback(incremental)
+
+            coro = self.provider.chat_stream_with_retry(
+                **kwargs,
+                on_content_delta=_stream_progress,
             )
         else:
             coro = self.provider.chat_with_retry(**kwargs)
@@ -656,13 +702,21 @@ class AgentRunner:
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
         for batch in batches:
             if spec.concurrent_tools and len(batch) > 1:
-                tool_results.extend(await asyncio.gather(*(
+                batch_results = await asyncio.gather(*(
                     self._run_tool(spec, tool_call, external_lookup_counts)
                     for tool_call in batch
-                )))
+                ))
+                tool_results.extend(batch_results)
             else:
+                batch_results = []
                 for tool_call in batch:
-                    tool_results.append(await self._run_tool(spec, tool_call, external_lookup_counts))
+                    result = await self._run_tool(spec, tool_call, external_lookup_counts)
+                    tool_results.append(result)
+                    batch_results.append(result)
+                    if isinstance(result[2], AskUserInterrupt):
+                        break
+            if any(isinstance(error, AskUserInterrupt) for _, _, error in batch_results):
+                break
 
         results: list[Any] = []
         events: list[dict[str, str]] = []
@@ -680,7 +734,7 @@ class AgentRunner:
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None]:
-        _HINT = "\n\n[Analyze the error above and try a different approach.]"
+        hint = "\n\n[Analyze the error above and try a different approach.]"
         lookup_error = repeated_external_lookup_error(
             tool_call.name,
             tool_call.arguments,
@@ -693,8 +747,8 @@ class AgentRunner:
                 "detail": "repeated external lookup blocked",
             }
             if spec.fail_on_tool_error:
-                return lookup_error + _HINT, event, RuntimeError(lookup_error)
-            return lookup_error + _HINT, event, None
+                return lookup_error + hint, event, RuntimeError(lookup_error)
+            return lookup_error + hint, event, None
         prepare_call = getattr(spec.tools, "prepare_call", None)
         tool, params, prep_error = None, tool_call.arguments, None
         if callable(prepare_call):
@@ -710,7 +764,16 @@ class AgentRunner:
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
-            return prep_error + _HINT, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
+            if self._is_workspace_violation(prep_error):
+                logger.warning(
+                    "Tool {} blocked by workspace/safety guard during preparation; aborting turn: {}",
+                    tool_call.name,
+                    prep_error.replace("\n", " ").strip()[:200],
+                )
+                event["detail"] = ("workspace_violation: "
+                                   + prep_error.replace("\n", " ").strip())[:160]
+                return prep_error, event, RuntimeError(prep_error)
+            return prep_error + hint, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -724,6 +787,18 @@ class AgentRunner:
                 "status": "error",
                 "detail": str(exc),
             }
+            if isinstance(exc, AskUserInterrupt):
+                event["status"] = "waiting"
+                return "", event, exc
+            if self._is_workspace_violation(str(exc)):
+                logger.warning(
+                    "Tool {} blocked by workspace/safety guard; aborting turn: {}",
+                    tool_call.name,
+                    str(exc).replace("\n", " ").strip()[:200],
+                )
+                event["detail"] = ("workspace_violation: "
+                                   + str(exc).replace("\n", " ").strip())[:160]
+                return f"Error: {type(exc).__name__}: {exc}", event, exc
             if spec.fail_on_tool_error:
                 return f"Error: {type(exc).__name__}: {exc}", event, exc
             return f"Error: {type(exc).__name__}: {exc}", event, None
@@ -734,9 +809,20 @@ class AgentRunner:
                 "status": "error",
                 "detail": result.replace("\n", " ").strip()[:120],
             }
+
+            # check the outside workspace error and break loop
+            if self._is_workspace_violation(result):
+                logger.warning(
+                    "Tool {} blocked by workspace/safety guard; aborting turn: {}",
+                    tool_call.name,
+                    result.replace("\n", " ").strip()[:200],
+                )
+                event["detail"] = ("workspace_violation: "
+                                   + result.replace("\n", " ").strip())[:160]
+                return result, event, RuntimeError(result)
             if spec.fail_on_tool_error:
-                return result + _HINT, event, RuntimeError(result)
-            return result + _HINT, event, None
+                return result + hint, event, RuntimeError(result)
+            return result + hint, event, None
 
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()
@@ -745,6 +831,24 @@ class AgentRunner:
         elif len(detail) > 120:
             detail = detail[:120] + "..."
         return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
+
+    # Markers identifying tool results that represent a workspace / safety boundary rejection.
+    _WORKSPACE_BLOCK_MARKERS: tuple[str, ...] = (
+        "blocked by safety guard",
+        "outside the configured workspace",
+        "outside allowed directory",
+        "working_dir is outside",
+        "working_dir could not be resolved",
+        "path traversal detected",
+        "path outside working dir",
+    )
+
+    @classmethod
+    def _is_workspace_violation(cls, text: str) -> bool:
+        if not text:
+            return False
+        lowered = text.lower()
+        return any(marker in lowered for marker in cls._WORKSPACE_BLOCK_MARKERS)
 
     async def _emit_checkpoint(
         self,

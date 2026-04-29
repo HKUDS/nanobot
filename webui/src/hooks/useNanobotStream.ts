@@ -160,13 +160,15 @@ export function useNanobotStream(
         setIsStreaming(false);
         setMessages((prev) => {
           const filtered = activeId ? prev.filter((m) => m.id !== activeId) : prev;
+          const content = ev.buttons?.length ? (ev.button_prompt ?? ev.text) : ev.text;
           return [
             ...filtered,
             {
               id: crypto.randomUUID(),
               role: "assistant",
-              content: ev.text,
+              content,
               createdAt: Date.now(),
+              ...(ev.buttons && ev.buttons.length > 0 ? { buttons: ev.buttons } : {}),
               ...(media && media.length > 0 ? { media } : {}),
             },
           ];

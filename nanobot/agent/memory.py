@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import weakref
 import tiktoken
@@ -359,10 +360,31 @@ class MemoryStore:
             return None
 
     def _write_entries(self, entries: list[dict[str, Any]]) -> None:
-        """Overwrite history.jsonl with the given entries."""
-        with open(self.history_file, "w", encoding="utf-8") as f:
-            for entry in entries:
-                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        """Overwrite history.jsonl with the given entries (atomic write)."""
+        tmp_path = self.history_file.with_suffix(self.history_file.suffix + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                for entry in entries:
+                    f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.history_file)
+
+            # fsync the directory so the rename is durable.
+            # On Windows, opening a directory with O_RDONLY raises
+            # PermissionError — skip the dir sync there (NTFS
+            # journals metadata synchronously).
+            try:
+                fd = os.open(str(self.history_file.parent), os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+            except PermissionError:
+                pass  # Windows — directory fsync not supported
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
     # -- dream cursor --------------------------------------------------------
 
@@ -435,6 +457,7 @@ class Consolidator:
         build_messages: Callable[..., list[dict[str, Any]]],
         get_tool_definitions: Callable[[], list[dict[str, Any]]],
         max_completion_tokens: int = 4096,
+        consolidation_ratio: float = 0.5,
     ):
         self.store = store
         self.provider = provider
@@ -442,11 +465,23 @@ class Consolidator:
         self.sessions = sessions
         self.context_window_tokens = context_window_tokens
         self.max_completion_tokens = max_completion_tokens
+        self.consolidation_ratio = consolidation_ratio
         self._build_messages = build_messages
         self._get_tool_definitions = get_tool_definitions
         self._locks: weakref.WeakValueDictionary[str, asyncio.Lock] = (
             weakref.WeakValueDictionary()
         )
+
+    def set_provider(
+        self,
+        provider: LLMProvider,
+        model: str,
+        context_window_tokens: int,
+    ) -> None:
+        self.provider = provider
+        self.model = model
+        self.context_window_tokens = context_window_tokens
+        self.max_completion_tokens = provider.generation.max_tokens
 
     def get_lock(self, session_key: str) -> asyncio.Lock:
         """Return the shared consolidation lock for one session."""
@@ -481,7 +516,7 @@ class Consolidator:
         session_summary: str | None = None,
     ) -> tuple[int, str]:
         """Estimate current prompt size for the normal session history view."""
-        history = session.get_history(max_messages=0)
+        history = session.get_history(max_messages=0, include_timestamps=True)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
         probe_messages = self._build_messages(
             history=history,
@@ -568,7 +603,7 @@ class Consolidator:
         lock = self.get_lock(session.key)
         async with lock:
             budget = self._input_token_budget
-            target = budget // 2
+            target = int(budget * self.consolidation_ratio)
             try:
                 estimated, source = self.estimate_session_prompt_tokens(
                     session,
@@ -707,6 +742,11 @@ class Dream:
         self.annotate_line_ages = annotate_line_ages
         self._runner = AgentRunner(provider)
         self._tools = self._build_tools()
+
+    def set_provider(self, provider: LLMProvider, model: str) -> None:
+        self.provider = provider
+        self.model = model
+        self._runner.provider = provider
 
     # -- tool registry -------------------------------------------------------
 

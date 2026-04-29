@@ -128,3 +128,89 @@ class TestToolEventProgress:
         finish = finish_msgs[0].metadata["_tool_events"][0]
         assert finish["phase"] == "end"
         assert finish["result"] == "file.txt"
+
+    @pytest.mark.asyncio
+    async def test_bus_progress_streams_provider_deltas_for_codex_style_provider(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Providers that opt in can stream content deltas through _progress messages."""
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.supports_progress_deltas = True
+        provider.get_default_model.return_value = "openai-codex/gpt-5.5"
+
+        async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+            await on_content_delta("Hel")
+            await on_content_delta("lo")
+            return LLMResponse(content="Hello", tool_calls=[])
+
+        provider.chat_stream_with_retry = chat_stream_with_retry
+        provider.chat_with_retry = AsyncMock()
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
+        loop.tools.get_definitions = MagicMock(return_value=[])
+
+        await loop._dispatch(InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="chat1",
+            content="say hello",
+        ))
+
+        outbound = []
+        while bus.outbound_size > 0:
+            outbound.append(await bus.consume_outbound())
+
+        progress = [m for m in outbound if m.metadata.get("_progress")]
+        final = [m for m in outbound if not m.metadata.get("_progress")]
+
+        assert [m.content for m in progress] == ["Hel", "lo"]
+        assert final[-1].content == "Hello"
+        provider.chat_with_retry.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_streamed_progress_is_not_repeated_before_tool_execution(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """If content was already streamed as progress, tool setup should not repeat it."""
+        loop = _make_loop(tmp_path)
+        loop.provider.supports_progress_deltas = True
+        tool_call = ToolCallRequest(id="call1", name="custom_tool", arguments={"path": "foo.txt"})
+        calls = iter([
+            LLMResponse(content="I will inspect it.", tool_calls=[tool_call]),
+            LLMResponse(content="Done", tool_calls=[]),
+        ])
+
+        async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+            response = next(calls)
+            if response.tool_calls:
+                await on_content_delta("I will ")
+                await on_content_delta("inspect it.")
+            return response
+
+        loop.provider.chat_stream_with_retry = chat_stream_with_retry
+        loop.provider.chat_with_retry = AsyncMock()
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.tools.prepare_call = MagicMock(return_value=(None, {"path": "foo.txt"}, None))
+        loop.tools.execute = AsyncMock(return_value="ok")
+
+        progress: list[tuple[str, bool, list[dict] | None]] = []
+
+        async def on_progress(
+            content: str,
+            *,
+            tool_hint: bool = False,
+            tool_events: list[dict] | None = None,
+        ) -> None:
+            progress.append((content, tool_hint, tool_events))
+
+        final_content, _, _, _, _ = await loop._run_agent_loop([], on_progress=on_progress)
+
+        assert final_content == "Done"
+        assert [item[0] for item in progress[:3]] == [
+            "I will",
+            " inspect it.",
+            'custom_tool("foo.txt")',
+        ]
+        assert all(item[0] != "I will inspect it." for item in progress)
