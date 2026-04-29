@@ -243,6 +243,9 @@ _WINDOWS_BLOCKED_PATHS: list[str] = [
 ]
 
 
+_PATH_TRAVERSAL_PATTERN = re.compile(r"(?:^|[\\/])(?:\.\.[\\/])+(?:$|[^\\/])")
+
+
 class ToolSecurityGuard:
     """Lightweight security guard for tool calls.
 
@@ -336,11 +339,12 @@ class ToolSecurityGuard:
                     detail = f"Parameter '{path_param}': {detail}"
                     break
 
+        sanitized_params = self._sanitize_params(params)
         if reason is not None:
             entry = AuditEntry(
                 timestamp=datetime.now(),
                 tool_name=tool_name,
-                parameters=params,
+                parameters=sanitized_params,
                 reason=reason,
                 detail=detail,
                 session_key=session_key,
@@ -354,7 +358,7 @@ class ToolSecurityGuard:
             entry = AuditEntry(
                 timestamp=datetime.now(),
                 tool_name=tool_name,
-                parameters=self._sanitize_params(params),
+                parameters=sanitized_params,
                 reason=DenialReason.SENSITIVE_FILE,
                 detail="allowed",
                 session_key=session_key,
@@ -375,20 +379,76 @@ class ToolSecurityGuard:
         
         return True
 
-    def _extract_path_params(self, params: dict[str, Any]) -> dict[str, str]:
-        """Extract parameters that likely contain paths."""
-        path_keys = {"path", "paths", "file", "files", "dir", "directory", "working_dir", "source", "destination", "target"}
+    def _extract_path_params(
+        self, params: dict[str, Any], prefix: str = ""
+    ) -> dict[str, str]:
+        """Extract parameters that likely contain paths.
+
+        Recursively searches through nested dictionaries for path-like values.
+        """
+        path_keys = {
+            "path", "paths", "file", "files", "dir", "directory", "working_dir",
+            "source", "destination", "target", "filename", "filepath", "src", "dst",
+            "from_path", "to_path", "input_path", "output_path", "config_path",
+            "data_path", "log_path", "cache_path", "backup_path", "save_path",
+            "load_path", "import_path", "export_path", "template_path",
+            "script_path", "module_path", "package_path", "resource_path",
+            "static_path", "media_path", "upload_path", "download_path",
+            "cert_path", "key_path", "pem_path", "env_path", "credential_path",
+        }
         result: dict[str, str] = {}
         
         for key, value in params.items():
-            if isinstance(value, str) and key in path_keys:
-                result[key] = value
-            elif isinstance(value, list) and key in path_keys:
+            current_key = f"{prefix}.{key}" if prefix else key
+            
+            if isinstance(value, str):
+                if key.lower() in path_keys or self._looks_like_path(value):
+                    result[current_key] = value
+            elif isinstance(value, list):
                 for i, item in enumerate(value):
-                    if isinstance(item, str):
-                        result[f"{key}[{i}]"] = item
+                    if isinstance(item, str) and self._looks_like_path(item):
+                        result[f"{current_key}[{i}]"] = item
+                    elif isinstance(item, dict):
+                        nested = self._extract_path_params(item, f"{current_key}[{i}]")
+                        result.update(nested)
+            elif isinstance(value, dict):
+                nested = self._extract_path_params(value, current_key)
+                result.update(nested)
         
         return result
+
+    def _looks_like_path(self, value: str) -> bool:
+        """Check if a string value looks like it could be a path.
+
+        Heuristics:
+        - Contains path separators (/, \)
+        - Contains ~ (home directory)
+        - Is a dot-path like ./.config or ../foo
+        - Has file extension with 2-4 chars
+        """
+        if not value or not isinstance(value, str):
+            return False
+        
+        if "/" in value or "\\" in value:
+            return True
+        
+        if value.startswith("~"):
+            return True
+        
+        if value.startswith("./") or value.startswith(".\\"):
+            return True
+        
+        if _PATH_TRAVERSAL_PATTERN.search(value):
+            return True
+        
+        if re.match(r"^[a-zA-Z]:", value):
+            return True
+        
+        if re.search(r"\.[a-zA-Z0-9]{2,4}$", value):
+            if len(value) > 4 and not value.isspace():
+                return True
+        
+        return False
 
     def _check_path(self, path_str: str, workspace: Path | None) -> tuple[DenialReason, str] | None:
         """Check a single path for security violations.
@@ -397,26 +457,56 @@ class ToolSecurityGuard:
             (reason, detail) if violated, None otherwise.
         """
         try:
-            path = Path(path_str).expanduser()
+            path = Path(path_str)
+            
+            normalized = path_str.replace("\\", "/")
             
             if self._config.block_path_traversal:
-                if ".." in path_str or path_str.startswith("~"):
-                    try:
-                        resolved = path.resolve()
-                    except Exception:
-                        return DenialReason.PATH_TRAVERSAL, f"Path '{path_str}' contains suspicious elements"
-
+                has_traversal_elements = False
+                
+                parts = normalized.split("/")
+                depth = 0
+                for part in parts:
+                    if part == "..":
+                        depth -= 1
+                        if depth < 0:
+                            has_traversal_elements = True
+                            break
+                    elif part and part != ".":
+                        depth += 1
+                
+                if has_traversal_elements:
+                    return DenialReason.PATH_TRAVERSAL, f"Path '{path_str}' contains path traversal elements"
+            
             try:
-                resolved = path.resolve()
+                expanded = path.expanduser()
+                resolved = expanded.resolve()
             except Exception:
-                resolved = path
-
+                try:
+                    resolved = path.resolve()
+                except Exception:
+                    resolved = path
+            
+            str_resolved = str(resolved)
+            
+            if self._config.block_path_traversal and workspace is not None:
+                try:
+                    workspace_resolved = workspace.resolve()
+                    try:
+                        relative = resolved.relative_to(workspace_resolved)
+                        if str(relative).startswith(".."):
+                            return DenialReason.PATH_TRAVERSAL, f"Path '{path_str}' resolves outside workspace"
+                    except ValueError:
+                        pass
+                except Exception:
+                    pass
+            
             if self._config.block_sensitive_files:
                 if self._is_sensitive_file(resolved):
                     return DenialReason.SENSITIVE_FILE, f"Path '{path_str}' matches a sensitive file pattern"
 
             if self._config.block_system_dirs:
-                if self._is_system_path(resolved):
+                if self._is_system_path(resolved, str_resolved):
                     return DenialReason.SYSTEM_DIRECTORY, f"Path '{path_str}' is in a blocked system directory"
 
             if workspace is not None:
@@ -444,21 +534,21 @@ class ToolSecurityGuard:
 
         return False
 
-    def _is_system_path(self, path: Path) -> bool:
-        """Check if a path is in a blocked system directory."""
+    def _is_system_path(self, path: Path, resolved_str: str) -> bool:
+        """Check if a path is in a blocked system directory.
+
+        Uses self._blocked_paths which includes additional_blocked_paths from config.
+        """
         try:
-            resolved = path.resolve()
-            path_str = str(resolved)
+            path_lower = resolved_str.lower()
             
-            if _IS_WINDOWS:
-                path_lower = path_str.lower()
-                for blocked in _WINDOWS_BLOCKED_PATHS:
-                    blocked_lower = blocked.lower()
+            for blocked in self._blocked_paths:
+                blocked_lower = blocked.lower()
+                if _IS_WINDOWS:
                     if path_lower == blocked_lower or path_lower.startswith(blocked_lower + "\\"):
                         return True
-            else:
-                for blocked in _BLOCKED_SYSTEM_PATHS:
-                    if path_str == blocked or path_str.startswith(blocked + "/"):
+                else:
+                    if resolved_str == blocked or resolved_str.startswith(blocked + "/"):
                         return True
         except Exception:
             pass
@@ -468,7 +558,13 @@ class ToolSecurityGuard:
     def _sanitize_params(self, params: dict[str, Any]) -> dict[str, Any]:
         """Sanitize parameters for audit logging (hide potential secrets)."""
         result: dict[str, Any] = {}
-        sensitive_keys = {"password", "passwd", "secret", "token", "api_key", "apikey", "private_key", "credential"}
+        sensitive_keys = {
+            "password", "passwd", "secret", "token", "api_key", "apikey",
+            "private_key", "credential", "auth", "authorization", "bearer",
+            "jwt", "session", "cookie", "access_token", "refresh_token",
+            "client_secret", "client_secret", "db_password", "db_pass",
+            "redis_password", "mysql_password", "pg_password", "sql_password",
+        }
         
         for key, value in params.items():
             key_lower = key.lower()
@@ -477,11 +573,41 @@ class ToolSecurityGuard:
             elif isinstance(value, dict):
                 result[key] = self._sanitize_params(value)
             elif isinstance(value, list):
-                result[key] = [self._sanitize_params(v) if isinstance(v, dict) else v for v in value]
+                result[key] = [
+                    self._sanitize_params(v) if isinstance(v, dict) else 
+                    ("[REDACTED]" if self._is_sensitive_value(v) else v) 
+                    for v in value
+                ]
+            elif isinstance(value, str) and self._is_sensitive_value(value):
+                result[key] = "[REDACTED]"
             else:
                 result[key] = value
         
         return result
+
+    def _is_sensitive_value(self, value: str) -> bool:
+        """Check if a string value looks like it could be a sensitive credential.
+
+        Heuristics for detecting API keys, tokens, etc.
+        """
+        if not value or not isinstance(value, str):
+            return False
+        
+        if re.match(r"^(sk|sk_live|sk_test|pk|pk_live|pk_test)_[a-zA-Z0-9]+", value):
+            return True
+        
+        if re.match(r"^gh[ps]_[a-zA-Z0-9]+$", value):
+            return True
+        
+        if re.match(r"^[a-zA-Z0-9_-]{20,}$", value) and len(value) >= 32:
+            if re.search(r"[A-Z]", value) and re.search(r"[a-z]", value):
+                return True
+        
+        if value.startswith("env:") or value.startswith("$"):
+            if len(value) > 4:
+                return True
+        
+        return False
 
     def _format_error(self, reason: DenialReason, detail: str) -> str:
         """Format an error message for the user."""
