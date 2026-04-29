@@ -280,6 +280,73 @@ nanobot gateway
 </details>
 
 <details>
+<summary><b>SimpleX (via WebSocket bridge)</b></summary>
+
+SimpleX is run as a **gateway-managed bridge process**. The setup is:
+
+1. nanobot's existing **WebSocket** channel
+2. the local **`simplex-chat` CLI**
+3. a small **bridge process** that forwards inbound text to nanobot and shells out to `simplex-chat` for replies
+
+**1. Configure nanobot**
+
+```json
+{
+  "channels": {
+    "websocket": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 8765,
+      "path": "/",
+      "websocketRequiresToken": false,
+      "allowFrom": ["YOUR_CLIENT_ID"],
+      "streaming": false
+    },
+    "simplex": {
+      "enabled": true,
+      "clientId": "YOUR_CLIENT_ID",
+      "chatId": "simplex:YOUR_CONTACT_KEY",
+      "contact": "YOUR_SIMPLEX_DISPLAY_NAME",
+      "simplexCmd": "simplex-chat",
+      "simplexTimeout": 3,
+      "stateFile": "",
+      "pollInterval": 2.0,
+      "receiveLimit": 20,
+      "bootstrap": "latest",
+      "reconnectDelay": 5.0
+    }
+  }
+}
+```
+
+> `allowFrom` is matched against the WebSocket `client_id` with exact string matching (case-sensitive), so keep them identical.
+> Use a fixed `chatId` such as `simplex:YOUR_CONTACT_KEY` so the conversation survives reconnects.
+> `contact` must exactly match the SimpleX local display name (case-sensitive).
+> Start with `streaming: false` so the bridge only has to deliver final replies.
+
+**2. Start nanobot**
+
+```bash
+nanobot gateway
+```
+
+SimpleX inbound polling uses only the local CLI command:
+
+```bash
+simplex-chat -e "/tail @YOUR_SIMPLEX_DISPLAY_NAME 20" -t 3
+```
+
+There is no interactive `login` step for SimpleX once your CLI profile is configured.
+
+The bridge forwards inbound SimpleX messages into nanobot as:
+
+```json
+{"type":"message","chat_id":"simplex:YOUR_CONTACT_KEY","content":"..."}
+```
+
+</details>
+
+<details>
 <summary><b>Feishu</b></summary>
 
 Uses **WebSocket** long connection — no public IP required.
