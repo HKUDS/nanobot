@@ -15,6 +15,7 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools.ask import AskUserInterrupt
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.providers.failover import ModelCandidate, ModelRouter
 from nanobot.utils.helpers import (
     build_assistant_message,
     estimate_message_tokens,
@@ -73,6 +74,7 @@ class AgentRunSpec:
     context_window_tokens: int | None = None
     context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
+    fallback_models: list[str] = field(default_factory=list)
     progress_callback: Any | None = None
     retry_wait_callback: Any | None = None
     checkpoint_callback: Any | None = None
@@ -94,11 +96,21 @@ class AgentRunResult:
     had_injections: bool = False
 
 
+ProviderFactory = Any  # Callable[[str], LLMProvider] — avoids circular import
+
+
 class AgentRunner:
     """Run a tool-capable LLM loop without product-layer concerns."""
 
-    def __init__(self, provider: LLMProvider):
+    def __init__(
+        self,
+        provider: LLMProvider,
+        *,
+        provider_factory: ProviderFactory | None = None,
+    ):
         self.provider = provider
+        self._provider_factory = provider_factory
+        self._fallback_providers: dict[str, LLMProvider] = {}
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -589,12 +601,9 @@ class AgentRunner:
         messages: list[dict[str, Any]],
         hook: AgentHook,
         context: AgentHookContext,
-    ):
+    ) -> LLMResponse:
         timeout_s: float | None = spec.llm_timeout_s
         if timeout_s is None:
-            # Default to a finite timeout to avoid per-session lock starvation when an LLM
-            # request hangs indefinitely (e.g. gateway/network stall).
-            # Set NANOBOT_LLM_TIMEOUT_S=0 to disable.
             raw = os.environ.get("NANOBOT_LLM_TIMEOUT_S", "300").strip()
             try:
                 timeout_s = float(raw)
@@ -608,11 +617,29 @@ class AgentRunner:
             messages,
             tools=spec.tools.get_definitions(),
         )
+        provider: LLMProvider = self.provider
+        request_timeout = timeout_s
+        if spec.fallback_models:
+            provider = self._build_model_router(spec, timeout_s)
+            # ModelRouter applies the same timeout per candidate, preserving
+            # fallback on primary timeouts instead of timing out the whole chain.
+            request_timeout = None
+        return await self._call_provider(provider, kwargs, hook, context, spec, request_timeout)
+
+    async def _call_provider(
+        self,
+        provider: LLMProvider,
+        kwargs: dict[str, Any],
+        hook: AgentHook,
+        context: AgentHookContext,
+        spec: AgentRunSpec,
+        timeout_s: float | None = None,
+    ) -> LLMResponse:
         wants_streaming = hook.wants_streaming()
         wants_progress_streaming = (
             not wants_streaming
             and spec.progress_callback is not None
-            and getattr(self.provider, "supports_progress_deltas", False) is True
+            and getattr(provider, "supports_progress_deltas", False) is True
         )
 
         if wants_streaming:
@@ -621,7 +648,7 @@ class AgentRunner:
                     context.streamed_content = True
                 await hook.on_stream(context, delta)
 
-            coro = self.provider.chat_stream_with_retry(
+            coro = provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream,
             )
@@ -640,12 +667,12 @@ class AgentRunner:
                     context.streamed_content = True
                     await spec.progress_callback(incremental)
 
-            coro = self.provider.chat_stream_with_retry(
+            coro = provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream_progress,
             )
         else:
-            coro = self.provider.chat_with_retry(**kwargs)
+            coro = provider.chat_with_retry(**kwargs)
 
         if timeout_s is None:
             return await coro
@@ -657,6 +684,41 @@ class AgentRunner:
                 finish_reason="error",
                 error_kind="timeout",
             )
+
+    def _resolve_fallback_provider(self, model: str) -> tuple[LLMProvider, str]:
+        """Return (provider, actual_model_name) for a fallback model.
+
+        When a provider_factory is available (and the model string may be a
+        preset name), the factory resolves the actual model; otherwise the
+        primary provider is reused with the raw model string.
+        """
+        if model in self._fallback_providers:
+            p = self._fallback_providers[model]
+            return p, p.get_default_model()
+        if self._provider_factory:
+            provider = self._provider_factory(model)
+            self._fallback_providers[model] = provider
+            return provider, provider.get_default_model()
+        return self.provider, model
+
+    def _build_model_router(
+        self,
+        spec: AgentRunSpec,
+        timeout_s: float | None,
+    ) -> ModelRouter:
+        candidates = [
+            ModelCandidate(
+                label=model,
+                resolver=lambda m=model: self._resolve_fallback_provider(m),
+            )
+            for model in spec.fallback_models
+        ]
+        return ModelRouter(
+            primary_provider=self.provider,
+            primary_model=spec.model,
+            fallback_candidates=candidates,
+            per_candidate_timeout_s=timeout_s,
+        )
 
     async def _request_finalization_retry(
         self,

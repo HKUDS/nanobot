@@ -412,13 +412,96 @@ def _make_provider(config: Config):
 
     Routing is driven by ``ProviderSpec.backend`` in the registry.
     """
-    from nanobot.providers.factory import make_provider
+    from nanobot.providers.base import GenerationSettings
+    from nanobot.providers.registry import find_by_name
 
-    try:
-        return make_provider(config)
-    except ValueError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
-        raise typer.Exit(1) from exc
+    resolved = config.resolve_preset()
+    model = resolved.model
+    provider_name = config.get_provider_name(model)
+    p = config.get_provider(model)
+    spec = find_by_name(provider_name) if provider_name else None
+    backend = spec.backend if spec else "openai_compat"
+
+    # --- validation ---
+    if backend == "azure_openai":
+        if not p or not p.api_key or not p.api_base:
+            console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
+            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
+            console.print("Use the model field to specify the deployment name.")
+            raise typer.Exit(1)
+    elif backend == "openai_compat" and not model.startswith("bedrock/"):
+        needs_key = not (p and p.api_key)
+        exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
+        if needs_key and not exempt:
+            console.print("[red]Error: No API key configured.[/red]")
+            console.print("Set one in ~/.nanobot/config.json under providers section")
+            raise typer.Exit(1)
+
+    # --- instantiation by backend ---
+    if backend == "openai_codex":
+        from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+
+        provider = OpenAICodexProvider(default_model=model)
+    elif backend == "azure_openai":
+        from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
+
+        provider = AzureOpenAIProvider(
+            api_key=p.api_key,
+            api_base=p.api_base,
+            default_model=model,
+        )
+    elif backend == "github_copilot":
+        from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+        provider = GitHubCopilotProvider(default_model=model)
+    elif backend == "anthropic":
+        from nanobot.providers.anthropic_provider import AnthropicProvider
+
+        provider = AnthropicProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+        )
+    else:
+        from nanobot.providers.openai_compat_provider import OpenAICompatProvider
+
+        provider = OpenAICompatProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+            spec=spec,
+            extra_body=p.extra_body if p else None,
+        )
+
+    provider.generation = GenerationSettings(
+        temperature=resolved.temperature,
+        max_tokens=resolved.max_tokens,
+        reasoning_effort=resolved.reasoning_effort,
+    )
+    return provider
+
+
+def _make_cli_provider_factory(config: Config):
+    """Build a cached factory for fallback model providers (CLI side).
+
+    Supports preset names: if a model string matches a preset, the preset's
+    full config is used for provider creation.
+    """
+    from nanobot.nanobot import _make_provider_for_model
+
+    cache: dict[str, Any] = {}
+    presets = getattr(config, "model_presets", {}) or {}
+
+    def factory(model_or_preset: str):
+        preset = presets.get(model_or_preset)
+        actual_model = preset.model if preset else model_or_preset
+        key = actual_model
+        if key not in cache:
+            cache[key] = _make_provider_for_model(config, actual_model, preset=preset)
+        return cache[key]
+
+    return factory
 
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
@@ -516,17 +599,22 @@ def serve(
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(runtime_config)
+    defaults = runtime_config.agents.defaults
+    pf = _make_cli_provider_factory(runtime_config) if defaults.fallback_models else None
     session_manager = SessionManager(runtime_config.workspace_path)
+    _resolved = runtime_config.resolve_preset()
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=runtime_config.workspace_path,
-        model=runtime_config.agents.defaults.model,
-        max_iterations=runtime_config.agents.defaults.max_tool_iterations,
-        context_window_tokens=runtime_config.agents.defaults.context_window_tokens,
-        context_block_limit=runtime_config.agents.defaults.context_block_limit,
-        max_tool_result_chars=runtime_config.agents.defaults.max_tool_result_chars,
-        provider_retry_mode=runtime_config.agents.defaults.provider_retry_mode,
+        model=_resolved.model,
+        max_iterations=defaults.max_tool_iterations,
+        context_window_tokens=_resolved.context_window_tokens,
+        context_block_limit=defaults.context_block_limit,
+        max_tool_result_chars=defaults.max_tool_result_chars,
+        provider_retry_mode=defaults.provider_retry_mode,
+        fallback_models=defaults.fallback_models,
+        provider_factory=pf,
         web_config=runtime_config.tools.web,
         exec_config=runtime_config.tools.exec,
         restrict_to_workspace=runtime_config.tools.restrict_to_workspace,
@@ -540,12 +628,16 @@ def serve(
         consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
         max_messages=runtime_config.agents.defaults.max_messages,
         tools_config=runtime_config.tools,
+        model_presets=runtime_config.model_presets,
+        model_preset=runtime_config.agents.defaults.model_preset,
     )
 
-    model_name = runtime_config.agents.defaults.model
+    model_name = _resolved.model
+    preset_name = defaults.model_preset
+    preset_tag = f" (preset: {preset_name})" if preset_name else ""
     console.print(f"{__logo__} Starting OpenAI-compatible API server")
     console.print(f"  [cyan]Endpoint[/cyan] : http://{host}:{port}/v1/chat/completions")
-    console.print(f"  [cyan]Model[/cyan]    : {model_name}")
+    console.print(f"  [cyan]Model[/cyan]    : {model_name}{preset_tag}")
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
     if host in {"0.0.0.0", "::"}:
@@ -613,12 +705,14 @@ def _run_gateway(
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
+    provider = _make_provider(config)
+    gw_defaults = config.agents.defaults
+    gw_pf = _make_cli_provider_factory(config) if gw_defaults.fallback_models else None
     try:
         provider_snapshot = build_provider_snapshot(config)
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
-    provider = provider_snapshot.provider
     session_manager = SessionManager(config.workspace_path)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
@@ -630,17 +724,20 @@ def _run_gateway(
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
+    _resolved = config.resolve_preset()
     agent = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        model=provider_snapshot.model,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=provider_snapshot.context_window_tokens,
+        model=_resolved.model,
+        max_iterations=gw_defaults.max_tool_iterations,
+        context_window_tokens=_resolved.context_window_tokens,
         web_config=config.tools.web,
-        context_block_limit=config.agents.defaults.context_block_limit,
-        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
-        provider_retry_mode=config.agents.defaults.provider_retry_mode,
+        context_block_limit=gw_defaults.context_block_limit,
+        max_tool_result_chars=gw_defaults.max_tool_result_chars,
+        provider_retry_mode=gw_defaults.provider_retry_mode,
+        fallback_models=gw_defaults.fallback_models,
+        provider_factory=gw_pf,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -656,6 +753,8 @@ def _run_gateway(
         tools_config=config.tools,
         provider_snapshot_loader=load_provider_snapshot,
         provider_signature=provider_snapshot.signature,
+        model_presets=config.model_presets,
+        model_preset=config.agents.defaults.model_preset,
     )
 
     from nanobot.agent.loop import UNIFIED_SESSION_KEY
@@ -1010,6 +1109,8 @@ def agent(
 
     bus = MessageBus()
     provider = _make_provider(config)
+    chat_defaults = config.agents.defaults
+    chat_pf = _make_cli_provider_factory(config) if chat_defaults.fallback_models else None
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
@@ -1024,17 +1125,20 @@ def agent(
     else:
         logger.disable("nanobot")
 
+    _resolved = config.resolve_preset()
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
+        model=_resolved.model,
+        max_iterations=chat_defaults.max_tool_iterations,
+        context_window_tokens=_resolved.context_window_tokens,
         web_config=config.tools.web,
-        context_block_limit=config.agents.defaults.context_block_limit,
-        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
-        provider_retry_mode=config.agents.defaults.provider_retry_mode,
+        context_block_limit=chat_defaults.context_block_limit,
+        max_tool_result_chars=chat_defaults.max_tool_result_chars,
+        provider_retry_mode=chat_defaults.provider_retry_mode,
+        fallback_models=chat_defaults.fallback_models,
+        provider_factory=chat_pf,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -1047,6 +1151,8 @@ def agent(
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         max_messages=config.agents.defaults.max_messages,
         tools_config=config.tools,
+        model_presets=config.model_presets,
+        model_preset=config.agents.defaults.model_preset,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
@@ -1090,7 +1196,7 @@ def agent(
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
         _init_prompt_session()
-        console.print(f"{__logo__} Interactive mode [bold blue]({config.agents.defaults.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
+        console.print(f"{__logo__} Interactive mode [bold blue]({_resolved.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)
@@ -1429,7 +1535,10 @@ def status():
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
 
-        console.print(f"Model: {config.agents.defaults.model}")
+        _resolved = config.resolve_preset()
+        _preset = config.agents.defaults.model_preset
+        _preset_tag = f" (preset: {_preset})" if _preset else ""
+        console.print(f"Model: {_resolved.model}{_preset_tag}")
 
         # Check API keys from registry
         for spec in PROVIDERS:

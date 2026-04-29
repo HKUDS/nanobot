@@ -40,7 +40,7 @@ from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
-from nanobot.config.schema import AgentDefaults
+from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.manager import Session, SessionManager
@@ -192,6 +192,8 @@ class AgentLoop:
         context_block_limit: int | None = None,
         max_tool_result_chars: int | None = None,
         provider_retry_mode: str = "standard",
+        fallback_models: list[str] | None = None,
+        provider_factory: Any | None = None,
         web_config: WebToolsConfig | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -209,6 +211,8 @@ class AgentLoop:
         tools_config: ToolsConfig | None = None,
         provider_snapshot_loader: Callable[[], ProviderSnapshot] | None = None,
         provider_signature: tuple[object, ...] | None = None,
+        model_presets: dict[str, ModelPresetConfig] | None = None,
+        model_preset: str | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
 
@@ -236,6 +240,7 @@ class AgentLoop:
             else defaults.max_tool_result_chars
         )
         self.provider_retry_mode = provider_retry_mode
+        self.fallback_models = fallback_models or []
         self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -243,11 +248,10 @@ class AgentLoop:
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
-
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
-        self.runner = AgentRunner(provider)
+        self.runner = AgentRunner(provider, provider_factory=provider_factory)
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -299,6 +303,8 @@ class AgentLoop:
             provider=provider,
             model=self.model,
         )
+        self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
+        self._active_preset: str | None = model_preset if model_presets and model_preset in model_presets else None
         self._register_default_tools()
         if _tc.my.enable:
             self.tools.register(MyTool(loop=self, modify_allowed=_tc.my.allow_set))
@@ -336,6 +342,31 @@ class AgentLoop:
         if snapshot.signature == self._provider_signature:
             return
         self._apply_provider_snapshot(snapshot)
+
+    # -- model_preset property --
+
+    @property
+    def model_preset(self) -> str | None:
+        return self._active_preset
+
+    @model_preset.setter
+    def model_preset(self, name: str | None) -> None:
+        """Resolve a preset by name and apply all fields atomically."""
+        from nanobot.providers.base import GenerationSettings
+
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("model_preset must be a non-empty string")
+        if name not in self.model_presets:
+            raise KeyError(f"model_preset {name!r} not found. Available: {', '.join(self.model_presets) or '(none)'}")
+        p = self.model_presets[name]
+        self.model = p.model
+        self.context_window_tokens = p.context_window_tokens
+        self.provider.generation = GenerationSettings(
+            temperature=p.temperature,
+            max_tokens=p.max_tokens,
+            reasoning_effort=p.reasoning_effort,
+        )
+        self._active_preset = name
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -625,6 +656,7 @@ class AgentLoop:
             context_window_tokens=self.context_window_tokens,
             context_block_limit=self.context_block_limit,
             provider_retry_mode=self.provider_retry_mode,
+            fallback_models=self.fallback_models,
             progress_callback=on_progress,
             retry_wait_callback=on_retry_wait,
             checkpoint_callback=_checkpoint,
