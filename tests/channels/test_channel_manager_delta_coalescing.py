@@ -1,6 +1,6 @@
 """Tests for ChannelManager delta coalescing to reduce streaming latency."""
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -296,6 +296,101 @@ class TestDispatchOutboundWithCoalescing:
         # Should have pending regular message
         assert len(pending) == 1
         assert pending[0].content == "Final"
+
+
+class TestProgressFiltering:
+    """Progress filtering should honor per-channel settings."""
+
+    def test_progress_visibility_uses_global_defaults(self, manager):
+        assert manager._should_send_progress("mock", tool_hint=False) is True
+        assert manager._should_send_progress("mock", tool_hint=True) is False
+
+    def test_progress_visibility_uses_channel_overrides(self, manager):
+        manager.channels["mock"].send_progress = False
+        manager.channels["mock"].send_tool_hints = True
+
+        assert manager._should_send_progress("mock", tool_hint=False) is False
+        assert manager._should_send_progress("mock", tool_hint=True) is True
+
+    def test_progress_visibility_returns_false_for_missing_channel(self, manager):
+        assert manager._should_send_progress("nonexistent", tool_hint=False) is False
+        assert manager._should_send_progress("nonexistent", tool_hint=True) is False
+
+    def test_resolve_bool_override_dict(self, manager):
+        assert manager._resolve_bool_override({}, "send_progress", True) is True
+        assert manager._resolve_bool_override({"send_progress": False}, "send_progress", True) is False
+        assert manager._resolve_bool_override({"sendProgress": False}, "send_progress", True) is False
+        assert manager._resolve_bool_override({"send_progress": "false"}, "send_progress", True) is True
+
+    def test_resolve_bool_override_model(self, manager):
+        class FakeSection:
+            send_progress = False
+            send_tool_hints = True
+
+        assert manager._resolve_bool_override(FakeSection(), "send_progress", True) is False
+        assert manager._resolve_bool_override(FakeSection(), "send_tool_hints", False) is True
+        # Missing attribute falls back to default
+        assert manager._resolve_bool_override(FakeSection(), "unknown_key", True) is True
+
+    @pytest.mark.asyncio
+    async def test_channel_override_can_drop_progress_message(self, manager, bus):
+        manager.channels["mock"].send_progress = False
+        await bus.publish_outbound(OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="thinking",
+            metadata={"_progress": True},
+        ))
+        await bus.publish_outbound(OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="final answer",
+            metadata={},
+        ))
+
+        task = asyncio.create_task(manager._dispatch_outbound())
+        try:
+            for _ in range(30):
+                if manager.channels["mock"]._send_mock.await_count >= 1:
+                    break
+                await asyncio.sleep(0.05)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        send_mock = manager.channels["mock"]._send_mock
+        assert send_mock.await_count == 1
+        assert send_mock.await_args_list[0].args[0].content == "final answer"
+
+    @pytest.mark.asyncio
+    async def test_channel_override_can_enable_tool_hints(self, manager, bus):
+        manager.channels["mock"].send_tool_hints = True
+        await bus.publish_outbound(OutboundMessage(
+            channel="mock",
+            chat_id="chat1",
+            content="read_file(foo.py)",
+            metadata={"_progress": True, "_tool_hint": True},
+        ))
+
+        task = asyncio.create_task(manager._dispatch_outbound())
+        try:
+            for _ in range(30):
+                if manager.channels["mock"]._send_mock.await_count >= 1:
+                    break
+                await asyncio.sleep(0.05)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        send_mock = manager.channels["mock"]._send_mock
+        assert send_mock.await_count == 1
+        assert send_mock.await_args_list[0].args[0].content == "read_file(foo.py)"
 
 
 class TestRetryWaitFiltering:

@@ -524,13 +524,15 @@ class TelegramChannel(BaseChannel):
                     continue
 
                 media_bytes = Path(media_path).read_bytes()
+                filename = Path(media_path).name
+                send_kwargs = {param: media_bytes, "filename": filename}
                 await self._call_with_retry(
                     sender,
                     chat_id=chat_id,
-                    **{param: media_bytes},
                     reply_parameters=reply_params,
                     **thread_kwargs,
                     **extra,
+                    **send_kwargs,
                 )
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]

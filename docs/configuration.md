@@ -58,6 +58,7 @@ IMAP_PASSWORD=your-password-here
 |----------|---------|-------------|
 | `custom` | Any OpenAI-compatible endpoint | — |
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
+| `huggingface` | LLM (Hugging Face Inference Providers) | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
 | `volcengine` | LLM (VolcEngine, pay-per-use) | [Coding Plan](https://www.volcengine.com/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [volcengine.com](https://www.volcengine.com) |
 | `byteplus` | LLM (VolcEngine international, pay-per-use) | [Coding Plan](https://www.byteplus.com/en/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [byteplus.com](https://www.byteplus.com) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
@@ -206,6 +207,25 @@ Connects directly to any OpenAI-compatible endpoint — llama.cpp, Together AI, 
 > ```
 >
 > In short: **chat-completions-compatible endpoint → `custom`**; **Responses-compatible endpoint → `azure_openai`**.
+
+Some OpenAI-compatible gateways expose request-body extensions such as vLLM guided decoding or local sampling controls. Put those under `extraBody`; nanobot merges them into the chat-completions request body after its provider defaults:
+
+```json
+{
+  "providers": {
+    "custom": {
+      "apiKey": "your-api-key",
+      "apiBase": "https://api.your-provider.com/v1",
+      "extraBody": {
+        "repetition_penalty": 1.15,
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        }
+      }
+    }
+  }
+}
+```
 
 </details>
 
@@ -454,6 +474,26 @@ Global settings that apply to all channels. Configure under the `channels` secti
 | `transcriptionProvider` | `"groq"` | Voice transcription backend: `"groq"` (free tier, default) or `"openai"`. API key is auto-resolved from the matching provider config. |
 | `transcriptionLanguage` | `null` | Optional ISO-639-1 language hint for audio transcription, e.g. `"en"`, `"ko"`, `"ja"`. |
 
+`sendProgress` and `sendToolHints` can also be overridden per channel. The
+global values stay as defaults for channels that do not set their own value:
+
+```json
+{
+  "channels": {
+    "sendProgress": true,
+    "sendToolHints": false,
+    "telegram": {
+      "enabled": true,
+      "sendProgress": false
+    },
+    "websocket": {
+      "enabled": true,
+      "sendToolHints": true
+    }
+  }
+}
+```
+
 ### Retry Behavior
 
 Retry is intentionally simple.
@@ -474,19 +514,21 @@ When a channel `send()` raises, nanobot retries at the channel-manager layer. By
 >
 > If a channel is completely unreachable, nanobot cannot notify the user through that same channel. Watch logs for `Failed to send to {channel} after N attempts` to spot persistent delivery failures.
 
-## Web Search
+## Web Tools
 
-> [!TIP]
-> Use `proxy` in `tools.web` to route all web requests (search + fetch) through a proxy:
-> ```json
-> { "tools": { "web": { "proxy": "http://127.0.0.1:7890" } } }
-> ```
+nanobot incorporates basic tools for accessing the web. These include searching via APIs, and fetching arbitrary web pages in Markdown format. They are enabled by default, and can be configured in `~/.nanobot/config.json` under `tools.web`.
 
-nanobot supports multiple web search providers. Configure in `~/.nanobot/config.json` under `tools.web.search`.
+If you want to disable them, which removes both `web_search` and `web_fetch` from the tool list sent to the LLM, set `tools.web.enable` to `false`:
 
-By default, web tools are enabled and web search uses `duckduckgo`, so search works out of the box without an API key.
-
-If you want to disable all built-in web tools entirely, set `tools.web.enable` to `false`. This removes both `web_search` and `web_fetch` from the tool list sent to the LLM.
+```json
+{
+  "tools": {
+    "web": {
+      "enable": false
+    }
+  }
+}
+```
 
 If you need to allow trusted private ranges such as Tailscale / CGNAT addresses, you can explicitly exempt them from SSRF blocking with `tools.ssrfWhitelist`:
 
@@ -498,25 +540,35 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
 }
 ```
 
+> [!TIP]
+> Use `proxy` in `tools.web` to route all web requests (search + fetch) through a proxy:
+> ```json
+> { "tools": { "web": { "proxy": "http://127.0.0.1:7890" } } }
+> ```
+
+### `tools.web`
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enable` | boolean | `true` | Enable or disable all built-in web tools (`web_search` + `web_fetch`) |
+| `proxy` | string or null | `null` | Proxy for all web requests, for example `http://127.0.0.1:7890` |
+| `userAgent` | string or null | `null` | User-Agent header for all web requests. If null, a browser one will be used |
+
+### Web Search
+
+nanobot supports multiple web search providers. Configure in `~/.nanobot/config.json` under `tools.web.search`.
+
+By default, web search uses `duckduckgo`, and it works out of the box without an API key.
+
 | Provider | Config fields | Env var fallback | Free |
 |----------|--------------|------------------|------|
 | `brave` | `apiKey` | `BRAVE_API_KEY` | No |
 | `tavily` | `apiKey` | `TAVILY_API_KEY` | No |
 | `jina` | `apiKey` | `JINA_API_KEY` | Free tier (10M tokens) |
 | `kagi` | `apiKey` | `KAGI_API_KEY` | No |
+| `olostep` | `apiKey` | `OLOSTEP_API_KEY` | No |
 | `searxng` | `baseUrl` | `SEARXNG_BASE_URL` | Yes (self-hosted) |
 | `duckduckgo` (default) | — | — | Yes |
-
-**Disable all built-in web tools:**
-```json
-{
-  "tools": {
-    "web": {
-      "enable": false
-    }
-  }
-}
-```
 
 **Brave:**
 ```json
@@ -574,6 +626,22 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
 }
 ```
 
+**Olostep:**
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "olostep",
+        "apiKey": "YOUR_OLOSTEP_API_KEY"
+      }
+    }
+  }
+}
+```
+
+You can also set `OLOSTEP_API_KEY` in the environment instead of storing it in config.
+
 **SearXNG** (self-hosted, no API key needed):
 ```json
 {
@@ -601,12 +669,7 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
 }
 ```
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `enable` | boolean | `true` | Enable or disable all built-in web tools (`web_search` + `web_fetch`) |
-| `proxy` | string or null | `null` | Proxy for all web requests, for example `http://127.0.0.1:7890` |
-
-### `tools.web.search`
+#### `tools.web.search`
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
@@ -614,6 +677,36 @@ If you need to allow trusted private ranges such as Tailscale / CGNAT addresses,
 | `apiKey` | string | `""` | API key for Brave or Tavily |
 | `baseUrl` | string | `""` | Base URL for SearXNG |
 | `maxResults` | integer | `5` | Results per search (1–10) |
+
+### Web Fetch
+
+> [!TIP]
+> If you are having issues with JS proof-of-work or Cloudflare captchas, set a random user agent and disable Jina Reader:
+> ```json
+> { "tools": { "web": { "userAgent": "Not-A-Browser", "fetch": { "useJinaReader": false } } } }
+> ```
+
+nanobot by default uses [Jina Reader](https://jina.ai/reader/), a third-party API, to convert arbitrary pages into Markdown format for easy digestion by the LLM, with a local fallback based on [readability-lxml](https://github.com/buriy/python-readability) if the former fails.
+
+If you want to always use the local conversion, you can force it using:
+
+```json
+{
+  "tools": {
+    "web": {
+      "fetch": {
+        "useJinaReader": false
+      }
+    }
+  }
+}
+```
+
+#### `tools.web.fetch`
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `useJinaReader` | boolean | `true` | If true, Jina Reader will be preferred over the local conversion |
 
 ## MCP (Model Context Protocol)
 
