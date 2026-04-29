@@ -1361,7 +1361,12 @@ class FeishuChannel(BaseChannel):
         # --- stream end: final update or fallback ---
         if meta.get("_stream_end"):
             message_id = meta.get("message_id")
-            if message_id:
+            # Only finalize the OnIt -> DONE reaction transition on the truly
+            # final stream end. _resuming=True means the agent will keep
+            # working (more tool-call rounds), so leave the reaction state
+            # in place — otherwise the OnIt indicator disappears prematurely
+            # and the DONE reaction fires after every tool call.
+            if message_id and not meta.get("_resuming"):
                 reaction_id = self._reaction_ids.pop(message_id, None)
                 if reaction_id:
                     await self._remove_reaction(message_id, reaction_id)

@@ -78,6 +78,11 @@ def test_supports_temperature_with_reasoning_effort():
     assert AzureOpenAIProvider._supports_temperature("gpt-4o", reasoning_effort="medium") is False
 
 
+def test_supports_temperature_with_reasoning_effort_none_string():
+    """reasoning_effort='none' must NOT suppress temperature — it means thinking is off."""
+    assert AzureOpenAIProvider._supports_temperature("gpt-4o", reasoning_effort="none") is True
+
+
 # ---------------------------------------------------------------------------
 # _build_body — Responses API body construction
 # ---------------------------------------------------------------------------
@@ -129,6 +134,16 @@ def test_build_body_with_reasoning():
     assert "reasoning.encrypted_content" in body.get("include", [])
     # temperature omitted for reasoning models
     assert "temperature" not in body
+
+
+def test_build_body_reasoning_effort_none_string_omits_reasoning():
+    """reasoning_effort='none' must not inject a reasoning body and must allow temperature."""
+    provider = AzureOpenAIProvider(api_key="k", api_base="https://r.com", default_model="gpt-4o")
+    body = provider._build_body(
+        [{"role": "user", "content": "hi"}], None, "gpt-4o", 4096, 0.7, "none", None,
+    )
+    assert "reasoning" not in body
+    assert body["temperature"] == 0.7
 
 
 def test_build_body_image_conversion():

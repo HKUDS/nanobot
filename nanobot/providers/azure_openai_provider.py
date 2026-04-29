@@ -71,7 +71,7 @@ class AzureOpenAIProvider(LLMProvider):
         reasoning_effort: str | None = None,
     ) -> bool:
         """Return True when temperature is likely supported for this deployment."""
-        if reasoning_effort:
+        if reasoning_effort and reasoning_effort.lower() != "none":
             return False
         name = deployment_name.lower()
         return not any(token in name for token in ("gpt-5", "o1", "o3", "o4"))
@@ -102,7 +102,7 @@ class AzureOpenAIProvider(LLMProvider):
         if self._supports_temperature(deployment, reasoning_effort):
             body["temperature"] = temperature
 
-        if reasoning_effort:
+        if reasoning_effort and reasoning_effort.lower() != "none":
             body["reasoning"] = {"effort": reasoning_effort}
             body["include"] = ["reasoning.encrypted_content"]
 
