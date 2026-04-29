@@ -737,41 +737,138 @@ def gateway(
         console.print(f"[red]Unknown gateway action: {action}[/red]  Supported: {', '.join(sorted(valid_actions))}")
         raise typer.Exit(1)
 
-    if action == "stop":
-        _stop_gateway_process(force=force)
-        return
+    cfg = _load_runtime_config(config, workspace)
+    workspace_display = str(cfg.workspace_path)
+
+    def _find_gateway_processes() -> list[tuple[int, str]]:
+        procs: list[tuple[int, str]] = []
+        try:
+            out = subprocess.check_output(["ps", "-axo", "pid=,command="], text=True, stderr=subprocess.DEVNULL)
+            for line in out.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split(None, 1)
+                if len(parts) != 2:
+                    continue
+                pid_s, cmd = parts
+                if "nanobot" not in cmd or "gateway" not in cmd or "grep" in cmd:
+                    continue
+                try:
+                    pid = int(pid_s)
+                except ValueError:
+                    continue
+                if pid == os.getpid():
+                    continue
+                if workspace_display in cmd or "--workspace" not in cmd:
+                    procs.append((pid, cmd))
+        except Exception:
+            pass
+        return procs
+
+    def _running_pid() -> int | None:
+        procs = _find_gateway_processes()
+        return procs[0][0] if procs else None
+
+    def _launchagent_plist() -> Path:
+        return Path.home() / "Library" / "LaunchAgents" / "ai.nanobot.gateway.plist"
+
+    def _launchagent_loaded() -> bool:
+        try:
+            out = subprocess.check_output(["launchctl", "list"], text=True, stderr=subprocess.DEVNULL)
+            return "ai.nanobot.gateway" in out
+        except Exception:
+            return False
+
+    def _launchagent_bootout() -> None:
+        plist = _launchagent_plist()
+        if not plist.exists():
+            return
+        subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}", str(plist)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _launchagent_bootstrap() -> None:
+        plist = _launchagent_plist()
+        if not plist.exists():
+            return
+        subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["launchctl", "enable", f"gui/{os.getuid()}/ai.nanobot.gateway"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/ai.nanobot.gateway"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def _stop_pid(pid: int, hard: bool = False) -> bool:
+        managed = _launchagent_loaded()
+        if managed:
+            _launchagent_bootout()
+            deadline = time.time() + 8
+            while time.time() < deadline:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    return True
+                time.sleep(0.25)
+        sig = signal.SIGKILL if hard else signal.SIGTERM
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            return True
+        deadline = time.time() + (5 if hard else 20)
+        while time.time() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return True
+            time.sleep(0.25)
+        return False
 
     if action == "status":
-        pid = _get_running_gateway_pid()
+        pid = _running_pid()
         if pid:
-            meta = _read_gateway_metadata() or {}
-            port_display = meta.get("port", "unknown")
-            workspace_display = meta.get("workspace", "unknown")
             console.print(f"[green]Gateway running[/green] (PID {pid})")
-            console.print(f"  [cyan]Port[/cyan]: {port_display}")
             console.print(f"  [cyan]Workspace[/cyan]: {workspace_display}")
         else:
             console.print("[yellow]Gateway is not running[/yellow]")
         return
 
-    cfg = _load_runtime_config(config, workspace)
+    if action == "stop":
+        pid = _running_pid()
+        if not pid:
+            if _launchagent_loaded():
+                _launchagent_bootout()
+                console.print("[green]✓[/green] Stopped launchd-managed gateway")
+                return
+            console.print("[yellow]Gateway is not running[/yellow]")
+            return
+        ok = _stop_pid(pid, hard=force)
+        if ok:
+            console.print(f"[green]✓[/green] Stopped gateway (PID {pid})")
+            return
+        console.print(f"[yellow]Gateway PID {pid} did not stop after SIGTERM[/yellow]")
+        raise typer.Exit(1)
 
     if action == "restart":
-        pid = _get_running_gateway_pid()
+        pid = _running_pid()
         if pid:
-            stopped = _stop_gateway_process(force=force)
-            if not stopped and not force:
-                console.print("[yellow]Tip:[/yellow] retry with [bold]nanobot gateway restart --force[/bold] if the process is stuck.")
+            ok = _stop_pid(pid, hard=force)
+            if not ok:
+                console.print(f"[yellow]Gateway PID {pid} did not stop after SIGTERM[/yellow]")
                 raise typer.Exit(1)
+            console.print(f"[green]✓[/green] Stopped gateway (PID {pid})")
+        elif _launchagent_loaded():
+            _launchagent_bootout()
         action = "start"
 
     if action == "start":
-        pid = _get_running_gateway_pid()
+        pid = _running_pid()
         if pid:
             console.print(f"[yellow]Gateway already running[/yellow] (PID {pid})")
             return
-
-        cmd = [sys.executable, "-m", "nanobot.cli.commands", "gateway", "run"]
+        if _launchagent_plist().exists():
+            _launchagent_bootstrap()
+            time.sleep(2.0)
+            pid = _running_pid()
+            if pid:
+                console.print(f"[green]✓[/green] Started gateway in background (PID {pid})")
+                return
+        cmd = [sys.executable, "-m", "nanobot.cli.commands", "run"]
         if port is not None:
             cmd += ["--port", str(port)]
         if workspace:
@@ -780,26 +877,23 @@ def gateway(
             cmd += ["--config", config]
         if verbose:
             cmd += ["--verbose"]
+        subprocess.Popen(
+            cmd,
+            stdout=open(os.devnull, "wb"),
+            stderr=open(os.devnull, "wb"),
+            stdin=subprocess.DEVNULL,
+            close_fds=True,
+            start_new_session=True,
+        )
+        time.sleep(2.0)
+        pid = _running_pid()
+        if pid:
+            console.print(f"[green]✓[/green] Started gateway in background (PID {pid})")
+            return
+        console.print("[red]Gateway failed to start in background[/red]")
+        raise typer.Exit(1)
 
-        creationflags = 0
-        popen_kwargs: dict[str, Any] = {
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
-            "stdin": subprocess.DEVNULL,
-            "close_fds": True,
-            "start_new_session": os.name != "nt",
-        }
-        if os.name == "nt":
-            creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-            popen_kwargs["creationflags"] = creationflags
-
-        proc = subprocess.Popen(cmd, **popen_kwargs)
-        _record_gateway_runtime(proc.pid, port if port is not None else cfg.gateway.port, cfg.workspace_path, config)
-        console.print(f"[green]✓[/green] Started gateway in background (PID {proc.pid})")
-        return
-
-    _run_gateway(cfg, port=port, config_path=config)
-
+    _run_gateway(cfg, port=port)
 
 def _run_gateway(
     config: Config,
