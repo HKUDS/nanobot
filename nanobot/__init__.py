@@ -28,5 +28,6 @@ __version__ = _resolve_version()
 __logo__ = "🐈"
 
 from nanobot.nanobot import Nanobot, RunResult
+from nanobot.utils.profiler import ProfilerTrace, profiler
 
-__all__ = ["Nanobot", "RunResult"]
+__all__ = ["Nanobot", "RunResult", "ProfilerTrace", "profiler"]
