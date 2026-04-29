@@ -78,8 +78,8 @@ for i in 1 2 3 4 5; do
 done
 
 # Launch agents in different workdirs
-tmux -S "$SOCKET" send-keys -t agent-1 "cd /tmp/project1 && codex --yolo 'Fix bug X'" Enter
-tmux -S "$SOCKET" send-keys -t agent-2 "cd /tmp/project2 && codex --yolo 'Fix bug Y'" Enter
+tmux -S "$SOCKET" send-keys -t agent-1 "cd ~/project1 && codex --yolo 'Fix bug X'" Enter
+tmux -S "$SOCKET" send-keys -t agent-2 "cd ~/project2 && codex --yolo 'Fix bug Y'" Enter
 
 # Poll for completion (check if prompt returned)
 for sess in agent-1 agent-2; do

@@ -43,7 +43,7 @@ nanobot agent -c ~/.nanobot-telegram/config.json -m "Hello from Telegram instanc
 nanobot agent -c ~/.nanobot-discord/config.json -m "Hello from Discord instance"
 
 # Optional one-off workspace override
-nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test
+nanobot agent -c ~/.nanobot-telegram/config.json -w ./nanobot-telegram-test
 ```
 
 > `nanobot agent` starts a local CLI agent using the selected workspace/config. It does not attach to or proxy through an already running `nanobot gateway` process.
@@ -108,7 +108,7 @@ public or LAN-facing address.
 Override workspace for one-off runs when needed:
 
 ```bash
-nanobot gateway --config ~/.nanobot-telegram/config.json --workspace /tmp/nanobot-telegram-test
+nanobot gateway --config ~/.nanobot-telegram/config.json --workspace ./nanobot-telegram-test
 ```
 
 ## Common Use Cases

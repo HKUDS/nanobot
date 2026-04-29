@@ -41,7 +41,7 @@ my(action="check")
 # → max_iterations: 40
 #   context_window_tokens: 65536
 #   model: 'anthropic/claude-sonnet-4-20250514'
-#   workspace: PosixPath('/tmp/workspace')
+#   workspace: Path('workspace')
 #   provider_retry_mode: 'standard'
 #   max_tool_result_chars: 16000
 #   _current_iteration: 3

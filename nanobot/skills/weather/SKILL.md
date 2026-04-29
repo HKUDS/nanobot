@@ -35,7 +35,7 @@ Tips:
 - Airport codes: `wttr.in/JFK`
 - Units: `?m` (metric) `?u` (USCS)
 - Today only: `?1` · Current only: `?0`
-- PNG: `curl -s "wttr.in/Berlin.png" -o /tmp/weather.png`
+- PNG: `curl -s "wttr.in/Berlin.png" -o weather.png`
 
 ## Open-Meteo (fallback, JSON)
 

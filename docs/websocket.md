@@ -100,7 +100,7 @@ All frames are JSON text. Each message has an `event` field.
   "event": "message",
   "chat_id": "uuid-v4",
   "text": "Hello! How can I help?",
-  "media": ["/tmp/image.png"],
+  "media": ["path/to/image.png"],
   "reply_to": "msg-id"
 }
 ```
