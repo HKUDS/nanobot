@@ -209,6 +209,8 @@ class AgentLoop:
         tools_config: ToolsConfig | None = None,
         provider_snapshot_loader: Callable[[], ProviderSnapshot] | None = None,
         provider_signature: tuple[object, ...] | None = None,
+        skill_orchestrator_enabled: bool = False,
+        skill_orchestrator_max_skills: int = 3,
     ):
         from nanobot.config.schema import ExecToolConfig, ToolsConfig, WebToolsConfig
 
@@ -244,7 +246,13 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
-        self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
+        self.context = ContextBuilder(
+            workspace,
+            timezone=timezone,
+            disabled_skills=disabled_skills,
+            skill_orchestrator_enabled=skill_orchestrator_enabled,
+            skill_orchestrator_max_skills=skill_orchestrator_max_skills,
+        )
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
@@ -913,6 +921,7 @@ class AgentLoop:
                 chat_id=chat_id,
                 session_summary=pending,
                 current_role=current_role,
+                tool_registry=self.tools,
             )
             final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
                 messages, session=session, channel=channel, chat_id=chat_id,
@@ -995,7 +1004,7 @@ class AgentLoop:
         pending_ask_id = pending_ask_user_id(history)
         if pending_ask_id:
             initial_messages = ask_user_tool_result_messages(
-                self.context.build_system_prompt(channel=msg.channel),
+                self.context.build_system_prompt(channel=msg.channel, user_input=msg.content, tool_registry=self.tools),
                 history,
                 pending_ask_id,
                 msg.content,
@@ -1008,6 +1017,7 @@ class AgentLoop:
                 media=msg.media if msg.media else None,
                 channel=msg.channel,
                 chat_id=self._runtime_chat_id(msg),
+                tool_registry=self.tools,
             )
 
         async def _bus_progress(

@@ -5,12 +5,18 @@ import mimetypes
 import platform
 from importlib.resources import files as pkg_files
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+from loguru import logger
 
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.orchestrator import SkillOrchestrator, SkillSelectionRecord
 from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import build_assistant_message, current_time_str, detect_image_mime, truncate_text
 from nanobot.utils.prompt_templates import render_template
+
+if TYPE_CHECKING:
+    from nanobot.agent.tools.registry import ToolRegistry
 
 
 class ContextBuilder:
@@ -22,18 +28,58 @@ class ContextBuilder:
     _MAX_HISTORY_CHARS = 32_000  # hard cap on recent history section size
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
-    def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
+    def __init__(
+        self,
+        workspace: Path,
+        timezone: str | None = None,
+        disabled_skills: list[str] | None = None,
+        skill_orchestrator_enabled: bool = False,
+        skill_orchestrator_max_skills: int = 3,
+    ):
         self.workspace = workspace
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+        self._orchestrator: SkillOrchestrator | None = None
+        self._skill_orchestrator_enabled = skill_orchestrator_enabled
+        self._skill_orchestrator_max_skills = skill_orchestrator_max_skills
+        self._last_skill_selection: SkillSelectionRecord | None = None
+
+    def _get_or_create_orchestrator(self) -> SkillOrchestrator:
+        """Get or create the SkillOrchestrator instance."""
+        if self._orchestrator is None:
+            self._orchestrator = SkillOrchestrator(
+                skills_loader=self.skills,
+                enabled=self._skill_orchestrator_enabled,
+                max_skills=self._skill_orchestrator_max_skills,
+            )
+        return self._orchestrator
+
+    @property
+    def last_skill_selection(self) -> SkillSelectionRecord | None:
+        """Get the last skill selection record for debugging."""
+        return self._last_skill_selection
+
+    @property
+    def skill_orchestrator_enabled(self) -> bool:
+        """Whether skill orchestration is enabled."""
+        return self._skill_orchestrator_enabled
 
     def build_system_prompt(
         self,
         skill_names: list[str] | None = None,
         channel: str | None = None,
+        user_input: str | None = None,
+        tool_registry: "ToolRegistry | None" = None,
     ) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
+        """Build the system prompt from identity, bootstrap files, memory, and skills.
+
+        Args:
+            skill_names: Optional list of skill names to inject (legacy parameter).
+            channel: Optional channel name for context.
+            user_input: Optional user input for intelligent skill selection.
+            tool_registry: Optional tool registry for validating related tools.
+        """
         parts = [self._get_identity(channel=channel)]
 
         bootstrap = self._load_bootstrap_files()
@@ -45,12 +91,36 @@ class ContextBuilder:
             parts.append(f"# Memory\n\n{memory}")
 
         always_skills = self.skills.get_always_skills()
-        if always_skills:
-            always_content = self.skills.load_skills_for_context(always_skills)
-            if always_content:
-                parts.append(f"# Active Skills\n\n{always_content}")
+        selected_skills: list[str] = []
+        excluded_from_summary: set[str] = set(always_skills)
 
-        skills_summary = self.skills.build_skills_summary(exclude=set(always_skills))
+        if self._skill_orchestrator_enabled and user_input is not None:
+            orchestrator = self._get_or_create_orchestrator()
+            selection = orchestrator.select_skills(user_input, tool_registry)
+            self._last_skill_selection = selection
+
+            if selection.warnings:
+                for warning in selection.warnings:
+                    logger.warning("Skill orchestrator warning: {}", warning)
+
+            selected_skills = selection.selected
+            excluded_from_summary.update(selected_skills)
+
+            logger.debug(
+                "Skill orchestrator: selected={}, always={}",
+                selected_skills,
+                always_skills,
+            )
+        else:
+            self._last_skill_selection = None
+
+        active_skills = always_skills + selected_skills
+        if active_skills:
+            active_content = self.skills.load_skills_for_context(active_skills)
+            if active_content:
+                parts.append(f"# Active Skills\n\n{active_content}")
+
+        skills_summary = self.skills.build_skills_summary(exclude=excluded_from_summary)
         if skills_summary:
             parts.append(render_template("agent/skills_section.md", skills_summary=skills_summary))
 
@@ -139,19 +209,35 @@ class ContextBuilder:
         chat_id: str | None = None,
         current_role: str = "user",
         session_summary: str | None = None,
+        tool_registry: "ToolRegistry | None" = None,
     ) -> list[dict[str, Any]]:
-        """Build the complete message list for an LLM call."""
+        """Build the complete message list for an LLM call.
+
+        Args:
+            history: Conversation history.
+            current_message: The current user message.
+            skill_names: Optional list of skill names (legacy).
+            media: Optional media attachments.
+            channel: Optional channel name.
+            chat_id: Optional chat ID.
+            current_role: Role of the current message.
+            session_summary: Optional session summary for resumed sessions.
+            tool_registry: Optional tool registry for skill orchestration.
+        """
         runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone, session_summary=session_summary)
         user_content = self._build_user_content(current_message, media)
 
-        # Merge runtime context and user content into a single user message
-        # to avoid consecutive same-role messages that some providers reject.
         if isinstance(user_content, str):
             merged = f"{runtime_ctx}\n\n{user_content}"
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel)},
+            {"role": "system", "content": self.build_system_prompt(
+                skill_names,
+                channel=channel,
+                user_input=current_message,
+                tool_registry=tool_registry,
+            )},
             *history,
         ]
         if messages[-1].get("role") == current_role:

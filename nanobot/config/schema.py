@@ -101,6 +101,16 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("consolidationRatio"),
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
+    skill_orchestrator_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("skillOrchestratorEnabled", "skill_orchestrator_enabled"),
+    )  # Enable intelligent skill selection based on user input (default: False for backward compatibility)
+    skill_orchestrator_max_skills: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        validation_alias=AliasChoices("skillOrchestratorMaxSkills", "skill_orchestrator_max_skills"),
+    )  # Max number of non-always skills to inject per turn when orchestrator is enabled
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
 
