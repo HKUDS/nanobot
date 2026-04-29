@@ -711,6 +711,27 @@ class AgentRunner:
                 return result + _HINT, event, RuntimeError(result)
             return result + _HINT, event, None
 
+        # Tools like web_fetch return JSON-encoded errors, e.g.
+        # {"error": "HTTP 404 fetching image URL", "url": "..."}.
+        # These don't start with "Error" so they previously fell through as
+        # successful results, causing the LLM to retry the same URL in a loop.
+        if isinstance(result, str) and result.startswith("{"):
+            try:
+                import json as _json_mod
+                _parsed_result = _json_mod.loads(result)
+                if isinstance(_parsed_result, dict) and "error" in _parsed_result:
+                    _err_detail = str(_parsed_result["error"])[:120]
+                    event = {
+                        "name": tool_call.name,
+                        "status": "error",
+                        "detail": _err_detail,
+                    }
+                    if spec.fail_on_tool_error:
+                        return result + _HINT, event, RuntimeError(_err_detail)
+                    return result + _HINT, event, None
+            except Exception:
+                pass
+
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()
         if not detail:

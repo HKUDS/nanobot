@@ -315,15 +315,29 @@ class WebFetchTool(Tool):
         if not is_valid:
             return json.dumps({"error": f"URL validation failed: {error_msg}", "url": url}, ensure_ascii=False)
 
-        # Detect and fetch images directly to avoid Jina's textual image captioning
+        # Detect and fetch images directly to avoid Jina's textual image captioning.
+        # Send a Referer matching the URL's own origin so CDN hotlink-protection
+        # (e.g. Unsplash, Cloudfront) doesn't reject the request with a 404/403.
         try:
+            parsed = urlparse(url)
+            origin_referer = f"{parsed.scheme}://{parsed.netloc}/"
+            prefetch_headers = {"User-Agent": USER_AGENT, "Referer": origin_referer}
             async with httpx.AsyncClient(proxy=self.proxy, follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=15.0) as client:
-                async with client.stream("GET", url, headers={"User-Agent": USER_AGENT}) as r:
+                async with client.stream("GET", url, headers=prefetch_headers) as r:
                     from nanobot.security.network import validate_resolved_url
 
                     redir_ok, redir_err = validate_resolved_url(str(r.url))
                     if not redir_ok:
                         return json.dumps({"error": f"Redirect blocked: {redir_err}", "url": url}, ensure_ascii=False)
+
+                    # Raise before checking content-type so 4xx/5xx errors
+                    # (e.g. Unsplash 404 without a valid Referer) are surfaced
+                    # immediately rather than silently falling through to Jina.
+                    if r.status_code >= 400:
+                        return json.dumps(
+                            {"error": f"HTTP {r.status_code} fetching image URL", "url": url},
+                            ensure_ascii=False,
+                        )
 
                     ctype = r.headers.get("content-type", "")
                     if ctype.startswith("image/"):
