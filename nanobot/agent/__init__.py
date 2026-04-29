@@ -6,15 +6,23 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.agent.memory import Dream, MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.workflow import (
+    AgentWorkflow,
+    WorkflowResult,
+    is_workflow_enabled,
+)
 
 __all__ = [
     "AgentHook",
     "AgentHookContext",
     "AgentLoop",
+    "AgentWorkflow",
     "CompositeHook",
     "ContextBuilder",
     "Dream",
     "MemoryStore",
     "SkillsLoader",
     "SubagentManager",
+    "WorkflowResult",
+    "is_workflow_enabled",
 ]

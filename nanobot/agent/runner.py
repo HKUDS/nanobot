@@ -14,6 +14,7 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools.ask import AskUserInterrupt
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.workflow import AgentWorkflow, is_workflow_enabled
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.helpers import (
     build_assistant_message,
@@ -228,7 +229,11 @@ class AgentRunner:
             injected_messages = injected_messages[:_MAX_INJECTIONS_PER_TURN]
         return injected_messages
 
-    async def run(self, spec: AgentRunSpec) -> AgentRunResult:
+    async def _run_legacy(self, spec: AgentRunSpec) -> AgentRunResult:
+        """Original direct execution loop (legacy behavior).
+
+        This is the original "direct tool call" behavior without workflow phases.
+        """
         hook = spec.hook or AgentHook()
         messages = list(spec.initial_messages)
         final_content: str | None = None
@@ -560,6 +565,55 @@ class AgentRunner:
             tool_events=tool_events,
             had_injections=had_injections,
         )
+
+    async def run(self, spec: AgentRunSpec) -> AgentRunResult:
+        """Run the agent execution loop.
+
+        If NANOBOT_AGENT_WORKFLOW=1 is set, uses the structured workflow:
+        1. Task Classification
+        2. Planning
+        3. Execution (via _run_legacy)
+        4. Compression
+        5. Validation
+        6. Reporting
+
+        Otherwise, falls back directly to _run_legacy (original behavior).
+
+        If any workflow phase fails, automatically falls back to _run_legacy.
+        """
+        if not is_workflow_enabled():
+            logger.info("Workflow: Disabled, using legacy direct execution")
+            return await self._run_legacy(spec)
+
+        logger.info("Workflow: Enabled, using structured 6-phase workflow")
+
+        async def run_legacy_wrapper() -> AgentRunResult:
+            return await self._run_legacy(spec)
+
+        workflow = AgentWorkflow(
+            provider=self.provider,
+            model=spec.model,
+            run_legacy_fn=run_legacy_wrapper,
+        )
+
+        result = await workflow.run(spec, hook=spec.hook)
+
+        if result.fallback_used:
+            logger.warning(
+                "Workflow: Fell back to legacy execution, reason: {}",
+                result.fallback_reason or "unknown",
+            )
+
+        if result.execution_result is None:
+            logger.error("Workflow: Both workflow and legacy execution failed")
+            return AgentRunResult(
+                final_content="Sorry, I encountered an error processing your request.",
+                messages=list(spec.initial_messages),
+                stop_reason="error",
+                error="Both workflow and legacy execution failed",
+            )
+
+        return result.execution_result
 
     def _build_request_kwargs(
         self,
