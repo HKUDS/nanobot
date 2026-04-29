@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from enum import Enum
+from traceback import format_exc
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from loguru import logger
@@ -42,6 +43,18 @@ def is_agent_workflow_enabled() -> bool:
     return os.environ.get(AGENT_WORKFLOW_ENV, "0") == "1"
 
 
+class WorkflowStage(Enum):
+    """Enumeration of workflow stages for error tracking."""
+    
+    INITIALIZATION = "initialization"
+    TASK_ROUTER = "task_router"
+    PLAN_BUILDER = "plan_builder"
+    TOOL_EXECUTOR = "tool_executor"
+    CONTEXT_COMPRESSOR = "context_compressor"
+    RESULT_VALIDATOR = "result_validator"
+    REPORT_RENDERER = "report_renderer"
+
+
 @dataclass
 class WorkflowContext:
     """Context object passed through all workflow stages.
@@ -59,17 +72,23 @@ class WorkflowContext:
     final_report: Optional[RenderedReport] = None
     
     metadata: Dict[str, Any] = field(default_factory=dict)
-    errors: List[Tuple[str, Exception]] = field(default_factory=list)
+    errors: List[Tuple[WorkflowStage, Exception, str]] = field(default_factory=list)
     
-    def add_error(self, stage: str, error: Exception) -> None:
+    def add_error(self, stage: WorkflowStage, error: Exception) -> None:
         """Add an error that occurred during a workflow stage.
         
         Args:
-            stage: Name of the stage where the error occurred.
+            stage: The workflow stage where the error occurred.
             error: The exception that was raised.
         """
-        self.errors.append((stage, error))
-        logger.warning("Workflow error in {}: {}", stage, str(error))
+        traceback = format_exc()
+        self.errors.append((stage, error, traceback))
+        logger.warning(
+            "Workflow error in stage [{}]: {}\n{}", 
+            stage.value, 
+            str(error)[:200],
+            traceback
+        )
     
     def has_errors(self) -> bool:
         """Check if any errors occurred during workflow execution.
@@ -79,13 +98,27 @@ class WorkflowContext:
         """
         return len(self.errors) > 0
     
-    def get_last_error(self) -> Optional[Tuple[str, Exception]]:
+    def get_last_error(self) -> Optional[Tuple[WorkflowStage, Exception, str]]:
         """Get the most recent error.
         
         Returns:
-            Tuple of (stage_name, exception) or None if no errors.
+            Tuple of (stage, exception, traceback) or None if no errors.
         """
         return self.errors[-1] if self.errors else None
+    
+    def get_last_error_summary(self) -> Tuple[str, str]:
+        """Get a summary of the last error for logging.
+        
+        Returns:
+            Tuple of (stage_name, error_summary)
+        """
+        if not self.errors:
+            return ("unknown", "No error recorded")
+        stage, error, _ = self.errors[-1]
+        stage_name = stage.value if isinstance(stage, WorkflowStage) else str(stage)
+        error_msg = str(error)
+        error_summary = error_msg[:100] + "..." if len(error_msg) > 100 else error_msg
+        return (stage_name, error_summary)
 
 
 @dataclass
@@ -100,7 +133,8 @@ class WorkflowResult:
     workflow_used: bool = True
     fallback_used: bool = False
     stage_results: Dict[str, Any] = field(default_factory=dict)
-    errors: List[Tuple[str, Exception]] = field(default_factory=list)
+    errors: List[Tuple[WorkflowStage, Exception, str]] = field(default_factory=list)
+    failed_stage: Optional[WorkflowStage] = None
     
     @property
     def partial_success(self) -> bool:
@@ -115,6 +149,31 @@ class WorkflowResult:
         has_success = any(r.success for r in results)
         has_failure = any(not r.success for r in results)
         return has_success and has_failure
+    
+    def get_failed_stage_name(self) -> str:
+        """Get the name of the stage where workflow failed.
+        
+        Returns:
+            Name of the failed stage or "unknown".
+        """
+        if self.failed_stage:
+            return self.failed_stage.value
+        if self.errors:
+            stage, _, _ = self.errors[-1]
+            return stage.value if isinstance(stage, WorkflowStage) else str(stage)
+        return "unknown"
+    
+    def get_error_summary(self) -> str:
+        """Get a summary of the last error.
+        
+        Returns:
+            Error summary string.
+        """
+        if not self.errors:
+            return "No error recorded"
+        _, error, _ = self.errors[-1]
+        error_msg = str(error)
+        return error_msg[:150] + "..." if len(error_msg) > 150 else error_msg
 
 
 class AgentWorkflow:
@@ -189,9 +248,11 @@ class AgentWorkflow:
         
         ctx = WorkflowContext(original_input=user_input)
         stage_results: Dict[str, Any] = {}
+        failed_stage: Optional[WorkflowStage] = None
         
         try:
             logger.info("Stage 1: Task Router - Analyzing task type")
+            failed_stage = WorkflowStage.TASK_ROUTER
             ctx.task_type = await self.router.route(user_input, conversation_history)
             stage_results["task_type"] = ctx.task_type
             logger.info("Task identified as: {}", ctx.task_type.value)
@@ -200,6 +261,7 @@ class AgentWorkflow:
                 await on_progress(f"[Task Type: {ctx.task_type.value}]")
             
             logger.info("Stage 2: Plan Builder - Creating execution plan")
+            failed_stage = WorkflowStage.PLAN_BUILDER
             ctx.plan = await self.planner.build_plan(
                 user_input,
                 ctx.task_type,
@@ -215,6 +277,7 @@ class AgentWorkflow:
                 logger.warning("No execution plan created, proceeding with default flow")
             
             logger.info("Stage 3: Tool Executor - Executing plan")
+            failed_stage = WorkflowStage.TOOL_EXECUTOR
             if ctx.plan and ctx.plan.steps:
                 for i, step in enumerate(ctx.plan.steps):
                     logger.info("Executing step {}: {}", i + 1, step.tool_name)
@@ -229,12 +292,16 @@ class AgentWorkflow:
                         logger.warning("Step {} failed: {}", i + 1, result.error_message)
                         if step.critical:
                             logger.error("Critical step failed, aborting workflow")
-                            ctx.add_error("executor", Exception(result.error_message or "Critical step failed"))
+                            ctx.add_error(
+                                WorkflowStage.TOOL_EXECUTOR, 
+                                Exception(result.error_message or "Critical step failed")
+                            )
                             break
             else:
                 logger.info("No steps to execute, proceeding to validation")
             
             logger.info("Stage 4: Context Compressor - Compressing context")
+            failed_stage = WorkflowStage.CONTEXT_COMPRESSOR
             ctx.compressed_context = await self.compressor.compress(
                 conversation_history,
                 ctx.execution_results,
@@ -242,6 +309,7 @@ class AgentWorkflow:
             stage_results["compressed_context"] = ctx.compressed_context
             
             logger.info("Stage 5: Result Validator - Validating results")
+            failed_stage = WorkflowStage.RESULT_VALIDATOR
             ctx.validation_result = await self.validator.validate(
                 user_input,
                 ctx.execution_results,
@@ -249,9 +317,13 @@ class AgentWorkflow:
             )
             stage_results["validation_result"] = ctx.validation_result
             
-            logger.info("Validation status: {}", ctx.validation_result.status.value if ctx.validation_result else "unknown")
+            logger.info(
+                "Validation status: {}", 
+                ctx.validation_result.status.value if ctx.validation_result else "unknown"
+            )
             
             logger.info("Stage 6: Report Renderer - Generating final report")
+            failed_stage = WorkflowStage.REPORT_RENDERER
             ctx.final_report = await self.renderer.render(
                 user_input,
                 ctx.task_type,
@@ -263,6 +335,7 @@ class AgentWorkflow:
             
             final_content = ctx.final_report.content if ctx.final_report else "No result generated."
             
+            failed_stage = None
             logger.info("Workflow completed successfully")
             return WorkflowResult(
                 success=ctx.validation_result.success if ctx.validation_result else True,
@@ -271,17 +344,24 @@ class AgentWorkflow:
                 fallback_used=False,
                 stage_results=stage_results,
                 errors=ctx.errors,
+                failed_stage=None,
             )
             
         except Exception as e:
-            logger.error("Workflow failed with exception: {}", str(e))
-            ctx.add_error("workflow", e)
+            logger.error(
+                "Workflow failed at stage [{}]: {}\n{}", 
+                failed_stage.value if failed_stage else "unknown", 
+                str(e)[:200],
+                format_exc()
+            )
+            ctx.add_error(failed_stage or WorkflowStage.INITIALIZATION, e)
             
             return WorkflowResult(
                 success=False,
-                content=f"Workflow error: {str(e)}",
+                content=f"Workflow error at [{failed_stage.value if failed_stage else 'unknown'}]: {str(e)[:100]}...",
                 workflow_used=True,
-                fallback_used=False,
+                fallback_used=True,
                 stage_results=stage_results,
                 errors=ctx.errors,
+                failed_stage=failed_stage,
             )

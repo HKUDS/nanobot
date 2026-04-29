@@ -20,6 +20,7 @@ from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.workflow import AgentWorkflow, is_agent_workflow_enabled
 from nanobot.agent.tools.ask import (
     AskUserTool,
     ask_user_options_from_messages,
@@ -1057,20 +1058,102 @@ class AgentLoop:
             self.sessions.save(session)
             user_persisted_early = True
 
-        final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
-            initial_messages,
-            on_progress=on_progress or _bus_progress,
-            on_stream=on_stream,
-            on_stream_end=on_stream_end,
-            on_retry_wait=_on_retry_wait,
-            session=session,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            message_id=msg.metadata.get("message_id"),
-            metadata=msg.metadata,
-            session_key=key,
-            pending_queue=pending_queue,
-        )
+        if is_agent_workflow_enabled() and msg.channel != "system":
+            workflow_result = None
+            try:
+                logger.info("Agent Workflow enabled: running multi-stage workflow for task")
+                workflow = AgentWorkflow(
+                    tools_registry=self.tools,
+                    skills_loader=self.skills,
+                    context_builder=self.context,
+                    llm_provider=self.provider,
+                    workspace=self.workspace,
+                    max_iterations=self.max_iterations,
+                )
+                workflow_history = [
+                    {"role": m["role"], "content": m["content"]}
+                    for m in initial_messages
+                    if m.get("role") in ["user", "assistant"] and m.get("content")
+                ]
+                workflow_result = await workflow.run(
+                    user_input=msg.content,
+                    conversation_history=workflow_history,
+                    on_progress=on_progress or _bus_progress,
+                )
+                if workflow_result.workflow_used and not workflow_result.fallback_used:
+                    final_content = workflow_result.content
+                    all_msgs = initial_messages + [{"role": "assistant", "content": final_content}]
+                    stop_reason = "workflow_completed"
+                    had_injections = False
+                    tools_used = []
+                    if workflow_result.stage_results.get("execution_results"):
+                        tools_used = [
+                            r.tool_name
+                            for r in workflow_result.stage_results["execution_results"]
+                            if r.success
+                        ]
+                    logger.info("Agent Workflow completed successfully. Tools used: {}", tools_used)
+                elif workflow_result.fallback_used:
+                    failed_stage = workflow_result.get_failed_stage_name()
+                    error_summary = workflow_result.get_error_summary()
+                    logger.warning(
+                        "Agent Workflow failed at stage [{}]: {}. Falling back to original loop.",
+                        failed_stage,
+                        error_summary,
+                    )
+                    final_content, tools_used, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
+                        initial_messages,
+                        on_progress=on_progress or _bus_progress,
+                        on_stream=on_stream,
+                        on_stream_end=on_stream_end,
+                        on_retry_wait=_on_retry_wait,
+                        session=session,
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        message_id=msg.metadata.get("message_id"),
+                        metadata=msg.metadata,
+                        session_key=key,
+                        pending_queue=pending_queue,
+                    )
+            except Exception as e:
+                stage_name = "unknown"
+                if workflow_result and workflow_result.failed_stage:
+                    stage_name = workflow_result.get_failed_stage_name()
+                error_summary = str(e)[:100]
+                logger.warning(
+                    "Agent Workflow failed at stage [{}]: {}. Falling back to original loop.",
+                    stage_name,
+                    error_summary,
+                )
+                final_content, tools_used, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
+                    initial_messages,
+                    on_progress=on_progress or _bus_progress,
+                    on_stream=on_stream,
+                    on_stream_end=on_stream_end,
+                    on_retry_wait=_on_retry_wait,
+                    session=session,
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    message_id=msg.metadata.get("message_id"),
+                    metadata=msg.metadata,
+                    session_key=key,
+                    pending_queue=pending_queue,
+                )
+        else:
+            final_content, tools_used, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
+                initial_messages,
+                on_progress=on_progress or _bus_progress,
+                on_stream=on_stream,
+                on_stream_end=on_stream_end,
+                on_retry_wait=_on_retry_wait,
+                session=session,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                message_id=msg.metadata.get("message_id"),
+                metadata=msg.metadata,
+                session_key=key,
+                pending_queue=pending_queue,
+            )
 
         if final_content is None or not final_content.strip():
             final_content = EMPTY_FINAL_RESPONSE_MESSAGE
