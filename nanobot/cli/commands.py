@@ -1359,6 +1359,19 @@ def channels_login(
     channel_cls = all_channels[channel_name]
     channel = channel_cls(channel_cfg, bus=None)
 
+    # If the channel supports add_account(), always run a fresh QR scan.
+    # After scanning, report whether it was a new account or a token refresh.
+    if hasattr(channel, "add_account"):
+        user_id, is_new = asyncio.run(channel.add_account())
+        if not user_id:
+            raise typer.Exit(1)
+        if is_new:
+            console.print(f"[green]New account added:[/green] {user_id}")
+        else:
+            console.print(f"[green]Account token refreshed:[/green] {user_id}")
+        console.print("[dim]Restart nanobot for changes to take effect.[/dim]")
+        return
+
     success = asyncio.run(channel.login(force=force))
 
     if not success:
