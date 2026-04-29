@@ -212,6 +212,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
     ),
 
 
+    # ZenMux: OpenAI-compatible gateway at zenmux.ai
+    ProviderSpec(
+        name="zenmux",
+        keywords=("zenmux",),
+        env_key="ZENMUX_API_KEY",
+        display_name="ZenMux",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_base_keyword="zenmux",
+        default_api_base="https://zenmux.ai/api/v1",
+    ),
+
     # === Standard providers (matched by model-name keywords) ===============
     # Anthropic: native Anthropic SDK
     ProviderSpec(
