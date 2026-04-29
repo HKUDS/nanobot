@@ -19,6 +19,11 @@ import pino from 'pino';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join, basename } from 'path';
 import { randomBytes } from 'crypto';
+import {
+  extractMentionedJids,
+  isGroupMessage,
+  isSelfMentioned,
+} from './jid.js';
 
 const VERSION = '0.1.0';
 
@@ -49,29 +54,15 @@ export class WhatsAppClient {
     this.options = options;
   }
 
-  private normalizeJid(jid: string | undefined | null): string {
-    return (jid || '').split(':')[0];
-  }
-
   private wasMentioned(msg: any): boolean {
-    if (!msg?.key?.remoteJid?.endsWith('@g.us')) return false;
-
-    const candidates = [
-      msg?.message?.extendedTextMessage?.contextInfo?.mentionedJid,
-      msg?.message?.imageMessage?.contextInfo?.mentionedJid,
-      msg?.message?.videoMessage?.contextInfo?.mentionedJid,
-      msg?.message?.documentMessage?.contextInfo?.mentionedJid,
-      msg?.message?.audioMessage?.contextInfo?.mentionedJid,
-    ];
-    const mentioned = candidates.flatMap((items) => (Array.isArray(items) ? items : []));
+    if (!isGroupMessage(msg)) return false;
+    const mentioned = extractMentionedJids(msg);
     if (mentioned.length === 0) return false;
-
-    const selfIds = new Set(
-      [this.sock?.user?.id, this.sock?.user?.lid, this.sock?.user?.jid]
-        .map((jid) => this.normalizeJid(jid))
-        .filter(Boolean),
-    );
-    return mentioned.some((jid: string) => selfIds.has(this.normalizeJid(jid)));
+    return isSelfMentioned(mentioned, [
+      this.sock?.user?.id,
+      this.sock?.user?.lid,
+      this.sock?.user?.jid,
+    ]);
   }
 
   async connect(): Promise<void> {
