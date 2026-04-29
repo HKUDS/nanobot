@@ -221,6 +221,21 @@ class _WeixinAccountRunner:
                 self._bot_id = data.get("bot_id", "")
             if not self._user_id:
                 self._user_id = data.get("user_id", "")
+            # If we just loaded from account.json (legacy fallback) but a
+            # per-user state file now exists (written by a previous run after
+            # upgrade), prefer the newer per-user file — it has the latest token.
+            if state_file == self._get_legacy_state_file():
+                newer = self._get_state_file()
+                if newer and newer.exists():
+                    try:
+                        data = json.loads(newer.read_text())
+                        self._token = data.get("token", self._token)
+                        if not self._bot_id:
+                            self._bot_id = data.get("bot_id", "")
+                        if not self._user_id:
+                            self._user_id = data.get("user_id", "")
+                    except Exception:
+                        pass
             self._get_updates_buf = data.get("get_updates_buf", "")
             context_tokens = data.get("context_tokens", {})
             if isinstance(context_tokens, dict):
@@ -376,7 +391,7 @@ class _WeixinAccountRunner:
             refresh_count = 0
             qrcode_id, scan_url = await self._fetch_qr_code()
             if self._multi:
-                print(f"\n[Account {self._idx}] Scan QR code to login:")
+                print(f"\nScan QR code to add a new account or refresh token for an existing one:")
             self._print_qr_code(scan_url)
             current_poll_base_url = self._cfg.base_url
 
@@ -1166,6 +1181,136 @@ class _WeixinAccountRunner:
         except Exception as e:
             logger.debug("WeChat typing clear failed for {}: {}", chat_id, e)
 
+    async def _send_media_file(
+        self,
+        to_user_id: str,
+        media_path: str,
+        context_token: str,
+    ) -> None:
+        """Upload a local file to WeChat CDN and send it as a media message."""
+        p = Path(media_path)
+        if not p.is_file():
+            raise FileNotFoundError(f"Media file not found: {media_path}")
+
+        raw_data = p.read_bytes()
+        raw_size = len(raw_data)
+        raw_md5 = hashlib.md5(raw_data).hexdigest()
+
+        ext = p.suffix.lower()
+        if ext in _IMAGE_EXTS:
+            upload_type = UPLOAD_MEDIA_IMAGE
+            item_type = ITEM_IMAGE
+            item_key = "image_item"
+        elif ext in _VIDEO_EXTS:
+            upload_type = UPLOAD_MEDIA_VIDEO
+            item_type = ITEM_VIDEO
+            item_key = "video_item"
+        elif ext in _VOICE_EXTS:
+            upload_type = UPLOAD_MEDIA_VOICE
+            item_type = ITEM_VOICE
+            item_key = "voice_item"
+        else:
+            upload_type = UPLOAD_MEDIA_FILE
+            item_type = ITEM_FILE
+            item_key = "file_item"
+
+        aes_key_raw = os.urandom(16)
+        aes_key_hex = aes_key_raw.hex()
+        padded_size = ((raw_size + 1 + 15) // 16) * 16
+        file_key = os.urandom(16).hex()
+
+        upload_body: dict[str, Any] = {
+            "filekey": file_key,
+            "media_type": upload_type,
+            "to_user_id": to_user_id,
+            "rawsize": raw_size,
+            "rawfilemd5": raw_md5,
+            "filesize": padded_size,
+            "no_need_thumb": True,
+            "aeskey": aes_key_hex,
+        }
+
+        assert self._client is not None
+        upload_resp = await self._api_post("ilink/bot/getuploadurl", upload_body)
+
+        upload_full_url = str(upload_resp.get("upload_full_url", "") or "").strip()
+        upload_param = str(upload_resp.get("upload_param", "") or "")
+        if not upload_full_url and not upload_param:
+            raise RuntimeError(
+                "getuploadurl returned no upload URL "
+                f"(need upload_full_url or upload_param): {upload_resp}"
+            )
+
+        aes_key_b64 = base64.b64encode(aes_key_raw).decode()
+        encrypted_data = _encrypt_aes_ecb(raw_data, aes_key_b64)
+
+        if upload_full_url:
+            cdn_upload_url = upload_full_url
+        else:
+            cdn_upload_url = (
+                f"{self._channel.config.cdn_base_url}/upload"
+                f"?encrypted_query_param={quote(upload_param)}"
+                f"&filekey={quote(file_key)}"
+            )
+
+        cdn_resp = await self._client.post(
+            cdn_upload_url,
+            content=encrypted_data,
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        cdn_resp.raise_for_status()
+
+        download_param = cdn_resp.headers.get("x-encrypted-param", "")
+        if not download_param:
+            raise RuntimeError(
+                "CDN upload response missing x-encrypted-param header; "
+                f"status={cdn_resp.status_code} headers={dict(cdn_resp.headers)}"
+            )
+
+        cdn_aes_key_b64 = base64.b64encode(aes_key_hex.encode()).decode()
+
+        media_item: dict[str, Any] = {
+            "media": {
+                "encrypt_query_param": download_param,
+                "aes_key": cdn_aes_key_b64,
+                "encrypt_type": 1,
+            },
+        }
+
+        if item_type == ITEM_IMAGE:
+            media_item["mid_size"] = padded_size
+        elif item_type == ITEM_VIDEO:
+            media_item["video_size"] = padded_size
+        elif item_type == ITEM_FILE:
+            media_item["file_name"] = p.name
+            media_item["len"] = str(raw_size)
+
+        client_id = f"nanobot-{uuid.uuid4().hex[:12]}"
+        item_list: list[dict] = [{"type": item_type, item_key: media_item}]
+
+        weixin_msg: dict[str, Any] = {
+            "from_user_id": "",
+            "to_user_id": to_user_id,
+            "client_id": client_id,
+            "message_type": MESSAGE_TYPE_BOT,
+            "message_state": MESSAGE_STATE_FINISH,
+            "item_list": item_list,
+        }
+        if context_token:
+            weixin_msg["context_token"] = context_token
+
+        body: dict[str, Any] = {
+            "msg": weixin_msg,
+            "base_info": BASE_INFO,
+        }
+
+        data = await self._api_post("ilink/bot/sendmessage", body)
+        errcode = data.get("errcode", 0)
+        if errcode and errcode != 0:
+            raise RuntimeError(
+                f"WeChat send media error (code {errcode}): {data.get('errmsg', '')}"
+            )
+
     async def _send_text(
         self,
         to_user_id: str,
@@ -1231,8 +1376,9 @@ class WeixinChannel(BaseChannel):
         self.config: WeixinConfig = config
 
         acct_cfgs = self._build_account_configs(config)
+        multi = len(acct_cfgs) > 1
         self._runners: list[_WeixinAccountRunner] = [
-            _WeixinAccountRunner(idx, acct_cfg, self, multi=True)
+            _WeixinAccountRunner(idx, acct_cfg, self, multi=multi)
             for idx, acct_cfg in enumerate(acct_cfgs)
         ]
 
@@ -1307,7 +1453,7 @@ class WeixinChannel(BaseChannel):
                 poll_timeout=self.config.poll_timeout,
             ),
             self,
-            multi=True,
+            multi=True,  # adding a second account always means multi mode
         )
         ok = await runner.login(force=True)
         if not ok:
@@ -1334,8 +1480,11 @@ class WeixinChannel(BaseChannel):
                     )
                 return (runner._bot_id, False)
 
-        # New account — register the runner.
+        # New account — register the runner, and switch ALL runners to multi mode
+        # now that there are genuinely multiple accounts.
         self._runners.append(runner)
+        for r in self._runners:
+            r._multi = True
 
         # Start polling immediately if the channel is already running.
         if getattr(self, "_running", False):

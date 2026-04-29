@@ -1369,6 +1369,7 @@ def channels_login(
             console.print(f"[green]New account added:[/green] {user_id}")
         else:
             console.print(f"[green]Account token refreshed:[/green] {user_id}")
+        console.print("[dim]Restart nanobot for changes to take effect.[/dim]")
         return
 
     success = asyncio.run(channel.login(force=force))
