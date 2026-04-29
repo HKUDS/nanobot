@@ -13,6 +13,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.channels.manager import ChannelManager
 from nanobot.config.schema import ChannelsConfig
+from nanobot.providers.transcription import GroqTranscriptionProvider as _GroqProvider
+from nanobot.providers.transcription import OpenAITranscriptionProvider as _OpenAIProvider
 from nanobot.utils.restart import RestartNotice
 
 # ---------------------------------------------------------------------------
@@ -338,11 +340,10 @@ async def test_base_channel_passes_language_to_groq_transcription_provider():
 # Transcription provider HTTP tests
 # ---------------------------------------------------------------------------
 
-from nanobot.providers.transcription import GroqTranscriptionProvider as _GroqProvider
-from nanobot.providers.transcription import OpenAITranscriptionProvider as _OpenAIProvider
-
 
 class _StubResponse:
+    status_code = 200
+
     def raise_for_status(self):
         return None
 
