@@ -18,6 +18,7 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
+from nanobot.agent.workflow import run_with_workflow_fallback
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.ask import (
@@ -611,7 +612,7 @@ class AgentLoop:
 
             return items
 
-        result = await self.runner.run(AgentRunSpec(
+        spec = AgentRunSpec(
             initial_messages=initial_messages,
             tools=self.tools,
             model=self.model,
@@ -629,7 +630,8 @@ class AgentLoop:
             retry_wait_callback=on_retry_wait,
             checkpoint_callback=_checkpoint,
             injection_callback=_drain_pending,
-        ))
+        )
+        result = await run_with_workflow_fallback(spec, self.provider)
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
