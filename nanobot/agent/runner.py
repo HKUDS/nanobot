@@ -1089,7 +1089,38 @@ class AgentRunner:
             start = find_legal_message_start(kept)
             if start:
                 kept = kept[start:]
-        return system_messages + kept
+
+        result = system_messages + kept
+
+        # Emergency pass: if the kept window still exceeds the budget
+        # (e.g. tool results accumulated within a single iteration are
+        # larger than the budget on their own), truncate tool result
+        # contents to fit.  This preserves assistant→tool pairing
+        # integrity while preventing a 400 from the provider.
+        post_estimate, _ = estimate_prompt_tokens_chain(
+            self.provider, spec.model, result, spec.tools.get_definitions(),
+        )
+        if post_estimate > budget:
+            tool_msgs = [m for m in result if m.get("role") == "tool"]
+            if tool_msgs:
+                tool_count = len(tool_msgs)
+                budget_per_tool = max(
+                    200, (budget - system_tokens - _SNIP_SAFETY_BUFFER) // tool_count
+                )
+                char_limit = budget_per_tool * 4  # ~4 chars per token
+                for msg in result:
+                    if msg.get("role") != "tool":
+                        continue
+                    content = msg.get("content", "")
+                    if isinstance(content, str) and len(content) > char_limit:
+                        msg["content"] = truncate_text(content, char_limit)
+                        logger.warning(
+                            "Emergency tool result truncation: {} chars → {} chars "
+                            "(context budget {}t exceeded after history snip)",
+                            len(content), char_limit, budget,
+                        )
+
+        return result
 
     def _partition_tool_batches(
         self,
