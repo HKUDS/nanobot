@@ -84,6 +84,90 @@ class HeartbeatService:
                 return None
         return None
 
+    @staticmethod
+    def _has_active_tasks(content: str) -> bool:
+        """Return True when HEARTBEAT.md contains actionable task text."""
+        active_lines = HeartbeatService._active_task_section_lines(content)
+        if active_lines is None:
+            active_lines = content.splitlines()
+
+        in_html_comment = False
+        for line in active_lines:
+            line, in_html_comment = HeartbeatService._strip_html_comment(line, in_html_comment)
+            normalized = line.strip()
+            if not normalized:
+                continue
+            if HeartbeatService._is_heartbeat_template_line(normalized):
+                continue
+            return True
+        return False
+
+    @staticmethod
+    def _active_task_section_lines(content: str) -> list[str] | None:
+        lines = content.splitlines()
+        section_start: int | None = None
+        section_level: int | None = None
+
+        for index, line in enumerate(lines):
+            stripped = line.lstrip()
+            level = len(stripped) - len(stripped.lstrip("#"))
+            if level == 0 or level > 6 or not stripped[level:].startswith(" "):
+                continue
+            title = stripped[level:].strip().casefold()
+            if title == "active tasks":
+                section_start = index + 1
+                section_level = level
+                break
+
+        if section_start is None or section_level is None:
+            return None
+
+        section_end = len(lines)
+        for index in range(section_start, len(lines)):
+            stripped = lines[index].lstrip()
+            level = len(stripped) - len(stripped.lstrip("#"))
+            if 0 < level <= section_level and stripped[level:].startswith(" "):
+                section_end = index
+                break
+
+        return lines[section_start:section_end]
+
+    @staticmethod
+    def _strip_html_comment(line: str, in_comment: bool) -> tuple[str, bool]:
+        remaining = line
+        output = ""
+
+        while remaining:
+            if in_comment:
+                end = remaining.find("-->")
+                if end == -1:
+                    return output, True
+                remaining = remaining[end + 3:]
+                in_comment = False
+                continue
+
+            start = remaining.find("<!--")
+            if start == -1:
+                output += remaining
+                break
+            output += remaining[:start]
+            remaining = remaining[start + 4:]
+            end = remaining.find("-->")
+            if end == -1:
+                return output, True
+            remaining = remaining[end + 3:]
+
+        return output, in_comment
+
+    @staticmethod
+    def _is_heartbeat_template_line(line: str) -> bool:
+        lower = line.casefold()
+        if line.startswith("#"):
+            return True
+        if lower in {"---", "***", "___"}:
+            return True
+        return False
+
     async def _decide(self, content: str) -> tuple[str, str]:
         """Phase 1: ask LLM to decide skip/run via virtual tool call.
 
@@ -190,6 +274,10 @@ class HeartbeatService:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
             return
 
+        if not self._has_active_tasks(content):
+            logger.debug("Heartbeat: no active tasks, skipping LLM call")
+            return
+
         logger.info("Heartbeat: checking for tasks...")
 
         try:
@@ -229,6 +317,8 @@ class HeartbeatService:
         """Manually trigger a heartbeat."""
         content = self._read_heartbeat_file()
         if not content:
+            return None
+        if not self._has_active_tasks(content):
             return None
         action, tasks = await self._decide(content)
         if action != "run" or not self.on_execute:
