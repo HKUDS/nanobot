@@ -112,6 +112,18 @@ def _has_downloadable_media_locator(media: dict[str, Any] | None) -> bool:
     return bool(str(media.get("encrypt_query_param", "") or "") or str(media.get("full_url", "") or "").strip())
 
 
+class WeixinAccountConfig(Base):
+    """Per-account WeChat configuration (used in multi-account mode)."""
+
+    token: str = ""
+    bot_id: str = ""  # Bot's iLinkai ID (e.g. xxxxxxxxxxxx@im.bot); changes on each QR scan
+    user_id: str = ""  # Stable WeChat user ID of the linked account; used as state filename
+    base_url: str = "https://ilinkai.weixin.qq.com"
+    cdn_base_url: str = "https://novac2c.cdn.weixin.qq.com/c2c"
+    route_tag: str | int | None = None
+    poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S
+
+
 class WeixinConfig(Base):
     """Personal WeChat channel configuration."""
 
@@ -121,68 +133,94 @@ class WeixinConfig(Base):
     cdn_base_url: str = "https://novac2c.cdn.weixin.qq.com/c2c"
     route_tag: str | int | None = None
     token: str = ""  # Manually set token, or obtained via QR login
-    state_dir: str = ""  # Default: ~/.nanobot/weixin/
+    state_dir: str = ""  # Override state directory (default: ~/.nanobot/weixin/)
     poll_timeout: int = DEFAULT_LONG_POLL_TIMEOUT_S  # seconds for long-poll
+    accounts: list[WeixinAccountConfig] = Field(default_factory=list)  # Optional per-account overrides
 
 
-class WeixinChannel(BaseChannel):
+class _WeixinAccountRunner:
+    """Per-account HTTP client, state, and polling loop for WeixinChannel.
+
+    One runner is created per ``{user_id}.json`` file discovered in the weixin
+    state directory, or per entry in ``WeixinConfig.accounts`` when explicit
+    per-account settings are needed.
     """
-    Personal WeChat channel using HTTP long-poll.
 
-    Connects to ilinkai.weixin.qq.com API to receive and send personal
-    WeChat messages. Authentication is via QR code login which produces
-    a bot token.
-    """
+    def __init__(
+        self,
+        idx: int,
+        cfg: WeixinAccountConfig,
+        channel: "WeixinChannel",
+        *,
+        multi: bool,
+    ) -> None:
+        self._idx = idx
+        self._cfg = cfg
+        self._channel = channel
+        self._multi = multi  # True => prefix chat_ids with "{bot_id}:{from_user_id}"
 
-    name = "weixin"
-    display_name = "WeChat"
-
-    @classmethod
-    def default_config(cls) -> dict[str, Any]:
-        return WeixinConfig().model_dump(by_alias=True)
-
-    def __init__(self, config: Any, bus: MessageBus):
-        if isinstance(config, dict):
-            config = WeixinConfig.model_validate(config)
-        super().__init__(config, bus)
-        self.config: WeixinConfig = config
-
-        # State
+        # Per-account state
         self._client: httpx.AsyncClient | None = None
         self._get_updates_buf: str = ""
-        self._context_tokens: dict[str, str] = {}  # from_user_id -> context_token
+        self._context_tokens: dict[str, str] = {}  # from_user_id (@im.wechat) -> context_token
         self._processed_ids: OrderedDict[str, None] = OrderedDict()
-        self._state_dir: Path | None = None
+        self._bot_id: str = cfg.bot_id  # Bot's iLinkai ID (e.g. xxxxxxxxxxxx@im.bot); changes each QR scan
+        self._user_id: str = cfg.user_id  # Stable WeChat user ID of the linked account (ilink_user_id from QR response)
         self._token: str = ""
-        self._poll_task: asyncio.Task | None = None
         self._next_poll_timeout_s: int = DEFAULT_LONG_POLL_TIMEOUT_S
         self._session_pause_until: float = 0.0
         self._typing_tasks: dict[str, asyncio.Task] = {}
         self._typing_tickets: dict[str, dict[str, Any]] = {}
+        self._running: bool = False
+
+    # ------------------------------------------------------------------
+    # chat_id helpers
+    # ------------------------------------------------------------------
+
+    def _make_chat_id(self, from_user_id: str) -> str:
+        """Build the chat_id seen by the bus (prefixed when multi-account)."""
+        if self._multi:
+            prefix = self._user_id or self._bot_id or str(self._idx)
+            return f"{prefix}:{from_user_id}"
+        return from_user_id
 
     # ------------------------------------------------------------------
     # State persistence
     # ------------------------------------------------------------------
 
-    def _get_state_dir(self) -> Path:
-        if self._state_dir:
-            return self._state_dir
-        if self.config.state_dir:
-            d = Path(self.config.state_dir).expanduser()
-        else:
-            d = get_runtime_subdir("weixin")
-        d.mkdir(parents=True, exist_ok=True)
-        self._state_dir = d
-        return d
+    def _get_state_file(self) -> Path | None:
+        """Return state file path: prefer stable user_id, fallback to bot_id."""
+        stem = self._user_id or self._bot_id
+        if stem:
+            return self._weixin_dir() / f"{stem}.json"
+        return None
+
+    def _get_legacy_state_file(self) -> Path:
+        """Legacy single-account state file path (fallback when user_id unknown)."""
+        return self._weixin_dir() / "account.json"
+
+    def _weixin_dir(self) -> Path:
+        """Resolve the weixin state directory, honouring config.state_dir override."""
+        sd = self._channel.config.state_dir
+        if sd:
+            p = Path(sd).expanduser()
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+        return get_runtime_subdir("weixin")
 
     def _load_state(self) -> bool:
         """Load saved account state. Returns True if a valid token was found."""
-        state_file = self._get_state_dir() / "account.json"
+        state_file = self._get_state_file() or self._get_legacy_state_file()
         if not state_file.exists():
             return False
         try:
             data = json.loads(state_file.read_text())
             self._token = data.get("token", "")
+            # Recover identifiers from state file if not already known
+            if not self._bot_id:
+                self._bot_id = data.get("bot_id", "")
+            if not self._user_id:
+                self._user_id = data.get("user_id", "")
             self._get_updates_buf = data.get("get_updates_buf", "")
             context_tokens = data.get("context_tokens", {})
             if isinstance(context_tokens, dict):
@@ -204,22 +242,24 @@ class WeixinChannel(BaseChannel):
                 self._typing_tickets = {}
             base_url = data.get("base_url", "")
             if base_url:
-                self.config.base_url = base_url
+                self._cfg.base_url = base_url
             return bool(self._token)
         except Exception:
             return False
 
     def _save_state(self) -> None:
-        state_file = self._get_state_dir() / "account.json"
+        state_file = self._get_state_file() or self._get_legacy_state_file()
         try:
             data = {
+                "bot_id": self._bot_id,
+                "user_id": self._user_id,
                 "token": self._token,
                 "get_updates_buf": self._get_updates_buf,
                 "context_tokens": self._context_tokens,
                 "typing_tickets": self._typing_tickets,
-                "base_url": self.config.base_url,
+                "base_url": self._cfg.base_url,
             }
-            state_file.write_text(json.dumps(data, ensure_ascii=False))
+            state_file.write_text(json.dumps(data, ensure_ascii=False, indent=2))
         except Exception:
             pass
 
@@ -248,8 +288,8 @@ class WeixinChannel(BaseChannel):
         }
         if auth and self._token:
             headers["Authorization"] = f"Bearer {self._token}"
-        if self.config.route_tag is not None and str(self.config.route_tag).strip():
-            headers["SKRouteTag"] = str(self.config.route_tag).strip()
+        if self._cfg.route_tag is not None and str(self._cfg.route_tag).strip():
+            headers["SKRouteTag"] = str(self._cfg.route_tag).strip()
         return headers
 
     @staticmethod
@@ -270,7 +310,7 @@ class WeixinChannel(BaseChannel):
         extra_headers: dict[str, str] | None = None,
     ) -> dict:
         assert self._client is not None
-        url = f"{self.config.base_url}/{endpoint}"
+        url = f"{self._cfg.base_url}/{endpoint}"
         hdrs = self._make_headers(auth=auth)
         if extra_headers:
             hdrs.update(extra_headers)
@@ -305,7 +345,7 @@ class WeixinChannel(BaseChannel):
         auth: bool = True,
     ) -> dict:
         assert self._client is not None
-        url = f"{self.config.base_url}/{endpoint}"
+        url = f"{self._cfg.base_url}/{endpoint}"
         payload = body or {}
         if "base_info" not in payload:
             payload["base_info"] = BASE_INFO
@@ -335,8 +375,10 @@ class WeixinChannel(BaseChannel):
         try:
             refresh_count = 0
             qrcode_id, scan_url = await self._fetch_qr_code()
+            if self._multi:
+                print(f"\n[Account {self._idx}] Scan QR code to login:")
             self._print_qr_code(scan_url)
-            current_poll_base_url = self.config.base_url
+            current_poll_base_url = self._cfg.base_url
 
             while self._running:
                 try:
@@ -360,21 +402,26 @@ class WeixinChannel(BaseChannel):
                 if status == "confirmed":
                     token = status_data.get("bot_token", "")
                     bot_id = status_data.get("ilink_bot_id", "")
-                    base_url = status_data.get("baseurl", "")
                     user_id = status_data.get("ilink_user_id", "")
+                    base_url = status_data.get("baseurl", "")
                     if token:
                         self._token = token
+                        if bot_id:
+                            self._bot_id = bot_id
+                        if user_id:
+                            self._user_id = user_id
                         if base_url:
-                            self.config.base_url = base_url
+                            self._cfg.base_url = base_url
                         self._save_state()
                         logger.info(
-                            "WeChat login successful! bot_id={} user_id={}",
+                            "WeChat account {} login successful! bot_id={} user_id={}",
+                            self._idx,
                             bot_id,
                             user_id,
                         )
                         return True
                     else:
-                        logger.error("Login confirmed but no bot_token in response")
+                        logger.error("WeChat account {} login confirmed but no bot_token", self._idx)
                         return False
                 elif status == "scaned_but_redirect":
                     redirect_host = str(status_data.get("redirect_host", "") or "").strip()
@@ -389,13 +436,14 @@ class WeixinChannel(BaseChannel):
                     refresh_count += 1
                     if refresh_count > MAX_QR_REFRESH_COUNT:
                         logger.warning(
-                            "QR code expired too many times ({}/{}), giving up.",
+                            "WeChat account {} QR code expired too many times ({}/{}), giving up.",
+                            self._idx,
                             refresh_count - 1,
                             MAX_QR_REFRESH_COUNT,
                         )
                         return False
                     qrcode_id, scan_url = await self._fetch_qr_code()
-                    current_poll_base_url = self.config.base_url
+                    current_poll_base_url = self._cfg.base_url
                     self._print_qr_code(scan_url)
                     continue
                 # status == "wait" — keep polling
@@ -403,7 +451,7 @@ class WeixinChannel(BaseChannel):
                 await asyncio.sleep(1)
 
         except Exception as e:
-            logger.error("WeChat QR login failed: {}", e)
+            logger.error("WeChat account {} QR login failed: {}", self._idx, e)
 
         return False
 
@@ -430,7 +478,7 @@ class WeixinChannel(BaseChannel):
             print(f"\nLogin URL: {url}\n")
 
     # ------------------------------------------------------------------
-    # Channel lifecycle
+    # Account lifecycle
     # ------------------------------------------------------------------
 
     async def login(self, force: bool = False) -> bool:
@@ -438,18 +486,19 @@ class WeixinChannel(BaseChannel):
         if force:
             self._token = ""
             self._get_updates_buf = ""
-            state_file = self._get_state_dir() / "account.json"
-            if state_file.exists():
-                state_file.unlink()
+            self._bot_id = self._cfg.bot_id
+            self._user_id = self._cfg.user_id
+            for sf in [self._get_state_file(), self._get_legacy_state_file()]:
+                if sf and sf.exists():
+                    sf.unlink()
         if self._token or self._load_state():
             return True
 
-        # Initialize HTTP client for the login flow
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(60, connect=30),
             follow_redirects=True,
         )
-        self._running = True  # Enable polling loop in _qr_login()
+        self._running = True
         try:
             return await self._qr_login()
         finally:
@@ -458,23 +507,27 @@ class WeixinChannel(BaseChannel):
                 await self._client.aclose()
                 self._client = None
 
-    async def start(self) -> None:
+    async def run(self) -> None:
+        """Main poll loop. Runs until stop() is called."""
         self._running = True
-        self._next_poll_timeout_s = self.config.poll_timeout
+        self._next_poll_timeout_s = self._cfg.poll_timeout
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(self._next_poll_timeout_s + 10, connect=30),
             follow_redirects=True,
         )
 
-        if self.config.token:
-            self._token = self.config.token
+        if self._cfg.token:
+            self._token = self._cfg.token
         elif not self._load_state():
             if not await self._qr_login():
-                logger.error("WeChat login failed. Run 'nanobot channels login weixin' to authenticate.")
+                logger.error(
+                    "WeChat account {} login failed. Run 'nanobot channels login weixin' to authenticate.",
+                    self._idx,
+                )
                 self._running = False
                 return
 
-        logger.info("WeChat channel starting with long-poll...")
+        logger.info("WeChat account {} starting with long-poll...", self._idx)
 
         consecutive_failures = 0
         while self._running:
@@ -496,14 +549,13 @@ class WeixinChannel(BaseChannel):
 
     async def stop(self) -> None:
         self._running = False
-        if self._poll_task and not self._poll_task.done():
-            self._poll_task.cancel()
         for chat_id in list(self._typing_tasks):
             await self._stop_typing(chat_id, clear_remote=False)
         if self._client:
             await self._client.aclose()
             self._client = None
         self._save_state()
+
     # ------------------------------------------------------------------
     # Polling  (matches monitor.ts monitorWeixinProvider)
     # ------------------------------------------------------------------
@@ -553,7 +605,8 @@ class WeixinChannel(BaseChannel):
                 self._pause_session()
                 remaining = self._session_pause_remaining_s()
                 logger.warning(
-                    "WeChat session expired (errcode {}). Pausing {} min.",
+                    "WeChat account {} session expired (errcode {}). Pausing {} min.",
+                    self._idx,
                     errcode,
                     max((remaining + 59) // 60, 1),
                 )
@@ -597,6 +650,7 @@ class WeixinChannel(BaseChannel):
             msg_id = f"{msg.get('from_user_id', '')}_{msg.get('create_time_ms', '')}"
         if msg_id in self._processed_ids:
             return
+        logger.debug(msg)
         self._processed_ids[msg_id] = None
         while len(self._processed_ids) > 1000:
             self._processed_ids.popitem(last=False)
@@ -672,7 +726,7 @@ class WeixinChannel(BaseChannel):
                         has_top_level_downloadable_media = True
                     file_path = await self._download_media_item(voice_item, "voice")
                     if file_path:
-                        transcription = await self.transcribe_audio(file_path)
+                        transcription = await self._channel.transcribe_audio(file_path)
                         if transcription:
                             content_parts.append(f"[voice] {transcription}")
                         else:
@@ -734,7 +788,7 @@ class WeixinChannel(BaseChannel):
                     voice_item = ref_media_item.get("voice_item") or {}
                     file_path = await self._download_media_item(voice_item, "voice")
                     if file_path:
-                        transcription = await self.transcribe_audio(file_path)
+                        transcription = await self._channel.transcribe_audio(file_path)
                         if transcription:
                             content_parts.append(f"[voice] {transcription}")
                         else:
@@ -759,7 +813,8 @@ class WeixinChannel(BaseChannel):
             return
 
         logger.info(
-            "WeChat inbound: from={} items={} bodyLen={}",
+            "WeChat account {} inbound: from={} items={} bodyLen={}",
+            self._idx,
             from_user_id,
             ",".join(str(i.get("type", 0)) for i in item_list),
             len(content),
@@ -767,9 +822,9 @@ class WeixinChannel(BaseChannel):
 
         await self._start_typing(from_user_id, ctx_token)
 
-        await self._handle_message(
+        await self._channel._handle_message(
             sender_id=from_user_id,
-            chat_id=from_user_id,
+            chat_id=self._make_chat_id(from_user_id),
             content=content,
             media=media_paths or None,
             metadata={"message_id": msg_id},
@@ -817,7 +872,7 @@ class WeixinChannel(BaseChannel):
             fallback_url = ""
             if encrypt_query_param:
                 fallback_url = (
-                    f"{self.config.cdn_base_url}/download"
+                    f"{self._cfg.cdn_base_url}/download"
                     f"?encrypted_query_param={quote(encrypt_query_param)}"
                 )
 
@@ -939,9 +994,10 @@ class WeixinChannel(BaseChannel):
         finally:
             pass
 
-    async def send(self, msg: OutboundMessage) -> None:
+    async def send(self, user_id: str, msg: OutboundMessage) -> None:
+        """Send an outbound message to user_id via this account."""
         if not self._client or not self._token:
-            logger.warning("WeChat client not initialized or not authenticated")
+            logger.warning("WeChat account {} client not initialized or not authenticated", self._idx)
             return
         try:
             self._assert_session_active()
@@ -950,26 +1006,27 @@ class WeixinChannel(BaseChannel):
 
         is_progress = bool((msg.metadata or {}).get("_progress", False))
         if not is_progress:
-            await self._stop_typing(msg.chat_id, clear_remote=True)
+            await self._stop_typing(user_id, clear_remote=True)
 
         content = msg.content.strip()
-        ctx_token = self._context_tokens.get(msg.chat_id, "")
+        ctx_token = self._context_tokens.get(user_id, "")
         if not ctx_token:
             logger.warning(
-                "WeChat: no context_token for chat_id={}, cannot send",
-                msg.chat_id,
+                "WeChat account {}: no context_token for user_id={}, cannot send",
+                self._idx,
+                user_id,
             )
             return
 
         typing_ticket = ""
         try:
-            typing_ticket = await self._get_typing_ticket(msg.chat_id, ctx_token)
+            typing_ticket = await self._get_typing_ticket(user_id, ctx_token)
         except Exception:
             typing_ticket = ""
 
         if typing_ticket:
             try:
-                await self._send_typing(msg.chat_id, typing_ticket, TYPING_STATUS_TYPING)
+                await self._send_typing(user_id, typing_ticket, TYPING_STATUS_TYPING)
             except Exception:
                 pass
 
@@ -977,14 +1034,14 @@ class WeixinChannel(BaseChannel):
         typing_keepalive_task: asyncio.Task | None = None
         if typing_ticket:
             typing_keepalive_task = asyncio.create_task(
-                self._typing_keepalive_loop(msg.chat_id, typing_ticket, typing_keepalive_stop)
+                self._typing_keepalive_loop(user_id, typing_ticket, typing_keepalive_stop)
             )
 
         try:
             # --- Send media files first (following Telegram channel pattern) ---
             for media_path in (msg.media or []):
                 try:
-                    await self._send_media_file(msg.chat_id, media_path, ctx_token)
+                    await self._send_media_file(user_id, media_path, ctx_token)
                 except (httpx.TimeoutException, httpx.TransportError) as net_err:
                     # Network/transport errors: do NOT fall back to text —
                     # the text send would also likely fail, and the outer
@@ -1017,16 +1074,15 @@ class WeixinChannel(BaseChannel):
                     filename = Path(media_path).name
                     logger.error("Failed to send WeChat media {}: {}", media_path, http_err)
                     await self._send_text(
-                        msg.chat_id, f"[Failed to send: {filename}]", ctx_token,
+                        user_id, f"[Failed to send: {filename}]", ctx_token,
                     )
                 except Exception as e:
                     # Non-network errors (format, file-not-found, etc.):
                     # notify the user via text fallback.
                     filename = Path(media_path).name
                     logger.error("Failed to send WeChat media {}: {}", media_path, e)
-                    # Notify user about failure via text
                     await self._send_text(
-                        msg.chat_id, f"[Failed to send: {filename}]", ctx_token,
+                        user_id, f"[Failed to send: {filename}]", ctx_token,
                     )
 
             # --- Send text content ---
@@ -1035,7 +1091,7 @@ class WeixinChannel(BaseChannel):
 
             chunks = split_message(content, WEIXIN_MAX_MESSAGE_LEN)
             for chunk in chunks:
-                await self._send_text(msg.chat_id, chunk, ctx_token)
+                await self._send_text(user_id, chunk, ctx_token)
         except Exception as e:
             logger.error("Error sending WeChat message: {}", e)
             raise
@@ -1050,7 +1106,7 @@ class WeixinChannel(BaseChannel):
 
             if typing_ticket and not is_progress:
                 try:
-                    await self._send_typing(msg.chat_id, typing_ticket, TYPING_STATUS_CANCEL)
+                    await self._send_typing(user_id, typing_ticket, TYPING_STATUS_CANCEL)
                 except Exception:
                     pass
 
@@ -1149,155 +1205,171 @@ class WeixinChannel(BaseChannel):
                 data.get("errmsg", ""),
             )
 
-    async def _send_media_file(
-        self,
-        to_user_id: str,
-        media_path: str,
-        context_token: str,
-    ) -> None:
-        """Upload a local file to WeChat CDN and send it as a media message.
 
-        Follows the exact protocol from ``@tencent-weixin/openclaw-weixin`` v1.0.3:
-        1. Generate a random 16-byte AES key (client-side).
-        2. Call ``getuploadurl`` with file metadata + hex-encoded AES key.
-        3. AES-128-ECB encrypt the file and POST to CDN (``{cdnBaseUrl}/upload``).
-        4. Read ``x-encrypted-param`` header from CDN response as the download param.
-        5. Send a ``sendmessage`` with the appropriate media item referencing the upload.
+
+class WeixinChannel(BaseChannel):
+    """
+    Personal WeChat channel using HTTP long-poll.
+
+    Supports multiple simultaneous WeChat accounts via the ``accounts`` list in
+    WeixinConfig. Each account runs its own independent poll loop and state file.
+    For single-account use the top-level ``token``/``state_dir``/etc. fields still work
+    unchanged — no migration needed.
+    """
+
+    name = "weixin"
+    display_name = "WeChat"
+
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return WeixinConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = WeixinConfig.model_validate(config)
+        super().__init__(config, bus)
+        self.config: WeixinConfig = config
+
+        acct_cfgs = self._build_account_configs(config)
+        self._runners: list[_WeixinAccountRunner] = [
+            _WeixinAccountRunner(idx, acct_cfg, self, multi=True)
+            for idx, acct_cfg in enumerate(acct_cfgs)
+        ]
+
+    @staticmethod
+    def _build_account_configs(config: WeixinConfig) -> list[WeixinAccountConfig]:
+        """Build the normalized per-account config list.
+
+        Priority:
+        1. Explicit ``accounts`` list in config (allows per-account overrides).
+        2. Auto-discover ``{user_id}.json`` files in the weixin state directory.
+        3. Fresh install: single empty runner (will trigger QR login on startup).
         """
-        p = Path(media_path)
-        if not p.is_file():
-            raise FileNotFoundError(f"Media file not found: {media_path}")
+        if config.accounts:
+            return list(config.accounts)
 
-        raw_data = p.read_bytes()
-        raw_size = len(raw_data)
-        raw_md5 = hashlib.md5(raw_data).hexdigest()
-
-        # Determine upload media type from extension
-        ext = p.suffix.lower()
-        if ext in _IMAGE_EXTS:
-            upload_type = UPLOAD_MEDIA_IMAGE
-            item_type = ITEM_IMAGE
-            item_key = "image_item"
-        elif ext in _VIDEO_EXTS:
-            upload_type = UPLOAD_MEDIA_VIDEO
-            item_type = ITEM_VIDEO
-            item_key = "video_item"
-        elif ext in _VOICE_EXTS:
-            upload_type = UPLOAD_MEDIA_VOICE
-            item_type = ITEM_VOICE
-            item_key = "voice_item"
-        else:
-            upload_type = UPLOAD_MEDIA_FILE
-            item_type = ITEM_FILE
-            item_key = "file_item"
-
-        # Generate client-side AES-128 key (16 random bytes)
-        aes_key_raw = os.urandom(16)
-        aes_key_hex = aes_key_raw.hex()
-
-        # Compute encrypted size: PKCS7 padding to 16-byte boundary
-        # Matches aesEcbPaddedSize: Math.ceil((size + 1) / 16) * 16
-        padded_size = ((raw_size + 1 + 15) // 16) * 16
-
-        # Step 1: Get upload URL from server (prefer upload_full_url, fallback to upload_param)
-        file_key = os.urandom(16).hex()
-        upload_body: dict[str, Any] = {
-            "filekey": file_key,
-            "media_type": upload_type,
-            "to_user_id": to_user_id,
-            "rawsize": raw_size,
-            "rawfilemd5": raw_md5,
-            "filesize": padded_size,
-            "no_need_thumb": True,
-            "aeskey": aes_key_hex,
-        }
-
-        assert self._client is not None
-        upload_resp = await self._api_post("ilink/bot/getuploadurl", upload_body)
-
-        upload_full_url = str(upload_resp.get("upload_full_url", "") or "").strip()
-        upload_param = str(upload_resp.get("upload_param", "") or "")
-        if not upload_full_url and not upload_param:
-            raise RuntimeError(
-                "getuploadurl returned no upload URL "
-                f"(need upload_full_url or upload_param): {upload_resp}"
+        # Auto-discover: each {user_id}.json in the weixin dir = one account
+        sd = config.state_dir
+        weixin_dir = (Path(sd).expanduser() if sd else get_runtime_subdir("weixin"))
+        discovered = [
+            WeixinAccountConfig(
+                user_id=p.stem,
+                base_url=config.base_url,
+                cdn_base_url=config.cdn_base_url,
+                route_tag=config.route_tag,
+                poll_timeout=config.poll_timeout,
             )
+            for p in sorted(weixin_dir.glob("*.json"))
+            if p.stem != "account"  # exclude legacy single-account fallback file
+        ]
+        if discovered:
+            return discovered
 
-        # Step 2: AES-128-ECB encrypt and POST to CDN
-        aes_key_b64 = base64.b64encode(aes_key_raw).decode()
-        encrypted_data = _encrypt_aes_ecb(raw_data, aes_key_b64)
-
-        if upload_full_url:
-            cdn_upload_url = upload_full_url
-        else:
-            cdn_upload_url = (
-                f"{self.config.cdn_base_url}/upload"
-                f"?encrypted_query_param={quote(upload_param)}"
-                f"&filekey={quote(file_key)}"
+        # Fresh install or legacy single-account: one runner (QR login on first run)
+        return [
+            WeixinAccountConfig(
+                token=config.token,
+                base_url=config.base_url,
+                cdn_base_url=config.cdn_base_url,
+                route_tag=config.route_tag,
+                poll_timeout=config.poll_timeout,
             )
+        ]
 
-        cdn_resp = await self._client.post(
-            cdn_upload_url,
-            content=encrypted_data,
-            headers={"Content-Type": "application/octet-stream"},
+    async def login(self, force: bool = False) -> bool:
+        """Login all configured accounts sequentially (interactive QR code)."""
+        all_ok = True
+        for runner in self._runners:
+            ok = await runner.login(force=force)
+            if not ok:
+                all_ok = False
+        return all_ok
+
+    async def add_account(self) -> tuple[str, bool]:
+        """Run a fresh QR scan, save the result, and start polling immediately.
+
+        Returns ``(user_id, is_new)`` where ``is_new`` is True if this is a
+        brand-new account, False if an existing account's token was refreshed.
+        Returns ``("", False)`` on failure.
+
+        If the channel is already running the new runner's poll loop is started
+        as a background task so messages are received without a restart.
+        """
+        weixin_dir = get_runtime_subdir("weixin") if not self.config.state_dir else Path(self.config.state_dir).expanduser()
+        existing = {p.stem for p in weixin_dir.glob("*.json") if p.stem != "account"}
+
+        runner = _WeixinAccountRunner(
+            len(self._runners),
+            WeixinAccountConfig(
+                base_url=self.config.base_url,
+                cdn_base_url=self.config.cdn_base_url,
+                route_tag=self.config.route_tag,
+                poll_timeout=self.config.poll_timeout,
+            ),
+            self,
+            multi=True,
         )
-        cdn_resp.raise_for_status()
+        ok = await runner.login(force=True)
+        if not ok:
+            return ("", False)
 
-        # The download encrypted_query_param comes from CDN response header
-        download_param = cdn_resp.headers.get("x-encrypted-param", "")
-        if not download_param:
-            raise RuntimeError(
-                "CDN upload response missing x-encrypted-param header; "
-                f"status={cdn_resp.status_code} headers={dict(cdn_resp.headers)}"
-            )
+        is_new = runner._user_id not in existing
 
-        # Step 3: Send message with the media item
-        # aes_key for CDNMedia is the hex key encoded as base64
-        # (matches: Buffer.from(uploaded.aeskey).toString("base64"))
-        cdn_aes_key_b64 = base64.b64encode(aes_key_hex.encode()).decode()
+        # If this WeChat account already has a running runner (same user_id),
+        # update it in-place — bot_id may have changed on re-login.
+        for existing_runner in self._runners:
+            if runner._user_id and existing_runner._user_id == runner._user_id:
+                old_bot_id = existing_runner._bot_id
+                existing_runner._bot_id = runner._bot_id
+                existing_runner._user_id = runner._user_id
+                existing_runner._token = runner._token
+                existing_runner._get_updates_buf = runner._get_updates_buf
+                existing_runner._cfg.base_url = runner._cfg.base_url
+                if old_bot_id != runner._bot_id:
+                    logger.info(
+                        "WeChat account re-logged in: old bot_id={} → new bot_id={} (user_id={})",
+                        old_bot_id,
+                        runner._bot_id,
+                        runner._user_id,
+                    )
+                return (runner._bot_id, False)
 
-        media_item: dict[str, Any] = {
-            "media": {
-                "encrypt_query_param": download_param,
-                "aes_key": cdn_aes_key_b64,
-                "encrypt_type": 1,
-            },
-        }
+        # New account — register the runner.
+        self._runners.append(runner)
 
-        if item_type == ITEM_IMAGE:
-            media_item["mid_size"] = padded_size
-        elif item_type == ITEM_VIDEO:
-            media_item["video_size"] = padded_size
-        elif item_type == ITEM_FILE:
-            media_item["file_name"] = p.name
-            media_item["len"] = str(raw_size)
+        # Start polling immediately if the channel is already running.
+        if getattr(self, "_running", False):
+            asyncio.create_task(runner.run())
 
-        # Send each media item as its own message (matching reference plugin)
-        client_id = f"nanobot-{uuid.uuid4().hex[:12]}"
-        item_list: list[dict] = [{"type": item_type, item_key: media_item}]
+        return (runner._bot_id, is_new)
 
-        weixin_msg: dict[str, Any] = {
-            "from_user_id": "",
-            "to_user_id": to_user_id,
-            "client_id": client_id,
-            "message_type": MESSAGE_TYPE_BOT,
-            "message_state": MESSAGE_STATE_FINISH,
-            "item_list": item_list,
-        }
-        if context_token:
-            weixin_msg["context_token"] = context_token
+    async def start(self) -> None:
+        self._running = True
+        runner_tasks = [asyncio.create_task(runner.run()) for runner in self._runners]
+        await asyncio.gather(*runner_tasks, return_exceptions=True)
 
-        body: dict[str, Any] = {
-            "msg": weixin_msg,
-            "base_info": BASE_INFO,
-        }
+    async def stop(self) -> None:
+        self._running = False
+        for runner in self._runners:
+            await runner.stop()
 
-        data = await self._api_post("ilink/bot/sendmessage", body)
-        errcode = data.get("errcode", 0)
-        if errcode and errcode != 0:
-            raise RuntimeError(
-                f"WeChat send media error (code {errcode}): {data.get('errmsg', '')}"
-            )
+    def _resolve_runner(self, chat_id: str) -> tuple[_WeixinAccountRunner, str]:
+        """Return (runner, from_user_id) for an outbound chat_id.
+
+        chat_id format: ``{user_id}:{from_user_id}``  (user_id = stable WeChat
+        identity of the bot account; from_user_id = sender's WeChat ID).
+        """
+        if ":" in chat_id:
+            account_id, from_user_id = chat_id.split(":", 1)
+            for runner in self._runners:
+                if runner._user_id == account_id:
+                    return runner, from_user_id
+        # Fallback to first runner
+        return self._runners[0], chat_id
+
+    async def send(self, msg: OutboundMessage) -> None:
+        runner, user_id = self._resolve_runner(msg.chat_id)
+        await runner.send(user_id, msg)
 
 
 # ---------------------------------------------------------------------------
