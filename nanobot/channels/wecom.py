@@ -117,13 +117,13 @@ class WecomChannel(BaseChannel):
         self._generate_req_id = generate_req_id
 
         # Create WebSocket client
-        self._client = WSClient({
-            "bot_id": self.config.bot_id,
-            "secret": self.config.secret,
-            "reconnect_interval": 1000,
-            "max_reconnect_attempts": -1,  # Infinite reconnect
-            "heartbeat_interval": 30000,
-        })
+        self._client = WSClient(
+            bot_id=self.config.bot_id,
+            secret=self.config.secret,
+            reconnect_interval=1000,
+            max_reconnect_attempts=-1,  # Infinite reconnect
+            heartbeat_interval=30000,
+        )
 
         # Register event handlers
         self._client.on("connected", self._on_connected)
@@ -141,7 +141,7 @@ class WecomChannel(BaseChannel):
         logger.info("No public IP required - using WebSocket to receive events")
 
         # Connect
-        await self._client.connect_async()
+        await self._client.connect()
 
         # Keep running until stopped
         while self._running:
@@ -154,44 +154,44 @@ class WecomChannel(BaseChannel):
             await self._client.disconnect()
         logger.info("WeCom bot stopped")
 
-    async def _on_connected(self, frame: Any) -> None:
+    async def _on_connected(self, frame: Any = None) -> None:
         """Handle WebSocket connected event."""
         logger.info("WeCom WebSocket connected")
 
-    async def _on_authenticated(self, frame: Any) -> None:
+    async def _on_authenticated(self, frame: Any = None) -> None:
         """Handle authentication success event."""
         logger.info("WeCom authenticated successfully")
 
-    async def _on_disconnected(self, frame: Any) -> None:
+    async def _on_disconnected(self, frame: Any = None) -> None:
         """Handle WebSocket disconnected event."""
         reason = frame.body if hasattr(frame, 'body') else str(frame)
         logger.warning("WeCom WebSocket disconnected: {}", reason)
 
-    async def _on_error(self, frame: Any) -> None:
+    async def _on_error(self, frame: Any = None) -> None:
         """Handle error event."""
         logger.error("WeCom error: {}", frame)
 
-    async def _on_text_message(self, frame: Any) -> None:
+    async def _on_text_message(self, frame: Any = None) -> None:
         """Handle text message."""
         await self._process_message(frame, "text")
 
-    async def _on_image_message(self, frame: Any) -> None:
+    async def _on_image_message(self, frame: Any = None) -> None:
         """Handle image message."""
         await self._process_message(frame, "image")
 
-    async def _on_voice_message(self, frame: Any) -> None:
+    async def _on_voice_message(self, frame: Any = None) -> None:
         """Handle voice message."""
         await self._process_message(frame, "voice")
 
-    async def _on_file_message(self, frame: Any) -> None:
+    async def _on_file_message(self, frame: Any = None) -> None:
         """Handle file message."""
         await self._process_message(frame, "file")
 
-    async def _on_mixed_message(self, frame: Any) -> None:
+    async def _on_mixed_message(self, frame: Any = None) -> None:
         """Handle mixed content message."""
         await self._process_message(frame, "mixed")
 
-    async def _on_enter_chat(self, frame: Any) -> None:
+    async def _on_enter_chat(self, frame: Any = None) -> None:
         """Handle enter_chat event (user opens chat with bot)."""
         try:
             # Extract body from WsFrame dataclass or dict
