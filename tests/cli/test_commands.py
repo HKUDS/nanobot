@@ -851,10 +851,16 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         async def close_mcp(self) -> None:
             return None
 
-    def _fake_create_app(agent_loop, model_name: str, request_timeout: float):
+    def _fake_create_app(
+        agent_loop,
+        model_name: str,
+        request_timeout: float,
+        auth_token: str = "",
+    ):
         seen["agent_loop"] = agent_loop
         seen["model_name"] = model_name
         seen["request_timeout"] = request_timeout
+        seen["auth_token"] = auth_token
         return _FakeApiApp()
 
     def _fake_run_app(api_app, host: str, port: int, print):
@@ -1547,6 +1553,76 @@ def test_serve_cli_options_override_api_config(monkeypatch, tmp_path: Path) -> N
     assert seen["host"] == "127.0.0.1"
     assert seen["port"] == 18901
     assert seen["request_timeout"] == 46.0
+
+
+def test_serve_refuses_non_loopback_without_auth_token(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Binding the API to a non-loopback host with no bearer token would
+    expose /v1/chat/completions to the world. The CLI must fail loud."""
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    seen: dict[str, object] = {}
+
+    _patch_serve_runtime(monkeypatch, config, seen)
+
+    result = runner.invoke(
+        app,
+        [
+            "serve",
+            "--config",
+            str(config_file),
+            "--host",
+            "0.0.0.0",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "auth token" in result.output.lower()
+    # Server must not have started — no aiohttp run_app invocation.
+    assert "api_app" not in seen
+
+
+def test_serve_passes_auth_token_to_create_app(monkeypatch, tmp_path: Path) -> None:
+    """When --auth-token is provided, it must reach create_app and the
+    non-loopback check must pass."""
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    seen: dict[str, object] = {}
+
+    _patch_serve_runtime(monkeypatch, config, seen)
+
+    result = runner.invoke(
+        app,
+        [
+            "serve",
+            "--config",
+            str(config_file),
+            "--host",
+            "0.0.0.0",
+            "--auth-token",
+            "supersecret",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen["auth_token"] == "supersecret"
+
+
+def test_serve_reads_auth_token_from_config(monkeypatch, tmp_path: Path) -> None:
+    """--auth-token omitted should fall back to api.authToken in config."""
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.api.host = "0.0.0.0"
+    config.api.auth_token = "from-config"
+    seen: dict[str, object] = {}
+
+    _patch_serve_runtime(monkeypatch, config, seen)
+
+    result = runner.invoke(app, ["serve", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert seen["auth_token"] == "from-config"
 
 
 def test_channels_login_requires_channel_name() -> None:

@@ -360,6 +360,88 @@ async def test_unknown_route_returns_404(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
+async def test_bootstrap_rejects_x_forwarded_for(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    """A reverse-proxy / tunnel running on the same host has TCP peer 127.0.0.1
+    even when the real client is remote. Standard proxy hop headers prove the
+    request is not truly local — bootstrap must refuse rather than mint a
+    token that authorizes WS + /api/sessions read/delete."""
+    sm = _seed_session(tmp_path)
+    channel = _ch(bus, session_manager=sm, port=29911)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        resp = await _http_get(
+            "http://127.0.0.1:29911/webui/bootstrap",
+            headers={"X-Forwarded-For": "203.0.113.5"},
+        )
+        assert resp.status_code == 403
+        # Token pool must stay empty — no leak even when refused.
+        assert channel._issued_tokens == {}
+        assert channel._api_tokens == {}
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_rejects_forwarded_header(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    """RFC 7239 ``Forwarded:`` is the modern proxy-hop header. Same gate."""
+    sm = _seed_session(tmp_path)
+    channel = _ch(bus, session_manager=sm, port=29912)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        resp = await _http_get(
+            "http://127.0.0.1:29912/webui/bootstrap",
+            headers={"Forwarded": 'for="203.0.113.5";proto=https'},
+        )
+        assert resp.status_code == 403
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_start_refuses_public_token_issue_without_secret(
+    bus: MagicMock,
+) -> None:
+    """A non-loopback bind that exposes ``token_issue_path`` without a secret
+    would let any public caller mint connection tokens — refuse to start."""
+    channel = _ch(
+        bus,
+        host="0.0.0.0",
+        port=29913,
+        tokenIssuePath="/issue",
+        tokenIssueSecret="",
+        websocketRequiresToken=True,
+    )
+    with pytest.raises(ValueError, match="token_issue_secret"):
+        await channel.start()
+
+
+@pytest.mark.asyncio
+async def test_start_refuses_public_bind_without_token_gate(
+    bus: MagicMock,
+) -> None:
+    """Non-loopback bind with no token gate at all is the same trap, just
+    expressed via ``websocket_requires_token=False`` instead of the issue
+    path. Refuse to start."""
+    channel = _ch(
+        bus,
+        host="0.0.0.0",
+        port=29914,
+        websocketRequiresToken=False,
+        token="",
+    )
+    with pytest.raises(ValueError, match="no token gate"):
+        await channel.start()
+
+
+@pytest.mark.asyncio
 async def test_api_token_pool_purges_expired(bus: MagicMock, tmp_path: Path) -> None:
     sm = _seed_session(tmp_path)
     channel = _ch(bus, session_manager=sm, port=29908)

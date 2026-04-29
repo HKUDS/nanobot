@@ -358,8 +358,34 @@ async def handle_health(request: web.Request) -> web.Response:
 # ---------------------------------------------------------------------------
 
 
+@web.middleware
+async def _bearer_auth_middleware(
+    request: web.Request, handler: Any
+) -> web.StreamResponse:
+    """Require ``Authorization: Bearer <auth_token>`` on /v1/* when configured.
+
+    /health is intentionally exempt so liveness probes don't need credentials.
+    Disabled (no-op) when ``auth_token`` is empty.
+    """
+    auth_token: str = request.app.get("auth_token", "") or ""
+    if not auth_token or not request.path.startswith("/v1/"):
+        return await handler(request)
+    header = request.headers.get("Authorization", "")
+    if not header.lower().startswith("bearer "):
+        return _error_json(401, "Missing bearer token", err_type="authentication_error")
+    import hmac as _hmac
+
+    supplied = header[7:].strip()
+    if not supplied or not _hmac.compare_digest(supplied, auth_token):
+        return _error_json(401, "Invalid bearer token", err_type="authentication_error")
+    return await handler(request)
+
+
 def create_app(
-    agent_loop, model_name: str = "nanobot", request_timeout: float = 120.0
+    agent_loop,
+    model_name: str = "nanobot",
+    request_timeout: float = 120.0,
+    auth_token: str = "",
 ) -> web.Application:
     """Create the aiohttp application.
 
@@ -367,11 +393,18 @@ def create_app(
         agent_loop: An initialized AgentLoop instance.
         model_name: Model name reported in responses.
         request_timeout: Per-request timeout in seconds.
+        auth_token: If non-empty, /v1/* requests must carry
+            ``Authorization: Bearer <auth_token>``. /health stays open so
+            liveness probes don't need credentials.
     """
-    app = web.Application(client_max_size=20 * 1024 * 1024)  # 20MB for base64 images
+    app = web.Application(
+        client_max_size=20 * 1024 * 1024,  # 20MB for base64 images
+        middlewares=[_bearer_auth_middleware],
+    )
     app["agent_loop"] = agent_loop
     app["model_name"] = model_name
     app["request_timeout"] = request_timeout
+    app["auth_token"] = auth_token
     app["session_locks"] = {}  # per-user locks, keyed by session_key
 
     app.router.add_post("/v1/chat/completions", handle_chat_completions)

@@ -187,6 +187,15 @@ All fields go under `channels.websocket` in `config.json`.
 | `tokenIssuePath` | string | `""` | HTTP path for issuing short-lived tokens. Must differ from `path`. See [Token Issuance](#token-issuance). |
 | `tokenIssueSecret` | string | `""` | Secret required to obtain tokens via the issue endpoint. If empty, any client can obtain tokens (logged as a warning). |
 | `tokenTtlS` | int | `300` | Time-to-live for issued tokens in seconds (30 – 86,400). |
+| `webuiBootstrapDisabled` | bool | `false` | Hard-disable the implicit `/webui/bootstrap` token mint. Set to `true` whenever nanobot sits behind a reverse proxy or tunnel — the bootstrap was always meant for same-machine use, and proxy hops can defeat peer-IP / header heuristics. With it disabled, expose the WS path with a static `token` or the `tokenIssuePath` + `tokenIssueSecret` flow instead. |
+
+> [!WARNING]
+> Public-tunnel deployments. nanobot is built around a single-user, single-instance deployment model. If you publish nanobot through a tunnel or reverse proxy:
+>
+> - Do **not** rely on `/webui/bootstrap` — set `webuiBootstrapDisabled: true` (or bind to a non-loopback host, which disables it automatically).
+> - Set `websocketRequiresToken: true` and a strong `tokenIssueSecret`.
+> - Terminate TLS in front, and require real authentication (basic auth, OAuth, mTLS, IP allowlist) at the proxy — nanobot itself does not authenticate human users for the WebUI.
+> - Refuses-to-start guards: the channel will fail loud at startup if `host` is not loopback and either `tokenIssuePath` is set without `tokenIssueSecret`, or `websocketRequiresToken=false` with no static `token`.
 
 ### Access Control
 
