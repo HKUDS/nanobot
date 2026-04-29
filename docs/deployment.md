@@ -46,7 +46,7 @@ docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot status
 
 ## Linux Service
 
-Run the gateway as a systemd user service so it starts automatically and restarts on failure.
+Run the gateway as a systemd user service so it starts automatically and restarts on failure. The CLI also supports `nanobot gateway stop`, `nanobot gateway restart`, and `nanobot gateway status` for local process management.
 
 **1. Find the nanobot binary path:**
 
@@ -162,6 +162,7 @@ launchctl kickstart -k gui/$(id -u)/ai.nanobot.gateway
 ```bash
 launchctl list | grep ai.nanobot.gateway
 launchctl kickstart -k gui/$(id -u)/ai.nanobot.gateway   # restart
+nanobot gateway status                                # inspect runtime metadata
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/ai.nanobot.gateway.plist
 ```
 
