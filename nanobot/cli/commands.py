@@ -540,6 +540,7 @@ def serve(
         consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
         max_messages=runtime_config.agents.defaults.max_messages,
         tools_config=runtime_config.tools,
+        token_optimization=runtime_config.agents.defaults.token_optimization,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -656,6 +657,7 @@ def _run_gateway(
         tools_config=config.tools,
         provider_snapshot_loader=load_provider_snapshot,
         provider_signature=provider_snapshot.signature,
+        token_optimization=config.agents.defaults.token_optimization,
     )
 
     from nanobot.agent.loop import UNIFIED_SESSION_KEY
@@ -1047,6 +1049,7 @@ def agent(
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         max_messages=config.agents.defaults.max_messages,
         tools_config=config.tools,
+        token_optimization=config.agents.defaults.token_optimization,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
