@@ -394,6 +394,8 @@ class MyTool(Tool):
         if "min_len" in spec and len(str(value)) < spec["min_len"]:
             return f"Error: '{key}' must be at least {spec['min_len']} characters"
         setattr(self._loop, key, value)
+        if key == "max_iterations" and hasattr(self._loop, "_sync_subagent_runtime_limits"):
+            self._loop._sync_subagent_runtime_limits()
         self._audit("modify", f"{key}: {old!r} -> {value!r}")
         return f"Set {key} = {value!r} (was {old!r})"
 
