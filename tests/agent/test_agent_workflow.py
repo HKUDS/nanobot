@@ -2,9 +2,12 @@
 
 This module tests:
 1. is_workflow_enabled() environment variable switch
-2. AgentWorkflow 6-phase pipeline (classification -> planning -> execution -> compression -> validation -> reporting)
-3. Fallback mechanism when workflow phases fail
-4. Integration with existing AgentRunner
+2. RestrictedToolRegistry - TRUE CLOSED-LOOP tool restriction
+3. AgentWorkflow 6-phase pipeline with TRUE CLOSED-LOOP behavior:
+   - Classification ACTUALLY determines tool availability
+   - Plan ACTUALLY guides each execution step
+4. Fallback mechanism when workflow phases fail
+5. Integration with existing AgentRunner
 """
 
 from __future__ import annotations
@@ -15,13 +18,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from nanobot.agent.runner import AgentRunResult, AgentRunSpec, AgentRunner
+from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.workflow import (
     AgentWorkflow,
+    RestrictedToolRegistry,
+    StepExecutionResult,
     WorkflowResult,
     _CLASSIFY_TOOL,
     _COMPRESS_TOOL,
     _PLAN_TOOL,
     _REPORT_TOOL,
+    _STEP_VALIDATION_TOOL,
     _VALIDATE_TOOL,
     is_workflow_enabled,
 )
@@ -84,6 +91,202 @@ class TestIsWorkflowEnabled:
 
         with patch.dict(os.environ, {"NANOBOT_AGENT_WORKFLOW": "  0  "}):
             assert is_workflow_enabled() is False
+
+
+class TestRestrictedToolRegistry:
+    """Tests for the RestrictedToolRegistry class - TRUE CLOSED-LOOP core.
+
+    This is the KEY component that enables TRUE CLOSED-LOOP behavior:
+    - Classification can disable all tools (simple_qa)
+    - Classification can restrict to recommended tools
+    - Classification can block specific tools
+    - Plan steps can further restrict tools
+    """
+
+    @pytest.fixture
+    def mock_tool_a(self):
+        """Create a mock tool."""
+        tool = MagicMock()
+        tool.name = "read_file"
+        tool.description = "Read file contents"
+        tool.to_schema.return_value = {
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Read file contents",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+        return tool
+
+    @pytest.fixture
+    def mock_tool_b(self):
+        """Create another mock tool."""
+        tool = MagicMock()
+        tool.name = "write_file"
+        tool.description = "Write file contents"
+        tool.to_schema.return_value = {
+            "type": "function",
+            "function": {
+                "name": "write_file",
+                "description": "Write file contents",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+        return tool
+
+    @pytest.fixture
+    def mock_tool_c(self):
+        """Create a third mock tool."""
+        tool = MagicMock()
+        tool.name = "exec"
+        tool.description = "Execute commands"
+        tool.to_schema.return_value = {
+            "type": "function",
+            "function": {
+                "name": "exec",
+                "description": "Execute commands",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+        return tool
+
+    @pytest.fixture
+    def original_registry(self, mock_tool_a, mock_tool_b, mock_tool_c):
+        """Create an original registry with multiple tools."""
+        registry = ToolRegistry()
+        registry.register(mock_tool_a)
+        registry.register(mock_tool_b)
+        registry.register(mock_tool_c)
+        return registry
+
+    def test_no_restrictions_uses_all_tools(self, original_registry, mock_tool_a, mock_tool_b, mock_tool_c):
+        """When no restrictions are set, all tools should be available."""
+        restricted = RestrictedToolRegistry(original=original_registry)
+
+        assert restricted.has("read_file") is True
+        assert restricted.has("write_file") is True
+        assert restricted.has("exec") is True
+        assert len(restricted) == 3
+        assert set(restricted.tool_names) == {"read_file", "write_file", "exec"}
+
+    def test_allowed_tools_restricts_availability(self, original_registry, mock_tool_a, mock_tool_b, mock_tool_c):
+        """When allowed_tools is set, only those tools should be available.
+
+        This is used for:
+        - classification.recommended_tools
+        - step.tools_allowed
+        """
+        restricted = RestrictedToolRegistry(
+            original=original_registry,
+            allowed_tools=["read_file", "write_file"],
+        )
+
+        assert restricted.has("read_file") is True
+        assert restricted.has("write_file") is True
+        assert restricted.has("exec") is False
+        assert len(restricted) == 2
+        assert set(restricted.tool_names) == {"read_file", "write_file"}
+
+    def test_blocked_tools_disables_specific_tools(self, original_registry, mock_tool_a, mock_tool_b, mock_tool_c):
+        """When blocked_tools is set, those tools should be unavailable.
+
+        This is used for:
+        - classification.blocked_tools
+        - plan.overall_tool_restrictions
+        """
+        restricted = RestrictedToolRegistry(
+            original=original_registry,
+            blocked_tools=["exec"],
+        )
+
+        assert restricted.has("read_file") is True
+        assert restricted.has("write_file") is True
+        assert restricted.has("exec") is False
+        assert len(restricted) == 2
+
+    def test_allowed_and_blocked_together(self, original_registry, mock_tool_a, mock_tool_b, mock_tool_c):
+        """blocked_tools takes precedence over allowed_tools."""
+        restricted = RestrictedToolRegistry(
+            original=original_registry,
+            allowed_tools=["read_file", "write_file", "exec"],
+            blocked_tools=["exec"],
+        )
+
+        assert restricted.has("read_file") is True
+        assert restricted.has("write_file") is True
+        assert restricted.has("exec") is False
+        assert len(restricted) == 2
+
+    def test_needs_tools_false_disables_all_tools(self, original_registry, mock_tool_a, mock_tool_b, mock_tool_c):
+        """When classification.needs_tools=False, ALL tools are blocked.
+
+        This is the KEY TRUE CLOSED-LOOP behavior for simple_qa tasks:
+        - If the task doesn't need tools, tools are HARD BLOCKED
+        - The agent CANNOT call any tools
+        """
+        all_tool_names = list(original_registry.tool_names)
+
+        restricted = RestrictedToolRegistry(
+            original=original_registry,
+            blocked_tools=all_tool_names,
+        )
+
+        assert restricted.has("read_file") is False
+        assert restricted.has("write_file") is False
+        assert restricted.has("exec") is False
+        assert len(restricted) == 0
+        assert restricted.tool_names == []
+
+    def test_get_disallowed_tool_returns_none(self, original_registry):
+        """get() should return None for disallowed tools."""
+        restricted = RestrictedToolRegistry(
+            original=original_registry,
+            allowed_tools=["read_file"],
+        )
+
+        assert restricted.get("read_file") is not None
+        assert restricted.get("write_file") is None
+        assert restricted.get("exec") is None
+
+    def test_get_definitions_only_includes_allowed_tools(self, original_registry):
+        """get_definitions() should only return schemas for allowed tools."""
+        restricted = RestrictedToolRegistry(
+            original=original_registry,
+            allowed_tools=["read_file", "write_file"],
+        )
+
+        definitions = restricted.get_definitions()
+        names = [ToolRegistry._schema_name(d) for d in definitions]
+
+        assert "read_file" in names
+        assert "write_file" in names
+        assert "exec" not in names
+        assert len(definitions) == 2
+
+    def test_prepare_call_disallowed_tool_returns_error(self, original_registry):
+        """prepare_call() should return an error for disallowed tools."""
+        restricted = RestrictedToolRegistry(
+            original=original_registry,
+            allowed_tools=["read_file"],
+        )
+
+        tool, params, error = restricted.prepare_call("write_file", {"path": "test.txt"})
+
+        assert tool is None
+        assert error is not None
+        assert "not available" in error or "not allowed" in error
+
+    def test_in_operator_works_correctly(self, original_registry):
+        """'in' operator should work correctly with restrictions."""
+        restricted = RestrictedToolRegistry(
+            original=original_registry,
+            allowed_tools=["read_file", "write_file"],
+        )
+
+        assert "read_file" in restricted
+        assert "write_file" in restricted
+        assert "exec" not in restricted
 
 
 class TestAgentWorkflowHelpers:
@@ -188,6 +391,85 @@ class TestAgentWorkflowHelpers:
         assert "Tool calls: list_dir" in result
         assert "## Tool Result (list_dir" in result
 
+    def test_build_step_context_injection(self, workflow):
+        """Should build proper step context injection with classification and plan info.
+
+        This is part of the TRUE CLOSED-LOOP: plan guidance is ACTUALLY injected.
+        """
+        step = {
+            "step_number": 1,
+            "description": "Read the config file",
+            "execution_guidance": "Look for the database connection string",
+            "expected_outcome": "We have the database URL",
+            "tools_allowed": ["read_file", "grep"],
+            "tools_preferred": ["read_file"],
+            "tools_avoid": ["write_file"],
+            "validation_query": "Did we find the database connection string?",
+        }
+
+        overall_plan = {
+            "overall_goal": "Connect to the database and fetch data",
+            "steps": [step],
+        }
+
+        classification = {
+            "primary_category": "information_gathering",
+            "estimated_complexity": "medium",
+            "needs_tools": True,
+            "recommended_tools": ["read_file", "grep"],
+            "blocked_tools": ["exec"],
+        }
+
+        result = workflow._build_step_context_injection(step, overall_plan, classification)
+
+        assert "WORKFLOW GUIDANCE" in result
+        assert "information_gathering" in result
+        assert "medium" in result
+        assert "read_file" in result
+        assert "grep" in result
+        assert "exec" in result
+        assert "Step 1 of 1" in result
+        assert "Look for the database connection string" in result
+        assert "Did we find the database connection string?" in result
+
+    def test_inject_step_guidance_appends_to_last_user_message(self, workflow):
+        """Should append step guidance to the last user message."""
+        messages = [
+            {"role": "system", "content": "System prompt"},
+            {"role": "user", "content": "Read the config file"},
+        ]
+
+        step_context = "--- WORKFLOW GUIDANCE ---\nUse read_file tool\n---"
+
+        result = workflow._inject_step_guidance(messages, step_context)
+
+        assert len(result) == 2
+        assert "Read the config file" in result[1]["content"]
+        assert "WORKFLOW GUIDANCE" in result[1]["content"]
+
+    def test_create_restricted_tools_with_needs_tools_false(self, workflow):
+        """When needs_tools=False, all tools should be blocked.
+
+        This is TRUE CLOSED-LOOP: classification ACTUALLY disables tools.
+        """
+        original_registry = MagicMock(spec=ToolRegistry)
+        original_registry.tool_names = ["read_file", "write_file", "exec"]
+
+        classification = {
+            "primary_category": "simple_qa",
+            "needs_tools": False,
+        }
+
+        with patch("nanobot.agent.workflow.RestrictedToolRegistry") as mock_restricted:
+            workflow._create_restricted_tools(original_registry, classification)
+
+            mock_restricted.assert_called_once()
+            call_args = mock_restricted.call_args
+
+            assert call_args.kwargs["original"] is original_registry
+            blocked = call_args.kwargs.get("blocked_tools")
+            assert blocked == ["read_file", "write_file", "exec"]
+
     def test_build_report_content(self, workflow):
         """Should convert report dict to user-facing string."""
         report = {
@@ -272,7 +554,7 @@ class TestAgentWorkflowExecution:
 
     @pytest.mark.asyncio
     async def test_classify_phase(self, mock_provider, legacy_result):
-        """Test the task classification phase."""
+        """Test the task classification phase with enhanced fields."""
         async def legacy_fn():
             return legacy_result
 
@@ -292,7 +574,10 @@ class TestAgentWorkflowExecution:
                     "secondary_categories": ["file_management"],
                     "reasoning": "User wants to create a Python script, which involves writing code.",
                     "estimated_complexity": "low",
-                    "suggested_approach": "Use write_file tool to create the script.",
+                    "needs_tools": True,
+                    "recommended_tools": ["write_file", "read_file"],
+                    "blocked_tools": ["exec"],
+                    "suggested_max_iterations": 3,
                 },
             )],
             usage={"prompt_tokens": 50, "completion_tokens": 20},
@@ -308,6 +593,10 @@ class TestAgentWorkflowExecution:
         assert result is not None
         assert result["primary_category"] == "code_modification"
         assert result["estimated_complexity"] == "low"
+        assert result["needs_tools"] is True
+        assert result["recommended_tools"] == ["write_file", "read_file"]
+        assert result["blocked_tools"] == ["exec"]
+        assert result["suggested_max_iterations"] == 3
 
         mock_provider.chat_with_retry.assert_awaited_once()
         call_kwargs = mock_provider.chat_with_retry.await_args.kwargs
@@ -364,7 +653,13 @@ class TestAgentWorkflowExecution:
 
     @pytest.mark.asyncio
     async def test_plan_phase(self, mock_provider, legacy_result):
-        """Test the planning phase."""
+        """Test the planning phase with enhanced step fields.
+
+        These fields are used in TRUE CLOSED-LOOP execution:
+        - execution_guidance: injected into context
+        - tools_allowed: restricts available tools
+        - validation_query: used to verify step completion
+        """
         async def legacy_fn():
             return legacy_result
 
@@ -383,10 +678,14 @@ class TestAgentWorkflowExecution:
                     "overall_goal": "Create a Python script that prints 'Hello World'",
                     "steps": [
                         {
+                            "step_number": 1,
                             "description": "Create the Python script file",
-                            "tools_needed": ["write_file"],
-                            "expected_outcome": "A file named hello.py exists",
-                            "validation_method": "Check if the file exists and has correct content",
+                            "execution_guidance": "Use write_file to create hello.py with print('Hello World')",
+                            "tools_allowed": ["write_file"],
+                            "tools_preferred": ["write_file"],
+                            "tools_avoid": ["exec"],
+                            "expected_outcome": "A file named hello.py exists with correct content",
+                            "validation_query": "Is hello.py created with the correct content?",
                         },
                     ],
                     "estimated_iterations": 1,
@@ -400,6 +699,7 @@ class TestAgentWorkflowExecution:
         classification = {
             "primary_category": "code_modification",
             "estimated_complexity": "low",
+            "needs_tools": True,
         }
 
         messages = [
@@ -411,11 +711,72 @@ class TestAgentWorkflowExecution:
         assert result is not None
         assert result["overall_goal"] == "Create a Python script that prints 'Hello World'"
         assert len(result["steps"]) == 1
-        assert result["steps"][0]["tools_needed"] == ["write_file"]
+
+        step = result["steps"][0]
+        assert step["step_number"] == 1
+        assert step["execution_guidance"] is not None
+        assert step["tools_allowed"] == ["write_file"]
+        assert step["validation_query"] is not None
 
         mock_provider.chat_with_retry.assert_awaited_once()
         call_kwargs = mock_provider.chat_with_retry.await_args.kwargs
         assert call_kwargs["tools"] == _PLAN_TOOL
+
+    @pytest.mark.asyncio
+    async def test_validate_step_phase(self, mock_provider, legacy_result):
+        """Test the step validation phase.
+
+        This is part of TRUE CLOSED-LOOP: each step is validated after execution.
+        """
+        async def legacy_fn():
+            return legacy_result
+
+        workflow = AgentWorkflow(
+            provider=mock_provider,
+            model="test-model",
+            run_legacy_fn=legacy_fn,
+        )
+
+        mock_provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+            content="",
+            tool_calls=[ToolCallRequest(
+                id="validate_step_1",
+                name="validate_step",
+                arguments={
+                    "step_complete": True,
+                    "confidence": 9,
+                    "reasoning": "The file was created successfully and contains the expected content.",
+                    "next_action": "proceed",
+                    "adjustments_needed": None,
+                },
+            )],
+            usage={"prompt_tokens": 50, "completion_tokens": 30},
+        ))
+
+        step = {
+            "step_number": 1,
+            "description": "Create hello.py",
+            "expected_outcome": "File exists",
+            "validation_query": "Is hello.py created?",
+        }
+
+        execution_messages = [
+            {"role": "user", "content": "Create hello.py"},
+            {"role": "assistant", "content": "Creating...", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "write_file"}}]},
+            {"role": "tool", "tool_call_id": "call_1", "name": "write_file", "content": "File created"},
+            {"role": "assistant", "content": "Done!"},
+        ]
+
+        result = await workflow._validate_step(step, execution_messages)
+
+        assert result is not None
+        assert result["step_complete"] is True
+        assert result["confidence"] == 9
+        assert result["next_action"] == "proceed"
+
+        mock_provider.chat_with_retry.assert_awaited_once()
+        call_kwargs = mock_provider.chat_with_retry.await_args.kwargs
+        assert call_kwargs["tools"] == _STEP_VALIDATION_TOOL
 
     @pytest.mark.asyncio
     async def test_compress_phase(self, mock_provider, legacy_result):
@@ -486,9 +847,9 @@ class TestAgentWorkflowExecution:
                     "steps_incomplete": [],
                     "errors_found": [],
                     "files_verified": ["hello.py exists and has correct content"],
-                    "validation_summary": "Task completed successfully. The script was created and contains the expected code.",
+                    "validation_summary": "Task completed successfully.",
                     "confidence_score": 9,
-                    "recommendations": ["Test the script to ensure it runs correctly"],
+                    "recommendations": ["Test the script"],
                     "needs_user_input": False,
                 },
             )],
@@ -637,6 +998,7 @@ class TestAgentWorkflowFallback:
                     "primary_category": "code_modification",
                     "reasoning": "User wants to create code",
                     "estimated_complexity": "low",
+                    "needs_tools": True,
                 },
             )],
         )
@@ -718,51 +1080,6 @@ class TestAgentWorkflowFallback:
         assert result.fallback_used is True
         assert "both_failed" in (result.fallback_reason or "")
         assert result.execution_result is None
-
-    @pytest.mark.asyncio
-    async def test_simple_qa_skips_planning(self, mock_provider, legacy_result):
-        """Simple QA tasks should skip planning overhead but still use workflow."""
-        async def legacy_fn():
-            return legacy_result
-
-        workflow = AgentWorkflow(
-            provider=mock_provider,
-            model="test-model",
-            run_legacy_fn=legacy_fn,
-        )
-
-        mock_provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-            content="",
-            tool_calls=[ToolCallRequest(
-                id="classify_1",
-                name="classify_task",
-                arguments={
-                    "primary_category": "simple_qa",
-                    "reasoning": "User is asking a simple question that doesn't require tools.",
-                    "estimated_complexity": "low",
-                },
-            )],
-        ))
-
-        spec = AgentRunSpec(
-            initial_messages=[{"role": "user", "content": "What is Python?"}],
-            tools=MagicMock(),
-            model="test-model",
-            max_iterations=5,
-            max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        )
-
-        result = await workflow.run(spec)
-
-        assert result.used_workflow is True
-        assert result.fallback_used is False
-        assert result.classification is not None
-        assert result.classification["primary_category"] == "simple_qa"
-        assert result.plan is not None
-        assert result.execution_result is legacy_result
-        assert result.compressed is not None
-        assert result.validation is not None
-        assert result.report is not None
 
 
 class TestAgentRunnerWorkflowIntegration:

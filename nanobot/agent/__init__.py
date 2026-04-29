@@ -8,6 +8,8 @@ from nanobot.agent.skills import SkillsLoader
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.workflow import (
     AgentWorkflow,
+    RestrictedToolRegistry,
+    StepExecutionResult,
     WorkflowResult,
     is_workflow_enabled,
 )
@@ -21,7 +23,9 @@ __all__ = [
     "ContextBuilder",
     "Dream",
     "MemoryStore",
+    "RestrictedToolRegistry",
     "SkillsLoader",
+    "StepExecutionResult",
     "SubagentManager",
     "WorkflowResult",
     "is_workflow_enabled",
