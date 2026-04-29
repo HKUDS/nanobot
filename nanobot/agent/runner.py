@@ -271,6 +271,14 @@ class AgentRunner:
                     messages_for_model = messages
             context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
+            if context.cancel:
+                logger.warning(
+                    "Hook cancelled iteration {}: {}", iteration, context.cancel_reason
+                )
+                stop_reason = "hook_cancelled"
+                context.stop_reason = stop_reason
+                await hook.after_iteration(context)
+                break
             response = await self._request_model(spec, messages_for_model, hook, context)
             raw_usage = self._usage_dict(response.usage)
             context.response = response
@@ -308,7 +316,16 @@ class AgentRunner:
                 )
 
                 await hook.before_execute_tools(context)
-
+                if context.cancel:
+                    logger.warning(
+                        "Hook cancelled tool execution on iteration {}: {}",
+                        iteration,
+                        context.cancel_reason,
+                    )
+                    stop_reason = "hook_cancelled"
+                    context.stop_reason = stop_reason
+                    await hook.after_iteration(context)
+                    break
                 results, new_events, fatal_error = await self._execute_tools(
                     spec,
                     tool_calls,

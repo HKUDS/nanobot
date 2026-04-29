@@ -111,6 +111,10 @@ class _LoopHook(AgentHook):
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         self._loop._current_iteration = context.iteration
+        result = await self._emit("agent.before_iteration", context)
+        if result.action == "cancel":
+            context.cancel = True
+            context.cancel_reason = result.reason
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if self._on_progress:
@@ -138,6 +142,10 @@ class _LoopHook(AgentHook):
             self._metadata,
             session_key=self._session_key,
         )
+        result = await self._emit("agent.before_execute_tools", context)
+        if result.action == "cancel":
+            context.cancel = True
+            context.cancel_reason = result.reason
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         if (
@@ -161,9 +169,26 @@ class _LoopHook(AgentHook):
             u.get("completion_tokens", 0),
             u.get("cached_tokens", 0),
         )
+        await self._emit("agent.after_iteration", context)
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         return self._loop._strip_think(content)
+
+    async def _emit(self, point: str, context: AgentHookContext):
+        from nanobot.hooks.context import HookContext
+
+        hook_ctx = HookContext(data={
+            "iteration": context.iteration,
+            "channel": self._channel,
+            "chat_id": self._chat_id,
+            "session_key": self._session_key,
+            "tool_calls": [
+                {"name": tc.name, "arguments": tc.arguments}
+                for tc in context.tool_calls
+            ],
+            "usage": context.usage or {},
+        })
+        return await self._loop._hook_center.emit(point, hook_ctx)
 
 
 class AgentLoop:
@@ -306,6 +331,32 @@ class AgentLoop:
         self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+        self._init_hook_center()
+
+    def _init_hook_center(self) -> None:
+        """Initialize the global HookCenter and discover external plugins."""
+        from nanobot.hooks.center import get_center
+        from nanobot.hooks.discovery import register_discovered
+
+        self._hook_center = get_center()
+        self._hook_center.register_point(
+            "agent.before_iteration", "Before each agent iteration"
+        )
+        self._hook_center.register_point(
+            "agent.after_iteration", "After each agent iteration"
+        )
+        self._hook_center.register_point(
+            "agent.before_execute_tools", "Before executing tool calls"
+        )
+        self._hook_center.register_point(
+            "agent.on_stream_end", "After streaming ends"
+        )
+        try:
+            n = register_discovered(self._hook_center)
+            if n:
+                logger.info("Loaded {} external hook plugin(s)", n)
+        except Exception:
+            logger.exception("Failed to load hook plugins")
 
     def _apply_provider_snapshot(self, snapshot: ProviderSnapshot) -> None:
         """Swap model/provider for future turns without disturbing an active one."""
