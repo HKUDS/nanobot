@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
+
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -16,16 +17,21 @@ if TYPE_CHECKING:
 class AutoCompact:
     _RECENT_SUFFIX_MESSAGES = 8
 
-    def __init__(self, sessions: SessionManager, consolidator: Consolidator,
-                 session_ttl_minutes: int = 0):
+    def __init__(
+        self,
+        sessions: SessionManager,
+        consolidator: Consolidator,
+        session_ttl_minutes: int = 0,
+        session_cleanup_seconds: float = 0,
+    ):
         self.sessions = sessions
         self.consolidator = consolidator
         self._ttl = session_ttl_minutes
+        self._cleanup_seconds = session_cleanup_seconds
         self._archiving: set[str] = set()
         self._summaries: dict[str, tuple[str, datetime]] = {}
 
-    def _is_expired(self, ts: datetime | str | None,
-                    now: datetime | None = None) -> bool:
+    def _is_expired(self, ts: datetime | str | None, now: datetime | None = None) -> bool:
         if self._ttl <= 0 or not ts:
             return False
         if isinstance(ts, str):
@@ -38,10 +44,11 @@ class AutoCompact:
         return f"Inactive for {idle_min} minutes.\nPrevious conversation summary: {text}"
 
     def _split_unconsolidated(
-        self, session: Session,
+        self,
+        session: Session,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Split live session tail into archiveable prefix and retained recent suffix."""
-        tail = list(session.messages[session.last_consolidated:])
+        tail = list(session.messages[session.last_consolidated :])
         if not tail:
             return [], []
 
@@ -58,8 +65,11 @@ class AutoCompact:
         cut = len(tail) - len(kept)
         return tail[:cut], kept
 
-    def check_expired(self, schedule_background: Callable[[Coroutine], None],
-                      active_session_keys: Collection[str] = ()) -> None:
+    def check_expired(
+        self,
+        schedule_background: Callable[[Coroutine], None],
+        active_session_keys: Collection[str] = (),
+    ) -> None:
         """Schedule archival for idle sessions, skipping those with in-flight agent tasks."""
         now = datetime.now()
         for info in self.sessions.list_sessions():
@@ -88,7 +98,10 @@ class AutoCompact:
                 summary = await self.consolidator.archive(archive_msgs) or ""
             if summary and summary != "(nothing)":
                 self._summaries[key] = (summary, last_active)
-                session.metadata["_last_summary"] = {"text": summary, "last_active": last_active.isoformat()}
+                session.metadata["_last_summary"] = {
+                    "text": summary,
+                    "last_active": last_active.isoformat(),
+                }
             session.messages = kept_msgs
             session.last_consolidated = 0
             session.updated_at = datetime.now()
@@ -106,9 +119,43 @@ class AutoCompact:
         finally:
             self._archiving.discard(key)
 
+    def _is_cleanup_expired(self, ts: datetime | str | None, now: datetime | None = None) -> bool:
+        if self._cleanup_seconds <= 0 or not ts:
+            return False
+        if isinstance(ts, str):
+            ts = datetime.fromisoformat(ts)
+        return ((now or datetime.now()) - ts).total_seconds() >= self._cleanup_seconds
+
+    def cleanup_expired(self, active_session_keys: Collection[str] = ()) -> int:
+        """Delete sessions idle longer than the configured cleanup threshold.
+
+        Skips sessions with in-flight agent tasks or pending archival.
+        Returns the number of sessions deleted.
+        """
+        if self._cleanup_seconds <= 0:
+            return 0
+        now = datetime.now()
+        deleted = 0
+        for info in self.sessions.list_sessions():
+            key = info.get("key", "")
+            if not key or key in self._archiving or key in active_session_keys:
+                continue
+            if self._is_cleanup_expired(info.get("updated_at"), now):
+                if self.sessions.delete_session(key):
+                    deleted += 1
+                    idle_h = int(self._cleanup_seconds / 3600)
+                    logger.info(
+                        "Session cleanup: deleted {} (idle >= {}h)",
+                        key,
+                        idle_h,
+                    )
+        return deleted
+
     def prepare_session(self, session: Session, key: str) -> tuple[Session, str | None]:
         if key in self._archiving or self._is_expired(session.updated_at):
-            logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
+            logger.info(
+                "Auto-compact: reloading session {} (archiving={})", key, key in self._archiving
+            )
             session = self.sessions.get_or_create(key)
         # Hot path: summary from in-memory dict (process hasn't restarted).
         # Also clean metadata copy so stale _last_summary never leaks to disk.
@@ -119,5 +166,7 @@ class AutoCompact:
         if "_last_summary" in session.metadata:
             meta = session.metadata.pop("_last_summary")
             self.sessions.save(session)
-            return session, self._format_summary(meta["text"], datetime.fromisoformat(meta["last_active"]))
+            return session, self._format_summary(
+                meta["text"], datetime.fromisoformat(meta["last_active"])
+            )
         return session, None

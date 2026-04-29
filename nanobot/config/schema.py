@@ -1,13 +1,37 @@
 """Configuration schema using Pydantic."""
 
+import re
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
 from nanobot.cron.types import CronSchedule
+
+_DURATION_RE = re.compile(r"^(\d+)\s*(m|min|minutes?|h|hours?|d|days?)$", re.IGNORECASE)
+_DURATION_MULTIPLIERS: dict[str, float] = {
+    "m": 60, "min": 60, "minute": 60, "minutes": 60,
+    "h": 3600, "hour": 3600, "hours": 3600,
+    "d": 86400, "day": 86400, "days": 86400,
+}
+
+
+def parse_duration(value: str) -> float:
+    """Parse a duration string like ``'15d'``, ``'24h'``, ``'30m'`` into seconds."""
+    value = value.strip()
+    if not value or value == "0":
+        return 0
+    match = _DURATION_RE.match(value)
+    if not match:
+        raise ValueError(
+            f"Invalid duration '{value}'. Use a number followed by a unit: "
+            "m/min/minutes, h/hour/hours, d/day/days (e.g. '15d', '24h', '30m')"
+        )
+    amount = float(match.group(1))
+    unit = match.group(2).lower()
+    return amount * _DURATION_MULTIPLIERS[unit]
 
 
 class Base(BaseModel):
@@ -90,6 +114,11 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("idleCompactAfterMinutes", "sessionTtlMinutes"),
         serialization_alias="idleCompactAfterMinutes",
     )  # Auto-compact idle threshold in minutes (0 = disabled)
+    session_cleanup: str = Field(
+        default="0",
+        validation_alias=AliasChoices("sessionCleanup", "sessionCleanupHours"),
+        serialization_alias="sessionCleanup",
+    )  # Auto-delete idle sessions after this duration (e.g. '15d', '24h', '30m'; '0' = disabled)
     consolidation_ratio: float = Field(
         default=0.5,
         ge=0.1,
@@ -98,6 +127,11 @@ class AgentDefaults(Base):
         serialization_alias="consolidationRatio",
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
+
+    @property
+    def session_cleanup_seconds(self) -> float:
+        """Return the cleanup threshold in seconds (0 = disabled)."""
+        return parse_duration(self.session_cleanup)
 
 
 class AgentsConfig(Base):

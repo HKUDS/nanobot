@@ -760,6 +760,37 @@ How it works:
 >
 > This differs from the **token-driven soft consolidation** that fires when a prompt exceeds the context budget: that path only advances an internal `last_consolidated` cursor and leaves the session file untouched, so the raw tool-call trail stays on disk and can still be replayed or audited. If you rely on that trail for debugging or auditing, leave `idleCompactAfterMinutes` at the default `0` and let only the token-driven path run.
 
+## Session Cleanup
+
+While auto-compact **compresses** idle sessions, they remain on disk indefinitely. Session cleanup **deletes** sessions that have been idle beyond a configurable threshold, freeing disk space and removing stale conversation files.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "sessionCleanup": "15d"
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.sessionCleanup` | `"0"` (disabled) | Duration after which idle sessions are automatically deleted. Accepts a number followed by a unit: `m`/`min`/`minutes`, `h`/`hours`, `d`/`days` (e.g. `"15d"`, `"24h"`, `"30m"`). Set to `"0"` to disable. |
+
+`sessionCleanupHours` remains accepted as a legacy alias for backward compatibility, but `sessionCleanup` is the preferred config key.
+
+How it works:
+1. **Scheduled check**: A system cron job runs every 15 days to scan all sessions.
+2. **Expiry detection**: Compares each session's `updated_at` timestamp against the configured threshold.
+3. **Safe deletion**: Skips sessions with active agent tasks or pending archival. Deletes the session file and removes it from the in-memory cache.
+4. **Logging**: Each deletion is logged with the session key and configured idle threshold.
+
+> [!NOTE]
+> Session cleanup is **destructive** — deleted sessions cannot be recovered. If you want to preserve conversation history, consider enabling `idleCompactAfterMinutes` instead (or in addition), which compresses sessions without deleting them.
+>
+> Both features can coexist: auto-compact handles short-term idle compression (e.g. 15 minutes), while session cleanup handles long-term removal (e.g. 15 days).
+
 ## Timezone
 
 Time is context. Context should be precise.

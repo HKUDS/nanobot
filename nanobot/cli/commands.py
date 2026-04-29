@@ -597,6 +597,7 @@ def serve(
         unified_session=runtime_config.agents.defaults.unified_session,
         disabled_skills=runtime_config.agents.defaults.disabled_skills,
         session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
+        session_cleanup_seconds=runtime_config.agents.defaults.session_cleanup_seconds,
         consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
         tools_config=runtime_config.tools,
     )
@@ -704,6 +705,7 @@ def _run_gateway(
         unified_session=config.agents.defaults.unified_session,
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        session_cleanup_seconds=config.agents.defaults.session_cleanup_seconds,
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         tools_config=config.tools,
     )
@@ -758,6 +760,15 @@ def _run_gateway(
                 logger.info("Dream cron job completed")
             except Exception:
                 logger.exception("Dream cron job failed")
+            return None
+
+        # Session cleanup is an internal job — delete idle sessions.
+        if job.name == "session_cleanup":
+            try:
+                deleted = agent.auto_compact.cleanup_expired()
+                logger.info("Session cleanup cron job completed (deleted={})", deleted)
+            except Exception:
+                logger.exception("Session cleanup cron job failed")
             return None
 
         from nanobot.utils.evaluator import evaluate_response
@@ -959,6 +970,24 @@ def _run_gateway(
     ))
     console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
 
+    # Register session cleanup system job (only when enabled)
+    cleanup_seconds = config.agents.defaults.session_cleanup_seconds
+    if cleanup_seconds > 0:
+        from nanobot.cron.types import CronSchedule
+
+        cron.register_system_job(
+            CronJob(
+                id="session-cleanup",
+                name="session_cleanup",
+                schedule=CronSchedule(kind="every", every_ms=15 * 24 * 3600 * 1000),
+                payload=CronPayload(kind="system_event"),
+            )
+        )
+        console.print(
+            "[green]✓[/green] Session cleanup: every 15d "
+            f"(idle threshold={config.agents.defaults.session_cleanup})"
+        )
+
     async def _open_browser_when_ready() -> None:
         """Wait for the gateway to bind, then point the user's browser at the webui."""
         if not open_browser_url:
@@ -1079,6 +1108,7 @@ def agent(
         unified_session=config.agents.defaults.unified_session,
         disabled_skills=config.agents.defaults.disabled_skills,
         session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        session_cleanup_seconds=config.agents.defaults.session_cleanup_seconds,
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         tools_config=config.tools,
     )
