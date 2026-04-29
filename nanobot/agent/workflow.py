@@ -1067,12 +1067,13 @@ class AgentWorkflow:
             initial_messages=step_messages,
             tools=restricted_tools,
             max_iterations=min(step_max_iterations, 3),
+            hook=hook,
         )
 
         runner = AgentRunner(self.provider)
 
         try:
-            result: AgentRunResult = await runner._run_legacy(step_spec, hook)
+            result: AgentRunResult = await runner._run_legacy(step_spec)
 
             validation = None
             if result.stop_reason != "error":
