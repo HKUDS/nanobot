@@ -234,12 +234,31 @@ class MyToolConfig(Base):
     allow_set: bool = False  # let `my` modify loop state (read-only if False)
 
 
+class ToolSecurityConfig(Base):
+    """Tool security guard configuration.
+
+    Provides lightweight permission checking and workspace protection.
+    All features are disabled by default for backward compatibility.
+    """
+
+    enabled: bool = False  # Enable security guard (default: False for backward compatibility)
+    block_sensitive_files: bool = True  # Block access to .env, private keys, tokens, etc.
+    block_system_dirs: bool = True  # Block access to system directories (/etc, /usr, C:\Windows, etc.)
+    block_path_traversal: bool = True  # Block path traversal attempts (.. in paths)
+    allowed_tools: list[str] | None = None  # If set, only these tools are allowed
+    denied_tools: list[str] | None = None  # Tools explicitly denied (takes precedence over allowed_tools)
+    additional_sensitive_patterns: list[str] | None = None  # Additional regex patterns for sensitive files
+    additional_blocked_paths: list[str] | None = None  # Additional paths to block
+    audit_enabled: bool = True  # Enable audit logging of security decisions
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     my: MyToolConfig = Field(default_factory=MyToolConfig)
+    security: ToolSecurityConfig = Field(default_factory=ToolSecurityConfig)
     restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)

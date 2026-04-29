@@ -1,8 +1,15 @@
 """Tool registry for dynamic tool management."""
 
+from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+from nanobot.security.tool_guard import (
+    AuditEntry,
+    SecurityConfig,
+    ToolSecurityGuard,
+    get_default_guard,
+)
 
 
 class ToolRegistry:
@@ -12,9 +19,17 @@ class ToolRegistry:
     Allows dynamic registration and execution of tools.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        security_guard: ToolSecurityGuard | None = None,
+        workspace: Path | None = None,
+    ):
         self._tools: dict[str, Tool] = {}
         self._cached_definitions: list[dict[str, Any]] | None = None
+        self._security_guard = security_guard or get_default_guard()
+        self._workspace = workspace
+        self._session_key: str | None = None
+        self._channel: str | None = None
 
     def register(self, tool: Tool) -> None:
         """Register a tool."""
@@ -70,6 +85,52 @@ class ToolRegistry:
         self._cached_definitions = builtins + mcp_tools
         return self._cached_definitions
 
+    def set_context(
+        self,
+        channel: str | None = None,
+        chat_id: str | None = None,
+        message_id: str | None = None,
+        metadata: dict | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        """Set context for security auditing.
+
+        This matches the signature used by other tools' set_context methods,
+        allowing it to be called from AgentLoop._set_tool_context.
+        """
+        if channel is not None:
+            self._channel = channel
+        if session_key is not None:
+            self._session_key = session_key
+
+    @property
+    def security_guard(self) -> ToolSecurityGuard:
+        """Get the security guard instance."""
+        return self._security_guard
+
+    @property
+    def workspace(self) -> Path | None:
+        """Get the workspace path."""
+        return self._workspace
+
+    def check_security(
+        self,
+        tool_name: str,
+        params: dict[str, Any],
+    ) -> tuple[bool, str | None, AuditEntry | None]:
+        """Check if a tool call is allowed by security policies.
+
+        Returns:
+            (allowed, error_message, audit_entry)
+        """
+        return self._security_guard.check_tool(
+            tool_name,
+            params,
+            workspace=self._workspace,
+            session_key=self._session_key,
+            channel=self._channel,
+        )
+
     def prepare_call(
         self,
         name: str,
@@ -95,6 +156,11 @@ class ToolRegistry:
             return tool, cast_params, (
                 f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
             )
+
+        allowed, security_error, _ = self.check_security(name, cast_params)
+        if not allowed and security_error:
+            return tool, cast_params, security_error
+
         return tool, cast_params, None
 
     async def execute(self, name: str, params: dict[str, Any]) -> Any:

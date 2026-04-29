@@ -41,6 +41,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.config.schema import AgentDefaults
+from nanobot.security.tool_guard import SecurityConfig, ToolSecurityGuard
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.manager import Session, SessionManager
@@ -246,7 +247,8 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
-        self.tools = ToolRegistry()
+        security_guard = self._create_security_guard(_tc)
+        self.tools = ToolRegistry(security_guard=security_guard, workspace=self.workspace)
         self.runner = AgentRunner(provider)
         self.subagents = SubagentManager(
             provider=provider,
@@ -258,6 +260,7 @@ class AgentLoop:
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
             disabled_skills=disabled_skills,
+            security_guard=security_guard,
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
@@ -409,6 +412,33 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
+    @staticmethod
+    def _create_security_guard(tools_config: Any) -> ToolSecurityGuard:
+        """Create a security guard from tools configuration.
+
+        Returns a ToolSecurityGuard instance configured based on the
+        tools.security configuration. If security is not enabled,
+        returns a guard with enabled=False for backward compatibility.
+        """
+        from nanobot.config.schema import ToolSecurityConfig
+
+        security_config = getattr(tools_config, "security", None)
+        if security_config is None:
+            security_config = ToolSecurityConfig()
+
+        guard_config = SecurityConfig(
+            enabled=security_config.enabled,
+            block_sensitive_files=security_config.block_sensitive_files,
+            block_system_dirs=security_config.block_system_dirs,
+            block_path_traversal=security_config.block_path_traversal,
+            allowed_tools=security_config.allowed_tools,
+            denied_tools=security_config.denied_tools,
+            additional_sensitive_patterns=security_config.additional_sensitive_patterns,
+            additional_blocked_paths=security_config.additional_blocked_paths,
+            audit_enabled=security_config.audit_enabled,
+        )
+        return ToolSecurityGuard(guard_config)
+
     def _set_tool_context(
         self, channel: str, chat_id: str,
         message_id: str | None = None, metadata: dict | None = None,
@@ -425,6 +455,14 @@ class AgentLoop:
             effective_key = UNIFIED_SESSION_KEY
         else:
             effective_key = f"{channel}:{chat_id}"
+        
+        self.tools.set_context(
+            channel=channel,
+            chat_id=chat_id,
+            message_id=message_id,
+            metadata=metadata,
+            session_key=effective_key,
+        )
         for name in ("message", "spawn", "cron", "my"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
