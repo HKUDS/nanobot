@@ -1,10 +1,13 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import json
 import os
 import select
 import signal
+import subprocess
 import sys
+import time
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
@@ -65,6 +68,145 @@ app = typer.Typer(
 
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
+
+
+def _gateway_runtime_dir() -> Path:
+    return Path.home() / ".nanobot" / "runtime"
+
+
+def _gateway_pid_path() -> Path:
+    return _gateway_runtime_dir() / "gateway.pid"
+
+
+def _gateway_meta_path() -> Path:
+    return _gateway_runtime_dir() / "gateway.json"
+
+
+def _read_gateway_metadata() -> dict[str, Any] | None:
+    path = _gateway_meta_path()
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def _cleanup_gateway_runtime_files() -> None:
+    for path in (_gateway_pid_path(), _gateway_meta_path()):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except Exception:
+            logger.debug("Failed to remove gateway runtime file {}", path)
+
+
+def _is_pid_running(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _gateway_matches_current_process(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        if pid == os.getpid():
+            return True
+        cmdline = Path(f"/proc/{pid}/cmdline")
+        if cmdline.exists():
+            raw = cmdline.read_bytes().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+            return "nanobot" in raw and "gateway" in raw
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(["ps", "-p", str(pid), "-o", "command="], text=True, stderr=subprocess.DEVNULL)
+        return "nanobot" in out and "gateway" in out
+    except Exception:
+        return False
+
+
+def _record_gateway_runtime(pid: int, port: int, workspace: Path, config_path: str | None) -> None:
+    runtime_dir = _gateway_runtime_dir()
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    _gateway_pid_path().write_text(f"{pid}\n")
+    payload = {
+        "pid": pid,
+        "port": port,
+        "workspace": str(workspace),
+        "config": config_path,
+        "started_at": int(time.time()),
+    }
+    _gateway_meta_path().write_text(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _read_gateway_pid() -> int | None:
+    try:
+        return int(_gateway_pid_path().read_text().strip())
+    except Exception:
+        return None
+
+
+def _get_running_gateway_pid() -> int | None:
+    pid = _read_gateway_pid()
+    if pid and _is_pid_running(pid) and _gateway_matches_current_process(pid):
+        return pid
+    if pid and not _is_pid_running(pid):
+        _cleanup_gateway_runtime_files()
+        return None
+    meta = _read_gateway_metadata()
+    if meta:
+        meta_pid = int(meta.get("pid") or 0)
+        if _is_pid_running(meta_pid) and _gateway_matches_current_process(meta_pid):
+            return meta_pid
+    return None
+
+
+def _wait_for_gateway_stop(pid: int, timeout_s: float = 20.0) -> bool:
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if not _is_pid_running(pid):
+            return True
+        time.sleep(0.25)
+    return not _is_pid_running(pid)
+
+
+def _stop_gateway_process(force: bool = False) -> bool:
+    pid = _get_running_gateway_pid()
+    if not pid:
+        console.print("[yellow]Gateway is not running[/yellow]")
+        _cleanup_gateway_runtime_files()
+        return False
+    sig = signal.SIGKILL if force else signal.SIGTERM
+    try:
+        os.kill(pid, sig)
+    except ProcessLookupError:
+        _cleanup_gateway_runtime_files()
+        console.print("[yellow]Gateway was already stopped[/yellow]")
+        return True
+    except PermissionError as exc:
+        console.print(f"[red]Error: cannot stop PID {pid}: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    stopped = _wait_for_gateway_stop(pid, timeout_s=5.0 if force else 20.0)
+    if stopped:
+        _cleanup_gateway_runtime_files()
+        console.print(f"[green]✓[/green] Stopped gateway (PID {pid})")
+        return True
+
+    if not force:
+        console.print(f"[yellow]Gateway PID {pid} did not stop after SIGTERM[/yellow]")
+        return False
+
+    console.print(f"[red]Gateway PID {pid} is still running after SIGKILL[/red]")
+    raise typer.Exit(1)
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -576,18 +718,87 @@ def serve(
 
 @app.command()
 def gateway(
+    action: str = typer.Argument("run", help="Gateway action: run, start, stop, restart, status"),
     port: int | None = typer.Option(None, "--port", "-p", help="Gateway port"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    force: bool = typer.Option(False, "--force", help="Force stop with SIGKILL when supported"),
 ):
-    """Start the nanobot gateway."""
+    """Run or manage the nanobot gateway."""
     if verbose:
         import logging
 
         logging.basicConfig(level=logging.DEBUG)
+
+    action = action.lower()
+    valid_actions = {"run", "start", "stop", "restart", "status"}
+    if action not in valid_actions:
+        console.print(f"[red]Unknown gateway action: {action}[/red]  Supported: {', '.join(sorted(valid_actions))}")
+        raise typer.Exit(1)
+
+    if action == "stop":
+        _stop_gateway_process(force=force)
+        return
+
+    if action == "status":
+        pid = _get_running_gateway_pid()
+        if pid:
+            meta = _read_gateway_metadata() or {}
+            port_display = meta.get("port", "unknown")
+            workspace_display = meta.get("workspace", "unknown")
+            console.print(f"[green]Gateway running[/green] (PID {pid})")
+            console.print(f"  [cyan]Port[/cyan]: {port_display}")
+            console.print(f"  [cyan]Workspace[/cyan]: {workspace_display}")
+        else:
+            console.print("[yellow]Gateway is not running[/yellow]")
+        return
+
     cfg = _load_runtime_config(config, workspace)
-    _run_gateway(cfg, port=port)
+
+    if action == "restart":
+        pid = _get_running_gateway_pid()
+        if pid:
+            stopped = _stop_gateway_process(force=force)
+            if not stopped and not force:
+                console.print("[yellow]Tip:[/yellow] retry with [bold]nanobot gateway restart --force[/bold] if the process is stuck.")
+                raise typer.Exit(1)
+        action = "start"
+
+    if action == "start":
+        pid = _get_running_gateway_pid()
+        if pid:
+            console.print(f"[yellow]Gateway already running[/yellow] (PID {pid})")
+            return
+
+        cmd = [sys.executable, "-m", "nanobot.cli.commands", "gateway", "run"]
+        if port is not None:
+            cmd += ["--port", str(port)]
+        if workspace:
+            cmd += ["--workspace", workspace]
+        if config:
+            cmd += ["--config", config]
+        if verbose:
+            cmd += ["--verbose"]
+
+        creationflags = 0
+        popen_kwargs: dict[str, Any] = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "stdin": subprocess.DEVNULL,
+            "close_fds": True,
+            "start_new_session": os.name != "nt",
+        }
+        if os.name == "nt":
+            creationflags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            popen_kwargs["creationflags"] = creationflags
+
+        proc = subprocess.Popen(cmd, **popen_kwargs)
+        _record_gateway_runtime(proc.pid, port if port is not None else cfg.gateway.port, cfg.workspace_path, config)
+        console.print(f"[green]✓[/green] Started gateway in background (PID {proc.pid})")
+        return
+
+    _run_gateway(cfg, port=port, config_path=config)
 
 
 def _run_gateway(
@@ -595,6 +806,7 @@ def _run_gateway(
     *,
     port: int | None = None,
     open_browser_url: str | None = None,
+    config_path: str | None = None,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.loop import AgentLoop
@@ -609,6 +821,11 @@ def _run_gateway(
     from nanobot.session.manager import SessionManager
 
     port = port if port is not None else config.gateway.port
+
+    existing_pid = _get_running_gateway_pid()
+    if existing_pid:
+        console.print(f"[red]Error: gateway already running (PID {existing_pid})[/red]")
+        raise typer.Exit(1)
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
@@ -981,7 +1198,11 @@ def _run_gateway(
             if flushed:
                 logger.info("Shutdown: flushed {} session(s) to disk", flushed)
 
-    asyncio.run(run())
+    _record_gateway_runtime(os.getpid(), port, config.workspace_path, config_path)
+    try:
+        asyncio.run(run())
+    finally:
+        _cleanup_gateway_runtime_files()
 
 
 # ============================================================================
