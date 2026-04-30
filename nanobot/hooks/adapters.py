@@ -65,7 +65,9 @@ def adapt_agent_hook(
     if _is_overridden(agent_hook, "before_iteration"):
 
         async def _bi_wrapper(event: BeforeIteration) -> HookResult:
-            ctx = AgentHookContext(iteration=event.iteration, messages=event.messages)
+            ctx = getattr(session, "context", None)
+            if ctx is None:
+                ctx = AgentHookContext(iteration=event.iteration, messages=event.messages)
             ctx_cell["ctx"] = ctx
             await agent_hook.before_iteration(ctx)
             return None
@@ -80,13 +82,15 @@ def adapt_agent_hook(
         async def _os_wrapper(event: OnStream) -> HookResult:
             ctx = ctx_cell["ctx"]
             if ctx is None:
-                ctx = AgentHookContext(iteration=event.iteration, messages=[])
+                ctx = getattr(session, "context", None)
+                if ctx is None:
+                    ctx = AgentHookContext(iteration=event.iteration, messages=[])
                 ctx_cell["ctx"] = ctx
             await agent_hook.on_stream(ctx, event.delta)
             return None
 
         center.register_internal(
-            session, OnStream, _os_wrapper, reraise=reraise, mode="observe"
+            session, OnStream, _os_wrapper, reraise=reraise, mode="observe", stream=False
         )
 
     # ── on_stream_end ─────────────────────────────────────────────
@@ -95,13 +99,15 @@ def adapt_agent_hook(
         async def _ose_wrapper(event: OnStreamEnd) -> HookResult:
             ctx = ctx_cell["ctx"]
             if ctx is None:
-                ctx = AgentHookContext(iteration=event.iteration, messages=[])
+                ctx = getattr(session, "context", None)
+                if ctx is None:
+                    ctx = AgentHookContext(iteration=event.iteration, messages=[])
                 ctx_cell["ctx"] = ctx
             await agent_hook.on_stream_end(ctx, resuming=event.resuming)
             return None
 
         center.register_internal(
-            session, OnStreamEnd, _ose_wrapper, reraise=reraise, mode="observe"
+            session, OnStreamEnd, _ose_wrapper, reraise=reraise, mode="observe", stream=False
         )
 
     # ── before_execute_tools ──────────────────────────────────────
@@ -110,7 +116,9 @@ def adapt_agent_hook(
         async def _bet_wrapper(event: BeforeExecuteTools) -> HookResult:
             ctx = ctx_cell["ctx"]
             if ctx is None:
-                ctx = AgentHookContext(iteration=event.iteration, messages=[])
+                ctx = getattr(session, "context", None)
+                if ctx is None:
+                    ctx = AgentHookContext(iteration=event.iteration, messages=[])
                 ctx_cell["ctx"] = ctx
             ctx.tool_calls = list(event.tool_calls)
             ctx.response = event.response
@@ -127,7 +135,9 @@ def adapt_agent_hook(
         async def _ai_wrapper(event: AfterIteration) -> HookResult:
             ctx = ctx_cell["ctx"]
             if ctx is None:
-                ctx = AgentHookContext(iteration=event.iteration, messages=[])
+                ctx = getattr(session, "context", None)
+                if ctx is None:
+                    ctx = AgentHookContext(iteration=event.iteration, messages=[])
             ctx.final_content = event.final_content
             ctx.stop_reason = event.stop_reason
             ctx.usage = dict(event.usage)
@@ -148,7 +158,9 @@ def adapt_agent_hook(
         def _fc_wrapper(content: str | None) -> str | None:
             ctx = ctx_cell["ctx"]
             if ctx is None:
-                ctx = AgentHookContext(iteration=0, messages=[])
+                ctx = getattr(session, "context", None)
+                if ctx is None:
+                    ctx = AgentHookContext(iteration=0, messages=[])
             return agent_hook.finalize_content(ctx, content)
 
         center.register_internal(

@@ -12,6 +12,8 @@ from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.hooks.adapters import adapt_agent_hook
+from nanobot.hooks.center import HookCenter
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -214,13 +216,18 @@ class SubagentManager:
                 {"role": "user", "content": task},
             ]
 
+            center = HookCenter()
+            hook_session = center.create_session()
+            subagent_hook = _SubagentHook(task_id, status)
+            adapt_agent_hook(subagent_hook, hook_session, center)
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=messages,
                 tools=tools,
                 model=self.model,
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
-                hook=_SubagentHook(task_id, status),
+                center=center,
+                session=hook_session,
                 max_iterations_message="Task completed but no final response was generated.",
                 error_message=None,
                 fail_on_tool_error=True,

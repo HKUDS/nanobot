@@ -27,6 +27,7 @@ class HookSession:
     )
     wants_streaming_handlers: set[HookHandler] = field(default_factory=set)
     finalize_handlers: list[tuple[HookHandler, bool]] = field(default_factory=list)
+    context: Any = field(default=None, init=False)
 
 
 class HookCenter:
@@ -60,12 +61,13 @@ class HookCenter:
         *,
         reraise: bool = False,
         mode: str = "observe",
+        stream: bool = True,
     ) -> None:
         if mode not in _VALID_MODES:
             raise ValueError(f"Unknown mode {mode!r}; expected one of {_VALID_MODES}")
         session.internal_handlers.setdefault(event_type, {"guard": [], "transform": [], "observe": []})
         session.internal_handlers[event_type][mode].append((handler, reraise))
-        if event_type in _STREAMING_EVENT_TYPES:
+        if stream and event_type in _STREAMING_EVENT_TYPES:
             session.wants_streaming_handlers.add(handler)
         if event_type is FinalizeContentEvent:
             session.finalize_handlers.append((handler, reraise))
@@ -183,7 +185,7 @@ class HookCenter:
             return result, result.data
         if isinstance(result, Deny):
             return result, content
-        return None, result if result is not None else content
+        return None, result
 
     # ------------------------------------------------------------------
     # lifecycle

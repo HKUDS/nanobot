@@ -14,6 +14,8 @@ from nanobot.config.schema import AgentDefaults
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMResponse, ToolCallRequest
+from nanobot.hooks.center import HookCenter, HookSession
+from nanobot.hooks.adapters import adapt_agent_hook
 
 _MAX_TOOL_RESULT_CHARS = AgentDefaults().max_tool_result_chars
 
@@ -150,13 +152,17 @@ async def test_runner_calls_hooks_in_order():
             return content.upper() if content else content
 
     runner = AgentRunner(provider)
+    center = HookCenter()
+    session = center.create_session()
+    adapt_agent_hook(RecordingHook(), session, center)
     result = await runner.run(AgentRunSpec(
         initial_messages=[],
         tools=tools,
         model="test-model",
         max_iterations=3,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        hook=RecordingHook(),
+        center=center,
+        session=session,
     ))
 
     assert result.final_content == "DONE"
@@ -207,13 +213,17 @@ async def test_runner_streaming_hook_receives_deltas_and_end_signal():
             endings.append(resuming)
 
     runner = AgentRunner(provider)
+    center = HookCenter()
+    session = center.create_session()
+    adapt_agent_hook(StreamingHook(), session, center)
     result = await runner.run(AgentRunSpec(
         initial_messages=[],
         tools=tools,
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        hook=StreamingHook(),
+        center=center,
+        session=session,
     ))
 
     assert result.final_content == "hello"
@@ -1525,13 +1535,17 @@ async def test_runner_passes_cached_tokens_to_hook_context():
     tools.get_definitions.return_value = []
 
     runner = AgentRunner(provider)
+    center = HookCenter()
+    session = center.create_session()
+    adapt_agent_hook(UsageHook(), session, center)
     await runner.run(AgentRunSpec(
         initial_messages=[],
         tools=tools,
         model="test-model",
         max_iterations=1,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        hook=UsageHook(),
+        center=center,
+        session=session,
     ))
 
     assert len(captured_usage) == 1
@@ -1614,13 +1628,17 @@ async def test_length_recovery_streaming_calls_on_stream_end_with_resuming():
     tools.get_definitions.return_value = []
 
     runner = AgentRunner(provider)
+    center = HookCenter()
+    session = center.create_session()
+    adapt_agent_hook(StreamHook(), session, center)
     await runner.run(AgentRunSpec(
         initial_messages=[{"role": "user", "content": "go"}],
         tools=tools,
         model="test-model",
         max_iterations=10,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        hook=StreamHook(),
+        center=center,
+        session=session,
     ))
 
     assert len(stream_end_calls) == 2
@@ -2372,13 +2390,17 @@ async def test_checkpoint2_injects_after_final_response_with_resuming_stream():
     )
 
     runner = AgentRunner(provider)
+    center = HookCenter()
+    session = center.create_session()
+    adapt_agent_hook(TrackingHook(), session, center)
     result = await runner.run(AgentRunSpec(
         initial_messages=[{"role": "user", "content": "hello"}],
         tools=tools,
         model="test-model",
         max_iterations=5,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        hook=TrackingHook(),
+        center=center,
+        session=session,
         injection_callback=inject_cb,
     ))
 
@@ -3072,6 +3094,9 @@ async def test_drain_injections_set_flag_when_followup_arrives_after_last_iterat
                 )
 
     runner = AgentRunner(provider)
+    center = HookCenter()
+    session = center.create_session()
+    adapt_agent_hook(InjectOnLastAfterIterationHook(), session, center)
     result = await runner.run(AgentRunSpec(
         initial_messages=[{"role": "user", "content": "hello"}],
         tools=tools,
@@ -3079,7 +3104,8 @@ async def test_drain_injections_set_flag_when_followup_arrives_after_last_iterat
         max_iterations=2,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
         injection_callback=inject_cb,
-        hook=InjectOnLastAfterIterationHook(),
+        center=center,
+        session=session,
     ))
 
     assert result.stop_reason == "max_iterations"

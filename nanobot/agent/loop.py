@@ -18,6 +18,8 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
 from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
+from nanobot.hooks.adapters import adapt_agent_hook_list
+from nanobot.hooks.center import HookCenter
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.ask import (
@@ -662,6 +664,9 @@ class AgentLoop:
 
             return items
 
+        center = self._hook_center
+        hook_session = center.create_session()
+        adapt_agent_hook_list([hook], hook_session, center)
         active_session_key = session.key if session else session_key
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
         try:
@@ -671,7 +676,8 @@ class AgentLoop:
                 model=self.model,
                 max_iterations=self.max_iterations,
                 max_tool_result_chars=self.max_tool_result_chars,
-                hook=hook,
+                center=center,
+                session=hook_session,
                 error_message="Sorry, I encountered an error calling the AI model.",
                 concurrent_tools=True,
                 workspace=self.workspace,

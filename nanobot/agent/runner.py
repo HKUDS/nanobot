@@ -12,7 +12,15 @@ from typing import Any
 
 from loguru import logger
 
-from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.hook import AgentHookContext
+from nanobot.hooks.center import HookCenter, HookSession
+from nanobot.hooks import (
+    AfterIteration,
+    BeforeExecuteTools,
+    BeforeIteration,
+    OnStream,
+    OnStreamEnd,
+)
 from nanobot.agent.tools.ask import AskUserInterrupt
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -65,7 +73,8 @@ class AgentRunSpec:
     temperature: float | None = None
     max_tokens: int | None = None
     reasoning_effort: str | None = None
-    hook: AgentHook | None = None
+    center: HookCenter | None = None
+    session: HookSession | None = None
     error_message: str | None = _DEFAULT_ERROR_MESSAGE
     max_iterations_message: str | None = None
     concurrent_tools: bool = False
@@ -232,7 +241,8 @@ class AgentRunner:
         return injected_messages
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
-        hook = spec.hook or AgentHook()
+        center = spec.center or HookCenter()
+        session = spec.session or center.create_session()
         messages = list(spec.initial_messages)
         final_content: str | None = None
         tools_used: list[str] = []
@@ -274,8 +284,9 @@ class AgentRunner:
                 except Exception:
                     messages_for_model = messages
             context = AgentHookContext(iteration=iteration, messages=messages)
-            await hook.before_iteration(context)
-            response = await self._request_model(spec, messages_for_model, hook, context)
+            session.context = context
+            await center.emit(BeforeIteration(iteration=iteration, messages=messages), session)
+            response = await self._request_model(spec, messages_for_model, center, session, context)
             raw_usage = self._usage_dict(response.usage)
             context.response = response
             context.usage = dict(raw_usage)
@@ -288,8 +299,8 @@ class AgentRunner:
                 if ask_index is not None:
                     tool_calls = tool_calls[: ask_index + 1]
                 context.tool_calls = list(tool_calls)
-                if hook.wants_streaming():
-                    await hook.on_stream_end(context, resuming=True)
+                if center.wants_streaming(session):
+                    await center.emit(OnStreamEnd(resuming=True, iteration=iteration), session)
 
                 assistant_message = build_assistant_message(
                     response.content or "",
@@ -311,7 +322,7 @@ class AgentRunner:
                     },
                 )
 
-                await hook.before_execute_tools(context)
+                await center.emit(BeforeExecuteTools(iteration=iteration, tool_calls=context.tool_calls, response=context.response), session)
 
                 results, new_events, fatal_error = await self._execute_tools(
                     spec,
@@ -345,9 +356,9 @@ class AgentRunner:
                         stop_reason = "ask_user"
                         context.final_content = final_content
                         context.stop_reason = stop_reason
-                        if hook.wants_streaming():
-                            await hook.on_stream_end(context, resuming=False)
-                        await hook.after_iteration(context)
+                        if center.wants_streaming(session):
+                            await center.emit(OnStreamEnd(resuming=False, iteration=iteration), session)
+                        await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
                         break
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     final_content = error
@@ -356,7 +367,7 @@ class AgentRunner:
                     context.final_content = final_content
                     context.error = error
                     context.stop_reason = stop_reason
-                    await hook.after_iteration(context)
+                    await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
                     should_continue, injection_cycles = await self._try_drain_injections(
                         spec, messages, None, injection_cycles,
                         phase="after tool error",
@@ -385,7 +396,7 @@ class AgentRunner:
                 )
                 if _drained:
                     had_injections = True
-                await hook.after_iteration(context)
+                await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
                 continue
 
             if response.has_tool_calls:
@@ -395,7 +406,7 @@ class AgentRunner:
                     spec.session_key or "default",
                 )
 
-            clean = hook.finalize_content(context, response.content)
+            clean = center.finalize_content(response.content, session)
             if response.finish_reason != "error" and is_blank_text(clean):
                 empty_content_retries += 1
                 if empty_content_retries < _MAX_EMPTY_RETRIES:
@@ -406,9 +417,9 @@ class AgentRunner:
                         empty_content_retries,
                         _MAX_EMPTY_RETRIES,
                     )
-                    if hook.wants_streaming():
-                        await hook.on_stream_end(context, resuming=False)
-                    await hook.after_iteration(context)
+                    if center.wants_streaming(session):
+                        await center.emit(OnStreamEnd(resuming=False, iteration=iteration), session)
+                    await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
                     continue
                 logger.warning(
                     "Empty response on turn {} for {} after {} retries; attempting finalization",
@@ -416,8 +427,8 @@ class AgentRunner:
                     spec.session_key or "default",
                     empty_content_retries,
                 )
-                if hook.wants_streaming():
-                    await hook.on_stream_end(context, resuming=False)
+                if center.wants_streaming(session):
+                    await center.emit(OnStreamEnd(resuming=False, iteration=iteration), session)
                 response = await self._request_finalization_retry(spec, messages_for_model)
                 retry_usage = self._usage_dict(response.usage)
                 self._accumulate_usage(usage, retry_usage)
@@ -425,7 +436,7 @@ class AgentRunner:
                 context.response = response
                 context.usage = dict(raw_usage)
                 context.tool_calls = list(response.tool_calls)
-                clean = hook.finalize_content(context, response.content)
+                clean = center.finalize_content(response.content, session)
 
             if response.finish_reason == "length" and not is_blank_text(clean):
                 length_recovery_count += 1
@@ -437,15 +448,15 @@ class AgentRunner:
                         length_recovery_count,
                         _MAX_LENGTH_RECOVERIES,
                     )
-                    if hook.wants_streaming():
-                        await hook.on_stream_end(context, resuming=True)
+                    if center.wants_streaming(session):
+                        await center.emit(OnStreamEnd(resuming=True, iteration=iteration), session)
                     messages.append(build_assistant_message(
                         clean,
                         reasoning_content=response.reasoning_content,
                         thinking_blocks=response.thinking_blocks,
                     ))
                     messages.append(build_length_recovery_message())
-                    await hook.after_iteration(context)
+                    await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
                     continue
 
             assistant_message: dict[str, Any] | None = None
@@ -467,11 +478,11 @@ class AgentRunner:
             if should_continue:
                 had_injections = True
 
-            if hook.wants_streaming():
-                await hook.on_stream_end(context, resuming=should_continue)
+            if center.wants_streaming(session):
+                await center.emit(OnStreamEnd(resuming=should_continue, iteration=iteration), session)
 
             if should_continue:
-                await hook.after_iteration(context)
+                await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
                 continue
 
             if response.finish_reason == "error":
@@ -482,7 +493,7 @@ class AgentRunner:
                 context.final_content = final_content
                 context.error = error
                 context.stop_reason = stop_reason
-                await hook.after_iteration(context)
+                await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
                 should_continue, injection_cycles = await self._try_drain_injections(
                     spec, messages, None, injection_cycles,
                     phase="after LLM error",
@@ -499,7 +510,7 @@ class AgentRunner:
                 context.final_content = final_content
                 context.error = error
                 context.stop_reason = stop_reason
-                await hook.after_iteration(context)
+                await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
                 should_continue, injection_cycles = await self._try_drain_injections(
                     spec, messages, None, injection_cycles,
                     phase="after empty response",
@@ -528,7 +539,7 @@ class AgentRunner:
             final_content = clean
             context.final_content = final_content
             context.stop_reason = stop_reason
-            await hook.after_iteration(context)
+            await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
             break
         else:
             stop_reason = "max_iterations"
@@ -592,7 +603,8 @@ class AgentRunner:
         self,
         spec: AgentRunSpec,
         messages: list[dict[str, Any]],
-        hook: AgentHook,
+        center: HookCenter,
+        session: HookSession,
         context: AgentHookContext,
     ):
         timeout_s: float | None = spec.llm_timeout_s
@@ -613,7 +625,7 @@ class AgentRunner:
             messages,
             tools=spec.tools.get_definitions(),
         )
-        wants_streaming = hook.wants_streaming()
+        wants_streaming = center.wants_streaming(session)
         wants_progress_streaming = (
             not wants_streaming
             and spec.stream_progress_deltas
@@ -625,7 +637,7 @@ class AgentRunner:
             async def _stream(delta: str) -> None:
                 if delta:
                     context.streamed_content = True
-                await hook.on_stream(context, delta)
+                await center.emit(OnStream(delta=delta, iteration=context.iteration), session)
 
             coro = self.provider.chat_stream_with_retry(
                 **kwargs,
