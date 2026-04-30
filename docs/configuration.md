@@ -69,6 +69,7 @@ IMAP_PASSWORD=your-password-here
 | `minimax` | LLM (MiniMax direct) | [platform.minimaxi.com](https://platform.minimaxi.com) |
 | `minimax_anthropic` | LLM (MiniMax Anthropic-compatible endpoint, thinking mode) | [platform.minimaxi.com](https://platform.minimaxi.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
+| `manifest` | LLM (open-source router, smart routing to cut costs) | [manifest.build](https://manifest.build) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
 | `siliconflow` | LLM (SiliconFlow/硅基流动) | [siliconflow.cn](https://siliconflow.cn) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
@@ -158,6 +159,33 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
+
+<details>
+<summary><b>Manifest (local / Any OpenAI-compatible API / Any Anthropic-compatible API / OpenAI-compatible)</b></summary>
+
+[Manifest](https://manifest.build) is an open-source LLM router that cuts inference costs through smart routing across 16+ providers. You get full control over which model handles each request. Route by complexity tier, task-specificity (coding, web browsing, etc.) and custom tiers. API keys start with `mnfst_`.
+
+**1. Get an API key** at [manifest.build](https://manifest.build) or self-host with Docker.
+
+**2. Add to config** (partial — merge into `~/.nanobot/config.json`):
+```json
+{
+  "providers": {
+    "manifest": {
+      "apiKey": "${MANIFEST_API_KEY}"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "auto"
+    }
+  }
+}
+```
+
+> Self-hosted users: set `"apiBase": "http://localhost:2099/v1"` in the manifest provider config.
 
 </details>
 
