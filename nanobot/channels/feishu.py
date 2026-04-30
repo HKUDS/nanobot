@@ -1174,6 +1174,17 @@ class FeishuChannel(BaseChannel):
         """Return whether a group reply should create a Feishu thread/topic."""
         return metadata.get("chat_type", "group") == "group" and self.config.reply_to_message
 
+    def _thread_reply_target(self, metadata: dict[str, Any]) -> str | None:
+        """Return the message_id that should receive a Reply API response."""
+        if metadata.get("chat_type", "group") != "group":
+            return None
+        message_id = metadata.get("message_id")
+        if not message_id:
+            return None
+        if metadata.get("thread_id") or self.config.reply_to_message:
+            return message_id
+        return None
+
     def _send_message_sync(
         self, receive_id_type: str, receive_id: str, msg_type: str, content: str
     ) -> str | None:
@@ -1415,15 +1426,14 @@ class FeishuChannel(BaseChannel):
                     {"config": {"wide_screen_mode": True}, "elements": chunk},
                     ensure_ascii=False,
                 )
-                # Fallback: only create a group thread/topic when reply-to-message
-                # is enabled. Otherwise use the plain create-message API.
-                _f_msg = meta.get("message_id")
-                fallback_msg_id = _f_msg if self._should_use_reply_in_thread(meta) else None
+                # Fallback replies stay in existing topics, but only create a
+                # new topic when reply-to-message is enabled.
+                fallback_msg_id = self._thread_reply_target(meta)
                 if fallback_msg_id:
                     await loop.run_in_executor(
                         None, lambda: self._reply_message_sync(
                             fallback_msg_id, "interactive", card,
-                            reply_in_thread=True,
+                            reply_in_thread=self._should_use_reply_in_thread(meta),
                         ),
                     )
                 else:
@@ -1443,10 +1453,10 @@ class FeishuChannel(BaseChannel):
 
         now = time.monotonic()
         if buf.card_id is None:
-            # Send the streaming card as a group thread/topic reply only when
-            # reply-to-message is enabled.
+            # Use the Reply API for existing topics, and only create new topics
+            # when reply-to-message is enabled.
             use_reply_in_thread = self._should_use_reply_in_thread(meta)
-            reply_msg_id = meta.get("message_id") if use_reply_in_thread else None
+            reply_msg_id = self._thread_reply_target(meta)
             card_id = await loop.run_in_executor(
                 None,
                 lambda: self._create_streaming_card_sync(
@@ -1497,20 +1507,20 @@ class FeishuChannel(BaseChannel):
                     )
                     return
                 # No active streaming card — send as a regular interactive card
-                # with the same 🔧 prefix style. Only create a group thread/topic
-                # when reply-to-message is enabled.
+                # with the same 🔧 prefix style. Existing topics stay threaded;
+                # new topics are created only when reply-to-message is enabled.
                 card = json.dumps(
                     {"config": {"wide_screen_mode": True}, "elements": [
                         {"tag": "markdown", "content": self._format_tool_hint_delta(hint)},
                     ]},
                     ensure_ascii=False,
                 )
-                _th_msg_id = msg.metadata.get("message_id")
-                if _th_msg_id and self._should_use_reply_in_thread(msg.metadata):
+                _th_msg_id = self._thread_reply_target(msg.metadata)
+                if _th_msg_id:
                     await loop.run_in_executor(
                         None, lambda: self._reply_message_sync(
                             _th_msg_id, "interactive", card,
-                            reply_in_thread=True,
+                            reply_in_thread=self._should_use_reply_in_thread(msg.metadata),
                         ),
                     )
                 else:
