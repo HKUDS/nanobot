@@ -8,6 +8,7 @@ Provides:
 - AgentHook compatibility adapter
 """
 
+from nanobot.hooks.center import HookCenter, HookSession
 from nanobot.hooks.event_types import (
     AfterIteration,
     BeforeExecuteTools,
@@ -24,8 +25,10 @@ __all__ = [
     "BeforeIteration",
     "Deny",
     "FinalizeContent",
+    "HookCenter",
     "HookHandler",
     "HookResult",
+    "HookSession",
     "Modified",
     "OnStream",
     "OnStreamEnd",
