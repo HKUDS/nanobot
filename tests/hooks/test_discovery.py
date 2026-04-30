@@ -5,8 +5,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-import pytest
-
 from nanobot.hooks.center import HookCenter
 from nanobot.hooks.discovery import discover_hook_plugins, register_discovered
 from nanobot.hooks.event_types import (
