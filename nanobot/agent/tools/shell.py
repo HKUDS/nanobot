@@ -62,13 +62,13 @@ class ExecTool(Tool):
             r"\b(shutdown|reboot|poweroff)\b",  # system power
             r":\(\)\s*\{.*\};\s*:",          # fork bomb
             # Block writes to nanobot internal state files (#2989).
-            # history.jsonl / .dream_cursor are managed by append_history();
-            # direct writes corrupt the cursor format and crash /dream.
-            r">>?\s*\S*(?:history\.jsonl|\.dream_cursor)",            # > / >> redirect
-            r"\btee\b[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",     # tee / tee -a
-            r"\b(?:cp|mv)\b(?:\s+[^\s|;&<>]+)+\s+\S*(?:history\.jsonl|\.dream_cursor)",  # cp/mv target
-            r"\bdd\b[^|;&<>]*\bof=\S*(?:history\.jsonl|\.dream_cursor)",  # dd of=
-            r"\bsed\s+-i[^|;&<>]*(?:history\.jsonl|\.dream_cursor)",  # sed -i
+            # history.jsonl / history-*.jsonl / .cursor / .dream_cursor are managed
+            # by append_history(); direct writes corrupt the cursor format and crash /dream.
+            r">>?\s*\S*(?:history(?:-[^/\s]+)?\.jsonl|\.dream_cursor|\.cursor)",  # > / >> redirect
+            r"\btee\b[^|;&<>]*(?:history(?:-[^/\s]+)?\.jsonl|\.dream_cursor|\.cursor)",  # tee / tee -a
+            r"\b(?:cp|mv)\b(?:\s+[^\s|;&<>]+)+\s+\S*(?:history(?:-[^/\s]+)?\.jsonl|\.dream_cursor|\.cursor)",  # cp/mv target
+            r"\bdd\b[^|;&<>]*\bof=\S*(?:history(?:-[^/\s]+)?\.jsonl|\.dream_cursor|\.cursor)",  # dd of=
+            r"\bsed\s+-i[^|;&<>]*(?:history(?:-[^/\s]+)?\.jsonl|\.dream_cursor|\.cursor)",  # sed -i
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
