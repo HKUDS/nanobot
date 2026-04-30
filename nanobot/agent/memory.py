@@ -524,6 +524,7 @@ class Consolidator:
             channel=channel,
             chat_id=chat_id,
             session_summary=session_summary,
+            sender_id=None,
         )
         return estimate_prompt_tokens_chain(
             self.provider,
