@@ -194,4 +194,6 @@ class HookCenter:
         self._external_handlers.clear()
 
     def discover(self, config: Any = None) -> None:
-        pass
+        from nanobot.hooks.discovery import register_discovered
+
+        register_discovered(self, config)

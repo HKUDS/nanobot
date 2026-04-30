@@ -9,6 +9,7 @@ Provides:
 """
 
 from nanobot.hooks.center import HookCenter, HookSession
+from nanobot.hooks.discovery import discover_hook_plugins, register_discovered
 from nanobot.hooks.event_types import (
     AfterIteration,
     BeforeExecuteTools,
@@ -32,4 +33,6 @@ __all__ = [
     "Modified",
     "OnStream",
     "OnStreamEnd",
+    "discover_hook_plugins",
+    "register_discovered",
 ]
