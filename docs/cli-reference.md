@@ -12,7 +12,11 @@
 | `nanobot agent --no-markdown` | Show plain-text replies |
 | `nanobot agent --logs` | Show runtime logs during chat |
 | `nanobot serve` | Start the OpenAI-compatible API |
-| `nanobot gateway` | Start the gateway |
+| `nanobot gateway` | Start the gateway in the foreground |
+| `nanobot gateway start` | Start the gateway if it is not already running |
+| `nanobot gateway stop` | Stop the running gateway process |
+| `nanobot gateway restart` | Restart the running gateway process |
+| `nanobot gateway status` | Show gateway runtime status |
 | `nanobot status` | Show status |
 | `nanobot provider login openai-codex` | OAuth login for providers |
 | `nanobot channels login <channel>` | Authenticate a channel interactively |
