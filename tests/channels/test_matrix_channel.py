@@ -1191,6 +1191,44 @@ async def test_send_progress_keeps_typing_keepalive_running() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_empty_content_does_not_call_room_send() -> None:
+    """Progress messages with empty content must not produce an empty body: '' event."""
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    await channel.send(
+        OutboundMessage(
+            channel="matrix",
+            chat_id="!room:matrix.org",
+            content="",
+            metadata={"_progress": True},
+        )
+    )
+
+    assert client.room_send_calls == []
+
+
+@pytest.mark.asyncio
+async def test_send_whitespace_only_content_does_not_call_room_send() -> None:
+    """Progress messages with whitespace-only content must not produce an empty message."""
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    await channel.send(
+        OutboundMessage(
+            channel="matrix",
+            chat_id="!room:matrix.org",
+            content="   \n\n  ",
+            metadata={"_progress": True},
+        )
+    )
+
+    assert client.room_send_calls == []
+
+
+@pytest.mark.asyncio
 async def test_send_clears_typing_when_send_fails() -> None:
     channel = MatrixChannel(_make_config(), MessageBus())
     client = _FakeAsyncClient("", "", "", None)

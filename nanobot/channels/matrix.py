@@ -523,7 +523,7 @@ class MatrixChannel(BaseChannel):
                         failures.append(fail)
             if failures:
                 text = f"{text.rstrip()}\n{chr(10).join(failures)}" if text.strip() else "\n".join(failures)
-            if text or not candidates:
+            if text.strip():
                 content = _build_matrix_text_content(text)
                 if relates_to:
                     content["m.relates_to"] = relates_to
