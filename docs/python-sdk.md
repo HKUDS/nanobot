@@ -93,6 +93,48 @@ Run the agent once and return a `RunResult`.
 
 ## Hooks
 
+There are two ways to write hooks: the new **event-based HookCenter API** and the **legacy AgentHook API**. Both work — the legacy AgentHook is automatically adapted to the HookCenter at runtime.
+
+### Event-based hooks (recommended for new plugins)
+
+The event-based API uses typed event dataclasses. Handlers subscribe to specific event types and return `None` (observe), `Modified(data)` (transform), or `Deny(reason)` (guard):
+
+```python
+from nanobot.hooks import BeforeExecuteTools, Deny
+
+
+
+class RateLimitHandler:
+    hook_events = [(BeforeExecuteTools, "guard")]
+
+    def __init__(self, max_calls: int = 10):
+        self._count = 0
+        self._max_calls = max_calls
+
+    async def __call__(self, event: BeforeExecuteTools):
+        self._count += len(event.tool_calls)
+        if self._count > self._max_calls:
+            return Deny(f"Rate limit exceeded ({self._max_calls} max)")
+        return None
+```
+
+Event types importable from `nanobot.hooks`:
+
+| Event | Purpose |
+|-------|---------|
+| `BeforeIteration(iteration, messages)` | Before each LLM iteration |
+| `OnStream(delta, iteration)` | On each streaming token |
+| `OnStreamEnd(resuming, iteration)` | When streaming finishes |
+| `BeforeExecuteTools(iteration, tool_calls, response)` | Before tool execution |
+| `AfterIteration(iteration, final_content, stop_reason, usage, ...)` | After each iteration |
+| `FinalizeContent` *(registration marker)* | Content transform pipeline |
+
+Return types: `Deny(reason)`, `Modified(data)`, `None`.
+
+For packaging and distribution (entry_points), see the [hook plugin guide](./hook-plugin-guide.md).
+
+### Legacy AgentHook API (backward-compatible)
+
 Hooks let you observe or customize the agent loop. Subclass `AgentHook` and override the methods you need.
 
 ### Hook lifecycle

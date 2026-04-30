@@ -30,6 +30,7 @@ Use these when you want deeper customization, integration, or extension details.
 | Memory | [`memory.md`](./memory.md) | How nanobot stores, consolidates, and restores memory |
 | Python SDK | [`python-sdk.md`](./python-sdk.md) | Use nanobot programmatically from Python |
 | Channel plugin guide | [`channel-plugin-guide.md`](./channel-plugin-guide.md) | Build and test custom chat channel plugins |
+| Hook plugin guide | [`hook-plugin-guide.md`](./hook-plugin-guide.md) | Build and distribute hook plugins for agent lifecycle events |
 | WebSocket channel | [`websocket.md`](./websocket.md) | Real-time WebSocket access and protocol details |
 | Custom tools | [`my-tool.md`](./my-tool.md) | Inspect and tune runtime state with the `my` tool |
 

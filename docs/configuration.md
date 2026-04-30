@@ -998,6 +998,27 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 
 
+## Hook Plugins
+
+nanobot discovers hook plugins installed via `pip` through the `nanobot.hooks` entry point group. When you set `hooks.enabled_plugins` to an explicit allowlist, **only** those plugins are loaded — this is a security control to prevent unintended code execution.
+
+When `enabled_plugins` is omitted or set to `null`, all discovered plugins load automatically.
+
+```json
+{
+  "hooks": {
+    "enabled_plugins": ["ratelimit", "audit-log"]
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `hooks.enabled_plugins` | `null` (allow all) | List of plugin entry-point names to allow. When set, non-listed plugins are skipped at discovery time before their module-level code executes. |
+
+See the [hook plugin guide](./hook-plugin-guide.md) for building and packaging hook plugins.
+
+
 ## Security
 
 > [!TIP]
