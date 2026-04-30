@@ -61,6 +61,12 @@ always: true
 - Protected params have type/range validation: `max_iterations` (1–100), `context_window_tokens` (4096–1M), `model` (non-empty str)
 - If `tools.my.allow_set` is false, check only
 
+<rule>
+Feishu: when asked to change the “processing” reaction emoji, use `my` to set `channels_config.feishu.reactEmoji`.
+</rule>
+
+Example: `my(action="set", key="channels_config.feishu.reactEmoji", value="THUMBSUP")`
+
 ## Related tools
 
 | Need | Use | Persists? |
