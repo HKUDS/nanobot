@@ -5,8 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import pytest
 import httpx
+import pytest
 
 import nanobot.channels.weixin as weixin_mod
 from nanobot.bus.queue import MessageBus
@@ -15,10 +15,10 @@ from nanobot.channels.weixin import (
     ITEM_TEXT,
     MESSAGE_TYPE_BOT,
     WEIXIN_CHANNEL_VERSION,
-    _decrypt_aes_ecb,
-    _encrypt_aes_ecb,
     WeixinChannel,
     WeixinConfig,
+    _decrypt_aes_ecb,
+    _encrypt_aes_ecb,
 )
 
 
@@ -1223,3 +1223,49 @@ async def test_send_without_context_token_still_delivers_message_via_getconfig_r
     channel._send_text.assert_awaited_once_with("wx-user", "hello from cron", "ctx-refreshed")
     assert channel._context_tokens.get("wx-user") == "ctx-refreshed"
     assert any(c["endpoint"] == "ilink/bot/getconfig" for c in getconfig_calls)
+
+
+@pytest.mark.asyncio
+async def test_send_retries_on_stale_context_token() -> None:
+    """When sendmessage rejects a stale context_token, send() should refresh
+    the token via getconfig and retry the sendmessage once.
+
+    Regression test: after a gateway restart or long idle period the cached
+    context_token may be present (persisted in account.json) but stale.
+    The first sendmessage returns a token-expired error; send() must refresh
+    the token and retry instead of silently dropping the message.
+    """
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "old-ctx"
+    channel._send_media_file = AsyncMock()
+
+    sendmessage_calls: list[dict] = []
+
+    async def _mock_api_post(
+        endpoint: str, body: dict | None = None, *, auth: bool = True,
+    ) -> dict:
+        if endpoint == "ilink/bot/sendmessage":
+            sendmessage_calls.append(body)
+            if len(sendmessage_calls) == 1:
+                return {"errcode": -6, "errmsg": "context_token expired"}
+            return {"ret": 0, "errcode": 0}
+        if endpoint == "ilink/bot/getconfig":
+            return {
+                "ret": 0,
+                "context_token": "ctx-refreshed",
+                "typing_ticket": "ticket-new",
+            }
+        return {"ret": 0}
+
+    channel._api_post = AsyncMock(side_effect=_mock_api_post)
+
+    msg = _make_outbound_msg(chat_id="wx-user", content="hello")
+    await channel.send(msg)
+
+    # sendmessage called twice: first with old token (failed), then with refreshed token
+    assert len(sendmessage_calls) == 2
+    assert sendmessage_calls[0]["msg"]["context_token"] == "old-ctx"
+    assert sendmessage_calls[1]["msg"]["context_token"] == "ctx-refreshed"
+    assert channel._context_tokens["wx-user"] == "ctx-refreshed"
