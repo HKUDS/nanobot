@@ -214,7 +214,7 @@ class MatrixConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention", "allowlist"] = "open"
     group_allow_from: list[str] = Field(default_factory=list)
-    allow_room_mentions: bool = False,
+    allow_room_mentions: bool = False
     streaming: bool = False
 
 
