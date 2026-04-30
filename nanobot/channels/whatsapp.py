@@ -1,6 +1,7 @@
 """WhatsApp channel implementation using Node.js bridge."""
 
 import asyncio
+import hashlib
 import json
 import mimetypes
 import os
@@ -316,13 +317,7 @@ def _ensure_bridge_setup() -> Path:
     from nanobot.config.paths import get_bridge_install_dir
 
     user_bridge = get_bridge_install_dir()
-
-    if (user_bridge / "dist" / "index.js").exists():
-        return user_bridge
-
-    npm_path = shutil.which("npm")
-    if not npm_path:
-        raise RuntimeError("npm not found. Please install Node.js >= 18.")
+    stamp_file = user_bridge / ".nanobot-bridge-source-hash"
 
     # Find source bridge
     current_file = Path(__file__)
@@ -341,6 +336,33 @@ def _ensure_bridge_setup() -> Path:
             "Try reinstalling: pip install --force-reinstall nanobot"
         )
 
+    def source_hash(root: Path) -> str:
+        digest = hashlib.sha256()
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(root)
+            if rel.parts and rel.parts[0] in {"node_modules", "dist"}:
+                continue
+            digest.update(rel.as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+        return digest.hexdigest()
+
+    expected_hash = source_hash(source)
+    current_hash = stamp_file.read_text().strip() if stamp_file.exists() else None
+
+    if (user_bridge / "dist" / "index.js").exists() and current_hash == expected_hash:
+        return user_bridge
+
+    if (user_bridge / "dist" / "index.js").exists() and current_hash != expected_hash:
+        logger.info("WhatsApp bridge source changed; rebuilding bridge...")
+
+    npm_path = shutil.which("npm")
+    if not npm_path:
+        raise RuntimeError("npm not found. Please install Node.js >= 18.")
+
     logger.info("Setting up WhatsApp bridge...")
     user_bridge.parent.mkdir(parents=True, exist_ok=True)
     if user_bridge.exists():
@@ -352,6 +374,7 @@ def _ensure_bridge_setup() -> Path:
 
     logger.info("  Building...")
     subprocess.run([npm_path, "run", "build"], cwd=user_bridge, check=True, capture_output=True)
+    stamp_file.write_text(expected_hash + "\n")
 
     logger.info("Bridge ready")
     return user_bridge
