@@ -551,14 +551,14 @@ class MatrixChannel(BaseChannel):
             await self._send_room_content(chat_id, content)
             return
 
+        if not delta.strip():
+            return
+
         buf = self._stream_bufs.get(chat_id)
         if buf is None:
             buf = _StreamBuf()
             self._stream_bufs[chat_id] = buf
         buf.text += delta
-    
-        if not buf.text.strip():
-            return
 
         now = self.monotonic_time()
 
