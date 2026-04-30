@@ -87,6 +87,42 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Return exactly: OK" in user_content
 
 
+def test_runtime_context_includes_sender_id_when_provided(tmp_path) -> None:
+    """Sender ID should be included in runtime context when provided."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="Return exactly: OK",
+        channel="cli",
+        chat_id="direct",
+        sender_id="user-12345",
+    )
+
+    user_content = messages[-1]["content"]
+    assert isinstance(user_content, str)
+    assert "Sender ID: user-12345" in user_content
+
+
+def test_runtime_context_excludes_sender_id_when_not_provided(tmp_path) -> None:
+    """Sender ID should not be present in runtime context when not provided."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="Return exactly: OK",
+        channel="cli",
+        chat_id="direct",
+        sender_id=None,
+    )
+
+    user_content = messages[-1]["content"]
+    assert isinstance(user_content, str)
+    assert "Sender ID:" not in user_content
+
+
 def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None:
     """Entries in history.jsonl not yet consumed by Dream appear with timestamps."""
     workspace = _make_workspace(tmp_path)
