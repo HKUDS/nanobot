@@ -1135,25 +1135,6 @@ class FeishuChannel(BaseChannel):
             logger.debug("Feishu: error fetching parent message {}: {}", message_id, e)
             return None
 
-    def _thread_reply_target(self, meta: dict) -> str | None:
-        """Pick the inbound message_id to reply to with reply_in_thread=True.
-
-        Returns the message_id when the response must travel through the
-        Reply API (continuation of an existing topic, or user opted in via
-        ``reply_to_message=True``); returns None to signal a plain send.
-        Used by streaming-card / fallback / tool-hint paths so they honor
-        the same gating as the regular send() path and don't unilaterally
-        spawn new topics in groups when ``reply_to_message`` is off.
-        """
-        if meta.get("chat_type", "group") != "group":
-            return None
-        msg_id = meta.get("message_id")
-        if not msg_id:
-            return None
-        if meta.get("thread_id") or self.config.reply_to_message:
-            return msg_id
-        return None
-
     def _reply_message_sync(self, parent_message_id: str, msg_type: str, content: str, *, reply_in_thread: bool = False) -> bool:
         """Reply to an existing Feishu message using the Reply API (synchronous).
 
