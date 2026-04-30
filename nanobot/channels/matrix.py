@@ -5,6 +5,7 @@ import json
 import logging
 import mimetypes
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
@@ -341,10 +342,8 @@ class MatrixChannel(BaseChannel):
                                        timeout=self.config.sync_stop_grace_seconds)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 self._sync_task.cancel()
-                try:
+                with suppress(asyncio.CancelledError):
                     await self._sync_task
-                except asyncio.CancelledError:
-                    pass
         if self.client:
             await self.client.close()
 
@@ -609,13 +608,11 @@ class MatrixChannel(BaseChannel):
         """Best-effort typing indicator update."""
         if not self.client:
             return
-        try:
+        with suppress(Exception):
             response = await self.client.room_typing(room_id=room_id, typing_state=typing,
                                                      timeout=TYPING_NOTICE_TIMEOUT_MS)
             if isinstance(response, RoomTypingError):
                 logger.debug("Matrix typing failed for {}: {}", room_id, response)
-        except Exception:
-            pass
 
     async def _start_typing_keepalive(self, room_id: str) -> None:
         """Start periodic typing refresh (spec-recommended keepalive)."""
@@ -625,22 +622,18 @@ class MatrixChannel(BaseChannel):
             return
 
         async def loop() -> None:
-            try:
+            with suppress(asyncio.CancelledError):
                 while self._running:
                     await asyncio.sleep(TYPING_KEEPALIVE_INTERVAL_MS / 1000)
                     await self._set_typing(room_id, True)
-            except asyncio.CancelledError:
-                pass
 
         self._typing_tasks[room_id] = asyncio.create_task(loop())
 
     async def _stop_typing_keepalive(self, room_id: str, *, clear_typing: bool) -> None:
         if task := self._typing_tasks.pop(room_id, None):
             task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
         if clear_typing:
             await self._set_typing(room_id, False)
 

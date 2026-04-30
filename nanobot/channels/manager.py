@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -220,10 +221,8 @@ class ChannelManager:
         # Stop dispatcher
         if self._dispatch_task:
             self._dispatch_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await self._dispatch_task
-            except asyncio.CancelledError:
-                pass
 
         # Stop all channels
         for name, channel in self.channels.items():
