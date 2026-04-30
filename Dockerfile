@@ -32,7 +32,8 @@ RUN git config --global --add url."https://github.com/".insteadOf ssh://git@gith
     npm install && npm run build
 WORKDIR /app
 
-# Create non-root user and config directory
+# Create non-root user. /home/nanobot IS the workspace; agent state
+# (config, sessions, memory, cron, media, logs) lives at /home/nanobot/.nanobot.
 RUN useradd -m -u 1000 -s /bin/bash nanobot && \
     mkdir -p /home/nanobot/.nanobot && \
     chown -R nanobot:nanobot /home/nanobot /app

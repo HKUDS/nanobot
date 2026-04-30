@@ -254,8 +254,8 @@ class TestLegacyHistoryMigration:
         assert entries[0]["cursor"] == 1
 
     def test_migrates_legacy_history_md_preserving_partial_entries(self, tmp_path):
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
+        memory_dir = tmp_path / ".nanobot" / "memory"
+        memory_dir.mkdir(parents=True)
         legacy_file = memory_dir / "HISTORY.md"
         legacy_content = (
             "[2026-04-01 10:00] User prefers dark mode.\n\n"
@@ -269,7 +269,7 @@ class TestLegacyHistoryMigration:
 
         store = MemoryStore(tmp_path)
         fallback_timestamp = datetime.fromtimestamp(
-            (memory_dir / "HISTORY.md.bak").stat().st_mtime,
+            (store.memory_dir / "HISTORY.md.bak").stat().st_mtime,
         ).strftime("%Y-%m-%d %H:%M")
 
         entries = store.read_unprocessed_history(since_cursor=0)
@@ -284,11 +284,11 @@ class TestLegacyHistoryMigration:
         assert store.read_file(store._cursor_file).strip() == "3"
         assert store.read_file(store._dream_cursor_file).strip() == "3"
         assert not legacy_file.exists()
-        assert (memory_dir / "HISTORY.md.bak").read_text(encoding="utf-8") == legacy_content
+        assert (store.memory_dir / "HISTORY.md.bak").read_text(encoding="utf-8") == legacy_content
 
     def test_migrates_consecutive_entries_without_blank_lines(self, tmp_path):
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
+        memory_dir = tmp_path / ".nanobot" / "memory"
+        memory_dir.mkdir(parents=True)
         legacy_file = memory_dir / "HISTORY.md"
         legacy_content = (
             "[2026-04-01 10:00] First event.\n"
@@ -308,8 +308,8 @@ class TestLegacyHistoryMigration:
         ]
 
     def test_raw_archive_stays_single_entry_while_following_events_split(self, tmp_path):
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
+        memory_dir = tmp_path / ".nanobot" / "memory"
+        memory_dir.mkdir(parents=True)
         legacy_file = memory_dir / "HISTORY.md"
         legacy_content = (
             "[2026-04-01 10:05] [RAW] 2 messages\n"
@@ -328,8 +328,8 @@ class TestLegacyHistoryMigration:
         assert entries[1]["content"] == "Normal event after raw block."
 
     def test_nonstandard_date_headers_still_start_new_entries(self, tmp_path):
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
+        memory_dir = tmp_path / ".nanobot" / "memory"
+        memory_dir.mkdir(parents=True)
         legacy_file = memory_dir / "HISTORY.md"
         legacy_content = (
             "[2026-03-25–2026-04-02] Multi-day summary.\n[2026-03-26/27] Cross-day summary.\n"
@@ -338,7 +338,7 @@ class TestLegacyHistoryMigration:
 
         store = MemoryStore(tmp_path)
         fallback_timestamp = datetime.fromtimestamp(
-            (memory_dir / "HISTORY.md.bak").stat().st_mtime,
+            (store.memory_dir / "HISTORY.md.bak").stat().st_mtime,
         ).strftime("%Y-%m-%d %H:%M")
 
         entries = store.read_unprocessed_history(since_cursor=0)
@@ -349,8 +349,8 @@ class TestLegacyHistoryMigration:
         assert entries[1]["content"] == "[2026-03-26/27] Cross-day summary."
 
     def test_existing_history_jsonl_skips_legacy_migration(self, tmp_path):
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
+        memory_dir = tmp_path / ".nanobot" / "memory"
+        memory_dir.mkdir(parents=True)
         history_file = memory_dir / "history.jsonl"
         history_file.write_text(
             '{"cursor": 7, "timestamp": "2026-04-01 12:00", "content": "existing"}\n',
@@ -366,11 +366,11 @@ class TestLegacyHistoryMigration:
         assert entries[0]["cursor"] == 7
         assert entries[0]["content"] == "existing"
         assert legacy_file.exists()
-        assert not (memory_dir / "HISTORY.md.bak").exists()
+        assert not (store.memory_dir / "HISTORY.md.bak").exists()
 
     def test_empty_history_jsonl_still_allows_legacy_migration(self, tmp_path):
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
+        memory_dir = tmp_path / ".nanobot" / "memory"
+        memory_dir.mkdir(parents=True)
         history_file = memory_dir / "history.jsonl"
         history_file.write_text("", encoding="utf-8")
         legacy_file = memory_dir / "HISTORY.md"
@@ -384,11 +384,11 @@ class TestLegacyHistoryMigration:
         assert entries[0]["timestamp"] == "2026-04-01 10:00"
         assert entries[0]["content"] == "legacy"
         assert not legacy_file.exists()
-        assert (memory_dir / "HISTORY.md.bak").exists()
+        assert (store.memory_dir / "HISTORY.md.bak").exists()
 
     def test_migrates_legacy_history_with_invalid_utf8_bytes(self, tmp_path):
-        memory_dir = tmp_path / "memory"
-        memory_dir.mkdir()
+        memory_dir = tmp_path / ".nanobot" / "memory"
+        memory_dir.mkdir(parents=True)
         legacy_file = memory_dir / "HISTORY.md"
         legacy_file.write_bytes(b"[2026-04-01 10:00] Broken \xff data still needs migration.\n\n")
 

@@ -24,6 +24,7 @@ class ContextBuilder:
 
     def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
         self.workspace = workspace
+        self.data_dir = workspace / ".nanobot"
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
@@ -107,14 +108,24 @@ class ContextBuilder:
         return _to_blocks(left) + _to_blocks(right)
 
     def _load_bootstrap_files(self) -> str:
-        """Load all bootstrap files from workspace."""
+        """Load all bootstrap files from ``<workspace>/.nanobot/``.
+
+        Falls back to the legacy ``<workspace>/<file>`` location when present
+        so installs that haven't yet hit a code path that triggers migration
+        still see their identity files.
+        """
         parts = []
 
         for filename in self.BOOTSTRAP_FILES:
-            file_path = self.workspace / filename
-            if file_path.exists():
-                content = file_path.read_text(encoding="utf-8")
-                parts.append(f"## {filename}\n\n{content}")
+            file_path = self.data_dir / filename
+            if not file_path.exists():
+                legacy_path = self.workspace / filename
+                if legacy_path.exists():
+                    file_path = legacy_path
+                else:
+                    continue
+            content = file_path.read_text(encoding="utf-8")
+            parts.append(f"## {filename}\n\n{content}")
 
         return "\n\n".join(parts) if parts else ""
 

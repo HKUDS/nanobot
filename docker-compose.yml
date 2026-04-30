@@ -3,7 +3,10 @@ x-common-config: &common-config
     context: .
     dockerfile: Dockerfile
   volumes:
-    - ~/.nanobot:/home/nanobot/.nanobot
+    # The whole home dir IS the workspace.
+    # Agent state (config, sessions, memory, cron, media, logs) lives at
+    # /home/nanobot/.nanobot/. User content lives directly under /home/nanobot.
+    - ~/nanobot:/home/nanobot
   cap_drop:
     - ALL
   cap_add:
@@ -32,8 +35,7 @@ services:
   nanobot-api:
     container_name: nanobot-api
     <<: *common-config
-    command:
-      ["serve", "--host", "0.0.0.0", "-w", "/home/nanobot/.nanobot/api-workspace"]
+    command: ["serve", "--host", "0.0.0.0"]
     restart: unless-stopped
     ports:
       - 127.0.0.1:8900:8900

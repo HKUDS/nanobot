@@ -43,20 +43,69 @@ class MemoryStore:
     def __init__(self, workspace: Path, max_history_entries: int = _DEFAULT_MAX_HISTORY):
         self.workspace = workspace
         self.max_history_entries = max_history_entries
-        self.memory_dir = ensure_dir(workspace / "memory")
+        self.data_dir = ensure_dir(workspace / ".nanobot")
+        self._migrate_legacy_workspace_state()
+        self.memory_dir = ensure_dir(self.data_dir / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "history.jsonl"
         self.legacy_history_file = self.memory_dir / "HISTORY.md"
-        self.soul_file = workspace / "SOUL.md"
-        self.user_file = workspace / "USER.md"
+        self.soul_file = self.data_dir / "SOUL.md"
+        self.user_file = self.data_dir / "USER.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
         self._corruption_logged = False  # rate-limit non-int cursor warning
         self._oversize_logged = False  # rate-limit oversized-entry warning
-        self._git = GitStore(workspace, tracked_files=[
+        self._git = GitStore(self.data_dir, tracked_files=[
             "SOUL.md", "USER.md", "memory/MEMORY.md",
         ])
         self._maybe_migrate_legacy_history()
+
+    def _migrate_legacy_workspace_state(self) -> None:
+        """Move pre-unification files from ``<workspace>/`` into ``<workspace>/.nanobot/``.
+
+        Handles: ``memory/`` dir, ``SOUL.md``, ``USER.md``, ``AGENTS.md``, ``TOOLS.md``,
+        ``HEARTBEAT.md``, ``skills/``, and the in-workspace ``.git`` repo used for
+        memory version control. Idempotent — a second call is a no-op.
+        """
+        ws = self.workspace
+        moves: list[tuple[Path, Path]] = []
+        for name in ("memory", "skills"):
+            old = ws / name
+            new = self.data_dir / name
+            if old.is_dir() and not new.exists() and old.resolve() != new.resolve():
+                moves.append((old, new))
+        for name in ("SOUL.md", "USER.md", "AGENTS.md", "TOOLS.md", "HEARTBEAT.md"):
+            old = ws / name
+            new = self.data_dir / name
+            if old.is_file() and not new.exists():
+                moves.append((old, new))
+        # Memory git store: <workspace>/.git → <workspace>/.nanobot/.git, but ONLY
+        # if it was created by nanobot (i.e. workspace isn't already inside another
+        # repo we shouldn't touch). The marker is the gitignore line set during init.
+        old_git = ws / ".git"
+        new_git = self.data_dir / ".git"
+        old_gitignore = ws / ".gitignore"
+        if (
+            old_git.is_dir()
+            and not new_git.exists()
+            and old_gitignore.is_file()
+            and "MEMORY.md" in old_gitignore.read_text(encoding="utf-8", errors="ignore")
+        ):
+            moves.append((old_git, new_git))
+            moves.append((old_gitignore, self.data_dir / ".gitignore"))
+
+        if not moves:
+            return
+
+        import shutil as _shutil
+
+        for old, new in moves:
+            try:
+                new.parent.mkdir(parents=True, exist_ok=True)
+                _shutil.move(str(old), str(new))
+                logger.info("Migrated {} → {}", old, new)
+            except Exception:
+                logger.exception("Failed to migrate {} → {}", old, new)
 
     @property
     def git(self) -> GitStore:

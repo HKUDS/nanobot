@@ -12,6 +12,7 @@ from nanobot.config.paths import (
     get_media_dir,
     get_runtime_subdir,
     get_workspace_path,
+    set_workspace,
 )
 from nanobot.config.schema import Config
 
@@ -29,4 +30,5 @@ __all__ = [
     "get_cli_history_path",
     "get_bridge_install_dir",
     "get_legacy_sessions_dir",
+    "set_workspace",
 ]

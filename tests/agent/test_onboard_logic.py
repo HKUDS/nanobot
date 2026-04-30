@@ -351,12 +351,13 @@ class TestSyncWorkspaceTemplates:
         assert content == "existing content"
 
     def test_creates_memory_directory(self, tmp_path):
-        """Should create memory directory structure."""
+        """Should create memory + skills directories under <workspace>/.nanobot/."""
         workspace = tmp_path / "workspace"
 
         sync_workspace_templates(workspace, silent=True)
 
-        assert (workspace / "memory").exists() or (workspace / "skills").exists()
+        data_dir = workspace / ".nanobot"
+        assert (data_dir / "memory").exists() or (data_dir / "skills").exists()
 
     def test_returns_list_of_added_files(self, tmp_path):
         """Should return list of relative paths for added files."""

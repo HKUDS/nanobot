@@ -23,10 +23,17 @@ def set_config_path(path: Path) -> None:
 
 
 def get_config_path() -> Path:
-    """Get the configuration file path."""
+    """Get the configuration file path.
+
+    Defaults to ``<workspace>/.nanobot/config.json``. With the default workspace
+    of ``$HOME``, this resolves to ``~/.nanobot/config.json`` — matching the
+    pre-unification location, so existing installs are picked up unchanged.
+    """
     if _current_config_path:
         return _current_config_path
-    return Path.home() / ".nanobot" / "config.json"
+    from nanobot.config.paths import get_data_dir
+
+    return get_data_dir() / "config.json"
 
 
 def load_config(config_path: Path | None = None) -> Config:

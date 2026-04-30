@@ -66,8 +66,8 @@ def test_onboard_fresh_install(mock_paths):
     assert "Created workspace" in result.stdout
     assert "nanobot is ready" in result.stdout
     assert config_file.exists()
-    assert (workspace_dir / "AGENTS.md").exists()
-    assert (workspace_dir / "memory" / "MEMORY.md").exists()
+    assert (workspace_dir / ".nanobot" / "AGENTS.md").exists()
+    assert (workspace_dir / ".nanobot" / "memory" / "MEMORY.md").exists()
     expected_workspace = Config().workspace_path
     assert mock_ws.call_args.args == (expected_workspace,)
 
@@ -83,7 +83,7 @@ def test_onboard_existing_config_refresh(mock_paths):
     assert "Config already exists" in result.stdout
     assert "existing values preserved" in result.stdout
     assert workspace_dir.exists()
-    assert (workspace_dir / "AGENTS.md").exists()
+    assert (workspace_dir / ".nanobot" / "AGENTS.md").exists()
 
 
 def test_onboard_existing_config_overwrite(mock_paths):
@@ -109,8 +109,8 @@ def test_onboard_existing_workspace_safe_create(mock_paths):
 
     assert result.exit_code == 0
     assert "Created workspace" not in result.stdout
-    assert "Created AGENTS.md" in result.stdout
-    assert (workspace_dir / "AGENTS.md").exists()
+    assert "Created .nanobot/AGENTS.md" in result.stdout
+    assert (workspace_dir / ".nanobot" / "AGENTS.md").exists()
 
 
 def _strip_ansi(text):
@@ -164,7 +164,7 @@ def test_onboard_uses_explicit_config_and_workspace_paths(tmp_path, monkeypatch)
     assert result.exit_code == 0
     saved = Config.model_validate(json.loads(config_path.read_text(encoding="utf-8")))
     assert saved.workspace_path == workspace_path
-    assert (workspace_path / "AGENTS.md").exists()
+    assert (workspace_path / ".nanobot" / "AGENTS.md").exists()
     stripped_output = _strip_ansi(result.stdout)
     compact_output = stripped_output.replace("\n", "")
     resolved_config = str(config_path.resolve())
@@ -614,22 +614,26 @@ def test_agent_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Pa
     result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
 
     assert result.exit_code == 0
-    assert seen["cron_store"] == config.workspace_path / "cron" / "jobs.json"
+    assert seen["cron_store"] == config.workspace_path / ".nanobot" / "cron" / "jobs.json"
 
 
-def test_agent_workspace_override_does_not_migrate_legacy_cron(
+def test_agent_workspace_override_migrates_workspace_cron(
     monkeypatch, tmp_path: Path
 ) -> None:
+    """Pre-unification ``<workspace>/cron/jobs.json`` is migrated into ``.nanobot/cron/``."""
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
     config_file.write_text("{}")
 
-    legacy_dir = tmp_path / "global" / "cron"
-    legacy_dir.mkdir(parents=True)
-    legacy_file = legacy_dir / "jobs.json"
+    override = tmp_path / "override-workspace"
+    legacy_cron = override / "cron"
+    legacy_cron.mkdir(parents=True)
+    legacy_file = legacy_cron / "jobs.json"
     legacy_file.write_text('{"jobs": []}')
 
-    override = tmp_path / "override-workspace"
+    # Pin $HOME so the migration helper does not see the real user's data.
+    monkeypatch.setenv("HOME", str(tmp_path / "fake-home"))
+
     config = Config()
     seen: dict[str, Path] = {}
 
@@ -638,7 +642,6 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
     monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
-    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
 
     class _FakeCron:
         def __init__(self, store_path: Path) -> None:
@@ -664,61 +667,10 @@ def test_agent_workspace_override_does_not_migrate_legacy_cron(
     )
 
     assert result.exit_code == 0
-    assert seen["cron_store"] == override / "cron" / "jobs.json"
-    assert legacy_file.exists()
-    assert not (override / "cron" / "jobs.json").exists()
-
-
-def test_agent_custom_config_workspace_does_not_migrate_legacy_cron(
-    monkeypatch, tmp_path: Path
-) -> None:
-    config_file = tmp_path / "instance" / "config.json"
-    config_file.parent.mkdir(parents=True)
-    config_file.write_text("{}")
-
-    legacy_dir = tmp_path / "global" / "cron"
-    legacy_dir.mkdir(parents=True)
-    legacy_file = legacy_dir / "jobs.json"
-    legacy_file.write_text('{"jobs": []}')
-
-    custom_workspace = tmp_path / "custom-workspace"
-    config = Config()
-    config.agents.defaults.workspace = str(custom_workspace)
-    seen: dict[str, Path] = {}
-
-    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
-    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
-
-    class _FakeCron:
-        def __init__(self, store_path: Path) -> None:
-            seen["cron_store"] = store_path
-
-    class _FakeAgentLoop:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
-
-        async def process_direct(self, *_args, **_kwargs):
-            return OutboundMessage(channel="cli", chat_id="direct", content="ok")
-
-        async def close_mcp(self) -> None:
-            return None
-
-    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr(
-        "nanobot.cli.commands._print_agent_response", lambda *_args, **_kwargs: None
-    )
-
-    result = runner.invoke(app, ["agent", "-m", "hello", "-c", str(config_file)])
-
-    assert result.exit_code == 0
-    assert seen["cron_store"] == custom_workspace / "cron" / "jobs.json"
-    assert legacy_file.exists()
-    assert not (custom_workspace / "cron" / "jobs.json").exists()
+    new_path = override / ".nanobot" / "cron" / "jobs.json"
+    assert seen["cron_store"] == new_path
+    assert new_path.exists(), "cron jobs file should be migrated into .nanobot/"
+    assert not legacy_file.exists(), "legacy <workspace>/cron/jobs.json should be moved"
 
 
 def test_agent_overrides_workspace_path(mock_agent_runtime):
@@ -940,7 +892,7 @@ def test_gateway_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
     assert isinstance(result.exception, _StopGatewayError)
-    assert seen["cron_store"] == config.workspace_path / "cron" / "jobs.json"
+    assert seen["cron_store"] == config.workspace_path / ".nanobot" / "cron" / "jobs.json"
 
 
 def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
@@ -1191,14 +1143,12 @@ def test_gateway_cron_job_suppresses_intermediate_progress(
     bus.publish_outbound.assert_not_awaited()
 
 
-def test_gateway_workspace_override_does_not_migrate_legacy_cron(
+def test_gateway_workspace_override_uses_data_dir_cron(
     monkeypatch, tmp_path: Path
 ) -> None:
+    """Cron store is rooted at ``<workspace>/.nanobot/cron/``."""
+    monkeypatch.setenv("HOME", str(tmp_path / "fake-home"))
     config_file = _write_instance_config(tmp_path)
-    legacy_dir = tmp_path / "global" / "cron"
-    legacy_dir.mkdir(parents=True)
-    legacy_file = legacy_dir / "jobs.json"
-    legacy_file.write_text('{"jobs": []}')
 
     override = tmp_path / "override-workspace"
     config = Config()
@@ -1215,7 +1165,6 @@ def test_gateway_workspace_override_does_not_migrate_legacy_cron(
         message_bus=lambda: object(),
         session_manager=lambda _workspace: object(),
         cron_service=_StopCron,
-        get_cron_dir=lambda: legacy_dir,
     )
 
     result = runner.invoke(
@@ -1224,86 +1173,50 @@ def test_gateway_workspace_override_does_not_migrate_legacy_cron(
     )
 
     assert isinstance(result.exception, _StopGatewayError)
-    assert seen["cron_store"] == override / "cron" / "jobs.json"
-    assert legacy_file.exists()
-    assert not (override / "cron" / "jobs.json").exists()
+    assert seen["cron_store"] == override / ".nanobot" / "cron" / "jobs.json"
 
 
-def test_gateway_custom_config_workspace_does_not_migrate_legacy_cron(
-    monkeypatch, tmp_path: Path
-) -> None:
-    config_file = _write_instance_config(tmp_path)
-    legacy_dir = tmp_path / "global" / "cron"
-    legacy_dir.mkdir(parents=True)
-    legacy_file = legacy_dir / "jobs.json"
-    legacy_file.write_text('{"jobs": []}')
-
-    custom_workspace = tmp_path / "custom-workspace"
-    config = Config()
-    config.agents.defaults.workspace = str(custom_workspace)
-    seen: dict[str, Path] = {}
-
-    class _StopCron:
-        def __init__(self, store_path: Path) -> None:
-            seen["cron_store"] = store_path
-            raise _StopGatewayError("stop")
-
-    _patch_cli_command_runtime(
-        monkeypatch,
-        config,
-        message_bus=lambda: object(),
-        session_manager=lambda _workspace: object(),
-        cron_service=_StopCron,
-        get_cron_dir=lambda: legacy_dir,
-    )
-
-    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
-
-    assert isinstance(result.exception, _StopGatewayError)
-    assert seen["cron_store"] == custom_workspace / "cron" / "jobs.json"
-    assert legacy_file.exists()
-    assert not (custom_workspace / "cron" / "jobs.json").exists()
-
-
-def test_migrate_cron_store_moves_legacy_file(tmp_path: Path) -> None:
-    """Legacy global jobs.json is moved into the workspace on first run."""
+def test_migrate_cron_store_moves_workspace_cron_into_data_dir(tmp_path: Path) -> None:
+    """Pre-unification ``<workspace>/cron/jobs.json`` is moved into ``.nanobot/cron``."""
     from nanobot.cli.commands import _migrate_cron_store
 
-    legacy_dir = tmp_path / "global" / "cron"
-    legacy_dir.mkdir(parents=True)
-    legacy_file = legacy_dir / "jobs.json"
-    legacy_file.write_text('{"jobs": []}')
+    workspace = tmp_path / "workspace"
+    legacy = workspace / "cron"
+    legacy.mkdir(parents=True)
+    (legacy / "jobs.json").write_text('{"jobs": []}')
 
     config = Config()
-    config.agents.defaults.workspace = str(tmp_path / "workspace")
-    workspace_cron = config.workspace_path / "cron" / "jobs.json"
+    config.agents.defaults.workspace = str(workspace)
+    new_path = workspace / ".nanobot" / "cron" / "jobs.json"
 
-    with patch("nanobot.config.paths.get_cron_dir", return_value=legacy_dir):
-        _migrate_cron_store(config)
+    _migrate_cron_store(config)
 
-    assert workspace_cron.exists()
-    assert workspace_cron.read_text() == '{"jobs": []}'
-    assert not legacy_file.exists()
+    assert new_path.exists()
+    assert new_path.read_text() == '{"jobs": []}'
+    assert not (legacy / "jobs.json").exists()
 
 
-def test_migrate_cron_store_skips_when_workspace_file_exists(tmp_path: Path) -> None:
-    """Migration does not overwrite an existing workspace cron store."""
+def test_migrate_cron_store_skips_when_data_dir_file_exists(tmp_path: Path) -> None:
+    """Migration does not overwrite an existing ``.nanobot/cron/jobs.json``."""
     from nanobot.cli.commands import _migrate_cron_store
 
-    legacy_dir = tmp_path / "global" / "cron"
-    legacy_dir.mkdir(parents=True)
-    (legacy_dir / "jobs.json").write_text('{"old": true}')
+    workspace = tmp_path / "workspace"
+    legacy_cron = workspace / "cron"
+    legacy_cron.mkdir(parents=True)
+    legacy_file = legacy_cron / "jobs.json"
+    legacy_file.write_text('{"old": true}')
 
     config = Config()
-    config.agents.defaults.workspace = str(tmp_path / "workspace")
-    workspace_cron = config.workspace_path / "cron" / "jobs.json"
-    workspace_cron.parent.mkdir(parents=True)
-    workspace_cron.write_text('{"new": true}')
+    config.agents.defaults.workspace = str(workspace)
+    new_path = workspace / ".nanobot" / "cron" / "jobs.json"
+    new_path.parent.mkdir(parents=True)
+    new_path.write_text('{"new": true}')
 
-    with patch("nanobot.config.paths.get_cron_dir", return_value=legacy_dir):
-        _migrate_cron_store(config)
+    _migrate_cron_store(config)
 
-    assert workspace_cron.read_text() == '{"new": true}'
+    assert new_path.read_text() == '{"new": true}'
+    # Legacy untouched because target already existed.
+    assert legacy_file.exists()
 
 
 def test_gateway_uses_configured_port_when_cli_flag_is_missing(monkeypatch, tmp_path: Path) -> None:

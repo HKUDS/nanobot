@@ -310,7 +310,7 @@ def test_customized_memory_md_is_injected(tmp_path) -> None:
     from nanobot.utils.helpers import sync_workspace_templates
     sync_workspace_templates(workspace, silent=True)
 
-    (workspace / "memory" / "MEMORY.md").write_text(
+    (workspace / ".nanobot" / "memory" / "MEMORY.md").write_text(
         "# Long-term Memory\n\nUser prefers dark mode.\n", encoding="utf-8"
     )
 

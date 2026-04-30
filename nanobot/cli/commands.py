@@ -47,7 +47,7 @@ class SafeFileHistory(FileHistory):
         safe = string.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
         super().store_string(safe)
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
-from nanobot.config.paths import get_workspace_path, is_default_workspace
+from nanobot.config.paths import get_workspace_path, is_default_workspace, set_workspace
 from nanobot.config.schema import Config
 from nanobot.utils.helpers import sync_workspace_templates
 from nanobot.utils.restart import (
@@ -278,15 +278,16 @@ def onboard(
     wizard: bool = typer.Option(False, "--wizard", help="Use interactive wizard"),
 ):
     """Initialize nanobot configuration and workspace."""
-    from nanobot.config.loader import get_config_path, load_config, save_config, set_config_path
+    from nanobot.config.loader import get_config_path, load_config, save_config
     from nanobot.config.schema import Config
 
-    if config:
-        config_path = Path(config).expanduser().resolve()
-        set_config_path(config_path)
+    ws, explicit_config_path = _resolve_workspace_and_config(workspace, config)
+    if explicit_config_path is not None:
+        config_path = explicit_config_path
         console.print(f"[dim]Using config: {config_path}[/dim]")
     else:
         config_path = get_config_path()
+    console.print(f"[dim]Using workspace: {ws}[/dim]")
 
     def _apply_workspace_override(loaded: Config) -> Config:
         if workspace:
@@ -421,17 +422,118 @@ def _make_provider(config: Config):
         raise typer.Exit(1) from exc
 
 
-def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
-    """Load config and optionally override the active workspace."""
-    from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
+_LEGACY_WORKSPACE_VALUES = {
+    "~/.nanobot/workspace",
+    str(Path.home() / ".nanobot" / "workspace"),
+}
 
-    config_path = None
+
+def _migrate_legacy_install(config_path: Path | None) -> None:
+    """One-time migration from the pre-unification ``~/.nanobot/workspace/`` layout.
+
+    Moves everything under ``~/.nanobot/workspace/`` up into ``~/.nanobot/``
+    (skipping conflicting names) and rewrites ``agents.defaults.workspace``
+    from ``~/.nanobot/workspace`` → ``~``. Idempotent.
+    """
+    import json
+    import shutil
+
+    target_path = config_path or (Path.home() / ".nanobot" / "config.json")
+    if not target_path.is_file():
+        return
+
+    try:
+        raw = json.loads(target_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+
+    saved_ws = raw.get("agents", {}).get("defaults", {}).get("workspace", "")
+    if saved_ws not in _LEGACY_WORKSPACE_VALUES:
+        return
+
+    legacy_ws = (Path.home() / ".nanobot" / "workspace").expanduser()
+    new_data = Path.home() / ".nanobot"
+
+    moved: list[str] = []
+    if legacy_ws.is_dir():
+        for entry in list(legacy_ws.iterdir()):
+            target = new_data / entry.name
+            if target.exists():
+                continue
+            try:
+                shutil.move(str(entry), str(target))
+                moved.append(entry.name)
+            except Exception:
+                logger.exception("Failed to migrate {} → {}", entry, target)
+        try:
+            if not any(legacy_ws.iterdir()):
+                legacy_ws.rmdir()
+        except OSError:
+            pass
+
+    raw.setdefault("agents", {}).setdefault("defaults", {})["workspace"] = "~"
+    try:
+        target_path.write_text(
+            json.dumps(raw, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+    except Exception:
+        logger.exception("Failed to update workspace field in {}", target_path)
+
+    if moved:
+        console.print(
+            f"[green]✓[/green] Migrated workspace from {legacy_ws} into {new_data}: "
+            + ", ".join(moved)
+        )
+
+
+def _resolve_workspace_and_config(
+    workspace: str | None, config: str | None
+) -> tuple[Path, Path | None]:
+    """Pin the active workspace and config path before any path helper is touched.
+
+    Resolution order:
+      1. ``--config`` wins for the config file location.
+      2. ``--workspace`` (or ``NANOBOT_WORKSPACE``) wins for the workspace.
+      3. If only ``--config`` is given and its parent is a ``.nanobot/`` dir,
+         the workspace is inferred as the grandparent (the new layout).
+      4. Otherwise the workspace defaults to ``$NANOBOT_WORKSPACE`` or ``$HOME``,
+         and the config is ``<workspace>/.nanobot/config.json``.
+    """
+    from nanobot.config.loader import set_config_path
+
+    config_path: Path | None = None
     if config:
         config_path = Path(config).expanduser().resolve()
-        if not config_path.exists():
-            console.print(f"[red]Error: Config file not found: {config_path}[/red]")
-            raise typer.Exit(1)
+
+    if workspace:
+        ws = Path(workspace).expanduser().resolve()
+    elif os.environ.get("NANOBOT_WORKSPACE"):
+        ws = Path(os.environ["NANOBOT_WORKSPACE"]).expanduser().resolve()
+    elif config_path is not None and config_path.parent.name == ".nanobot":
+        ws = config_path.parent.parent
+    else:
+        ws = Path.home()
+
+    set_workspace(ws)
+    if config_path is not None:
         set_config_path(config_path)
+
+    # One-shot migration for installs that predate the unified ``<workspace>/.nanobot/``
+    # layout. Runs only when the legacy default workspace value is detected, so
+    # custom workspaces are not touched.
+    _migrate_legacy_install(config_path)
+    return ws, config_path
+
+
+def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
+    """Load config and optionally override the active workspace."""
+    from nanobot.config.loader import load_config, resolve_config_env_vars
+
+    _, config_path = _resolve_workspace_and_config(workspace, config)
+    if config_path is not None and not config_path.exists():
+        console.print(f"[red]Error: Config file not found: {config_path}[/red]")
+        raise typer.Exit(1)
+    if config_path is not None:
         console.print(f"[dim]Using config: {config_path}[/dim]")
 
     try:
@@ -464,16 +566,24 @@ def _warn_deprecated_config_keys(config_path: Path | None) -> None:
 
 
 def _migrate_cron_store(config: "Config") -> None:
-    """One-time migration: move legacy global cron store into the workspace."""
-    from nanobot.config.paths import get_cron_dir
+    """One-time migration of any legacy cron store into ``<workspace>/.nanobot/cron/``."""
+    import shutil
 
-    legacy_path = get_cron_dir() / "jobs.json"
-    new_path = config.workspace_path / "cron" / "jobs.json"
-    if legacy_path.is_file() and not new_path.exists():
-        new_path.parent.mkdir(parents=True, exist_ok=True)
-        import shutil
+    new_path = config.workspace_path / ".nanobot" / "cron" / "jobs.json"
+    if new_path.exists():
+        return
 
-        shutil.move(str(legacy_path), str(new_path))
+    # Source A: pre-unification ``<workspace>/cron/jobs.json``
+    # Source B: pre-workspace ``~/.nanobot/cron/jobs.json``
+    candidates = [
+        config.workspace_path / "cron" / "jobs.json",
+        Path.home() / ".nanobot" / "cron" / "jobs.json",
+    ]
+    for legacy_path in candidates:
+        if legacy_path.is_file() and legacy_path.resolve() != new_path.resolve():
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(legacy_path), str(new_path))
+            return
 
 
 # ============================================================================
@@ -621,12 +731,10 @@ def _run_gateway(
     provider = provider_snapshot.provider
     session_manager = SessionManager(config.workspace_path)
 
-    # Preserve existing single-workspace installs, but keep custom workspaces clean.
-    if is_default_workspace(config.workspace_path):
-        _migrate_cron_store(config)
+    _migrate_cron_store(config)
 
     # Create cron service with workspace-scoped store
-    cron_store_path = config.workspace_path / "cron" / "jobs.json"
+    cron_store_path = config.workspace_path / ".nanobot" / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
@@ -1011,12 +1119,10 @@ def agent(
     bus = MessageBus()
     provider = _make_provider(config)
 
-    # Preserve existing single-workspace installs, but keep custom workspaces clean.
-    if is_default_workspace(config.workspace_path):
-        _migrate_cron_store(config)
+    _migrate_cron_store(config)
 
     # Create cron service with workspace-scoped store
-    cron_store_path = config.workspace_path / "cron" / "jobs.json"
+    cron_store_path = config.workspace_path / ".nanobot" / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
     if logs:
@@ -1241,11 +1347,9 @@ def channels_status(
 ):
     """Show channel status."""
     from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.config.loader import load_config
 
-    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
-    if resolved_config_path is not None:
-        set_config_path(resolved_config_path)
+    _, resolved_config_path = _resolve_workspace_and_config(None, config_path)
 
     config = load_config(resolved_config_path)
 
@@ -1361,11 +1465,9 @@ def channels_login(
 ):
     """Authenticate with a channel via QR code or other interactive login."""
     from nanobot.channels.registry import discover_all
-    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.config.loader import load_config
 
-    resolved_config_path = Path(config_path).expanduser().resolve() if config_path else None
-    if resolved_config_path is not None:
-        set_config_path(resolved_config_path)
+    _, resolved_config_path = _resolve_workspace_and_config(None, config_path)
 
     config = load_config(resolved_config_path)
     channel_cfg = getattr(config.channels, channel_name, None) or {}
@@ -1436,10 +1538,14 @@ def plugins_list():
 
 
 @app.command()
-def status():
+def status(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
     """Show nanobot status."""
     from nanobot.config.loader import get_config_path, load_config
 
+    _resolve_workspace_and_config(workspace, config)
     config_path = get_config_path()
     config = load_config()
     workspace = config.workspace_path

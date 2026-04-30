@@ -244,9 +244,38 @@ class SessionManager:
 
     def __init__(self, workspace: Path):
         self.workspace = workspace
-        self.sessions_dir = ensure_dir(self.workspace / "sessions")
+        self.sessions_dir = ensure_dir(self.workspace / ".nanobot" / "sessions")
         self.legacy_sessions_dir = get_legacy_sessions_dir()
+        self.legacy_workspace_sessions_dir = self.workspace / "sessions"
         self._cache: dict[str, Session] = {}
+        self._migrate_legacy_workspace_sessions()
+
+    def _migrate_legacy_workspace_sessions(self) -> None:
+        """Move pre-unification ``<workspace>/sessions/`` into ``<workspace>/.nanobot/sessions/``."""
+        legacy = self.legacy_workspace_sessions_dir
+        if not legacy.is_dir() or legacy.resolve() == self.sessions_dir.resolve():
+            return
+        try:
+            for entry in legacy.iterdir():
+                if not entry.is_file() or entry.suffix != ".jsonl":
+                    continue
+                target = self.sessions_dir / entry.name
+                if target.exists():
+                    continue
+                try:
+                    shutil.move(str(entry), str(target))
+                except Exception:
+                    logger.exception("Failed to migrate session file {}", entry)
+            try:
+                if not any(legacy.iterdir()):
+                    legacy.rmdir()
+            except OSError:
+                pass
+            logger.info(
+                "Migrated workspace sessions from {} to {}", legacy, self.sessions_dir
+            )
+        except Exception:
+            logger.exception("Failed to migrate legacy workspace sessions")
 
     @staticmethod
     def safe_key(key: str) -> str:

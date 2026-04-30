@@ -177,13 +177,14 @@ class QQChannel(BaseChannel):
         """Choose a directory for saving inbound attachments."""
         if self.config.media_dir:
             root = Path(self.config.media_dir).expanduser()
-        elif get_media_dir:
+        else:
             try:
+                if get_media_dir is None:
+                    raise RuntimeError("get_media_dir helper unavailable")
                 root = Path(get_media_dir("qq"))
             except Exception:
+                # Fallback only when the runtime helper isn't importable.
                 root = Path.home() / ".nanobot" / "media" / "qq"
-        else:
-            root = Path.home() / ".nanobot" / "media" / "qq"
 
         root.mkdir(parents=True, exist_ok=True)
         logger.info("QQ media directory: {}", str(root))
