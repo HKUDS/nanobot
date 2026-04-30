@@ -307,6 +307,9 @@ class FeishuChannel(BaseChannel):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stream_bufs: dict[str, _FeishuStreamBuf] = {}
         self._bot_open_id: str | None = None
+        # open_id -> display name. Negative results cached as None to avoid
+        # retrying when the app lacks contact:user.base:readonly scope.
+        self._user_name_cache: dict[str, str | None] = {}
         self._background_tasks: set[asyncio.Task] = set()
         self._reaction_ids: dict[str, str] = {}  # message_id → reaction_id
 
@@ -449,6 +452,53 @@ class FeishuChannel(BaseChannel):
         except Exception as e:
             logger.warning("Error fetching bot info: {}", e)
             return None
+
+    def _fetch_user_name_sync(self, open_id: str) -> str | None:
+        """Fetch a user's display name via GET /open-apis/contact/v3/users/{open_id}.
+
+        Requires the contact:user.base:readonly scope. Returns None on any
+        failure (missing scope, external user, network error) so callers can
+        gracefully fall back to the open_id.
+        """
+        try:
+            import lark_oapi as lark
+
+            request = (
+                lark.BaseRequest.builder()
+                .http_method(lark.HttpMethod.GET)
+                .uri(f"/open-apis/contact/v3/users/{open_id}")
+                .queries([("user_id_type", "open_id")])
+                .token_types({lark.AccessTokenType.TENANT})
+                .build()
+            )
+            response = self._client.request(request)
+            if response.success():
+                data = json.loads(response.raw.content)
+                user = (data.get("data") or {}).get("user") or {}
+                return user.get("name") or None
+            logger.debug(
+                "Failed to fetch Feishu user {}: code={}, msg={}",
+                open_id,
+                response.code,
+                response.msg,
+            )
+            return None
+        except Exception as e:
+            logger.debug("Error fetching Feishu user {}: {}", open_id, e)
+            return None
+
+    async def _get_user_name(self, open_id: str) -> str | None:
+        """Cached async wrapper around _fetch_user_name_sync.
+
+        Negative results (None) are cached too — re-fetching on every message
+        when the app lacks contact scope would be wasteful.
+        """
+        if open_id in self._user_name_cache:
+            return self._user_name_cache[open_id]
+        loop = asyncio.get_running_loop()
+        name = await loop.run_in_executor(None, self._fetch_user_name_sync, open_id)
+        self._user_name_cache[open_id] = name
+        return name
 
     @staticmethod
     def _resolve_mentions(text: str, mentions: list[MentionEvent] | None) -> str:
@@ -1752,6 +1802,20 @@ class FeishuChannel(BaseChannel):
             if not content and not media_paths:
                 return
 
+            # Prepend a Feishu-specific context block so the model knows who
+            # is speaking. In group chats the bot sees a single shared session
+            # across all members, so without this it cannot tell users apart.
+            sender_user_id = (
+                getattr(sender.sender_id, "user_id", None) if sender.sender_id else None
+            )
+            sender_name = await self._get_user_name(sender_id) or sender_id
+            if sender_user_id:
+                sender_line = f"Sender: {sender_name} ({sender_id}, user id: {sender_user_id})"
+            else:
+                sender_line = f"Sender: {sender_name} ({sender_id})"
+            prefix = f"[FEISHU-CONTEXT]\n{sender_line}"
+            content = f"{prefix}\n\n{content}" if content else prefix
+
             # Build topic-scoped session key for conversation isolation.
             # Group chat: each topic gets its own session via root_id (replies
             # inside a topic) or message_id (top-level messages start a new topic).
@@ -1775,6 +1839,9 @@ class FeishuChannel(BaseChannel):
                     "parent_id": parent_id,
                     "root_id": root_id,
                     "thread_id": thread_id,
+                    "sender_name": sender_name,
+                    "sender_open_id": sender_id,
+                    "sender_user_id": sender_user_id,
                 },
                 session_key=session_key,
             )

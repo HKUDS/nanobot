@@ -422,7 +422,7 @@ async def test_on_message_prepends_reply_context_when_parent_id_present() -> Non
 
     assert len(captured) == 1
     content = captured[0]["content"]
-    assert content.startswith("[Reply to: original question]")
+    assert "[Reply to: original question]" in content
     assert "my answer" in content
 
 
