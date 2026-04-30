@@ -1036,8 +1036,9 @@ class TestSecurityAttributeProtection:
 
     @pytest.mark.asyncio
     async def test_modify_channels_config_feishu_reactEmoji_allowed(self):
-        """whitelisted channels_config.feishu.reactEmoji should be allowed."""
-        tool = _make_tool()
+        """whitelisted channels_config.feishu.reactEmoji should be allowed via config allow_list."""
+        loop = _make_mock_loop()
+        tool = MyTool(loop=loop, modify_allowed=True, allow_list=["channels_config.feishu.reactEmoji"])
         result = await tool.execute(action="set", key="channels_config.feishu.reactEmoji", value="OnIt")
         assert "Error" not in result
 

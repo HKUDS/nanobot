@@ -335,7 +335,7 @@ class AgentLoop:
         )
         self._register_default_tools()
         if _tc.my.enable:
-            self.tools.register(MyTool(loop=self, modify_allowed=_tc.my.allow_set))
+            self.tools.register(MyTool(loop=self, modify_allowed=_tc.my.allow_set, allow_list=_tc.my.allow_list))
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
         self.commands = CommandRouter()

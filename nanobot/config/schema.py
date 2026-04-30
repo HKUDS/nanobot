@@ -251,6 +251,7 @@ class MyToolConfig(Base):
 
     enable: bool = True  # register the `my` tool (agent runtime state inspection)
     allow_set: bool = False  # let `my` modify loop state (read-only if False)
+    allow_list: list[str] = Field(default_factory=list)  # whitelist of dot-paths allowed to modify even if top-level is BLOCKED
 
 
 class ImageGenerationToolConfig(Base):

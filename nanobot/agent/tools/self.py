@@ -46,11 +46,6 @@ class MyTool(Tool):
         "_concurrency_gate", "_unified_session", "_extra_hooks",
     })
 
-    # Whitelist for specific keys allowed to modify (even if top-level is BLOCKED)
-    _ALLOW_LIST_IN_BLOCKED = frozenset({
-        "channels_config.feishu.reactEmoji",
-    })
-
     READ_ONLY = frozenset({
         "subagents",  # observable but replacing it would break the system
         "_current_iteration",  # updated by runner only
@@ -87,9 +82,10 @@ class MyTool(Tool):
 
     _MAX_RUNTIME_KEYS = 64
 
-    def __init__(self, loop: AgentLoop, modify_allowed: bool = True) -> None:
+    def __init__(self, loop: AgentLoop, modify_allowed: bool = True, allow_list: list[str] | None = None) -> None:
         self._loop = loop
         self._modify_allowed = modify_allowed
+        self._allow_list = frozenset(allow_list) if allow_list else frozenset()
         self._channel = ""
         self._chat_id = ""
 
@@ -99,6 +95,7 @@ class MyTool(Tool):
         memo[id(self)] = result
         result._loop = self._loop
         result._modify_allowed = self._modify_allowed
+        result._allow_list = self._allow_list
         result._channel = self._channel
         result._chat_id = self._chat_id
         return result
@@ -355,7 +352,7 @@ class MyTool(Tool):
             return err
 
         # 1. Whitelist check: allow specific keys even if top-level is BLOCKED
-        if key in self._ALLOW_LIST_IN_BLOCKED:
+        if key in self._allow_list:
             return self._modify_whitelisted(key, value)
 
         top = key.split(".")[0]
