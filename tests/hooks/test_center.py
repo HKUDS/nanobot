@@ -474,13 +474,6 @@ async def test_internal_runs_before_external():
 # ---------------------------------------------------------------------------
 
 
-def test_register_point_stores_description():
-    center = HookCenter()
-    center.register_point(BeforeIteration, "before each iteration")
-
-    assert center._points[BeforeIteration] == "before each iteration"
-
-
 # ---------------------------------------------------------------------------
 # Invalid mode
 # ---------------------------------------------------------------------------

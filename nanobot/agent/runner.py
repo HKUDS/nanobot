@@ -18,6 +18,7 @@ from nanobot.hooks import (
     AfterIteration,
     BeforeExecuteTools,
     BeforeIteration,
+    Deny,
     OnStream,
     OnStreamEnd,
 )
@@ -104,6 +105,19 @@ class AgentRunResult:
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
+
+
+def _make_after_iteration(context: AgentHookContext, iteration: int) -> AfterIteration:
+    return AfterIteration(
+        iteration=iteration,
+        final_content=context.final_content,
+        stop_reason=context.stop_reason,
+        usage=dict(context.usage),
+        tool_calls=list(context.tool_calls),
+        tool_events=list(context.tool_events),
+        tool_results=list(context.tool_results),
+        error=context.error,
+    )
 
 
 class AgentRunner:
@@ -322,7 +336,32 @@ class AgentRunner:
                     },
                 )
 
-                await center.emit(BeforeExecuteTools(iteration=iteration, tool_calls=context.tool_calls, response=context.response), session)
+                result = await center.emit(BeforeExecuteTools(iteration=iteration, tool_calls=context.tool_calls, response=context.response), session)
+                if isinstance(result, Deny):
+                    for tc in tool_calls:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "name": tc.name,
+                            "content": f"Tool execution was denied: {result.reason}",
+                        })
+                    tool_events.extend(
+                        {"name": tc.name, "status": "ok", "detail": f"[denied] {result.reason}"}
+                        for tc in tool_calls
+                    )
+                    empty_content_retries = 0
+                    length_recovery_count = 0
+                    await center.emit(AfterIteration(
+                        iteration=iteration,
+                        final_content=context.final_content,
+                        stop_reason=context.stop_reason,
+                        usage=dict(context.usage),
+                        tool_calls=list(context.tool_calls),
+                        tool_events=list(context.tool_events),
+                        tool_results=list(context.tool_results),
+                        error=context.error,
+                    ), session)
+                    continue
 
                 results, new_events, fatal_error = await self._execute_tools(
                     spec,
@@ -358,7 +397,7 @@ class AgentRunner:
                         context.stop_reason = stop_reason
                         if center.wants_streaming(session):
                             await center.emit(OnStreamEnd(resuming=False, iteration=iteration), session)
-                        await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
+                        await center.emit(_make_after_iteration(context, iteration), session)
                         break
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     final_content = error
@@ -367,7 +406,7 @@ class AgentRunner:
                     context.final_content = final_content
                     context.error = error
                     context.stop_reason = stop_reason
-                    await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
+                    await center.emit(_make_after_iteration(context, iteration), session)
                     should_continue, injection_cycles = await self._try_drain_injections(
                         spec, messages, None, injection_cycles,
                         phase="after tool error",
@@ -396,7 +435,7 @@ class AgentRunner:
                 )
                 if _drained:
                     had_injections = True
-                await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
+                await center.emit(_make_after_iteration(context, iteration), session)
                 continue
 
             if response.has_tool_calls:
@@ -419,7 +458,7 @@ class AgentRunner:
                     )
                     if center.wants_streaming(session):
                         await center.emit(OnStreamEnd(resuming=False, iteration=iteration), session)
-                    await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
+                    await center.emit(_make_after_iteration(context, iteration), session)
                     continue
                 logger.warning(
                     "Empty response on turn {} for {} after {} retries; attempting finalization",
@@ -456,7 +495,7 @@ class AgentRunner:
                         thinking_blocks=response.thinking_blocks,
                     ))
                     messages.append(build_length_recovery_message())
-                    await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
+                    await center.emit(_make_after_iteration(context, iteration), session)
                     continue
 
             assistant_message: dict[str, Any] | None = None
@@ -482,7 +521,7 @@ class AgentRunner:
                 await center.emit(OnStreamEnd(resuming=should_continue, iteration=iteration), session)
 
             if should_continue:
-                await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
+                await center.emit(_make_after_iteration(context, iteration), session)
                 continue
 
             if response.finish_reason == "error":
@@ -493,7 +532,7 @@ class AgentRunner:
                 context.final_content = final_content
                 context.error = error
                 context.stop_reason = stop_reason
-                await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
+                await center.emit(_make_after_iteration(context, iteration), session)
                 should_continue, injection_cycles = await self._try_drain_injections(
                     spec, messages, None, injection_cycles,
                     phase="after LLM error",
@@ -510,7 +549,7 @@ class AgentRunner:
                 context.final_content = final_content
                 context.error = error
                 context.stop_reason = stop_reason
-                await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
+                await center.emit(_make_after_iteration(context, iteration), session)
                 should_continue, injection_cycles = await self._try_drain_injections(
                     spec, messages, None, injection_cycles,
                     phase="after empty response",
@@ -539,7 +578,7 @@ class AgentRunner:
             final_content = clean
             context.final_content = final_content
             context.stop_reason = stop_reason
-            await center.emit(AfterIteration(iteration=iteration, final_content=context.final_content, stop_reason=context.stop_reason, usage=dict(context.usage), tool_calls=list(context.tool_calls), tool_events=list(context.tool_events), tool_results=list(context.tool_results), error=context.error), session)
+            await center.emit(_make_after_iteration(context, iteration), session)
             break
         else:
             stop_reason = "max_iterations"
@@ -565,6 +604,8 @@ class AgentRunner:
             )
             if drained_after_max_iterations:
                 had_injections = True
+            if 'context' in dir():
+                await center.emit(AfterIteration(iteration=iteration, final_content=final_content, stop_reason=stop_reason, usage=dict(context.usage) if hasattr(context, 'usage') else {}, tool_calls=list(getattr(context, 'tool_calls', [])), tool_events=list(getattr(context, 'tool_events', [])), tool_results=list(getattr(context, 'tool_results', [])), error=getattr(context, 'error', None)), session)
 
         return AgentRunResult(
             final_content=final_content,

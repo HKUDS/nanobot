@@ -28,21 +28,23 @@ class HookSession:
     wants_streaming_handlers: set[HookHandler] = field(default_factory=set)
     finalize_handlers: list[tuple[HookHandler, bool]] = field(default_factory=list)
     context: Any = field(default=None, init=False)
+    """Placeholder for runner-provided AgentHookContext.  
+    
+    Set by AgentRunner.run() before each iteration.  Adapter wrappers read
+    this reference to share the runner's mutable context object with
+    legacy AgentHook subclasses.
+    """
 
 
 class HookCenter:
-    __slots__ = ("_points", "_external_handlers")
+    __slots__ = ("_external_handlers",)
 
     def __init__(self) -> None:
-        self._points: dict[type, str] = {}
         self._external_handlers: dict[type, dict[str, list[HookHandler]]] = {}
 
     # ------------------------------------------------------------------
     # registry
     # ------------------------------------------------------------------
-
-    def register_point(self, event_type: type, description: str) -> None:
-        self._points[event_type] = description
 
     def register(self, event_type: type, handler: HookHandler, mode: str) -> None:
         if mode not in _VALID_MODES:
@@ -66,7 +68,10 @@ class HookCenter:
         if mode not in _VALID_MODES:
             raise ValueError(f"Unknown mode {mode!r}; expected one of {_VALID_MODES}")
         session.internal_handlers.setdefault(event_type, {"guard": [], "transform": [], "observe": []})
-        session.internal_handlers[event_type][mode].append((handler, reraise))
+        group = session.internal_handlers[event_type][mode]
+        item = (handler, reraise)
+        if item not in group:
+            group.append(item)
         if stream and event_type in _STREAMING_EVENT_TYPES:
             session.wants_streaming_handlers.add(handler)
         if event_type is FinalizeContentEvent:
@@ -163,12 +168,22 @@ class HookCenter:
     @staticmethod
     def _apply_modified(event: Any, modified: Modified) -> Any:
         data = modified.data
-        if isinstance(data, dict):
-            for key, value in data.items():
-                if hasattr(event, key):
-                    setattr(event, key, value)
-            return event
-        return data
+        if not isinstance(data, dict):
+            logger.warning(
+                "Transform handler returned non-dict Modified.data ({}) — "
+                "event object replaced, downstream handlers may break",
+                type(data).__name__,
+            )
+            return data
+        for key, value in data.items():
+            if hasattr(event, key):
+                setattr(event, key, value)
+            else:
+                logger.debug(
+                    "Modified.data key {!r} not found on event type {}",
+                    key, type(event).__name__,
+                )
+        return event
 
     @staticmethod
     def _call_finalize_handler(
@@ -192,7 +207,6 @@ class HookCenter:
     # ------------------------------------------------------------------
 
     def reset(self) -> None:
-        self._points.clear()
         self._external_handlers.clear()
 
     def discover(self, config: Any = None) -> None:

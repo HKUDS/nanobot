@@ -52,10 +52,11 @@ class AfterIteration:
 
 @dataclass(slots=True)
 class FinalizeContent:
-    """Registration-type marker for finalize_content pipeline handlers.
+    """Registration-only marker for finalize_content pipeline handlers.
 
     Not dispatched through emit().  HookCenter.finalize_content() collects
     handlers registered under this type and runs them as a sync pipeline.
+    This dataclass carries no fields — it exists purely as a type key for
+    handler registration.
     """
-    content: str | None
-    context: Any = None
+    pass
