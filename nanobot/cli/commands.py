@@ -426,41 +426,83 @@ _LEGACY_WORKSPACE_VALUES = {
     "~/.nanobot/workspace",
     str(Path.home() / ".nanobot" / "workspace"),
 }
+_LEGACY_WORKSPACE_MARKERS = (
+    "memory",
+    "sessions",
+    "skills",
+    "SOUL.md",
+    "AGENTS.md",
+    "USER.md",
+)
+
+
+def _legacy_workspace_dir(config_path: Path | None) -> Path | None:
+    """Return the legacy ``<config-parent>/workspace/`` dir if it looks like an old workspace.
+
+    Detects two cases:
+      1. The config explicitly sets ``agents.defaults.workspace`` to the legacy default.
+      2. The config field is missing (so the old default applied at runtime) but the
+         legacy dir exists and contains agent-state markers.
+    """
+    import json
+
+    target_path = config_path or (Path.home() / ".nanobot" / "config.json")
+    if not target_path.is_file():
+        return None
+
+    legacy_ws = target_path.parent / "workspace"
+
+    try:
+        raw = json.loads(target_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    saved_ws = raw.get("agents", {}).get("defaults", {}).get("workspace", "")
+    if saved_ws in _LEGACY_WORKSPACE_VALUES:
+        return legacy_ws
+
+    # Field missing — fall back to a directory-presence heuristic.
+    if not saved_ws and legacy_ws.is_dir():
+        if any((legacy_ws / m).exists() for m in _LEGACY_WORKSPACE_MARKERS):
+            return legacy_ws
+
+    return None
 
 
 def _migrate_legacy_install(config_path: Path | None) -> None:
     """One-time migration from the pre-unification ``~/.nanobot/workspace/`` layout.
 
-    Moves everything under ``~/.nanobot/workspace/`` up into ``~/.nanobot/``
-    (skipping conflicting names) and rewrites ``agents.defaults.workspace``
-    from ``~/.nanobot/workspace`` → ``~``. Idempotent.
+    Moves agent-state entries up into ``~/.nanobot/`` and merges ``cron/jobs.json``
+    into an existing empty ``cron/`` rather than skipping it. Rewrites
+    ``agents.defaults.workspace`` to ``~``. Idempotent.
     """
     import json
     import shutil
 
+    legacy_ws = _legacy_workspace_dir(config_path)
+    if legacy_ws is None:
+        return
+
     target_path = config_path or (Path.home() / ".nanobot" / "config.json")
-    if not target_path.is_file():
-        return
-
-    try:
-        raw = json.loads(target_path.read_text(encoding="utf-8"))
-    except Exception:
-        return
-
-    saved_ws = raw.get("agents", {}).get("defaults", {}).get("workspace", "")
-    if saved_ws not in _LEGACY_WORKSPACE_VALUES:
-        return
-
-    legacy_ws = (Path.home() / ".nanobot" / "workspace").expanduser()
-    new_data = Path.home() / ".nanobot"
+    new_data = target_path.parent  # ~/.nanobot/
 
     moved: list[str] = []
     if legacy_ws.is_dir():
         for entry in list(legacy_ws.iterdir()):
             target = new_data / entry.name
-            if target.exists():
-                continue
             try:
+                if target.exists():
+                    # Special case: cron/ may pre-exist as an empty placeholder.
+                    # Merge files into it instead of orphaning the legacy data.
+                    if entry.is_dir() and target.is_dir() and not any(target.iterdir()):
+                        for child in list(entry.iterdir()):
+                            shutil.move(str(child), str(target / child.name))
+                        try:
+                            entry.rmdir()
+                        except OSError:
+                            pass
+                        moved.append(entry.name + "/*")
+                    continue
                 shutil.move(str(entry), str(target))
                 moved.append(entry.name)
             except Exception:
@@ -471,6 +513,10 @@ def _migrate_legacy_install(config_path: Path | None) -> None:
         except OSError:
             pass
 
+    try:
+        raw = json.loads(target_path.read_text(encoding="utf-8"))
+    except Exception:
+        raw = {}
     raw.setdefault("agents", {}).setdefault("defaults", {})["workspace"] = "~"
     try:
         target_path.write_text(
