@@ -8,6 +8,7 @@ Provides:
 - AgentHook compatibility adapter
 """
 
+from nanobot.hooks.adapters import adapt_agent_hook, adapt_agent_hook_list
 from nanobot.hooks.center import HookCenter, HookSession
 from nanobot.hooks.discovery import discover_hook_plugins, register_discovered
 from nanobot.hooks.event_types import (
@@ -33,6 +34,8 @@ __all__ = [
     "Modified",
     "OnStream",
     "OnStreamEnd",
+    "adapt_agent_hook",
+    "adapt_agent_hook_list",
     "discover_hook_plugins",
     "register_discovered",
 ]
