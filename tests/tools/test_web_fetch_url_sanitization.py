@@ -110,6 +110,24 @@ async def test_execute_strips_space_and_backticks():
     assert "error" not in data, f"unexpected error: {data}"
 
 
+@pytest.mark.asyncio
+async def test_execute_strips_mixed_markdown_and_quotes():
+    tool = WebFetchTool()
+    with _patch_env()[0], _patch_env()[1]:
+        result = await tool.execute(url='"`https://example.com/page`"')
+    data = json.loads(result)
+    assert "error" not in data, f"unexpected error: {data}"
+
+
+@pytest.mark.asyncio
+async def test_execute_keeps_case_insensitive_http_scheme():
+    tool = WebFetchTool()
+    with _patch_env()[0], _patch_env()[1]:
+        result = await tool.execute(url="HTTPS://example.com/page")
+    data = json.loads(result)
+    assert "error" not in data, f"unexpected error: {data}"
+
+
 # --- startswith guard tests ---
 
 @pytest.mark.asyncio
@@ -118,7 +136,7 @@ async def test_execute_rejects_non_http_url_after_cleaning():
     result = await tool.execute(url="ftp://example.com/file")
     data = json.loads(result)
     assert "error" in data
-    assert "Invalid URL" in data["error"]
+    assert "URL validation failed" in data["error"]
 
 
 @pytest.mark.asyncio
@@ -127,7 +145,7 @@ async def test_execute_rejects_garbage_after_cleaning():
     result = await tool.execute(url="`not a url at all`")
     data = json.loads(result)
     assert "error" in data
-    assert "Invalid URL" in data["error"]
+    assert "URL validation failed" in data["error"]
 
 
 @pytest.mark.asyncio
@@ -136,4 +154,4 @@ async def test_execute_rejects_bare_domain_after_cleaning():
     result = await tool.execute(url="`example.com/page`")
     data = json.loads(result)
     assert "error" in data
-    assert "Invalid URL" in data["error"]
+    assert "URL validation failed" in data["error"]
