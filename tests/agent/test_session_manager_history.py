@@ -180,6 +180,7 @@ def test_get_history_preserves_reasoning_content():
         "role": "assistant",
         "content": "done",
         "reasoning_content": "hidden chain of thought",
+        "thinking_blocks": [{"type": "thinking", "thinking": "hidden chain of thought", "signature": "sig"}],
     })
 
     history = session.get_history(max_messages=500)
@@ -190,6 +191,11 @@ def test_get_history_preserves_reasoning_content():
             "role": "assistant",
             "content": "done",
             "reasoning_content": "hidden chain of thought",
+            "thinking_blocks": [{
+                "type": "thinking",
+                "thinking": "hidden chain of thought",
+                "signature": "sig",
+            }],
         },
     ]
 

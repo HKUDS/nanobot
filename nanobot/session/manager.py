@@ -118,7 +118,7 @@ class Session:
             if include_timestamps:
                 content = self._annotate_message_time(message, content)
             entry: dict[str, Any] = {"role": message["role"], "content": content}
-            for key in ("tool_calls", "tool_call_id", "name", "reasoning_content"):
+            for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
                 if key in message:
                     entry[key] = message[key]
             out.append(entry)
