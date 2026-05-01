@@ -18,7 +18,7 @@ def test_longcat_provider_in_registry():
     longcat = specs["longcat"]
     assert longcat.backend == "openai_compat"
     assert longcat.env_key == "LONGCAT_API_KEY"
-    assert longcat.default_api_base == "https://api.longcat.chat/openai"
+    assert longcat.default_api_base == "https://api.longcat.chat/openai/v1"
 
 
 def test_find_by_name_longcat():

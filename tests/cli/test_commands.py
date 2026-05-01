@@ -306,6 +306,7 @@ def test_config_explicit_longcat_provider_resolves_provider_name():
     )
 
     assert config.get_provider_name() == "longcat"
+    assert config.get_api_base() == "https://api.longcat.chat/openai/v1"
 
 
 def test_config_auto_detects_longcat_from_model_keyword():

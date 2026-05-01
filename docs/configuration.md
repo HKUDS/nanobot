@@ -165,7 +165,7 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 <summary><b>LongCat (OpenAI-compatible)</b></summary>
 
 LongCat is available through nanobot's built-in OpenAI-compatible provider flow.
-The default API base already points to `https://api.longcat.chat/openai`, so you
+The default API base already points to `https://api.longcat.chat/openai/v1`, so you
 usually only need to set `apiKey`.
 
 ```json

@@ -323,7 +323,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         env_key="LONGCAT_API_KEY",
         display_name="LongCat",
         backend="openai_compat",
-        default_api_base="https://api.longcat.chat/openai",
+        default_api_base="https://api.longcat.chat/openai/v1",
     ),
     # === Local deployment (matched by config key, NOT by api_base) =========
     # vLLM / any OpenAI-compatible local server
