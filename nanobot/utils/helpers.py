@@ -63,8 +63,8 @@ def strip_think(text: str) -> str:
     # Stream chunks may end in the middle of a control tag. Strip only known
     # control-token prefixes at the very end.
     partial_control_tag = (
-        r"</?(?:t|th|thi|thin|think|tho|thou|thoug|though|thought)"
-        r"|<\|?(?:c|ch|cha|chan|chann|channe|channel|channel\|?)"
+        r"</?(?:t|th|thi|thin|think|tho|thou|thoug|though|thought)>?"
+        r"|<\|?(?:c|ch|cha|chan|chann|channe|channel)(?:\|?>?)?"
     )
     text = re.sub(rf"(?:{partial_control_tag})$", "", text)
     text = re.sub(r"^\s*<\|?$", "", text)
