@@ -251,11 +251,13 @@ class MatrixChannel(BaseChannel):
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
         self._stream_bufs: dict[str, _StreamBuf] = {}
+        self._started_at_ms: int = 0
 
 
     async def start(self) -> None:
         """Start Matrix client and begin sync loop."""
         self._running = True
+        self._started_at_ms = int(time.time() * 1000)
         _configure_nio_logging_bridge()
 
         self.store_path = get_data_dir() / "matrix-store"
@@ -674,6 +676,16 @@ class MatrixChannel(BaseChannel):
             return True
         return bool(self.config.allow_room_mentions and mentions.get("room") is True)
 
+    def _is_pre_startup_event(self, event: RoomMessage) -> bool:
+        """Skip events that landed in the timeline before this process started.
+
+        Matrix sync replays the room timeline on each startup/restart; without
+        this filter old messages would be re-handled as if they were fresh
+        (#3553).
+        """
+        ts = getattr(event, "server_timestamp", None)
+        return isinstance(ts, int) and ts < self._started_at_ms
+
     def _should_process_message(self, room: MatrixRoom, event: RoomMessage) -> bool:
         """Apply sender and room policy checks."""
         if not self.is_allowed(event.sender):
@@ -858,7 +870,11 @@ class MatrixChannel(BaseChannel):
         return meta
 
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText) -> None:
-        if event.sender == self.config.user_id or not self._should_process_message(room, event):
+        if (
+            event.sender == self.config.user_id
+            or self._is_pre_startup_event(event)
+            or not self._should_process_message(room, event)
+        ):
             return
         await self._start_typing_keepalive(room.room_id)
         try:
@@ -871,7 +887,11 @@ class MatrixChannel(BaseChannel):
             raise
 
     async def _on_media_message(self, room: MatrixRoom, event: MatrixMediaEvent) -> None:
-        if event.sender == self.config.user_id or not self._should_process_message(room, event):
+        if (
+            event.sender == self.config.user_id
+            or self._is_pre_startup_event(event)
+            or not self._should_process_message(room, event)
+        ):
             return
         attachment, marker = await self._fetch_media_attachment(room, event)
         parts: list[str] = []
