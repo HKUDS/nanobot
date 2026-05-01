@@ -98,6 +98,37 @@ class TestReadDedup:
 
 
 # ---------------------------------------------------------------------------
+# Cross-session isolation (issue #3571)
+# ---------------------------------------------------------------------------
+# Each session must keep its own read cache. When session A reads a file,
+# session B reading the same file must still receive the full content, not
+# the "[File unchanged since last read]" dedup stub. The stub is only valid
+# within the session that first cached the read.
+
+class TestReadDedupSessionIsolation:
+
+    @pytest.mark.asyncio
+    async def test_separate_sessions_do_not_share_dedup_state(self, tmp_path):
+        f = tmp_path / "shared.txt"
+        f.write_text("\n".join(f"line {i}" for i in range(10)), encoding="utf-8")
+
+        session_a_tool = ReadFileTool(workspace=tmp_path)
+        session_b_tool = ReadFileTool(workspace=tmp_path)
+
+        first = await session_a_tool.execute(path=str(f))
+        assert "line 0" in first
+
+        # Session B has never read this file before — it must see the full
+        # content, not the dedup stub from session A.
+        second = await session_b_tool.execute(path=str(f))
+        assert "unchanged" not in second.lower(), (
+            "Session B should not inherit session A's read-dedup state. "
+            f"Got: {second!r}"
+        )
+        assert "line 0" in second
+
+
+# ---------------------------------------------------------------------------
 # PDF support
 # ---------------------------------------------------------------------------
 

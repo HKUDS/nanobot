@@ -28,6 +28,7 @@ from nanobot.agent.tools.ask import (
     pending_ask_user_id,
 )
 from nanobot.agent.tools.cron import CronTool
+from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.notebook import NotebookEditTool
@@ -247,6 +248,10 @@ class AgentLoop:
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
+        # Per-session file-read/write tracker (issue #3571) — shared across
+        # the filesystem tools registered below so this AgentLoop does not
+        # leak read-dedup state into another loop's tools.
+        self._file_states = FileStates()
         self.runner = AgentRunner(provider)
         self.subagents = SubagentManager(
             provider=provider,
@@ -348,17 +353,24 @@ class AgentLoop:
             self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
         )
         extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
+        # One FileStates per session so read-dedup and read-before-edit
+        # tracking does not leak across sessions sharing this process
+        # (issue #3571).
+        file_states = self._file_states
         self.tools.register(AskUserTool())
         self.tools.register(
             ReadFileTool(
-                workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read
+                workspace=self.workspace,
+                allowed_dir=allowed_dir,
+                extra_allowed_dirs=extra_read,
+                file_states=file_states,
             )
         )
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir, file_states=file_states))
         for cls in (GlobTool, GrepTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
-        self.tools.register(NotebookEditTool(workspace=self.workspace, allowed_dir=allowed_dir))
+            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir, file_states=file_states))
+        self.tools.register(NotebookEditTool(workspace=self.workspace, allowed_dir=allowed_dir, file_states=file_states))
         if self.exec_config.enable:
             self.tools.register(
                 ExecTool(
