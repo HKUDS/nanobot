@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -127,6 +128,26 @@ class FileStates:
     def clear(self) -> None:
         """Clear all tracked state (useful for testing)."""
         self._state.clear()
+
+
+_current_file_states: ContextVar[FileStates | None] = ContextVar(
+    "nanobot_file_states",
+    default=None,
+)
+
+
+def current_file_states(default: FileStates) -> FileStates:
+    """Return the FileStates bound to the current agent task, or a fallback."""
+    return _current_file_states.get() or default
+
+
+def bind_file_states(file_states: FileStates) -> Token[FileStates | None]:
+    """Bind file read/write state for the current async task."""
+    return _current_file_states.set(file_states)
+
+
+def reset_file_states(token: Token[FileStates | None]) -> None:
+    _current_file_states.reset(token)
 
 
 # Module-level default instance, retained for backward compatibility with

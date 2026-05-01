@@ -9,7 +9,7 @@ from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
-from nanobot.agent.tools.file_state import FileStates, _hash_file
+from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 from nanobot.config.paths import get_media_dir
 
@@ -54,10 +54,17 @@ class _FsTool(Tool):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
         self._extra_allowed_dirs = extra_allowed_dirs
-        # Read-dedup / read-before-edit state is scoped to one FileStates
-        # so it does not leak across sessions sharing this process
-        # (issue #3571). Bare constructions get a private instance.
-        self._file_states: FileStates = file_states if file_states is not None else FileStates()
+        # Explicit state is used by isolated runners like Dream/subagents.
+        # Main AgentLoop tools leave this unset and resolve state from the
+        # current async task, which keeps shared tool instances session-safe.
+        self._explicit_file_states = file_states
+        self._fallback_file_states = FileStates()
+
+    @property
+    def _file_states(self) -> FileStates:
+        if self._explicit_file_states is not None:
+            return self._explicit_file_states
+        return current_file_states(self._fallback_file_states)
 
     def _resolve(self, path: str) -> Path:
         return _resolve_path(path, self._workspace, self._allowed_dir, self._extra_allowed_dirs)

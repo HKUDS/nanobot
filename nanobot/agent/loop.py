@@ -28,7 +28,7 @@ from nanobot.agent.tools.ask import (
     pending_ask_user_id,
 )
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.file_state import FileStates
+from nanobot.agent.tools.file_state import FileStates, bind_file_states, reset_file_states
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.notebook import NotebookEditTool
@@ -248,10 +248,9 @@ class AgentLoop:
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
-        # Per-session file-read/write tracker (issue #3571) — shared across
-        # the filesystem tools registered below so this AgentLoop does not
-        # leak read-dedup state into another loop's tools.
-        self._file_states = FileStates()
+        # One file-read/write tracker per logical session. The tool registry is
+        # shared by this loop, so tools resolve the active state via contextvars.
+        self._file_states_by_session: dict[str, FileStates] = {}
         self.runner = AgentRunner(provider)
         self.subagents = SubagentManager(
             provider=provider,
@@ -313,6 +312,14 @@ class AgentLoop:
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
+    def _file_states_for_session(self, session_key: str | None) -> FileStates:
+        key = session_key or "__default__"
+        states = self._file_states_by_session.get(key)
+        if states is None:
+            states = FileStates()
+            self._file_states_by_session[key] = states
+        return states
+
     def _sync_subagent_runtime_limits(self) -> None:
         """Keep subagent runtime limits aligned with mutable loop settings."""
         self.subagents.max_iterations = self.max_iterations
@@ -353,24 +360,19 @@ class AgentLoop:
             self.workspace if (self.restrict_to_workspace or self.exec_config.sandbox) else None
         )
         extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
-        # One FileStates per session so read-dedup and read-before-edit
-        # tracking does not leak across sessions sharing this process
-        # (issue #3571).
-        file_states = self._file_states
         self.tools.register(AskUserTool())
         self.tools.register(
             ReadFileTool(
                 workspace=self.workspace,
                 allowed_dir=allowed_dir,
                 extra_allowed_dirs=extra_read,
-                file_states=file_states,
             )
         )
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir, file_states=file_states))
+            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         for cls in (GlobTool, GrepTool):
-            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir, file_states=file_states))
-        self.tools.register(NotebookEditTool(workspace=self.workspace, allowed_dir=allowed_dir, file_states=file_states))
+            self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
+        self.tools.register(NotebookEditTool(workspace=self.workspace, allowed_dir=allowed_dir))
         if self.exec_config.enable:
             self.tools.register(
                 ExecTool(
@@ -630,25 +632,30 @@ class AgentLoop:
 
             return items
 
-        result = await self.runner.run(AgentRunSpec(
-            initial_messages=initial_messages,
-            tools=self.tools,
-            model=self.model,
-            max_iterations=self.max_iterations,
-            max_tool_result_chars=self.max_tool_result_chars,
-            hook=hook,
-            error_message="Sorry, I encountered an error calling the AI model.",
-            concurrent_tools=True,
-            workspace=self.workspace,
-            session_key=session.key if session else None,
-            context_window_tokens=self.context_window_tokens,
-            context_block_limit=self.context_block_limit,
-            provider_retry_mode=self.provider_retry_mode,
-            progress_callback=on_progress,
-            retry_wait_callback=on_retry_wait,
-            checkpoint_callback=_checkpoint,
-            injection_callback=_drain_pending,
-        ))
+        active_session_key = session.key if session else session_key
+        file_state_token = bind_file_states(self._file_states_for_session(active_session_key))
+        try:
+            result = await self.runner.run(AgentRunSpec(
+                initial_messages=initial_messages,
+                tools=self.tools,
+                model=self.model,
+                max_iterations=self.max_iterations,
+                max_tool_result_chars=self.max_tool_result_chars,
+                hook=hook,
+                error_message="Sorry, I encountered an error calling the AI model.",
+                concurrent_tools=True,
+                workspace=self.workspace,
+                session_key=session.key if session else None,
+                context_window_tokens=self.context_window_tokens,
+                context_block_limit=self.context_block_limit,
+                provider_retry_mode=self.provider_retry_mode,
+                progress_callback=on_progress,
+                retry_wait_callback=on_retry_wait,
+                checkpoint_callback=_checkpoint,
+                injection_callback=_drain_pending,
+            ))
+        finally:
+            reset_file_states(file_state_token)
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
