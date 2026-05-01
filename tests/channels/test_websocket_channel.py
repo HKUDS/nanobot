@@ -288,6 +288,25 @@ async def test_send_delta_emits_delta_and_stream_end() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_turn_end_emits_turn_end_event() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={"_turn_end": True},
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {"event": "turn_end", "chat_id": "chat-1"}
+
+
+@pytest.mark.asyncio
 async def test_send_non_connection_closed_exception_is_raised() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
@@ -545,6 +564,16 @@ async def test_end_to_end_server_pushes_streaming_deltas_to_client(bus: MagicMoc
             end = json.loads(await client.recv())
             assert end["event"] == "stream_end"
             assert end["stream_id"] == "s1"
+
+            await channel.send(OutboundMessage(
+                channel="websocket",
+                chat_id=chat_id,
+                content="",
+                metadata={"_turn_end": True},
+            ))
+
+            turn_end = json.loads(await client.recv())
+            assert turn_end == {"event": "turn_end", "chat_id": chat_id}
     finally:
         await channel.stop()
         await server_task
