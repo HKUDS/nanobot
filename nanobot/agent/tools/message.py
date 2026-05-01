@@ -10,6 +10,21 @@ from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameter
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
 
+_BUTTONS_DESCRIPTION = (
+    "Optional: inline keyboard buttons as list of rows; each row is a list of cells. "
+    "A cell may be a plain string label (renders as a primary button on every channel), "
+    "or on Discord a structured dict for richer components: "
+    '{"type":"button","label":"Approve","style":"primary|secondary|success|danger",'
+    '"custom_id":"opt-id","modal":{"title":"...","inputs":[{"label":"Notes",'
+    '"style":"short|paragraph","custom_id":"notes","required":true,"max_length":1000}]}} '
+    "for an action button (with optional modal opened on click); "
+    '{"type":"link","label":"Docs","url":"https://..."} for a link button; '
+    '{"type":"select","custom_id":"pick","placeholder":"Pick one",'
+    '"options":[{"label":"High","value":"high"},{"label":"Low","value":"low"}]} '
+    "for a dropdown that takes the whole row. "
+    "Non-Discord channels render dict cells as plain labels (selects are dropped)."
+)
+
 
 @tool_parameters(
     tool_parameters_schema(
@@ -21,8 +36,12 @@ from nanobot.config.paths import get_workspace_path
             description="Optional: list of file paths to attach (images, video, audio, documents)",
         ),
         buttons=ArraySchema(
-            ArraySchema(StringSchema("Button label")),
-            description="Optional: inline keyboard buttons as list of rows, each row is list of button labels.",
+            ArraySchema(
+                # Untyped item: cells may be a string (label) or an object
+                # (component dict). The runtime validates the shape in execute().
+                {"description": "A button label string, or a component dict (button/link/select)."},
+            ),
+            description=_BUTTONS_DESCRIPTION,
         ),
         required=["content"],
     )
@@ -39,9 +58,15 @@ class MessageTool(Tool):
         workspace: str | Path | None = None,
     ):
         self._send_callback = send_callback
-        self._workspace = Path(workspace).expanduser() if workspace is not None else get_workspace_path()
-        self._default_channel: ContextVar[str] = ContextVar("message_default_channel", default=default_channel)
-        self._default_chat_id: ContextVar[str] = ContextVar("message_default_chat_id", default=default_chat_id)
+        self._workspace = (
+            Path(workspace).expanduser() if workspace is not None else get_workspace_path()
+        )
+        self._default_channel: ContextVar[str] = ContextVar(
+            "message_default_channel", default=default_channel
+        )
+        self._default_chat_id: ContextVar[str] = ContextVar(
+            "message_default_chat_id", default=default_chat_id
+        )
         self._default_message_id: ContextVar[str | None] = ContextVar(
             "message_default_message_id",
             default=default_message_id,
@@ -114,17 +139,32 @@ class MessageTool(Tool):
         message_id: str | None = None,
         media: list[str] | None = None,
         buttons: list[list[str]] | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> str:
         from nanobot.utils.helpers import strip_think
+
         content = strip_think(content)
 
+        components: list[list[Any]] | None = None
         if buttons is not None:
             if not isinstance(buttons, list) or any(
-                not isinstance(row, list) or any(not isinstance(label, str) for label in row)
+                not isinstance(row, list) or any(not isinstance(cell, (str, dict)) for cell in row)
                 for row in buttons
             ):
-                return "Error: buttons must be a list of list of strings"
+                return "Error: buttons must be a list of list of strings or component dicts"
+            if any(any(isinstance(cell, dict) for cell in row) for row in buttons):
+                # Rich component cells ride on metadata so non-Discord channels stay
+                # untouched; we keep buttons as a label-only fallback for them.
+                components = [list(row) for row in buttons]
+                buttons = [
+                    [
+                        cell if isinstance(cell, str) else str(cell.get("label") or "")
+                        for cell in row
+                        if isinstance(cell, str) or (isinstance(cell, dict) and cell.get("label"))
+                    ]
+                    for row in buttons
+                ]
+                buttons = [row for row in buttons if row]
         default_channel = self._default_channel.get()
         default_chat_id = self._default_chat_id.get()
         channel = channel or default_channel
@@ -160,6 +200,8 @@ class MessageTool(Tool):
             metadata["message_id"] = message_id
         if self._record_channel_delivery_var.get():
             metadata["_record_channel_delivery"] = True
+        if components is not None:
+            metadata["_components"] = components
 
         msg = OutboundMessage(
             channel=channel,
@@ -176,6 +218,9 @@ class MessageTool(Tool):
                 self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
             button_info = f" with {sum(len(row) for row in buttons)} button(s)" if buttons else ""
-            return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"
+            extra = ""
+            if components is not None and channel != "discord":
+                extra = f" (components rendered as labels on {channel})"
+            return f"Message sent to {channel}:{chat_id}{media_info}{button_info}{extra}"
         except Exception as e:
             return f"Error sending message: {str(e)}"

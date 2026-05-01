@@ -79,14 +79,16 @@ async def test_runner_pauses_on_ask_user_without_executing_later_tools():
     tools.register(AskUserTool())
     tools.register(later)
 
-    result = await AgentRunner(_make_provider(chat_with_retry)).run(AgentRunSpec(
-        initial_messages=[{"role": "user", "content": "continue"}],
-        tools=tools,
-        model="test-model",
-        max_iterations=3,
-        max_tool_result_chars=16_000,
-        concurrent_tools=True,
-    ))
+    result = await AgentRunner(_make_provider(chat_with_retry)).run(
+        AgentRunSpec(
+            initial_messages=[{"role": "user", "content": "continue"}],
+            tools=tools,
+            model="test-model",
+            max_iterations=3,
+            max_tool_result_chars=16_000,
+            concurrent_tools=True,
+        )
+    )
 
     assert result.stop_reason == "ask_user"
     assert result.final_content == "Install this package?"
@@ -146,8 +148,14 @@ async def test_ask_user_text_fallback_resumes_with_next_message(tmp_path):
     assert "_streamed" not in first.metadata
 
     session = loop.sessions.get_or_create("cli:direct")
-    assert any(message.get("role") == "assistant" and message.get("tool_calls") for message in session.messages)
-    assert not any(message.get("role") == "tool" and message.get("name") == "ask_user" for message in session.messages)
+    assert any(
+        message.get("role") == "assistant" and message.get("tool_calls")
+        for message in session.messages
+    )
+    assert not any(
+        message.get("role") == "tool" and message.get("name") == "ask_user"
+        for message in session.messages
+    )
 
     second = await loop._process_message(
         InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="Skip")
@@ -234,6 +242,40 @@ async def test_ask_user_keeps_buttons_for_websocket(tmp_path):
 
     response = await loop._process_message(
         InboundMessage(channel="websocket", sender_id="user", chat_id="123", content="set it up")
+    )
+
+    assert response is not None
+    assert response.content == "Install the optional package?"
+    assert response.buttons == [["Install", "Skip"]]
+
+
+@pytest.mark.asyncio
+async def test_ask_user_keeps_buttons_for_discord(tmp_path):
+    async def chat_with_retry(**kwargs):
+        return LLMResponse(
+            content="",
+            finish_reason="tool_calls",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_ask",
+                    name="ask_user",
+                    arguments={
+                        "question": "Install the optional package?",
+                        "options": ["Install", "Skip"],
+                    },
+                )
+            ],
+        )
+
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=_make_provider(chat_with_retry),
+        workspace=tmp_path,
+        model="test-model",
+    )
+
+    response = await loop._process_message(
+        InboundMessage(channel="discord", sender_id="user", chat_id="123", content="set it up")
     )
 
     assert response is not None

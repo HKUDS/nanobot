@@ -6,7 +6,7 @@ from typing import Any
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 
-STRUCTURED_BUTTON_CHANNELS = frozenset({"telegram", "websocket"})
+STRUCTURED_BUTTON_CHANNELS = frozenset({"telegram", "websocket", "discord"})
 
 
 class AskUserInterrupt(BaseException):

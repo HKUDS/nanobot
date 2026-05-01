@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import time
+import uuid
+from collections import OrderedDict
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -32,9 +35,55 @@ if DISCORD_AVAILABLE:
     from discord import app_commands
     from discord.abc import Messageable
 
+    _BUTTON_STYLES = {
+        "primary": discord.ButtonStyle.primary,
+        "secondary": discord.ButtonStyle.secondary,
+        "success": discord.ButtonStyle.success,
+        "danger": discord.ButtonStyle.danger,
+    }
+    _TEXT_INPUT_STYLES = {
+        "short": discord.TextStyle.short,
+        "paragraph": discord.TextStyle.paragraph,
+    }
+
+    class _NanobotModal(discord.ui.Modal):
+        """Stateless Modal — submission is routed via on_interaction by custom_id."""
+
+        def __init__(self, *, title: str, custom_id: str) -> None:
+            super().__init__(title=title, custom_id=custom_id, timeout=None)
+
+        async def on_submit(self, interaction: discord.Interaction) -> None:
+            # No-op: the global on_interaction handler dispatches modal_submit
+            # interactions by custom_id, so this Modal subclass holds no state.
+            return
+
+
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 MAX_MESSAGE_LEN = 2000  # Discord message character limit
 TYPING_INTERVAL_S = 8
+
+# Discord component limits
+MAX_BUTTON_LABEL = 80
+MAX_CUSTOM_ID = 100
+MAX_SELECT_OPTIONS = 25
+MAX_SELECT_LABEL = 100
+MAX_MODAL_INPUTS = 5
+MAX_ROWS = 5
+MAX_BTNS_PER_ROW = 5
+MAX_TEXT_INPUT_LABEL = 45
+MAX_MODAL_TITLE = 45
+MODAL_SPEC_CAP = 1024
+MODAL_CID_SUFFIX = ":m"
+ZERO_WIDTH_SPACE = "​"
+
+
+def _truncate(value: str, limit: int) -> str:
+    """Truncate a string to the given Discord limit."""
+    if value is None:
+        return ""
+    if len(value) <= limit:
+        return value
+    return value[:limit]
 
 
 @dataclass
@@ -104,6 +153,259 @@ if DISCORD_AVAILABLE:
             else:
                 self._channel._remember_channel(after)
 
+        async def on_interaction(self, interaction: discord.Interaction) -> None:
+            """Route Discord component & modal-submit interactions to the agent.
+
+            Slash-command interactions are handled by CommandTree separately;
+            this dispatcher only processes type=component (button/select) and
+            type=modal_submit. The 3-second response window is preserved by
+            deferring immediately on every path that doesn't open a modal.
+            """
+            try:
+                interaction_type = getattr(interaction, "type", None)
+                # discord.py's enum: InteractionType.component / .modal_submit
+                if interaction_type == discord.InteractionType.component:
+                    await self._handle_component_interaction(interaction)
+                elif interaction_type == discord.InteractionType.modal_submit:
+                    await self._handle_modal_submit(interaction)
+            except Exception as e:
+                logger.warning("Discord on_interaction error: {}", e)
+
+        async def _interaction_auth_ok(
+            self, interaction: discord.Interaction
+        ) -> tuple[bool, Any | None]:
+            """Run the same allow_from / allow_channels checks slash commands use."""
+            sender_id = str(interaction.user.id)
+            if not self._channel.is_allowed(sender_id):
+                await self._reply_ephemeral(interaction, "You are not allowed to use this bot.")
+                return False, None
+            channel = await self._resolve_interaction_channel(interaction)
+            if not await self._interaction_channel_allowed(interaction, channel):
+                await self._reply_ephemeral(
+                    interaction, "This channel is not allowed for this bot."
+                )
+                return False, None
+            return True, channel
+
+        def _interaction_session_metadata(
+            self,
+            interaction: discord.Interaction,
+            channel: Any | None,
+        ) -> tuple[dict[str, Any], str | None]:
+            """Mirror _forward_slash_command's metadata + thread session-key shape."""
+            channel_id = interaction.channel_id
+            metadata: dict[str, Any] = {
+                "interaction_id": str(interaction.id),
+                "guild_id": str(interaction.guild_id) if interaction.guild_id else None,
+                "is_callback": True,
+            }
+            session_key: str | None = None
+            if channel is not None and channel_id is not None:
+                parent_channel_id = self._channel._channel_parent_key(channel)
+                if parent_channel_id is not None:
+                    metadata["parent_channel_id"] = parent_channel_id
+                    metadata["context_chat_id"] = parent_channel_id
+                    metadata["thread_id"] = str(channel_id)
+                    session_key = f"{self._channel.name}:{parent_channel_id}:thread:{channel_id}"
+            return metadata, session_key
+
+        async def _handle_component_interaction(self, interaction: discord.Interaction) -> None:
+            ok, channel = await self._interaction_auth_ok(interaction)
+            if not ok:
+                return
+
+            data = getattr(interaction, "data", None) or {}
+            custom_id = str(data.get("custom_id") or "")
+            component_type = data.get("component_type")
+            channel_id = interaction.channel_id
+
+            if channel_id is None or not custom_id:
+                return
+
+            modal_spec = self._channel._modal_specs.get(custom_id)
+            if component_type == 2 and modal_spec is not None:
+                modal = self._build_modal(modal_spec, button_custom_id=custom_id)
+                if modal is None:
+                    await self._reply_ephemeral(interaction, "Form unavailable.")
+                    return
+                try:
+                    await interaction.response.send_modal(modal)
+                except Exception as e:
+                    logger.warning("Discord send_modal failed: {}", e)
+                return
+
+            with suppress(Exception):
+                await interaction.response.defer()
+
+            metadata, session_key = self._interaction_session_metadata(interaction, channel)
+            metadata["custom_id"] = custom_id
+            message = getattr(interaction, "message", None)
+            if message is not None:
+                metadata["message_id"] = str(getattr(message, "id", "") or "")
+
+            if component_type == 2:
+                # Button click without a registered modal.
+                button_label = self._extract_button_label(interaction, custom_id) or custom_id
+                metadata["interaction_type"] = "button"
+                metadata["button_label"] = button_label
+                content = button_label
+            elif component_type == 3:
+                values = list(data.get("values") or [])
+                labels = self._resolve_select_labels(interaction, custom_id, values)
+                metadata["interaction_type"] = "select"
+                metadata["values"] = values
+                metadata["labels"] = labels
+                content = ", ".join(labels) if labels else ", ".join(values)
+            else:
+                logger.debug("Discord ignoring component_type={}", component_type)
+                return
+
+            await self._channel._handle_message(
+                sender_id=str(interaction.user.id),
+                chat_id=str(channel_id),
+                content=content,
+                metadata=metadata,
+                session_key=session_key,
+            )
+
+        async def _handle_modal_submit(self, interaction: discord.Interaction) -> None:
+            ok, channel = await self._interaction_auth_ok(interaction)
+            if not ok:
+                return
+
+            data = getattr(interaction, "data", None) or {}
+            modal_custom_id = str(data.get("custom_id") or "")
+            button_cid = self._channel._modal_to_button.get(modal_custom_id)
+            if not button_cid:
+                logger.info(
+                    "Discord modal_submit with unknown cid {}; form expired", modal_custom_id
+                )
+                with suppress(Exception):
+                    await interaction.response.send_message(
+                        "This form has expired. Please request it again.", ephemeral=True
+                    )
+                return
+
+            spec = self._channel._modal_specs.get(button_cid) or {}
+            input_specs = {
+                str(item.get("custom_id") or item.get("label") or ""): item
+                for item in (spec.get("inputs") or [])
+                if isinstance(item, dict)
+            }
+
+            form_values: dict[str, str] = {}
+            content_lines: list[str] = []
+            for action_row in data.get("components") or []:
+                for component in action_row.get("components") or []:
+                    cid = str(component.get("custom_id") or "")
+                    value = str(component.get("value") or "")
+                    if not cid:
+                        continue
+                    form_values[cid] = value
+                    label = ""
+                    if cid in input_specs:
+                        label = str(input_specs[cid].get("label") or cid)
+                    else:
+                        label = cid
+                    content_lines.append(f"{label}: {value}")
+
+            with suppress(Exception):
+                await interaction.response.defer()
+
+            metadata, session_key = self._interaction_session_metadata(interaction, channel)
+            metadata["custom_id"] = button_cid
+            metadata["interaction_type"] = "modal_submit"
+            metadata["form_values"] = form_values
+            parent_message = getattr(interaction, "message", None)
+            if parent_message is not None:
+                metadata["parent_message_id"] = str(getattr(parent_message, "id", "") or "")
+
+            content = "\n".join(content_lines) if content_lines else ""
+            channel_id = interaction.channel_id
+            if channel_id is None:
+                return
+
+            await self._channel._handle_message(
+                sender_id=str(interaction.user.id),
+                chat_id=str(channel_id),
+                content=content,
+                metadata=metadata,
+                session_key=session_key,
+            )
+
+        @staticmethod
+        def _extract_button_label(interaction: discord.Interaction, custom_id: str) -> str | None:
+            """Pull the clicked button's label from the originating message components."""
+            message = getattr(interaction, "message", None)
+            if message is None:
+                return None
+            for action_row in getattr(message, "components", None) or []:
+                for child in getattr(action_row, "children", None) or []:
+                    if getattr(child, "custom_id", None) == custom_id:
+                        return getattr(child, "label", None)
+            return None
+
+        @staticmethod
+        def _resolve_select_labels(
+            interaction: discord.Interaction,
+            custom_id: str,
+            values: list[str],
+        ) -> list[str]:
+            """Map selected values back to display labels using the original message."""
+            label_for: dict[str, str] = {}
+            message = getattr(interaction, "message", None)
+            if message is not None:
+                for action_row in getattr(message, "components", None) or []:
+                    for child in getattr(action_row, "children", None) or []:
+                        if getattr(child, "custom_id", None) != custom_id:
+                            continue
+                        for option in getattr(child, "options", None) or []:
+                            label = getattr(option, "label", None)
+                            value = getattr(option, "value", None)
+                            if label and value is not None:
+                                label_for[str(value)] = str(label)
+            return [label_for.get(v, v) for v in values]
+
+        def _build_modal(
+            self, spec: dict[str, Any], *, button_custom_id: str
+        ) -> "discord.ui.Modal | None":
+            """Instantiate a Modal subclass from a stored spec."""
+            inputs = spec.get("inputs") or []
+            if not isinstance(inputs, list) or not inputs:
+                return None
+
+            title = _truncate(str(spec.get("title") or "Form"), MAX_MODAL_TITLE)
+            modal_custom_id = f"{button_custom_id}{MODAL_CID_SUFFIX}"
+            modal = _NanobotModal(title=title, custom_id=_truncate(modal_custom_id, MAX_CUSTOM_ID))
+
+            for index, item in enumerate(inputs[:MAX_MODAL_INPUTS]):
+                if not isinstance(item, dict):
+                    continue
+                label = _truncate(
+                    str(item.get("label") or f"Field {index + 1}"), MAX_TEXT_INPUT_LABEL
+                )
+                style_name = str(item.get("style") or "short").lower()
+                style = _TEXT_INPUT_STYLES.get(style_name, discord.TextStyle.short)
+                cid = _truncate(
+                    str(item.get("custom_id") or item.get("label") or f"f{index}"),
+                    MAX_CUSTOM_ID,
+                )
+                placeholder = item.get("placeholder")
+                default = item.get("value") or item.get("default")
+                modal.add_item(
+                    discord.ui.TextInput(
+                        label=label,
+                        style=style,
+                        custom_id=cid,
+                        placeholder=str(placeholder)[:100] if placeholder else None,
+                        default=str(default)[:4000] if default else None,
+                        required=bool(item.get("required", True)),
+                        min_length=item.get("min_length"),
+                        max_length=item.get("max_length"),
+                    )
+                )
+            return modal
+
         async def _reply_ephemeral(self, interaction: discord.Interaction, text: str) -> bool:
             """Send an ephemeral interaction response and report success."""
             try:
@@ -162,7 +464,9 @@ if DISCORD_AVAILABLE:
 
             channel = await self._resolve_interaction_channel(interaction)
             if not await self._interaction_channel_allowed(interaction, channel):
-                await self._reply_ephemeral(interaction, "This channel is not allowed for this bot.")
+                await self._reply_ephemeral(
+                    interaction, "This channel is not allowed for this bot."
+                )
                 return
 
             await self._reply_ephemeral(interaction, f"Processing {command_text}...")
@@ -215,7 +519,9 @@ if DISCORD_AVAILABLE:
                     return
                 channel = await self._resolve_interaction_channel(interaction)
                 if not await self._interaction_channel_allowed(interaction, channel):
-                    await self._reply_ephemeral(interaction, "This channel is not allowed for this bot.")
+                    await self._reply_ephemeral(
+                        interaction, "This channel is not allowed for this bot."
+                    )
                     return
                 await self._reply_ephemeral(interaction, build_help_text())
 
@@ -260,14 +566,40 @@ if DISCORD_AVAILABLE:
                 else:
                     failed_media.append(Path(media_path).name)
 
-            for index, chunk in enumerate(
-                self._build_chunks(msg.content or "", failed_media, sent_media)
-            ):
+            view = self._build_view(self._components_from(msg))
+            chunks = self._build_chunks(msg.content or "", failed_media, sent_media)
+            last_index = len(chunks) - 1
+
+            for index, chunk in enumerate(chunks):
                 kwargs: dict[str, Any] = {"content": chunk}
                 if index == 0 and reference is not None and not sent_media:
                     kwargs["reference"] = reference
                     kwargs["allowed_mentions"] = mention_settings
+                if view is not None and index == last_index:
+                    kwargs["view"] = view
                 await channel.send(**kwargs)
+
+            if view is not None and not chunks:
+                # No text/fallback to attach the view to. Discord requires content
+                # or an embed for a message that carries components, so we send
+                # one trailing zero-width-space message to host the view.
+                await channel.send(content=ZERO_WIDTH_SPACE, view=view)
+
+        @staticmethod
+        def _components_from(msg: OutboundMessage) -> list[Any] | None:
+            """Pick the component source for an outbound message.
+
+            Rich components (with styles, selects, modals) ride on
+            metadata['_components']; the legacy buttons field is used only when
+            no rich components are present, and only contains plain labels.
+            """
+            metadata = msg.metadata or {}
+            rich = metadata.get("_components")
+            if isinstance(rich, list) and rich:
+                return rich
+            if msg.buttons:
+                return list(msg.buttons)
+            return None
 
         async def _send_file(
             self,
@@ -298,6 +630,171 @@ if DISCORD_AVAILABLE:
             except Exception as e:
                 logger.error("Error sending Discord file {}: {}", path.name, e)
                 return False
+
+        def _build_view(self, rows: list[Any] | None) -> discord.ui.View | None:
+            """Render component rows (str | dict cells) into a persistent View.
+
+            Rows may contain plain string labels (-> primary buttons), button
+            dicts ({type:'button'|'link', ...}), or a single select dict
+            ({type:'select', ...}) which takes the whole row. Button rows wider
+            than 5 are auto-rewrapped into multiple action rows. >5 rows total
+            are dropped with a warning. The View has timeout=None so custom_ids
+            stay dispatchable; we never store the View itself — dispatch is
+            keyed on custom_id by on_interaction.
+            """
+            if not rows:
+                return None
+
+            seed = uuid.uuid4().hex[:12]
+            view = discord.ui.View(timeout=None)
+            row_index = 0
+
+            for input_row in rows:
+                if row_index >= MAX_ROWS:
+                    logger.warning("Discord components: dropping rows beyond {}", MAX_ROWS)
+                    break
+                if not isinstance(input_row, list):
+                    continue
+
+                select_cell = self._extract_select(input_row)
+                if select_cell is not None:
+                    select = self._build_select(select_cell, seed=seed, row=row_index)
+                    if select is not None:
+                        select.row = row_index
+                        view.add_item(select)
+                        row_index += 1
+                    continue
+
+                # Button row: auto-rewrap if >5 buttons.
+                buttons: list[discord.ui.Button] = []
+                for col, cell in enumerate(input_row):
+                    btn = self._build_button(cell, seed=seed, row=row_index, col=col)
+                    if btn is not None:
+                        buttons.append(btn)
+
+                while buttons:
+                    if row_index >= MAX_ROWS:
+                        logger.warning("Discord components: button overflow past {} rows", MAX_ROWS)
+                        break
+                    chunk = buttons[:MAX_BTNS_PER_ROW]
+                    buttons = buttons[MAX_BTNS_PER_ROW:]
+                    for btn in chunk:
+                        btn.row = row_index
+                        view.add_item(btn)
+                    row_index += 1
+
+            return view if view.children else None
+
+        @staticmethod
+        def _extract_select(row: list[Any]) -> dict[str, Any] | None:
+            """Return a select dict if the row contains exactly one select cell."""
+            for cell in row:
+                if isinstance(cell, dict) and (cell.get("type") == "select" or "select" in cell):
+                    return cell.get("select", cell) if cell.get("type") != "select" else cell
+            return None
+
+        def _build_button(
+            self,
+            cell: Any,
+            *,
+            seed: str,
+            row: int,
+            col: int,
+        ) -> discord.ui.Button | None:
+            """Build one Button from a string label or button/link dict."""
+            if isinstance(cell, str):
+                label = cell
+                spec: dict[str, Any] = {"type": "button", "label": label}
+            elif isinstance(cell, dict):
+                spec = cell
+                label = str(spec.get("label") or "")
+                if spec.get("type") not in (None, "button", "link"):
+                    return None
+            else:
+                return None
+
+            label = _truncate(label, MAX_BUTTON_LABEL)
+            if not label:
+                return None
+
+            if spec.get("type") == "link" or spec.get("url"):
+                url = str(spec.get("url") or "").strip()
+                if not url:
+                    return None
+                return discord.ui.Button(
+                    style=discord.ButtonStyle.link,
+                    label=label,
+                    url=url,
+                )
+
+            style_name = str(spec.get("style") or "primary").lower()
+            style = _BUTTON_STYLES.get(style_name, discord.ButtonStyle.primary)
+
+            custom_id = str(spec.get("custom_id") or "").strip()
+            if not custom_id:
+                custom_id = f"nb:{seed}:{row}:{col}"
+            custom_id = _truncate(custom_id, MAX_CUSTOM_ID)
+
+            modal_spec = spec.get("modal")
+            if isinstance(modal_spec, dict) and modal_spec.get("inputs"):
+                self._channel._record_modal_spec(custom_id, modal_spec)
+
+            return discord.ui.Button(style=style, label=label, custom_id=custom_id)
+
+        @staticmethod
+        def _build_select(
+            spec: dict[str, Any],
+            *,
+            seed: str,
+            row: int,
+        ) -> discord.ui.Select | None:
+            """Build a string-select Select from a dict spec."""
+            options_raw = spec.get("options") or []
+            if not isinstance(options_raw, list) or not options_raw:
+                return None
+
+            if len(options_raw) > MAX_SELECT_OPTIONS:
+                logger.warning(
+                    "Discord select truncated to {} options (had {})",
+                    MAX_SELECT_OPTIONS,
+                    len(options_raw),
+                )
+                options_raw = options_raw[:MAX_SELECT_OPTIONS]
+
+            options: list[discord.SelectOption] = []
+            for opt in options_raw:
+                if isinstance(opt, str):
+                    label, value = opt, opt
+                elif isinstance(opt, dict):
+                    label = str(opt.get("label") or opt.get("value") or "")
+                    value = str(opt.get("value") or opt.get("label") or "")
+                else:
+                    continue
+                label = _truncate(label, MAX_SELECT_LABEL)
+                value = _truncate(value, MAX_CUSTOM_ID)
+                if not label or not value:
+                    continue
+                options.append(discord.SelectOption(label=label, value=value))
+
+            if not options:
+                return None
+
+            custom_id = _truncate(
+                str(spec.get("custom_id") or "").strip() or f"nb:{seed}:{row}:s",
+                MAX_CUSTOM_ID,
+            )
+            placeholder = spec.get("placeholder")
+            placeholder = _truncate(str(placeholder), 150) if placeholder else None
+            min_values = max(0, int(spec.get("min_values", 1)))
+            max_values = max(1, min(int(spec.get("max_values", 1)), len(options)))
+
+            return discord.ui.Select(
+                custom_id=custom_id,
+                placeholder=placeholder,
+                min_values=min_values,
+                max_values=max_values,
+                options=options,
+            )
 
         @staticmethod
         def _build_chunks(content: str, failed_media: list[str], sent_media: bool) -> list[str]:
@@ -374,6 +871,23 @@ class DiscordChannel(BaseChannel):
         self._working_emoji_tasks: dict[str, asyncio.Task[None]] = {}
         self._stream_bufs: dict[str, _StreamBuf] = {}
         self._known_channels: dict[str, Any] = {}
+        # Modal flow state. Lost on restart; orphaned button clicks degrade to
+        # plain button-click dispatch, modal_submit with unknown cid is dropped.
+        self._modal_specs: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._modal_to_button: OrderedDict[str, str] = OrderedDict()
+
+    def _record_modal_spec(self, button_custom_id: str, spec: dict[str, Any]) -> None:
+        """Cache a modal spec keyed by its trigger button's custom_id (FIFO-bounded)."""
+        modal_custom_id = f"{button_custom_id}{MODAL_CID_SUFFIX}"
+        self._modal_specs[button_custom_id] = spec
+        self._modal_specs.move_to_end(button_custom_id)
+        self._modal_to_button[modal_custom_id] = button_custom_id
+        self._modal_to_button.move_to_end(modal_custom_id)
+        while len(self._modal_specs) > MODAL_SPEC_CAP:
+            evicted_button_cid, _ = self._modal_specs.popitem(last=False)
+            self._modal_to_button.pop(f"{evicted_button_cid}{MODAL_CID_SUFFIX}", None)
+        while len(self._modal_to_button) > MODAL_SPEC_CAP:
+            self._modal_to_button.popitem(last=False)
 
     def _remember_channel(self, channel: Any) -> None:
         self._known_channels[self._channel_key(channel)] = channel
