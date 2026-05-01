@@ -28,7 +28,7 @@ from nanobot.agent.tools.ask import (
     pending_ask_user_id,
 )
 from nanobot.agent.tools.cron import CronTool
-from nanobot.agent.tools.file_state import FileStates, bind_file_states, reset_file_states
+from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.notebook import NotebookEditTool
@@ -250,7 +250,7 @@ class AgentLoop:
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
-        self._file_states_by_session: dict[str, FileStates] = {}
+        self._file_state_store = FileStateStore()
         self.runner = AgentRunner(provider)
         self.subagents = SubagentManager(
             provider=provider,
@@ -311,14 +311,6 @@ class AgentLoop:
         self._current_iteration: int = 0
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
-
-    def _file_states_for_session(self, session_key: str | None) -> FileStates:
-        key = session_key or "__default__"
-        states = self._file_states_by_session.get(key)
-        if states is None:
-            states = FileStates()
-            self._file_states_by_session[key] = states
-        return states
 
     def _sync_subagent_runtime_limits(self) -> None:
         """Keep subagent runtime limits aligned with mutable loop settings."""
@@ -633,7 +625,7 @@ class AgentLoop:
             return items
 
         active_session_key = session.key if session else session_key
-        file_state_token = bind_file_states(self._file_states_for_session(active_session_key))
+        file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
         try:
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,

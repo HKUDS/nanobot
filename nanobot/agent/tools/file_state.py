@@ -130,6 +130,26 @@ class FileStates:
         self._state.clear()
 
 
+class FileStateStore:
+    """Lookup table for per-session file read/write state."""
+
+    __slots__ = ("_states_by_key",)
+
+    def __init__(self) -> None:
+        self._states_by_key: dict[str, FileStates] = {}
+
+    def for_session(self, session_key: str | None) -> FileStates:
+        key = session_key or "__default__"
+        states = self._states_by_key.get(key)
+        if states is None:
+            states = FileStates()
+            self._states_by_key[key] = states
+        return states
+
+    def clear(self) -> None:
+        self._states_by_key.clear()
+
+
 _current_file_states: ContextVar[FileStates | None] = ContextVar(
     "nanobot_file_states",
     default=None,
