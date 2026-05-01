@@ -8,6 +8,15 @@ tool results, appended guidance, or hard turn termination.
 This addresses the "model retries the same failing call until iteration
 budget runs out" failure mode (#2298), which is especially common with
 small or local models.
+
+Ported from hermes-agent's ``agent/tool_guardrails.py``
+(https://github.com/NousResearch/hermes-agent), adapted to nanobot's
+tool inventory and runner integration. Original work:
+
+    MIT License
+    Copyright (c) 2025 Nous Research
+
+The full MIT text is reproduced in this project's ``THIRD_PARTY_NOTICES.md``.
 """
 
 from __future__ import annotations
