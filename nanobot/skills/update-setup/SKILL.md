@@ -19,7 +19,7 @@ Use `exec` to run `nanobot --version`. Tell the user the current version.
 
 ## Step 3: Ask Questions
 
-Use `ask_user` three times, one question per call.
+Use `ask_user` for the questions below, one question per call.
 
 **Question 1 — Install method:**
 
@@ -28,10 +28,13 @@ question: "How did you install nanobot?"
 options: ["uv", "pipx", "pip", "source (git clone)"]
 ```
 
+If the user selected `source (git clone)`, ask for the local checkout path:
+`question: "Where is your nanobot source checkout? Enter an absolute path or a path relative to this workspace:"`.
+
 **Question 2 — Optional dependencies:**
 
 ```
-question: "Which optional dependencies do you need? List names separated by spaces, or reply 'none'. Available: wecom, weixin, msteams, matrix, discord, langsmith, pdf"
+question: "Which optional dependencies do you need? List names separated by spaces, or reply 'none'. Available: api, wecom, weixin, msteams, matrix, discord, langsmith, pdf"
 ```
 
 Parse the reply. If the user says "none" or similar, set extras to empty. Otherwise collect the valid names.
@@ -53,12 +56,12 @@ Determine the upgrade command from the install method:
 
 | Method | Command |
 |--------|---------|
-| uv | `uv tool install nanobot-ai[EXTRAS] --force` |
-| pipx | `pipx install nanobot-ai[EXTRAS] --upgrade` |
-| pip | `pip install --upgrade "nanobot-ai[EXTRAS]"` |
-| source | `git pull && uv sync` |
+| uv | `uv tool install "nanobot-ai[EXTRAS]" --force` |
+| pipx | `pipx install --force "nanobot-ai[EXTRAS]"` |
+| pip | `python -m pip install --upgrade "nanobot-ai[EXTRAS]"` |
+| source | `cd <SOURCE_CHECKOUT> && git pull && python -m pip install -e ".[EXTRAS]"` |
 
-For source installs, ignore extras (uv sync handles them).
+For source installs, include extras in the editable install command when selected. Quote the source checkout path if it contains spaces.
 
 Build the skill content. If proxy is configured, add `export http_proxy=URL` and `export https_proxy=URL` lines before the upgrade command.
 
