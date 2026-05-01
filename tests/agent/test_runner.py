@@ -973,6 +973,27 @@ async def test_loop_stream_filter_handles_think_only_prefix_without_crashing(tmp
 
 
 @pytest.mark.asyncio
+async def test_loop_stream_filter_hides_partial_trailing_think_prefix(tmp_path):
+    loop = _make_loop(tmp_path)
+    deltas: list[str] = []
+
+    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+        await on_content_delta("Hello <thin")
+        await on_content_delta("k>hidden</think>World")
+        return LLMResponse(content="Hello <think>hidden</think>World", tool_calls=[], usage={})
+
+    loop.provider.chat_stream_with_retry = chat_stream_with_retry
+
+    async def on_stream(delta: str) -> None:
+        deltas.append(delta)
+
+    final_content, _, _, _, _ = await loop._run_agent_loop([], on_stream=on_stream)
+
+    assert final_content == "Hello World"
+    assert deltas == ["Hello", " World"]
+
+
+@pytest.mark.asyncio
 async def test_loop_retries_think_only_final_response(tmp_path):
     loop = _make_loop(tmp_path)
     call_count = {"n": 0}
