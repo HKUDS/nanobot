@@ -815,6 +815,7 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
     tools.register(write_a)
 
     runner = AgentRunner(MagicMock())
+    from nanobot.agent.tool_guardrails import ToolCallGuardrailController
     await runner._execute_tools(
         AgentRunSpec(
             initial_messages=[],
@@ -830,6 +831,7 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
             ToolCallRequest(id="rw1", name="write_a", arguments={}),
         ],
         {},
+        ToolCallGuardrailController(),
     )
 
     assert shared_events[0:2] == ["start:read_a", "start:read_b"]
@@ -859,6 +861,7 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
     tools.register(read_b)
 
     runner = AgentRunner(MagicMock())
+    from nanobot.agent.tool_guardrails import ToolCallGuardrailController
     await runner._execute_tools(
         AgentRunSpec(
             initial_messages=[],
@@ -874,6 +877,7 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
             ToolCallRequest(id="ro2", name="read_b", arguments={}),
         ],
         {},
+        ToolCallGuardrailController(),
     )
 
     assert shared_events[0] == "start:read_a"
@@ -1190,10 +1194,25 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="working",
-        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
-    ))
+    # Vary the tool call args so the per-turn idempotent-no-progress guardrail
+    # doesn't trip first — this test specifically exercises the max_iterations
+    # fallback path.
+    counter = {"n": 0}
+
+    async def _vary_chat(*_args, **_kwargs):
+        counter["n"] += 1
+        return LLMResponse(
+            content="working",
+            tool_calls=[
+                ToolCallRequest(
+                    id=f"call_{counter['n']}",
+                    name="list_dir",
+                    arguments={"path": f"./dir_{counter['n']}"},
+                ),
+            ],
+        )
+
+    provider.chat_with_retry = AsyncMock(side_effect=_vary_chat)
     mgr = SubagentManager(
         provider=provider,
         workspace=tmp_path,
@@ -1203,7 +1222,9 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
     mgr._announce_result = AsyncMock()
 
     async def fake_execute(self, **kwargs):
-        return "tool result"
+        # Return a unique result per call so the no-progress guardrail
+        # also doesn't fire on result-hash repetition.
+        return f"tool result {counter['n']}"
 
     monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
