@@ -836,10 +836,10 @@ class AgentRunner:
                 tool_call.name, tool_call.arguments, err_text, failed=True,
             )
             err_text = append_guidance(err_text, decision)
-            fatal = exc if (spec.fail_on_tool_error or decision.action == "halt") else None
             if decision.action == "halt":
                 event["detail"] = f"guardrail:{decision.code}"
                 return err_text, event, RuntimeError(decision.message)
+            fatal = exc if spec.fail_on_tool_error else None
             return err_text, event, fatal
 
         if isinstance(result, str) and result.startswith("Error"):

@@ -174,3 +174,22 @@ def test_loop_signature_unaffected_by_dict_key_order() -> None:
     c.after_call("read_file", {"a": 1, "b": 2}, "data", failed=False)
     decision = c.after_call("read_file", {"b": 2, "a": 1}, "data", failed=False)
     assert decision.action == "warn"
+
+
+def test_controller_does_not_crash_on_non_mapping_args() -> None:
+    """Direct callers may pass list / None / scalars; controller must coerce
+    silently rather than raising and tearing down the agent loop."""
+    c = _make()
+    # before_call / after_call already coerce internally; just verify the
+    # public ``from_call`` path is also defensive (used by external callers).
+    from nanobot.agent.tool_guardrails import ToolCallSignature
+
+    sig_list = ToolCallSignature.from_call("read_file", ["not", "a", "mapping"])  # type: ignore[arg-type]
+    sig_none = ToolCallSignature.from_call("read_file", None)
+    sig_empty = ToolCallSignature.from_call("read_file", {})
+    # All non-mapping inputs collapse to the same empty-args signature.
+    assert sig_list.args_hash == sig_none.args_hash == sig_empty.args_hash
+
+    # And the live observation methods don't crash either.
+    assert c.before_call("read_file", "garbage").action == "allow"  # type: ignore[arg-type]
+    assert c.after_call("read_file", None, "ok", failed=False).action == "allow"

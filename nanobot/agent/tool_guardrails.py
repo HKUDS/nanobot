@@ -117,7 +117,9 @@ class ToolCallSignature:
 
     @classmethod
     def from_call(cls, tool_name: str, args: Mapping[str, Any] | None) -> "ToolCallSignature":
-        canonical = canonical_tool_args(args or {})
+        # Coerce defensively — direct callers (third parties, tests) shouldn't
+        # be able to crash the controller by passing a list / non-Mapping.
+        canonical = canonical_tool_args(_coerce_args(args))
         return cls(tool_name=tool_name, args_hash=_sha256(canonical))
 
 
