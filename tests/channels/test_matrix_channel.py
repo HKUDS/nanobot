@@ -7,7 +7,7 @@ import pytest
 pytest.importorskip("nio")
 pytest.importorskip("nh3")
 pytest.importorskip("mistune")
-from nio import RoomSendResponse
+from nio import RoomSendResponse, SyncError
 
 from nanobot.channels.matrix import _build_matrix_text_content
 
@@ -264,6 +264,61 @@ async def test_start_disables_e2ee_when_configured(
     assert clients[0].config.encryption_enabled is False
 
     await channel.stop()
+
+
+@pytest.mark.asyncio
+async def test_on_sync_error_stops_loop_on_unknown_token() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    channel._running = True
+
+    await channel._on_sync_error(SyncError(message="bad", status_code="M_UNKNOWN_TOKEN"))
+
+    assert channel._running is False
+    assert client.stop_sync_forever_called is True
+
+
+@pytest.mark.asyncio
+async def test_on_sync_error_keeps_running_on_transient_error() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    channel._running = True
+
+    await channel._on_sync_error(SyncError(message="oops", status_code="M_LIMIT_EXCEEDED"))
+
+    assert channel._running is True
+    assert client.stop_sync_forever_called is False
+
+
+@pytest.mark.asyncio
+async def test_sync_loop_backs_off_on_repeated_errors(monkeypatch) -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+
+    sleeps: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(matrix_module.asyncio, "sleep", _fake_sleep)
+
+    call_count = {"n": 0}
+
+    class _BoomClient:
+        async def sync_forever(self, **_kwargs) -> None:
+            call_count["n"] += 1
+            if call_count["n"] > 4:
+                channel._running = False
+                return
+            raise RuntimeError("boom")
+
+    channel.client = _BoomClient()
+    channel._running = True
+
+    await channel._sync_loop()
+
+    assert sleeps == [2.0, 4.0, 8.0, 16.0]
 
 
 @pytest.mark.asyncio

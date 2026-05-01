@@ -590,15 +590,26 @@ class MatrixChannel(BaseChannel):
         self.client.add_response_callback(self._on_join_error, JoinError)
         self.client.add_response_callback(self._on_send_error, RoomSendError)
 
-    def _log_response_error(self, label: str, response: Any) -> None:
-        """Log Matrix response errors — auth errors at ERROR level, rest at WARNING."""
+    def _is_fatal_auth_response(self, response: Any) -> bool:
         code = getattr(response, "status_code", None)
         is_auth = code in {"M_UNKNOWN_TOKEN", "M_FORBIDDEN", "M_UNAUTHORIZED"}
-        is_fatal = is_auth or getattr(response, "soft_logout", False)
+        return is_auth or bool(getattr(response, "soft_logout", False))
+
+    def _log_response_error(self, label: str, response: Any) -> None:
+        """Log Matrix response errors — auth errors at ERROR level, rest at WARNING."""
+        is_fatal = self._is_fatal_auth_response(response)
         (logger.error if is_fatal else logger.warning)("Matrix {} failed: {}", label, response)
 
     async def _on_sync_error(self, response: SyncError) -> None:
         self._log_response_error("sync", response)
+        if self._is_fatal_auth_response(response):
+            # Auth errors won't recover by retry; stop the sync loop instead of
+            # spamming the homeserver every 2s (#1851).
+            logger.error("Matrix authentication failed irrecoverably; stopping sync loop")
+            self._running = False
+            if self.client:
+                with suppress(Exception):
+                    self.client.stop_sync_forever()
 
     async def _on_join_error(self, response: JoinError) -> None:
         self._log_response_error("join", response)
@@ -640,13 +651,18 @@ class MatrixChannel(BaseChannel):
             await self._set_typing(room_id, False)
 
     async def _sync_loop(self) -> None:
+        backoff = 2.0
         while self._running:
             try:
                 await self.client.sync_forever(timeout=30000, full_state=True)
+                backoff = 2.0
             except asyncio.CancelledError:
                 break
             except Exception:
-                await asyncio.sleep(2)
+                if not self._running:
+                    break
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60.0)
 
     async def _on_room_invite(self, room: MatrixRoom, event: InviteEvent) -> None:
         if self.is_allowed(event.sender):
