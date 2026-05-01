@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import sys
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -212,9 +213,8 @@ class ExecTool(Tool):
         """Kill a subprocess and reap it to prevent zombies."""
         process.kill()
         try:
-            await asyncio.wait_for(process.wait(), timeout=5.0)
-        except asyncio.TimeoutError:
-            pass
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(process.wait(), timeout=5.0)
         finally:
             if not _IS_WINDOWS:
                 try:
