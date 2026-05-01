@@ -6,6 +6,7 @@ import re
 import shutil
 import time
 import uuid
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -416,14 +417,10 @@ def estimate_prompt_tokens_chain(
     """Estimate prompt tokens via provider counter first, then tiktoken fallback."""
     provider_counter = getattr(provider, "estimate_prompt_tokens", None)
     if callable(provider_counter):
-        try:
+        with suppress(Exception):
             tokens, source = provider_counter(messages, tools, model)
             if isinstance(tokens, (int, float)) and tokens > 0:
                 return int(tokens), str(source or "provider_counter")
-        except Exception:
-            pass
-
-    estimated = estimate_prompt_tokens(messages, tools)
     if estimated > 0:
         return int(estimated), "tiktoken"
     return 0, "none"

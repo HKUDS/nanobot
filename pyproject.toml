@@ -1,12 +1,13 @@
 [project]
 name = "nanobot-ai"
-version = "0.1.5.post2"
+version = "0.1.5.post3"
 description = "A lightweight personal AI assistant framework"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "nanobot contributors"}
+    {name = "Xubin Ren"},
+    {name = "the nanobot contributors"}
 ]
 keywords = ["ai", "agent", "chatbot"]
 classifiers = [
@@ -60,6 +61,7 @@ dependencies = [
     "openpyxl>=3.1.0,<4.0.0",
     "python-pptx>=1.0.0,<2.0.0",
     "filelock>=3.25.2",
+    "boto3>=1.43.0",
 ]
 
 [project.optional-dependencies]

@@ -20,7 +20,7 @@ import re
 import tempfile
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any
@@ -712,10 +712,8 @@ class MSTeamsChannel(BaseChannel):
             os.replace(tmp_path, path)
         finally:
             if tmp_path and os.path.exists(tmp_path):
-                try:
+                with suppress(OSError):
                     os.unlink(tmp_path)
-                except OSError:
-                    pass
 
     def _save_refs_locked(self, *, prune: bool = True) -> None:
         """Persist conversation references (caller must hold _refs_guard)."""

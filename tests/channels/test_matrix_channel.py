@@ -381,6 +381,62 @@ async def test_on_message_skips_typing_for_self_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_on_message_skips_pre_startup_event() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    channel._started_at_ms = 1_000_000
+
+    handled: list[str] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        handled.append(kwargs["sender_id"])
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
+    room = SimpleNamespace(room_id="!room:matrix.org", display_name="Test room")
+    old_event = SimpleNamespace(
+        sender="@alice:matrix.org", body="old", source={}, server_timestamp=999_999
+    )
+    fresh_event = SimpleNamespace(
+        sender="@alice:matrix.org", body="fresh", source={}, server_timestamp=1_000_001
+    )
+
+    await channel._on_message(room, old_event)
+    await channel._on_message(room, fresh_event)
+
+    assert handled == ["@alice:matrix.org"]
+    assert client.typing_calls == [
+        ("!room:matrix.org", True, TYPING_NOTICE_TIMEOUT_MS),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_on_media_message_skips_pre_startup_event() -> None:
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+    channel._started_at_ms = 1_000_000
+
+    handled: list[str] = []
+
+    async def _fake_handle_message(**kwargs) -> None:
+        handled.append(kwargs["sender_id"])
+
+    channel._handle_message = _fake_handle_message  # type: ignore[method-assign]
+
+    room = SimpleNamespace(room_id="!room:matrix.org", display_name="Test room")
+    old_event = SimpleNamespace(
+        sender="@alice:matrix.org", body="old", source={}, server_timestamp=999_999
+    )
+
+    await channel._on_media_message(room, old_event)
+
+    assert handled == []
+    assert client.typing_calls == []
+
+
+@pytest.mark.asyncio
 async def test_on_message_skips_typing_for_denied_sender() -> None:
     channel = MatrixChannel(_make_config(allow_from=["@bob:matrix.org"]), MessageBus())
     client = _FakeAsyncClient("", "", "", None)
@@ -1188,6 +1244,44 @@ async def test_send_progress_keeps_typing_keepalive_running() -> None:
     assert client.typing_calls[-1] == ("!room:matrix.org", True, TYPING_NOTICE_TIMEOUT_MS)
 
     await channel.stop()
+
+
+@pytest.mark.asyncio
+async def test_send_empty_content_does_not_call_room_send() -> None:
+    """Progress messages with empty content must not produce an empty body: '' event."""
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    await channel.send(
+        OutboundMessage(
+            channel="matrix",
+            chat_id="!room:matrix.org",
+            content="",
+            metadata={"_progress": True},
+        )
+    )
+
+    assert client.room_send_calls == []
+
+
+@pytest.mark.asyncio
+async def test_send_whitespace_only_content_does_not_call_room_send() -> None:
+    """Progress messages with whitespace-only content must not produce an empty message."""
+    channel = MatrixChannel(_make_config(), MessageBus())
+    client = _FakeAsyncClient("", "", "", None)
+    channel.client = client
+
+    await channel.send(
+        OutboundMessage(
+            channel="matrix",
+            chat_id="!room:matrix.org",
+            content="   \n\n  ",
+            metadata={"_progress": True},
+        )
+    )
+
+    assert client.room_send_calls == []
 
 
 @pytest.mark.asyncio

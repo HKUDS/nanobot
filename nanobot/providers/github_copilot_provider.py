@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import webbrowser
 from collections.abc import Callable
+from contextlib import suppress
 
 import httpx
 from oauth_cli_kit.models import OAuthToken
@@ -86,10 +87,8 @@ def login_github_copilot(
         printer(f"Open: {verify_url}")
         printer(f"Code: {user_code}")
         if verify_complete:
-            try:
+            with suppress(Exception):
                 webbrowser.open(verify_complete)
-            except Exception:
-                pass
 
         deadline = time.time() + expires_in
         current_interval = interval

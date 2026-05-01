@@ -5,7 +5,7 @@ import os
 import select
 import signal
 import sys
-from contextlib import nullcontext
+from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +14,9 @@ if sys.platform == "win32":
     if sys.stdout.encoding != "utf-8":
         os.environ["PYTHONIOENCODING"] = "utf-8"
         # Re-open stdout/stderr with UTF-8 encoding
-        try:
+        with suppress(Exception):
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
 
 import typer
 from loguru import logger
@@ -83,35 +81,29 @@ def _flush_pending_tty_input() -> None:
     except Exception:
         return
 
-    try:
+    with suppress(Exception):
         import termios
 
         termios.tcflush(fd, termios.TCIFLUSH)
         return
-    except Exception:
-        pass
 
-    try:
+    with suppress(Exception):
         while True:
             ready, _, _ = select.select([fd], [], [], 0)
             if not ready:
                 break
             if not os.read(fd, 4096):
                 break
-    except Exception:
-        return
 
 
 def _restore_terminal() -> None:
     """Restore terminal to its original state (echo, line buffering, etc.)."""
     if _SAVED_TERM_ATTRS is None:
         return
-    try:
+    with suppress(Exception):
         import termios
 
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
-    except Exception:
-        pass
 
 
 def _init_prompt_session() -> None:
@@ -119,12 +111,10 @@ def _init_prompt_session() -> None:
     global _PROMPT_SESSION, _SAVED_TERM_ATTRS
 
     # Save terminal state so we can restore it on exit
-    try:
+    with suppress(Exception):
         import termios
 
         _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
-    except Exception:
-        pass
 
     from nanobot.config.paths import get_cli_history_path
 
@@ -936,10 +926,8 @@ def _run_gateway(
                     config.gateway.host or "127.0.0.1", port
                 )
                 writer.close()
-                try:
+                with suppress(Exception):
                     await writer.wait_closed()
-                except Exception:
-                    pass
                 break
             except OSError:
                 await asyncio.sleep(0.1)
@@ -1271,6 +1259,7 @@ def channels_status(
 
 def _get_bridge_dir() -> Path:
     """Get the bridge directory, setting it up if needed."""
+    import hashlib
     import shutil
     import subprocess
 
@@ -1278,16 +1267,7 @@ def _get_bridge_dir() -> Path:
     from nanobot.config.paths import get_bridge_install_dir
 
     user_bridge = get_bridge_install_dir()
-
-    # Check if already built
-    if (user_bridge / "dist" / "index.js").exists():
-        return user_bridge
-
-    # Check for npm
-    npm_path = shutil.which("npm")
-    if not npm_path:
-        console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
-        raise typer.Exit(1)
+    stamp_file = user_bridge / ".nanobot-bridge-source-hash"
 
     # Find source bridge: first check package data, then source dir
     pkg_bridge = Path(__file__).parent.parent / "bridge"  # nanobot/bridge (installed)
@@ -1302,6 +1282,36 @@ def _get_bridge_dir() -> Path:
     if not source:
         console.print("[red]Bridge source not found.[/red]")
         console.print("Try reinstalling: pip install --force-reinstall nanobot")
+        raise typer.Exit(1)
+
+    def source_hash(root: Path) -> str:
+        digest = hashlib.sha256()
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(root)
+            if rel.parts and rel.parts[0] in {"node_modules", "dist"}:
+                continue
+            digest.update(rel.as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+        return digest.hexdigest()
+
+    expected_hash = source_hash(source)
+    current_hash = stamp_file.read_text().strip() if stamp_file.exists() else None
+
+    # Reuse only a bridge built from the currently installed source.
+    if (user_bridge / "dist" / "index.js").exists() and current_hash == expected_hash:
+        return user_bridge
+
+    if (user_bridge / "dist" / "index.js").exists() and current_hash != expected_hash:
+        console.print(f"{__logo__} WhatsApp bridge source changed; rebuilding bridge...")
+
+    # Check for npm
+    npm_path = shutil.which("npm")
+    if not npm_path:
+        console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
         raise typer.Exit(1)
 
     console.print(f"{__logo__} Setting up bridge...")
@@ -1319,6 +1329,7 @@ def _get_bridge_dir() -> Path:
 
         console.print("  Building...")
         subprocess.run([npm_path, "run", "build"], cwd=user_bridge, check=True, capture_output=True)
+        stamp_file.write_text(expected_hash + "\n")
 
         console.print("[green]✓[/green] Bridge ready\n")
     except subprocess.CalledProcessError as e:
@@ -1497,10 +1508,8 @@ def _login_openai_codex() -> None:
         from oauth_cli_kit import get_token, login_oauth_interactive
 
         token = None
-        try:
+        with suppress(Exception):
             token = get_token()
-        except Exception:
-            pass
         if not (token and token.access):
             console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
             token = login_oauth_interactive(

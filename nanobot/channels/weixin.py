@@ -19,6 +19,7 @@ import re
 import time
 import uuid
 from collections import OrderedDict
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -211,7 +212,7 @@ class WeixinChannel(BaseChannel):
 
     def _save_state(self) -> None:
         state_file = self._get_state_dir() / "account.json"
-        try:
+        with suppress(Exception):
             data = {
                 "token": self._token,
                 "get_updates_buf": self._get_updates_buf,
@@ -220,8 +221,6 @@ class WeixinChannel(BaseChannel):
                 "base_url": self.config.base_url,
             }
             state_file.write_text(json.dumps(data, ensure_ascii=False))
-        except Exception:
-            pass
 
     # ------------------------------------------------------------------
     # HTTP helpers  (matches api.ts buildHeaders / apiFetch)
@@ -576,10 +575,8 @@ class WeixinChannel(BaseChannel):
         # Process messages (WeixinMessage[] from types.ts)
         msgs: list[dict] = data.get("msgs", []) or []
         for msg in msgs:
-            try:
+            with suppress(Exception):
                 await self._process_message(msg)
-            except Exception:
-                pass
 
     # ------------------------------------------------------------------
     # Inbound message processing  (matches inbound.ts + process-message.ts)
@@ -932,10 +929,8 @@ class WeixinChannel(BaseChannel):
                 await asyncio.sleep(TYPING_KEEPALIVE_INTERVAL_S)
                 if stop_event.is_set():
                     break
-                try:
+                with suppress(Exception):
                     await self._send_typing(user_id, typing_ticket, TYPING_STATUS_TYPING)
-                except Exception:
-                    pass
         finally:
             pass
 
@@ -962,16 +957,12 @@ class WeixinChannel(BaseChannel):
             return
 
         typing_ticket = ""
-        try:
+        with suppress(Exception):
             typing_ticket = await self._get_typing_ticket(msg.chat_id, ctx_token)
-        except Exception:
-            typing_ticket = ""
 
         if typing_ticket:
-            try:
+            with suppress(Exception):
                 await self._send_typing(msg.chat_id, typing_ticket, TYPING_STATUS_TYPING)
-            except Exception:
-                pass
 
         typing_keepalive_stop = asyncio.Event()
         typing_keepalive_task: asyncio.Task | None = None
@@ -1043,16 +1034,12 @@ class WeixinChannel(BaseChannel):
             if typing_keepalive_task:
                 typing_keepalive_stop.set()
                 typing_keepalive_task.cancel()
-                try:
+                with suppress(asyncio.CancelledError):
                     await typing_keepalive_task
-                except asyncio.CancelledError:
-                    pass
 
             if typing_ticket and not is_progress:
-                try:
+                with suppress(Exception):
                     await self._send_typing(msg.chat_id, typing_ticket, TYPING_STATUS_CANCEL)
-                except Exception:
-                    pass
 
     async def _start_typing(self, chat_id: str, context_token: str = "") -> None:
         """Start typing indicator immediately when a message is received."""
@@ -1076,10 +1063,8 @@ class WeixinChannel(BaseChannel):
                     await asyncio.sleep(TYPING_KEEPALIVE_INTERVAL_S)
                     if stop_event.is_set():
                         break
-                    try:
+                    with suppress(Exception):
                         await self._send_typing(chat_id, ticket, TYPING_STATUS_TYPING)
-                    except Exception:
-                        pass
             finally:
                 pass
 
@@ -1095,10 +1080,8 @@ class WeixinChannel(BaseChannel):
             if stop_event:
                 stop_event.set()
             task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
         if not clear_remote:
             return
         entry = self._typing_tickets.get(chat_id)
@@ -1339,13 +1322,11 @@ def _encrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
     pad_len = 16 - len(data) % 16
     padded = data + bytes([pad_len] * pad_len)
 
-    try:
+    with suppress(ImportError):
         from Crypto.Cipher import AES
 
         cipher = AES.new(key, AES.MODE_ECB)
         return cipher.encrypt(padded)
-    except ImportError:
-        pass
 
     try:
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -1371,13 +1352,11 @@ def _decrypt_aes_ecb(data: bytes, aes_key_b64: str) -> bytes:
 
     decrypted: bytes | None = None
 
-    try:
+    with suppress(ImportError):
         from Crypto.Cipher import AES
 
         cipher = AES.new(key, AES.MODE_ECB)
         decrypted = cipher.decrypt(data)
-    except ImportError:
-        pass
 
     if decrypted is None:
         try:

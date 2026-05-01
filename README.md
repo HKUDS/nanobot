@@ -23,6 +23,14 @@
 
 ## 📢 News
 
+- **2026-04-29** 🚀 Released **v0.1.5.post3** — Smarter threads on Feishu, Discord, Slack, and Teams; **DeepSeek-V4**; Hugging Face & Olostep; choices, `/history`, and steadier long chats. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.5.post3) for details.
+- **2026-04-28** 🌐 Olostep web search, Hugging Face provider, safer workspace-tool interruptions.
+- **2026-04-27** 💬 `/history` command, smarter session replay caps, smoother Discord / Slack threads.
+- **2026-04-26** 🧭 Natural cron reminders, thread-aware restarts, safer local provider and shell behavior.
+- **2026-04-25** 🧩 `ask_user` choices, macOS LaunchAgent deployment, MSTeams stale-reference cleanup.
+- **2026-04-24** 🎥 Video attachments for channels, DeepSeek thinking control, faster document startup.
+- **2026-04-23** 🧵 Discord thread sessions, Telegram inline buttons, structured tool progress updates.
+- **2026-04-22** 🔎 GitHub Copilot GPT-5 / o-series support, configurable web fetch, WebUI image uploads.
 - **2026-04-21** 🚀 Released **v0.1.5.post2** — Windows & Python 3.14 support, Office document reading, SSE streaming for the OpenAI-compatible API, and stronger reliability across sessions, memory, and channels. Please see [release notes](https://github.com/HKUDS/nanobot/releases/tag/v0.1.5.post2) for details.
 - **2026-04-20** 🎨 Kimi K2.6 support, Telegram long-message split, WebUI typography & dark-mode polish.
 - **2026-04-19** 🌐 WebUI i18n locale switcher, atomic session writes with auto-repair.

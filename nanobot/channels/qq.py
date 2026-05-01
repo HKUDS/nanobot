@@ -25,6 +25,7 @@ import os
 import re
 import time
 from collections import deque
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import unquote, urlparse
@@ -221,17 +222,13 @@ class QQChannel(BaseChannel):
         """Stop bot and cleanup resources."""
         self._running = False
         if self._client:
-            try:
+            with suppress(Exception):
                 await self._client.close()
-            except Exception:
-                pass
         self._client = None
 
         if self._http:
-            try:
+            with suppress(Exception):
                 await self._http.close()
-            except Exception:
-                pass
         self._http = None
 
         logger.info("QQ bot stopped")
@@ -683,7 +680,5 @@ class QQChannel(BaseChannel):
         finally:
             # Cleanup partial file
             if tmp_path is not None:
-                try:
+                with suppress(Exception):
                     tmp_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
