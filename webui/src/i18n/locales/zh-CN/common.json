@@ -62,6 +62,7 @@
       "placeholderThread": "输入消息…",
       "placeholderHero": "你在想什么？",
       "placeholderOpening": "正在打开新对话…",
+      "placeholderStreaming": "模型正在回复…",
       "inputAria": "消息输入框",
       "sendHint": "Enter 发送 · Shift+Enter 换行",
       "send": "发送消息",

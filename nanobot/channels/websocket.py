@@ -1229,6 +1229,10 @@ class WebSocketChannel(BaseChannel):
         if not conns:
             logger.warning("websocket: no active subscribers for chat_id={}", msg.chat_id)
             return
+        # Signal that the agent has fully finished processing the current turn.
+        if msg.metadata.get("_turn_end"):
+            await self.send_turn_end(msg.chat_id)
+            return
         text = msg.content
         if msg.buttons:
             text = _append_buttons_as_text(text, msg.buttons)
@@ -1285,3 +1289,13 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" stream ")
+
+    async def send_turn_end(self, chat_id: str) -> None:
+        """Signal that the agent has fully finished processing the current turn."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body: dict[str, Any] = {"event": "turn_end", "chat_id": chat_id}
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" turn_end ")

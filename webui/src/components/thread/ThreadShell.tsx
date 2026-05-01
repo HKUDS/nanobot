@@ -39,7 +39,7 @@ export function ThreadShell({
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
   const historyKey = session?.key ?? null;
-  const { messages: historical, loading } = useSessionHistory(historyKey);
+  const { messages: historical, loading, hasPendingToolCalls } = useSessionHistory(historyKey);
   const { client, modelName } = useClient();
   const [booting, setBooting] = useState(false);
   const pendingFirstRef = useRef<string | null>(null);
@@ -56,7 +56,7 @@ export function ThreadShell({
     setMessages,
     streamError,
     dismissStreamError,
-  } = useNanobotStream(chatId, initial);
+  } = useNanobotStream(chatId, initial, hasPendingToolCalls);
   const showHeroComposer = messages.length === 0 && !loading;
   const pendingAsk = useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
@@ -179,6 +179,7 @@ export function ThreadShell({
               <ThreadComposer
                 onSend={send}
                 disabled={!chatId}
+                isStreaming={isStreaming}
                 placeholder={
                   showHeroComposer
                     ? t("thread.composer.placeholderHero")
@@ -191,6 +192,7 @@ export function ThreadShell({
               <ThreadComposer
                 onSend={handleWelcomeSend}
                 disabled={booting}
+                isStreaming={isStreaming}
                 placeholder={
                   booting
                     ? t("thread.composer.placeholderOpening")
