@@ -24,10 +24,17 @@ class Deny:
     ``reason`` is a human-readable string explaining the denial.
     The caller (emit site) decides how to act on it — soft-deny
     (inject reason into the conversation) or hard-deny (abort the
-    operation).
+    agent loop entirely).
+
+    When ``abort`` is ``False`` (default), the operation is denied
+    but the agent loop continues — the reason is injected as a tool
+    result so the LLM can adapt.  When ``abort`` is ``True``, the
+    agent loop terminates immediately and ``reason`` becomes the
+    final content returned to the caller.
     """
 
     reason: str
+    abort: bool = False
 
 
 HookResult = Modified | Deny | None

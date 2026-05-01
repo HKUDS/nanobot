@@ -500,3 +500,48 @@ def test_register_internal_invalid_mode_raises():
 def test_discover_is_noop_placeholder():
     center = HookCenter()
     center.discover(None)
+
+
+# ---------------------------------------------------------------------------
+# Deny.abort
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_deny_abort_defaults_false():
+    d = Deny(reason="blocked")
+    assert d.abort is False
+
+
+@pytest.mark.asyncio
+async def test_deny_abort_true_propagated_through_emit():
+    center = HookCenter()
+    session = center.create_session()
+    guard = Mock(return_value=Deny(reason="stop", abort=True))
+    later = Mock()
+
+    center.register(BeforeIteration, guard, mode="guard")
+    center.register(BeforeIteration, later, mode="observe")
+    event = BeforeIteration(iteration=0, messages=[])
+
+    result = await center.emit(event, session)
+
+    assert isinstance(result, Deny)
+    assert result.reason == "stop"
+    assert result.abort is True
+    later.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_deny_abort_false_does_not_set_abort():
+    center = HookCenter()
+    session = center.create_session()
+    guard = Mock(return_value=Deny(reason="soft"))
+
+    center.register(BeforeIteration, guard, mode="guard")
+    event = BeforeIteration(iteration=0, messages=[])
+
+    result = await center.emit(event, session)
+
+    assert isinstance(result, Deny)
+    assert result.abort is False

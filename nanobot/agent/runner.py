@@ -299,7 +299,14 @@ class AgentRunner:
                     messages_for_model = messages
             context = AgentHookContext(iteration=iteration, messages=messages)
             session.context = context
-            await center.emit(BeforeIteration(iteration=iteration, messages=messages), session)
+            bi_result = await center.emit(BeforeIteration(iteration=iteration, messages=messages), session)
+            if isinstance(bi_result, Deny) and bi_result.abort:
+                final_content = bi_result.reason
+                stop_reason = "aborted"
+                context.final_content = final_content
+                context.stop_reason = stop_reason
+                await center.emit(_make_after_iteration(context, iteration), session)
+                break
             response = await self._request_model(spec, messages_for_model, center, session, context)
             raw_usage = self._usage_dict(response.usage)
             context.response = response
@@ -338,6 +345,13 @@ class AgentRunner:
 
                 result = await center.emit(BeforeExecuteTools(iteration=iteration, tool_calls=context.tool_calls, response=context.response), session)
                 if isinstance(result, Deny):
+                    if result.abort:
+                        final_content = result.reason
+                        stop_reason = "aborted"
+                        context.final_content = final_content
+                        context.stop_reason = stop_reason
+                        await center.emit(_make_after_iteration(context, iteration), session)
+                        break
                     for tc in tool_calls:
                         messages.append({
                             "role": "tool",
@@ -351,16 +365,7 @@ class AgentRunner:
                     )
                     empty_content_retries = 0
                     length_recovery_count = 0
-                    await center.emit(AfterIteration(
-                        iteration=iteration,
-                        final_content=context.final_content,
-                        stop_reason=context.stop_reason,
-                        usage=dict(context.usage),
-                        tool_calls=list(context.tool_calls),
-                        tool_events=list(context.tool_events),
-                        tool_results=list(context.tool_results),
-                        error=context.error,
-                    ), session)
+                    await center.emit(_make_after_iteration(context, iteration), session)
                     continue
 
                 results, new_events, fatal_error = await self._execute_tools(

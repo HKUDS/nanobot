@@ -62,6 +62,24 @@ class RateLimitHandler:
 
         self._counts[session_id] = count + len(event.tool_calls)
         return None
+
+
+class BlocklistHandler:
+    """Abort the agent loop if a blocked tool is called."""
+
+    hook_events = [(BeforeExecuteTools, "guard")]
+
+    def __init__(self, blocked_tools: list[str] | None = None) -> None:
+        self._blocked = set(blocked_tools or [])
+
+    async def __call__(self, event: BeforeExecuteTools):
+        for tc in event.tool_calls:
+            if tc.name in self._blocked:
+                return Deny(
+                    f"Blocked tool '{tc.name}' — agent loop aborted",
+                    abort=True,
+                )
+        return None
 ```
 
 ### 2. Register the Entry Point
@@ -127,7 +145,8 @@ async def handler(event: EventType) -> HookResult | Modified | Deny | None: ...
 |-------------|----------|--------|
 | `None` | Observe | No action needed; handler ran as a side-effect |
 | `Modified(data)` | Transform | Apply the returned data to the event (dict keys mapped to event fields) |
-| `Deny(reason)` | Guard | Block the operation — runner injects the reason as a tool result |
+| `Deny(reason)` | Guard (soft) | Block the operation — runner injects the reason as a tool result and continues the loop |
+| `Deny(reason, abort=True)` | Guard (hard) | Block the operation — runner terminates the agent loop immediately, `reason` becomes the final content |
 
 ### Declaring subscriptions
 
@@ -149,7 +168,7 @@ v1 exposes six event types covering the agent iteration lifecycle:
 
 | Event | Fields | Mode |
 |-------|--------|------|
-| `BeforeIteration` | `iteration`, `messages` | observe |
+| `BeforeIteration` | `iteration`, `messages` | guard, observe |
 | `OnStream` | `delta`, `iteration` | observe |
 | `OnStreamEnd` | `resuming`, `iteration` | observe |
 | `BeforeExecuteTools` | `iteration`, `tool_calls`, `response` | guard, observe |
