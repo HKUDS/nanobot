@@ -44,6 +44,7 @@ export function ThreadShell({
   const [booting, setBooting] = useState(false);
   const pendingFirstRef = useRef<string | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
+  const lastCachedChatIdRef = useRef<string | null>(null);
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
@@ -91,6 +92,13 @@ export function ThreadShell({
 
   useEffect(() => {
     if (!chatId) return;
+    // Skip the first cache write after a chat switch. During that render,
+    // `messages` can still belong to the previous chat until the stream hook
+    // resets its local state for the new session.
+    if (lastCachedChatIdRef.current !== chatId) {
+      lastCachedChatIdRef.current = chatId;
+      return;
+    }
     messageCacheRef.current.set(chatId, messages);
   }, [chatId, messages]);
 

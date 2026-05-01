@@ -267,6 +267,93 @@ describe("ThreadShell", () => {
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
   });
 
+  it("does not cache optimistic messages under the next chat during a session switch", async () => {
+    const client = makeClient();
+    const onNewChat = vi.fn().mockResolvedValue("chat-b");
+
+    const { rerender } = render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-a")}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={onNewChat}
+        />,
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "only in chat a" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() =>
+      expect(client.sendMessage).toHaveBeenCalledWith(
+        "chat-a",
+        "only in chat a",
+        undefined,
+      ),
+    );
+    expect(screen.getByText("only in chat a")).toBeInTheDocument();
+
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-b")}
+            title="Chat chat-b"
+            onToggleSidebar={() => {}}
+            onGoHome={() => {}}
+            onNewChat={onNewChat}
+          />,
+        ),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("only in chat a")).not.toBeInTheDocument();
+    });
+
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-a")}
+            title="Chat chat-a"
+            onToggleSidebar={() => {}}
+            onGoHome={() => {}}
+            onNewChat={onNewChat}
+          />,
+        ),
+      );
+    });
+
+    expect(screen.getByText("only in chat a")).toBeInTheDocument();
+
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-b")}
+            title="Chat chat-b"
+            onToggleSidebar={() => {}}
+            onGoHome={() => {}}
+            onNewChat={onNewChat}
+          />,
+        ),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("only in chat a")).not.toBeInTheDocument();
+    });
+  });
+
   it("surfaces a dismissible banner when the stream reports message_too_big", async () => {
     const client = makeClient();
     const onNewChat = vi.fn().mockResolvedValue("chat-a");
