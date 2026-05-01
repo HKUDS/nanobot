@@ -1,4 +1,9 @@
-import type { ConnectionStatus, InboundEvent, Outbound } from "./types";
+import type {
+  ConnectionStatus,
+  InboundEvent,
+  Outbound,
+  OutboundMedia,
+} from "./types";
 
 /** WebSocket readyState constants, referenced by value to stay portable
  * across runtimes that don't expose a global ``WebSocket`` (tests, SSR). */
@@ -8,6 +13,22 @@ const WS_CLOSING = 2;
 type Unsubscribe = () => void;
 type EventHandler = (ev: InboundEvent) => void;
 type StatusHandler = (status: ConnectionStatus) => void;
+
+/** Structured connection-level errors surfaced to the UI.
+ *
+ * These are *not* InboundEvent errors from the server application layer —
+ * those arrive as ``{event: "error"}`` messages via ``onChat``. These are
+ * transport-level or protocol-level faults the UI should make visible so
+ * the user understands *why* their action failed (as opposed to silently
+ * reconnecting under the hood).
+ */
+export type StreamError =
+  /** Server rejected the inbound frame as too large (WS close code 1009).
+   * Typically means the user attached images whose base64 size exceeded
+   * ``maxMessageBytes`` on the server. */
+  | { kind: "message_too_big" };
+
+type ErrorHandler = (error: StreamError) => void;
 
 interface PendingNewChat {
   resolve: (chatId: string) => void;
@@ -36,6 +57,7 @@ export interface NanobotClientOptions {
 export class NanobotClient {
   private socket: WebSocket | null = null;
   private statusHandlers = new Set<StatusHandler>();
+  private errorHandlers = new Set<ErrorHandler>();
   // chat_id -> handlers listening on it
   private chatHandlers = new Map<string, Set<EventHandler>>();
   // chat_ids we've attached to since connect; re-attached after reconnects
@@ -84,6 +106,14 @@ export class NanobotClient {
     };
   }
 
+  /** Subscribe to transport-level faults (see :type:`StreamError`). */
+  onError(handler: ErrorHandler): Unsubscribe {
+    this.errorHandlers.add(handler);
+    return () => {
+      this.errorHandlers.delete(handler);
+    };
+  }
+
   /** Subscribe to events for a given chat_id. Auto-attaches on the next open. */
   onChat(chatId: string, handler: EventHandler): Unsubscribe {
     let handlers = this.chatHandlers.get(chatId);
@@ -110,7 +140,7 @@ export class NanobotClient {
     sock.onopen = () => this.handleOpen();
     sock.onmessage = (ev) => this.handleMessage(ev);
     sock.onerror = () => this.setStatus("error");
-    sock.onclose = () => this.handleClose();
+    sock.onclose = (ev) => this.handleClose(ev);
   }
 
   close(): void {
@@ -151,9 +181,13 @@ export class NanobotClient {
     }
   }
 
-  sendMessage(chatId: string, content: string): void {
+  sendMessage(chatId: string, content: string, media?: OutboundMedia[]): void {
     this.knownChats.add(chatId);
-    this.queueSend({ type: "message", chat_id: chatId, content });
+    const frame: Outbound =
+      media && media.length > 0
+        ? { type: "message", chat_id: chatId, content, media }
+        : { type: "message", chat_id: chatId, content };
+    this.queueSend(frame);
   }
 
   // -- internals ---------------------------------------------------------
@@ -211,18 +245,39 @@ export class NanobotClient {
     for (const h of handlers) h(ev);
   }
 
-  private handleClose(): void {
+  private handleClose(event?: { code?: number }): void {
     this.socket = null;
     if (this.pendingNewChat) {
       clearTimeout(this.pendingNewChat.timer);
       this.pendingNewChat.reject(new Error("socket closed"));
       this.pendingNewChat = null;
     }
+    // Surface structured reasons *before* reconnect logic so the UI can
+    // display the error even while the client transparently reconnects.
+    // Browsers populate ``CloseEvent.code`` with the wire-level close code;
+    // 1009 = Message Too Big (server's max frame guard).
+    if (event?.code === 1009) {
+      this.emitError({ kind: "message_too_big" });
+    }
     if (this.intentionallyClosed || !this.shouldReconnect) {
       this.setStatus("closed");
       return;
     }
     this.scheduleReconnect();
+  }
+
+  private emitError(error: StreamError): void {
+    // Isolate subscribers so a throwing handler cannot abort the surrounding
+    // ``handleClose`` flow (which still owes us a reconnect decision + status
+    // update). We deliberately swallow here: error reporting is best-effort
+    // and must never be allowed to compound the failure it's reporting.
+    for (const handler of this.errorHandlers) {
+      try {
+        handler(error);
+      } catch {
+        // best-effort: subscriber fault must not stall transport bookkeeping
+      }
+    }
   }
 
   private scheduleReconnect(): void {

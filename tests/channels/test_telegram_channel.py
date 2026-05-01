@@ -1,4 +1,3 @@
-import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -15,8 +14,12 @@ except ImportError:
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.telegram import TELEGRAM_REPLY_CONTEXT_MAX_LEN, TelegramChannel, _StreamBuf
-from nanobot.channels.telegram import TelegramConfig
+from nanobot.channels.telegram import (
+    TELEGRAM_REPLY_CONTEXT_MAX_LEN,
+    TelegramChannel,
+    TelegramConfig,
+    _StreamBuf,
+)
 
 
 class _FakeHTTPXRequest:
@@ -60,6 +63,9 @@ class _FakeBot:
 
     async def send_photo(self, **kwargs) -> None:
         self.sent_media.append({"kind": "photo", **kwargs})
+
+    async def send_video(self, **kwargs) -> None:
+        self.sent_media.append({"kind": "video", **kwargs})
 
     async def send_voice(self, **kwargs) -> None:
         self.sent_media.append({"kind": "voice", **kwargs})
@@ -195,6 +201,7 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     assert builder.get_updates_request_value is poll_req
     assert callable(app.updater.start_polling_kwargs["error_callback"])
     assert any(cmd.command == "status" for cmd in app.bot.commands)
+    assert any(cmd.command == "history" for cmd in app.bot.commands)
     assert any(cmd.command == "dream" for cmd in app.bot.commands)
     assert any(cmd.command == "dream_log" for cmd in app.bot.commands)
     assert any(cmd.command == "dream_restore" for cmd in app.bot.commands)
@@ -767,6 +774,36 @@ async def test_send_remote_media_url_after_security_validation(monkeypatch) -> N
             "chat_id": 123,
             "photo": "https://example.com/cat.jpg",
             "reply_parameters": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_local_media_preserves_filename(tmp_path: Path) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    attachment = tmp_path / "report.final.md"
+    attachment.write_bytes(b"# Report\n")
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="",
+            media=[str(attachment)],
+        )
+    )
+
+    assert channel._app.bot.sent_media == [
+        {
+            "kind": "document",
+            "chat_id": 123,
+            "document": b"# Report\n",
+            "reply_parameters": None,
+            "filename": "report.final.md",
         }
     ]
 
@@ -1907,7 +1944,6 @@ async def test_send_delta_mid_stream_strips_markdown() -> None:
     assert "Title" in edited_text
     assert "1. step" in edited_text
 
-
 def test_sender_id_formatting():
     """_sender_id should include full name and bot status correctly."""
     from nanobot.channels.telegram import TelegramChannel, TelegramConfig
@@ -2002,3 +2038,125 @@ async def test_reply_to_bot_tagging():
     channel._download_message_media = AsyncMock(side_effect=[([], []), (["/tmp/p.jpg"], ["[image: /tmp/p.jpg]"])])
     await channel._on_message(update, None)
     assert "[Reply to: [image: /tmp/p.jpg]]" in channel._handle_message.call_args[1]["content"]
+
+
+def test_build_keyboard_respects_inline_keyboards_flag() -> None:
+    """``_build_keyboard`` returns ``None`` whenever the feature flag is off,
+    regardless of whether buttons are provided; returns a proper Markup only
+    when the flag is explicitly enabled. Pins the kill-switch so accidentally
+    flipping the default doesn't silently expose callback handlers."""
+    from telegram import InlineKeyboardMarkup
+
+    off = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", inline_keyboards=False),
+        MessageBus(),
+    )
+    assert off._build_keyboard([["A", "B"]]) is None
+
+    on = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", inline_keyboards=True),
+        MessageBus(),
+    )
+    assert on._build_keyboard([]) is None  # empty still no-op
+    markup = on._build_keyboard([["Yes", "No"], ["Cancel"]])
+    assert isinstance(markup, InlineKeyboardMarkup)
+    rows = markup.inline_keyboard
+    assert [[b.text for b in row] for row in rows] == [["Yes", "No"], ["Cancel"]]
+    # callback_data mirrors label so _on_callback_query can echo the tap back.
+    assert rows[0][0].callback_data == "Yes"
+
+
+def test_safe_callback_data_truncates_at_utf8_boundary() -> None:
+    # Telegram's 64-byte callback_data cap is a hard API limit; silent 400s were the bug.
+    short = "Yes"
+    assert TelegramChannel._safe_callback_data(short) == short
+
+    long_ascii = "a" * 100
+    out = TelegramChannel._safe_callback_data(long_ascii)
+    assert len(out.encode("utf-8")) <= 64
+    assert long_ascii.startswith(out)
+
+    # Multibyte labels must not split a codepoint mid-byte.
+    long_cjk = "同意并继续下一步，我已阅读并同意了服务条款以及隐私政策"
+    assert len(long_cjk.encode("utf-8")) > 64
+    out = TelegramChannel._safe_callback_data(long_cjk)
+    assert len(out.encode("utf-8")) <= 64
+    assert long_cjk.startswith(out)
+    out.encode("utf-8").decode("utf-8")  # must round-trip cleanly
+
+
+def test_build_keyboard_uses_safe_callback_data_for_long_labels() -> None:
+    # Pins the integration so a long-label payload survives ``send_message`` instead of 400ing.
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", inline_keyboards=True),
+        MessageBus(),
+    )
+    long_label = "Approve and continue to the next step with the updated terms of service"
+    assert len(long_label.encode("utf-8")) > 64
+
+    markup = channel._build_keyboard([[long_label]])
+    btn = markup.inline_keyboard[0][0]
+    assert btn.text == long_label  # display preserved
+    assert len(btn.callback_data.encode("utf-8")) <= 64
+    assert long_label.startswith(btn.callback_data)
+
+
+def test_buttons_as_text_format_preserves_rows_and_labels() -> None:
+    # Canonical shape: one row per line, labels bracketed. Layout survives the fallback.
+    assert TelegramChannel._buttons_as_text([["Yes", "No"], ["Cancel"]]) == "[Yes] [No]\n[Cancel]"
+    assert TelegramChannel._buttons_as_text([["Only"]]) == "[Only]"
+    assert TelegramChannel._buttons_as_text([[], ["A"]]) == "[A]"  # empty rows skipped
+
+
+@pytest.mark.asyncio
+async def test_send_falls_back_buttons_to_inline_text_when_flag_off() -> None:
+    """Buttons are semantic options; with ``inline_keyboards=False`` we must
+    splice labels into the text so users still see the choices. Silent-drop
+    was the pre-fallback bug — the agent got a success reply while the user
+    saw a question with no options."""
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], inline_keyboards=False),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Proceed?",
+            buttons=[["Yes", "No"], ["Cancel"]],
+        )
+    )
+
+    assert len(channel._app.bot.sent_messages) == 1
+    sent = channel._app.bot.sent_messages[0]
+    assert sent.get("reply_markup") is None
+    assert "Proceed?" in sent["text"]
+    assert "[Yes] [No]" in sent["text"]
+    assert "[Cancel]" in sent["text"]
+
+
+@pytest.mark.asyncio
+async def test_send_uses_native_keyboard_when_flag_on() -> None:
+    """With the flag on, the content stays clean and buttons ride in ``reply_markup``."""
+    from telegram import InlineKeyboardMarkup
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], inline_keyboards=True),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(
+        OutboundMessage(
+            channel="telegram",
+            chat_id="123",
+            content="Proceed?",
+            buttons=[["Yes", "No"]],
+        )
+    )
+
+    sent = channel._app.bot.sent_messages[0]
+    assert isinstance(sent.get("reply_markup"), InlineKeyboardMarkup)
+    assert "[Yes]" not in sent["text"]  # native keyboard owns the rendering

@@ -64,7 +64,19 @@
       "placeholderOpening": "Đang mở cuộc trò chuyện mới…",
       "inputAria": "Ô nhập tin nhắn",
       "sendHint": "Enter để gửi · Shift+Enter để xuống dòng",
-      "send": "Gửi tin nhắn"
+      "send": "Gửi tin nhắn",
+      "attachImage": "Đính kèm ảnh",
+      "encoding": "Đang xử lý…",
+      "remove": "Xóa tệp đính kèm",
+      "normalizedSizeHint": "{{orig}} → {{current}} (tự động)",
+      "imageRejected": {
+        "unsupported_type": "Loại tệp không được hỗ trợ",
+        "too_many_images": "Tối đa {{max}} ảnh mỗi tin nhắn",
+        "magic_mismatch": "Tệp này không phải là một ảnh thực",
+        "decode_failed": "Không thể giải mã ảnh này",
+        "too_large": "Ảnh quá lớn — hãy thử ảnh nhỏ hơn",
+        "io": "Không thể đọc tệp này"
+      }
     },
     "scrollToBottom": "Cuộn xuống cuối"
   },
@@ -72,12 +84,29 @@
     "streaming": "đang truyền",
     "assistantTyping": "Trợ lý đang nhập",
     "toolSingle": "Đang dùng một công cụ",
-    "toolMany": "Đã dùng {{count}} công cụ"
+    "toolMany": "Đã dùng {{count}} công cụ",
+    "imageAttachment": "Tệp hình ảnh đính kèm"
+  },
+  "lightbox": {
+    "title": "Xem trước ảnh",
+    "open": "Xem ảnh",
+    "prev": "Ảnh trước",
+    "next": "Ảnh tiếp theo",
+    "close": "Đóng xem trước"
   },
   "code": {
     "fallbackLanguage": "mã",
     "copyAria": "Sao chép mã",
     "copy": "Sao chép",
     "copied": "Đã sao chép"
+  },
+  "common": {
+    "dismiss": "Đóng"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "Tin nhắn quá lớn",
+      "body": "Máy chủ đã từ chối tin nhắn trước vì vượt quá giới hạn kích thước. Hãy bớt ảnh hoặc chọn tệp nhỏ hơn rồi thử lại."
+    }
   }
 }

@@ -64,7 +64,19 @@
       "placeholderOpening": "正在開啟新對話…",
       "inputAria": "訊息輸入框",
       "sendHint": "Enter 送出 · Shift+Enter 換行",
-      "send": "送出訊息"
+      "send": "送出訊息",
+      "attachImage": "附加圖片",
+      "encoding": "處理中…",
+      "remove": "移除附件",
+      "normalizedSizeHint": "{{orig}} → {{current}}（已自動壓縮）",
+      "imageRejected": {
+        "unsupported_type": "不支援的檔案類型",
+        "too_many_images": "每則訊息最多 {{max}} 張圖片",
+        "magic_mismatch": "檔案看起來不像真正的圖片",
+        "decode_failed": "無法解碼這張圖片",
+        "too_large": "圖片太大，請換一張小一點的",
+        "io": "無法讀取這個檔案"
+      }
     },
     "scrollToBottom": "捲動到底部"
   },
@@ -72,12 +84,29 @@
     "streaming": "串流輸出中",
     "assistantTyping": "助理正在輸入",
     "toolSingle": "正在使用工具",
-    "toolMany": "已使用 {{count}} 個工具"
+    "toolMany": "已使用 {{count}} 個工具",
+    "imageAttachment": "圖片附件"
+  },
+  "lightbox": {
+    "title": "圖片預覽",
+    "open": "檢視圖片",
+    "prev": "上一張",
+    "next": "下一張",
+    "close": "關閉預覽"
   },
   "code": {
     "fallbackLanguage": "程式碼",
     "copyAria": "複製程式碼",
     "copy": "複製",
     "copied": "已複製"
+  },
+  "common": {
+    "dismiss": "關閉"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "訊息過大",
+      "body": "伺服器因超過大小限制拒收了上一則訊息。可移除部分圖片或改用較小的圖片後再試。"
+    }
   }
 }

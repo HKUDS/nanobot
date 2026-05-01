@@ -1,12 +1,13 @@
 [project]
 name = "nanobot-ai"
-version = "0.1.5.post2"
+version = "0.1.5.post3"
 description = "A lightweight personal AI assistant framework"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "nanobot contributors"}
+    {name = "Xubin Ren"},
+    {name = "the nanobot contributors"}
 ]
 keywords = ["ai", "agent", "chatbot"]
 classifiers = [
@@ -91,6 +92,9 @@ langsmith = [
 ]
 pdf = [
     "pymupdf>=1.25.0",
+]
+olostep = [
+    "olostep>=0.1.0",
 ]
 dev = [
     "pytest>=9.0.0,<10.0.0",

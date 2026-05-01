@@ -28,6 +28,8 @@ class CronPayload:
     channel: str | None = None  # e.g. "whatsapp"
     to: str | None = None  # e.g. phone number
     sender_id: str | None = None  # The creator of the job (for privilege checks)
+    channel_meta: dict = field(default_factory=dict)  # channel-specific routing (e.g. Slack thread_ts)
+    session_key: str | None = None  # original session key for correct session recording
 
 
 @dataclass

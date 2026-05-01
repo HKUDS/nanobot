@@ -64,7 +64,19 @@
       "placeholderOpening": "Ouverture d’une nouvelle discussion…",
       "inputAria": "Champ de message",
       "sendHint": "Entrée pour envoyer · Maj+Entrée pour un retour à la ligne",
-      "send": "Envoyer le message"
+      "send": "Envoyer le message",
+      "attachImage": "Joindre une image",
+      "encoding": "Traitement…",
+      "remove": "Retirer la pièce jointe",
+      "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "imageRejected": {
+        "unsupported_type": "Type de fichier non pris en charge",
+        "too_many_images": "Maximum {{max}} images par message",
+        "magic_mismatch": "Ce fichier n'est pas une image",
+        "decode_failed": "Impossible de décoder cette image",
+        "too_large": "Image trop grande — essayez-en une plus petite",
+        "io": "Impossible de lire ce fichier"
+      }
     },
     "scrollToBottom": "Faire défiler vers le bas"
   },
@@ -72,12 +84,29 @@
     "streaming": "en cours de génération",
     "assistantTyping": "L’assistant est en train d’écrire",
     "toolSingle": "Utilisation d’un outil",
-    "toolMany": "{{count}} outils utilisés"
+    "toolMany": "{{count}} outils utilisés",
+    "imageAttachment": "Pièce jointe image"
+  },
+  "lightbox": {
+    "title": "Aperçu de l’image",
+    "open": "Voir l’image",
+    "prev": "Image précédente",
+    "next": "Image suivante",
+    "close": "Fermer l’aperçu"
   },
   "code": {
     "fallbackLanguage": "code",
     "copyAria": "Copier le code",
     "copy": "Copier",
     "copied": "Copié"
+  },
+  "common": {
+    "dismiss": "Fermer"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "Message trop volumineux",
+      "body": "Le serveur a rejeté votre dernier message car il dépasse la taille autorisée. Retirez des images ou choisissez des fichiers plus légers, puis renvoyez-le."
+    }
   }
 }

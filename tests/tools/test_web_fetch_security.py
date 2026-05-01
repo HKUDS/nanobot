@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from nanobot.agent.tools.web import WebFetchTool
+from nanobot.config.schema import WebFetchConfig
 
 
 def _fake_resolve_private(hostname, port, family=0, type_=0):
@@ -47,7 +48,6 @@ async def test_web_fetch_result_contains_untrusted_flag():
 
     fake_html = "<html><head><title>Test</title></head><body><p>Hello world</p></body></html>"
 
-    import httpx
 
     class FakeResponse:
         status_code = 200
@@ -67,6 +67,68 @@ async def test_web_fetch_result_contains_untrusted_flag():
     data = json.loads(result)
     assert data.get("untrusted") is True
     assert "[External content" in data.get("text", "")
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_can_skip_jina_and_use_custom_user_agent(monkeypatch):
+    tool = WebFetchTool(
+        config=WebFetchConfig(use_jina_reader=False),
+        user_agent="nanobot-test-agent",
+    )
+    seen_headers: list[dict] = []
+
+    async def _fail_jina(*args, **kwargs):
+        raise AssertionError("Jina Reader should be skipped when disabled")
+
+    class FakeStreamResponse:
+        headers = {"content-type": "text/html"}
+        url = "https://example.com/page"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeResponse:
+        status_code = 200
+        url = "https://example.com/page"
+        text = "<html><head><title>Test</title></head><body><p>Hello world</p></body></html>"
+        headers = {"content-type": "text/html"}
+
+        def raise_for_status(self):
+            return None
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, headers=None):
+            seen_headers.append(headers or {})
+            return FakeStreamResponse()
+
+        async def get(self, url, headers=None):
+            seen_headers.append(headers or {})
+            return FakeResponse()
+
+    monkeypatch.setattr(tool, "_fetch_jina", _fail_jina)
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", FakeClient)
+
+    with patch("nanobot.security.network.socket.getaddrinfo", _fake_resolve_public):
+        result = await tool.execute(url="https://example.com/page")
+
+    data = json.loads(result)
+    assert data["extractor"] == "readability"
+    assert [headers["User-Agent"] for headers in seen_headers] == [
+        "nanobot-test-agent",
+        "nanobot-test-agent",
+    ]
 
 
 @pytest.mark.asyncio

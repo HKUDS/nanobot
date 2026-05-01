@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pytest
 
-from nanobot.agent.memory import MemoryStore
+from nanobot.agent.memory import MemoryStore, _HISTORY_ENTRY_HARD_CAP
 
 
 @pytest.fixture
@@ -140,6 +140,92 @@ class TestHistoryWithCursor:
         entries = store.read_unprocessed_history(since_cursor=0)
         assert len(entries) == 2
         assert entries[0]["cursor"] in {4, 5}
+
+    def test_write_entries_uses_atomic_write(self, tmp_path):
+        """_write_entries uses temp file + os.replace for atomicity."""
+        store = MemoryStore(tmp_path)
+        store.append_history("event 1")
+        store.append_history("event 2")
+        store.append_history("event 3")
+        entries = store.read_unprocessed_history(since_cursor=0)
+
+        # Monitor temp file existence
+        tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
+        assert not tmp_path_obj.exists()  # Should not exist initially
+
+        # Call _write_entries
+        store._write_entries(entries)
+
+        # Temp file should be cleaned up
+        assert not tmp_path_obj.exists()
+        # Original file should exist
+        assert store.history_file.exists()
+
+    def test_write_entries_cleans_up_tmp_on_exception(self, tmp_path, monkeypatch):
+        """Exception during _write_entries cleans up the temp file."""
+        store = MemoryStore(tmp_path)
+        store.append_history("event 1")
+        entries = store.read_unprocessed_history(since_cursor=0)
+
+        tmp_path_obj = store.history_file.with_suffix(".jsonl.tmp")
+
+        # Mock os.replace to raise an exception
+        def failing_replace(*args, **kwargs):
+            raise RuntimeError("Simulated failure")
+
+        monkeypatch.setattr('os.replace', failing_replace)
+
+        with pytest.raises(RuntimeError):
+            store._write_entries(entries)
+
+        # Temp file should be cleaned up
+        assert not tmp_path_obj.exists()
+
+        # Original file should still exist (because replace failed)
+        assert store.history_file.exists()
+
+
+class TestAppendHistoryHardCap:
+    """append_history has a defensive cap that catches new callers who forgot
+    to set their own tighter cap. The default is intentionally larger than
+    any current caller's per-call cap, so normal operation never trips it."""
+
+    def test_oversized_entry_is_truncated(self, store):
+        """An entry above _HISTORY_ENTRY_HARD_CAP is truncated before being persisted."""
+        huge = "x" * (_HISTORY_ENTRY_HARD_CAP + 10_000)
+        store.append_history(huge)
+        entry = store.read_unprocessed_history(since_cursor=0)[0]
+        assert len(entry["content"]) <= _HISTORY_ENTRY_HARD_CAP + 50
+
+    def test_oversize_warning_is_emitted_once(self, store, caplog):
+        """Repeated oversized writes should warn only on the first occurrence."""
+        from loguru import logger as loguru_logger
+
+        records: list[str] = []
+        handler_id = loguru_logger.add(lambda m: records.append(m), level="WARNING")
+        try:
+            huge = "x" * (_HISTORY_ENTRY_HARD_CAP + 1)
+            store.append_history(huge)
+            store.append_history(huge)
+            store.append_history(huge)
+        finally:
+            loguru_logger.remove(handler_id)
+
+        oversize_warnings = [r for r in records if "exceeds" in r and "chars" in r]
+        assert len(oversize_warnings) == 1
+
+    def test_custom_max_chars_overrides_default(self, store):
+        """Callers that pass max_chars should get their tighter cap applied."""
+        store.append_history("a" * 500, max_chars=100)
+        entry = store.read_unprocessed_history(since_cursor=0)[0]
+        assert len(entry["content"]) <= 150  # 100 + "\n... (truncated)"
+
+    def test_normal_sized_entries_unaffected(self, store):
+        """The hard cap must not alter entries that fit within it."""
+        msg = "normal short entry"
+        store.append_history(msg)
+        entry = store.read_unprocessed_history(since_cursor=0)[0]
+        assert entry["content"] == msg
 
 
 class TestDreamCursor:

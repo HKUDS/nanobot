@@ -1,5 +1,7 @@
 """Tests for the Dream class — two-phase memory consolidation via AgentRunner."""
 
+import json
+
 import pytest
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -255,4 +257,53 @@ class TestDreamRun:
         system_msg = mock_provider.chat_with_retry.call_args.kwargs["messages"][0]["content"]
         # The template renders with stale_threshold_days=14 → LLM must see "N>14"
         assert "N>14" in system_msg
+
+
+class TestDreamPromptCaps:
+    """Dream's Phase 1/2 prompt must not be poisoned by a legacy oversized
+    history entry or a runaway MEMORY.md. Without caps, a single pre-#3412
+    raw_archive dump in history.jsonl would make every subsequent Dream run
+    exceed the context window and silently advance the cursor past real work.
+    """
+
+    async def test_phase1_caps_huge_memory_file(
+        self, dream, mock_provider, mock_runner, store,
+    ):
+        """A MEMORY.md much larger than _MEMORY_FILE_MAX_CHARS must be truncated
+        in the prompt preview (full content is still reachable via read_file)."""
+        store.write_memory("M" * (dream._MEMORY_FILE_MAX_CHARS * 5))
+        store.append_history("some event")
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        await dream.run()
+
+        user_msg = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        memory_section = user_msg.split("## Current MEMORY.md")[1].split("## Current SOUL.md")[0]
+        assert len(memory_section) < dream._MEMORY_FILE_MAX_CHARS + 500
+
+    async def test_phase1_caps_huge_history_entry(
+        self, dream, mock_provider, mock_runner, store,
+    ):
+        """A legacy oversized history entry (e.g. pre-#3412 raw_archive dump)
+        must not explode the Phase 1 prompt — each entry is capped in the
+        preview, even though the JSONL record itself stays full-size."""
+        # Bypass the append_history cap by writing directly, simulating a
+        # record that was written by an older nanobot build before any caps.
+        store.history_file.write_text(
+            json.dumps({
+                "cursor": 1,
+                "timestamp": "2026-04-01 10:00",
+                "content": "H" * (dream._HISTORY_ENTRY_PREVIEW_MAX_CHARS * 8),
+            }) + "\n",
+            encoding="utf-8",
+        )
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SKIP]")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        await dream.run()
+
+        user_msg = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        history_section = user_msg.split("## Conversation History\n")[1].split("\n\n## Current Date")[0]
+        assert len(history_section) < dream._HISTORY_ENTRY_PREVIEW_MAX_CHARS + 500
 

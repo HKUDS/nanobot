@@ -61,13 +61,21 @@ class CronTool(Tool):
         self._channel: ContextVar[str] = ContextVar("cron_channel", default="")
         self._chat_id: ContextVar[str] = ContextVar("cron_chat_id", default="")
         self._sender_id: ContextVar[str] = ContextVar("cron_sender_id", default="")
+        self._metadata: ContextVar[dict] = ContextVar("cron_metadata", default={})
+        self._session_key: ContextVar[str] = ContextVar("cron_session_key", default="")
         self._in_cron_context: ContextVar[bool] = ContextVar("cron_in_context", default=False)
 
-    def set_context(self, channel: str, chat_id: str, sender_id: str = "") -> None:
+    def set_context(
+        self, channel: str, chat_id: str,
+        sender_id: str = "",
+        metadata: dict | None = None, session_key: str | None = None,
+    ) -> None:
         """Set the current session context for delivery."""
         self._channel.set(channel)
         self._chat_id.set(chat_id)
         self._sender_id.set(sender_id)
+        self._metadata.set(metadata or {})
+        self._session_key.set(session_key or f"{channel}:{chat_id}")
 
     def set_cron_context(self, active: bool):
         """Mark whether the tool is executing inside a cron job callback."""
@@ -202,6 +210,8 @@ class CronTool(Tool):
             to=chat_id,
             sender_id=self._sender_id.get(),
             delete_after_run=delete_after,
+            channel_meta=self._metadata.get(),
+            session_key=self._session_key.get() or None,
         )
 
         return f"Created job '{job.name}' (id: {job.id})"
