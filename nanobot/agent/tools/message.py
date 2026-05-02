@@ -34,8 +34,10 @@ _BUTTONS_DESCRIPTION = (
     '{"type":"radio","custom_id":"energy","label":"Energy",'
     '"options":[{"label":"1 — drained","value":"1"},{"label":"2","value":"2"},'
     '{"label":"3","value":"3"},{"label":"4","value":"4"},{"label":"5 — fresh","value":"5"}]},'
-    '{"type":"checkbox","custom_id":"tags","label":"Activities","min_values":0,"max_values":4,'
+    '{"type":"checkbox","custom_id":"tags","label":"Activities","min_values":1,"max_values":4,'
     '"options":[{"label":"Run","value":"run"},{"label":"Bike","value":"bike"},{"label":"Lift","value":"lift"}]}]}}]]\n'
+    "Note: Discord rejects required=true with min_values=0. If a select/checkbox "
+    "should be optional, either set min_values=1 (the default) or pass required=false."
     "Style: primary (default), secondary, success, danger. "
     "Discord renders every shape natively; other channels render labels only "
     "(select rows without scalar labels are dropped)."

@@ -520,13 +520,14 @@ if DISCORD_AVAILABLE:
                     return None
                 placeholder = item.get("placeholder")
                 placeholder = _truncate(str(placeholder), 150) if placeholder else None
+                min_v, max_v, required = self._resolve_multi_required(item, len(options))
                 return discord.ui.Select(
                     custom_id=cid,
                     placeholder=placeholder,
-                    min_values=max(0, int(item.get("min_values", 1))),
-                    max_values=max(1, min(int(item.get("max_values", 1)), len(options))),
+                    min_values=min_v,
+                    max_values=max_v,
                     options=options,
-                    required=bool(item.get("required", True)),
+                    required=required,
                 )
             if item_type == "radio":
                 if _MODAL_RADIO is None or _MODAL_RADIO_OPT is None:
@@ -548,15 +549,43 @@ if DISCORD_AVAILABLE:
                 options = self._build_modal_options(item, _MODAL_CHECKBOX_OPT)
                 if not options:
                     return None
+                min_v, max_v, required = self._resolve_multi_required(item, len(options))
                 return _MODAL_CHECKBOX(
                     custom_id=cid,
                     options=options,
-                    min_values=item.get("min_values"),
-                    max_values=item.get("max_values"),
-                    required=bool(item.get("required", True)),
+                    min_values=min_v,
+                    max_values=max_v,
+                    required=required,
                 )
             logger.warning("unknown modal input type: {!r}", item_type)
             return None
+
+        @staticmethod
+        def _resolve_multi_required(
+            item: dict[str, Any], n_options: int
+        ) -> tuple[int, int, bool]:
+            """Reconcile min_values / max_values / required for select + checkbox.
+
+            Discord 400s on `required=true` paired with `min_values=0`. If the
+            spec explicitly sets `min_values: 0` (meaning: optional submission)
+            and `required` isn't pinned to True, flip required to False. If
+            both `required: true` and `min_values: 0` are set, prefer the
+            stronger user signal (required=true) and clamp min_values to 1.
+            """
+            raw_min = item.get("min_values")
+            raw_max = item.get("max_values")
+            min_v = max(0, int(raw_min)) if raw_min is not None else 1
+            max_v = max(1, min(int(raw_max) if raw_max is not None else 1, n_options))
+            if min_v > max_v:
+                min_v = max_v
+            required_pinned = "required" in item
+            required = bool(item.get("required", True))
+            if min_v == 0:
+                if required_pinned and required:
+                    min_v = 1  # explicit required wins
+                else:
+                    required = False
+            return min_v, max_v, required
 
         async def _reply_ephemeral(self, interaction: discord.Interaction, text: str) -> bool:
             """Send an ephemeral interaction response and report success."""
