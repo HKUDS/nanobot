@@ -34,6 +34,7 @@ from nanobot.agent.tools.notebook import NotebookEditTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.search import GlobTool, GrepTool
 from nanobot.agent.tools.self import MyTool
+from nanobot.agent.tools.send_form import SendFormTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
@@ -238,6 +239,7 @@ class AgentLoop:
         self.provider_retry_mode = provider_retry_mode
         self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
+        self.forms_config = _tc.forms
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
@@ -385,7 +387,12 @@ class AgentLoop:
                     user_agent=self.web_config.user_agent,
                 )
             )
-        self.tools.register(MessageTool(send_callback=self.bus.publish_outbound, workspace=self.workspace))
+        message_tool = MessageTool(send_callback=self.bus.publish_outbound, workspace=self.workspace)
+        self.tools.register(message_tool)
+        if self.forms_config.enable and self.forms_config.templates:
+            self.tools.register(
+                SendFormTool(message_tool=message_tool, templates=self.forms_config.templates)
+            )
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(

@@ -234,12 +234,58 @@ class MyToolConfig(Base):
     allow_set: bool = False  # let `my` modify loop state (read-only if False)
 
 
+class FormInputConfig(Base):
+    """One input inside a form template's modal.
+
+    Mirrors the per-input shape accepted by the message tool's ``buttons[…].modal.inputs``
+    payload. Unset fields are stripped before forwarding so the channel layer's defaults
+    apply (e.g. ``required`` defaults differ for radio vs. select).
+    """
+
+    type: Literal["text", "short", "paragraph", "select", "radio", "checkbox"] = "text"
+    custom_id: str
+    label: str
+    description: str | None = None
+    placeholder: str | None = None
+    required: bool | None = None
+    min_values: int | None = None
+    max_values: int | None = None
+    min_length: int | None = None
+    max_length: int | None = None
+    options: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class FormTemplateConfig(Base):
+    """A named, reusable form template invokable via the ``send_form`` tool.
+
+    The template encodes both the modal (``title`` + ``inputs``) and the button that
+    opens it (``button_label`` / ``button_style`` / ``button_custom_id``). Define
+    templates once in nanobot.json and the model invokes them by ``id``, removing
+    its ability to paraphrase labels or drop inputs.
+    """
+
+    id: str
+    title: str
+    button_label: str | None = None  # defaults to ``title`` when None
+    button_style: Literal["primary", "secondary", "success", "danger"] = "primary"
+    button_custom_id: str | None = None  # defaults to ``id`` when None
+    inputs: list[FormInputConfig]
+
+
+class FormsToolConfig(Base):
+    """``send_form`` tool configuration."""
+
+    enable: bool = True
+    templates: list[FormTemplateConfig] = Field(default_factory=list)
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     my: MyToolConfig = Field(default_factory=MyToolConfig)
+    forms: FormsToolConfig = Field(default_factory=FormsToolConfig)
     restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
