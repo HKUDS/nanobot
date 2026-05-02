@@ -281,11 +281,11 @@ class ExecTool(Tool):
         else:
             for pattern in self.deny_patterns:
                 if re.search(pattern, lower):
-                    return "Error: Command blocked by safety guard (dangerous pattern detected)"
+                    return "Error: Command blocked by deny pattern filter"
 
             if self.allow_patterns:
                 if not any(re.search(p, lower) for p in self.allow_patterns):
-                    return "Error: Command blocked by safety guard (not in allowlist)"
+                    return "Error: Command blocked by allowlist filter (not in allowlist)"
 
         from nanobot.security.network import contains_internal_url
         if contains_internal_url(cmd):
