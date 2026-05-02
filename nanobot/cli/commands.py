@@ -505,6 +505,15 @@ def serve(
             "non-loopback. Reads api.authToken from config when omitted."
         ),
     ),
+    allowed_origin: list[str] | None = typer.Option(
+        None,
+        "--allowed-origin",
+        help=(
+            "Browser Origin permitted to POST to /v1/*. Repeat to allow "
+            "multiple. Default rejects any request carrying an `Origin` "
+            "header to close browser-localhost CSRF."
+        ),
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show nanobot runtime logs"),
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
@@ -536,6 +545,9 @@ def serve(
         auth_token if auth_token is not None else api_cfg.auth_token
     ) or ""
     resolved_auth_token = resolved_auth_token.strip()
+    resolved_allowed_origins = tuple(
+        allowed_origin if allowed_origin is not None else api_cfg.allowed_origins
+    )
     if not _is_loopback_bind_host(host) and not resolved_auth_token:
         console.print(
             "[red]Error:[/red] API host {!r} is not loopback and no auth token "
@@ -592,6 +604,7 @@ def serve(
         model_name=model_name,
         request_timeout=timeout,
         auth_token=resolved_auth_token,
+        allowed_origins=resolved_allowed_origins,
     )
 
     async def on_startup(_app):

@@ -110,3 +110,103 @@ async def test_health_is_exempt_from_auth(aiohttp_client) -> None:
 
     resp = await client.get("/health")
     assert resp.status == 200
+
+
+# ---------------------------------------------------------------------------
+# Browser-CSRF guard (closes the text/plain + Origin gap on default loopback)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_v1_rejects_browser_simple_text_plain(aiohttp_client) -> None:
+    """A browser-simple `text/plain` POST must not reach the agent, even with
+    auth disabled. This is the reviewer's reported CSRF vector."""
+    agent = _agent_returning("ok")
+    app = create_app(agent, model_name="m", auth_token="")
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        data='{"messages":[{"role":"user","content":"pwned"}]}',
+        headers={"Content-Type": "text/plain;charset=UTF-8"},
+    )
+    assert resp.status == 415
+    agent.process_direct.assert_not_awaited()
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_v1_rejects_unallowlisted_origin(aiohttp_client) -> None:
+    """Any browser Origin not in the allowlist is rejected, even with valid
+    Content-Type and no auth required."""
+    agent = _agent_returning("ok")
+    app = create_app(agent, model_name="m", auth_token="")
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hi"}]},
+        headers={"Origin": "https://evil.example"},
+    )
+    assert resp.status == 403
+    agent.process_direct.assert_not_awaited()
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_v1_accepts_allowlisted_origin(aiohttp_client) -> None:
+    agent = _agent_returning("ok")
+    app = create_app(
+        agent,
+        model_name="m",
+        auth_token="",
+        allowed_origins=("https://app.example",),
+    )
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hi"}]},
+        headers={"Origin": "https://app.example"},
+    )
+    assert resp.status == 200
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_v1_accepts_non_browser_clients(aiohttp_client) -> None:
+    """curl / openai-python / LiteLLM don't send Origin and use
+    application/json — they must continue to work with no auth."""
+    agent = _agent_returning("ok")
+    app = create_app(agent, model_name="m", auth_token="")
+    client = await aiohttp_client(app)
+
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status == 200
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_health_skips_csrf_guard(aiohttp_client) -> None:
+    """/health stays unauthenticated and unfiltered — liveness probes don't
+    set Origin or interesting Content-Type."""
+    app = create_app(_agent_returning("ok"), model_name="m", auth_token="")
+    client = await aiohttp_client(app)
+
+    resp = await client.get("/health", headers={"Origin": "https://evil.example"})
+    assert resp.status == 200
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_v1_models_get_skips_csrf_guard(aiohttp_client) -> None:
+    """GETs have no side effects, so the CSRF guard doesn't apply to them."""
+    app = create_app(_agent_returning("ok"), model_name="m", auth_token="")
+    client = await aiohttp_client(app)
+
+    resp = await client.get("/v1/models", headers={"Origin": "https://evil.example"})
+    assert resp.status == 200

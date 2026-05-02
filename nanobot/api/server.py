@@ -378,6 +378,56 @@ async def handle_health(request: web.Request) -> web.Response:
 # ---------------------------------------------------------------------------
 
 
+_ALLOWED_V1_CONTENT_TYPES = ("application/json", "multipart/form-data")
+
+
+def _is_origin_allowed(origin: str, allowed: tuple[str, ...]) -> bool:
+    if not origin:
+        return True
+    return origin in allowed
+
+
+@web.middleware
+async def _browser_csrf_middleware(
+    request: web.Request, handler: Any
+) -> web.StreamResponse:
+    """Block browser-driven CSRF on /v1/* even when no bearer is configured.
+
+    Browsers can send `Content-Type: text/plain` POSTs without a CORS preflight,
+    which would otherwise let any visited page drive a default `nanobot serve`
+    on loopback. Two cheap defenses, applied only to mutating /v1/* requests:
+
+    1. Reject `Origin` headers that aren't in the configured allowlist. Real
+       OpenAI clients (curl, openai-python, LiteLLM) don't send Origin;
+       browsers always do on cross-origin POSTs.
+    2. Require Content-Type `application/json` or `multipart/form-data`.
+       This forces a CORS preflight for any browser request, which we never
+       answer.
+
+    /health and GETs (e.g. /v1/models) are exempt — they have no side effects.
+    """
+    if request.method != "POST" or not request.path.startswith("/v1/"):
+        return await handler(request)
+
+    allowed_origins: tuple[str, ...] = request.app.get("allowed_origins", ())
+    origin = request.headers.get("Origin", "")
+    if origin and not _is_origin_allowed(origin, allowed_origins):
+        return _error_json(
+            403,
+            "Cross-origin requests are not allowed",
+            err_type="forbidden",
+        )
+
+    content_type = (request.content_type or "").lower()
+    if not any(content_type.startswith(ct) for ct in _ALLOWED_V1_CONTENT_TYPES):
+        return _error_json(
+            415,
+            "Unsupported Content-Type; expected application/json or multipart/form-data",
+            err_type="invalid_request_error",
+        )
+    return await handler(request)
+
+
 @web.middleware
 async def _bearer_auth_middleware(
     request: web.Request, handler: Any
@@ -406,6 +456,7 @@ def create_app(
     model_name: str = "nanobot",
     request_timeout: float = 120.0,
     auth_token: str = "",
+    allowed_origins: tuple[str, ...] | list[str] | None = None,
 ) -> web.Application:
     """Create the aiohttp application.
 
@@ -416,15 +467,20 @@ def create_app(
         auth_token: If non-empty, /v1/* requests must carry
             ``Authorization: Bearer <auth_token>``. /health stays open so
             liveness probes don't need credentials.
+        allowed_origins: Browser origins permitted to POST to /v1/*. Empty
+            (default) means any request carrying an `Origin` header is
+            rejected — which closes browser-localhost CSRF without affecting
+            non-browser clients (curl, openai-python, LiteLLM).
     """
     app = web.Application(
         client_max_size=20 * 1024 * 1024,  # 20MB for base64 images
-        middlewares=[_bearer_auth_middleware],
+        middlewares=[_browser_csrf_middleware, _bearer_auth_middleware],
     )
     app["agent_loop"] = agent_loop
     app["model_name"] = model_name
     app["request_timeout"] = request_timeout
     app["auth_token"] = auth_token
+    app["allowed_origins"] = tuple(allowed_origins or ())
     app["session_locks"] = {}  # per-user locks, keyed by session_key
 
     app.router.add_post("/v1/chat/completions", handle_chat_completions)

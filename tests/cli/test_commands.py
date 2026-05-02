@@ -973,11 +973,13 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         model_name: str,
         request_timeout: float,
         auth_token: str = "",
+        allowed_origins: tuple[str, ...] | list[str] | None = None,
     ):
         seen["agent_loop"] = agent_loop
         seen["model_name"] = model_name
         seen["request_timeout"] = request_timeout
         seen["auth_token"] = auth_token
+        seen["allowed_origins"] = tuple(allowed_origins or ())
         return _FakeApiApp()
 
     def _fake_run_app(api_app, host: str, port: int, print):

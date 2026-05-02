@@ -182,6 +182,10 @@ class ApiConfig(Base):
     # trust boundary fronts the server). The CLI refuses non-loopback binds
     # without a token to make the unsafe case loud.
     auth_token: str = ""
+    # Browser origins permitted to POST to /v1/*. Empty (default) rejects any
+    # request that carries an `Origin` header — closes browser-localhost CSRF
+    # without affecting non-browser clients (curl, openai-python, LiteLLM).
+    allowed_origins: list[str] = Field(default_factory=list)
 
 
 class GatewayConfig(Base):
