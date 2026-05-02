@@ -1219,8 +1219,15 @@ def agent(
 # ============================================================================
 
 
-channels_app = typer.Typer(help="Manage channels")
+channels_app = typer.Typer(help="Manage channels", invoke_without_command=True)
 app.add_typer(channels_app, name="channels")
+
+
+@channels_app.callback()
+def channels_callback(ctx: typer.Context):
+    """Manage channels."""
+    if ctx.invoked_subcommand is None:
+        print(ctx.get_help())
 
 
 @channels_app.command("status")
@@ -1380,8 +1387,15 @@ def channels_login(
 # Plugin Commands
 # ============================================================================
 
-plugins_app = typer.Typer(help="Manage channel plugins")
+plugins_app = typer.Typer(help="Manage channel plugins", invoke_without_command=True)
 app.add_typer(plugins_app, name="plugins")
+
+
+@plugins_app.callback()
+def plugins_callback(ctx: typer.Context):
+    """Manage channel plugins."""
+    if ctx.invoked_subcommand is None:
+        print(ctx.get_help())
 
 
 @plugins_app.command("list")
@@ -1464,8 +1478,15 @@ def status():
 # OAuth Login
 # ============================================================================
 
-provider_app = typer.Typer(help="Manage providers")
+provider_app = typer.Typer(help="Manage providers", invoke_without_command=True)
 app.add_typer(provider_app, name="provider")
+
+
+@provider_app.callback()
+def provider_callback(ctx: typer.Context):
+    """Manage providers."""
+    if ctx.invoked_subcommand is None:
+        print(ctx.get_help())
 
 
 _LOGIN_HANDLERS: dict[str, callable] = {}
