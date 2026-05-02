@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
@@ -35,6 +36,14 @@ _HEARTBEAT_TOOL = [
         },
     }
 ]
+
+
+@dataclass(frozen=True)
+class HeartbeatDecision:
+    """Phase 1 heartbeat decision exposed for manual dry-runs."""
+
+    action: str
+    tasks: str
 
 
 class HeartbeatService:
@@ -71,6 +80,7 @@ class HeartbeatService:
         self.timezone = timezone
         self._running = False
         self._task: asyncio.Task | None = None
+        self._tick_lock = asyncio.Lock()
 
     @property
     def heartbeat_file(self) -> Path:
@@ -183,6 +193,14 @@ class HeartbeatService:
 
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
+        if self._tick_lock.locked():
+            logger.info("Heartbeat: tick skipped because another trigger is running")
+            return
+        async with self._tick_lock:
+            await self._tick_unlocked()
+
+    async def _tick_unlocked(self) -> None:
+        """Execute a heartbeat tick while the caller holds ``_tick_lock``."""
         from nanobot.utils.evaluator import evaluate_response
 
         content = self._read_heartbeat_file()
@@ -225,12 +243,21 @@ class HeartbeatService:
         except Exception:
             logger.exception("Heartbeat execution failed")
 
-    async def trigger_now(self) -> str | None:
-        """Manually trigger a heartbeat."""
+    async def decide_now(self) -> HeartbeatDecision | None:
+        """Run Phase 1 and return the skip/run decision without executing tasks."""
         content = self._read_heartbeat_file()
         if not content:
             return None
         action, tasks = await self._decide(content)
-        if action != "run" or not self.on_execute:
-            return None
-        return await self.on_execute(tasks)
+        return HeartbeatDecision(action=action, tasks=tasks)
+
+    async def trigger_now(self) -> str | None:
+        """Manually trigger a heartbeat."""
+        async with self._tick_lock:
+            decision = await self.decide_now()
+            if decision is None:
+                return None
+            action, tasks = decision.action, decision.tasks
+            if action != "run" or not self.on_execute:
+                return None
+            return await self.on_execute(tasks)

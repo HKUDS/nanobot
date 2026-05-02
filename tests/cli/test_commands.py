@@ -800,6 +800,83 @@ def test_heartbeat_retains_recent_messages_by_default():
     assert config.gateway.heartbeat.keep_recent_messages == 8
 
 
+def test_heartbeat_trigger_dry_run_prints_decision(monkeypatch, tmp_path: Path) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path)
+
+    _patch_cli_command_runtime(monkeypatch, config)
+
+    class _FakeDecision:
+        action = "run"
+        tasks = "check backups"
+
+    class _FakeHeartbeatService:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def decide_now(self):
+            return _FakeDecision()
+
+    monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _FakeHeartbeatService)
+
+    result = runner.invoke(app, ["heartbeat", "trigger", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "Heartbeat Dry Run" in result.stdout
+    assert "run" in result.stdout
+    assert "check backups" in result.stdout
+
+
+def test_heartbeat_trigger_run_executes_phase_two(monkeypatch, tmp_path: Path) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path)
+    seen: dict[str, object] = {}
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: object(),
+        cron_service=lambda _store: object(),
+    )
+
+    class _FakeAgentLoop:
+        model = "test-model"
+
+        def __init__(self, **kwargs) -> None:
+            seen["agent_kwargs"] = kwargs
+
+        async def process_direct(self, message: str, **kwargs):
+            seen["message"] = message
+            seen["process_kwargs"] = kwargs
+            return OutboundMessage(channel="cli", chat_id="direct", content="heartbeat result")
+
+        async def close_mcp(self) -> None:
+            seen["closed"] = True
+
+    class _FakeHeartbeatService:
+        def __init__(self, **kwargs) -> None:
+            self.on_execute = kwargs["on_execute"]
+
+        async def trigger_now(self):
+            return await self.on_execute("check backups")
+
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _FakeHeartbeatService)
+    monkeypatch.setattr("nanobot.cli.commands._print_agent_response", lambda *args, **kwargs: seen.__setitem__("printed", (args, kwargs)))
+
+    result = runner.invoke(app, ["heartbeat", "trigger"])
+
+    assert result.exit_code == 0
+    assert seen["message"] == "check backups"
+    assert seen["process_kwargs"] == {
+        "session_key": "heartbeat",
+        "channel": "cli",
+        "chat_id": "direct",
+    }
+    assert seen["closed"] is True
+    assert seen["printed"] == (("heartbeat result",), {"render_markdown": True})
+
+
 def _write_instance_config(tmp_path: Path) -> Path:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)

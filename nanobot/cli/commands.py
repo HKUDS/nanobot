@@ -1215,6 +1215,113 @@ def agent(
 
 
 # ============================================================================
+# Heartbeat Commands
+# ============================================================================
+
+
+heartbeat_app = typer.Typer(help="Debug and trigger heartbeat tasks")
+app.add_typer(heartbeat_app, name="heartbeat")
+
+
+@heartbeat_app.command("trigger")
+def heartbeat_trigger(
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Run Phase 1 only and print the skip/run decision without executing tasks",
+    ),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+    markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render Phase 2 output as Markdown"),
+):
+    """Trigger the heartbeat check on demand."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.cron.service import CronService
+    from nanobot.heartbeat.service import HeartbeatService
+
+    config_obj = _load_runtime_config(config, workspace)
+    sync_workspace_templates(config_obj.workspace_path)
+    provider = _make_provider(config_obj)
+
+    if dry_run:
+        service = HeartbeatService(
+            workspace=config_obj.workspace_path,
+            provider=provider,
+            model=config_obj.agents.defaults.model,
+            timezone=config_obj.agents.defaults.timezone,
+        )
+        decision = asyncio.run(service.decide_now())
+        if decision is None:
+            console.print("[yellow]No HEARTBEAT.md found, or it is empty.[/yellow]")
+            raise typer.Exit(1)
+
+        table = Table(title="Heartbeat Dry Run")
+        table.add_column("Field")
+        table.add_column("Value")
+        table.add_row("Action", decision.action)
+        table.add_row("Tasks", decision.tasks or "(none)")
+        console.print(table)
+        return
+
+    bus = MessageBus()
+    cron_store_path = config_obj.workspace_path / "cron" / "jobs.json"
+    cron = CronService(cron_store_path)
+    agent_loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=config_obj.workspace_path,
+        model=config_obj.agents.defaults.model,
+        max_iterations=config_obj.agents.defaults.max_tool_iterations,
+        context_window_tokens=config_obj.agents.defaults.context_window_tokens,
+        web_config=config_obj.tools.web,
+        context_block_limit=config_obj.agents.defaults.context_block_limit,
+        max_tool_result_chars=config_obj.agents.defaults.max_tool_result_chars,
+        provider_retry_mode=config_obj.agents.defaults.provider_retry_mode,
+        exec_config=config_obj.tools.exec,
+        cron_service=cron,
+        restrict_to_workspace=config_obj.tools.restrict_to_workspace,
+        mcp_servers=config_obj.tools.mcp_servers,
+        channels_config=config_obj.channels,
+        timezone=config_obj.agents.defaults.timezone,
+        unified_session=config_obj.agents.defaults.unified_session,
+        disabled_skills=config_obj.agents.defaults.disabled_skills,
+        session_ttl_minutes=config_obj.agents.defaults.session_ttl_minutes,
+        consolidation_ratio=config_obj.agents.defaults.consolidation_ratio,
+        max_messages=config_obj.agents.defaults.max_messages,
+        tools_config=config_obj.tools,
+    )
+
+    async def _on_execute(tasks: str) -> str:
+        response = await agent_loop.process_direct(
+            tasks,
+            session_key="heartbeat",
+            channel="cli",
+            chat_id="direct",
+        )
+        return response.content if response else ""
+
+    async def _run_trigger() -> str | None:
+        service = HeartbeatService(
+            workspace=config_obj.workspace_path,
+            provider=provider,
+            model=agent_loop.model,
+            on_execute=_on_execute,
+            timezone=config_obj.agents.defaults.timezone,
+        )
+        try:
+            return await service.trigger_now()
+        finally:
+            await agent_loop.close_mcp()
+
+    response = asyncio.run(_run_trigger())
+    if response:
+        _print_agent_response(response, render_markdown=markdown)
+    else:
+        console.print("[green]Heartbeat completed: nothing to run.[/green]")
+
+
+# ============================================================================
 # Channel Commands
 # ============================================================================
 
