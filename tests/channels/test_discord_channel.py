@@ -1837,3 +1837,154 @@ def test_modal_spec_cache_evicts_oldest_at_cap() -> None:
     assert "btn-4" not in channel._modal_specs
     assert f"btn-{MODAL_SPEC_CAP + 4}" in channel._modal_specs
     assert "btn-0:m" not in channel._modal_to_button
+
+
+# ---------------------------------------------------------------------------
+# Modal v2: select / radio / checkbox inputs (discord.py 2.6+ Label wrapping)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_modal_select_input_wraps_select_in_label() -> None:
+    """A modal spec with a select input opens a Modal containing a Label
+    whose inner component is a discord.ui.Select. Pins the v2 dispatch
+    path that the type='select' branch in _build_modal must produce."""
+    bus = MessageBus()
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), bus)
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    channel_obj = _FakeChannel(channel_id=456)
+    owner._remember_channel(channel_obj)
+
+    target = _FakeChannel(channel_id=456)
+    client.get_channel = lambda channel_id: target if channel_id == 456 else None  # type: ignore[method-assign]
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="456",
+            content="open",
+            metadata={
+                "_components": [
+                    [
+                        {
+                            "type": "button",
+                            "label": "Open",
+                            "custom_id": "btn-sel",
+                            "modal": {
+                                "title": "Pick",
+                                "inputs": [
+                                    {
+                                        "type": "select",
+                                        "label": "Priority",
+                                        "custom_id": "pri",
+                                        "options": [
+                                            {"label": "High", "value": "high"},
+                                            {"label": "Low", "value": "low"},
+                                        ],
+                                    }
+                                ],
+                            },
+                        }
+                    ]
+                ]
+            },
+        )
+    )
+
+    click = _make_component_interaction(
+        custom_id="btn-sel",
+        component_type=2,
+        channel=channel_obj,
+        message=_component_message_double(),
+    )
+    await client.on_interaction(click)
+
+    modal = click.response.modal
+    assert isinstance(modal, discord.ui.Modal)
+    children = list(modal.children)
+    assert len(children) == 1
+    label = children[0]
+    assert isinstance(label, discord.ui.Label)
+    inner = getattr(label, "component", None)
+    assert isinstance(inner, discord.ui.Select)
+    assert inner.custom_id == "pri"
+    assert [opt.value for opt in inner.options] == ["high", "low"]
+
+
+@pytest.mark.asyncio
+async def test_modal_submit_label_shape_with_list_values() -> None:
+    """Modal submits from select/checkbox inputs nest leaves under a Label
+    envelope (`component`, not `components`) and carry list `values`. The
+    payload walker must flatten those and join with ', '."""
+    bus = MessageBus()
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), bus)
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    channel_obj = _FakeChannel(channel_id=456)
+    owner._remember_channel(channel_obj)
+    owner._record_modal_spec(
+        "btn-sel",
+        {
+            "title": "Pick",
+            "inputs": [
+                {
+                    "type": "select",
+                    "label": "Priority",
+                    "custom_id": "pri",
+                    "options": [
+                        {"label": "High", "value": "high"},
+                        {"label": "Low", "value": "low"},
+                    ],
+                }
+            ],
+        },
+    )
+
+    submit = _make_modal_submit_interaction(
+        modal_custom_id="btn-sel:m",
+        components=[
+            {"component": {"custom_id": "pri", "values": ["high", "low"]}},
+        ],
+        channel=channel_obj,
+    )
+    await client.on_interaction(submit)
+
+    msg = bus.inbound.get_nowait()
+    assert msg.metadata["interaction_type"] == "modal_submit"
+    assert msg.metadata["custom_id"] == "btn-sel"
+    assert msg.metadata["form_values"] == {"pri": "high, low"}
+    assert "Priority: high, low" in msg.content
+
+
+@pytest.mark.asyncio
+async def test_modal_submit_legacy_actionrow_shape_still_works() -> None:
+    """The walker must keep handling the pre-2.6 ActionRow envelope
+    (`components` list nesting) so existing TextInput-only modals don't
+    regress when the v2 dispatch ships."""
+    bus = MessageBus()
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), bus)
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    channel_obj = _FakeChannel(channel_id=456)
+    owner._remember_channel(channel_obj)
+    owner._record_modal_spec(
+        "btn-old",
+        {
+            "title": "Notes",
+            "inputs": [
+                {"label": "Comment", "custom_id": "comment", "style": "paragraph"},
+            ],
+        },
+    )
+
+    submit = _make_modal_submit_interaction(
+        modal_custom_id="btn-old:m",
+        components=[
+            {"components": [{"custom_id": "comment", "value": "looks good"}]},
+        ],
+        channel=channel_obj,
+    )
+    await client.on_interaction(submit)
+
+    msg = bus.inbound.get_nowait()
+    assert msg.metadata["interaction_type"] == "modal_submit"
+    assert msg.metadata["custom_id"] == "btn-old"
+    assert msg.metadata["form_values"] == {"comment": "looks good"}
+    assert "Comment: looks good" in msg.content
