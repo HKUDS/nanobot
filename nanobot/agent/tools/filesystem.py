@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
-from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
+from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.config.paths import get_media_dir
+from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
 def _resolve_path(
@@ -19,17 +19,24 @@ def _resolve_path(
     workspace: Path | None = None,
     allowed_dir: Path | None = None,
     extra_allowed_dirs: list[Path] | None = None,
+    allowed_paths: list[Path] | None = None,
 ) -> Path:
     """Resolve path against workspace (if relative) and enforce directory restriction."""
     p = Path(path).expanduser()
     if not p.is_absolute() and workspace:
         p = workspace / p
     resolved = p.resolve()
-    if allowed_dir:
+    if allowed_dir or extra_allowed_dirs or allowed_paths:
         media_path = get_media_dir().resolve()
-        all_dirs = [allowed_dir] + [media_path] + (extra_allowed_dirs or []) 
-        if not any(_is_under(resolved, d) for d in all_dirs):
+        all_dirs = ([allowed_dir] if allowed_dir else []) + [media_path] + (extra_allowed_dirs or [])
+        all_paths = [allowed.resolve() for allowed in allowed_paths or []]
+        if resolved in all_paths:
+            return resolved
+        if any(_is_under(resolved, d) for d in all_dirs):
+            return resolved
+        if allowed_dir:
             raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
+        raise PermissionError("Path {} is not in the allowed file list".format(path))
     return resolved
 
 
@@ -49,11 +56,13 @@ class _FsTool(Tool):
         workspace: Path | None = None,
         allowed_dir: Path | None = None,
         extra_allowed_dirs: list[Path] | None = None,
+        allowed_paths: list[Path] | None = None,
         file_states: FileStates | None = None,
     ):
         self._workspace = workspace
         self._allowed_dir = allowed_dir
         self._extra_allowed_dirs = extra_allowed_dirs
+        self._allowed_paths = allowed_paths
         # Explicit state is used by isolated runners like Dream/subagents.
         # Main AgentLoop tools leave this unset and resolve state from the
         # current async task, which keeps shared tool instances session-safe.
@@ -67,7 +76,13 @@ class _FsTool(Tool):
         return current_file_states(self._fallback_file_states)
 
     def _resolve(self, path: str) -> Path:
-        return _resolve_path(path, self._workspace, self._allowed_dir, self._extra_allowed_dirs)
+        return _resolve_path(
+            path,
+            self._workspace,
+            self._allowed_dir,
+            self._extra_allowed_dirs,
+            self._allowed_paths,
+        )
 
 
 # ---------------------------------------------------------------------------

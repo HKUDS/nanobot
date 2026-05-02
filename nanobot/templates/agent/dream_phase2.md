@@ -1,13 +1,14 @@
 Update memory files based on the analysis below.
 - [FILE] entries: add the described content to the appropriate file
 - [FILE-REMOVE] entries: delete the corresponding content from memory files
+{% if allow_skills %}
 - [SKILL] entries: create a new skill under skills/<name>/SKILL.md using write_file
+{% else %}
+- [SKILL] entries: ignore them because skill creation is disabled by configuration
+{% endif %}
 
 ## File paths (relative to workspace root)
-- SOUL.md
-- USER.md
-- memory/MEMORY.md
-- skills/<name>/SKILL.md (for [SKILL] entries only)
+{{ allowed_file_paths }}
 
 Do NOT guess paths.
 
@@ -19,6 +20,7 @@ Do NOT guess paths.
 - Surgical edits only — never rewrite entire files
 - If nothing to update, stop without calling tools
 
+{% if allow_skills %}
 ## Skill creation rules (for [SKILL] entries)
 - Use write_file to create skills/<name>/SKILL.md
 - Before writing, read_file `{{ skill_creator_path }}` for format reference (frontmatter structure, naming conventions, quality standards)
@@ -29,6 +31,11 @@ Do NOT guess paths.
 - Do NOT overwrite existing skills — skip if the skill directory already exists
 - Reference specific tools the agent has access to (read_file, write_file, exec, web_search, etc.)
 - Skills are instruction sets, not code — do not include implementation code
+{% else %}
+## Skill creation disabled
+- Ignore [SKILL] entries if present in the analysis.
+- Do not create or edit files under `skills/`.
+{% endif %}
 
 ## Quality
 - Every line must carry standalone value

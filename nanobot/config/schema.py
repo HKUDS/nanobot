@@ -37,6 +37,7 @@ class DreamConfig(Base):
 
     _HOUR_MS = 3_600_000
 
+    enabled: bool = True
     interval_h: int = Field(default=2, ge=1)  # Every 2 hours by default
     cron: str | None = Field(default=None, exclude=True)  # Legacy compatibility override
     model_override: str | None = Field(
@@ -46,6 +47,10 @@ class DreamConfig(Base):
     max_batch_size: int = Field(default=20, ge=1)  # Max history entries per run
     # Bumped from 10 to 15 in #3212 (exp002: +30% dedup, no accuracy loss; >15 plateaus).
     max_iterations: int = Field(default=15, ge=1)  # Max tool calls per Phase 2
+    update_scope: Literal["memory", "memory_context", "all"] = Field(
+        default="all",
+        validation_alias=AliasChoices("updateScope", "update_scope"),
+    )  # memory = MEMORY.md only; memory_context also permits SOUL.md/USER.md; all also permits skills
     # Per-line git-blame age annotation in Phase 1 prompt (see #3212). Default
     # on — set to False to feed MEMORY.md raw if a specific LLM reacts poorly
     # to the `← Nd` suffix or you want deterministic, git-independent prompts.
@@ -59,6 +64,8 @@ class DreamConfig(Base):
 
     def describe_schedule(self) -> str:
         """Return a human-readable summary for logs and startup output."""
+        if not self.enabled:
+            return "disabled"
         if self.cron:
             return f"cron {self.cron} (legacy)"
         hours = self.interval_h

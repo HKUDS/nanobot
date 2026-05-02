@@ -1387,6 +1387,9 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
         max_batch_size = 0
         max_iterations = 0
 
+        def set_update_scope(self, update_scope: str) -> None:
+            self.update_scope = update_scope
+
         async def run(self) -> None:
             return None
 

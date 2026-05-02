@@ -8,19 +8,24 @@ import os
 import re
 import weakref
 from contextlib import suppress
-import tiktoken
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
+import tiktoken
 from loguru import logger
-
-from nanobot.utils.prompt_templates import render_template
-from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, strip_think, truncate_text
 
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.utils.helpers import (
+    ensure_dir,
+    estimate_message_tokens,
+    estimate_prompt_tokens_chain,
+    strip_think,
+    truncate_text,
+)
 from nanobot.utils.gitstore import GitStore
+from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -350,7 +355,7 @@ class MemoryStore:
                 read_size = min(size, 4096)
                 f.seek(size - read_size)
                 data = f.read().decode("utf-8")
-                lines = [l for l in data.split("\n") if l.strip()]
+                lines = [line for line in data.split("\n") if line.strip()]
                 if not lines:
                     return None
                 return json.loads(lines[-1])
@@ -724,6 +729,8 @@ class Dream:
         max_iterations: int = 10,
         max_tool_result_chars: int = 16_000,
         annotate_line_ages: bool = True,
+        enabled: bool = True,
+        update_scope: str = "all",
     ):
         self.store = store
         self.provider = provider
@@ -735,6 +742,8 @@ class Dream:
         # Default True keeps the #3212 behavior; set False to feed MEMORY.md raw
         # (e.g. if a specific LLM reacts poorly to the `← Nd` suffix).
         self.annotate_line_ages = annotate_line_ages
+        self.enabled = enabled
+        self.update_scope = update_scope
         self._runner = AgentRunner(provider)
         self._tools = self._build_tools()
 
@@ -742,6 +751,13 @@ class Dream:
         self.provider = provider
         self.model = model
         self._runner.provider = provider
+
+    def set_update_scope(self, update_scope: str) -> None:
+        """Apply a new Dream update scope and rebuild scoped tools if needed."""
+        if update_scope == self.update_scope:
+            return
+        self.update_scope = update_scope
+        self._tools = self._build_tools()
 
     # -- tool registry -------------------------------------------------------
 
@@ -753,24 +769,65 @@ class Dream:
 
         tools = ToolRegistry()
         workspace = self.store.workspace
+        allowed_files = self._allowed_update_files()
         # Allow reading builtin skills for reference during skill creation
-        extra_read = [BUILTIN_SKILLS_DIR] if BUILTIN_SKILLS_DIR.exists() else None
+        extra_read = None
+        if self._allows_skills():
+            extra_read = []
+            workspace_skills = workspace / "skills"
+            if workspace_skills.exists():
+                extra_read.append(workspace_skills)
+            if BUILTIN_SKILLS_DIR.exists():
+                extra_read.append(BUILTIN_SKILLS_DIR)
         # Dream gets its own FileStates so its caches stay isolated from the
         # main loop's sessions (issue #3571).
         file_states = FileStates()
         tools.register(ReadFileTool(
             workspace=workspace,
-            allowed_dir=workspace,
+            allowed_paths=allowed_files,
             extra_allowed_dirs=extra_read,
             file_states=file_states,
         ))
-        tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace, file_states=file_states))
-        # write_file resolves relative paths from workspace root, but can only
-        # write under skills/ so the prompt can safely use skills/<name>/SKILL.md.
-        skills_dir = workspace / "skills"
-        skills_dir.mkdir(parents=True, exist_ok=True)
-        tools.register(WriteFileTool(workspace=workspace, allowed_dir=skills_dir, file_states=file_states))
+        tools.register(EditFileTool(
+            workspace=workspace,
+            allowed_paths=allowed_files,
+            file_states=file_states,
+        ))
+        if self._allows_skills():
+            # write_file resolves relative paths from workspace root, but can only
+            # write under skills/ so the prompt can safely use skills/<name>/SKILL.md.
+            skills_dir = workspace / "skills"
+            skills_dir.mkdir(parents=True, exist_ok=True)
+            tools.register(
+                WriteFileTool(workspace=workspace, allowed_dir=skills_dir, file_states=file_states)
+            )
         return tools
+
+    def _allows_context_files(self) -> bool:
+        return self.update_scope in {"memory_context", "all"}
+
+    def _allows_skills(self) -> bool:
+        return self.update_scope == "all"
+
+    def _allowed_update_files(self) -> list[Path]:
+        files = [self.store.memory_file]
+        if self._allows_context_files():
+            files.extend([self.store.soul_file, self.store.user_file])
+        return files
+
+    def _allowed_file_labels(self) -> list[str]:
+        labels = ["MEMORY"]
+        if self._allows_context_files():
+            labels.extend(["SOUL", "USER"])
+        return labels
+
+    def _allowed_file_paths_text(self) -> str:
+        paths = ["memory/MEMORY.md"]
+        if self._allows_context_files():
+            paths.extend(["SOUL.md", "USER.md"])
+        if self._allows_skills():
+            paths.append("skills/<name>/SKILL.md")
+        return "\n".join(f"- {path}" for path in paths)
 
     # -- skill listing --------------------------------------------------------
 
@@ -780,7 +837,7 @@ class Dream:
 
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 
-        _DESC_RE = _re.compile(r"^description:\s*(.+)$", _re.MULTILINE | _re.IGNORECASE)
+        desc_re = _re.compile(r"^description:\s*(.+)$", _re.MULTILINE | _re.IGNORECASE)
         entries: dict[str, str] = {}
         for base in (self.store.workspace / "skills", BUILTIN_SKILLS_DIR):
             if not base.exists():
@@ -795,7 +852,7 @@ class Dream:
                 if d.name in entries and base == BUILTIN_SKILLS_DIR:
                     continue
                 content = skill_md.read_text(encoding="utf-8")[:500]
-                m = _DESC_RE.search(content)
+                m = desc_re.search(content)
                 desc = m.group(1).strip() if m else "(no description)"
                 entries[d.name] = desc
         return [f"{name} — {desc}" for name, desc in sorted(entries.items())]
@@ -852,6 +909,10 @@ class Dream:
         """Process unprocessed history entries. Returns True if work was done."""
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 
+        if not self.enabled:
+            logger.info("Dream: disabled by configuration")
+            return False
+
         last_cursor = self.store.get_last_dream_cursor()
         entries = self.store.read_unprocessed_history(since_cursor=last_cursor)
         if not entries:
@@ -882,19 +943,21 @@ class Dream:
             else raw_memory
         )
         current_memory = truncate_text(annotated_memory, self._MEMORY_FILE_MAX_CHARS)
-        current_soul = truncate_text(
-            self.store.read_soul() or "(empty)", self._SOUL_FILE_MAX_CHARS,
-        )
-        current_user = truncate_text(
-            self.store.read_user() or "(empty)", self._USER_FILE_MAX_CHARS,
-        )
-
         file_context = (
             f"## Current Date\n{current_date}\n\n"
-            f"## Current MEMORY.md ({len(current_memory)} chars)\n{current_memory}\n\n"
-            f"## Current SOUL.md ({len(current_soul)} chars)\n{current_soul}\n\n"
-            f"## Current USER.md ({len(current_user)} chars)\n{current_user}"
+            f"## Current MEMORY.md ({len(current_memory)} chars)\n{current_memory}"
         )
+        if self._allows_context_files():
+            current_soul = truncate_text(
+                self.store.read_soul() or "(empty)", self._SOUL_FILE_MAX_CHARS,
+            )
+            current_user = truncate_text(
+                self.store.read_user() or "(empty)", self._USER_FILE_MAX_CHARS,
+            )
+            file_context += (
+                f"\n\n## Current SOUL.md ({len(current_soul)} chars)\n{current_soul}\n\n"
+                f"## Current USER.md ({len(current_user)} chars)\n{current_user}"
+            )
 
         # Phase 1: Analyze (no skills list — dedup is Phase 2's job)
         phase1_prompt = (
@@ -911,6 +974,9 @@ class Dream:
                             "agent/dream_phase1.md",
                             strip=True,
                             stale_threshold_days=_STALE_THRESHOLD_DAYS,
+                            allow_context_files=self._allows_context_files(),
+                            allow_skills=self._allows_skills(),
+                            allowed_file_labels=", ".join(self._allowed_file_labels()),
                         ),
                     },
                     {"role": "user", "content": phase1_prompt},
@@ -943,6 +1009,9 @@ class Dream:
                     "agent/dream_phase2.md",
                     strip=True,
                     skill_creator_path=str(skill_creator_path),
+                    allow_context_files=self._allows_context_files(),
+                    allow_skills=self._allows_skills(),
+                    allowed_file_paths=self._allowed_file_paths_text(),
                 ),
             },
             {"role": "user", "content": phase2_prompt},

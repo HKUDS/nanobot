@@ -466,6 +466,24 @@ def _migrate_cron_store(config: "Config") -> None:
         shutil.move(str(legacy_path), str(new_path))
 
 
+def _apply_dream_config(agent: Any, config: "Config") -> None:
+    """Apply Dream settings from runtime config to an AgentLoop instance."""
+    dream = getattr(agent, "dream", None)
+    if dream is None:
+        return
+    dream_cfg = config.agents.defaults.dream
+    if dream_cfg.model_override:
+        dream.model = dream_cfg.model_override
+    dream.max_batch_size = dream_cfg.max_batch_size
+    dream.max_iterations = dream_cfg.max_iterations
+    dream.annotate_line_ages = dream_cfg.annotate_line_ages
+    dream.enabled = dream_cfg.enabled
+    if hasattr(dream, "set_update_scope"):
+        dream.set_update_scope(dream_cfg.update_scope)
+    else:
+        dream.update_scope = dream_cfg.update_scope
+
+
 # ============================================================================
 # OpenAI-Compatible API Server
 # ============================================================================
@@ -531,6 +549,7 @@ def serve(
         max_messages=runtime_config.agents.defaults.max_messages,
         tools_config=runtime_config.tools,
     )
+    _apply_dream_config(agent_loop, runtime_config)
 
     model_name = runtime_config.agents.defaults.model
     console.print(f"{__logo__} Starting OpenAI-compatible API server")
@@ -900,18 +919,15 @@ def _run_gateway(
             await server.serve_forever()
     # Register Dream system job (always-on, idempotent on restart)
     dream_cfg = config.agents.defaults.dream
-    if dream_cfg.model_override:
-        agent.dream.model = dream_cfg.model_override
-    agent.dream.max_batch_size = dream_cfg.max_batch_size
-    agent.dream.max_iterations = dream_cfg.max_iterations
-    agent.dream.annotate_line_ages = dream_cfg.annotate_line_ages
+    _apply_dream_config(agent, config)
     from nanobot.cron.types import CronJob, CronPayload
-    cron.register_system_job(CronJob(
-        id="dream",
-        name="dream",
-        schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
-        payload=CronPayload(kind="system_event"),
-    ))
+    if dream_cfg.enabled:
+        cron.register_system_job(CronJob(
+            id="dream",
+            name="dream",
+            schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
+            payload=CronPayload(kind="system_event"),
+        ))
     console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
 
     async def _open_browser_when_ready() -> None:
@@ -1036,6 +1052,7 @@ def agent(
         max_messages=config.agents.defaults.max_messages,
         tools_config=config.tools,
     )
+    _apply_dream_config(agent_loop, config)
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
         _print_agent_response(
