@@ -46,6 +46,14 @@ if DISCORD_AVAILABLE:
         "paragraph": discord.TextStyle.paragraph,
     }
 
+    # discord.py 2.6 added Label + Select-in-modal; 2.7 added RadioGroup + CheckboxGroup.
+    # Feature-detect so older discord.py installs still work for plain TextInput modals.
+    _MODAL_LABEL = getattr(discord.ui, "Label", None)
+    _MODAL_RADIO = getattr(discord.ui, "RadioGroup", None)
+    _MODAL_RADIO_OPT = getattr(discord, "RadioGroupOption", None)
+    _MODAL_CHECKBOX = getattr(discord.ui, "CheckboxGroup", None)
+    _MODAL_CHECKBOX_OPT = getattr(discord, "CheckboxGroupOption", None)
+
     class _NanobotModal(discord.ui.Modal):
         """Stateless Modal — submission is routed via on_interaction by custom_id."""
 
@@ -293,21 +301,45 @@ if DISCORD_AVAILABLE:
                 if isinstance(item, dict)
             }
 
+            # Modal submit payload tree: top-level entries can be ActionRow (type 1,
+            # legacy TextInput wrapping) or Label (type 18, 2.6+ wrapper for Select /
+            # RadioGroup / CheckboxGroup / TextInput). Walk recursively to leaves —
+            # be permissive on shape (ActionRow nests under `components`, Label nests
+            # under `component`; some fixtures omit the explicit `type` integer).
+            leaves: list[dict[str, Any]] = []
+
+            def _collect(items: list[Any]) -> None:
+                for item in items or []:
+                    if not isinstance(item, dict):
+                        continue
+                    if isinstance(item.get("components"), list):  # ActionRow shape
+                        _collect(item["components"])
+                    elif isinstance(item.get("component"), dict):  # Label shape
+                        _collect([item["component"]])
+                    elif item.get("custom_id"):
+                        leaves.append(item)
+
+            _collect(data.get("components") or [])
+
             form_values: dict[str, str] = {}
             content_lines: list[str] = []
-            for action_row in data.get("components") or []:
-                for component in action_row.get("components") or []:
-                    cid = str(component.get("custom_id") or "")
+            for component in leaves:
+                cid = str(component.get("custom_id") or "")
+                if not cid:
+                    continue
+                # TextInput + RadioGroup carry singular `value`; Select +
+                # CheckboxGroup carry list `values`. Flatten lists with ", ".
+                if "values" in component:
+                    raw_values = [str(v) for v in (component.get("values") or [])]
+                    value = ", ".join(raw_values)
+                else:
                     value = str(component.get("value") or "")
-                    if not cid:
-                        continue
-                    form_values[cid] = value
-                    label = ""
-                    if cid in input_specs:
-                        label = str(input_specs[cid].get("label") or cid)
-                    else:
-                        label = cid
-                    content_lines.append(f"{label}: {value}")
+                form_values[cid] = value
+                if cid in input_specs:
+                    label = str(input_specs[cid].get("label") or cid)
+                else:
+                    label = cid
+                content_lines.append(f"{label}: {value}")
 
             with suppress(Exception):
                 await interaction.response.defer()
@@ -369,7 +401,14 @@ if DISCORD_AVAILABLE:
         def _build_modal(
             self, spec: dict[str, Any], *, button_custom_id: str
         ) -> "discord.ui.Modal | None":
-            """Instantiate a Modal subclass from a stored spec."""
+            """Instantiate a Modal subclass from a stored spec.
+
+            Each input dict is dispatched on its ``type``:
+              - "text" / "paragraph" / unset → TextInput (legacy default)
+              - "select" → String Select wrapped in a Label (discord.py 2.6+)
+              - "radio"  → RadioGroup wrapped in a Label (discord.py 2.7+)
+              - "checkbox" → CheckboxGroup wrapped in a Label (discord.py 2.7+)
+            """
             inputs = spec.get("inputs") or []
             if not isinstance(inputs, list) or not inputs:
                 return None
@@ -381,30 +420,143 @@ if DISCORD_AVAILABLE:
             for index, item in enumerate(inputs[:MAX_MODAL_INPUTS]):
                 if not isinstance(item, dict):
                     continue
-                label = _truncate(
-                    str(item.get("label") or f"Field {index + 1}"), MAX_TEXT_INPUT_LABEL
-                )
-                style_name = str(item.get("style") or "short").lower()
-                style = _TEXT_INPUT_STYLES.get(style_name, discord.TextStyle.short)
                 cid = _truncate(
                     str(item.get("custom_id") or item.get("label") or f"f{index}"),
                     MAX_CUSTOM_ID,
                 )
-                placeholder = item.get("placeholder")
-                default = item.get("value") or item.get("default")
-                modal.add_item(
-                    discord.ui.TextInput(
-                        label=label,
-                        style=style,
-                        custom_id=cid,
-                        placeholder=str(placeholder)[:100] if placeholder else None,
-                        default=str(default)[:4000] if default else None,
-                        required=bool(item.get("required", True)),
-                        min_length=item.get("min_length"),
-                        max_length=item.get("max_length"),
-                    )
+                label_text = _truncate(
+                    str(item.get("label") or f"Field {index + 1}"), MAX_TEXT_INPUT_LABEL
                 )
+                description = item.get("description")
+                description = _truncate(str(description), 100) if description else None
+
+                item_type = str(item.get("type") or "").lower()
+                # Back-compat: no `type`, only `style` → TextInput.
+                if not item_type:
+                    item_type = (
+                        "paragraph"
+                        if str(item.get("style") or "").lower() == "paragraph"
+                        else "text"
+                    )
+
+                if item_type in ("text", "short", "paragraph"):
+                    style = (
+                        discord.TextStyle.paragraph
+                        if item_type == "paragraph"
+                        or str(item.get("style") or "").lower() == "paragraph"
+                        else discord.TextStyle.short
+                    )
+                    placeholder = item.get("placeholder")
+                    default = item.get("value") or item.get("default")
+                    modal.add_item(
+                        discord.ui.TextInput(
+                            label=label_text,
+                            style=style,
+                            custom_id=cid,
+                            placeholder=str(placeholder)[:100] if placeholder else None,
+                            default=str(default)[:4000] if default else None,
+                            required=bool(item.get("required", True)),
+                            min_length=item.get("min_length"),
+                            max_length=item.get("max_length"),
+                        )
+                    )
+                    continue
+
+                if _MODAL_LABEL is None:
+                    logger.warning(
+                        "Discord modal input type {!r} requires discord.py 2.6+ (Label); skipping",
+                        item_type,
+                    )
+                    continue
+
+                inner = self._build_modal_input(item_type, item, cid)
+                if inner is None:
+                    continue
+                modal.add_item(
+                    _MODAL_LABEL(text=label_text, description=description, component=inner)
+                )
+
             return modal
+
+        @staticmethod
+        def _build_modal_options(item: dict[str, Any], cls: Any) -> list[Any]:
+            """Coerce an `options` list into RadioGroupOption / CheckboxGroupOption / SelectOption."""
+            options_raw = item.get("options") or []
+            if not isinstance(options_raw, list):
+                return []
+            out: list[Any] = []
+            for opt in options_raw[:MAX_SELECT_OPTIONS]:
+                if isinstance(opt, str):
+                    label, value, desc, default = opt, opt, None, False
+                elif isinstance(opt, dict):
+                    label = str(opt.get("label") or opt.get("value") or "")
+                    value = str(opt.get("value") or opt.get("label") or "")
+                    desc = opt.get("description")
+                    desc = str(desc) if desc else None
+                    default = bool(opt.get("default", False))
+                else:
+                    continue
+                label = _truncate(label, MAX_SELECT_LABEL)
+                value = _truncate(value, MAX_CUSTOM_ID)
+                if not label or not value:
+                    continue
+                if cls is discord.SelectOption:
+                    out.append(
+                        discord.SelectOption(
+                            label=label, value=value, description=desc, default=default
+                        )
+                    )
+                else:
+                    out.append(cls(label=label, value=value, description=desc, default=default))
+            return out
+
+        def _build_modal_input(
+            self, item_type: str, item: dict[str, Any], cid: str
+        ) -> "discord.ui.Item | None":
+            """Build the inner widget for a Label-wrapped modal input."""
+            if item_type == "select":
+                options = self._build_modal_options(item, discord.SelectOption)
+                if not options:
+                    return None
+                placeholder = item.get("placeholder")
+                placeholder = _truncate(str(placeholder), 150) if placeholder else None
+                return discord.ui.Select(
+                    custom_id=cid,
+                    placeholder=placeholder,
+                    min_values=max(0, int(item.get("min_values", 1))),
+                    max_values=max(1, min(int(item.get("max_values", 1)), len(options))),
+                    options=options,
+                    required=bool(item.get("required", True)),
+                )
+            if item_type == "radio":
+                if _MODAL_RADIO is None or _MODAL_RADIO_OPT is None:
+                    logger.warning("Radio in modal requires discord.py 2.7+; skipping")
+                    return None
+                options = self._build_modal_options(item, _MODAL_RADIO_OPT)
+                if len(options) < 2:
+                    logger.warning("RadioGroup needs ≥ 2 options; skipping")
+                    return None
+                return _MODAL_RADIO(
+                    custom_id=cid,
+                    options=options[:10],  # RadioGroup hard-capped at 10 options.
+                    required=bool(item.get("required", True)),
+                )
+            if item_type == "checkbox":
+                if _MODAL_CHECKBOX is None or _MODAL_CHECKBOX_OPT is None:
+                    logger.warning("Checkbox in modal requires discord.py 2.7+; skipping")
+                    return None
+                options = self._build_modal_options(item, _MODAL_CHECKBOX_OPT)
+                if not options:
+                    return None
+                return _MODAL_CHECKBOX(
+                    custom_id=cid,
+                    options=options,
+                    min_values=item.get("min_values"),
+                    max_values=item.get("max_values"),
+                    required=bool(item.get("required", True)),
+                )
+            logger.warning("unknown modal input type: {!r}", item_type)
+            return None
 
         async def _reply_ephemeral(self, interaction: discord.Interaction, text: str) -> bool:
             """Send an ephemeral interaction response and report success."""
