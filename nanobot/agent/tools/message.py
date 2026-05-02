@@ -23,7 +23,19 @@ _BUTTONS_DESCRIPTION = (
     '"options":[{"label":"High","value":"high"},{"label":"Low","value":"low"}]}]]\n'
     '  buttons=[[{"type":"button","label":"Open form","custom_id":"notes-btn",'
     '"modal":{"title":"Notes","inputs":['
-    '{"label":"Notes","style":"paragraph","custom_id":"notes","max_length":1000}]}}]]\n'
+    '{"type":"text","label":"Notes","custom_id":"notes","max_length":1000}]}}]]\n'
+    "Modal inputs support type=text (short), type=paragraph, type=radio "
+    "(single-choice 1-of-N, options=[{label,value}], 2-10 options), "
+    "type=checkbox (multi-choice, options=[…], min_values/max_values), "
+    "and type=select (dropdown, options=[…], required). Modal cap is 5 inputs total. Example with mixed types:\n"
+    '  buttons=[[{"type":"button","label":"Daily check-in","custom_id":"checkin",'
+    '"modal":{"title":"Check-in","inputs":['
+    '{"type":"text","custom_id":"sleep","label":"Hours of sleep"},'
+    '{"type":"radio","custom_id":"energy","label":"Energy",'
+    '"options":[{"label":"1 — drained","value":"1"},{"label":"2","value":"2"},'
+    '{"label":"3","value":"3"},{"label":"4","value":"4"},{"label":"5 — fresh","value":"5"}]},'
+    '{"type":"checkbox","custom_id":"tags","label":"Activities","min_values":0,"max_values":4,'
+    '"options":[{"label":"Run","value":"run"},{"label":"Bike","value":"bike"},{"label":"Lift","value":"lift"}]}]}}]]\n'
     "Style: primary (default), secondary, success, danger. "
     "Discord renders every shape natively; other channels render labels only "
     "(select rows without scalar labels are dropped)."
