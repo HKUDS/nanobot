@@ -27,17 +27,20 @@ _BUTTONS_DESCRIPTION = (
     "Modal inputs support type=text (short), type=paragraph, type=radio "
     "(single-choice 1-of-N, options=[{label,value}], 2-10 options), "
     "type=checkbox (multi-choice, options=[…], min_values/max_values), "
-    "and type=select (dropdown, options=[…], required). Modal cap is 5 inputs total. Example with mixed types:\n"
-    '  buttons=[[{"type":"button","label":"Daily check-in","custom_id":"checkin",'
-    '"modal":{"title":"Check-in","inputs":['
-    '{"type":"text","custom_id":"sleep","label":"Hours of sleep"},'
-    '{"type":"radio","custom_id":"energy","label":"Energy",'
-    '"options":[{"label":"1 — drained","value":"1"},{"label":"2","value":"2"},'
-    '{"label":"3","value":"3"},{"label":"4","value":"4"},{"label":"5 — fresh","value":"5"}]},'
-    '{"type":"checkbox","custom_id":"tags","label":"Activities","min_values":1,"max_values":4,'
-    '"options":[{"label":"Run","value":"run"},{"label":"Bike","value":"bike"},{"label":"Lift","value":"lift"}]}]}}]]\n'
+    "and type=select (dropdown, options=[…], required). Modal cap is 5 inputs total. "
+    "Generic illustration of mixed types — DO NOT copy these labels for an actual "
+    "domain form (always emit the labels and options the calling skill specifies):\n"
+    '  buttons=[[{"type":"button","label":"Open demo form","custom_id":"demo-btn",'
+    '"modal":{"title":"Demo","inputs":['
+    '{"type":"text","custom_id":"f1","label":"Single-line field"},'
+    '{"type":"radio","custom_id":"f2","label":"Pick one rating",'
+    '"options":[{"label":"A","value":"a"},{"label":"B","value":"b"},{"label":"C","value":"c"}]},'
+    '{"type":"checkbox","custom_id":"f3","label":"Pick any","min_values":1,"max_values":3,'
+    '"options":[{"label":"X","value":"x"},{"label":"Y","value":"y"},{"label":"Z","value":"z"}]}]}}]]\n'
     "Note: Discord rejects required=true with min_values=0. If a select/checkbox "
-    "should be optional, either set min_values=1 (the default) or pass required=false."
+    "should be optional, either set min_values=1 (the default) or pass required=false. "
+    "When a skill's SKILL.md ships a JSON5 modal payload, use those exact labels, "
+    "custom_ids, and options — the example above is a shape reference only."
     "Style: primary (default), secondary, success, danger. "
     "Discord renders every shape natively; other channels render labels only "
     "(select rows without scalar labels are dropped)."
