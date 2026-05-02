@@ -134,6 +134,25 @@ In practice:
 - Prefer focused patches over broad rewrites
 - If a new abstraction is introduced, it should clearly reduce complexity rather than move it around
 
+### Provider and Configuration Changes
+
+Provider behavior should have a single source of truth. When a provider needs
+special request wiring, model routing, or compatibility behavior, prefer a
+declarative `ProviderSpec` field in `nanobot/providers/registry.py` over a
+parallel `if provider == ...` chain or model-name heuristic in request-building
+code.
+
+Before adding provider-specific fallback logic, check whether the behavior can
+be represented as metadata and handled by the shared provider path. Avoid adding
+two mechanisms for the same decision. If a heuristic is unavoidable, keep it
+narrow, document why metadata cannot express it, and add both positive and
+negative tests for the matching boundary.
+
+Tests should verify observable behavior rather than tuple positions or other
+incidental structure. For example, prefer asserting generated provider settings
+or outgoing request kwargs over `provider_signature(...)[n]` unless the tuple
+shape itself is the behavior under test.
+
 ## Questions?
 
 If you have questions, ideas, or half-formed insights, you are warmly welcome here.

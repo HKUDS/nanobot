@@ -653,6 +653,7 @@ That's it! Environment variables, model routing, config matching, and `nanobot s
 | `detect_by_base_keyword` | Detect gateway by API base URL | `"openrouter"` |
 | `strip_model_prefix` | Strip provider prefix before sending to gateway | `True` (for AiHubMix) |
 | `supports_max_completion_tokens` | Use `max_completion_tokens` instead of `max_tokens`; required for providers that reject both being set simultaneously (e.g. VolcEngine) | `True` |
+| `reasoning_disable_style` | Provider-specific payload for explicitly disabling reasoning; prefer this metadata over model-name heuristics | `"reasoning_effort_null"` |
 
 </details>
 
