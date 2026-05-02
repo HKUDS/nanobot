@@ -1134,6 +1134,19 @@ def test_dashscope_thinking_disabled_for_none_string() -> None:
     assert "reasoning_effort" not in kw
 
 
+def test_xiaomi_mimo_none_sends_explicit_null_disable() -> None:
+    """MiMo needs an explicit JSON null to override its thinking-on default."""
+    kw = _build_kwargs_for("xiaomi_mimo", "mimo-pro", reasoning_effort="none")
+    assert kw.get("extra_body") == {"reasoning_effort": None}
+    assert "reasoning_effort" not in kw
+
+
+def test_openrouter_none_preserves_provider_default_without_disable_style() -> None:
+    kw = _build_kwargs_for("openrouter", "openai/gpt-4o", reasoning_effort="none")
+    assert "extra_body" not in kw
+    assert "reasoning_effort" not in kw
+
+
 def test_deepseek_no_backfill_when_reasoning_effort_none_string() -> None:
     """reasoning_effort='none' must NOT trigger reasoning_content backfill (thinking inactive)."""
     spec = find_by_name("deepseek")

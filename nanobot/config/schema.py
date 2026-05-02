@@ -103,6 +103,20 @@ class AgentDefaults(Base):
     )  # Consolidation target ratio (0.5 = 50% of budget retained after compression)
     dream: DreamConfig = Field(default_factory=DreamConfig)
 
+    def effective_reasoning_effort(self) -> str | None:
+        """Return the provider-facing reasoning setting.
+
+        An omitted field preserves provider defaults. An explicit JSON/YAML null
+        means "turn reasoning off", represented internally by the existing
+        ``"none"`` semantic so downstream code can distinguish it from omitted.
+        """
+        if (
+            self.reasoning_effort is None
+            and "reasoning_effort" in self.model_fields_set
+        ):
+            return "none"
+        return self.reasoning_effort
+
 
 class AgentsConfig(Base):
     """Agent configuration."""

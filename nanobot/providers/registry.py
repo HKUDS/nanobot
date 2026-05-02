@@ -71,6 +71,12 @@ class ProviderSpec:
     # "reasoning_split" — {"reasoning_split": true/false}  (MiniMax)
     thinking_style: str = ""
 
+    # How to explicitly disable provider-default reasoning when
+    # reasoning_effort resolves to "none".
+    # "" — no provider-specific disable payload
+    # "reasoning_effort_null" — {"reasoning_effort": null} in extra_body
+    reasoning_disable_style: str = ""
+
     # When True, treat the "reasoning" response field as formal content
     # when "content" is empty.  Only set this for providers (e.g. StepFun)
     # whose API returns the actual answer in "reasoning" instead of "content".
@@ -375,6 +381,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Xiaomi MIMO",
         backend="openai_compat",
         default_api_base="https://api.xiaomimimo.com/v1",
+        reasoning_disable_style="reasoning_effort_null",
     ),
     # LongCat: OpenAI-compatible API
     ProviderSpec(

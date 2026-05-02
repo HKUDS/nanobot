@@ -91,6 +91,11 @@ def _is_kimi_thinking_model(model_name: str) -> bool:
     return False
 
 
+def _needs_null_reasoning_disable(spec: ProviderSpec | None) -> bool:
+    """Return True for OpenAI-compatible routes that disable thinking via JSON null."""
+    return bool(spec and spec.reasoning_disable_style == "reasoning_effort_null")
+
+
 def _openai_compat_timeout_s() -> float:
     """Return the bounded request timeout used for OpenAI-compatible providers."""
     return _float_env("NANOBOT_OPENAI_COMPAT_TIMEOUT_S", _OPENAI_COMPAT_REQUEST_TIMEOUT_S)
@@ -585,6 +590,10 @@ class OpenAICompatProvider(LLMProvider):
 
         if wire_effort and semantic_effort != "none":
             kwargs["reasoning_effort"] = wire_effort
+        elif semantic_effort == "none" and _needs_null_reasoning_disable(spec):
+            # Put provider-specific null disables in extra_body so the OpenAI
+            # SDK cannot treat a top-level None as an omitted argument.
+            kwargs.setdefault("extra_body", {})["reasoning_effort"] = None
 
         # Provider-specific thinking parameters.
         # Only sent when reasoning_effort is explicitly configured so that

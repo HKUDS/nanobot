@@ -87,7 +87,7 @@ def make_provider(config: Config) -> LLMProvider:
     provider.generation = GenerationSettings(
         temperature=defaults.temperature,
         max_tokens=defaults.max_tokens,
-        reasoning_effort=defaults.reasoning_effort,
+        reasoning_effort=defaults.effective_reasoning_effort(),
     )
     return provider
 
@@ -97,6 +97,7 @@ def provider_signature(config: Config) -> tuple[object, ...]:
     model = config.agents.defaults.model
     defaults = config.agents.defaults
     p = config.get_provider(model)
+    reasoning_effort = defaults.effective_reasoning_effort()
     return (
         model,
         defaults.provider,
@@ -109,7 +110,7 @@ def provider_signature(config: Config) -> tuple[object, ...]:
         getattr(p, "profile", None) if p else None,
         defaults.max_tokens,
         defaults.temperature,
-        defaults.reasoning_effort,
+        reasoning_effort,
         defaults.context_window_tokens,
     )
 
