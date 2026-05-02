@@ -41,9 +41,19 @@ _BUTTONS_DESCRIPTION = (
         ),
         buttons=ArraySchema(
             ArraySchema(
-                # Untyped item: cells may be a string (label) or an object
-                # (component dict). The runtime validates the shape in execute().
-                {"description": "A button label string, or a component dict (button/link/select)."},
+                # Cells are polymorphic: a string label or a component dict.
+                # `oneOf` keeps the schema valid for strict providers (Mistral
+                # 500s on items with no `type`) while letting models emit
+                # either shape. Runtime validation in execute() enforces it.
+                {
+                    "oneOf": [
+                        {
+                            "type": "string",
+                            "description": "Plain button label (renders as a primary button)",
+                        },
+                        {"type": "object", "description": "Component dict (button/link/select)"},
+                    ],
+                },
             ),
             description=_BUTTONS_DESCRIPTION,
         ),
