@@ -12,7 +12,7 @@ def test_deny_patterns_block_rm_rf():
     tool = ExecTool()
     result = tool._guard_command("rm -rf /tmp/build", "/tmp")
     assert result is not None
-    assert "dangerous pattern" in result.lower()
+        assert "deny pattern filter" in result.lower()
 
 
 def test_allow_patterns_bypass_deny():
@@ -27,7 +27,7 @@ def test_allow_patterns_must_match_to_bypass():
     tool = ExecTool(allow_patterns=[r"rm\s+-rf\s+/opt/"])
     result = tool._guard_command("rm -rf /tmp/build", "/tmp")
     assert result is not None
-    assert "dangerous pattern" in result.lower()
+        assert "deny pattern filter" in result.lower()
 
 
 def test_extra_deny_patterns_from_config():
