@@ -11,18 +11,22 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
 
 _BUTTONS_DESCRIPTION = (
-    "Optional: inline keyboard buttons as list of rows; each row is a list of cells. "
-    "A cell may be a plain string label (renders as a primary button on every channel), "
-    "or on Discord a structured dict for richer components: "
-    '{"type":"button","label":"Approve","style":"primary|secondary|success|danger",'
-    '"custom_id":"opt-id","modal":{"title":"...","inputs":[{"label":"Notes",'
-    '"style":"short|paragraph","custom_id":"notes","required":true,"max_length":1000}]}} '
-    "for an action button (with optional modal opened on click); "
-    '{"type":"link","label":"Docs","url":"https://..."} for a link button; '
-    '{"type":"select","custom_id":"pick","placeholder":"Pick one",'
-    '"options":[{"label":"High","value":"high"},{"label":"Low","value":"low"}]} '
-    "for a dropdown that takes the whole row. "
-    "Non-Discord channels render dict cells as plain labels (selects are dropped)."
+    "Inline interactive components for the user to click. "
+    "USE this — do NOT describe buttons or menus in prose, and do NOT render "
+    "them as markdown text. Each row is a list of cells; a cell is either a "
+    "string (primary button label) or a dict. Examples:\n"
+    '  buttons=[["Yes", "No"]]   # two primary buttons\n'
+    '  buttons=[[{"type":"button","label":"Approve","style":"success"},'
+    '{"type":"button","label":"Reject","style":"danger"}]]\n'
+    '  buttons=[[{"type":"link","label":"Docs","url":"https://..."}]]\n'
+    '  buttons=[[{"type":"select","custom_id":"pick","placeholder":"Pick one",'
+    '"options":[{"label":"High","value":"high"},{"label":"Low","value":"low"}]}]]\n'
+    '  buttons=[[{"type":"button","label":"Open form","custom_id":"notes-btn",'
+    '"modal":{"title":"Notes","inputs":['
+    '{"label":"Notes","style":"paragraph","custom_id":"notes","max_length":1000}]}}]]\n'
+    "Style: primary (default), secondary, success, danger. "
+    "Discord renders every shape natively; other channels render labels only "
+    "(select rows without scalar labels are dropped)."
 )
 
 
@@ -125,9 +129,12 @@ class MessageTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Send a message to the user, optionally with file attachments. "
+            "Send a message to the user, optionally with file attachments or "
+            "interactive components. "
             "This is the ONLY way to deliver files (images, documents, audio, video) to the user. "
             "Use the 'media' parameter with file paths to attach files. "
+            "Use the 'buttons' parameter to offer choices, confirmations, menus, or "
+            "fillable forms — emit them as components, do not describe them in prose. "
             "Do NOT use read_file to send files — that only reads content for your own analysis."
         )
 
