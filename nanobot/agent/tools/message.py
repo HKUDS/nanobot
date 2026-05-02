@@ -10,6 +10,25 @@ from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameter
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
 
+_BUTTONS_DESCRIPTION = (
+    "Inline interactive components for the user to click. "
+    "USE this — do NOT describe buttons or menus in prose, and do NOT render "
+    "them as markdown text. Each row is a list of cells; a cell is either a "
+    "string (primary button label) or a dict. Examples:\n"
+    '  buttons=[["Yes", "No"]]   # two primary buttons\n'
+    '  buttons=[[{"type":"button","label":"Approve","style":"success"},'
+    '{"type":"button","label":"Reject","style":"danger"}]]\n'
+    '  buttons=[[{"type":"link","label":"Docs","url":"https://..."}]]\n'
+    '  buttons=[[{"type":"select","custom_id":"pick","placeholder":"Pick one",'
+    '"options":[{"label":"High","value":"high"},{"label":"Low","value":"low"}]}]]\n'
+    '  buttons=[[{"type":"button","label":"Open form","custom_id":"notes-btn",'
+    '"modal":{"title":"Notes","inputs":['
+    '{"label":"Notes","style":"paragraph","custom_id":"notes","max_length":1000}]}}]]\n'
+    "Style: primary (default), secondary, success, danger. "
+    "Discord renders every shape natively; other channels render labels only "
+    "(select rows without scalar labels are dropped)."
+)
+
 
 @tool_parameters(
     tool_parameters_schema(
@@ -21,8 +40,22 @@ from nanobot.config.paths import get_workspace_path
             description="Optional: list of file paths to attach (images, video, audio, documents)",
         ),
         buttons=ArraySchema(
-            ArraySchema(StringSchema("Button label")),
-            description="Optional: inline keyboard buttons as list of rows, each row is list of button labels.",
+            ArraySchema(
+                # Cells are polymorphic: a string label or a component dict.
+                # `oneOf` keeps the schema valid for strict providers (Mistral
+                # 500s on items with no `type`) while letting models emit
+                # either shape. Runtime validation in execute() enforces it.
+                {
+                    "oneOf": [
+                        {
+                            "type": "string",
+                            "description": "Plain button label (renders as a primary button)",
+                        },
+                        {"type": "object", "description": "Component dict (button/link/select)"},
+                    ],
+                },
+            ),
+            description=_BUTTONS_DESCRIPTION,
         ),
         required=["content"],
     )
@@ -39,9 +72,15 @@ class MessageTool(Tool):
         workspace: str | Path | None = None,
     ):
         self._send_callback = send_callback
-        self._workspace = Path(workspace).expanduser() if workspace is not None else get_workspace_path()
-        self._default_channel: ContextVar[str] = ContextVar("message_default_channel", default=default_channel)
-        self._default_chat_id: ContextVar[str] = ContextVar("message_default_chat_id", default=default_chat_id)
+        self._workspace = (
+            Path(workspace).expanduser() if workspace is not None else get_workspace_path()
+        )
+        self._default_channel: ContextVar[str] = ContextVar(
+            "message_default_channel", default=default_channel
+        )
+        self._default_chat_id: ContextVar[str] = ContextVar(
+            "message_default_chat_id", default=default_chat_id
+        )
         self._default_message_id: ContextVar[str | None] = ContextVar(
             "message_default_message_id",
             default=default_message_id,
@@ -100,9 +139,12 @@ class MessageTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Send a message to the user, optionally with file attachments. "
+            "Send a message to the user, optionally with file attachments or "
+            "interactive components. "
             "This is the ONLY way to deliver files (images, documents, audio, video) to the user. "
             "Use the 'media' parameter with file paths to attach files. "
+            "Use the 'buttons' parameter to offer choices, confirmations, menus, or "
+            "fillable forms — emit them as components, do not describe them in prose. "
             "Do NOT use read_file to send files — that only reads content for your own analysis."
         )
 
@@ -114,17 +156,32 @@ class MessageTool(Tool):
         message_id: str | None = None,
         media: list[str] | None = None,
         buttons: list[list[str]] | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> str:
         from nanobot.utils.helpers import strip_think
+
         content = strip_think(content)
 
+        components: list[list[Any]] | None = None
         if buttons is not None:
             if not isinstance(buttons, list) or any(
-                not isinstance(row, list) or any(not isinstance(label, str) for label in row)
+                not isinstance(row, list) or any(not isinstance(cell, (str, dict)) for cell in row)
                 for row in buttons
             ):
-                return "Error: buttons must be a list of list of strings"
+                return "Error: buttons must be a list of list of strings or component dicts"
+            if any(any(isinstance(cell, dict) for cell in row) for row in buttons):
+                # Rich component cells ride on metadata so non-Discord channels stay
+                # untouched; we keep buttons as a label-only fallback for them.
+                components = [list(row) for row in buttons]
+                buttons = [
+                    [
+                        cell if isinstance(cell, str) else str(cell.get("label") or "")
+                        for cell in row
+                        if isinstance(cell, str) or (isinstance(cell, dict) and cell.get("label"))
+                    ]
+                    for row in buttons
+                ]
+                buttons = [row for row in buttons if row]
         default_channel = self._default_channel.get()
         default_chat_id = self._default_chat_id.get()
         channel = channel or default_channel
@@ -160,6 +217,8 @@ class MessageTool(Tool):
             metadata["message_id"] = message_id
         if self._record_channel_delivery_var.get():
             metadata["_record_channel_delivery"] = True
+        if components is not None:
+            metadata["_components"] = components
 
         msg = OutboundMessage(
             channel=channel,
@@ -176,6 +235,9 @@ class MessageTool(Tool):
                 self._sent_in_turn = True
             media_info = f" with {len(media)} attachments" if media else ""
             button_info = f" with {sum(len(row) for row in buttons)} button(s)" if buttons else ""
-            return f"Message sent to {channel}:{chat_id}{media_info}{button_info}"
+            extra = ""
+            if components is not None and channel != "discord":
+                extra = f" (components rendered as labels on {channel})"
+            return f"Message sent to {channel}:{chat_id}{media_info}{button_info}{extra}"
         except Exception as e:
             return f"Error sending message: {str(e)}"

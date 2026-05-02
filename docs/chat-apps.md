@@ -162,6 +162,14 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 nanobot gateway
 ```
 
+> **Interactive components.** Discord renders inline buttons, select menus, and
+> modal forms when the agent calls the `message` tool with structured `buttons`.
+> Plain string labels render as primary buttons; dict cells with `type: "button"`,
+> `"link"`, or `"select"` enable the richer shapes, and a button may carry a
+> `modal` spec to open a text-input form on click. See the `message` tool's
+> parameter description for the exact shape; non-Discord channels fall back to
+> label-only rendering.
+
 </details>
 
 <details>

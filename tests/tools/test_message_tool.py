@@ -30,9 +30,12 @@ async def test_message_tool_rejects_malformed_buttons(bad) -> None:
     into the channel layer where Telegram would silently reject the frame."""
     tool = MessageTool()
     result = await tool.execute(
-        content="hi", channel="telegram", chat_id="1", buttons=bad,
+        content="hi",
+        channel="telegram",
+        chat_id="1",
+        buttons=bad,
     )
-    assert result == "Error: buttons must be a list of list of strings"
+    assert result == "Error: buttons must be a list of list of strings or component dicts"
 
 
 @pytest.mark.asyncio
@@ -202,3 +205,77 @@ async def test_message_tool_resolves_mixed_media_paths() -> None:
         "https://example.com/url.png",
         "http://example.com/http.png",
     ]
+
+
+@pytest.mark.asyncio
+async def test_message_tool_stashes_rich_components_in_metadata_for_discord() -> None:
+    """Dict button cells move into metadata['_components']; buttons keeps the
+    plain-label fallback so non-Discord renderers still see something."""
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+    rich = [
+        [
+            {"type": "button", "label": "Approve", "style": "success", "custom_id": "ok"},
+            "Reject",
+        ]
+    ]
+
+    result = await tool.execute(
+        content="confirm",
+        channel="discord",
+        chat_id="123",
+        buttons=rich,
+    )
+
+    assert "components rendered as labels" not in result  # Discord renders them natively
+    assert sent[0].metadata["_components"] == rich
+    assert sent[0].buttons == [["Approve", "Reject"]]
+
+
+@pytest.mark.asyncio
+async def test_message_tool_warns_when_components_dropped_on_non_discord() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+    result = await tool.execute(
+        content="confirm",
+        channel="telegram",
+        chat_id="1",
+        buttons=[[{"type": "button", "label": "Approve", "style": "success"}]],
+    )
+
+    assert "components rendered as labels on telegram" in result
+    assert sent[0].buttons == [["Approve"]]
+
+
+@pytest.mark.asyncio
+async def test_message_tool_drops_select_only_rows_from_label_fallback() -> None:
+    """Selects have no scalar label; on non-Discord the row simply disappears
+    from msg.buttons but the rich shape stays in metadata for Discord."""
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+    rich = [
+        [
+            {
+                "type": "select",
+                "custom_id": "pri",
+                "options": [{"label": "High", "value": "high"}],
+            }
+        ],
+        ["Cancel"],
+    ]
+    await tool.execute(content="?", channel="telegram", chat_id="1", buttons=rich)
+
+    assert sent[0].metadata["_components"] == rich
+    assert sent[0].buttons == [["Cancel"]]

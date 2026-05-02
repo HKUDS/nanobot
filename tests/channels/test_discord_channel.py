@@ -1222,6 +1222,7 @@ async def test_start_no_proxy_auth_when_only_password(monkeypatch) -> None:
 # Tests for the send() exception propagation fix
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_send_re_raises_network_error() -> None:
     """Network errors during send must propagate so ChannelManager can retry."""
@@ -1313,3 +1314,677 @@ async def test_send_succeeds_normally() -> None:
     assert len(sent_messages) == 1
     assert sent_messages[0].content == "hello world"
     assert sent_messages[0].chat_id == "123"
+
+
+# ---------------------------------------------------------------------------
+# Interactive components (buttons, selects, modals)
+# ---------------------------------------------------------------------------
+
+
+class _FakeInteractionResponseFull(_FakeInteractionResponse):
+    """Extends the slash-command response double with defer() and send_modal()."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.deferred = False
+        self.modal = None
+
+    async def defer(self) -> None:
+        self.deferred = True
+        self._done = True
+
+    async def send_modal(self, modal) -> None:
+        self.modal = modal
+        self._done = True
+
+
+def _component_message_double(
+    *,
+    components: list[object] | None = None,
+    message_id: int = 12345,
+):
+    """Stand-in for interaction.message; carries action rows for label resolution."""
+    return SimpleNamespace(id=message_id, components=components or [])
+
+
+def _make_component_interaction(
+    *,
+    custom_id: str,
+    component_type: int,
+    values: list[str] | None = None,
+    user_id: int = 123,
+    channel_id: int = 456,
+    channel=None,
+    guild_id: int | None = None,
+    interaction_id: int = 999,
+    message=None,
+):
+    data: dict[str, object] = {"custom_id": custom_id, "component_type": component_type}
+    if values is not None:
+        data["values"] = values
+    return SimpleNamespace(
+        type=discord.InteractionType.component,
+        data=data,
+        user=SimpleNamespace(id=user_id),
+        channel_id=channel_id,
+        channel=channel,
+        guild_id=guild_id,
+        id=interaction_id,
+        response=_FakeInteractionResponseFull(),
+        message=message,
+    )
+
+
+def _make_modal_submit_interaction(
+    *,
+    modal_custom_id: str,
+    components: list[dict],
+    user_id: int = 123,
+    channel_id: int = 456,
+    channel=None,
+    interaction_id: int = 1000,
+    message=None,
+):
+    return SimpleNamespace(
+        type=discord.InteractionType.modal_submit,
+        data={"custom_id": modal_custom_id, "components": components},
+        user=SimpleNamespace(id=user_id),
+        channel_id=channel_id,
+        channel=channel,
+        guild_id=None,
+        id=interaction_id,
+        response=_FakeInteractionResponseFull(),
+        message=message,
+    )
+
+
+@pytest.mark.asyncio
+async def test_components_plain_string_buttons_attach_to_last_chunk() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="pick one",
+            buttons=[["Yes", "No"]],
+        )
+    )
+
+    assert len(target.sent_payloads) == 1
+    payload = target.sent_payloads[0]
+    assert payload["content"] == "pick one"
+    view = payload["view"]
+    assert isinstance(view, discord.ui.View)
+    children = list(view.children)
+    assert [child.label for child in children] == ["Yes", "No"]
+    assert all(child.style == discord.ButtonStyle.primary for child in children)
+    # Custom IDs are auto-assigned to nb:<seed>:0:0 etc.
+    assert all(child.custom_id and child.custom_id.startswith("nb:") for child in children)
+
+
+@pytest.mark.asyncio
+async def test_components_view_only_on_last_chunk_when_text_overflows() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="a" * 2100,
+            buttons=[["Ok"]],
+        )
+    )
+
+    assert len(target.sent_payloads) == 2
+    assert "view" not in target.sent_payloads[0]
+    assert isinstance(target.sent_payloads[1]["view"], discord.ui.View)
+
+
+@pytest.mark.asyncio
+async def test_components_styled_button_via_dict() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="confirm",
+            metadata={
+                "_components": [
+                    [{"type": "button", "label": "Approve", "style": "success", "custom_id": "ok"}]
+                ]
+            },
+        )
+    )
+
+    view = target.sent_payloads[0]["view"]
+    button = list(view.children)[0]
+    assert button.style == discord.ButtonStyle.success
+    assert button.label == "Approve"
+    assert button.custom_id == "ok"
+
+
+@pytest.mark.asyncio
+async def test_components_link_button_has_no_custom_id() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="see docs",
+            metadata={
+                "_components": [[{"type": "link", "label": "Docs", "url": "https://example.com"}]]
+            },
+        )
+    )
+
+    view = target.sent_payloads[0]["view"]
+    button = list(view.children)[0]
+    assert button.style == discord.ButtonStyle.link
+    assert button.url == "https://example.com"
+    assert button.custom_id is None
+
+
+@pytest.mark.asyncio
+async def test_components_select_row_renders_select() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="priority?",
+            metadata={
+                "_components": [
+                    [
+                        {
+                            "type": "select",
+                            "custom_id": "pri",
+                            "placeholder": "Pick one",
+                            "options": [
+                                {"label": "High", "value": "high"},
+                                {"label": "Low", "value": "low"},
+                            ],
+                        }
+                    ]
+                ]
+            },
+        )
+    )
+
+    view = target.sent_payloads[0]["view"]
+    children = list(view.children)
+    assert len(children) == 1
+    select = children[0]
+    assert isinstance(select, discord.ui.Select)
+    assert [opt.label for opt in select.options] == ["High", "Low"]
+    assert select.custom_id == "pri"
+
+
+@pytest.mark.asyncio
+async def test_components_button_row_autorewraps_when_over_five() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    eight = [f"opt{i}" for i in range(8)]
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="pick",
+            buttons=[eight],
+        )
+    )
+
+    view = target.sent_payloads[0]["view"]
+    rows: dict[int, list[object]] = {}
+    for child in view.children:
+        rows.setdefault(child.row, []).append(child)
+    assert sorted(rows.keys()) == [0, 1]
+    assert len(rows[0]) == 5
+    assert len(rows[1]) == 3
+
+
+@pytest.mark.asyncio
+async def test_components_select_truncates_options_over_25() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    options = [{"label": f"o{i}", "value": str(i)} for i in range(30)]
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="pick",
+            metadata={"_components": [[{"type": "select", "custom_id": "x", "options": options}]]},
+        )
+    )
+
+    view = target.sent_payloads[0]["view"]
+    select = list(view.children)[0]
+    assert len(select.options) == 25
+
+
+@pytest.mark.asyncio
+async def test_components_empty_content_uses_zero_width_space_carrier() -> None:
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    target = _FakeChannel(channel_id=123)
+    client.get_channel = lambda channel_id: target if channel_id == 123 else None  # type: ignore[method-assign]
+
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="123",
+            content="",
+            buttons=[["Ack"]],
+        )
+    )
+
+    assert len(target.sent_payloads) == 1
+    payload = target.sent_payloads[0]
+    assert payload["content"] == "​"  # zero-width space
+    assert isinstance(payload["view"], discord.ui.View)
+
+
+@pytest.mark.asyncio
+async def test_components_button_click_dispatches_inbound() -> None:
+    bus = MessageBus()
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["123"]), bus)
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    channel_obj = _FakeChannel(channel_id=456)
+    owner._remember_channel(channel_obj)
+
+    button_child = SimpleNamespace(custom_id="nb:abc:0:0", label="Yes")
+    action_row = SimpleNamespace(children=[button_child])
+    interaction = _make_component_interaction(
+        custom_id="nb:abc:0:0",
+        component_type=2,
+        channel=channel_obj,
+        message=_component_message_double(components=[action_row]),
+    )
+
+    await client.on_interaction(interaction)
+
+    assert interaction.response.deferred is True
+    msg = bus.inbound.get_nowait()
+    assert msg.content == "Yes"
+    assert msg.metadata["is_callback"] is True
+    assert msg.metadata["interaction_type"] == "button"
+    assert msg.metadata["custom_id"] == "nb:abc:0:0"
+    assert msg.metadata["button_label"] == "Yes"
+
+
+@pytest.mark.asyncio
+async def test_components_select_submit_dispatches_with_values_and_labels() -> None:
+    bus = MessageBus()
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), bus)
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    channel_obj = _FakeChannel(channel_id=456)
+    owner._remember_channel(channel_obj)
+
+    select_child = SimpleNamespace(
+        custom_id="pri",
+        options=[
+            SimpleNamespace(label="High", value="high"),
+            SimpleNamespace(label="Low", value="low"),
+        ],
+    )
+    interaction = _make_component_interaction(
+        custom_id="pri",
+        component_type=3,
+        values=["high", "low"],
+        channel=channel_obj,
+        message=_component_message_double(components=[SimpleNamespace(children=[select_child])]),
+    )
+
+    await client.on_interaction(interaction)
+
+    msg = bus.inbound.get_nowait()
+    assert msg.metadata["interaction_type"] == "select"
+    assert msg.metadata["values"] == ["high", "low"]
+    assert msg.metadata["labels"] == ["High", "Low"]
+    assert msg.content == "High, Low"
+
+
+@pytest.mark.asyncio
+async def test_components_button_with_modal_opens_modal_and_submission_dispatches() -> None:
+    bus = MessageBus()
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), bus)
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    channel_obj = _FakeChannel(channel_id=456)
+    owner._remember_channel(channel_obj)
+
+    # First send the button-with-modal so the spec is cached.
+    target = _FakeChannel(channel_id=456)
+    client.get_channel = lambda channel_id: target if channel_id == 456 else None  # type: ignore[method-assign]
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="456",
+            content="open",
+            metadata={
+                "_components": [
+                    [
+                        {
+                            "type": "button",
+                            "label": "Open",
+                            "custom_id": "btn-1",
+                            "modal": {
+                                "title": "Notes",
+                                "inputs": [
+                                    {
+                                        "label": "Comment",
+                                        "custom_id": "comment",
+                                        "style": "paragraph",
+                                    }
+                                ],
+                            },
+                        }
+                    ]
+                ]
+            },
+        )
+    )
+    assert "btn-1" in owner._modal_specs
+    assert owner._modal_to_button["btn-1:m"] == "btn-1"
+
+    # Click the button -> bot opens modal, no inbound dispatched yet.
+    click = _make_component_interaction(
+        custom_id="btn-1",
+        component_type=2,
+        channel=channel_obj,
+        message=_component_message_double(),
+    )
+    await client.on_interaction(click)
+    assert click.response.modal is not None
+    assert isinstance(click.response.modal, discord.ui.Modal)
+    assert bus.inbound_size == 0
+
+    # Submit the modal -> inbound message keyed by the originating button's custom_id.
+    submit = _make_modal_submit_interaction(
+        modal_custom_id="btn-1:m",
+        components=[
+            {"components": [{"custom_id": "comment", "value": "looks good"}]},
+        ],
+        channel=channel_obj,
+    )
+    await client.on_interaction(submit)
+    msg = bus.inbound.get_nowait()
+    assert msg.metadata["interaction_type"] == "modal_submit"
+    assert msg.metadata["custom_id"] == "btn-1"
+    assert msg.metadata["form_values"] == {"comment": "looks good"}
+    assert "Comment: looks good" in msg.content
+
+
+@pytest.mark.asyncio
+async def test_components_modal_button_after_restart_falls_back_to_click() -> None:
+    bus = MessageBus()
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), bus)
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    channel_obj = _FakeChannel(channel_id=456)
+    owner._remember_channel(channel_obj)
+    # Simulate post-restart: caches empty.
+    assert not owner._modal_specs
+
+    button_child = SimpleNamespace(custom_id="btn-1", label="Open")
+    interaction = _make_component_interaction(
+        custom_id="btn-1",
+        component_type=2,
+        channel=channel_obj,
+        message=_component_message_double(components=[SimpleNamespace(children=[button_child])]),
+    )
+    await client.on_interaction(interaction)
+
+    msg = bus.inbound.get_nowait()
+    assert msg.metadata["interaction_type"] == "button"
+    assert msg.content == "Open"
+
+
+@pytest.mark.asyncio
+async def test_components_modal_submit_unknown_cid_emits_expired_message() -> None:
+    bus = MessageBus()
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), bus)
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    channel_obj = _FakeChannel(channel_id=456)
+    owner._remember_channel(channel_obj)
+
+    submit = _make_modal_submit_interaction(
+        modal_custom_id="ghost:m",
+        components=[],
+        channel=channel_obj,
+    )
+    await client.on_interaction(submit)
+
+    assert bus.inbound_size == 0
+    assert any("expired" in m["content"] for m in submit.response.messages)
+
+
+@pytest.mark.asyncio
+async def test_components_unauthorized_user_is_blocked() -> None:
+    bus = MessageBus()
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["999"]), bus)  # not 123
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    channel_obj = _FakeChannel(channel_id=456)
+    owner._remember_channel(channel_obj)
+
+    interaction = _make_component_interaction(
+        custom_id="x",
+        component_type=2,
+        user_id=123,
+        channel=channel_obj,
+        message=_component_message_double(),
+    )
+    await client.on_interaction(interaction)
+
+    assert bus.inbound_size == 0
+    assert any("not allowed" in m["content"] for m in interaction.response.messages)
+
+
+@pytest.mark.asyncio
+async def test_components_disallowed_channel_is_blocked() -> None:
+    bus = MessageBus()
+    owner = DiscordChannel(
+        DiscordConfig(enabled=True, allow_from=["*"], allow_channels=["999"]),
+        bus,
+    )
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    channel_obj = _FakeChannel(channel_id=456)
+    owner._remember_channel(channel_obj)
+
+    interaction = _make_component_interaction(
+        custom_id="x",
+        component_type=2,
+        channel=channel_obj,
+        message=_component_message_double(),
+    )
+    await client.on_interaction(interaction)
+
+    assert bus.inbound_size == 0
+    assert any("not allowed" in m["content"] for m in interaction.response.messages)
+
+
+def test_modal_spec_cache_evicts_oldest_at_cap() -> None:
+    channel = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), MessageBus())
+    from nanobot.channels.discord import MODAL_SPEC_CAP
+
+    for i in range(MODAL_SPEC_CAP + 5):
+        channel._record_modal_spec(f"btn-{i}", {"title": "t", "inputs": []})
+
+    assert len(channel._modal_specs) == MODAL_SPEC_CAP
+    assert "btn-0" not in channel._modal_specs
+    assert "btn-4" not in channel._modal_specs
+    assert f"btn-{MODAL_SPEC_CAP + 4}" in channel._modal_specs
+    assert "btn-0:m" not in channel._modal_to_button
+
+
+# ---------------------------------------------------------------------------
+# Modal v2: select / radio / checkbox inputs (discord.py 2.6+ Label wrapping)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_modal_select_input_wraps_select_in_label() -> None:
+    """A modal spec with a select input opens a Modal containing a Label
+    whose inner component is a discord.ui.Select. Pins the v2 dispatch
+    path that the type='select' branch in _build_modal must produce."""
+    bus = MessageBus()
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), bus)
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    channel_obj = _FakeChannel(channel_id=456)
+    owner._remember_channel(channel_obj)
+
+    target = _FakeChannel(channel_id=456)
+    client.get_channel = lambda channel_id: target if channel_id == 456 else None  # type: ignore[method-assign]
+    await client.send_outbound(
+        OutboundMessage(
+            channel="discord",
+            chat_id="456",
+            content="open",
+            metadata={
+                "_components": [
+                    [
+                        {
+                            "type": "button",
+                            "label": "Open",
+                            "custom_id": "btn-sel",
+                            "modal": {
+                                "title": "Pick",
+                                "inputs": [
+                                    {
+                                        "type": "select",
+                                        "label": "Priority",
+                                        "custom_id": "pri",
+                                        "options": [
+                                            {"label": "High", "value": "high"},
+                                            {"label": "Low", "value": "low"},
+                                        ],
+                                    }
+                                ],
+                            },
+                        }
+                    ]
+                ]
+            },
+        )
+    )
+
+    click = _make_component_interaction(
+        custom_id="btn-sel",
+        component_type=2,
+        channel=channel_obj,
+        message=_component_message_double(),
+    )
+    await client.on_interaction(click)
+
+    modal = click.response.modal
+    assert isinstance(modal, discord.ui.Modal)
+    children = list(modal.children)
+    assert len(children) == 1
+    label = children[0]
+    assert isinstance(label, discord.ui.Label)
+    inner = getattr(label, "component", None)
+    assert isinstance(inner, discord.ui.Select)
+    assert inner.custom_id == "pri"
+    assert [opt.value for opt in inner.options] == ["high", "low"]
+
+
+@pytest.mark.asyncio
+async def test_modal_submit_label_shape_with_list_values() -> None:
+    """Modal submits from select/checkbox inputs nest leaves under a Label
+    envelope (`component`, not `components`) and carry list `values`. The
+    payload walker must flatten those and join with ', '."""
+    bus = MessageBus()
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), bus)
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    channel_obj = _FakeChannel(channel_id=456)
+    owner._remember_channel(channel_obj)
+    owner._record_modal_spec(
+        "btn-sel",
+        {
+            "title": "Pick",
+            "inputs": [
+                {
+                    "type": "select",
+                    "label": "Priority",
+                    "custom_id": "pri",
+                    "options": [
+                        {"label": "High", "value": "high"},
+                        {"label": "Low", "value": "low"},
+                    ],
+                }
+            ],
+        },
+    )
+
+    submit = _make_modal_submit_interaction(
+        modal_custom_id="btn-sel:m",
+        components=[
+            {"component": {"custom_id": "pri", "values": ["high", "low"]}},
+        ],
+        channel=channel_obj,
+    )
+    await client.on_interaction(submit)
+
+    msg = bus.inbound.get_nowait()
+    assert msg.metadata["interaction_type"] == "modal_submit"
+    assert msg.metadata["custom_id"] == "btn-sel"
+    assert msg.metadata["form_values"] == {"pri": "high, low"}
+    assert "Priority: high, low" in msg.content
+
+
+@pytest.mark.asyncio
+async def test_modal_submit_legacy_actionrow_shape_still_works() -> None:
+    """The walker must keep handling the pre-2.6 ActionRow envelope
+    (`components` list nesting) so existing TextInput-only modals don't
+    regress when the v2 dispatch ships."""
+    bus = MessageBus()
+    owner = DiscordChannel(DiscordConfig(enabled=True, allow_from=["*"]), bus)
+    client = DiscordBotClient(owner, intents=discord.Intents.none())
+    channel_obj = _FakeChannel(channel_id=456)
+    owner._remember_channel(channel_obj)
+    owner._record_modal_spec(
+        "btn-old",
+        {
+            "title": "Notes",
+            "inputs": [
+                {"label": "Comment", "custom_id": "comment", "style": "paragraph"},
+            ],
+        },
+    )
+
+    submit = _make_modal_submit_interaction(
+        modal_custom_id="btn-old:m",
+        components=[
+            {"components": [{"custom_id": "comment", "value": "looks good"}]},
+        ],
+        channel=channel_obj,
+    )
+    await client.on_interaction(submit)
+
+    msg = bus.inbound.get_nowait()
+    assert msg.metadata["interaction_type"] == "modal_submit"
+    assert msg.metadata["custom_id"] == "btn-old"
+    assert msg.metadata["form_values"] == {"comment": "looks good"}
+    assert "Comment: looks good" in msg.content
