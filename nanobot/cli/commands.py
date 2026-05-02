@@ -5,6 +5,7 @@ import os
 import select
 import signal
 import sys
+import time
 from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.formatted_text import ANSI, HTML
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.patch_stdout import patch_stdout
 from rich.console import Console
 from rich.markdown import Markdown
@@ -63,6 +65,13 @@ app = typer.Typer(
 
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
+# Ctrl+C state — two independent timestamp tracks:
+#   _idle_ctrl_c_ts: used by the prompt_toolkit key binding (idle / input state)
+#   _agent_ctrl_c_ts: used by the SIGINT signal handler (agent running state)
+_agent_running: bool = False
+_idle_ctrl_c_ts: float = 0.0
+_agent_ctrl_c_ts: float = 0.0
+_CTRL_C_DOUBLE_TIMEOUT: float = 2.0
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -121,10 +130,36 @@ def _init_prompt_session() -> None:
     history_file = get_cli_history_path()
     history_file.parent.mkdir(parents=True, exist_ok=True)
 
+    # Custom key bindings for Ctrl+C behavior (idle/input state only)
+    # Agent-running Ctrl+C is handled by the SIGINT signal handler.
+    kb = KeyBindings()
+
+    @kb.add("c-c")
+    def _(event):
+        global _idle_ctrl_c_ts
+        buf = event.app.current_buffer
+        now = time.time()
+        if buf.text:
+            # Input is non-empty: clear it (like bash/zsh/readline)
+            buf.reset()
+        else:
+            # Input is empty: double-press to exit
+            if now - _idle_ctrl_c_ts < _CTRL_C_DOUBLE_TIMEOUT:
+                _idle_ctrl_c_ts = 0.0
+                raise KeyboardInterrupt
+            else:
+                _idle_ctrl_c_ts = now
+                def _show_hint():
+                    print_formatted_text(HTML(
+                        "<ansiyellow>Press Ctrl+C again to exit</ansiyellow>"
+                    ))
+                run_in_terminal(_show_hint)
+
     _PROMPT_SESSION = PromptSession(
         history=SafeFileHistory(str(history_file)),
         enable_open_in_editor=False,
         multiline=False,  # Enter submits (single line mode)
+        key_bindings=kb,
     )
 
 
@@ -1078,40 +1113,98 @@ def agent(
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
         _init_prompt_session()
-        console.print(f"{__logo__} Interactive mode [bold blue]({config.agents.defaults.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
+        console.print(f"{__logo__} Interactive mode [bold blue]({config.agents.defaults.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] twice to quit\n")
+
+        # Shared between signal handler and run_interactive()
+        renderer: StreamRenderer | None = None
+        _event_loop: asyncio.AbstractEventLoop | None = None
+        _interrupt_event: asyncio.Event | None = None
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)
         else:
             cli_channel, cli_chat_id = "cli", session_id
 
+        # --- Signal handling (SIGINT / SIGTERM / SIGHUP) ---
+        #
+        # Two Ctrl+C paths depending on agent state:
+        #
+        #   IDLE (waiting for input):
+        #     Handled by prompt_toolkit key binding above (clear input / double-exit).
+        #     prompt_toolkit intercepts Ctrl+C before it becomes SIGINT, so this
+        #     signal handler is NOT involved when the user is at the input prompt.
+        #
+        #   AGENT RUNNING:
+        #     prompt_toolkit is suspended → Ctrl+C fires SIGINT → this handler.
+        #     Single press: set _interrupt_event → main loop cancels agent task.
+        #     Double press (within 2s): force exit.
+        #
+        # Signal-safe output: use os.write(2, ...) instead of console/print
+        # to avoid corrupting prompt_toolkit's display state.
+
         def _handle_signal(signum, frame):
-            sig_name = signal.Signals(signum).name
-            _restore_terminal()
-            console.print(f"\nReceived {sig_name}, goodbye!")
-            sys.exit(0)
+            global _agent_running, _agent_ctrl_c_ts
+            now = time.time()
+
+            if _agent_running:
+                # Agent is running: first interrupt, second force exit
+                if now - _agent_ctrl_c_ts < _CTRL_C_DOUBLE_TIMEOUT:
+                    _restore_terminal()
+                    os.write(2, b"\nForce exit!\n")
+                    sys.exit(1)
+                else:
+                    _agent_ctrl_c_ts = now
+                    # Wake up the main loop's asyncio.wait() via the event loop
+                    # thread-safe handle.  This is necessary because the signal
+                    # handler runs between Python bytecodes while the event loop
+                    # is blocked inside await; call_soon_threadsafe writes to
+                    # the event loop's self-pipe which wakes the selector.
+                    if _event_loop is not None and _interrupt_event is not None:
+                        _event_loop.call_soon_threadsafe(_interrupt_event.set)
+                    os.write(2, b"\nInterrupting agent... (Ctrl+C again to force exit)\n")
+            else:
+                # Agent not running: normal exit (shouldn't normally reach here
+                # because prompt_toolkit intercepts Ctrl+C during input, but
+                # guard against edge cases like SIGTERM from kill(1)).
+                _restore_terminal()
+                os.write(2, f"\nReceived {signal.Signals(signum).name}, goodbye!\n".encode())
+                sys.exit(0)
 
         signal.signal(signal.SIGINT, _handle_signal)
         signal.signal(signal.SIGTERM, _handle_signal)
-        # SIGHUP is not available on Windows
         if hasattr(signal, 'SIGHUP'):
             signal.signal(signal.SIGHUP, _handle_signal)
-        # Ignore SIGPIPE to prevent silent process termination when writing to closed pipes
-        # SIGPIPE is not available on Windows
         if hasattr(signal, 'SIGPIPE'):
             signal.signal(signal.SIGPIPE, signal.SIG_IGN)
 
         async def run_interactive():
+            nonlocal renderer, _event_loop, _interrupt_event
+            global _agent_running, _idle_ctrl_c_ts
             bus_task = asyncio.create_task(agent_loop.run())
             turn_done = asyncio.Event()
             turn_done.set()
             turn_response: list[tuple[str, dict]] = []
-            renderer: StreamRenderer | None = None
+
+            # Interrupt event — set by the signal handler via
+            # loop.call_soon_threadsafe() to wake the main loop.
+            _interrupt_event = asyncio.Event()
+            # Capture the event loop so the signal handler can schedule
+            # _interrupt_event.set() from a non-asyncio thread.
+            _event_loop = asyncio.get_running_loop()
+            # Drain flag — set after interrupt to discard stale outbound
+            # messages from the interrupted turn before the next turn starts.
+            _drain_outbound = False
 
             async def _consume_outbound():
+                nonlocal _drain_outbound
                 while True:
                     try:
                         msg = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+
+                        # After interrupt: discard all stale messages until
+                        # the next turn clears _drain_outbound.
+                        if _drain_outbound:
+                            continue
 
                         if msg.metadata.get("_stream_delta"):
                             if renderer:
@@ -1160,7 +1253,6 @@ def agent(
                 while True:
                     try:
                         _flush_pending_tty_input()
-                        # Stop spinner before user input to avoid prompt_toolkit conflicts
                         if renderer:
                             renderer.stop_for_input()
                         user_input = await _read_interactive_input_async()
@@ -1175,6 +1267,8 @@ def agent(
 
                         turn_done.clear()
                         turn_response.clear()
+                        _interrupt_event.clear()
+                        _drain_outbound = False
                         renderer = StreamRenderer(render_markdown=markdown)
 
                         await bus.publish_inbound(InboundMessage(
@@ -1185,8 +1279,41 @@ def agent(
                             metadata={"_wants_stream": True},
                         ))
 
-                        await turn_done.wait()
+                        _agent_running = True
+                        try:
+                            # Wait for either normal completion or interrupt
+                            turn_task = asyncio.create_task(turn_done.wait())
+                            int_task = asyncio.create_task(_interrupt_event.wait())
+                            done, pending = await asyncio.wait(
+                                [turn_task, int_task],
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                            # Cancel whichever didn't finish
+                            for t in pending:
+                                t.cancel()
+                                with suppress(asyncio.CancelledError):
+                                    await t
+                        finally:
+                            _agent_running = False
+                            # Reset idle Ctrl+C timer so key binding doesn't
+                            # inherit the agent-running timestamp
+                            _idle_ctrl_c_ts = 0.0
 
+                        if _interrupt_event.is_set():
+                            # User pressed Ctrl+C — cancel the agent task
+                            _interrupt_event.clear()
+                            session_key = f"{cli_channel}:{cli_chat_id}"
+                            cancelled = await agent_loop._cancel_active_tasks(session_key)
+                            if renderer:
+                                await renderer.close()
+                                renderer = None
+                            # Drain stale outbound messages from the cancelled turn
+                            _drain_outbound = True
+                            logger.info("Agent interrupted by user ({} task(s) cancelled)", cancelled)
+                            console.print(f"\n[yellow]Agent interrupted.[/yellow]\n")
+                            continue
+
+                        # Normal completion
                         if turn_response:
                             content, meta = turn_response[0]
                             if content and not meta.get("_streamed"):
