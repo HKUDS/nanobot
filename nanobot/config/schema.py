@@ -223,6 +223,8 @@ class ExecToolConfig(Base):
     path_append: str = ""
     sandbox: str = ""  # sandbox backend: "" (none) or "bwrap"
     allowed_env_keys: list[str] = Field(default_factory=list)  # Env var names to pass through to subprocess (e.g. ["GOPATH", "JAVA_HOME"])
+    allow_patterns: list[str] = Field(default_factory=list)  # Regex patterns that bypass deny_patterns (e.g. [r"rm\s+-rf\s+/tmp/"])
+    deny_patterns: list[str] = Field(default_factory=list)  # Extra regex patterns to block (appended to built-in list)
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
