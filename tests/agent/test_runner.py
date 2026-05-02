@@ -352,6 +352,27 @@ async def test_runner_stops_on_workspace_violation_without_fail_on_tool_error():
     ]
 
 
+def test_is_workspace_violation_recognizes_ssrf_block():
+    """Internal/private URL block must be classified as a fatal workspace violation.
+
+    Regression guard: the deny/allowlist filter messages were intentionally split
+    out of `_WORKSPACE_BLOCK_MARKERS` so the LLM can retry, but SSRF rejections
+    are a hard security boundary and must remain fatal.
+    """
+    from nanobot.agent.runner import AgentRunner
+
+    ssrf_msg = "Error: Command blocked by safety guard (internal/private URL detected)"
+    assert AgentRunner._is_workspace_violation(ssrf_msg) is True
+
+    # Sanity: deny/allowlist filter messages are deliberately *not* fatal.
+    assert AgentRunner._is_workspace_violation(
+        "Error: Command blocked by deny pattern filter"
+    ) is False
+    assert AgentRunner._is_workspace_violation(
+        "Error: Command blocked by allowlist filter (not in allowlist)"
+    ) is False
+
+
 @pytest.mark.asyncio
 async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     from nanobot.agent.runner import AgentRunSpec, AgentRunner

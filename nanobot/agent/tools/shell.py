@@ -276,16 +276,16 @@ class ExecTool(Tool):
         # allow_patterns take priority over deny_patterns so that users can
         # exempt specific commands (e.g. "rm -rf" inside a build directory)
         # from the hardcoded deny list via configuration.
-        if self.allow_patterns and any(re.search(p, lower) for p in self.allow_patterns):
-            pass  # explicitly allowed – skip deny check
-        else:
+        explicitly_allowed = bool(self.allow_patterns) and any(
+            re.search(p, lower) for p in self.allow_patterns
+        )
+        if not explicitly_allowed:
             for pattern in self.deny_patterns:
                 if re.search(pattern, lower):
                     return "Error: Command blocked by deny pattern filter"
 
             if self.allow_patterns:
-                if not any(re.search(p, lower) for p in self.allow_patterns):
-                    return "Error: Command blocked by allowlist filter (not in allowlist)"
+                return "Error: Command blocked by allowlist filter (not in allowlist)"
 
         from nanobot.security.network import contains_internal_url
         if contains_internal_url(cmd):

@@ -839,6 +839,7 @@ class AgentRunner:
         "working_dir could not be resolved",
         "path traversal detected",
         "path outside working dir",
+        "internal/private url detected",
     )
 
     @classmethod
