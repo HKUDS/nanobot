@@ -219,7 +219,8 @@ class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
     enable: bool = True
-    timeout: int = 60
+    timeout: int = Field(default=60, ge=0)  # Default exec timeout in seconds; 0 disables timeout
+    idle_timeout: int = Field(default=300, ge=0)  # Kill commands silent for this many seconds; 0 disables idle guard
     path_append: str = ""
     sandbox: str = ""  # sandbox backend: "" (none) or "bwrap"
     allowed_env_keys: list[str] = Field(default_factory=list)  # Env var names to pass through to subprocess (e.g. ["GOPATH", "JAVA_HOME"])

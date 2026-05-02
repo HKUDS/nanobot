@@ -370,6 +370,7 @@ class AgentLoop:
                 ExecTool(
                     working_dir=str(self.workspace),
                     timeout=self.exec_config.timeout,
+                    idle_timeout=self.exec_config.idle_timeout,
                     restrict_to_workspace=self.restrict_to_workspace,
                     sandbox=self.exec_config.sandbox,
                     path_append=self.exec_config.path_append,
