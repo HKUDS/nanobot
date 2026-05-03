@@ -297,7 +297,7 @@ class AgentLoop:
         on_progress: Callable[..., Awaitable[None]] | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
-        messages = initial_messages
+        messages = list(initial_messages)
         iteration = 0
         final_content = None
         tools_used: list[str] = []
