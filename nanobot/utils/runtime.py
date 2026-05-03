@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -9,6 +11,14 @@ from loguru import logger
 from nanobot.utils.helpers import stringify_text_blocks
 
 _MAX_REPEAT_EXTERNAL_LOOKUPS = 2
+
+# Workspace-violation throttle: how many times the LLM is allowed to bump
+# against the same outside-workspace target *within a single turn* before the
+# tool result is escalated with a hard "stop trying to bypass the policy"
+# instruction.  Two free attempts give the model room to e.g. read_file then
+# fall back to exec without immediately escalating; the third attempt at the
+# same target is treated as a clear bypass loop.
+_MAX_REPEAT_WORKSPACE_VIOLATIONS = 2
 
 EMPTY_FINAL_RESPONSE_MESSAGE = (
     "I completed the tool steps but couldn't produce a final answer. "
@@ -94,4 +104,109 @@ def repeated_external_lookup_error(
     return (
         "Error: repeated external lookup blocked. "
         "Use the results you already have to answer, or try a meaningfully different source."
+    )
+
+
+# --- Workspace-violation throttle --------------------------------------------
+#
+# When ``restrict_to_workspace`` is on and the LLM tries to read or exec
+# something outside of the workspace, we want to *tell* the model that it
+# hit a hard policy boundary -- not silently abort the whole turn and not
+# allow it to spin forever swapping ``read_file`` for ``exec cat`` for
+# ``python -c open(...)`` (the actual loop reported in #3493).  The strategy
+# is two-fold:
+#
+# 1. Each individual guard error already includes structured instructions
+#    that tell the model "don't try to bypass this; ask the user for help".
+# 2. We additionally count how many times the *same outside target* has
+#    been refused within the current turn.  After two free attempts the
+#    third refusal swaps in a much more forceful message that quotes the
+#    target path and explicitly orders the model to stop and surface the
+#    boundary back to the user.  The model is still free to do something
+#    else (different target, different question) -- only the bypass loop
+#    is interrupted.
+#
+# This intentionally does *not* fatal-abort the turn: max_iterations and
+# the empty-final-response retries already provide the ultimate ceiling
+# for runaway loops, and aborting is what produced the silent-hang bug
+# in #3605 in the first place.
+
+_OUTSIDE_PATH_PATTERN = re.compile(r"(?:^|[\s|>'\"])((?:/[^\s\"'>;|<]+)|(?:~[^\s\"'>;|<]+))")
+
+
+def workspace_violation_signature(
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> str | None:
+    """Return a stable signature for the outside-workspace target a tool tried.
+
+    The signature is shared across tool names so that the LLM cannot bypass
+    the throttle by switching from ``read_file`` to ``exec cat`` to
+    ``python -c open(...)`` against the same path.  Returns ``None`` when
+    the call has no obvious outside target (e.g. SSRF rejections, deny
+    pattern hits, or tools whose argument shape we don't understand).
+    """
+    for key in ("path", "file_path", "target", "source", "destination"):
+        val = arguments.get(key)
+        if isinstance(val, str) and val.strip():
+            return _normalize_violation_target(val.strip())
+
+    if tool_name in {"exec", "shell"}:
+        cmd = str(arguments.get("command") or "").strip()
+        if cmd:
+            match = _OUTSIDE_PATH_PATTERN.search(cmd)
+            if match:
+                return _normalize_violation_target(match.group(1))
+        cwd = str(arguments.get("working_dir") or "").strip()
+        if cwd:
+            return _normalize_violation_target(cwd)
+
+    return None
+
+
+def _normalize_violation_target(raw: str) -> str:
+    """Normalize *raw* path so that equivalent spellings collide on the same key."""
+    try:
+        normalized = str(Path(raw).expanduser().resolve())
+    except Exception:
+        normalized = raw
+    return f"violation:{normalized}".lower()
+
+
+def repeated_workspace_violation_error(
+    tool_name: str,
+    arguments: dict[str, Any],
+    seen_counts: dict[str, int],
+) -> str | None:
+    """Return an escalated error string after repeated bypass attempts.
+
+    Returns ``None`` while the LLM is still within the soft retry budget --
+    callers should fall back to the tool's own error message in that case.
+    Once the budget is exceeded, returns a hard "stop trying" instruction
+    that quotes the offending target.  Throttle state lives in
+    *seen_counts* (a per-turn dict), so the budget naturally resets across
+    turns without persisting LLM-controlled keys.
+    """
+    signature = workspace_violation_signature(tool_name, arguments)
+    if signature is None:
+        return None
+    count = seen_counts.get(signature, 0) + 1
+    seen_counts[signature] = count
+    if count <= _MAX_REPEAT_WORKSPACE_VIOLATIONS:
+        return None
+    logger.warning(
+        "Escalating repeated workspace bypass attempt {} (attempt {})",
+        signature[:160],
+        count,
+    )
+    target = signature.split("violation:", 1)[1] if "violation:" in signature else signature
+    return (
+        "Error: refusing repeated workspace-bypass attempts.\n"
+        f"You have tried to access '{target}' (or an equivalent path) "
+        f"{count} times in this turn. This is a hard policy boundary -- "
+        "switching tools, shell tricks, working_dir overrides, symlinks, "
+        "or base64 piping will NOT change the answer. Stop retrying. "
+        "If the user genuinely needs this resource, tell them you cannot "
+        "access it and ask how they want to proceed (e.g. copy the file "
+        "into the workspace, or disable restrict_to_workspace for this run)."
     )

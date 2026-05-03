@@ -19,6 +19,20 @@ from nanobot.config.paths import get_media_dir
 _IS_WINDOWS = sys.platform == "win32"
 
 
+# Appended to every workspace / safety guard rejection so the LLM is told
+# explicitly that this is a policy boundary (not a transient failure) and
+# that bypass loops will not change the answer.  The throttle in
+# ``nanobot.utils.runtime.repeated_workspace_violation_error`` upgrades
+# this further once the model keeps targeting the same path.
+_WORKSPACE_BOUNDARY_NOTE = (
+    "\n\nNote: this is a hard policy boundary, not a transient failure. "
+    "Do NOT retry with shell tricks (symlinks, base64 piping, alternative "
+    "tools, working_dir overrides). If the user genuinely needs this "
+    "resource, tell them you cannot reach it under the current "
+    "restrict_to_workspace policy and ask how to proceed."
+)
+
+
 @tool_parameters(
     tool_parameters_schema(
         command=StringSchema("The shell command to execute"),
@@ -129,9 +143,15 @@ class ExecTool(Tool):
                 requested = Path(cwd).expanduser().resolve()
                 workspace_root = Path(self.working_dir).expanduser().resolve()
             except Exception:
-                return "Error: working_dir could not be resolved"
+                return (
+                    "Error: working_dir could not be resolved"
+                    + _WORKSPACE_BOUNDARY_NOTE
+                )
             if requested != workspace_root and workspace_root not in requested.parents:
-                return "Error: working_dir is outside the configured workspace"
+                return (
+                    "Error: working_dir is outside the configured workspace"
+                    + _WORKSPACE_BOUNDARY_NOTE
+                )
 
         guard_error = self._guard_command(command, cwd)
         if guard_error:
@@ -305,11 +325,18 @@ class ExecTool(Tool):
 
         from nanobot.security.network import contains_internal_url
         if contains_internal_url(cmd):
+            # SSRF: stay short and direct.  The runner classifies this
+            # marker as a hard, non-recoverable boundary, so the
+            # _WORKSPACE_BOUNDARY_NOTE policy text doesn't apply here --
+            # we don't want the model to retry at all.
             return "Error: Command blocked by safety guard (internal/private URL detected)"
 
         if self.restrict_to_workspace:
             if "..\\" in cmd or "../" in cmd:
-                return "Error: Command blocked by safety guard (path traversal detected)"
+                return (
+                    "Error: Command blocked by safety guard (path traversal detected)"
+                    + _WORKSPACE_BOUNDARY_NOTE
+                )
 
             cwd_path = Path(cwd).resolve()
 
@@ -335,7 +362,10 @@ class ExecTool(Tool):
                     and media_path not in p.parents
                     and p != media_path
                 ):
-                    return "Error: Command blocked by safety guard (path outside working dir)"
+                    return (
+                        "Error: Command blocked by safety guard (path outside working dir)"
+                        + _WORKSPACE_BOUNDARY_NOTE
+                    )
 
         return None
 

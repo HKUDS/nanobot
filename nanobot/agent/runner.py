@@ -33,6 +33,7 @@ from nanobot.utils.runtime import (
     ensure_nonempty_tool_result,
     is_blank_text,
     repeated_external_lookup_error,
+    repeated_workspace_violation_error,
 )
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
@@ -239,6 +240,10 @@ class AgentRunner:
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
+        # Tracks repeated bypass attempts against the same outside-workspace
+        # target within this turn.  See ``repeated_workspace_violation_error``
+        # in ``nanobot.utils.runtime`` for the throttle policy.
+        workspace_violation_counts: dict[str, int] = {}
         empty_content_retries = 0
         length_recovery_count = 0
         had_injections = False
@@ -314,6 +319,7 @@ class AgentRunner:
                     spec,
                     tool_calls,
                     external_lookup_counts,
+                    workspace_violation_counts,
                 )
                 tool_events.extend(new_events)
                 context.tool_results = list(results)
@@ -698,20 +704,25 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_calls: list[ToolCallRequest],
         external_lookup_counts: dict[str, int],
+        workspace_violation_counts: dict[str, int],
     ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
         batches = self._partition_tool_batches(spec, tool_calls)
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
         for batch in batches:
             if spec.concurrent_tools and len(batch) > 1:
                 batch_results = await asyncio.gather(*(
-                    self._run_tool(spec, tool_call, external_lookup_counts)
+                    self._run_tool(
+                        spec, tool_call, external_lookup_counts, workspace_violation_counts,
+                    )
                     for tool_call in batch
                 ))
                 tool_results.extend(batch_results)
             else:
                 batch_results = []
                 for tool_call in batch:
-                    result = await self._run_tool(spec, tool_call, external_lookup_counts)
+                    result = await self._run_tool(
+                        spec, tool_call, external_lookup_counts, workspace_violation_counts,
+                    )
                     tool_results.append(result)
                     batch_results.append(result)
                     if isinstance(result[2], AskUserInterrupt):
@@ -734,6 +745,7 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
+        workspace_violation_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None]:
         hint = "\n\n[Analyze the error above and try a different approach.]"
         lookup_error = repeated_external_lookup_error(
@@ -763,16 +775,20 @@ class AgentRunner:
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
-            if self._is_workspace_violation(prep_error):
-                logger.warning(
-                    "Tool {} blocked by workspace/safety guard during preparation; aborting turn: {}",
-                    tool_call.name,
-                    prep_error.replace("\n", " ").strip()[:200],
-                )
-                event["detail"] = ("workspace_violation: "
-                                   + prep_error.replace("\n", " ").strip())[:160]
-                return prep_error, event, RuntimeError(prep_error)
-            return prep_error + hint, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
+            handled = self._classify_violation(
+                raw_text=prep_error,
+                soft_payload=prep_error + hint,
+                ssrf_payload=prep_error,
+                ssrf_error=RuntimeError(prep_error),
+                event=event,
+                tool_call=tool_call,
+                workspace_violation_counts=workspace_violation_counts,
+            )
+            if handled is not None:
+                return handled
+            return prep_error + hint, event, (
+                RuntimeError(prep_error) if spec.fail_on_tool_error else None
+            )
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -789,18 +805,25 @@ class AgentRunner:
             if isinstance(exc, AskUserInterrupt):
                 event["status"] = "waiting"
                 return "", event, exc
-            if self._is_workspace_violation(str(exc)):
-                logger.warning(
-                    "Tool {} blocked by workspace/safety guard; aborting turn: {}",
-                    tool_call.name,
-                    str(exc).replace("\n", " ").strip()[:200],
-                )
-                event["detail"] = ("workspace_violation: "
-                                   + str(exc).replace("\n", " ").strip())[:160]
-                return f"Error: {type(exc).__name__}: {exc}", event, exc
+            payload = f"Error: {type(exc).__name__}: {exc}"
+            handled = self._classify_violation(
+                raw_text=str(exc),
+                # Match the legacy behavior here: the exception branch never
+                # appended the "try a different approach" hint, even on the
+                # workspace-violation path -- preserve that for callers that
+                # eyeball the exact tool message.
+                soft_payload=payload,
+                ssrf_payload=payload,
+                ssrf_error=exc,
+                event=event,
+                tool_call=tool_call,
+                workspace_violation_counts=workspace_violation_counts,
+            )
+            if handled is not None:
+                return handled
             if spec.fail_on_tool_error:
-                return f"Error: {type(exc).__name__}: {exc}", event, exc
-            return f"Error: {type(exc).__name__}: {exc}", event, None
+                return payload, event, exc
+            return payload, event, None
 
         if isinstance(result, str) and result.startswith("Error"):
             event = {
@@ -808,17 +831,17 @@ class AgentRunner:
                 "status": "error",
                 "detail": result.replace("\n", " ").strip()[:120],
             }
-
-            # check the outside workspace error and break loop
-            if self._is_workspace_violation(result):
-                logger.warning(
-                    "Tool {} blocked by workspace/safety guard; aborting turn: {}",
-                    tool_call.name,
-                    result.replace("\n", " ").strip()[:200],
-                )
-                event["detail"] = ("workspace_violation: "
-                                   + result.replace("\n", " ").strip())[:160]
-                return result, event, RuntimeError(result)
+            handled = self._classify_violation(
+                raw_text=result,
+                soft_payload=result + hint,
+                ssrf_payload=result,
+                ssrf_error=RuntimeError(result),
+                event=event,
+                tool_call=tool_call,
+                workspace_violation_counts=workspace_violation_counts,
+            )
+            if handled is not None:
+                return handled
             if spec.fail_on_tool_error:
                 return result + hint, event, RuntimeError(result)
             return result + hint, event, None
@@ -831,39 +854,103 @@ class AgentRunner:
             detail = detail[:120] + "..."
         return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
 
-    # Markers identifying tool results that represent a *hard* workspace /
-    # safety boundary rejection -- only these abort the agent loop.
-    #
-    # We deliberately keep this list narrow (#3599 / #3605):
-    # - The first four come from explicit path-resolution checks in
-    #   ``filesystem.py`` and ``shell.py`` that cannot false-positive on user
-    #   payloads -- if you see them, the LLM truly tried to escape the
-    #   workspace.
-    # - "internal/private url detected" stays fatal because SSRF is a real
-    #   security boundary; allowing the LLM to "retry" would just let it
-    #   poke internal infra with a different URL phrasing.
-    # - "path traversal detected" and "path outside working dir" are
-    #   intentionally *not* listed: both come from the heuristic
-    #   ``_guard_command`` checks in ``shell.py`` which scan the raw command
-    #   string and routinely false-positive on legitimate constructs (e.g.
-    #   ``2>/dev/null`` redirects, quoted ``..`` arguments to ``sed`` /
-    #   ``find``, paths inside inline scripts).  Treating them as fatal
-    #   silently kills user turns (#3599) and prevents the agent from
-    #   self-correcting by trying a different approach (#3605).
-    _WORKSPACE_BLOCK_MARKERS: tuple[str, ...] = (
+    # SSRF rejections remain a hard, non-recoverable safety boundary: a single
+    # successful internal-URL fetch can leak cloud metadata, so we never let
+    # the LLM "retry" with a different phrasing of the same target.
+    _SSRF_MARKER: str = "internal/private url detected"
+
+    # Markers that identify "tried to access something outside the workspace".
+    # Unlike SSRF these are intentionally *non-fatal* (#3599 / #3605):
+    # - The structured error message itself tells the model not to bypass.
+    # - ``repeated_workspace_violation_error`` throttles the loop reported
+    #   in #3493 by escalating after two attempts against the same target.
+    # - max_iterations is the ultimate ceiling, so we never need to abort.
+    _WORKSPACE_VIOLATION_MARKERS: tuple[str, ...] = (
         "outside the configured workspace",
         "outside allowed directory",
         "working_dir is outside",
         "working_dir could not be resolved",
-        "internal/private url detected",
+        "path outside working dir",
+        "path traversal detected",
     )
 
     @classmethod
+    def _is_ssrf_violation(cls, text: str) -> bool:
+        return bool(text) and cls._SSRF_MARKER in text.lower()
+
+    @classmethod
     def _is_workspace_violation(cls, text: str) -> bool:
+        """True when *text* looks like *any* policy boundary rejection.
+
+        Kept as a public-ish hook for callers that need a yes/no signal
+        (logging, telemetry).  The runner itself uses the more specific
+        ``_is_ssrf_violation`` to decide what is fatal.
+        """
         if not text:
             return False
         lowered = text.lower()
-        return any(marker in lowered for marker in cls._WORKSPACE_BLOCK_MARKERS)
+        if cls._SSRF_MARKER in lowered:
+            return True
+        return any(marker in lowered for marker in cls._WORKSPACE_VIOLATION_MARKERS)
+
+    def _classify_violation(
+        self,
+        *,
+        raw_text: str,
+        soft_payload: str,
+        ssrf_payload: str,
+        ssrf_error: BaseException,
+        event: dict[str, str],
+        tool_call: ToolCallRequest,
+        workspace_violation_counts: dict[str, int],
+    ) -> tuple[Any, dict[str, str], BaseException | None] | None:
+        """Apply violation policy to a tool failure, or pass through.
+
+        Returns a fully-formed (payload, event, error) triple when *raw_text*
+        looks like a policy boundary rejection.  Returns ``None`` when the
+        caller should fall through to its generic per-branch handling.
+
+        - SSRF stays fatal -- a single successful internal fetch can leak
+          cloud metadata, so retrying with a different URL phrasing is
+          never acceptable.  We mutate ``event`` in place so the caller's
+          telemetry stays consistent.
+        - All other workspace-bound rejections become soft tool errors.
+          Each repeated attempt against the same outside target bumps a
+          per-turn counter; after the soft retry budget is exhausted we
+          replace the message body with an explicit "stop trying to bypass
+          the policy" instruction (see #3493 for the original bypass-loop
+          that motivated PR #3493's hard-abort, and #3599 / #3605 for why
+          the hard-abort backfired).
+        """
+        if self._is_ssrf_violation(raw_text):
+            logger.warning(
+                "Tool {} blocked by SSRF guard; aborting turn: {}",
+                tool_call.name,
+                raw_text.replace("\n", " ").strip()[:200],
+            )
+            event["detail"] = ("workspace_violation: "
+                               + raw_text.replace("\n", " ").strip())[:160]
+            return ssrf_payload, event, ssrf_error
+
+        if self._is_workspace_violation(raw_text):
+            escalation = repeated_workspace_violation_error(
+                tool_call.name,
+                tool_call.arguments,
+                workspace_violation_counts,
+            )
+            event["detail"] = ("workspace_violation: "
+                               + raw_text.replace("\n", " ").strip())[:160]
+            if escalation is not None:
+                logger.warning(
+                    "Tool {} hit workspace boundary repeatedly; escalating hint",
+                    tool_call.name,
+                )
+                event["detail"] = ("workspace_violation_escalated: "
+                                   + raw_text.replace("\n", " ").strip())[:160]
+                return escalation, event, None
+            return soft_payload, event, None
+
+        return None
 
     async def _emit_checkpoint(
         self,
