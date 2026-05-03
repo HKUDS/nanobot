@@ -122,6 +122,8 @@ class WebSearchTool(Tool):
         if provider == "olostep":
             api_key = self.config.api_key or os.environ.get("OLOSTEP_API_KEY", "")
             return "olostep" if api_key else "duckduckgo"
+        if provider == "zero_api_key":
+            return "zero_api_key"
         return provider
 
     @property
@@ -139,7 +141,9 @@ class WebSearchTool(Tool):
 
         if provider == "olostep":
             return await self._search_olostep(query, n)
-        if provider == "duckduckgo":
+        elif provider == "zero_api_key":
+            return await self._search_zero_api_key(query, n)
+        elif provider == "duckduckgo":
             return await self._search_duckduckgo(query, n)
         elif provider == "tavily":
             return await self._search_tavily(query, n)
@@ -323,6 +327,33 @@ class WebSearchTool(Tool):
             return _format_results(query, items, n)
         except Exception as e:
             return f"Error: {e}"
+
+    async def _search_zero_api_key(self, query: str, n: int) -> str:
+        try:
+            from zero_api_key_web_search import UltimateSearcher
+        except ImportError:
+            return "Error: zero-api-key-web-search package not installed. Run: pip install zero-api-key-web-search"
+        try:
+            profile = self.config.api_key or os.environ.get("ZERO_SEARCH_BRIGHTDATA_API_KEY", "")
+            searcher_kwargs = {}
+            if profile:
+                searcher_kwargs["profile"] = "production"
+            searcher = UltimateSearcher(**searcher_kwargs)
+            answer = await asyncio.wait_for(
+                asyncio.to_thread(searcher.search, query=query),
+                timeout=self.config.timeout,
+            )
+            items = [
+                {"title": s.title, "url": s.url, "content": s.snippet or ""}
+                for s in answer.sources[:n]
+            ]
+            result = _format_results(query, items, n)
+            if answer.answer:
+                result = f"{answer.answer}\n\n{result}"
+            return result
+        except Exception as e:
+            logger.warning("zero_api_key_web_search failed: {}", e)
+            return f"Error: zero_api_key_web_search failed ({e})"
 
     async def _search_duckduckgo(self, query: str, n: int) -> str:
         try:
