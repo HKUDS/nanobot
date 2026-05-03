@@ -1009,6 +1009,27 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
 
 
+## Subagent Concurrency
+
+By default, nanobot runs one spawned subagent at a time. This protects local LLM
+servers from loading multiple KV caches at once. If your provider can handle more
+parallel work, raise the limit:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "maxConcurrentSubagents": 2
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may execute at the same time. Extra subagents stay queued until a slot is free. |
+
+
 ## Auto Compact
 
 When a user is idle for longer than a configured threshold, nanobot **proactively** compresses the older part of the session context into a summary while keeping a recent legal suffix of live messages. This reduces token cost and first-token latency when the user returns — instead of re-processing a long stale context with an expired KV cache, the model receives a compact summary, the most recent live context, and fresh input.

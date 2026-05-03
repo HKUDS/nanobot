@@ -189,6 +189,7 @@ class AgentLoop:
         workspace: Path,
         model: str | None = None,
         max_iterations: int | None = None,
+        max_concurrent_subagents: int | None = None,
         context_window_tokens: int | None = None,
         context_block_limit: int | None = None,
         max_tool_result_chars: int | None = None,
@@ -224,6 +225,11 @@ class AgentLoop:
         self.model = model or provider.get_default_model()
         self.max_iterations = (
             max_iterations if max_iterations is not None else defaults.max_tool_iterations
+        )
+        self.max_concurrent_subagents = (
+            max_concurrent_subagents
+            if max_concurrent_subagents is not None
+            else defaults.max_concurrent_subagents
         )
         self.context_window_tokens = (
             context_window_tokens
@@ -263,6 +269,7 @@ class AgentLoop:
             restrict_to_workspace=restrict_to_workspace,
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
+            max_concurrent_subagents=self.max_concurrent_subagents,
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120

@@ -93,6 +93,84 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
     mgr.runner.run.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_subagent_manager_limits_concurrent_spawn_runs(tmp_path):
+    """Spawned subagents should not execute more than the configured limit at once."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        max_concurrent_subagents=1,
+    )
+    mgr._announce_result = AsyncMock()
+
+    active = 0
+    max_active = 0
+    started_count = 0
+    starts: asyncio.Queue[int] = asyncio.Queue()
+    releases = [asyncio.Event(), asyncio.Event()]
+
+    async def fake_run(spec):
+        nonlocal active, max_active, started_count
+        index = started_count
+        started_count += 1
+        active += 1
+        max_active = max(max_active, active)
+        await starts.put(index)
+        await releases[index].wait()
+        active -= 1
+        return SimpleNamespace(
+            stop_reason="done",
+            final_content="done",
+            error=None,
+            tool_events=[],
+        )
+
+    mgr.runner.run = AsyncMock(side_effect=fake_run)
+
+    await mgr.spawn("first task", session_key="test:session")
+    await mgr.spawn("second task", session_key="test:session")
+    tasks = list(mgr._running_tasks.values())
+
+    first_index = await asyncio.wait_for(starts.get(), timeout=0.5)
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(starts.get(), timeout=0.05)
+
+    releases[first_index].set()
+    second_index = await asyncio.wait_for(starts.get(), timeout=0.5)
+    releases[second_index].set()
+    await asyncio.gather(*tasks)
+
+    assert max_active == 1
+    assert mgr.runner.run.await_count == 2
+
+
+def test_subagent_default_max_concurrent_matches_agent_defaults(tmp_path):
+    """Direct SubagentManager construction should use the agent default concurrency limit."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+
+    assert mgr.max_concurrent_subagents == AgentDefaults().max_concurrent_subagents
+
+
 def test_subagent_default_max_iterations_matches_agent_defaults(tmp_path):
     """Direct SubagentManager construction should use the agent default limit."""
     from nanobot.agent.subagent import SubagentManager
@@ -130,6 +208,26 @@ def test_agent_loop_passes_max_iterations_to_subagents(tmp_path):
     )
 
     assert loop.subagents.max_iterations == 42
+
+
+def test_agent_loop_passes_max_concurrent_subagents_to_subagents(tmp_path):
+    """AgentLoop's configured subagent concurrency limit should be shared with subagents."""
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=tmp_path,
+        model="test-model",
+        max_concurrent_subagents=2,
+    )
+
+    assert loop.subagents.max_concurrent_subagents == 2
 
 
 @pytest.mark.asyncio

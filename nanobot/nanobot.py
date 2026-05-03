@@ -72,6 +72,7 @@ class Nanobot:
             workspace=config.workspace_path,
             model=defaults.model,
             max_iterations=defaults.max_tool_iterations,
+            max_concurrent_subagents=defaults.max_concurrent_subagents,
             context_window_tokens=defaults.context_window_tokens,
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
