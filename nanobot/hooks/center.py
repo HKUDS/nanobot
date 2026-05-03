@@ -37,10 +37,11 @@ class HookSession:
 
 
 class HookCenter:
-    __slots__ = ("_external_handlers",)
+    __slots__ = ("_external_handlers", "_streaming_plugins")
 
     def __init__(self) -> None:
         self._external_handlers: dict[type, dict[str, list[HookHandler]]] = {}
+        self._streaming_plugins: set[HookHandler] = set()
 
     # ------------------------------------------------------------------
     # registry
@@ -121,6 +122,8 @@ class HookCenter:
     def wants_streaming(self, session: HookSession) -> bool:
         if session.wants_streaming_handlers:
             return True
+        if self._streaming_plugins:
+            return True
         for et in _STREAMING_EVENT_TYPES:
             if self._external_handlers.get(et):
                 return True
@@ -171,16 +174,16 @@ class HookCenter:
         if not isinstance(data, dict):
             logger.warning(
                 "Transform handler returned non-dict Modified.data ({}) — "
-                "event object replaced, downstream handlers may break",
+                "discarding, downstream handlers receive original event",
                 type(data).__name__,
             )
-            return data
+            return event
         for key, value in data.items():
             if hasattr(event, key):
                 setattr(event, key, value)
             else:
-                logger.debug(
-                    "Modified.data key {!r} not found on event type {}",
+                logger.warning(
+                    "Modified.data key {!r} not found on event type {} — typo?",
                     key, type(event).__name__,
                 )
         return event
@@ -191,6 +194,13 @@ class HookCenter:
     ) -> tuple[HookResult, str | None]:
         try:
             result = handler(content)
+            if inspect.isawaitable(result):
+                logger.warning(
+                    "FinalizeContent handler {} returned coroutine — "
+                    "finalize_content handlers must be synchronous; discarding result",
+                    type(handler).__name__,
+                )
+                return None, content
         except Exception:
             if reraise:
                 raise
@@ -200,6 +210,8 @@ class HookCenter:
             return result, result.data
         if isinstance(result, Deny):
             return result, content
+        if result is None:
+            return None, content
         return None, result
 
     # ------------------------------------------------------------------

@@ -22,14 +22,6 @@ from nanobot.hooks.protocols import HookResult
 if TYPE_CHECKING:
     from nanobot.hooks.center import HookCenter, HookSession
 
-_METHOD_EVENT_MAP: dict[str, type] = {
-    "before_iteration": BeforeIteration,
-    "on_stream": OnStream,
-    "on_stream_end": OnStreamEnd,
-    "before_execute_tools": BeforeExecuteTools,
-    "after_iteration": AfterIteration,
-}
-
 
 def _is_overridden(agent_hook: AgentHook, method_name: str) -> bool:
     inst_method = getattr(agent_hook, method_name, None)

@@ -301,13 +301,22 @@ class AgentRunner:
             context = AgentHookContext(iteration=iteration, messages=messages)
             session.context = context
             bi_result = await center.emit(BeforeIteration(iteration=iteration, messages=messages), session)
-            if isinstance(bi_result, Deny) and bi_result.abort:
-                final_content = bi_result.reason
-                stop_reason = "aborted"
-                context.final_content = final_content
-                context.stop_reason = stop_reason
+            if isinstance(bi_result, Deny):
+                if bi_result.abort:
+                    final_content = bi_result.reason
+                    stop_reason = "aborted"
+                    context.final_content = final_content
+                    context.stop_reason = stop_reason
+                    await center.emit(_make_after_iteration(context, iteration), session)
+                    break
+                messages.append({
+                    "role": "user",
+                    "content": f"[System] Operation denied by hook guard: {bi_result.reason}",
+                })
+                empty_content_retries = 0
+                length_recovery_count = 0
                 await center.emit(_make_after_iteration(context, iteration), session)
-                break
+                continue
             response = await self._request_model(spec, messages_for_model, center, session, context)
             raw_usage = self._usage_dict(response.usage)
             context.response = response

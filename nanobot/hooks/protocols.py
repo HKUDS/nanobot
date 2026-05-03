@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol
 
 
 @dataclass(slots=True)
@@ -40,7 +40,6 @@ class Deny:
 HookResult = Modified | Deny | None
 
 
-@runtime_checkable
 class HookHandler(Protocol):
     """Protocol for hook handlers.
 

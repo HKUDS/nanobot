@@ -358,6 +358,55 @@ async def test_runner_before_iteration_abort_deny_breaks_loop():
 
 
 @pytest.mark.asyncio
+async def test_runner_before_iteration_soft_deny_continues_loop():
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+    deny_count = {"n": 0}
+
+    async def chat_with_retry(*, messages, **kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(content="recovered", tool_calls=[], usage={})
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    async def conditional_guard(event):
+        deny_count["n"] += 1
+        if deny_count["n"] == 1:
+            return Deny(reason="rate limited")
+        return None
+
+    center = HookCenter()
+    session = center.create_session()
+    center.register(
+        BeforeIteration,
+        conditional_guard,
+        mode="guard",
+    )
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "hi"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=5,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        center=center,
+        session=session,
+    ))
+
+    assert result.final_content == "recovered"
+    assert result.stop_reason == "completed"
+    assert call_count["n"] == 1
+    assert deny_count["n"] == 2  # fired on both iterations
+
+
+@pytest.mark.asyncio
 async def test_runner_returns_max_iterations_fallback():
     from nanobot.agent.runner import AgentRunner, AgentRunSpec
 

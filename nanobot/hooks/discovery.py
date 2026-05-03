@@ -6,13 +6,14 @@ Plugin contract:
     the plugin subscribes to.
 
     Plugin objects may expose ``hook_streaming: bool`` flag for
-    wants_streaming indication.
+    wants_streaming indication (session-independent streaming).
 
     Plugin module-level code executes at ``ep.load()`` time.
 """
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -20,6 +21,8 @@ from loguru import logger
 if TYPE_CHECKING:
     from nanobot.hooks.center import HookCenter
     from nanobot.hooks.protocols import HookHandler
+
+_PLUGIN_LOAD_TIMEOUT = 10  # seconds per plugin
 
 
 def discover_hook_plugins(enabled: list[str] | None = None) -> dict[str, "HookHandler"]:
@@ -40,8 +43,12 @@ def discover_hook_plugins(enabled: list[str] | None = None) -> dict[str, "HookHa
             logger.info("Hook plugin '{}' not in enabled_plugins, skipping", ep.name)
             continue
         try:
-            handler = ep.load()
-            plugins[ep.name] = handler
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(ep.load)
+                handler = future.result(timeout=_PLUGIN_LOAD_TIMEOUT)
+                plugins[ep.name] = handler
+        except TimeoutError:
+            logger.warning("Hook plugin '{}' load timed out after {}s, skipping", ep.name, _PLUGIN_LOAD_TIMEOUT)
         except Exception:
             logger.warning("Failed to load hook plugin '{}'", ep.name)
     return plugins
@@ -71,4 +78,9 @@ def register_discovered(center: "HookCenter", config: Any = None) -> None:
 
         for event_type, mode in hook_events:
             center.register(event_type, handler, mode)
+
+        if getattr(handler, "hook_streaming", False):
+            center._streaming_plugins.add(handler)
+            logger.info("Hook plugin '{}' enabled streaming", name)
+
         logger.debug("Registered hook plugin '{}' with {} events", name, len(hook_events))
