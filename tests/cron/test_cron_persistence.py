@@ -9,7 +9,6 @@ jobs.json + don't silently overwrite corrupt store``.
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 
 import pytest

@@ -14,7 +14,14 @@ from typing import Any, Callable, Coroutine, Literal
 from filelock import FileLock
 from loguru import logger
 
-from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronRunRecord, CronSchedule, CronStore
+from nanobot.cron.types import (
+    CronJob,
+    CronJobState,
+    CronPayload,
+    CronRunRecord,
+    CronSchedule,
+    CronStore,
+)
 
 
 def _now_ms() -> int:
@@ -387,11 +394,10 @@ class CronService:
 
     async def _on_timer(self) -> None:
         """Handle timer tick - run due jobs."""
-        loaded = self._load_store()
-        # If a hot reload found a corrupt store on disk, ``loaded`` is
-        # ``None`` but ``self._store`` may still hold the previous,
-        # known-good in-memory snapshot.  Keep using it rather than
-        # crashing the timer or wiping live jobs.
+        self._load_store()
+        # If a hot reload found a corrupt store on disk, ``self._store`` may
+        # still hold the previous, known-good in-memory snapshot.  Keep using
+        # it rather than crashing the timer or wiping live jobs.
         if not self._store:
             self._arm_timer()
             return
