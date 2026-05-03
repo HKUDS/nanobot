@@ -13,6 +13,13 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tool_guardrails import (
+    ToolCallGuardrailController,
+    ToolGuardrailConfig,
+    ToolGuardrailDecision,
+    append_guidance,
+    synthetic_block_result,
+)
 from nanobot.agent.tools.ask import AskUserInterrupt
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
@@ -79,6 +86,7 @@ class AgentRunSpec:
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
     llm_timeout_s: float | None = None
+    tool_guardrail_config: ToolGuardrailConfig | None = None
 
 
 @dataclass(slots=True)
@@ -239,6 +247,7 @@ class AgentRunner:
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
+        guardrail_controller = ToolCallGuardrailController(spec.tool_guardrail_config)
         empty_content_retries = 0
         length_recovery_count = 0
         had_injections = False
@@ -314,6 +323,7 @@ class AgentRunner:
                     spec,
                     tool_calls,
                     external_lookup_counts,
+                    guardrail_controller,
                 )
                 tool_events.extend(new_events)
                 context.tool_results = list(results)
@@ -698,20 +708,23 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_calls: list[ToolCallRequest],
         external_lookup_counts: dict[str, int],
+        guardrail_controller: ToolCallGuardrailController,
     ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
         batches = self._partition_tool_batches(spec, tool_calls)
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
         for batch in batches:
             if spec.concurrent_tools and len(batch) > 1:
                 batch_results = await asyncio.gather(*(
-                    self._run_tool(spec, tool_call, external_lookup_counts)
+                    self._run_tool(spec, tool_call, external_lookup_counts, guardrail_controller)
                     for tool_call in batch
                 ))
                 tool_results.extend(batch_results)
             else:
                 batch_results = []
                 for tool_call in batch:
-                    result = await self._run_tool(spec, tool_call, external_lookup_counts)
+                    result = await self._run_tool(
+                        spec, tool_call, external_lookup_counts, guardrail_controller,
+                    )
                     tool_results.append(result)
                     batch_results.append(result)
                     if isinstance(result[2], AskUserInterrupt):
@@ -734,8 +747,23 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
+        guardrail_controller: ToolCallGuardrailController,
     ) -> tuple[Any, dict[str, str], BaseException | None]:
         hint = "\n\n[Analyze the error above and try a different approach.]"
+
+        guardrail_pre = guardrail_controller.before_call(tool_call.name, tool_call.arguments)
+        if guardrail_pre.should_halt:
+            logger.warning(
+                "Tool guardrail blocked {}: {} (count={})",
+                tool_call.name, guardrail_pre.code, guardrail_pre.count,
+            )
+            event = {
+                "name": tool_call.name,
+                "status": "error",
+                "detail": f"guardrail:{guardrail_pre.code}",
+            }
+            return synthetic_block_result(guardrail_pre), event, RuntimeError(guardrail_pre.message)
+
         lookup_error = repeated_external_lookup_error(
             tool_call.name,
             tool_call.arguments,
@@ -789,6 +817,7 @@ class AgentRunner:
             if isinstance(exc, AskUserInterrupt):
                 event["status"] = "waiting"
                 return "", event, exc
+            err_text = f"Error: {type(exc).__name__}: {exc}"
             if self._is_workspace_violation(str(exc)):
                 logger.warning(
                     "Tool {} blocked by workspace/safety guard; aborting turn: {}",
@@ -797,10 +826,21 @@ class AgentRunner:
                 )
                 event["detail"] = ("workspace_violation: "
                                    + str(exc).replace("\n", " ").strip())[:160]
-                return f"Error: {type(exc).__name__}: {exc}", event, exc
-            if spec.fail_on_tool_error:
-                return f"Error: {type(exc).__name__}: {exc}", event, exc
-            return f"Error: {type(exc).__name__}: {exc}", event, None
+                # Workspace violations are terminal — record as failure but
+                # don't run guardrail logic (the loop is being aborted anyway).
+                guardrail_controller.after_call(
+                    tool_call.name, tool_call.arguments, err_text, failed=True,
+                )
+                return err_text, event, exc
+            decision = guardrail_controller.after_call(
+                tool_call.name, tool_call.arguments, err_text, failed=True,
+            )
+            err_text = append_guidance(err_text, decision)
+            if decision.action == "halt":
+                event["detail"] = f"guardrail:{decision.code}"
+                return err_text, event, RuntimeError(decision.message)
+            fatal = exc if spec.fail_on_tool_error else None
+            return err_text, event, fatal
 
         if isinstance(result, str) and result.startswith("Error"):
             event = {
@@ -818,10 +858,31 @@ class AgentRunner:
                 )
                 event["detail"] = ("workspace_violation: "
                                    + result.replace("\n", " ").strip())[:160]
+                guardrail_controller.after_call(
+                    tool_call.name, tool_call.arguments, result, failed=True,
+                )
                 return result, event, RuntimeError(result)
+            decision = guardrail_controller.after_call(
+                tool_call.name, tool_call.arguments, result, failed=True,
+            )
+            annotated = append_guidance(result + hint, decision)
+            if decision.action == "halt":
+                event["detail"] = f"guardrail:{decision.code}"
+                return annotated, event, RuntimeError(decision.message)
             if spec.fail_on_tool_error:
-                return result + hint, event, RuntimeError(result)
-            return result + hint, event, None
+                return annotated, event, RuntimeError(result)
+            return annotated, event, None
+
+        # Success path: feed result to the guardrail tracker for idempotent-no-progress detection.
+        result_text = result if isinstance(result, str) else (
+            "" if result is None else str(result)
+        )
+        decision = guardrail_controller.after_call(
+            tool_call.name, tool_call.arguments, result_text, failed=False,
+        )
+        annotated_result = result
+        if decision.action == "warn" and isinstance(result, str):
+            annotated_result = append_guidance(result, decision)
 
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()
@@ -829,7 +890,7 @@ class AgentRunner:
             detail = "(empty)"
         elif len(detail) > 120:
             detail = detail[:120] + "..."
-        return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
+        return annotated_result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
 
     # Markers identifying tool results that represent a workspace / safety boundary rejection.
     _WORKSPACE_BLOCK_MARKERS: tuple[str, ...] = (

@@ -836,6 +836,7 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
     tools.register(write_a)
 
     runner = AgentRunner(MagicMock())
+    from nanobot.agent.tool_guardrails import ToolCallGuardrailController
     await runner._execute_tools(
         AgentRunSpec(
             initial_messages=[],
@@ -851,6 +852,7 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
             ToolCallRequest(id="rw1", name="write_a", arguments={}),
         ],
         {},
+        ToolCallGuardrailController(),
     )
 
     assert shared_events[0:2] == ["start:read_a", "start:read_b"]
@@ -880,6 +882,7 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
     tools.register(read_b)
 
     runner = AgentRunner(MagicMock())
+    from nanobot.agent.tool_guardrails import ToolCallGuardrailController
     await runner._execute_tools(
         AgentRunSpec(
             initial_messages=[],
@@ -895,6 +898,7 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
             ToolCallRequest(id="ro2", name="read_b", arguments={}),
         ],
         {},
+        ToolCallGuardrailController(),
     )
 
     assert shared_events[0] == "start:read_a"
@@ -1211,10 +1215,25 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="working",
-        tool_calls=[ToolCallRequest(id="call_1", name="list_dir", arguments={"path": "."})],
-    ))
+    # Vary the tool call args so the per-turn idempotent-no-progress guardrail
+    # doesn't trip first — this test specifically exercises the max_iterations
+    # fallback path.
+    counter = {"n": 0}
+
+    async def _vary_chat(*_args, **_kwargs):
+        counter["n"] += 1
+        return LLMResponse(
+            content="working",
+            tool_calls=[
+                ToolCallRequest(
+                    id=f"call_{counter['n']}",
+                    name="list_dir",
+                    arguments={"path": f"./dir_{counter['n']}"},
+                ),
+            ],
+        )
+
+    provider.chat_with_retry = AsyncMock(side_effect=_vary_chat)
     mgr = SubagentManager(
         provider=provider,
         workspace=tmp_path,
@@ -1224,7 +1243,9 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
     mgr._announce_result = AsyncMock()
 
     async def fake_execute(self, **kwargs):
-        return "tool result"
+        # Return a unique result per call so the no-progress guardrail
+        # also doesn't fire on result-hash repetition.
+        return f"tool result {counter['n']}"
 
     monkeypatch.setattr("nanobot.agent.tools.filesystem.ListDirTool.execute", fake_execute)
 
@@ -3091,3 +3112,94 @@ async def test_runner_binds_on_retry_wait_to_retry_callback_not_progress():
 
     assert captured["on_retry_wait"] is retry_wait_cb
     assert captured["on_retry_wait"] is not progress_cb
+
+
+# ---------------------------------------------------------------------------
+# Tool-loop guardrail integration (#2298 / PR #3580)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_guardrail_blocks_repeated_failing_call_in_runner():
+    """End-to-end: model keeps emitting the same failing write_file. Once the
+    block threshold is hit, the next call's tool result is the guardrail's
+    synthetic JSON body and the agent halts with stop_reason='tool_error'."""
+    import json as _json
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.tool_guardrails import ToolGuardrailConfig
+
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="retrying",
+        tool_calls=[ToolCallRequest(
+            id="call_x", name="write_file", arguments={"path": "/x", "content": "y"},
+        )],
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="Error: permission denied")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=20,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        tool_guardrail_config=ToolGuardrailConfig(
+            exact_failure_warn_after=2,
+            exact_failure_block_after=3,
+        ),
+    ))
+
+    assert result.stop_reason == "tool_error"
+    tool_messages = [m for m in result.messages if m.get("role") == "tool"]
+    # First few calls hit the real tool then return the error result;
+    # the call that trips the block returns a synthetic JSON body.
+    last_tool = tool_messages[-1]
+    last_content = last_tool["content"]
+    if isinstance(last_content, list):
+        last_content = "".join(
+            part.get("text", "") for part in last_content if isinstance(part, dict)
+        )
+    parsed = _json.loads(last_content)
+    assert parsed["guardrail"]["code"] == "repeated_exact_failure_block"
+    assert parsed["guardrail"]["tool_name"] == "write_file"
+    # The runner should have stopped before max_iterations — guardrail kicked in early.
+    assert tools.execute.await_count <= 4
+
+
+@pytest.mark.asyncio
+async def test_guardrail_disabled_lets_loop_run_to_max_iterations():
+    """With hard_stop_enabled=False the controller is observation-only;
+    the loop terminates only when max_iterations runs out."""
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.tool_guardrails import ToolGuardrailConfig
+
+    provider = MagicMock()
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
+        content="retrying",
+        tool_calls=[ToolCallRequest(
+            id="call_x", name="write_file", arguments={"path": "/x"},
+        )],
+    ))
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="Error: permission denied")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=4,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        tool_guardrail_config=ToolGuardrailConfig(
+            warnings_enabled=False,
+            hard_stop_enabled=False,
+        ),
+    ))
+
+    assert result.stop_reason == "max_iterations"
+    # Tool was called every iteration — guardrail did not block anything.
+    assert tools.execute.await_count == 4
