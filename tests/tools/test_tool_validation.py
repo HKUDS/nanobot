@@ -15,6 +15,7 @@ from nanobot.agent.tools import (
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.shell import ExecTool
+from nanobot.config.schema import Config
 
 
 class SampleTool(Tool):
@@ -584,6 +585,92 @@ async def test_exec_timeout_capped_at_max() -> None:
     tool = ExecTool()
     # Should not raise — just clamp to 600
     result = await tool.execute(command="echo ok", timeout=9999)
+    assert "Exit code: 0" in result
+
+
+def test_exec_config_accepts_zero_timeout() -> None:
+    config = Config.model_validate({"tools": {"exec": {"timeout": 0}}})
+
+    assert config.tools.exec.timeout == 0
+
+
+def test_exec_config_accepts_timeout_above_per_call_cap() -> None:
+    config = Config.model_validate({"tools": {"exec": {"timeout": 3600}}})
+
+    assert config.tools.exec.timeout == 3600
+
+
+def test_exec_config_accepts_idle_timeout() -> None:
+    config = Config.model_validate({"tools": {"exec": {"idleTimeout": 120}}})
+
+    assert config.tools.exec.idle_timeout == 120
+
+
+def test_exec_config_timeout_above_per_call_cap_is_not_clamped() -> None:
+    tool = ExecTool(timeout=3600)
+
+    assert tool._resolve_timeouts(timeout=None) == (3600, 300)
+
+
+def test_exec_config_zero_disables_hard_timeout() -> None:
+    tool = ExecTool(timeout=0)
+
+    assert tool._resolve_timeouts(timeout=None) == (None, 300)
+
+
+def test_exec_idle_timeout_can_be_disabled() -> None:
+    tool = ExecTool(timeout=0, idle_timeout=0)
+
+    assert tool._resolve_timeouts(timeout=None) == (None, None)
+
+
+def test_exec_per_call_timeout_remains_capped() -> None:
+    tool = ExecTool(timeout=3600)
+
+    assert tool._resolve_timeouts(timeout=9999) == (600, 300)
+
+
+def test_exec_per_call_zero_does_not_disable_timeout() -> None:
+    tool = ExecTool(timeout=0)
+
+    assert tool._resolve_timeouts(timeout=0) == (600, 300)
+
+
+async def test_exec_idle_timeout_kills_silent_command(tmp_path) -> None:
+    script_file = tmp_path / "silent.py"
+    script_file.write_text("import time\ntime.sleep(2)\n", encoding="utf-8")
+    command = (
+        subprocess.list2cmdline([sys.executable, str(script_file)])
+        if sys.platform == "win32"
+        else f"{shlex.quote(sys.executable)} {shlex.quote(str(script_file))}"
+    )
+    tool = ExecTool(timeout=10, idle_timeout=1)
+
+    result = await tool.execute(command=command)
+
+    assert "produced no output for 1 seconds" in result
+
+
+async def test_exec_idle_timeout_allows_active_long_task(tmp_path) -> None:
+    script_file = tmp_path / "active_output.py"
+    script_file.write_text(
+        "import time\n"
+        "print('start', flush=True)\n"
+        "time.sleep(0.5)\n"
+        "print('done', flush=True)\n",
+        encoding="utf-8",
+    )
+    command = (
+        subprocess.list2cmdline([sys.executable, str(script_file)])
+        if sys.platform == "win32"
+        else f"{shlex.quote(sys.executable)} {shlex.quote(str(script_file))}"
+    )
+    tool = ExecTool(timeout=10, idle_timeout=1)
+
+    result = await tool.execute(command=command)
+
+    assert "start" in result
+    assert "done" in result
     assert "Exit code: 0" in result
 
 

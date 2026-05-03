@@ -19,6 +19,14 @@ from nanobot.config.paths import get_media_dir
 _IS_WINDOWS = sys.platform == "win32"
 
 
+class _ExecHardTimeoutError(TimeoutError):
+    """Raised when a command exceeds its configured hard timeout."""
+
+
+class _ExecIdleTimeoutError(TimeoutError):
+    """Raised when a command stops producing output for too long."""
+
+
 @tool_parameters(
     tool_parameters_schema(
         command=StringSchema("The shell command to execute"),
@@ -26,8 +34,10 @@ _IS_WINDOWS = sys.platform == "win32"
         timeout=IntegerSchema(
             60,
             description=(
-                "Timeout in seconds. Increase for long-running commands "
-                "like compilation or installation (default 60, max 600)."
+                "Per-call timeout in seconds. Increase for long-running commands "
+                "like compilation or installation (default 60, max 600). Configure "
+                "tools.exec.timeout for longer default hard timeouts; tools.exec.idleTimeout "
+                "still kills commands that stop producing output."
             ),
             minimum=1,
             maximum=600,
@@ -41,6 +51,7 @@ class ExecTool(Tool):
     def __init__(
         self,
         timeout: int = 60,
+        idle_timeout: int = 300,
         working_dir: str | None = None,
         deny_patterns: list[str] | None = None,
         allow_patterns: list[str] | None = None,
@@ -50,6 +61,7 @@ class ExecTool(Tool):
         allowed_env_keys: list[str] | None = None,
     ):
         self.timeout = timeout
+        self.idle_timeout = idle_timeout
         self.working_dir = working_dir
         self.sandbox = sandbox
         self.deny_patterns = (deny_patterns or []) + [
@@ -80,8 +92,9 @@ class ExecTool(Tool):
     def name(self) -> str:
         return "exec"
 
-    _MAX_TIMEOUT = 600
+    _MAX_TOOL_TIMEOUT = 600
     _MAX_OUTPUT = 10_000
+    _STREAM_CHUNK_SIZE = 4096
 
     @property
     def description(self) -> str:
@@ -132,7 +145,7 @@ class ExecTool(Tool):
                 command = wrap_command(self.sandbox, command, workspace, cwd)
                 cwd = str(Path(workspace).resolve())
 
-        effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
+        hard_timeout, idle_timeout = self._resolve_timeouts(timeout)
         env = self._build_env()
 
         if self.path_append:
@@ -146,13 +159,17 @@ class ExecTool(Tool):
             process = await self._spawn(command, cwd, env)
 
             try:
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(),
-                    timeout=effective_timeout,
+                stdout, stderr = await self._communicate_with_timeouts(
+                    process,
+                    hard_timeout=hard_timeout,
+                    idle_timeout=idle_timeout,
                 )
-            except asyncio.TimeoutError:
+            except _ExecHardTimeoutError:
                 await self._kill_process(process)
-                return f"Error: Command timed out after {effective_timeout} seconds"
+                return f"Error: Command timed out after {hard_timeout} seconds"
+            except _ExecIdleTimeoutError:
+                await self._kill_process(process)
+                return f"Error: Command produced no output for {idle_timeout} seconds"
             except asyncio.CancelledError:
                 await self._kill_process(process)
                 raise
@@ -184,6 +201,157 @@ class ExecTool(Tool):
 
         except Exception as e:
             return f"Error executing command: {str(e)}"
+
+    def _resolve_timeouts(self, timeout: int | None) -> tuple[int | None, int | None]:
+        """Resolve configured and per-call timeouts.
+
+        The config-level timeout may be larger than the tool-call cap, and 0
+        disables timeout entirely.  Explicit per-call timeouts remain capped by
+        the tool schema/runtime guard and cannot disable the timeout.  The idle
+        timeout is config-only and guards silent commands without punishing
+        active long-running tasks.
+        """
+        if timeout is None:
+            if self.timeout <= 0:
+                hard_timeout = None
+            else:
+                hard_timeout = self.timeout
+        elif timeout <= 0:
+            hard_timeout = self._MAX_TOOL_TIMEOUT
+        else:
+            hard_timeout = min(timeout, self._MAX_TOOL_TIMEOUT)
+
+        idle_timeout = self.idle_timeout if self.idle_timeout > 0 else None
+        return hard_timeout, idle_timeout
+
+    async def _communicate_with_timeouts(
+        self,
+        process: asyncio.subprocess.Process,
+        *,
+        hard_timeout: int | None,
+        idle_timeout: int | None,
+    ) -> tuple[bytes, bytes]:
+        """Read process output while enforcing hard and idle deadlines."""
+        stdout_stream = getattr(process, "stdout", None)
+        stderr_stream = getattr(process, "stderr", None)
+        if (
+            not isinstance(stdout_stream, asyncio.StreamReader)
+            or not isinstance(stderr_stream, asyncio.StreamReader)
+        ):
+            if hard_timeout is None:
+                return await process.communicate()
+            try:
+                return await asyncio.wait_for(process.communicate(), timeout=hard_timeout)
+            except asyncio.TimeoutError as exc:
+                raise _ExecHardTimeoutError from exc
+
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        last_activity = started_at
+        hard_deadline = started_at + hard_timeout if hard_timeout is not None else None
+        stdout_chunks: list[bytes] = []
+        stderr_chunks: list[bytes] = []
+        queue: asyncio.Queue[tuple[str, bytes, BaseException | None]] = asyncio.Queue()
+        live_streams = {"stdout", "stderr"}
+
+        async def _read_stream(label: str, stream: asyncio.StreamReader) -> None:
+            try:
+                while True:
+                    data = await stream.read(self._STREAM_CHUNK_SIZE)
+                    await queue.put((label, data, None))
+                    if not data:
+                        break
+            except Exception as exc:
+                await queue.put((label, b"", exc))
+
+        readers = [
+            asyncio.create_task(_read_stream("stdout", stdout_stream)),
+            asyncio.create_task(_read_stream("stderr", stderr_stream)),
+        ]
+
+        try:
+            while live_streams:
+                now = loop.time()
+                wait_timeout: float | None = None
+
+                if hard_deadline is not None:
+                    hard_remaining = hard_deadline - now
+                    if hard_remaining <= 0:
+                        raise _ExecHardTimeoutError
+                    wait_timeout = hard_remaining
+
+                if idle_timeout is not None:
+                    idle_remaining = (last_activity + idle_timeout) - now
+                    if idle_remaining <= 0:
+                        raise _ExecIdleTimeoutError
+                    wait_timeout = (
+                        idle_remaining
+                        if wait_timeout is None
+                        else min(wait_timeout, idle_remaining)
+                    )
+
+                try:
+                    label, data, error = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=wait_timeout,
+                    )
+                except asyncio.TimeoutError as exc:
+                    now = loop.time()
+                    if hard_deadline is not None and now >= hard_deadline:
+                        raise _ExecHardTimeoutError from exc
+                    raise _ExecIdleTimeoutError from exc
+
+                if error is not None:
+                    raise RuntimeError(f"Error reading process {label}: {error}") from error
+
+                if data:
+                    last_activity = loop.time()
+                    if label == "stdout":
+                        stdout_chunks.append(data)
+                    else:
+                        stderr_chunks.append(data)
+                else:
+                    live_streams.discard(label)
+
+            while process.returncode is None:
+                now = loop.time()
+                wait_timeout: float | None = None
+
+                if hard_deadline is not None:
+                    hard_remaining = hard_deadline - now
+                    if hard_remaining <= 0:
+                        raise _ExecHardTimeoutError
+                    wait_timeout = hard_remaining
+
+                if idle_timeout is not None:
+                    idle_remaining = (last_activity + idle_timeout) - now
+                    if idle_remaining <= 0:
+                        raise _ExecIdleTimeoutError
+                    wait_timeout = (
+                        idle_remaining
+                        if wait_timeout is None
+                        else min(wait_timeout, idle_remaining)
+                    )
+
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=wait_timeout)
+                except asyncio.TimeoutError as exc:
+                    now = loop.time()
+                    if hard_deadline is not None and now >= hard_deadline:
+                        raise _ExecHardTimeoutError from exc
+                    raise _ExecIdleTimeoutError from exc
+
+            return b"".join(stdout_chunks), b"".join(stderr_chunks)
+        finally:
+            for reader in readers:
+                if not reader.done():
+                    reader.cancel()
+            await asyncio.gather(*readers, return_exceptions=True)
+
+    def _resolve_timeout(self, timeout: int | None) -> int | None:
+        """Backward-compatible hard timeout resolver."""
+        hard_timeout, _ = self._resolve_timeouts(timeout)
+        return hard_timeout
 
     @staticmethod
     async def _spawn(
