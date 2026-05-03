@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -212,6 +213,7 @@ def test_exec_allows_benign_device_targets_inside_workspace(tmp_path, command):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX rm and /dev/null syntax")
 async def test_exec_3599_regression_rm_with_dev_null_redirect(tmp_path):
     """#3599: ``rm <ws-path> 2>/dev/null`` must succeed against the workspace guard."""
     workspace = tmp_path / "workspace"

@@ -240,9 +240,7 @@ class AgentRunner:
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
-        # Tracks repeated bypass attempts against the same outside-workspace
-        # target within this turn.  See ``repeated_workspace_violation_error``
-        # in ``nanobot.utils.runtime`` for the throttle policy.
+        # Per-turn throttle for repeated attempts against the same outside target.
         workspace_violation_counts: dict[str, int] = {}
         empty_content_retries = 0
         length_recovery_count = 0
@@ -808,10 +806,7 @@ class AgentRunner:
             payload = f"Error: {type(exc).__name__}: {exc}"
             handled = self._classify_violation(
                 raw_text=str(exc),
-                # Match the legacy behavior here: the exception branch never
-                # appended the "try a different approach" hint, even on the
-                # workspace-violation path -- preserve that for callers that
-                # eyeball the exact tool message.
+                # Preserve legacy exception payloads without the retry hint.
                 soft_payload=payload,
                 ssrf_payload=payload,
                 ssrf_error=exc,
@@ -854,17 +849,10 @@ class AgentRunner:
             detail = detail[:120] + "..."
         return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
 
-    # SSRF rejections remain a hard, non-recoverable safety boundary: a single
-    # successful internal-URL fetch can leak cloud metadata, so we never let
-    # the LLM "retry" with a different phrasing of the same target.
+    # SSRF remains fatal; workspace path boundaries are soft + throttled.
     _SSRF_MARKER: str = "internal/private url detected"
 
-    # Markers that identify "tried to access something outside the workspace".
-    # Unlike SSRF these are intentionally *non-fatal* (#3599 / #3605):
-    # - The structured error message itself tells the model not to bypass.
-    # - ``repeated_workspace_violation_error`` throttles the loop reported
-    #   in #3493 by escalating after two attempts against the same target.
-    # - max_iterations is the ultimate ceiling, so we never need to abort.
+    # Non-SSRF boundary markers returned to the LLM as recoverable tool errors.
     _WORKSPACE_VIOLATION_MARKERS: tuple[str, ...] = (
         "outside the configured workspace",
         "outside allowed directory",
@@ -880,12 +868,7 @@ class AgentRunner:
 
     @classmethod
     def _is_workspace_violation(cls, text: str) -> bool:
-        """True when *text* looks like *any* policy boundary rejection.
-
-        Kept as a public-ish hook for callers that need a yes/no signal
-        (logging, telemetry).  The runner itself uses the more specific
-        ``_is_ssrf_violation`` to decide what is fatal.
-        """
+        """True when *text* looks like any policy boundary rejection."""
         if not text:
             return False
         lowered = text.lower()
@@ -904,32 +887,14 @@ class AgentRunner:
         tool_call: ToolCallRequest,
         workspace_violation_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None] | None:
-        """Apply violation policy to a tool failure, or pass through.
-
-        Returns a fully-formed (payload, event, error) triple when *raw_text*
-        looks like a policy boundary rejection.  Returns ``None`` when the
-        caller should fall through to its generic per-branch handling.
-
-        - SSRF stays fatal -- a single successful internal fetch can leak
-          cloud metadata, so retrying with a different URL phrasing is
-          never acceptable.  We mutate ``event`` in place so the caller's
-          telemetry stays consistent.
-        - All other workspace-bound rejections become soft tool errors.
-          Each repeated attempt against the same outside target bumps a
-          per-turn counter; after the soft retry budget is exhausted we
-          replace the message body with an explicit "stop trying to bypass
-          the policy" instruction (see #3493 for the original bypass-loop
-          that motivated PR #3493's hard-abort, and #3599 / #3605 for why
-          the hard-abort backfired).
-        """
+        """Classify safety-boundary failures, or return ``None`` to pass through."""
         if self._is_ssrf_violation(raw_text):
             logger.warning(
                 "Tool {} blocked by SSRF guard; aborting turn: {}",
                 tool_call.name,
                 raw_text.replace("\n", " ").strip()[:200],
             )
-            event["detail"] = ("workspace_violation: "
-                               + raw_text.replace("\n", " ").strip())[:160]
+            event["detail"] = self._event_detail("workspace_violation: ", raw_text)
             return ssrf_payload, event, ssrf_error
 
         if self._is_workspace_violation(raw_text):
@@ -938,19 +903,24 @@ class AgentRunner:
                 tool_call.arguments,
                 workspace_violation_counts,
             )
-            event["detail"] = ("workspace_violation: "
-                               + raw_text.replace("\n", " ").strip())[:160]
+            event["detail"] = self._event_detail("workspace_violation: ", raw_text)
             if escalation is not None:
                 logger.warning(
                     "Tool {} hit workspace boundary repeatedly; escalating hint",
                     tool_call.name,
                 )
-                event["detail"] = ("workspace_violation_escalated: "
-                                   + raw_text.replace("\n", " ").strip())[:160]
+                event["detail"] = self._event_detail(
+                    "workspace_violation_escalated: ",
+                    raw_text,
+                )
                 return escalation, event, None
             return soft_payload, event, None
 
         return None
+
+    @staticmethod
+    def _event_detail(prefix: str, text: str, limit: int = 160) -> str:
+        return (prefix + text.replace("\n", " ").strip())[:limit]
 
     async def _emit_checkpoint(
         self,

@@ -19,11 +19,7 @@ from nanobot.config.paths import get_media_dir
 _IS_WINDOWS = sys.platform == "win32"
 
 
-# Appended to every workspace / safety guard rejection so the LLM is told
-# explicitly that this is a policy boundary (not a transient failure) and
-# that bypass loops will not change the answer.  The throttle in
-# ``nanobot.utils.runtime.repeated_workspace_violation_error`` upgrades
-# this further once the model keeps targeting the same path.
+# Policy note appended to recoverable workspace-boundary guard errors.
 _WORKSPACE_BOUNDARY_NOTE = (
     "\n\nNote: this is a hard policy boundary, not a transient failure. "
     "Do NOT retry with shell tricks (symlinks, base64 piping, alternative "
@@ -97,10 +93,7 @@ class ExecTool(Tool):
     _MAX_TIMEOUT = 600
     _MAX_OUTPUT = 10_000
 
-    # Kernel device files that are universally safe as stdio redirect targets
-    # (e.g. ``cmd 2>/dev/null``).  Without this allow-list the workspace guard
-    # treats them as ``path outside working dir`` and the LLM ends up unable
-    # to silence stderr inside the workspace (#3599).
+    # Kernel device files safe as stdio redirect targets (#3599).
     _BENIGN_DEVICE_PATHS: frozenset[str] = frozenset({
         "/dev/null",
         "/dev/zero",
@@ -325,10 +318,7 @@ class ExecTool(Tool):
 
         from nanobot.security.network import contains_internal_url
         if contains_internal_url(cmd):
-            # SSRF: stay short and direct.  The runner classifies this
-            # marker as a hard, non-recoverable boundary, so the
-            # _WORKSPACE_BOUNDARY_NOTE policy text doesn't apply here --
-            # we don't want the model to retry at all.
+            # SSRF stays fatal in the runner, so keep this marker direct.
             return "Error: Command blocked by safety guard (internal/private URL detected)"
 
         if self.restrict_to_workspace:
@@ -371,15 +361,7 @@ class ExecTool(Tool):
 
     @classmethod
     def _is_benign_device_path(cls, path: str) -> bool:
-        """Return True when *path* is a kernel device file we should never block.
-
-        Treats ``/dev/null``, the standard streams, ``/dev/random``, etc. as
-        always-safe targets so that idiomatic stdio plumbing such as
-        ``cmd 2>/dev/null`` or ``echo done >/dev/stderr`` is not flagged as a
-        workspace violation regardless of the configured working directory.
-        Also accepts ``/dev/fd/N`` because those are per-process aliases for
-        already-open file descriptors and never escape the workspace.
-        """
+        """Return True for kernel device files that should never be workspace-blocked."""
         if path in cls._BENIGN_DEVICE_PATHS:
             return True
         return path.startswith("/dev/fd/")

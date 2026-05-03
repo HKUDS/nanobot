@@ -12,12 +12,7 @@ from nanobot.utils.helpers import stringify_text_blocks
 
 _MAX_REPEAT_EXTERNAL_LOOKUPS = 2
 
-# Workspace-violation throttle: how many times the LLM is allowed to bump
-# against the same outside-workspace target *within a single turn* before the
-# tool result is escalated with a hard "stop trying to bypass the policy"
-# instruction.  Two free attempts give the model room to e.g. read_file then
-# fall back to exec without immediately escalating; the third attempt at the
-# same target is treated as a clear bypass loop.
+# Third same-target workspace violation in a turn escalates to "stop retrying".
 _MAX_REPEAT_WORKSPACE_VIOLATIONS = 2
 
 EMPTY_FINAL_RESPONSE_MESSAGE = (
@@ -107,29 +102,7 @@ def repeated_external_lookup_error(
     )
 
 
-# --- Workspace-violation throttle --------------------------------------------
-#
-# When ``restrict_to_workspace`` is on and the LLM tries to read or exec
-# something outside of the workspace, we want to *tell* the model that it
-# hit a hard policy boundary -- not silently abort the whole turn and not
-# allow it to spin forever swapping ``read_file`` for ``exec cat`` for
-# ``python -c open(...)`` (the actual loop reported in #3493).  The strategy
-# is two-fold:
-#
-# 1. Each individual guard error already includes structured instructions
-#    that tell the model "don't try to bypass this; ask the user for help".
-# 2. We additionally count how many times the *same outside target* has
-#    been refused within the current turn.  After two free attempts the
-#    third refusal swaps in a much more forceful message that quotes the
-#    target path and explicitly orders the model to stop and surface the
-#    boundary back to the user.  The model is still free to do something
-#    else (different target, different question) -- only the bypass loop
-#    is interrupted.
-#
-# This intentionally does *not* fatal-abort the turn: max_iterations and
-# the empty-final-response retries already provide the ultimate ceiling
-# for runaway loops, and aborting is what produced the silent-hang bug
-# in #3605 in the first place.
+# Workspace-boundary violations are soft errors, with per-target throttling.
 
 _OUTSIDE_PATH_PATTERN = re.compile(r"(?:^|[\s|>'\"])((?:/[^\s\"'>;|<]+)|(?:~[^\s\"'>;|<]+))")
 
@@ -138,14 +111,7 @@ def workspace_violation_signature(
     tool_name: str,
     arguments: dict[str, Any],
 ) -> str | None:
-    """Return a stable signature for the outside-workspace target a tool tried.
-
-    The signature is shared across tool names so that the LLM cannot bypass
-    the throttle by switching from ``read_file`` to ``exec cat`` to
-    ``python -c open(...)`` against the same path.  Returns ``None`` when
-    the call has no obvious outside target (e.g. SSRF rejections, deny
-    pattern hits, or tools whose argument shape we don't understand).
-    """
+    """Return a stable cross-tool signature for the outside-workspace target."""
     for key in ("path", "file_path", "target", "source", "destination"):
         val = arguments.get(key)
         if isinstance(val, str) and val.strip():
@@ -167,9 +133,9 @@ def workspace_violation_signature(
 def _normalize_violation_target(raw: str) -> str:
     """Normalize *raw* path so that equivalent spellings collide on the same key."""
     try:
-        normalized = str(Path(raw).expanduser().resolve())
+        normalized = Path(raw).expanduser().resolve().as_posix()
     except Exception:
-        normalized = raw
+        normalized = raw.replace("\\", "/")
     return f"violation:{normalized}".lower()
 
 
@@ -178,15 +144,7 @@ def repeated_workspace_violation_error(
     arguments: dict[str, Any],
     seen_counts: dict[str, int],
 ) -> str | None:
-    """Return an escalated error string after repeated bypass attempts.
-
-    Returns ``None`` while the LLM is still within the soft retry budget --
-    callers should fall back to the tool's own error message in that case.
-    Once the budget is exceeded, returns a hard "stop trying" instruction
-    that quotes the offending target.  Throttle state lives in
-    *seen_counts* (a per-turn dict), so the budget naturally resets across
-    turns without persisting LLM-controlled keys.
-    """
+    """Return an escalated error after repeated bypass attempts."""
     signature = workspace_violation_signature(tool_name, arguments)
     if signature is None:
         return None
