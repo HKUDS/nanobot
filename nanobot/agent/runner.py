@@ -831,14 +831,30 @@ class AgentRunner:
             detail = detail[:120] + "..."
         return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
 
-    # Markers identifying tool results that represent a workspace / safety boundary rejection.
+    # Markers identifying tool results that represent a *hard* workspace /
+    # safety boundary rejection -- only these abort the agent loop.
+    #
+    # We deliberately keep this list narrow (#3599 / #3605):
+    # - The first four come from explicit path-resolution checks in
+    #   ``filesystem.py`` and ``shell.py`` that cannot false-positive on user
+    #   payloads -- if you see them, the LLM truly tried to escape the
+    #   workspace.
+    # - "internal/private url detected" stays fatal because SSRF is a real
+    #   security boundary; allowing the LLM to "retry" would just let it
+    #   poke internal infra with a different URL phrasing.
+    # - "path traversal detected" and "path outside working dir" are
+    #   intentionally *not* listed: both come from the heuristic
+    #   ``_guard_command`` checks in ``shell.py`` which scan the raw command
+    #   string and routinely false-positive on legitimate constructs (e.g.
+    #   ``2>/dev/null`` redirects, quoted ``..`` arguments to ``sed`` /
+    #   ``find``, paths inside inline scripts).  Treating them as fatal
+    #   silently kills user turns (#3599) and prevents the agent from
+    #   self-correcting by trying a different approach (#3605).
     _WORKSPACE_BLOCK_MARKERS: tuple[str, ...] = (
         "outside the configured workspace",
         "outside allowed directory",
         "working_dir is outside",
         "working_dir could not be resolved",
-        "path traversal detected",
-        "path outside working dir",
         "internal/private url detected",
     )
 

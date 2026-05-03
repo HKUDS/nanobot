@@ -373,6 +373,79 @@ def test_is_workspace_violation_recognizes_ssrf_block():
     ) is False
 
 
+def test_is_workspace_violation_does_not_fatal_on_shell_guard_heuristics():
+    """#3599 / #3605 regression: shell guard heuristics must NOT be fatal.
+
+    ``path outside working dir`` and ``path traversal detected`` are produced
+    by best-effort string scans inside ``ExecTool._guard_command`` -- they
+    routinely false-positive on idiomatic constructs (``2>/dev/null``,
+    ``sed 's|x|../y|g'``) and should be surfaced to the LLM as recoverable
+    tool errors so it can switch tactics, not abort the whole turn.
+    """
+    from nanobot.agent.runner import AgentRunner
+
+    assert AgentRunner._is_workspace_violation(
+        "Error: Command blocked by safety guard (path outside working dir)"
+    ) is False
+    assert AgentRunner._is_workspace_violation(
+        "Error: Command blocked by safety guard (path traversal detected)"
+    ) is False
+
+
+@pytest.mark.asyncio
+async def test_runner_lets_llm_recover_from_shell_guard_path_outside():
+    """End-to-end: a guard-blocked exec is a soft tool error, not a turn-fatal.
+
+    Reporter scenario: a previous PR turned ``path outside working dir`` into
+    a turn-fatal RuntimeError, so when the false-positive guard fired the
+    user got no further iterations and (depending on channel) a silent hang.
+    After narrowing the marker list, the runner must hand the error back to
+    the LLM and let the next iteration succeed normally.
+    """
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    captured_second_call: list[dict] = []
+
+    async def chat_with_retry(*, messages, **kwargs):
+        if provider.chat_with_retry.await_count == 1:
+            return LLMResponse(
+                content="trying noisy cleanup",
+                tool_calls=[ToolCallRequest(
+                    id="call_blocked",
+                    name="exec",
+                    arguments={"command": "rm scratch.txt 2>/dev/null"},
+                )],
+            )
+        captured_second_call[:] = list(messages)
+        return LLMResponse(content="recovered final answer", tool_calls=[])
+
+    provider.chat_with_retry = AsyncMock(side_effect=chat_with_retry)
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(
+        return_value="Error: Command blocked by safety guard (path outside working dir)"
+    )
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    ))
+
+    assert provider.chat_with_retry.await_count == 2, (
+        "guard hit must NOT short-circuit the loop -- LLM should get a second turn"
+    )
+    assert result.stop_reason != "tool_error"
+    assert result.error is None
+    assert result.final_content == "recovered final answer"
+    assert result.tool_events and result.tool_events[0]["status"] == "error"
+    assert "workspace_violation" not in result.tool_events[0]["detail"]
+
+
 @pytest.mark.asyncio
 async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     from nanobot.agent.runner import AgentRunSpec, AgentRunner

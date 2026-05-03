@@ -83,6 +83,22 @@ class ExecTool(Tool):
     _MAX_TIMEOUT = 600
     _MAX_OUTPUT = 10_000
 
+    # Kernel device files that are universally safe as stdio redirect targets
+    # (e.g. ``cmd 2>/dev/null``).  Without this allow-list the workspace guard
+    # treats them as ``path outside working dir`` and the LLM ends up unable
+    # to silence stderr inside the workspace (#3599).
+    _BENIGN_DEVICE_PATHS: frozenset[str] = frozenset({
+        "/dev/null",
+        "/dev/zero",
+        "/dev/full",
+        "/dev/random",
+        "/dev/urandom",
+        "/dev/stdin",
+        "/dev/stdout",
+        "/dev/stderr",
+        "/dev/tty",
+    })
+
     @property
     def description(self) -> str:
         return (
@@ -300,8 +316,16 @@ class ExecTool(Tool):
             for raw in self._extract_absolute_paths(cmd):
                 try:
                     expanded = os.path.expandvars(raw.strip())
+                    # Match against the un-resolved path first.  On Linux,
+                    # /dev/stderr is a symlink to /proc/self/fd/2 and
+                    # ``Path.resolve()`` would mask the device-file intent.
+                    if self._is_benign_device_path(expanded):
+                        continue
                     p = Path(expanded).expanduser().resolve()
                 except Exception:
+                    continue
+
+                if self._is_benign_device_path(str(p)):
                     continue
 
                 media_path = get_media_dir().resolve()
@@ -314,6 +338,21 @@ class ExecTool(Tool):
                     return "Error: Command blocked by safety guard (path outside working dir)"
 
         return None
+
+    @classmethod
+    def _is_benign_device_path(cls, path: str) -> bool:
+        """Return True when *path* is a kernel device file we should never block.
+
+        Treats ``/dev/null``, the standard streams, ``/dev/random``, etc. as
+        always-safe targets so that idiomatic stdio plumbing such as
+        ``cmd 2>/dev/null`` or ``echo done >/dev/stderr`` is not flagged as a
+        workspace violation regardless of the configured working directory.
+        Also accepts ``/dev/fd/N`` because those are per-process aliases for
+        already-open file descriptors and never escape the workspace.
+        """
+        if path in cls._BENIGN_DEVICE_PATHS:
+            return True
+        return path.startswith("/dev/fd/")
 
     @staticmethod
     def _extract_absolute_paths(command: str) -> list[str]:
