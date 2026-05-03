@@ -285,6 +285,40 @@ def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
     assert find_by_name("volcengineCodingPlan").name == "volcengine_coding_plan"
     assert find_by_name("github-copilot") is not None
     assert find_by_name("github-copilot").name == "github_copilot"
+    assert find_by_name("longcat") is not None
+    assert find_by_name("longcat").name == "longcat"
+
+
+def test_config_explicit_longcat_provider_resolves_provider_name():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "longcat",
+                    "model": "LongCat-Flash-Chat",
+                }
+            },
+            "providers": {
+                "longcat": {
+                    "apiKey": "test-key",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "longcat"
+    assert config.get_api_base() == "https://api.longcat.chat/openai/v1"
+
+
+def test_config_auto_detects_longcat_from_model_keyword():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "longcat/LongCat-Flash-Chat"}},
+            "providers": {"longcat": {"apiKey": "test-key"}},
+        }
+    )
+
+    assert config.get_provider_name() == "longcat"
 
 
 def test_config_explicit_xiaomi_mimo_provider_uses_default_api_base():

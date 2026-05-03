@@ -94,7 +94,7 @@ def test_exec_blocks_writes_to_history_jsonl(command):
     tool = ExecTool()
     result = tool._guard_command(command, "/tmp")
     assert result is not None
-    assert "dangerous pattern" in result.lower()
+    assert "deny pattern filter" in result.lower()
 
 
 @pytest.mark.parametrize(

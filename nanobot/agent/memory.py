@@ -7,6 +7,7 @@ import json
 import os
 import re
 import weakref
+from contextlib import suppress
 import tiktoken
 from datetime import datetime
 from pathlib import Path
@@ -296,10 +297,8 @@ class MemoryStore:
     def _next_cursor(self) -> int:
         """Read the current cursor counter and return the next value."""
         if self._cursor_file.exists():
-            try:
+            with suppress(ValueError, OSError):
                 return int(self._cursor_file.read_text(encoding="utf-8").strip()) + 1
-            except (ValueError, OSError):
-                pass
         # Fast path: trust the tail when intact.  Otherwise scan the whole
         # file and take ``max`` — that stays correct even if the monotonic
         # invariant was broken by external writes.
@@ -328,7 +327,7 @@ class MemoryStore:
     def _read_entries(self) -> list[dict[str, Any]]:
         """Read all entries from history.jsonl."""
         entries: list[dict[str, Any]] = []
-        try:
+        with suppress(FileNotFoundError):
             with open(self.history_file, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -337,8 +336,7 @@ class MemoryStore:
                             entries.append(json.loads(line))
                         except json.JSONDecodeError:
                             continue
-        except FileNotFoundError:
-            pass
+
         return entries
 
     def _read_last_entry(self) -> dict[str, Any] | None:
@@ -374,14 +372,12 @@ class MemoryStore:
             # On Windows, opening a directory with O_RDONLY raises
             # PermissionError — skip the dir sync there (NTFS
             # journals metadata synchronously).
-            try:
+            with suppress(PermissionError):
                 fd = os.open(str(self.history_file.parent), os.O_RDONLY)
                 try:
                     os.fsync(fd)
                 finally:
                     os.close(fd)
-            except PermissionError:
-                pass  # Windows — directory fsync not supported
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise
@@ -390,10 +386,8 @@ class MemoryStore:
 
     def get_last_dream_cursor(self) -> int:
         if self._dream_cursor_file.exists():
-            try:
+            with suppress(ValueError, OSError):
                 return int(self._dream_cursor_file.read_text(encoding="utf-8").strip())
-            except (ValueError, OSError):
-                pass
         return 0
 
     def set_last_dream_cursor(self, cursor: int) -> None:
@@ -524,6 +518,7 @@ class Consolidator:
             channel=channel,
             chat_id=chat_id,
             session_summary=session_summary,
+            sender_id=None,
         )
         return estimate_prompt_tokens_chain(
             self.provider,
@@ -753,23 +748,28 @@ class Dream:
     def _build_tools(self) -> ToolRegistry:
         """Build a minimal tool registry for the Dream agent."""
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+        from nanobot.agent.tools.file_state import FileStates
         from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
 
         tools = ToolRegistry()
         workspace = self.store.workspace
         # Allow reading builtin skills for reference during skill creation
         extra_read = [BUILTIN_SKILLS_DIR] if BUILTIN_SKILLS_DIR.exists() else None
+        # Dream gets its own FileStates so its caches stay isolated from the
+        # main loop's sessions (issue #3571).
+        file_states = FileStates()
         tools.register(ReadFileTool(
             workspace=workspace,
             allowed_dir=workspace,
             extra_allowed_dirs=extra_read,
+            file_states=file_states,
         ))
-        tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace))
+        tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace, file_states=file_states))
         # write_file resolves relative paths from workspace root, but can only
         # write under skills/ so the prompt can safely use skills/<name>/SKILL.md.
         skills_dir = workspace / "skills"
         skills_dir.mkdir(parents=True, exist_ok=True)
-        tools.register(WriteFileTool(workspace=workspace, allowed_dir=skills_dir))
+        tools.register(WriteFileTool(workspace=workspace, allowed_dir=skills_dir, file_states=file_states))
         return tools
 
     # -- skill listing --------------------------------------------------------

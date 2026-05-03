@@ -581,6 +581,32 @@ async def test_reply_without_reply_in_thread_when_disabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_topic_reply_does_not_force_reply_in_thread_when_disabled() -> None:
+    """Topic replies must not create new Feishu topics when reply_to_message is False."""
+    channel = _make_feishu_channel(reply_to_message=False)
+
+    reply_resp = MagicMock()
+    reply_resp.success.return_value = True
+    channel._client.im.v1.message.reply.return_value = reply_resp
+
+    await channel.send(OutboundMessage(
+        channel="feishu",
+        chat_id="oc_abc",
+        content="hello",
+        metadata={
+            "message_id": "om_child456",
+            "chat_type": "group",
+            "thread_id": "om_root123",
+        },
+    ))
+
+    channel._client.im.v1.message.reply.assert_called_once()
+    call_args = channel._client.im.v1.message.reply.call_args
+    request = call_args[0][0]
+    assert request.request_body.reply_in_thread is not True
+
+
+@pytest.mark.asyncio
 async def test_reply_keeps_fallback_when_reply_fails() -> None:
     """Even with reply_to_message=True, fallback to create on reply failure."""
     channel = _make_feishu_channel(reply_to_message=True)

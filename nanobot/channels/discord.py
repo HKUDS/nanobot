@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -564,10 +565,8 @@ class DiscordChannel(BaseChannel):
         # Delayed working indicator (cosmetic — not tied to subagent lifecycle)
         async def _delayed_working_emoji() -> None:
             await asyncio.sleep(self.config.working_emoji_delay)
-            try:
+            with suppress(Exception):
                 await message.add_reaction(self.config.working_emoji)
-            except Exception:
-                pass
 
         self._working_emoji_tasks[channel_id] = asyncio.create_task(_delayed_working_emoji())
 
@@ -771,10 +770,8 @@ class DiscordChannel(BaseChannel):
         if task is None:
             return
         task.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
     async def _clear_reactions(self, chat_id: str) -> None:
         """Remove all pending reactions after bot replies."""
@@ -788,10 +785,8 @@ class DiscordChannel(BaseChannel):
             return
         bot_user = self._client.user if self._client else None
         for emoji in (self.config.read_receipt_emoji, self.config.working_emoji):
-            try:
+            with suppress(Exception):
                 await msg_obj.remove_reaction(emoji, bot_user)
-            except Exception:
-                pass
 
     async def _cancel_all_typing(self) -> None:
         """Stop all typing tasks."""

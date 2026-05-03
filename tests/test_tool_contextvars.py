@@ -49,7 +49,16 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
     release = asyncio.Event()
 
     class _Manager:
-        async def spawn(self, *, task: str, label: str | None, origin_channel: str, origin_chat_id: str, session_key: str) -> str:
+        async def spawn(
+            self,
+            *,
+            task: str,
+            label: str | None,
+            origin_channel: str,
+            origin_chat_id: str,
+            session_key: str,
+            origin_message_id: str | None = None,
+        ) -> str:
             seen.append((origin_channel, origin_chat_id, session_key))
             return f"{origin_channel}:{origin_chat_id}:{task}"
 
@@ -147,7 +156,16 @@ async def test_spawn_tool_basic_set_context_and_execute() -> None:
     seen: list[tuple[str, str, str]] = []
 
     class _Manager:
-        async def spawn(self, *, task, label, origin_channel, origin_chat_id, session_key):
+        async def spawn(
+            self,
+            *,
+            task,
+            label,
+            origin_channel,
+            origin_chat_id,
+            session_key,
+            origin_message_id=None,
+        ):
             seen.append((origin_channel, origin_chat_id, session_key))
             return f"ok: {task}"
 
@@ -165,7 +183,16 @@ async def test_spawn_tool_default_values_without_set_context() -> None:
     seen: list[tuple[str, str, str]] = []
 
     class _Manager:
-        async def spawn(self, *, task, label, origin_channel, origin_chat_id, session_key):
+        async def spawn(
+            self,
+            *,
+            task,
+            label,
+            origin_channel,
+            origin_chat_id,
+            session_key,
+            origin_message_id=None,
+        ):
             seen.append((origin_channel, origin_chat_id, session_key))
             return "ok"
 

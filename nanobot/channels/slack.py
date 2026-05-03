@@ -435,9 +435,9 @@ class SlackChannel(BaseChannel):
         marker = f"[{marker_type}: {name}]"
         url = str(file_info.get("url_private_download") or file_info.get("url_private") or "")
         if not url:
-            return None, f"[{marker_type}: {name}: missing download url]"
+            return None, self._download_failure_marker(marker_type, name, "missing download url")
         if not self.config.bot_token:
-            return None, f"[{marker_type}: {name}: missing bot token]"
+            return None, self._download_failure_marker(marker_type, name, "missing bot token")
 
         filename = safe_filename(f"{file_id}_{name}")
         path = Path(get_media_dir("slack")) / filename
@@ -454,7 +454,14 @@ class SlackChannel(BaseChannel):
             return str(path), marker
         except Exception as e:
             logger.warning("Failed to download Slack file {}: {}", file_id, e)
-            return None, f"[{marker_type}: {name}: download failed]"
+            return None, self._download_failure_marker(marker_type, name, "download failed")
+
+    @staticmethod
+    def _download_failure_marker(marker_type: str, name: str, reason: str) -> str:
+        return (
+            f"[{marker_type}: {name}: {reason}; not available to nanobot. "
+            "Check Slack files:read scope, reinstall the Slack app, and ensure the bot can access the file.]"
+        )
 
     @staticmethod
     def _looks_like_html_download(response: httpx.Response) -> bool:

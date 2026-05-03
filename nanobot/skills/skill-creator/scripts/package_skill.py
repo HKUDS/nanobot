@@ -12,25 +12,23 @@ Example:
 
 import sys
 import zipfile
+from contextlib import suppress
 from pathlib import Path
 
 from quick_validate import validate_skill
 
 
 def _is_within(path: Path, root: Path) -> bool:
-    try:
+    with suppress(ValueError):
         path.relative_to(root)
         return True
-    except ValueError:
-        return False
+    return False
 
 
 def _cleanup_partial_archive(skill_filename: Path) -> None:
-    try:
-        if skill_filename.exists():
+    if skill_filename.exists():
+        with suppress(OSError):
             skill_filename.unlink()
-    except OSError:
-        pass
 
 
 def package_skill(skill_path, output_dir=None):

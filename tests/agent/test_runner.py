@@ -352,6 +352,27 @@ async def test_runner_stops_on_workspace_violation_without_fail_on_tool_error():
     ]
 
 
+def test_is_workspace_violation_recognizes_ssrf_block():
+    """Internal/private URL block must be classified as a fatal workspace violation.
+
+    Regression guard: the deny/allowlist filter messages were intentionally split
+    out of `_WORKSPACE_BLOCK_MARKERS` so the LLM can retry, but SSRF rejections
+    are a hard security boundary and must remain fatal.
+    """
+    from nanobot.agent.runner import AgentRunner
+
+    ssrf_msg = "Error: Command blocked by safety guard (internal/private URL detected)"
+    assert AgentRunner._is_workspace_violation(ssrf_msg) is True
+
+    # Sanity: deny/allowlist filter messages are deliberately *not* fatal.
+    assert AgentRunner._is_workspace_violation(
+        "Error: Command blocked by deny pattern filter"
+    ) is False
+    assert AgentRunner._is_workspace_violation(
+        "Error: Command blocked by allowlist filter (not in allowlist)"
+    ) is False
+
+
 @pytest.mark.asyncio
 async def test_runner_persists_large_tool_results_for_follow_up_calls(tmp_path):
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
@@ -970,6 +991,48 @@ async def test_loop_stream_filter_handles_think_only_prefix_without_crashing(tmp
     assert final_content == "Hello"
     assert deltas == ["Hello"]
     assert endings == [False]
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_filter_hides_partial_trailing_think_prefix(tmp_path):
+    loop = _make_loop(tmp_path)
+    deltas: list[str] = []
+
+    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+        await on_content_delta("Hello <thin")
+        await on_content_delta("k>hidden</think>World")
+        return LLMResponse(content="Hello <think>hidden</think>World", tool_calls=[], usage={})
+
+    loop.provider.chat_stream_with_retry = chat_stream_with_retry
+
+    async def on_stream(delta: str) -> None:
+        deltas.append(delta)
+
+    final_content, _, _, _, _ = await loop._run_agent_loop([], on_stream=on_stream)
+
+    assert final_content == "Hello World"
+    assert deltas == ["Hello", " World"]
+
+
+@pytest.mark.asyncio
+async def test_loop_stream_filter_hides_complete_trailing_think_tag(tmp_path):
+    loop = _make_loop(tmp_path)
+    deltas: list[str] = []
+
+    async def chat_stream_with_retry(*, on_content_delta, **kwargs):
+        await on_content_delta("Hello <think>")
+        await on_content_delta("hidden</think>World")
+        return LLMResponse(content="Hello <think>hidden</think>World", tool_calls=[], usage={})
+
+    loop.provider.chat_stream_with_retry = chat_stream_with_retry
+
+    async def on_stream(delta: str) -> None:
+        deltas.append(delta)
+
+    final_content, _, _, _, _ = await loop._run_agent_loop([], on_stream=on_stream)
+
+    assert final_content == "Hello World"
+    assert deltas == ["Hello", " World"]
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections import deque
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -330,10 +331,8 @@ class MochatChannel(BaseChannel):
         await self._cancel_delay_timers()
 
         if self._socket:
-            try:
+            with suppress(Exception):
                 await self._socket.disconnect()
-            except Exception:
-                pass
             self._socket = None
 
         if self._cursor_save_task:
@@ -460,10 +459,8 @@ class MochatChannel(BaseChannel):
             return True
         except Exception as e:
             logger.error("Failed to connect Mochat websocket: {}", e)
-            try:
+            with suppress(Exception):
                 await client.disconnect()
-            except Exception:
-                pass
             self._socket = None
             return False
 

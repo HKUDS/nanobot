@@ -63,6 +63,7 @@ IMAP_PASSWORD=your-password-here
 | `byteplus` | LLM (VolcEngine international, pay-per-use) | [Coding Plan](https://www.byteplus.com/en/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [byteplus.com](https://www.byteplus.com) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `azure_openai` | LLM (Azure OpenAI) | [portal.azure.com](https://portal.azure.com) |
+| `bedrock` | LLM (AWS Bedrock Converse, Claude/Nova/Llama/etc.) | [aws.amazon.com/bedrock](https://aws.amazon.com/bedrock/) |
 | `openai` | LLM + Voice transcription (Whisper) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + Voice transcription (Whisper, default) | [console.groq.com](https://console.groq.com) |
@@ -75,6 +76,7 @@ IMAP_PASSWORD=your-password-here
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `mimo` | LLM (MiMo) | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
+| `longcat` | LLM (LongCat) | [longcat.chat](https://longcat.chat/platform/docs/zh/) |
 | `ollama` | LLM (local, Ollama) | — |
 | `lm_studio` | LLM (local, LM Studio) | — |
 | `mistral` | LLM | [docs.mistral.ai](https://docs.mistral.ai/) |
@@ -84,6 +86,183 @@ IMAP_PASSWORD=your-password-here
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
 | `qianfan` | LLM (Baidu Qianfan) | [cloud.baidu.com](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |
+
+<details>
+<summary><b>AWS Bedrock (Converse API)</b></summary>
+
+Bedrock uses the native `bedrock-runtime` Converse API, so it can call Bedrock model IDs such as Claude Opus 4.7, Claude Sonnet, Amazon Nova, Meta Llama, Mistral, Qwen, and other models that support Converse. It supports normal chat, streaming, tool calling, tool results, token usage, and Bedrock error metadata.
+
+This provider is for Bedrock's native Converse API, not Bedrock's OpenAI-compatible `/openai/v1` endpoint. For OpenAI-compatible Bedrock models, you can still use `custom` if you specifically want that API surface.
+
+**1. Configure credentials**
+
+Use the normal AWS credential chain (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, an AWS profile, or an IAM role). The IAM identity needs:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "bedrock:InvokeModel",
+    "bedrock:InvokeModelWithResponseStream"
+  ],
+  "Resource": "*"
+}
+```
+
+You can also set `providers.bedrock.apiKey` to a Bedrock API key; nanobot exports it as `AWS_BEARER_TOKEN_BEDROCK` for the AWS SDK.
+
+Credential options:
+
+- **AWS CLI/default profile**: leave `apiKey` and `profile` empty, then run `aws configure` or provide `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.
+- **Named AWS profile**: set `profile` to a profile from `~/.aws/config` or `~/.aws/credentials`.
+- **IAM role**: on EC2/ECS/Lambda, leave `apiKey` and `profile` empty and attach a role with Bedrock permissions.
+- **Bedrock API key**: set `apiKey` or `AWS_BEARER_TOKEN_BEDROCK`; `profile` can stay `null`.
+
+**2. Minimal config**
+
+For a non-Anthropic model such as Amazon Nova:
+
+```json
+{
+  "providers": {
+    "bedrock": {
+      "region": "us-east-1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "bedrock",
+      "model": "bedrock/amazon.nova-lite-v1:0",
+      "reasoningEffort": null
+    }
+  }
+}
+```
+
+With a Bedrock API key:
+
+```json
+{
+  "providers": {
+    "bedrock": {
+      "region": "us-east-1",
+      "apiKey": "${AWS_BEARER_TOKEN_BEDROCK}"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "bedrock",
+      "model": "bedrock/amazon.nova-lite-v1:0",
+      "reasoningEffort": null
+    }
+  }
+}
+```
+
+With a named AWS profile:
+
+```json
+{
+  "providers": {
+    "bedrock": {
+      "region": "us-east-1",
+      "profile": "my-bedrock-profile"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "bedrock",
+      "model": "bedrock/amazon.nova-lite-v1:0"
+    }
+  }
+}
+```
+
+**3. Claude Opus 4.7 example**
+
+```json
+{
+  "providers": {
+    "bedrock": {
+      "region": "us-east-1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "bedrock",
+      "model": "bedrock/global.anthropic.claude-opus-4-7",
+      "reasoningEffort": "medium",
+      "maxTokens": 8192
+    }
+  }
+}
+```
+
+For regional routing, use one of Bedrock's inference IDs, for example `bedrock/us.anthropic.claude-opus-4-7`, `bedrock/eu.anthropic.claude-opus-4-7`, or `bedrock/jp.anthropic.claude-opus-4-7`.
+
+Claude Opus 4.7 does not accept `temperature`, `top_p`, or `top_k`; nanobot omits `temperature` automatically for this model. If `reasoningEffort` is set to `low`, `medium`, `high`, `max`, or `adaptive`, nanobot sends Bedrock's adaptive thinking parameter.
+
+Anthropic models on Bedrock can also require Anthropic use-case registration and are subject to Anthropic-supported country/region restrictions. If Claude fails with a `ValidationException` about unsupported countries or regions, try a non-Anthropic Bedrock model such as Amazon Nova to verify the provider setup.
+
+**4. Model IDs**
+
+Use Bedrock model IDs or inference profile IDs with a `bedrock/` prefix in nanobot config. nanobot removes the prefix before calling AWS.
+
+Examples:
+
+- `bedrock/amazon.nova-micro-v1:0`
+- `bedrock/amazon.nova-lite-v1:0`
+- `bedrock/global.anthropic.claude-opus-4-7`
+- `bedrock/us.anthropic.claude-opus-4-7`
+- `bedrock/openai.gpt-oss-20b-1:0`
+- `bedrock/meta.llama...`
+- `bedrock/mistral...`
+
+Check the Bedrock console for the exact model ID and region availability. Some models require cross-region inference profile IDs such as `us.*`, `eu.*`, or `global.*`.
+
+**5. Advanced model fields**
+
+Model-specific fields can be supplied with `extraBody`; nanobot merges it into Converse `additionalModelRequestFields`:
+
+```json
+{
+  "providers": {
+    "bedrock": {
+      "region": "us-east-1",
+      "extraBody": {
+        "thinking": {
+          "type": "adaptive",
+          "effort": "medium",
+          "display": "summarized"
+        }
+      }
+    }
+  }
+}
+```
+
+Use `apiBase` only for a custom Bedrock Runtime endpoint URL, such as a VPC endpoint or proxy. It is not needed for normal AWS regions.
+
+Current scope: nanobot passes `messages`, `system`, `inferenceConfig`, `toolConfig`, and `additionalModelRequestFields`. Bedrock Prompt Management, Guardrails, `serviceTier`, and other top-level Converse options are not first-class config fields yet.
+
+**6. Quick checks**
+
+```bash
+# For AWS credential-chain usage:
+aws sts get-caller-identity
+
+# For API-key usage:
+export AWS_BEARER_TOKEN_BEDROCK="your-bedrock-api-key"
+export AWS_REGION="us-east-1"
+```
+
+Then run:
+
+```bash
+nanobot agent -m "Reply with one short sentence."
+```
+
+</details>
 
 
 <details>
@@ -158,6 +337,34 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
+
+<details>
+<summary><b>LongCat (OpenAI-compatible)</b></summary>
+
+LongCat is available through nanobot's built-in OpenAI-compatible provider flow.
+The default API base already points to `https://api.longcat.chat/openai/v1`, so you
+usually only need to set `apiKey`.
+
+```json
+{
+  "providers": {
+    "longcat": {
+      "apiKey": "${LONGCAT_API_KEY}"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "longcat",
+      "model": "LongCat-Flash-Chat"
+    }
+  }
+}
+```
+
+Official model names include `LongCat-Flash-Chat`, `LongCat-Flash-Thinking`,
+`LongCat-Flash-Thinking-2601`, and `LongCat-Flash-Lite`.
 
 </details>
 

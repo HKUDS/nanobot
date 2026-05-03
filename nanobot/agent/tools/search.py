@@ -5,6 +5,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, TypeVar
 
@@ -92,10 +93,8 @@ class _SearchTool(_FsTool):
 
     def _display_path(self, target: Path, root: Path) -> str:
         if self._workspace:
-            try:
+            with suppress(ValueError):
                 return target.relative_to(self._workspace).as_posix()
-            except ValueError:
-                pass
         return target.relative_to(root).as_posix()
 
     def _iter_files(self, root: Path) -> Iterable[Path]:

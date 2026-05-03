@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -752,12 +753,10 @@ class AgentRunner:
         prepare_call = getattr(spec.tools, "prepare_call", None)
         tool, params, prep_error = None, tool_call.arguments, None
         if callable(prepare_call):
-            try:
+            with suppress(Exception):
                 prepared = prepare_call(tool_call.name, tool_call.arguments)
                 if isinstance(prepared, tuple) and len(prepared) == 3:
                     tool, params, prep_error = prepared
-            except Exception:
-                pass
         if prep_error:
             event = {
                 "name": tool_call.name,
@@ -834,13 +833,13 @@ class AgentRunner:
 
     # Markers identifying tool results that represent a workspace / safety boundary rejection.
     _WORKSPACE_BLOCK_MARKERS: tuple[str, ...] = (
-        "blocked by safety guard",
         "outside the configured workspace",
         "outside allowed directory",
         "working_dir is outside",
         "working_dir could not be resolved",
         "path traversal detected",
         "path outside working dir",
+        "internal/private url detected",
     )
 
     @classmethod
