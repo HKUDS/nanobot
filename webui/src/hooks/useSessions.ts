@@ -84,7 +84,7 @@ export function useSessionHistory(key: string | null): {
   messages: UIMessage[];
   loading: boolean;
   error: string | null;
-  /** ``true`` when the last persisted message has ``tool_calls`` but no
+  /** ``true`` when the last persisted assistant turn has ``tool_calls`` but no
    *  final text yet — the model was still processing when the page loaded. */
   hasPendingToolCalls: boolean;
 } {
@@ -153,9 +153,11 @@ export function useSessionHistory(key: string | null): {
             },
           ];
         });
-        // Check if the last persisted message has tool_calls but no final
-        // text yet — the model was still processing when the page loaded.
-        const lastRaw = body.messages[body.messages.length - 1];
+        // Tool result rows can trail the assistant tool-call row while the turn
+        // is still running, so check the last conversational row.
+        const lastRaw = [...body.messages]
+          .reverse()
+          .find((m) => m.role === "user" || m.role === "assistant");
         const hasPending =
           lastRaw?.role === "assistant" &&
           Array.isArray(lastRaw.tool_calls) &&

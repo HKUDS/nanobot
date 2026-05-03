@@ -243,3 +243,28 @@ class TestToolEventProgress:
         assert outbound[-1].content == ""
         assert (outbound[-1].metadata or {}).get("_turn_end") is True
         assert outbound[-1].chat_id == "chat1"
+
+    @pytest.mark.asyncio
+    async def test_non_websocket_dispatch_does_not_publish_turn_end_marker(self, tmp_path: Path) -> None:
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Done", tool_calls=[]))
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        await loop._dispatch(InboundMessage(
+            channel="slack",
+            sender_id="u1",
+            chat_id="chat1",
+            content="say hello",
+        ))
+
+        outbound = []
+        while bus.outbound_size > 0:
+            outbound.append(await bus.consume_outbound())
+
+        assert len(outbound) == 1
+        assert outbound[0].content == "Done"
+        assert (outbound[0].metadata or {}).get("_turn_end") is not True
