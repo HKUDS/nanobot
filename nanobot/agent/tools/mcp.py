@@ -591,26 +591,46 @@ async def connect_mcp_servers(
             )
             return name, server_stack
 
-        except Exception as e:
-            hint = ""
-            text = str(e).lower()
-            if any(
-                marker in text
-                for marker in (
-                    "parse error",
-                    "invalid json",
-                    "unexpected token",
-                    "jsonrpc",
-                    "content-length",
+        except BaseException as e:
+            # Catch BaseException (not just Exception) so a CancelledError
+            # mid-connect still triggers cleanup. Without this the partially
+            # entered context managers — including any anyio task groups —
+            # are orphaned, which causes anyio's _deliver_cancellation to
+            # reschedule itself indefinitely in the event loop. See #935.
+            is_cancelled = isinstance(e, asyncio.CancelledError)
+            if not is_cancelled:
+                hint = ""
+                text = str(e).lower()
+                if any(
+                    marker in text
+                    for marker in (
+                        "parse error",
+                        "invalid json",
+                        "unexpected token",
+                        "jsonrpc",
+                        "content-length",
+                    )
+                ):
+                    hint = (
+                        " Hint: this looks like stdio protocol pollution. Make sure the MCP server writes "
+                        "only JSON-RPC to stdout and sends logs/debug output to stderr instead."
+                    )
+                logger.error("MCP server '{}': failed to connect: {}{}", name, e, hint)
+            # Shielded cleanup — anyio cancel scopes inside server_stack must
+            # finish closing, even if our enclosing task is itself being
+            # cancelled. Otherwise the leaked task groups keep firing
+            # _deliver_cancellation forever.
+            import anyio
+            try:
+                with anyio.CancelScope(shield=True):
+                    await server_stack.aclose()
+            except BaseException as cleanup_err:  # noqa: BLE001
+                logger.debug(
+                    "MCP server '{}': cleanup error after failed connect (ignored): {}",
+                    name, cleanup_err,
                 )
-            ):
-                hint = (
-                    " Hint: this looks like stdio protocol pollution. Make sure the MCP server writes "
-                    "only JSON-RPC to stdout and sends logs/debug output to stderr instead."
-                )
-            logger.error("MCP server '{}': failed to connect: {}{}", name, e, hint)
-            with suppress(Exception):
-                await server_stack.aclose()
+            if is_cancelled:
+                raise
             return name, None
 
     server_stacks: dict[str, AsyncExitStack] = {}
