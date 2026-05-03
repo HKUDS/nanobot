@@ -34,9 +34,15 @@ class LinePanel:
     """A custom panel that draws top and bottom straight borders,
     but omits vertical borders (left/right) and padding.
 
-    This ensures that when users select text in the terminal to copy, they do not
-    copy vertical border characters, massive blocks of trailing spaces, or indentations.
+    Paragraph indent: the first line of each plain-text paragraph
+    (a group of consecutive non-blank lines between blanks, with
+    no structural Rich styling) gets a 2-space indent.  Soft-wrapped
+    continuation lines and structural elements (headings, tables,
+    lists, code blocks, blockquotes, horizontal rules) stay flush.
     """
+
+    _INDENT = "  "  # 2-space paragraph indent
+    _LIST_MARKER_RE = __import__("re").compile(r"^[•\-\*]$|^\d+\.$")
 
     def __init__(self, renderable: RenderableType, title: str):
         self.renderable = renderable
@@ -46,33 +52,83 @@ class LinePanel:
         width = options.max_width
         title_text = f" {self.title} "
         fill = width - 2 - len(title_text)
-        
+
         border_style = Style(color="cyan", dim=True)
-        
+
         # Top border
         yield Segment(f"──{title_text}{'─' * max(0, fill)}\n", border_style)
 
         # Render the inner content, full width
         lines = console.render_lines(self.renderable, options)
-        
-        for line in lines:
-            # Strip trailing segments that are just empty spaces AND have no background color
-            while line and not line[-1].text.strip() and not (line[-1].style and line[-1].style.bgcolor):
-                line.pop()
-            
-            if line:
-                last_seg = line[-1]
-                # If the last segment doesn't have a background color, strip its trailing spaces
-                if not (last_seg.style and last_seg.style.bgcolor):
-                    last_text = last_seg.text.rstrip()
-                    if last_text:
-                        line[-1] = Segment(last_text, last_seg.style, last_seg.control)
-                    else:
-                        line.pop()
 
-            yield from line
-            yield Segment("\n")
-            
+        # Identify which groups of consecutive non-blank lines are "structural"
+        # (headings, tables, lists, code, blockquotes, rules) vs plain paragraphs.
+        # Only the first line of a plain-paragraph group gets an indent.
+        groups: list[list[list[Segment]]] = []
+        current: list[list[Segment]] = []
+        for line in lines:
+            text = "".join(s.text for s in line)
+            if not text.strip():
+                if current:
+                    groups.append(current)
+                    current = []
+            else:
+                current.append(line)
+        if current:
+            groups.append(current)
+
+        structural_first_lines: set[int] = set()
+        for group in groups:
+            ns_segs = [s for ln in group for s in ln if s.text.strip()]
+            has_color = any(s.style and s.style.color for s in ns_segs)
+            has_bgcolor = any(s.style and s.style.bgcolor for s in ns_segs)
+            all_dim = bool(ns_segs) and all(s.style and s.style.dim for s in ns_segs)
+
+            first_segs = [s for s in group[0] if s.text.strip()]
+            all_bold = bool(first_segs) and all(
+                s.style and s.style.bold for s in first_segs
+            )
+
+            has_list_marker = False
+            if first_segs:
+                s0 = first_segs[0]
+                mt = s0.text.strip()
+                if s0.style and s0.style.bold and len(mt) <= 3 and self._LIST_MARKER_RE.match(mt):
+                    has_list_marker = True
+
+            if has_color or has_bgcolor or all_dim or all_bold or has_list_marker:
+                structural_first_lines.add(id(group[0]))
+
+        # Emit lines, adding indent to plain-paragraph first lines
+        after_blank = True  # start of content = first paragraph
+        for line in lines:
+            text = "".join(s.text for s in line)
+            is_blank = not text.strip()
+
+            if not is_blank and after_blank and id(line) not in structural_first_lines:
+                line.insert(0, Segment(self._INDENT))
+            if is_blank:
+                after_blank = True
+                yield Segment("\n")
+            else:
+                after_blank = False
+
+                # Strip trailing whitespace segments (no bgcolor)
+                while line and not line[-1].text.strip() and not (line[-1].style and line[-1].style.bgcolor):
+                    line.pop()
+
+                if line:
+                    last = line[-1]
+                    if not (last.style and last.style.bgcolor):
+                        trimmed = last.text.rstrip()
+                        if trimmed:
+                            line[-1] = Segment(trimmed, last.style, last.control)
+                        else:
+                            line.pop()
+
+                yield from line
+                yield Segment("\n")
+
         # Bottom border
         yield Segment(f"{'─' * width}\n", border_style)
 
