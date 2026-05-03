@@ -221,7 +221,7 @@ def test_config_dump_excludes_oauth_provider_blocks():
 
 
 def test_provider_logout_openai_codex_removes_local_oauth_files(tmp_path, monkeypatch):
-    token_path = tmp_path / "auth" / "oauth.json"
+    token_path = tmp_path / "auth" / "codex.json"
     lock_path = token_path.with_suffix(".lock")
     token_path.parent.mkdir(parents=True, exist_ok=True)
     token_path.write_text("{}", encoding="utf-8")
@@ -237,13 +237,70 @@ def test_provider_logout_openai_codex_removes_local_oauth_files(tmp_path, monkey
 
 
 def test_provider_logout_openai_codex_succeeds_when_no_local_oauth_file(monkeypatch, tmp_path):
-    token_path = tmp_path / "auth" / "oauth.json"
+    token_path = tmp_path / "auth" / "codex.json"
     monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
 
     result = runner.invoke(app, ["provider", "logout", "openai-codex"])
 
     assert result.exit_code == 0
     assert "No local OAuth credentials found for OpenAI Codex" in result.stdout
+
+
+def test_provider_logout_github_copilot_removes_local_oauth_files(tmp_path, monkeypatch):
+    token_path = tmp_path / "auth" / "github-copilot.json"
+    lock_path = token_path.with_suffix(".lock")
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text("{}", encoding="utf-8")
+    lock_path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "github-copilot"])
+
+    assert result.exit_code == 0
+    assert not token_path.exists()
+    assert not lock_path.exists()
+    assert "Logged out from GitHub Copilot" in result.stdout
+
+
+def test_provider_logout_github_copilot_succeeds_when_no_local_oauth_file(monkeypatch, tmp_path):
+    token_path = tmp_path / "auth" / "github-copilot.json"
+    monkeypatch.setenv("OAUTH_CLI_KIT_TOKEN_PATH", str(token_path))
+
+    result = runner.invoke(app, ["provider", "logout", "github-copilot"])
+
+    assert result.exit_code == 0
+    assert "No local OAuth credentials found for GitHub Copilot" in result.stdout
+
+
+def test_provider_logout_rejects_unknown_provider():
+    result = runner.invoke(app, ["provider", "logout", "not-a-real-provider"])
+
+    assert result.exit_code == 1
+    assert "Unknown OAuth provider" in result.stdout
+
+
+def test_provider_logout_paths_resolve_to_expected_files():
+    from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
+    from oauth_cli_kit.storage import FileTokenStorage
+
+    from nanobot.providers.github_copilot_provider import get_storage
+
+    codex_storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
+    codex_path = codex_storage.get_token_path()
+    assert codex_path.name == "codex.json"
+    assert codex_path.parent.name == "auth"
+
+    gh_storage = get_storage()
+    gh_path = gh_storage.get_token_path()
+    assert gh_path.name == "github-copilot.json"
+    assert gh_path.parent.name == "auth"
+
+
+def test_provider_login_rejects_unknown_provider():
+    result = runner.invoke(app, ["provider", "login", "not-a-real-provider"])
+
+    assert result.exit_code == 1
+    assert "Unknown OAuth provider" in result.stdout
 
 
 def test_config_matches_explicit_ollama_prefix_without_api_key():
