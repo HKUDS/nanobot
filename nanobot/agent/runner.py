@@ -271,6 +271,7 @@ class AgentRunner:
         length_recovery_count = 0
         had_injections = False
         injection_cycles = 0
+        context: AgentHookContext | None = None
 
         for iteration in range(spec.max_iterations):
             try:
@@ -609,8 +610,10 @@ class AgentRunner:
             )
             if drained_after_max_iterations:
                 had_injections = True
-            if 'context' in dir():
-                await center.emit(AfterIteration(iteration=iteration, final_content=final_content, stop_reason=stop_reason, usage=dict(context.usage) if hasattr(context, 'usage') else {}, tool_calls=list(getattr(context, 'tool_calls', [])), tool_events=list(getattr(context, 'tool_events', [])), tool_results=list(getattr(context, 'tool_results', [])), error=getattr(context, 'error', None)), session)
+            if context is not None:
+                context.final_content = final_content
+                context.stop_reason = stop_reason
+                await center.emit(_make_after_iteration(context, iteration), session)
 
         return AgentRunResult(
             final_content=final_content,

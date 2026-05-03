@@ -41,11 +41,20 @@ def test_discover_returns_empty_dict_for_no_entry_points():
     assert result == {}
 
 
+def test_discover_with_none_enabled_loads_nothing():
+    handler = object()
+
+    with patch(_EP_TARGET, return_value=[_make_entry_point("my_plugin", handler)]):
+        result = discover_hook_plugins(enabled=None)
+
+    assert result == {}
+
+
 def test_discover_loads_single_plugin():
     handler = object()
 
     with patch(_EP_TARGET, return_value=[_make_entry_point("my_plugin", handler)]):
-        result = discover_hook_plugins()
+        result = discover_hook_plugins(enabled=["my_plugin"])
 
     assert result == {"my_plugin": handler}
 
@@ -57,7 +66,7 @@ def test_discover_loads_multiple_plugins():
         _EP_TARGET,
         return_value=[_make_entry_point("a", h1), _make_entry_point("b", h2)],
     ):
-        result = discover_hook_plugins()
+        result = discover_hook_plugins(enabled=["a", "b"])
 
     assert result == {"a": h1, "b": h2}
 
@@ -72,7 +81,7 @@ def test_discover_skips_failed_plugin_loads_others():
             _make_entry_point("ok", h2),
         ],
     ):
-        result = discover_hook_plugins()
+        result = discover_hook_plugins(enabled=["broken", "ok"])
 
     assert "broken" not in result
     assert result == {"ok": h2}
@@ -88,11 +97,13 @@ def test_register_discovered_registers_handler():
     handler = Mock(return_value=None)
     handler.hook_events = [(BeforeIteration, "guard")]
 
+    config = SimpleNamespace(hooks=SimpleNamespace(enabled_plugins=["testguard"]))
+
     with patch(
         _EP_TARGET,
         return_value=[_make_entry_point("testguard", handler)],
     ):
-        register_discovered(center)
+        register_discovered(center, config)
 
     external = center._external_handlers
     assert BeforeIteration in external
@@ -106,6 +117,8 @@ def test_register_discovered_registers_multiple_plugins():
     h2 = Mock(return_value=None)
     h2.hook_events = [(BeforeIteration, "observe")]
 
+    config = SimpleNamespace(hooks=SimpleNamespace(enabled_plugins=["g", "o"]))
+
     with patch(
         _EP_TARGET,
         return_value=[
@@ -113,7 +126,7 @@ def test_register_discovered_registers_multiple_plugins():
             _make_entry_point("o", h2),
         ],
     ):
-        register_discovered(center)
+        register_discovered(center, config)
 
     external = center._external_handlers
     assert external[BeforeIteration]["guard"] == [h1]
@@ -128,11 +141,13 @@ def test_register_discovered_plugin_subscribes_multiple_event_types():
         (AfterIteration, "observe"),
     ]
 
+    config = SimpleNamespace(hooks=SimpleNamespace(enabled_plugins=["multi"]))
+
     with patch(
         _EP_TARGET,
         return_value=[_make_entry_point("multi", handler)],
     ):
-        register_discovered(center)
+        register_discovered(center, config)
 
     external = center._external_handlers
     assert external[BeforeIteration]["guard"] == [handler]
@@ -146,6 +161,8 @@ def test_register_discovered_multiple_plugins_same_event():
     h2 = Mock(return_value=None)
     h2.hook_events = [(BeforeIteration, "observe")]
 
+    config = SimpleNamespace(hooks=SimpleNamespace(enabled_plugins=["p1", "p2"]))
+
     with patch(
         _EP_TARGET,
         return_value=[
@@ -153,7 +170,7 @@ def test_register_discovered_multiple_plugins_same_event():
             _make_entry_point("p2", h2),
         ],
     ):
-        register_discovered(center)
+        register_discovered(center, config)
 
     external = center._external_handlers
     assert external[BeforeIteration]["observe"] == [h1, h2]
@@ -189,7 +206,7 @@ def test_register_discovered_respects_enabled_plugins_allowlist():
     assert blocked not in external.get(BeforeIteration, {}).get("observe", [])
 
 
-def test_register_discovered_allowlist_none_allows_all():
+def test_register_discovered_allowlist_none_denies_all():
     center = HookCenter()
     h1 = Mock(return_value=None)
     h1.hook_events = [(BeforeIteration, "observe")]
@@ -207,11 +224,10 @@ def test_register_discovered_allowlist_none_allows_all():
     ):
         register_discovered(center, config)
 
-    external = center._external_handlers
-    assert external[BeforeIteration]["observe"] == [h1, h2]
+    assert center._external_handlers == {}
 
 
-def test_register_discovered_no_hooks_config_allows_all():
+def test_register_discovered_no_hooks_config_denies_all():
     center = HookCenter()
     handler = Mock(return_value=None)
     handler.hook_events = [(BeforeIteration, "observe")]
@@ -224,11 +240,10 @@ def test_register_discovered_no_hooks_config_allows_all():
     ):
         register_discovered(center, config)
 
-    external = center._external_handlers
-    assert external[BeforeIteration]["observe"] == [handler]
+    assert center._external_handlers == {}
 
 
-def test_register_discovered_no_config_allows_all():
+def test_register_discovered_no_config_denies_all():
     center = HookCenter()
     handler = Mock(return_value=None)
     handler.hook_events = [(BeforeIteration, "observe")]
@@ -239,8 +254,7 @@ def test_register_discovered_no_config_allows_all():
     ):
         register_discovered(center)
 
-    external = center._external_handlers
-    assert external[BeforeIteration]["observe"] == [handler]
+    assert center._external_handlers == {}
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +294,8 @@ def test_register_discovered_single_plugin_load_error_skips_and_continues():
     ok_handler = Mock(return_value=None)
     ok_handler.hook_events = [(BeforeExecuteTools, "transform")]
 
+    config = SimpleNamespace(hooks=SimpleNamespace(enabled_plugins=["bad", "good"]))
+
     with patch(
         _EP_TARGET,
         return_value=[
@@ -287,7 +303,7 @@ def test_register_discovered_single_plugin_load_error_skips_and_continues():
             _make_entry_point("good", ok_handler),
         ],
     ):
-        register_discovered(center)
+        register_discovered(center, config)
 
     external = center._external_handlers
     assert BeforeExecuteTools in external
@@ -316,11 +332,13 @@ def test_center_discover_delegates_to_register_discovered():
     handler = Mock(return_value=None)
     handler.hook_events = [(BeforeIteration, "guard")]
 
+    config = SimpleNamespace(hooks=SimpleNamespace(enabled_plugins=["p"]))
+
     with patch(
         _EP_TARGET,
         return_value=[_make_entry_point("p", handler)],
     ):
-        center.discover()
+        center.discover(config)
 
     external = center._external_handlers
     assert external[BeforeIteration]["guard"] == [handler]

@@ -120,7 +120,7 @@ Edit `~/.nanobot/config.json` to enable the plugin:
 }
 ```
 
-When `enabled_plugins` is set, **only** listed plugins are loaded. Without this key (or when set to `null`), all discovered plugins are loaded.
+When `enabled_plugins` is set, **only** listed plugins are loaded. Without this key (or when set to `null`), **no** discovered plugins are loaded — this is a default-deny security policy.
 
 ### 4. Verify
 
@@ -202,11 +202,11 @@ Internal handlers (built-in framework logic such as streaming and progress) alwa
 
 ## Security
 
-Hook plugin entry-point loading carries inherent security implications.  When the `nanobot gateway` starts, the `HookCenter` loads all hooks that appear in `hooks.enabled_plugins`.  Any hook plugin has **full access to the agent process** — all conversational data, in-memory state, filesystem access, and network access.
+Hook plugin entry-point loading carries inherent security implications.  When the `nanobot gateway` starts, the `HookCenter` loads **only** the hooks listed in `hooks.enabled_plugins`.  No plugins are loaded by default — you must explicitly opt in.  Any hook plugin has **full access to the agent process** — all conversational data, in-memory state, filesystem access, and network access.
 
 **Important controls:**
 
-- Set `hooks.enabled_plugins` to an explicit allowlist to control which plugins load.
+- Set `hooks.enabled_plugins` to an explicit allowlist to control which plugins load.  Plugins not in this list are skipped before their module-level code executes.
 - Audit your plugin dependencies.  Any installed hook package can execute arbitrary Python code at `ep.load()` time.
 - For high-security deployments, consider running nanobot in a sandboxed environment (`tools.restrictToWorkspace`, `tools.exec.sandbox: bwrap`).
 

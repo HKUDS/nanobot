@@ -32,6 +32,17 @@ class ChannelsConfig(Base):
     transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # Optional ISO-639-1 hint for audio transcription
 
 
+class HooksConfig(Base):
+    """Configuration for hook plugins.
+
+    Default-deny: when ``enabled_plugins`` is ``None`` (the default), no
+    external hook plugins are loaded.  Set to an explicit list of entry-point
+    names to opt in to loading discovered plugins.
+    """
+
+    enabled_plugins: list[str] | None = None
+
+
 class DreamConfig(Base):
     """Dream memory consolidation configuration."""
 

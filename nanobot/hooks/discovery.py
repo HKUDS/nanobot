@@ -25,16 +25,18 @@ if TYPE_CHECKING:
 def discover_hook_plugins(enabled: list[str] | None = None) -> dict[str, "HookHandler"]:
     """Scan ``entry_points(group="nanobot.hooks")`` and return ``{name: handler}``.
 
-    When *enabled* is provided, only plugins in the allowlist are loaded
-    (``ep.load()`` is called *after* the allowlist check).  Each entry
-    point is loaded independently — a single failed plugin does not
-    prevent other plugins from being discovered.
+    **Default-deny**: when *enabled* is ``None`` (the default), no plugins
+    are loaded.  Callers must pass an explicit allowlist to opt in to
+    loading discovered entry points.  ``ep.load()`` is called *after* the
+    allowlist check so blocked plugins never execute module-level code.
+    Each entry point is loaded independently — a single failed plugin does
+    not prevent other plugins from being discovered.
     """
     from importlib.metadata import entry_points
 
     plugins: dict[str, HookHandler] = {}
     for ep in entry_points(group="nanobot.hooks"):
-        if enabled is not None and ep.name not in enabled:
+        if enabled is None or ep.name not in enabled:
             logger.info("Hook plugin '{}' not in enabled_plugins, skipping", ep.name)
             continue
         try:

@@ -545,3 +545,128 @@ async def test_deny_abort_false_does_not_set_abort():
 
     assert isinstance(result, Deny)
     assert result.abort is False
+
+
+# ---------------------------------------------------------------------------
+# Guard exception handling
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_guard_exception_reraise_false_others_continue():
+    center = HookCenter()
+    session = center.create_session()
+
+    async def bad_guard(event):
+        raise RuntimeError("guard boom")
+
+    good_guard = Mock(return_value=None)
+
+    center.register(BeforeIteration, bad_guard, mode="guard")
+    center.register(BeforeIteration, good_guard, mode="guard")
+    event = BeforeIteration(iteration=0, messages=[])
+
+    result = await center.emit(event, session)
+
+    assert result is None
+    good_guard.assert_called_once_with(event)
+
+
+@pytest.mark.asyncio
+async def test_guard_exception_reraise_true_propagates():
+    center = HookCenter()
+    session = center.create_session()
+
+    async def bad_guard(event):
+        raise RuntimeError("guard propagate")
+
+    center.register_internal(
+        session, BeforeIteration, bad_guard, reraise=True, mode="guard"
+    )
+    event = BeforeIteration(iteration=0, messages=[])
+
+    with pytest.raises(RuntimeError, match="guard propagate"):
+        await center.emit(event, session)
+
+
+# ---------------------------------------------------------------------------
+# Transform exception handling
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_transform_exception_non_reraise_pipeline_continues():
+    center = HookCenter()
+    session = center.create_session()
+    events_seen: list[str] = []
+
+    async def bad_transform(event):
+        events_seen.append("bad")
+        raise RuntimeError("transform boom")
+
+    async def good_transform(event):
+        events_seen.append("good")
+        return None
+
+    center.register(BeforeIteration, bad_transform, mode="transform")
+    center.register(BeforeIteration, good_transform, mode="transform")
+    event = BeforeIteration(iteration=0, messages=[])
+
+    await center.emit(event, session)
+
+    assert events_seen == ["bad", "good"]
+
+
+# ---------------------------------------------------------------------------
+# finalize_content: Deny stops pipeline
+# ---------------------------------------------------------------------------
+
+
+def test_finalize_content_deny_stops_pipeline():
+    center = HookCenter()
+    session = center.create_session()
+
+    def deny_handler(c):
+        return Deny(reason="blocked")
+
+    def after_deny(c):
+        return "should not run"
+
+    center.register_internal(session, FinalizeContent, deny_handler, mode="transform")
+    center.register_internal(session, FinalizeContent, after_deny, mode="transform")
+
+    result = center.finalize_content("hello", session)
+    assert result == "hello"
+
+
+# ---------------------------------------------------------------------------
+# Independent sessions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_emit_independent_sessions():
+    center = HookCenter()
+    session_a = center.create_session()
+    session_b = center.create_session()
+
+    events_a: list[int] = []
+    events_b: list[int] = []
+
+    async def handler_a(event):
+        events_a.append(event.iteration)
+
+    async def handler_b(event):
+        events_b.append(event.iteration)
+
+    center.register_internal(session_a, BeforeIteration, handler_a, mode="observe")
+    center.register_internal(session_b, BeforeIteration, handler_b, mode="observe")
+
+    event_a = BeforeIteration(iteration=1, messages=[])
+    event_b = BeforeIteration(iteration=2, messages=[])
+
+    await center.emit(event_a, session_a)
+    await center.emit(event_b, session_b)
+
+    assert events_a == [1]
+    assert events_b == [2]
