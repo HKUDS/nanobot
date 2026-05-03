@@ -210,7 +210,7 @@ class AgentLoop:
                         "complexity": {
                             "type": "string",
                             "enum": ["simple", "complex"],
-                            "description": "simple = greeting, short question, acknowledgement, casual chat. complex = analysis, multi-step reasoning, research, writing, summarisation, anything requiring tool use.",
+                            "description": "simple = greeting, short question, acknowledgement, casual chat, factual enquiry. complex = user safety, analysis, multi-step reasoning,  anything requiring tool use.",
                         },
                     },
                     "required": ["complexity"],
