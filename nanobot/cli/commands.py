@@ -216,6 +216,29 @@ async def _print_interactive_progress_line(text: str, thinking: ThinkingSpinner 
         await _print_interactive_line(text)
 
 
+async def _maybe_print_interactive_progress(
+    msg: Any,
+    thinking: ThinkingSpinner | None,
+    channels_config: Any,
+) -> bool:
+    metadata = msg.metadata or {}
+    if metadata.get("_retry_wait"):
+        await _print_interactive_progress_line(msg.content, thinking)
+        return True
+
+    if not metadata.get("_progress"):
+        return False
+
+    is_tool_hint = metadata.get("_tool_hint", False)
+    if channels_config and is_tool_hint and not channels_config.send_tool_hints:
+        return True
+    if channels_config and not is_tool_hint and not channels_config.send_progress:
+        return True
+
+    await _print_interactive_progress_line(msg.content, thinking)
+    return True
+
+
 def _is_exit_command(command: str) -> bool:
     """Return True when input should end interactive chat."""
     return command.lower() in EXIT_COMMANDS
@@ -1127,15 +1150,11 @@ def agent(
                             turn_done.set()
                             continue
 
-                        if msg.metadata.get("_progress"):
-                            is_tool_hint = msg.metadata.get("_tool_hint", False)
-                            ch = agent_loop.channels_config
-                            if ch and is_tool_hint and not ch.send_tool_hints:
-                                pass
-                            elif ch and not is_tool_hint and not ch.send_progress:
-                                pass
-                            else:
-                                await _print_interactive_progress_line(msg.content, _thinking)
+                        if await _maybe_print_interactive_progress(
+                            msg,
+                            _thinking,
+                            agent_loop.channels_config,
+                        ):
                             continue
 
                         if not turn_done.is_set():

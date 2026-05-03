@@ -62,6 +62,7 @@
       "placeholderThread": "메시지를 입력하세요…",
       "placeholderHero": "무슨 생각을 하고 있나요?",
       "placeholderOpening": "새 채팅을 여는 중…",
+      "placeholderStreaming": "모델이 응답 중입니다…",
       "inputAria": "메시지 입력",
       "sendHint": "Enter로 전송 · Shift+Enter로 줄바꿈",
       "send": "메시지 보내기",

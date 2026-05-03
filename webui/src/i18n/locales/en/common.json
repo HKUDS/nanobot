@@ -62,6 +62,7 @@
       "placeholderThread": "Type your message…",
       "placeholderHero": "What's on your mind?",
       "placeholderOpening": "Opening a new chat…",
+      "placeholderStreaming": "Model is responding…",
       "inputAria": "Message input",
       "sendHint": "Enter to send · Shift+Enter for newline",
       "send": "Send message",
