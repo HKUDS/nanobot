@@ -330,6 +330,13 @@ def test_exec_guard_allows_dev_urandom(tmp_path) -> None:
     assert error is None
 
 
+def test_exec_guard_blocks_non_benign_dev_path(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command("cat /dev/sda", str(tmp_path))
+    assert error is not None
+    assert "path outside working dir" in error
+
+
 def test_exec_extract_absolute_paths_ignores_pipe_tilde() -> None:
     cmd = "python query.py --query '{job=\"app\"} |~ \"error\"'"
     paths = ExecTool._extract_absolute_paths(cmd)

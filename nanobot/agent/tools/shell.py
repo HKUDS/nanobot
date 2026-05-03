@@ -349,14 +349,11 @@ class ExecTool(Tool):
                     continue
 
                 media_path = get_media_dir().resolve()
-                dev_path = Path("/dev").resolve()
                 if (p.is_absolute()
                     and cwd_path not in p.parents
                     and p != cwd_path
                     and media_path not in p.parents
                     and p != media_path
-                    and dev_path not in p.parents
-                    and p != dev_path
                 ):
                     return (
                         "Error: Command blocked by safety guard (path outside working dir)"

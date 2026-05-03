@@ -1290,6 +1290,45 @@ async def test_streamed_flag_not_set_on_llm_error(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_streamed_flag_not_set_on_tool_error(tmp_path):
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.events import InboundMessage
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    tool_call_resp = LLMResponse(
+        content="checking metadata",
+        tool_calls=[ToolCallRequest(
+            id="call_ssrf",
+            name="exec",
+            arguments={"command": "curl http://169.254.169.254/latest/meta-data/"},
+        )],
+        usage={},
+    )
+    provider.chat_stream_with_retry = AsyncMock(return_value=tool_call_resp)
+
+    loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.tools.prepare_call = MagicMock(return_value=(None, {}, None))
+    loop.tools.execute = AsyncMock(return_value=(
+        "Error: Command blocked by safety guard (internal/private URL detected)"
+    ))
+
+    result = await loop._process_message(
+        InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="hi"),
+        on_stream=AsyncMock(),
+        on_stream_end=AsyncMock(),
+    )
+
+    assert result is not None
+    assert "internal/private URL detected" in result.content
+    assert not result.metadata.get("_streamed"), \
+        "_streamed must not be set when stop_reason is tool_error"
+
+
+@pytest.mark.asyncio
 async def test_next_turn_after_llm_error_keeps_turn_boundary(tmp_path):
     from nanobot.agent.loop import AgentLoop
     from nanobot.agent.runner import _PERSISTED_MODEL_ERROR_PLACEHOLDER
