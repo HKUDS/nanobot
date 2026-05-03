@@ -4,7 +4,7 @@ import asyncio
 import os
 import re
 import shutil
-from contextlib import AsyncExitStack, suppress
+from contextlib import AsyncExitStack
 from typing import Any
 
 import httpx
