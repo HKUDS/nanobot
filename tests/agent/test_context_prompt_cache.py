@@ -355,3 +355,142 @@ def test_customized_memory_md_is_injected(tmp_path) -> None:
 
     assert "# Memory\n\n## Long-term Memory" in prompt
     assert "User prefers dark mode" in prompt
+
+
+# ---------------------------------------------------------------------------
+# System prompt mtime cache
+# ---------------------------------------------------------------------------
+
+def test_cache_hit_returns_same_object(tmp_path) -> None:
+    """Back-to-back calls with no file changes must return the identical string."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt1 = builder.build_system_prompt(channel="telegram")
+    prompt2 = builder.build_system_prompt(channel="telegram")
+
+    assert prompt1 is prompt2, "expected cache hit — same object identity"
+
+
+def test_cache_miss_on_channel_change(tmp_path) -> None:
+    """Different channels produce different prompts and are cached independently."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt_tg = builder.build_system_prompt(channel="telegram")
+    prompt_cli = builder.build_system_prompt(channel="cli")
+
+    assert prompt_tg is not prompt_cli
+    assert "messaging app" in prompt_tg   # telegram format hint
+    assert "messaging app" not in prompt_cli
+
+    # Second call for each channel must be a cache hit
+    assert builder.build_system_prompt(channel="telegram") is prompt_tg
+    assert builder.build_system_prompt(channel="cli") is prompt_cli
+
+
+def test_cache_invalidated_on_soul_edit(tmp_path) -> None:
+    """Editing SOUL.md must produce a new prompt on the next call."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    soul_path = workspace / "SOUL.md"
+    soul_path.write_text("# Soul v1\n\nOriginal soul.", encoding="utf-8")
+    prompt1 = builder.build_system_prompt()
+    assert "Original soul" in prompt1
+
+    # Bump mtime by writing a new version
+    soul_path.write_text("# Soul v2\n\nUpdated soul.", encoding="utf-8")
+    prompt2 = builder.build_system_prompt()
+
+    assert prompt1 is not prompt2
+    assert "Updated soul" in prompt2
+
+
+def test_cache_invalidated_on_memory_edit(tmp_path) -> None:
+    """Editing MEMORY.md must invalidate the cache."""
+    workspace = _make_workspace(tmp_path)
+    (workspace / "memory").mkdir(parents=True, exist_ok=True)
+    memory_path = workspace / "memory" / "MEMORY.md"
+    memory_path.write_text("# Long-term Memory\n\nFact A.", encoding="utf-8")
+
+    builder = ContextBuilder(workspace)
+    prompt1 = builder.build_system_prompt()
+    assert "Fact A" in prompt1
+
+    memory_path.write_text("# Long-term Memory\n\nFact B.", encoding="utf-8")
+    prompt2 = builder.build_system_prompt()
+
+    assert prompt1 is not prompt2
+    assert "Fact B" in prompt2
+
+
+def test_cache_invalidated_on_dream_cursor_advance(tmp_path) -> None:
+    """Advancing the dream cursor (new history entries) must invalidate the cache."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt1 = builder.build_system_prompt()
+    assert "# Recent History" not in prompt1
+
+    builder.memory.append_history("User asked about nanobot internals")
+    prompt2 = builder.build_system_prompt()
+
+    assert prompt1 is not prompt2
+    assert "# Recent History" in prompt2
+    assert "nanobot internals" in prompt2
+
+
+def test_cache_invalidated_on_new_skill(tmp_path) -> None:
+    """Adding a new skill to the workspace skills directory invalidates the cache."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt1 = builder.build_system_prompt()
+
+    # Create a new user-defined skill
+    skill_dir = workspace / "skills" / "my-custom-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: my-custom-skill\ndescription: A custom skill for testing.\n---\n# Custom\n",
+        encoding="utf-8",
+    )
+    prompt2 = builder.build_system_prompt()
+
+    assert prompt1 is not prompt2
+    assert "my-custom-skill" in prompt2
+
+
+def test_invalidate_prompt_cache_clears_all_channels(tmp_path) -> None:
+    """invalidate_prompt_cache() must drop cached entries for every channel."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    tg = builder.build_system_prompt(channel="telegram")
+    cli = builder.build_system_prompt(channel="cli")
+
+    builder.invalidate_prompt_cache()
+
+    # After explicit invalidation both channels must be rebuilt
+    assert builder.build_system_prompt(channel="telegram") is not tg
+    assert builder.build_system_prompt(channel="cli") is not cli
+
+
+def test_prompt_cache_key_excludes_wall_clock(tmp_path, monkeypatch) -> None:
+    """Cache key must not depend on the wall clock (clock tick ≠ cache miss)."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    key1 = builder._prompt_cache_key(channel=None)
+    # Advance the fake clock — key must stay identical
+    import datetime as datetime_module
+
+    class _Shifted(real_datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return real_datetime(2026, 6, 1, 0, 0)
+
+    monkeypatch.setattr(datetime_module, "datetime", _Shifted)
+    key2 = builder._prompt_cache_key(channel=None)
+
+    assert key1 == key2
