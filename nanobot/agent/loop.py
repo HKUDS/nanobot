@@ -193,6 +193,7 @@ class AgentLoop:
         context_block_limit: int | None = None,
         max_tool_result_chars: int | None = None,
         provider_retry_mode: str = "standard",
+        tool_hint_max_length: int | None = None,
         web_config: WebToolsConfig | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -237,7 +238,10 @@ class AgentLoop:
             else defaults.max_tool_result_chars
         )
         self.provider_retry_mode = provider_retry_mode
-        self.tool_hint_max_length = defaults.tool_hint_max_length
+        self.tool_hint_max_length = (
+            tool_hint_max_length if tool_hint_max_length is not None
+            else defaults.tool_hint_max_length
+        )
         self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
