@@ -369,6 +369,34 @@ Official model names include `LongCat-Flash-Chat`, `LongCat-Flash-Thinking`,
 </details>
 
 <details>
+<summary><b>Xiaomi MiMo Token Plan</b></summary>
+
+Xiaomi MiMo's token plan uses a dedicated OpenAI-compatible endpoint. Configure it
+through the `custom` provider and pass the MiMo model name directly.
+
+```json
+{
+  "providers": {
+    "custom": {
+      "apiKey": "${MIMO_TOKEN_PLAN_API_KEY}",
+      "apiBase": "https://token-plan-sgp.xiaomimimo.com/v1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "custom",
+      "model": "xiaomi/mimo-v2.5-pro"
+    }
+  }
+}
+```
+
+Use an API key from the MiMo token plan console. Check the MiMo platform for the
+latest supported model names.
+
+</details>
+
+<details>
 <summary><b>Custom Provider (Any OpenAI-compatible API)</b></summary>
 
 Connects directly to any OpenAI-compatible endpoint — llama.cpp, Together AI, Fireworks, Azure OpenAI, or any self-hosted server. Model name is passed as-is.
