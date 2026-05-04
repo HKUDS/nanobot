@@ -27,7 +27,7 @@ _PATH_IN_CMD_RE = re.compile(
 )
 
 
-def format_tool_hints(tool_calls: list) -> str:
+def format_tool_hints(tool_calls: list, max_length: int = 40) -> str:
     """Format tool calls as concise hints with smart abbreviation."""
     if not tool_calls:
         return ""
@@ -36,11 +36,11 @@ def format_tool_hints(tool_calls: list) -> str:
     for tc in tool_calls:
         fmt = _TOOL_FORMATS.get(tc.name)
         if fmt:
-            formatted.append(_fmt_known(tc, fmt))
+            formatted.append(_fmt_known(tc, fmt, max_length))
         elif tc.name.startswith("mcp_"):
-            formatted.append(_fmt_mcp(tc))
+            formatted.append(_fmt_mcp(tc, max_length))
         else:
-            formatted.append(_fmt_fallback(tc))
+            formatted.append(_fmt_fallback(tc, max_length))
 
     hints = []
     for hint in formatted:
@@ -80,7 +80,7 @@ def _extract_arg(tc, key_args: list[str]) -> str | None:
     return None
 
 
-def _fmt_known(tc, fmt: tuple) -> str:
+def _fmt_known(tc, fmt: tuple, max_length: int = 40) -> str:
     """Format a registered tool using its template."""
     val = _extract_arg(tc, fmt[0])
     if val is None:
@@ -88,18 +88,20 @@ def _fmt_known(tc, fmt: tuple) -> str:
     if fmt[2]:  # is_path
         val = abbreviate_path(val)
     elif fmt[3]:  # is_command
-        val = _abbreviate_command(val)
+        val = _abbreviate_command(val, max_len=max_length)
     return fmt[1].format(val)
 
 
 def _abbreviate_command(cmd: str, max_len: int = 40) -> str:
     """Abbreviate paths in a command string, then truncate."""
+    path_max = max(max_len // 2, 25)
+
     def _replace_path(match: re.Match[str]) -> str:
         if match.group("double") is not None:
-            return f'"{abbreviate_path(match.group("double"), max_len=25)}"'
+            return f'"{abbreviate_path(match.group("double"), max_len=path_max)}"'
         if match.group("single") is not None:
-            return f"'{abbreviate_path(match.group('single'), max_len=25)}'"
-        return abbreviate_path(match.group("bare"), max_len=25)
+            return f"'{abbreviate_path(match.group('single'), max_len=path_max)}'"
+        return abbreviate_path(match.group("bare"), max_len=path_max)
 
     abbreviated = _PATH_IN_CMD_RE.sub(_replace_path, cmd)
     if len(abbreviated) <= max_len:
@@ -107,7 +109,7 @@ def _abbreviate_command(cmd: str, max_len: int = 40) -> str:
     return abbreviated[:max_len - 1] + "\u2026"
 
 
-def _fmt_mcp(tc) -> str:
+def _fmt_mcp(tc, max_length: int = 40) -> str:
     """Format MCP tool as server::tool."""
     name = tc.name
     if "__" in name:
@@ -125,13 +127,13 @@ def _fmt_mcp(tc) -> str:
     val = next((v for v in args.values() if isinstance(v, str) and v), None)
     if val is None:
         return f"{server}::{tool}"
-    return f'{server}::{tool}("{abbreviate_path(val, 40)}")'
+    return f'{server}::{tool}("{abbreviate_path(val, max_length)}")'
 
 
-def _fmt_fallback(tc) -> str:
+def _fmt_fallback(tc, max_length: int = 40) -> str:
     """Original formatting logic for unregistered tools."""
     args = _get_args(tc)
     val = next(iter(args.values()), None) if isinstance(args, dict) else None
     if not isinstance(val, str):
         return tc.name
-    return f'{tc.name}("{abbreviate_path(val, 40)}")' if len(val) > 40 else f'{tc.name}("{val}")'
+    return f'{tc.name}("{abbreviate_path(val, max_length)}")' if len(val) > max_length else f'{tc.name}("{val}")'

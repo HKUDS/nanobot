@@ -237,6 +237,7 @@ class AgentLoop:
             else defaults.max_tool_result_chars
         )
         self.provider_retry_mode = provider_retry_mode
+        self.tool_hint_max_length = defaults.tool_hint_max_length
         self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -466,12 +467,11 @@ class AgentLoop:
         """Return the chat id shown in runtime metadata for the model."""
         return str(msg.metadata.get("context_chat_id") or msg.chat_id)
 
-    @staticmethod
-    def _tool_hint(tool_calls: list) -> str:
+    def _tool_hint(self, tool_calls: list) -> str:
         """Format tool calls as concise hints with smart abbreviation."""
         from nanobot.utils.tool_hints import format_tool_hints
 
-        return format_tool_hints(tool_calls)
+        return format_tool_hints(tool_calls, max_length=self.tool_hint_max_length)
 
     async def _dispatch_command_inline(
         self,
