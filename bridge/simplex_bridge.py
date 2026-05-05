@@ -18,6 +18,7 @@ import websockets
 from nanobot.utils.simplex_bridge import default_simplex_state_path, extract_simplex_reply_text
 
 _DEFAULT_CONFIG_PATH = Path.home() / ".nanobot" / "config.json"
+_MAX_RECENT_CONTENT_TOKENS = 50
 
 
 def _parse_args() -> argparse.Namespace:
@@ -173,24 +174,50 @@ def _resolve_args(args: argparse.Namespace) -> argparse.Namespace:
     return args
 
 
-def _load_last_seen_token(path: Path) -> str | None:
+def _load_bridge_state(path: Path) -> tuple[str | None, list[str]]:
     if not path.exists():
-        return None
+        return None, []
     data = json.loads(path.read_text(encoding="utf-8"))
     value = data.get("last_seen_token")
-    return value if isinstance(value, str) and value.strip() else None
+    token = value if isinstance(value, str) and value.strip() else None
+    raw_recent = data.get("recent_content_tokens")
+    if not isinstance(raw_recent, list):
+        return token, []
+    recent = [item for item in raw_recent if isinstance(item, str) and item.strip()]
+    return token, recent[-_MAX_RECENT_CONTENT_TOKENS:]
 
 
-def _save_last_seen_token(path: Path, token: str) -> None:
+def _save_bridge_state(path: Path, last_seen_token: str | None, recent_content_tokens: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({"last_seen_token": token}, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(
+            {
+                "last_seen_token": last_seen_token,
+                "recent_content_tokens": recent_content_tokens[-_MAX_RECENT_CONTENT_TOKENS:],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
 
 
 def _message_token(raw_line: str, data: dict[str, Any] | None = None) -> str:
     return hashlib.sha1(raw_line.encode("utf-8")).hexdigest()
+
+
+def _content_dedup_token(chat_id: str, text: str) -> str:
+    payload = f"{chat_id}\0{text}"
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def _append_recent_content_token(tokens: list[str], token: str) -> None:
+    if token in tokens:
+        return
+    tokens.append(token)
+    if len(tokens) > _MAX_RECENT_CONTENT_TOKENS:
+        del tokens[:-_MAX_RECENT_CONTENT_TOKENS]
 
 
 def _strip_leading_time_prefix(line: str) -> str:
@@ -287,7 +314,8 @@ async def _forward_simplex_inbound(
     state_file: Path,
     stop_event: asyncio.Event,
 ) -> None:
-    last_seen_token = _load_last_seen_token(state_file)
+    last_seen_token, recent_content_tokens = _load_bridge_state(state_file)
+    recent_content_set = set(recent_content_tokens)
 
     while not stop_event.is_set():
         messages = await _run_receiver_once(args)
@@ -296,20 +324,30 @@ async def _forward_simplex_inbound(
             continue
 
         start_idx = 0
+        watermark_found = False
         if last_seen_token:
             for idx in range(len(messages) - 1, -1, -1):
                 if messages[idx][0] == last_seen_token:
                     start_idx = idx + 1
+                    watermark_found = True
                     break
 
         if last_seen_token is None and args.bootstrap == "latest":
-            _save_last_seen_token(state_file, messages[-1][0])
+            _save_bridge_state(state_file, messages[-1][0], recent_content_tokens)
             last_seen_token = messages[-1][0]
             await asyncio.sleep(max(args.poll_interval, 0.1))
             continue
 
-        delivered_any = False
+        uncertain_replay = bool(last_seen_token) and not watermark_found
+        advanced_any = False
         for token, text in messages[start_idx:]:
+            content_token = _content_dedup_token(args.chat_id, text)
+            if uncertain_replay and content_token in recent_content_set:
+                _log(f"skipped probable replay token={token} for chat_id={args.chat_id}")
+                last_seen_token = token
+                advanced_any = True
+                continue
+
             await ws.send(
                 json.dumps(
                     {
@@ -322,10 +360,12 @@ async def _forward_simplex_inbound(
             )
             _log(f"forwarded inbound SimpleX message token={token} to chat_id={args.chat_id}")
             last_seen_token = token
-            delivered_any = True
+            _append_recent_content_token(recent_content_tokens, content_token)
+            recent_content_set.add(content_token)
+            advanced_any = True
 
-        if delivered_any and last_seen_token is not None:
-            _save_last_seen_token(state_file, last_seen_token)
+        if advanced_any:
+            _save_bridge_state(state_file, last_seen_token, recent_content_tokens)
 
         await asyncio.sleep(max(args.poll_interval, 0.1))
 
