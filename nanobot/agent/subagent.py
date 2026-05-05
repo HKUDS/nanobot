@@ -83,6 +83,7 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
     ):
+        defaults = AgentDefaults()
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
@@ -95,8 +96,9 @@ class SubagentManager:
         self.max_iterations = (
             max_iterations
             if max_iterations is not None
-            else AgentDefaults().max_tool_iterations
+            else defaults.max_tool_iterations
         )
+        self.max_concurrent_subagents = defaults.max_concurrent_subagents
         self.runner = AgentRunner(provider)
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
