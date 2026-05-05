@@ -242,13 +242,21 @@ def test_exec_extract_absolute_paths_captures_quoted_paths() -> None:
 def test_exec_guard_blocks_home_path_outside_workspace(tmp_path) -> None:
     tool = ExecTool(restrict_to_workspace=True)
     error = tool._guard_command("cat ~/.nanobot/config.json", str(tmp_path))
-    assert error == "Error: Command blocked by safety guard (path outside working dir)"
+    assert error is not None
+    assert error.startswith(
+        "Error: Command blocked by safety guard (path outside working dir)"
+    )
+    assert "hard policy boundary" in error
 
 
 def test_exec_guard_blocks_quoted_home_path_outside_workspace(tmp_path) -> None:
     tool = ExecTool(restrict_to_workspace=True)
     error = tool._guard_command('cat "~/.nanobot/config.json"', str(tmp_path))
-    assert error == "Error: Command blocked by safety guard (path outside working dir)"
+    assert error is not None
+    assert error.startswith(
+        "Error: Command blocked by safety guard (path outside working dir)"
+    )
+    assert "hard policy boundary" in error
 
 
 def test_exec_guard_allows_media_path_outside_workspace(tmp_path, monkeypatch) -> None:
@@ -300,7 +308,39 @@ def test_exec_guard_blocks_windows_drive_root_outside_workspace(monkeypatch) -> 
 
     tool = ExecTool(restrict_to_workspace=True)
     error = tool._guard_command("dir E:\\", "E:\\workspace")
-    assert error == "Error: Command blocked by safety guard (path outside working dir)"
+    assert error is not None
+    assert error.startswith(
+        "Error: Command blocked by safety guard (path outside working dir)"
+    )
+    assert "hard policy boundary" in error
+
+
+def test_exec_guard_allows_dev_null_redirect(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "file.txt").write_text("ok", encoding="utf-8")
+    error = tool._guard_command(f'rm "{ws / "file.txt"}" 2>/dev/null', str(ws))
+    assert error is None
+
+
+def test_exec_guard_allows_dev_urandom(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command("cat /dev/urandom | head -c 16 > random.bin", str(tmp_path))
+    assert error is None
+
+
+def test_exec_guard_blocks_non_benign_dev_path(tmp_path) -> None:
+    tool = ExecTool(restrict_to_workspace=True)
+    error = tool._guard_command("cat /dev/sda", str(tmp_path))
+    assert error is not None
+    assert "path outside working dir" in error
+
+
+def test_exec_extract_absolute_paths_ignores_pipe_tilde() -> None:
+    cmd = "python query.py --query '{job=\"app\"} |~ \"error\"'"
+    paths = ExecTool._extract_absolute_paths(cmd)
+    assert not any(p.startswith("~") for p in paths)
 
 
 # --- cast_params tests ---
@@ -545,18 +585,23 @@ async def test_exec_always_returns_exit_code() -> None:
     assert "hello" in result
 
 
-async def test_exec_head_tail_truncation() -> None:
+async def test_exec_head_tail_truncation(tmp_path) -> None:
     """Long output should preserve both head and tail."""
     tool = ExecTool()
-    # Generate output that exceeds _MAX_OUTPUT (10_000 chars)
-    # Use current interpreter (PATH may not have `python`). ExecTool uses
-    # create_subprocess_shell: POSIX needs shlex.quote; Windows uses cmd.exe
-    # rules, so list2cmdline is appropriate there.
-    script = "print('A' * 6000 + '\\n' + 'B' * 6000)"
+    # Generate output that exceeds _MAX_OUTPUT (10_000 chars).
+    # Use a temp script file so the output-generating logic lives in a file
+    # (Windows cmd.exe has finicky rules for quoting `-c` payloads with
+    # embedded newlines). ExecTool runs via create_subprocess_shell, so we
+    # must quote *both* the interpreter path and the script path — tmp_path
+    # on some CI runners and on many local Windows installs contains spaces
+    # (e.g. C:\Users\John Doe\AppData\...) which would otherwise break the
+    # shell's argv split.
+    script_file = tmp_path / "gen_output.py"
+    script_file.write_text("print('A' * 6000 + chr(10) + 'B' * 6000)", encoding="utf-8")
     if sys.platform == "win32":
-        command = subprocess.list2cmdline([sys.executable, "-c", script])
+        command = subprocess.list2cmdline([sys.executable, str(script_file)])
     else:
-        command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
+        command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script_file))}"
     result = await tool.execute(command=command)
     assert "chars truncated" in result
     # Head portion should start with As

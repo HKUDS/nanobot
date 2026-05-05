@@ -5,7 +5,8 @@ import os
 import select
 import signal
 import sys
-from contextlib import nullcontext
+from collections.abc import Callable
+from contextlib import nullcontext, suppress
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +15,9 @@ if sys.platform == "win32":
     if sys.stdout.encoding != "utf-8":
         os.environ["PYTHONIOENCODING"] = "utf-8"
         # Re-open stdout/stderr with UTF-8 encoding
-        try:
+        with suppress(Exception):
             sys.stdout.reconfigure(encoding="utf-8", errors="replace")
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
 
 import typer
 from loguru import logger
@@ -83,35 +82,29 @@ def _flush_pending_tty_input() -> None:
     except Exception:
         return
 
-    try:
+    with suppress(Exception):
         import termios
 
         termios.tcflush(fd, termios.TCIFLUSH)
         return
-    except Exception:
-        pass
 
-    try:
+    with suppress(Exception):
         while True:
             ready, _, _ = select.select([fd], [], [], 0)
             if not ready:
                 break
             if not os.read(fd, 4096):
                 break
-    except Exception:
-        return
 
 
 def _restore_terminal() -> None:
     """Restore terminal to its original state (echo, line buffering, etc.)."""
     if _SAVED_TERM_ATTRS is None:
         return
-    try:
+    with suppress(Exception):
         import termios
 
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, _SAVED_TERM_ATTRS)
-    except Exception:
-        pass
 
 
 def _init_prompt_session() -> None:
@@ -119,12 +112,10 @@ def _init_prompt_session() -> None:
     global _PROMPT_SESSION, _SAVED_TERM_ATTRS
 
     # Save terminal state so we can restore it on exit
-    try:
+    with suppress(Exception):
         import termios
 
         _SAVED_TERM_ATTRS = termios.tcgetattr(sys.stdin.fileno())
-    except Exception:
-        pass
 
     from nanobot.config.paths import get_cli_history_path
 
@@ -145,7 +136,7 @@ def _make_console() -> Console:
 def _render_interactive_ansi(render_fn) -> str:
     """Render Rich output to ANSI so prompt_toolkit can print it safely."""
     ansi_console = Console(
-        force_terminal=True,
+        force_terminal=sys.stdout.isatty(),
         color_system=console.color_system or "standard",
         width=console.width,
     )
@@ -212,14 +203,41 @@ async def _print_interactive_response(
 
 def _print_cli_progress_line(text: str, thinking: ThinkingSpinner | None) -> None:
     """Print a CLI progress line, pausing the spinner if needed."""
+    if not text.strip():
+        return
     with thinking.pause() if thinking else nullcontext():
         console.print(f"  [dim]↳ {text}[/dim]")
 
 
 async def _print_interactive_progress_line(text: str, thinking: ThinkingSpinner | None) -> None:
     """Print an interactive progress line, pausing the spinner if needed."""
+    if not text.strip():
+        return
     with thinking.pause() if thinking else nullcontext():
         await _print_interactive_line(text)
+
+
+async def _maybe_print_interactive_progress(
+    msg: Any,
+    thinking: ThinkingSpinner | None,
+    channels_config: Any,
+) -> bool:
+    metadata = msg.metadata or {}
+    if metadata.get("_retry_wait"):
+        await _print_interactive_progress_line(msg.content, thinking)
+        return True
+
+    if not metadata.get("_progress"):
+        return False
+
+    is_tool_hint = metadata.get("_tool_hint", False)
+    if channels_config and is_tool_hint and not channels_config.send_tool_hints:
+        return True
+    if channels_config and not is_tool_hint and not channels_config.send_progress:
+        return True
+
+    await _print_interactive_progress_line(msg.content, thinking)
+    return True
 
 
 def _is_exit_command(command: str) -> bool:
@@ -408,73 +426,13 @@ def _make_provider(config: Config):
 
     Routing is driven by ``ProviderSpec.backend`` in the registry.
     """
-    from nanobot.providers.base import GenerationSettings
-    from nanobot.providers.registry import find_by_name
+    from nanobot.providers.factory import make_provider
 
-    model = config.agents.defaults.model
-    provider_name = config.get_provider_name(model)
-    p = config.get_provider(model)
-    spec = find_by_name(provider_name) if provider_name else None
-    backend = spec.backend if spec else "openai_compat"
-
-    # --- validation ---
-    if backend == "azure_openai":
-        if not p or not p.api_key or not p.api_base:
-            console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
-            console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
-            console.print("Use the model field to specify the deployment name.")
-            raise typer.Exit(1)
-    elif backend == "openai_compat" and not model.startswith("bedrock/"):
-        needs_key = not (p and p.api_key)
-        exempt = spec and (spec.is_oauth or spec.is_local or spec.is_direct)
-        if needs_key and not exempt:
-            console.print("[red]Error: No API key configured.[/red]")
-            console.print("Set one in ~/.nanobot/config.json under providers section")
-            raise typer.Exit(1)
-
-    # --- instantiation by backend ---
-    if backend == "openai_codex":
-        from nanobot.providers.openai_codex_provider import OpenAICodexProvider
-
-        provider = OpenAICodexProvider(default_model=model)
-    elif backend == "azure_openai":
-        from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
-
-        provider = AzureOpenAIProvider(
-            api_key=p.api_key,
-            api_base=p.api_base,
-            default_model=model,
-        )
-    elif backend == "github_copilot":
-        from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
-        provider = GitHubCopilotProvider(default_model=model)
-    elif backend == "anthropic":
-        from nanobot.providers.anthropic_provider import AnthropicProvider
-
-        provider = AnthropicProvider(
-            api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model),
-            default_model=model,
-            extra_headers=p.extra_headers if p else None,
-        )
-    else:
-        from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-
-        provider = OpenAICompatProvider(
-            api_key=p.api_key if p else None,
-            api_base=config.get_api_base(model),
-            default_model=model,
-            extra_headers=p.extra_headers if p else None,
-            spec=spec,
-        )
-
-    defaults = config.agents.defaults
-    provider.generation = GenerationSettings(
-        temperature=defaults.temperature,
-        max_tokens=defaults.max_tokens,
-        reasoning_effort=defaults.reasoning_effort,
-    )
-    return provider
+    try:
+        return make_provider(config)
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
 
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
@@ -590,6 +548,12 @@ def serve(
         mcp_servers=runtime_config.tools.mcp_servers,
         channels_config=runtime_config.channels,
         timezone=runtime_config.agents.defaults.timezone,
+        unified_session=runtime_config.agents.defaults.unified_session,
+        disabled_skills=runtime_config.agents.defaults.disabled_skills,
+        session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
+        consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
+        max_messages=runtime_config.agents.defaults.max_messages,
+        tools_config=runtime_config.tools,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -632,26 +596,43 @@ def gateway(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Start the nanobot gateway."""
+    if verbose:
+        import logging
+
+        logging.basicConfig(level=logging.DEBUG)
+    cfg = _load_runtime_config(config, workspace)
+    _run_gateway(cfg, port=port)
+
+
+def _run_gateway(
+    config: Config,
+    *,
+    port: int | None = None,
+    open_browser_url: str | None = None,
+) -> None:
+    """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.tools.cron import CronTool
+    from nanobot.agent.tools.message import MessageTool
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
+    from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
     from nanobot.session.manager import SessionManager
 
-    if verbose:
-        import logging
-
-        logging.basicConfig(level=logging.DEBUG)
-
-    config = _load_runtime_config(config, workspace)
     port = port if port is not None else config.gateway.port
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
-    provider = _make_provider(config)
+    try:
+        provider_snapshot = build_provider_snapshot(config)
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
+    provider = provider_snapshot.provider
     session_manager = SessionManager(config.workspace_path)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
@@ -667,9 +648,9 @@ def gateway(
         bus=bus,
         provider=provider,
         workspace=config.workspace_path,
-        model=config.agents.defaults.model,
+        model=provider_snapshot.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
+        context_window_tokens=provider_snapshot.context_window_tokens,
         web_config=config.tools.web,
         context_block_limit=config.agents.defaults.context_block_limit,
         max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
@@ -681,7 +662,58 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        unified_session=config.agents.defaults.unified_session,
+        disabled_skills=config.agents.defaults.disabled_skills,
+        session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        consolidation_ratio=config.agents.defaults.consolidation_ratio,
+        max_messages=config.agents.defaults.max_messages,
+        tools_config=config.tools,
+        provider_snapshot_loader=load_provider_snapshot,
+        provider_signature=provider_snapshot.signature,
     )
+
+    from nanobot.agent.loop import UNIFIED_SESSION_KEY
+    from nanobot.bus.events import OutboundMessage
+
+    def _channel_session_key(channel: str, chat_id: str) -> str:
+        return (
+            UNIFIED_SESSION_KEY
+            if config.agents.defaults.unified_session
+            else f"{channel}:{chat_id}"
+        )
+
+    async def _deliver_to_channel(
+        msg: OutboundMessage, *, record: bool = False, session_key: str | None = None,
+    ) -> None:
+        """Publish a user-visible message and mirror it into that channel's session."""
+        metadata = dict(msg.metadata or {})
+        record = record or bool(metadata.pop("_record_channel_delivery", False))
+        if metadata != (msg.metadata or {}):
+            msg = OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=msg.content,
+                reply_to=msg.reply_to,
+                media=msg.media,
+                metadata=metadata,
+                buttons=msg.buttons,
+            )
+        if (
+            record
+            and msg.channel != "cli"
+            and msg.content.strip()
+            and hasattr(session_manager, "get_or_create")
+            and hasattr(session_manager, "save")
+        ):
+            key = session_key or _channel_session_key(msg.channel, msg.chat_id)
+            session = session_manager.get_or_create(key)
+            session.add_message("assistant", msg.content, _channel_delivery=True)
+            session_manager.save(session)
+        await bus.publish_outbound(msg)
+
+    message_tool = getattr(agent, "tools", {}).get("message")
+    if isinstance(message_tool, MessageTool):
+        message_tool.set_send_callback(_deliver_to_channel)
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
@@ -695,35 +727,45 @@ def gateway(
                 logger.exception("Dream cron job failed")
             return None
 
-        from nanobot.agent.tools.cron import CronTool
-        from nanobot.agent.tools.message import MessageTool
         from nanobot.utils.evaluator import evaluate_response
 
         reminder_note = (
-            "[Scheduled Task] Timer finished.\n\n"
-            f"Task '{job.name}' has been triggered.\n"
-            f"Scheduled instruction: {job.payload.message}"
+            "The scheduled time has arrived. Deliver this reminder to the user now, "
+            "as a brief and natural message in their language. Speak directly to them — "
+            "do not narrate progress, summarize, include user IDs, or add status reports "
+            "like 'Done' or 'Reminded'.\n\n"
+            f"Reminder: {job.payload.message}"
         )
 
         cron_tool = agent.tools.get("cron")
         cron_token = None
         if isinstance(cron_tool, CronTool):
             cron_token = cron_tool.set_cron_context(True)
+
+        async def _silent(*_args, **_kwargs):
+            pass
+
+        message_record_token = None
+        if isinstance(message_tool, MessageTool):
+            message_record_token = message_tool.set_record_channel_delivery(True)
+
         try:
             resp = await agent.process_direct(
                 reminder_note,
                 session_key=f"cron:{job.id}",
                 channel=job.payload.channel or "cli",
                 chat_id=job.payload.to or "direct",
+                on_progress=_silent,
             )
         finally:
             if isinstance(cron_tool, CronTool) and cron_token is not None:
                 cron_tool.reset_cron_context(cron_token)
+            if isinstance(message_tool, MessageTool) and message_record_token is not None:
+                message_tool.reset_record_channel_delivery(message_record_token)
 
         response = resp.content if resp else ""
 
-        message_tool = agent.tools.get("message")
-        if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+        if job.payload.deliver and isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
             return response
 
         if job.payload.deliver and job.payload.to and response:
@@ -731,18 +773,23 @@ def gateway(
                 response, reminder_note, provider, agent.model,
             )
             if should_notify:
-                from nanobot.bus.events import OutboundMessage
-                await bus.publish_outbound(OutboundMessage(
-                    channel=job.payload.channel or "cli",
-                    chat_id=job.payload.to,
-                    content=response,
-                ))
+                await _deliver_to_channel(
+                    OutboundMessage(
+                        channel=job.payload.channel or "cli",
+                        chat_id=job.payload.to,
+                        content=response,
+                        metadata=dict(job.payload.channel_meta),
+                    ),
+                    record=True,
+                    session_key=job.payload.session_key,
+                )
         return response
 
     cron.on_job = on_cron_job
 
-    # Create channel manager
-    channels = ChannelManager(config, bus)
+    # Create channel manager (forwards SessionManager so the WebSocket channel
+    # can serve the embedded webui's REST surface).
+    channels = ChannelManager(config, bus, session_manager=session_manager)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -761,6 +808,14 @@ def gateway(
         return "cli", "direct"
 
     # Create heartbeat service
+    heartbeat_preamble = (
+        "[Your response will be delivered directly to the user's messaging app. "
+        "Output ONLY the final user-facing message. Never reference internal "
+        "files (HEARTBEAT.md, AWARENESS.md, etc.), your instructions, or your "
+        "decision process. If nothing needs reporting, respond with just "
+        "'All clear.' and nothing else.]\n\n"
+    )
+
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
@@ -769,7 +824,7 @@ def gateway(
             pass
 
         resp = await agent.process_direct(
-            tasks,
+            heartbeat_preamble + tasks,
             session_key="heartbeat",
             channel=channel,
             chat_id=chat_id,
@@ -785,12 +840,22 @@ def gateway(
         return resp.content if resp else ""
 
     async def on_heartbeat_notify(response: str) -> None:
-        """Deliver a heartbeat response to the user's channel."""
-        from nanobot.bus.events import OutboundMessage
+        """Deliver a heartbeat response to the user's channel.
+
+        In addition to publishing the outbound message, this injects the
+        delivered text as an assistant turn into the *target channel's*
+        session.  Without this, a user reply on the channel (e.g. "Sure")
+        lands in a session that has no context about the heartbeat message
+        and the agent cannot follow through.
+        """
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
             return  # No external channel available to deliver to
-        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+
+        await _deliver_to_channel(
+            OutboundMessage(channel=channel, chat_id=chat_id, content=response),
+            record=True,
+        )
 
     hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(
@@ -815,12 +880,55 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
+    async def _health_server(host: str, health_port: int):
+        """Lightweight HTTP health endpoint on the gateway port."""
+        import json as _json
+
+        async def handle(reader, writer):
+            try:
+                data = await asyncio.wait_for(reader.read(4096), timeout=5)
+            except (asyncio.TimeoutError, ConnectionError):
+                writer.close()
+                return
+
+            request_line = data.split(b"\r\n", 1)[0].decode("utf-8", errors="replace")
+            method, path = "", ""
+            parts = request_line.split(" ")
+            if len(parts) >= 2:
+                method, path = parts[0], parts[1]
+
+            if method == "GET" and path == "/health":
+                body = _json.dumps({"status": "ok"})
+                resp = (
+                    f"HTTP/1.0 200 OK\r\n"
+                    f"Content-Type: application/json\r\n"
+                    f"Content-Length: {len(body)}\r\n"
+                    f"\r\n{body}"
+                )
+            else:
+                body = "Not Found"
+                resp = (
+                    f"HTTP/1.0 404 Not Found\r\n"
+                    f"Content-Type: text/plain\r\n"
+                    f"Content-Length: {len(body)}\r\n"
+                    f"\r\n{body}"
+                )
+
+            writer.write(resp.encode())
+            await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_server(handle, host, health_port)
+        console.print(f"[green]✓[/green] Health endpoint: http://{host}:{health_port}/health")
+        async with server:
+            await server.serve_forever()
     # Register Dream system job (always-on, idempotent on restart)
     dream_cfg = config.agents.defaults.dream
     if dream_cfg.model_override:
         agent.dream.model = dream_cfg.model_override
     agent.dream.max_batch_size = dream_cfg.max_batch_size
     agent.dream.max_iterations = dream_cfg.max_iterations
+    agent.dream.annotate_line_ages = dream_cfg.annotate_line_ages
     from nanobot.cron.types import CronJob, CronPayload
     cron.register_system_job(CronJob(
         id="dream",
@@ -830,14 +938,41 @@ def gateway(
     ))
     console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
 
+    async def _open_browser_when_ready() -> None:
+        """Wait for the gateway to bind, then point the user's browser at the webui."""
+        if not open_browser_url:
+            return
+        import webbrowser
+        # Channels start asynchronously; a short poll lets us avoid racing the bind.
+        for _ in range(40):  # ~4s max
+            try:
+                reader, writer = await asyncio.open_connection(
+                    config.gateway.host or "127.0.0.1", port
+                )
+                writer.close()
+                with suppress(Exception):
+                    await writer.wait_closed()
+                break
+            except OSError:
+                await asyncio.sleep(0.1)
+        try:
+            webbrowser.open(open_browser_url)
+            console.print(f"[green]✓[/green] Opened browser at {open_browser_url}")
+        except Exception as e:
+            console.print(f"[yellow]Could not open browser ({e}); visit {open_browser_url}[/yellow]")
+
     async def run():
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
+            tasks = [
                 agent.run(),
                 channels.start_all(),
-            )
+                _health_server(config.gateway.host, port),
+            ]
+            if open_browser_url:
+                tasks.append(_open_browser_when_ready())
+            await asyncio.gather(*tasks)
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         except Exception:
@@ -851,6 +986,12 @@ def gateway(
             cron.stop()
             agent.stop()
             await channels.stop_all()
+            # Flush all cached sessions to durable storage before exit.
+            # This prevents data loss on filesystems with write-back
+            # caching (rclone VFS, NFS, FUSE mounts, etc.).
+            flushed = agent.sessions.flush_all()
+            if flushed:
+                logger.info("Shutdown: flushed {} session(s) to disk", flushed)
 
     asyncio.run(run())
 
@@ -912,6 +1053,12 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        unified_session=config.agents.defaults.unified_session,
+        disabled_skills=config.agents.defaults.disabled_skills,
+        session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
+        consolidation_ratio=config.agents.defaults.consolidation_ratio,
+        max_messages=config.agents.defaults.max_messages,
+        tools_config=config.tools,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
@@ -923,7 +1070,7 @@ def agent(
     # Shared reference for progress callbacks
     _thinking: ThinkingSpinner | None = None
 
-    async def _cli_progress(content: str, *, tool_hint: bool = False) -> None:
+    async def _cli_progress(content: str, *, tool_hint: bool = False, **_kwargs: Any) -> None:
         ch = agent_loop.channels_config
         if ch and tool_hint and not ch.send_tool_hints:
             return
@@ -955,7 +1102,7 @@ def agent(
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
         _init_prompt_session()
-        console.print(f"{__logo__} Interactive mode (type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit)\n")
+        console.print(f"{__logo__} Interactive mode [bold blue]({config.agents.defaults.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)
@@ -1004,15 +1151,11 @@ def agent(
                             turn_done.set()
                             continue
 
-                        if msg.metadata.get("_progress"):
-                            is_tool_hint = msg.metadata.get("_tool_hint", False)
-                            ch = agent_loop.channels_config
-                            if ch and is_tool_hint and not ch.send_tool_hints:
-                                pass
-                            elif ch and not is_tool_hint and not ch.send_progress:
-                                pass
-                            else:
-                                await _print_interactive_progress_line(msg.content, _thinking)
+                        if await _maybe_print_interactive_progress(
+                            msg,
+                            _thinking,
+                            agent_loop.channels_config,
+                        ):
                             continue
 
                         if not turn_done.is_set():
@@ -1116,7 +1259,7 @@ def channels_status(
 
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
-    table.add_column("Enabled", style="green")
+    table.add_column("Enabled")
 
     for name, cls in sorted(discover_all().items()):
         section = getattr(config.channels, name, None)
@@ -1136,6 +1279,7 @@ def channels_status(
 
 def _get_bridge_dir() -> Path:
     """Get the bridge directory, setting it up if needed."""
+    import hashlib
     import shutil
     import subprocess
 
@@ -1143,16 +1287,7 @@ def _get_bridge_dir() -> Path:
     from nanobot.config.paths import get_bridge_install_dir
 
     user_bridge = get_bridge_install_dir()
-
-    # Check if already built
-    if (user_bridge / "dist" / "index.js").exists():
-        return user_bridge
-
-    # Check for npm
-    npm_path = shutil.which("npm")
-    if not npm_path:
-        console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
-        raise typer.Exit(1)
+    stamp_file = user_bridge / ".nanobot-bridge-source-hash"
 
     # Find source bridge: first check package data, then source dir
     pkg_bridge = Path(__file__).parent.parent / "bridge"  # nanobot/bridge (installed)
@@ -1167,6 +1302,36 @@ def _get_bridge_dir() -> Path:
     if not source:
         console.print("[red]Bridge source not found.[/red]")
         console.print("Try reinstalling: pip install --force-reinstall nanobot")
+        raise typer.Exit(1)
+
+    def source_hash(root: Path) -> str:
+        digest = hashlib.sha256()
+        for path in sorted(root.rglob("*")):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(root)
+            if rel.parts and rel.parts[0] in {"node_modules", "dist"}:
+                continue
+            digest.update(rel.as_posix().encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+        return digest.hexdigest()
+
+    expected_hash = source_hash(source)
+    current_hash = stamp_file.read_text().strip() if stamp_file.exists() else None
+
+    # Reuse only a bridge built from the currently installed source.
+    if (user_bridge / "dist" / "index.js").exists() and current_hash == expected_hash:
+        return user_bridge
+
+    if (user_bridge / "dist" / "index.js").exists() and current_hash != expected_hash:
+        console.print(f"{__logo__} WhatsApp bridge source changed; rebuilding bridge...")
+
+    # Check for npm
+    npm_path = shutil.which("npm")
+    if not npm_path:
+        console.print("[red]npm not found. Please install Node.js >= 18.[/red]")
         raise typer.Exit(1)
 
     console.print(f"{__logo__} Setting up bridge...")
@@ -1184,6 +1349,7 @@ def _get_bridge_dir() -> Path:
 
         console.print("  Building...")
         subprocess.run([npm_path, "run", "build"], cwd=user_bridge, check=True, capture_output=True)
+        stamp_file.write_text(expected_hash + "\n")
 
         console.print("[green]✓[/green] Bridge ready\n")
     except subprocess.CalledProcessError as e:
@@ -1251,7 +1417,7 @@ def plugins_list():
     table = Table(title="Channel Plugins")
     table.add_column("Name", style="cyan")
     table.add_column("Source", style="magenta")
-    table.add_column("Enabled", style="green")
+    table.add_column("Enabled")
 
     for name in sorted(all_channels):
         cls = all_channels[name]
@@ -1322,10 +1488,17 @@ provider_app = typer.Typer(help="Manage providers")
 app.add_typer(provider_app, name="provider")
 
 
-_LOGIN_HANDLERS: dict[str, callable] = {}
+_LOGIN_HANDLERS: dict[str, Callable[[], None]] = {}
+_LOGOUT_HANDLERS: dict[str, Callable[[], None]] = {}
+
+_PROVIDER_DISPLAY: dict[str, str] = {
+    "openai_codex": "OpenAI Codex",
+    "github_copilot": "GitHub Copilot",
+}
 
 
 def _register_login(name: str):
+    """Register an OAuth login handler."""
     def decorator(fn):
         _LOGIN_HANDLERS[name] = fn
         return fn
@@ -1333,11 +1506,16 @@ def _register_login(name: str):
     return decorator
 
 
-@provider_app.command("login")
-def provider_login(
-    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
-):
-    """Authenticate with an OAuth provider."""
+def _register_logout(name: str):
+    """Register an OAuth logout handler."""
+    def decorator(fn):
+        _LOGOUT_HANDLERS[name] = fn
+        return fn
+    return decorator
+
+
+def _resolve_oauth_provider(provider: str):
+    """Resolve and validate an OAuth provider configuration."""
     from nanobot.providers.registry import PROVIDERS
 
     key = provider.replace("-", "_")
@@ -1346,6 +1524,15 @@ def provider_login(
         names = ", ".join(s.name.replace("_", "-") for s in PROVIDERS if s.is_oauth)
         console.print(f"[red]Unknown OAuth provider: {provider}[/red]  Supported: {names}")
         raise typer.Exit(1)
+    return spec
+
+
+@provider_app.command("login")
+def provider_login(
+    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+):
+    """Authenticate with an OAuth provider."""
+    spec = _resolve_oauth_provider(provider)
 
     handler = _LOGIN_HANDLERS.get(spec.name)
     if not handler:
@@ -1356,16 +1543,30 @@ def provider_login(
     handler()
 
 
+@provider_app.command("logout")
+def provider_logout(
+    provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+):
+    """Log out from an OAuth provider."""
+    spec = _resolve_oauth_provider(provider)
+
+    handler = _LOGOUT_HANDLERS.get(spec.name)
+    if not handler:
+        console.print(f"[red]Logout not implemented for {spec.label}[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"{__logo__} OAuth Logout - {spec.label}\n")
+    handler()
+
+
 @_register_login("openai_codex")
 def _login_openai_codex() -> None:
     try:
         from oauth_cli_kit import get_token, login_oauth_interactive
 
         token = None
-        try:
+        with suppress(Exception):
             token = get_token()
-        except Exception:
-            pass
         if not (token and token.access):
             console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
             token = login_oauth_interactive(
@@ -1379,6 +1580,59 @@ def _login_openai_codex() -> None:
     except ImportError:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         raise typer.Exit(1)
+
+
+@_register_logout("openai_codex")
+def _logout_openai_codex() -> None:
+    """Clear local OAuth credentials for OpenAI Codex."""
+    try:
+        from oauth_cli_kit.providers import OPENAI_CODEX_PROVIDER
+        from oauth_cli_kit.storage import FileTokenStorage
+    except ImportError:
+        console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
+        raise typer.Exit(1)
+
+    storage = FileTokenStorage(token_filename=OPENAI_CODEX_PROVIDER.token_filename)
+    _delete_oauth_files(storage.get_token_path(), _PROVIDER_DISPLAY["openai_codex"])
+
+
+@_register_logout("github_copilot")
+def _logout_github_copilot() -> None:
+    """Clear local OAuth credentials for GitHub Copilot."""
+    try:
+        from nanobot.providers.github_copilot_provider import get_storage
+    except ImportError:
+        console.print("[red]GitHub Copilot provider unavailable. Ensure oauth-cli-kit is installed.[/red]")
+        raise typer.Exit(1)
+
+    storage = get_storage()
+    _delete_oauth_files(storage.get_token_path(), _PROVIDER_DISPLAY["github_copilot"])
+
+
+def _delete_oauth_files(token_path: Path, provider_label: str) -> None:
+    """Delete OAuth token and lock files, reporting the result."""
+    removed_paths: list[Path] = []
+    skipped: list[tuple[Path, OSError]] = []
+    for path in (token_path, token_path.with_suffix(".lock")):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            skipped.append((path, exc))
+            continue
+        removed_paths.append(path)
+
+    if not removed_paths and not skipped:
+        console.print(f"[yellow]! No local OAuth credentials found for {provider_label}[/yellow]")
+        return
+
+    if removed_paths:
+        console.print(f"[green]✓ Logged out from {provider_label}[/green]")
+        for path in removed_paths:
+            console.print(f"[dim]Removed: {path}[/dim]")
+    for path, exc in skipped:
+        console.print(f"[yellow]! Could not remove {path}: {exc}[/yellow]")
 
 
 @_register_login("github_copilot")

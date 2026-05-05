@@ -2,6 +2,8 @@
 
 from datetime import datetime, timezone
 
+import pytest
+
 from nanobot.agent.tools.cron import CronTool
 from nanobot.cron.service import CronService
 from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronSchedule
@@ -215,8 +217,10 @@ def test_list_at_job_shows_iso_timestamp(tmp_path) -> None:
     assert "Asia/Shanghai" in result
 
 
-def test_list_shows_last_run_state(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_list_shows_last_run_state(tmp_path) -> None:
     tool = _make_tool(tmp_path)
+    tool._cron._running = True
     job = tool._cron.add_job(
         name="Stateful job",
         schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"),
@@ -232,9 +236,10 @@ def test_list_shows_last_run_state(tmp_path) -> None:
     assert "ok" in result
     assert "(UTC)" in result
 
-
-def test_list_shows_error_message(tmp_path) -> None:
+@pytest.mark.asyncio
+async def test_list_shows_error_message(tmp_path) -> None:
     tool = _make_tool(tmp_path)
+    tool._cron._running = True
     job = tool._cron.add_job(
         name="Failed job",
         schedule=CronSchedule(kind="cron", expr="0 9 * * *", tz="UTC"),
@@ -338,6 +343,58 @@ def test_add_job_can_disable_delivery(tmp_path) -> None:
     assert result.startswith("Created job")
     job = tool._cron.list_jobs()[0]
     assert job.payload.deliver is False
+
+
+def test_cron_schema_advertises_action_specific_requirements(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+
+    # Only ``action`` is required at the schema root — per-action requirements
+    # are enforced at runtime via ``validate_params`` and surfaced to the LLM
+    # through field descriptions. We intentionally do NOT set top-level
+    # ``oneOf``/``anyOf``/``allOf``/``enum``/``not``: OpenAI Codex/Responses
+    # reject those at the root of function parameters (#3265 regression).
+    assert tool.parameters["required"] == ["action"]
+    for disallowed in ("oneOf", "anyOf", "allOf", "not"):
+        assert disallowed not in tool.parameters, (
+            f"Top-level '{disallowed}' is rejected by OpenAI Codex/Responses tool schemas"
+        )
+    message_desc = tool.parameters["properties"]["message"]["description"]
+    assert "REQUIRED" in message_desc and "action='add'" in message_desc
+    job_id_desc = tool.parameters["properties"]["job_id"]["description"]
+    assert "REQUIRED" in job_id_desc and "action='remove'" in job_id_desc
+
+
+def test_validate_params_requires_message_only_for_add(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+
+    assert "message is required when action='add'" in tool.validate_params({"action": "add"})
+    assert tool.validate_params({"action": "list"}) == []
+    assert "job_id is required when action='remove'" in tool.validate_params({"action": "remove"})
+
+
+def test_add_job_empty_message_returns_actionable_error(tmp_path) -> None:
+    tool = _make_tool(tmp_path)
+    tool.set_context("telegram", "chat-1")
+
+    result = tool._add_job(None, "", 60, None, None, None)
+
+    assert "action='add' requires a non-empty 'message'" in result
+    assert "Retry including message=" in result
+
+
+def test_add_job_captures_metadata_and_session_key(tmp_path) -> None:
+    """CronTool stores channel metadata and session_key when adding a job."""
+    tool = _make_tool(tmp_path)
+    meta = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
+    tool.set_context("slack", "C99", metadata=meta, session_key="slack:C99:111.222")
+
+    result = tool._add_job("test", "say hi", 60, None, None, None)
+    assert "Created job" in result
+
+    jobs = tool._cron.list_jobs()
+    assert len(jobs) == 1
+    assert jobs[0].payload.channel_meta == meta
+    assert jobs[0].payload.session_key == "slack:C99:111.222"
 
 
 def test_list_excludes_disabled_jobs(tmp_path) -> None:

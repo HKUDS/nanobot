@@ -43,6 +43,26 @@ We use a two-branch model to balance stability and exploration:
 **When in doubt, target `nightly`.** It is easier to move a stable idea from `nightly`
 to `main` than to undo a risky change after it lands in the stable branch.
 
+### Starting Work
+
+Before making changes, sync the target branch and create a topic branch from it.
+For stable bug fixes and documentation-only changes, start from the latest `main`.
+For experimental work, start from the latest `nightly`.
+
+```bash
+git fetch upstream
+git switch main
+git pull --ff-only upstream main
+git switch -c your-topic-branch
+```
+
+Use your primary HKUDS/nanobot remote in place of `upstream` if your checkout
+uses a different remote name.
+
+Keep unrelated local changes out of the topic branch. If your checkout already has
+work in progress, use a separate worktree or finish that work before starting a
+new branch.
+
 ### How Does Nightly Get Merged to Main?
 
 We don't merge the entire `nightly` branch. Instead, stable features are **cherry-picked** from `nightly` into individual PRs targeting `main`:
@@ -86,6 +106,11 @@ ruff check nanobot/
 # Format code
 ruff format nanobot/
 ```
+
+## Contribution License
+
+By submitting a contribution, you confirm that you have the right to submit it
+and agree that it will be licensed under the project's MIT License.
 
 ## Code Style
 

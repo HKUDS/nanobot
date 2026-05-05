@@ -102,7 +102,7 @@ async def test_consolidation_loops_until_target_met(tmp_path, monkeypatch) -> No
     loop.sessions.save(session)
 
     call_count = [0]
-    def mock_estimate(_session):
+    def mock_estimate(_session, *, session_summary=None):
         call_count[0] += 1
         if call_count[0] == 1:
             return (500, "test")
@@ -139,7 +139,7 @@ async def test_consolidation_continues_below_trigger_until_half_target(tmp_path,
 
     call_count = [0]
 
-    def mock_estimate(_session):
+    def mock_estimate(_session, *, session_summary=None):
         call_count[0] += 1
         if call_count[0] == 1:
             return (500, "test")
@@ -154,6 +154,61 @@ async def test_consolidation_continues_below_trigger_until_half_target(tmp_path,
 
     assert loop.consolidator.archive.await_count == 2
     assert session.last_consolidated == 6
+
+
+@pytest.mark.asyncio
+async def test_consolidation_persists_summary_for_next_prepare_session(tmp_path, monkeypatch) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=0, context_window_tokens=200)
+    loop.consolidator.archive = AsyncMock(return_value="User discussed project status.")  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("cli:test")
+    session.messages = [
+        {"role": "user", "content": "u1", "timestamp": "2026-01-01T00:00:00"},
+        {"role": "assistant", "content": "a1", "timestamp": "2026-01-01T00:00:01"},
+        {"role": "user", "content": "u2", "timestamp": "2026-01-01T00:00:02"},
+    ]
+    loop.sessions.save(session)
+
+    call_count = [0]
+
+    def mock_estimate(_session, *, session_summary=None):
+        call_count[0] += 1
+        if call_count[0] == 1:
+            return (500, "test")
+        return (80, "test")
+
+    loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]
+    monkeypatch.setattr(memory_module, "estimate_message_tokens", lambda _m: 150)
+
+    await loop.consolidator.maybe_consolidate_by_tokens(session)
+
+    reloaded = loop.sessions.get_or_create("cli:test")
+    meta = reloaded.metadata.get("_last_summary")
+    assert meta is not None
+    assert meta["text"] == "User discussed project status."
+
+    reloaded, pending = loop.auto_compact.prepare_session(reloaded, "cli:test")
+    assert pending is not None
+    assert "User discussed project status." in pending
+    assert "_last_summary" not in reloaded.metadata
+
+
+@pytest.mark.asyncio
+async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
+    session = loop.sessions.get_or_create("cli:test")
+    loop.auto_compact.prepare_session = MagicMock(
+        return_value=(session, "Previous conversation summary: earlier context")
+    )  # type: ignore[method-assign]
+    loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    loop._schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
+
+    await loop.process_direct("hello", session_key="cli:test")
+
+    loop.consolidator.maybe_consolidate_by_tokens.assert_awaited_once_with(
+        session,
+        session_summary="Previous conversation summary: earlier context",
+    )
 
 
 @pytest.mark.asyncio
@@ -173,6 +228,7 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
         return LLMResponse(content="ok", tool_calls=[])
     loop.provider.chat_with_retry = track_llm
     loop.provider.chat_stream_with_retry = track_llm
+    loop._schedule_background = lambda coro: coro.close()  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
     session.messages = [
@@ -184,7 +240,7 @@ async def test_preflight_consolidation_before_llm_call(tmp_path, monkeypatch) ->
     monkeypatch.setattr(memory_module, "estimate_message_tokens", lambda _m: 500)
 
     call_count = [0]
-    def mock_estimate(_session):
+    def mock_estimate(_session, *, session_summary=None):
         call_count[0] += 1
         return (1000 if call_count[0] <= 1 else 80, "test")
     loop.consolidator.estimate_session_prompt_tokens = mock_estimate  # type: ignore[method-assign]

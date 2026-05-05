@@ -47,3 +47,57 @@ def test_get_definitions_orders_builtins_then_mcp_tools() -> None:
         "mcp_fs_list",
         "mcp_git_status",
     ]
+
+
+def test_prepare_call_read_file_rejects_non_object_params_with_actionable_hint() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool("read_file"))
+
+    tool, params, error = registry.prepare_call("read_file", ["foo.txt"])
+
+    assert tool is None
+    assert params == ["foo.txt"]
+    assert error is not None
+    assert "must be a JSON object" in error
+    assert "Use named parameters" in error
+
+
+def test_prepare_call_other_tools_keep_generic_object_validation() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool("grep"))
+
+    tool, params, error = registry.prepare_call("grep", ["TODO"])
+
+    assert tool is not None
+    assert params == ["TODO"]
+    assert error == "Error: Invalid parameters for tool 'grep': parameters must be an object, got list"
+
+
+def test_get_definitions_returns_cached_result() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool("read_file"))
+    first = registry.get_definitions()
+    assert registry._cached_definitions is not None
+    second = registry.get_definitions()
+    assert first == second
+
+
+def test_register_invalidates_cache() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool("read_file"))
+    first = registry.get_definitions()
+    registry.register(_FakeTool("write_file"))
+    second = registry.get_definitions()
+    assert first is not second
+    assert len(second) == 2
+
+
+def test_unregister_invalidates_cache() -> None:
+    registry = ToolRegistry()
+    registry.register(_FakeTool("read_file"))
+    registry.register(_FakeTool("write_file"))
+    first = registry.get_definitions()
+    registry.unregister("write_file")
+    second = registry.get_definitions()
+    assert first is not second
+    assert len(second) == 1

@@ -6,14 +6,23 @@ import asyncio
 import re
 import time
 import unicodedata
+from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
-from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
+from telegram import (
+    BotCommand,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReactionTypeEmoji,
+    ReplyParameters,
+    Update,
+)
 from telegram.error import BadRequest, NetworkError, TimedOut
-from telegram.ext import Application, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
@@ -26,6 +35,11 @@ from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
+# Telegram's actual API limit is 4096; we split raw markdown at 4000 as a
+# safety margin for mid-stream edits (plain text).  For _stream_end, we
+# convert to HTML first and then split at the true 4096-char boundary so
+# the final rendered message never overflows.
+TELEGRAM_HTML_MAX_LEN = 4096
 TELEGRAM_REPLY_CONTEXT_MAX_LEN = TELEGRAM_MAX_MESSAGE_LEN  # Max length for reply context in user message
 
 
@@ -46,6 +60,34 @@ def _strip_md(s: str) -> str:
     s = re.sub(r'~~(.+?)~~', r'\1', s)
     s = re.sub(r'`([^`]+)`', r'\1', s)
     return s.strip()
+
+
+def _strip_md_block(text: str) -> str:
+    """Strip block-level and inline markdown for readable plain-text preview.
+
+    Used during streaming mid-edits so users see clean text instead of raw
+    markdown syntax while the response is still being generated.
+    """
+    # Code blocks -> just the code
+    text = re.sub(r'```[\w]*\n?([\s\S]*?)```', r'\1', text)
+    # Headers -> plain text
+    text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
+    # Blockquotes
+    text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
+    # Bold / italic / strikethrough
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = re.sub(r'__(.+?)__', r'\1', text)
+    text = re.sub(r'(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])', r'\1', text)
+    text = re.sub(r'~~(.+?)~~', r'\1', text)
+    # Inline code
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+    # Links [text](url) -> text
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+    # Bullet lists
+    text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
+    # Numbered lists (normalize spacing)
+    text = re.sub(r'^(\d+)\.\s+', r'\1. ', text, flags=re.MULTILINE)
+    return text
 
 
 def _render_table_box(table_lines: list[str]) -> str:
@@ -124,8 +166,8 @@ def _markdown_to_telegram_html(text: str) -> str:
 
     text = re.sub(r'`([^`]+)`', save_inline_code, text)
 
-    # 3. Headers # Title -> just the title text
-    text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
+    # 3. Headers # Title -> <b>Title</b> (preserve visual hierarchy)
+    text = re.sub(r'^#{1,6}\s+(.+)$', r'⟪B⟫\1⟪/B⟫', text, flags=re.MULTILINE)
 
     # 4. Blockquotes > text -> just the text (before HTML escaping)
     text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
@@ -149,6 +191,9 @@ def _markdown_to_telegram_html(text: str) -> str:
     # 10. Bullet lists - item -> • item
     text = re.sub(r'^[-*]\s+', '• ', text, flags=re.MULTILINE)
 
+    # 10.5. Numbered lists  1. item -> 1. item (keep number, normalize indent)
+    text = re.sub(r'^(\d+)\.\s+', r'\1. ', text, flags=re.MULTILINE)
+
     # 11. Restore inline code with HTML tags
     for i, code in enumerate(inline_codes):
         # Escape HTML in code content
@@ -161,11 +206,15 @@ def _markdown_to_telegram_html(text: str) -> str:
         escaped = _escape_telegram_html(code)
         text = text.replace(f"\x00CB{i}\x00", f"<pre><code>{escaped}</code></pre>")
 
+    # 13. Restore header bold markers (inserted in step 3, after HTML escaping)
+    text = text.replace('⟪B⟫', '<b>').replace('⟪/B⟫', '</b>')
+
     return text
 
 
 _SEND_MAX_RETRIES = 3
 _SEND_RETRY_BASE_DELAY = 0.5  # seconds, doubled each retry
+_STREAM_EDIT_INTERVAL_DEFAULT = 0.6  # min seconds between edit_message_text calls
 
 
 @dataclass
@@ -190,6 +239,9 @@ class TelegramConfig(Base):
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
+    # Enable inline keyboard buttons in Telegram messages.
+    inline_keyboards: bool = False
+    stream_edit_interval: float = Field(default=_STREAM_EDIT_INTERVAL_DEFAULT, ge=0.1)
 
 
 class TelegramChannel(BaseChannel):
@@ -209,6 +261,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("stop", "Stop the current task"),
         BotCommand("restart", "Restart the bot"),
         BotCommand("status", "Show bot status"),
+        BotCommand("history", "Show recent conversation messages"),
         BotCommand("dream", "Run Dream memory consolidation now"),
         BotCommand("dream_log", "Show the latest Dream memory change"),
         BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
@@ -218,8 +271,6 @@ class TelegramChannel(BaseChannel):
     @classmethod
     def default_config(cls) -> dict[str, Any]:
         return TelegramConfig().model_dump(by_alias=True)
-
-    _STREAM_EDIT_INTERVAL = 0.6  # min seconds between edit_message_text calls
 
     def __init__(self, config: Any, bus: MessageBus):
         if isinstance(config, dict):
@@ -316,14 +367,24 @@ class TelegramChannel(BaseChannel):
         )
         self._app.add_handler(MessageHandler(filters.Regex(r"^/help(?:@\w+)?$"), self._on_help))
 
-        # Add message handler for text, photos, voice, documents
+        # Add message handler for text, photos, video, voice, documents, and locations
         self._app.add_handler(
             MessageHandler(
-                (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL)
+                (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.VIDEO_NOTE
+                 | filters.ANIMATION | filters.VOICE | filters.AUDIO
+                 | filters.Document.ALL | filters.LOCATION)
                 & ~filters.COMMAND,
                 self._on_message
             )
         )
+
+        # Conditionally register inline keyboard callback handler
+        if self.config.inline_keyboards:
+            self._app.add_handler(CallbackQueryHandler(self._on_callback_query))
+            allowed_updates = ["message", "callback_query"]
+            logger.debug("Telegram inline keyboards enabled")
+        else:
+            allowed_updates = ["message"]
 
         logger.info("Starting Telegram bot (polling mode)...")
 
@@ -345,7 +406,7 @@ class TelegramChannel(BaseChannel):
 
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
-            allowed_updates=["message"],
+            allowed_updates=allowed_updates,
             drop_pending_updates=False,  # Process pending messages on startup
             error_callback=self._on_polling_error,
         )
@@ -380,6 +441,8 @@ class TelegramChannel(BaseChannel):
         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
         if ext in ("jpg", "jpeg", "png", "gif", "webp"):
             return "photo"
+        if ext in ("mp4", "mov", "avi", "mkv", "webm", "3gp"):
+            return "video"
         if ext == "ogg":
             return "voice"
         if ext in ("mp3", "m4a", "wav", "aac"):
@@ -400,10 +463,8 @@ class TelegramChannel(BaseChannel):
         if not msg.metadata.get("_progress", False):
             self._stop_typing(msg.chat_id)
             if reply_to_message_id := msg.metadata.get("message_id"):
-                try:
+                with suppress(ValueError):
                     await self._remove_reaction(msg.chat_id, int(reply_to_message_id))
-                except ValueError:
-                    pass
 
         try:
             chat_id = int(msg.chat_id)
@@ -432,10 +493,19 @@ class TelegramChannel(BaseChannel):
                 media_type = self._get_media_type(media_path)
                 sender = {
                     "photo": self._app.bot.send_photo,
+                    "video": self._app.bot.send_video,
                     "voice": self._app.bot.send_voice,
                     "audio": self._app.bot.send_audio,
                 }.get(media_type, self._app.bot.send_document)
-                param = "photo" if media_type == "photo" else media_type if media_type in ("voice", "audio") else "document"
+                param = {
+                    "photo": "photo",
+                    "video": "video",
+                    "voice": "voice",
+                    "audio": "audio",
+                }.get(media_type, "document")
+                extra: dict[str, Any] = {}
+                if media_type == "video":
+                    extra["supports_streaming"] = True
 
                 # Telegram Bot API accepts HTTP(S) URLs directly for media params.
                 if self._is_remote_media_url(media_path):
@@ -448,16 +518,21 @@ class TelegramChannel(BaseChannel):
                         **{param: media_path},
                         reply_parameters=reply_params,
                         **thread_kwargs,
+                        **extra,
                     )
                     continue
 
-                with open(media_path, "rb") as f:
-                    await sender(
-                        chat_id=chat_id,
-                        **{param: f},
-                        reply_parameters=reply_params,
-                        **thread_kwargs,
-                    )
+                media_bytes = Path(media_path).read_bytes()
+                filename = Path(media_path).name
+                send_kwargs = {param: media_bytes, "filename": filename}
+                await self._call_with_retry(
+                    sender,
+                    chat_id=chat_id,
+                    reply_parameters=reply_params,
+                    **thread_kwargs,
+                    **extra,
+                    **send_kwargs,
+                )
             except Exception as e:
                 filename = media_path.rsplit("/", 1)[-1]
                 logger.error("Failed to send media {}: {}", media_path, e)
@@ -471,16 +546,25 @@ class TelegramChannel(BaseChannel):
         # Send text content
         if msg.content and msg.content != "[empty message]":
             render_as_blockquote = bool(msg.metadata.get("_tool_hint"))
-            for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
+            buttons = getattr(msg, "buttons", None) or []
+            reply_markup = self._build_keyboard(buttons) if buttons else None
+            text = msg.content
+            # Fallback: no native keyboard → splice labels into the message so the choices survive.
+            if buttons and reply_markup is None:
+                text = f"{text}\n\n{self._buttons_as_text(buttons)}"
+            chunks = split_message(text, TELEGRAM_MAX_MESSAGE_LEN)
+            for i, chunk in enumerate(chunks):
+                is_last = (i == len(chunks) - 1)
                 await self._send_text(
                     chat_id, chunk, reply_params, thread_kwargs,
                     render_as_blockquote=render_as_blockquote,
+                    reply_markup=reply_markup if is_last else None,
                 )
 
     async def _call_with_retry(self, fn, *args, **kwargs):
         """Call an async Telegram API function with retry on pool/network timeout and RetryAfter."""
         from telegram.error import RetryAfter
-        
+
         for attempt in range(1, _SEND_MAX_RETRIES + 1):
             try:
                 return await fn(*args, **kwargs)
@@ -510,6 +594,7 @@ class TelegramChannel(BaseChannel):
         reply_params=None,
         thread_kwargs: dict | None = None,
         render_as_blockquote: bool = False,
+        reply_markup=None,
     ) -> None:
         """Send a plain text message with HTML fallback."""
         try:
@@ -518,9 +603,10 @@ class TelegramChannel(BaseChannel):
                 self._app.bot.send_message,
                 chat_id=chat_id, text=html, parse_mode="HTML",
                 reply_parameters=reply_params,
+                reply_markup=reply_markup,
                 **(thread_kwargs or {}),
             )
-        except Exception as e:
+        except BadRequest as e:
             logger.warning("HTML parse failed, falling back to plain text: {}", e)
             try:
                 await self._call_with_retry(
@@ -528,6 +614,7 @@ class TelegramChannel(BaseChannel):
                     chat_id=chat_id,
                     text=text,
                     reply_parameters=reply_params,
+                    reply_markup=reply_markup,
                     **(thread_kwargs or {}),
                 )
             except Exception as e2:
@@ -554,30 +641,42 @@ class TelegramChannel(BaseChannel):
                 return
             self._stop_typing(chat_id)
             if reply_to_message_id := meta.get("message_id"):
-                try:
+                with suppress(ValueError):
                     await self._remove_reaction(chat_id, int(reply_to_message_id))
-                except ValueError:
-                    pass
-            chunks = split_message(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
-            primary_text = chunks[0] if chunks else buf.text
+            thread_kwargs = {}
+            if message_thread_id := meta.get("message_thread_id"):
+                thread_kwargs["message_thread_id"] = message_thread_id
+            raw_text = buf.text
+            html = _markdown_to_telegram_html(raw_text)
+            if len(html) <= TELEGRAM_HTML_MAX_LEN:
+                primary_html = html
+                extra_html_chunks = []
+            else:
+                html_chunks = split_message(html, TELEGRAM_HTML_MAX_LEN)
+                primary_html = html_chunks[0]
+                extra_html_chunks = html_chunks[1:]
             try:
-                html = _markdown_to_telegram_html(primary_text)
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
-                    text=html, parse_mode="HTML",
+                    text=primary_html, parse_mode="HTML",
                 )
-            except Exception as e:
+            except BadRequest as e:
+                # Only fall back to plain text on actual HTML parse/format errors.
+                # Network errors (TimedOut, NetworkError) should propagate immediately
+                # to avoid doubling connection demand during pool exhaustion.
                 if self._is_not_modified_error(e):
                     logger.debug("Final stream edit already applied for {}", chat_id)
                     self._stream_bufs.pop(chat_id, None)
                     return
                 logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
+                # Fall back to raw markdown (not HTML) so users don't see raw tags.
+                primary_plain = split_message(raw_text, TELEGRAM_MAX_MESSAGE_LEN)[0] if len(raw_text) > TELEGRAM_MAX_MESSAGE_LEN else raw_text
                 try:
                     await self._call_with_retry(
                         self._app.bot.edit_message_text,
                         chat_id=int_chat_id, message_id=buf.message_id,
-                        text=primary_text,
+                        text=primary_plain,
                     )
                 except Exception as e2:
                     if self._is_not_modified_error(e2):
@@ -585,10 +684,17 @@ class TelegramChannel(BaseChannel):
                     else:
                         logger.warning("Final stream edit failed: {}", e2)
                         raise  # Let ChannelManager handle retry
-            # If final content exceeds Telegram limit, keep the first chunk in
-            # the edited stream message and send the rest as follow-up messages.
-            for extra_chunk in chunks[1:]:
-                await self._send_text(int_chat_id, extra_chunk)
+            for extra_html_chunk in extra_html_chunks:
+                try:
+                    await self._call_with_retry(
+                        self._app.bot.send_message,
+                        chat_id=int_chat_id, text=extra_html_chunk,
+                        parse_mode="HTML",
+                        **thread_kwargs,
+                    )
+                except Exception:
+                    # Fall back to _send_text which handles HTML→plain gracefully.
+                    await self._send_text(int_chat_id, extra_html_chunk)
             self._stream_bufs.pop(chat_id, None)
             return
 
@@ -608,10 +714,11 @@ class TelegramChannel(BaseChannel):
         if message_thread_id := meta.get("message_thread_id"):
             thread_kwargs["message_thread_id"] = message_thread_id
         if buf.message_id is None:
+            preview = _strip_md_block(buf.text)
             try:
                 sent = await self._call_with_retry(
                     self._app.bot.send_message,
-                    chat_id=int_chat_id, text=buf.text,
+                    chat_id=int_chat_id, text=preview,
                     **thread_kwargs,
                 )
                 buf.message_id = sent.message_id
@@ -619,12 +726,17 @@ class TelegramChannel(BaseChannel):
             except Exception as e:
                 logger.warning("Stream initial send failed: {}", e)
                 raise  # Let ChannelManager handle retry
-        elif (now - buf.last_edit) >= self._STREAM_EDIT_INTERVAL:
+        elif (now - buf.last_edit) >= self.config.stream_edit_interval:
+            if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
+                await self._flush_stream_overflow(int_chat_id, buf, thread_kwargs)
+                buf.last_edit = now
+                return
+            preview = _strip_md_block(buf.text)
             try:
                 await self._call_with_retry(
                     self._app.bot.edit_message_text,
                     chat_id=int_chat_id, message_id=buf.message_id,
-                    text=buf.text,
+                    text=preview,
                 )
                 buf.last_edit = now
             except Exception as e:
@@ -633,6 +745,44 @@ class TelegramChannel(BaseChannel):
                     return
                 logger.warning("Stream edit failed: {}", e)
                 raise  # Let ChannelManager handle retry
+
+    async def _flush_stream_overflow(
+        self,
+        chat_id: int,
+        buf: "_StreamBuf",
+        thread_kwargs: dict,
+    ) -> None:
+        """Split an oversized stream buffer mid-flight.
+
+        Edits the current stream message with the first chunk, sends any
+        intermediate chunks as standalone messages, then opens a new message
+        for the tail so subsequent deltas continue streaming into it.
+        """
+        chunks = split_message(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
+        if len(chunks) <= 1:
+            return
+        try:
+            await self._call_with_retry(
+                self._app.bot.edit_message_text,
+                chat_id=chat_id, message_id=buf.message_id,
+                text=chunks[0],
+            )
+        except Exception as e:
+            if not self._is_not_modified_error(e):
+                logger.warning("Stream overflow edit failed: {}", e)
+                raise
+        for chunk in chunks[1:-1]:
+            await self._call_with_retry(
+                self._app.bot.send_message,
+                chat_id=chat_id, text=chunk, **thread_kwargs,
+            )
+        tail = chunks[-1]
+        sent = await self._call_with_retry(
+            self._app.bot.send_message,
+            chat_id=chat_id, text=tail, **thread_kwargs,
+        )
+        buf.message_id = sent.message_id
+        buf.text = tail
 
     async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle /start command."""
@@ -689,13 +839,13 @@ class TelegramChannel(BaseChannel):
         text = getattr(reply, "text", None) or getattr(reply, "caption", None) or ""
         if len(text) > TELEGRAM_REPLY_CONTEXT_MAX_LEN:
             text = text[:TELEGRAM_REPLY_CONTEXT_MAX_LEN] + "..."
-            
+
         if not text:
             return None
-            
+
         bot_id, _ = await self._ensure_bot_identity()
         reply_user = getattr(reply, "from_user", None)
-        
+
         if bot_id and reply_user and getattr(reply_user, "id", None) == bot_id:
             return f"[Reply to bot: {text}]"
         elif reply_user and getattr(reply_user, "username", None):
@@ -840,7 +990,7 @@ class TelegramChannel(BaseChannel):
         message = update.message
         user = update.effective_user
         self._remember_thread_context(message)
-        
+
         # Strip @bot_username suffix if present
         content = message.text or ""
         if content.startswith("/") and "@" in content:
@@ -848,7 +998,7 @@ class TelegramChannel(BaseChannel):
             cmd_part = cmd_part.split("@")[0]
             content = f"{cmd_part} {rest[0]}" if rest else cmd_part
         content = self._normalize_telegram_command(content)
-            
+
         await self._handle_message(
             sender_id=self._sender_id(user),
             chat_id=str(message.chat_id),
@@ -883,6 +1033,12 @@ class TelegramChannel(BaseChannel):
             content_parts.append(message.text)
         if message.caption:
             content_parts.append(message.caption)
+
+        # Location content
+        if message.location:
+            lat = message.location.latitude
+            lon = message.location.longitude
+            content_parts.append(f"[location: {lat}, {lon}]")
 
         # Download current message media
         current_media_paths, current_media_parts = await self._download_message_media(
@@ -1003,11 +1159,10 @@ class TelegramChannel(BaseChannel):
     async def _typing_loop(self, chat_id: str) -> None:
         """Repeatedly send 'typing' action until cancelled."""
         try:
-            while self._app:
-                await self._app.bot.send_chat_action(chat_id=int(chat_id), action="typing")
-                await asyncio.sleep(4)
-        except asyncio.CancelledError:
-            pass
+            with suppress(asyncio.CancelledError):
+                while self._app:
+                    await self._app.bot.send_chat_action(chat_id=int(chat_id), action="typing")
+                    await asyncio.sleep(4)
         except Exception as e:
             logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
 
@@ -1052,18 +1207,74 @@ class TelegramChannel(BaseChannel):
         if mime_type:
             ext_map = {
                 "image/jpeg": ".jpg", "image/png": ".png", "image/gif": ".gif",
+                "image/webp": ".webp",
                 "audio/ogg": ".ogg", "audio/mpeg": ".mp3", "audio/mp4": ".m4a",
+                "video/mp4": ".mp4", "video/quicktime": ".mov", "video/webm": ".webm",
+                "video/x-matroska": ".mkv", "video/3gpp": ".3gp",
             }
             if mime_type in ext_map:
                 return ext_map[mime_type]
 
-        type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "file": ""}
+        type_map = {"image": ".jpg", "voice": ".ogg", "audio": ".mp3", "video": ".mp4", "file": ""}
         if ext := type_map.get(media_type, ""):
             return ext
 
         if filename:
-            from pathlib import Path
-
             return "".join(Path(filename).suffixes)
 
         return ""
+
+    def _build_keyboard(self, buttons: list) -> InlineKeyboardMarkup | None:
+        """Build inline keyboard markup if inline_keyboards is enabled."""
+        if not buttons or not self.config.inline_keyboards:
+            return None
+        keyboard = [
+            [InlineKeyboardButton(label, callback_data=self._safe_callback_data(label)) for label in row]
+            for row in buttons
+        ]
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
+    def _safe_callback_data(label: str) -> str:
+        # Telegram caps callback_data at 64 bytes UTF-8; truncate at a char boundary so the keyboard still sends.
+        encoded = label.encode("utf-8")
+        if len(encoded) <= 64:
+            return label
+        return encoded[:64].decode("utf-8", errors="ignore")
+
+    @staticmethod
+    def _buttons_as_text(buttons: list[list[str]]) -> str:
+        # Buttons are semantic options; when we can't render a keyboard, the user still needs to see them.
+        return "\n".join(" ".join(f"[{label}]" for label in row) for row in buttons if row)
+
+    async def _on_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle inline keyboard button clicks (callback queries)."""
+        if not update.callback_query or not update.effective_user:
+            return
+        query = update.callback_query
+        user = update.effective_user
+        chat_id = query.message.chat_id if query.message else None
+        sender_id = self._sender_id(user)
+        if not chat_id:
+            logger.warning("Callback query without chat_id")
+            return
+        button_label = query.data or ""
+        await query.answer()
+        if query.message:
+            with suppress(Exception):
+                await query.message.edit_reply_markup(reply_markup=None)
+        logger.debug("Inline button tap from {}: {}", sender_id, button_label)
+        self._start_typing(str(chat_id))
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=str(chat_id),
+            content=button_label,
+            metadata={
+                "callback_query_id": query.id,
+                "button_label": button_label,
+                "user_id": user.id,
+                "username": user.username,
+                "first_name": user.first_name,
+                "is_callback": True,
+            },
+        )

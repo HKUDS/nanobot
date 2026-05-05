@@ -34,7 +34,7 @@ class ProviderSpec:
     display_name: str = ""  # shown in `nanobot status`
 
     # which provider implementation to use
-    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot"
+    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
     backend: str = "openai_compat"
 
     # extra env vars, e.g. (("ZHIPUAI_API_KEY", "{api_key}"),)
@@ -62,6 +62,19 @@ class ProviderSpec:
 
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
+
+    # How to inject the thinking on/off toggle into extra_body.
+    # ""              — no extra_body needed (default)
+    # "thinking_type" — {"thinking": {"type": "enabled"/"disabled"}}
+    #                   (DeepSeek, VolcEngine, BytePlus)
+    # "enable_thinking" — {"enable_thinking": true/false}  (DashScope)
+    # "reasoning_split" — {"reasoning_split": true/false}  (MiniMax)
+    thinking_style: str = ""
+
+    # When True, treat the "reasoning" response field as formal content
+    # when "content" is empty.  Only set this for providers (e.g. StepFun)
+    # whose API returns the actual answer in "reasoning" instead of "content".
+    reasoning_as_content: bool = False
 
     @property
     def label(self) -> str:
@@ -92,6 +105,29 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="azure_openai",
         is_direct=True,
     ),
+    # === AWS Bedrock (native Converse API via bedrock-runtime) =============
+    ProviderSpec(
+        name="bedrock",
+        keywords=(
+            "bedrock",
+            "anthropic.claude",
+            "amazon.nova",
+            "meta.",
+            "mistral.",
+            "cohere.",
+            "qwen.",
+            "deepseek.",
+            "openai.gpt-oss",
+            "ai21.",
+            "moonshot.",
+            "writer.",
+            "zai.",
+        ),
+        env_key="AWS_BEARER_TOKEN_BEDROCK",
+        display_name="AWS Bedrock",
+        backend="bedrock",
+        is_direct=True,
+    ),
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
     # OpenRouter: global gateway, keys start with "sk-or-"
@@ -106,6 +142,18 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="openrouter",
         default_api_base="https://openrouter.ai/api/v1",
         supports_prompt_caching=True,
+    ),
+    # Hugging Face Inference Providers: OpenAI-compatible router for chat models.
+    ProviderSpec(
+        name="huggingface",
+        keywords=("huggingface", "hugging-face"),
+        env_key="HF_TOKEN",
+        display_name="Hugging Face",
+        backend="openai_compat",
+        is_gateway=True,
+        detect_by_key_prefix="hf_",
+        detect_by_base_keyword="huggingface",
+        default_api_base="https://router.huggingface.co/v1",
     ),
     # AiHubMix: global gateway, OpenAI-compatible interface.
     # strip_model_prefix=True: doesn't understand "anthropic/claude-3",
@@ -143,6 +191,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_gateway=True,
         detect_by_base_keyword="volces",
         default_api_base="https://ark.cn-beijing.volces.com/api/v3",
+        thinking_style="thinking_type",
     ),
 
     # VolcEngine Coding Plan (火山引擎 Coding Plan): same key as volcengine
@@ -155,6 +204,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_gateway=True,
         default_api_base="https://ark.cn-beijing.volces.com/api/coding/v3",
         strip_model_prefix=True,
+        thinking_style="thinking_type",
     ),
 
     # BytePlus: VolcEngine international, pay-per-use models
@@ -168,6 +218,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="bytepluses",
         default_api_base="https://ark.ap-southeast.bytepluses.com/api/v3",
         strip_model_prefix=True,
+        thinking_style="thinking_type",
     ),
 
     # BytePlus Coding Plan: same key as byteplus
@@ -180,6 +231,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_gateway=True,
         default_api_base="https://ark.ap-southeast.bytepluses.com/api/coding/v3",
         strip_model_prefix=True,
+        thinking_style="thinking_type",
     ),
 
 
@@ -223,6 +275,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://api.githubcopilot.com",
         strip_model_prefix=True,
         is_oauth=True,
+        supports_max_completion_tokens=True,
     ),
     # DeepSeek: OpenAI-compatible at api.deepseek.com
     ProviderSpec(
@@ -232,11 +285,12 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="DeepSeek",
         backend="openai_compat",
         default_api_base="https://api.deepseek.com",
+        thinking_style="thinking_type",
     ),
     # Gemini: Google's OpenAI-compatible endpoint
     ProviderSpec(
         name="gemini",
-        keywords=("gemini",),
+        keywords=("gemini", "gemma"),
         env_key="GEMINI_API_KEY",
         display_name="Gemini",
         backend="openai_compat",
@@ -260,8 +314,9 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="DashScope",
         backend="openai_compat",
         default_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        thinking_style="enable_thinking",
     ),
-    # Moonshot (月之暗面): Kimi models. K2.5 enforces temperature >= 1.0.
+    # Moonshot (月之暗面): Kimi K2.5 / K2.6 enforce temperature >= 1.0.
     ProviderSpec(
         name="moonshot",
         keywords=("moonshot", "kimi"),
@@ -269,7 +324,10 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Moonshot",
         backend="openai_compat",
         default_api_base="https://api.moonshot.ai/v1",
-        model_overrides=(("kimi-k2.5", {"temperature": 1.0}),),
+        model_overrides=(
+            ("kimi-k2.5", {"temperature": 1.0}),
+            ("kimi-k2.6", {"temperature": 1.0}),
+        ),
     ),
     # MiniMax: OpenAI-compatible API
     ProviderSpec(
@@ -279,6 +337,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="MiniMax",
         backend="openai_compat",
         default_api_base="https://api.minimax.io/v1",
+        thinking_style="reasoning_split",
+    ),
+    # MiniMax Anthropic-compatible endpoint: supports thinking mode
+    ProviderSpec(
+        name="minimax_anthropic",
+        keywords=("minimax_anthropic",),
+        env_key="MINIMAX_API_KEY",
+        display_name="MiniMax (Anthropic)",
+        backend="anthropic",
+        default_api_base="https://api.minimax.io/anthropic",
     ),
     # Mistral AI: OpenAI-compatible API
     ProviderSpec(
@@ -297,6 +365,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Step Fun",
         backend="openai_compat",
         default_api_base="https://api.stepfun.com/v1",
+        reasoning_as_content=True,
     ),
     # Xiaomi MIMO (小米): OpenAI-compatible API
     ProviderSpec(
@@ -306,6 +375,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Xiaomi MIMO",
         backend="openai_compat",
         default_api_base="https://api.xiaomimimo.com/v1",
+    ),
+    # LongCat: OpenAI-compatible API
+    ProviderSpec(
+        name="longcat",
+        keywords=("longcat",),
+        env_key="LONGCAT_API_KEY",
+        display_name="LongCat",
+        backend="openai_compat",
+        default_api_base="https://api.longcat.chat/openai/v1",
     ),
     # === Local deployment (matched by config key, NOT by api_base) =========
     # vLLM / any OpenAI-compatible local server
@@ -327,6 +405,17 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_local=True,
         detect_by_base_keyword="11434",
         default_api_base="http://localhost:11434/v1",
+    ),
+    # LM Studio (local, OpenAI-compatible)
+    ProviderSpec(
+        name="lm_studio",
+        keywords=("lm-studio", "lmstudio", "lm_studio"),
+        env_key="LM_STUDIO_API_KEY",
+        display_name="LM Studio",
+        backend="openai_compat",
+        is_local=True,
+        detect_by_base_keyword="1234",
+        default_api_base="http://localhost:1234/v1",
     ),
     # === OpenVINO Model Server (direct, local, OpenAI-compatible at /v3) ===
     ProviderSpec(

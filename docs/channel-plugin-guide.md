@@ -19,7 +19,7 @@ We'll build a minimal webhook channel that receives messages via HTTP POST and s
 
 ### Project Structure
 
-```
+```text
 nanobot-channel-webhook/
 ├── nanobot_channel_webhook/
 │   ├── __init__.py          # re-export WebhookChannel
@@ -43,18 +43,33 @@ from typing import Any
 
 from aiohttp import web
 from loguru import logger
+from pydantic import Field
 
 from nanobot.channels.base import BaseChannel
 from nanobot.bus.events import OutboundMessage
+from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import Base
+
+
+class WebhookConfig(Base):
+    """Webhook channel configuration."""
+    enabled: bool = False
+    port: int = 9000
+    allow_from: list[str] = Field(default_factory=list)
 
 
 class WebhookChannel(BaseChannel):
     name = "webhook"
     display_name = "Webhook"
 
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = WebhookConfig(**config)
+        super().__init__(config, bus)
+
     @classmethod
     def default_config(cls) -> dict[str, Any]:
-        return {"enabled": False, "port": 9000, "allowFrom": []}
+        return WebhookConfig().model_dump(by_alias=True)
 
     async def start(self) -> None:
         """Start an HTTP server that listens for incoming messages.
@@ -63,7 +78,7 @@ class WebhookChannel(BaseChannel):
         If it returns, the channel is considered dead.
         """
         self._running = True
-        port = self.config.get("port", 9000)
+        port = self.config.port
 
         app = web.Application()
         app.router.add_post("/message", self._on_request)
@@ -120,14 +135,17 @@ class WebhookChannel(BaseChannel):
 [project]
 name = "nanobot-channel-webhook"
 version = "0.1.0"
-dependencies = ["nanobot", "aiohttp"]
+dependencies = ["nanobot-ai", "aiohttp"]
 
 [project.entry-points."nanobot.channels"]
 webhook = "nanobot_channel_webhook:WebhookChannel"
 
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.backends._legacy:_Backend"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["nanobot_channel_webhook"]
 ```
 
 The key (`webhook`) becomes the config section name. The value points to your `BaseChannel` subclass.
@@ -214,7 +232,7 @@ nanobot channels login <channel_name> --force  # re-authenticate
 | Method / Property | Description |
 |-------------------|-------------|
 | `_handle_message(sender_id, chat_id, content, media?, metadata?, session_key?)` | **Call this when you receive a message.** Checks `is_allowed()`, then publishes to the bus. Automatically sets `_wants_stream` if `supports_streaming` is true. |
-| `is_allowed(sender_id)` | Checks against `config["allowFrom"]`; `"*"` allows all, `[]` denies all. |
+| `is_allowed(sender_id)` | Checks against `config.allow_from`; `"*"` allows all, `[]` denies all. |
 | `default_config()` (classmethod) | Returns default config dict for `nanobot onboard`. Override to declare your fields. |
 | `transcribe_audio(file_path)` | Transcribes audio via Groq Whisper (if configured). |
 | `supports_streaming` (property) | `True` when config has `"streaming": true` **and** subclass overrides `send_delta()`. |
@@ -275,7 +293,6 @@ async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | 
 |------|---------|
 | `_stream_delta: True` | A content chunk (delta contains the new text) |
 | `_stream_end: True` | Streaming finished (delta is empty) |
-| `_resuming: True` | More streaming rounds coming (e.g. tool call then another response) |
 
 ### Example: Webhook with Streaming
 
@@ -284,7 +301,9 @@ class WebhookChannel(BaseChannel):
     name = "webhook"
     display_name = "Webhook"
 
-    def __init__(self, config, bus):
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = WebhookConfig(**config)
         super().__init__(config, bus)
         self._buffers: dict[str, str] = {}
 
@@ -333,12 +352,48 @@ When `streaming` is `false` (default) or omitted, only `send()` is called — no
 
 ## Config
 
-Your channel receives config as a plain `dict`. Access fields with `.get()`:
+### Why Pydantic model is required
+
+`BaseChannel.is_allowed()` reads the permission list via `getattr(self.config, "allow_from", [])`. This works for Pydantic models where `allow_from` is a real Python attribute, but **fails silently for plain `dict`** — `dict` has no `allow_from` attribute, so `getattr` always returns the default `[]`, causing all messages to be denied.
+
+Built-in channels use Pydantic config models (subclassing `Base` from `nanobot.config.schema`). Plugin channels **must do the same**.
+
+### Pattern
+
+1. Define a Pydantic model inheriting from `nanobot.config.schema.Base`:
+
+```python
+from pydantic import Field
+from nanobot.config.schema import Base
+
+class WebhookConfig(Base):
+    """Webhook channel configuration."""
+    enabled: bool = False
+    port: int = 9000
+    allow_from: list[str] = Field(default_factory=list)
+```
+
+`Base` is configured with `alias_generator=to_camel` and `populate_by_name=True`, so JSON keys like `"allowFrom"` and `"allow_from"` are both accepted.
+
+2. Convert `dict` → model in `__init__`:
+
+```python
+from typing import Any
+from nanobot.bus.queue import MessageBus
+
+class WebhookChannel(BaseChannel):
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = WebhookConfig(**config)
+        super().__init__(config, bus)
+```
+
+3. Access config as attributes (not `.get()`):
 
 ```python
 async def start(self) -> None:
-    port = self.config.get("port", 9000)
-    token = self.config.get("token", "")
+    port = self.config.port
+    token = self.config.token
 ```
 
 `allowFrom` is handled automatically by `_handle_message()` — you don't need to check it yourself.
@@ -348,8 +403,10 @@ Override `default_config()` so `nanobot onboard` auto-populates `config.json`:
 ```python
 @classmethod
 def default_config(cls) -> dict[str, Any]:
-    return {"enabled": False, "port": 9000, "allowFrom": []}
+    return WebhookConfig().model_dump(by_alias=True)
 ```
+
+> **Note:** `default_config()` returns a plain `dict` (not a Pydantic model) because it's used to serialize into `config.json`. The recommended way is to instantiate your config model and call `model_dump(by_alias=True)` — this automatically uses camelCase keys (`allowFrom`) and keeps defaults in a single source of truth.
 
 If not overridden, the base class returns `{"enabled": false}`.
 

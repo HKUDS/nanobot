@@ -5,6 +5,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import socket
+from contextlib import suppress
 from urllib.parse import urlparse
 
 _BLOCKED_NETWORKS = [
@@ -30,10 +31,8 @@ def configure_ssrf_whitelist(cidrs: list[str]) -> None:
     global _allowed_networks
     nets = []
     for cidr in cidrs:
-        try:
+        with suppress(ValueError):
             nets.append(ipaddress.ip_network(cidr, strict=False))
-        except ValueError:
-            pass
     _allowed_networks = nets
 
 

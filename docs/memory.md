@@ -1,7 +1,5 @@
 # Memory in nanobot
 
-> **Note:** This design is currently an experiment in the latest source code version and is planned to officially ship in `v0.1.5`.
-
 nanobot's memory is built on a simple belief: memory should feel alive, but it should not feel chaotic.
 
 Good memory is not a pile of notes. It is a quiet system of attention. It notices what is worth keeping, lets go of what no longer needs the spotlight, and turns lived experience into something calm, durable, and useful.
@@ -65,7 +63,7 @@ This is why nanobot's memory is not just archival. It is interpretive.
 
 ## The Files
 
-```
+```text
 workspace/
 ├── SOUL.md              # The bot's long-term voice and communication style
 ├── USER.md              # Stable knowledge about the user

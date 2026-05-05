@@ -18,7 +18,17 @@ from nanobot import __logo__
 
 
 def _make_console() -> Console:
-    return Console(file=sys.stdout, force_terminal=True)
+    """Create a Console that emits plain text when stdout is not a TTY.
+
+    Rich's spinner, Live render, and cursor-visibility escape codes all
+    key off ``Console.is_terminal``. Forcing ``force_terminal=True`` overrode
+    the ``isatty()`` check and caused control sequences (``\\x1b[?25l``,
+    braille spinner frames) to pollute programmatic consumers such as
+    ``docker exec -i`` or pipes, even with ``NO_COLOR`` or ``TERM=dumb``.
+    Deferring to ``isatty()`` keeps Rich output in interactive terminals
+    and plain text everywhere else (#3265).
+    """
+    return Console(file=sys.stdout, force_terminal=sys.stdout.isatty())
 
 
 class ThinkingSpinner:
@@ -102,7 +112,7 @@ class StreamRenderer:
             self._live = Live(self._render(), console=c, auto_refresh=False)
             self._live.start()
         now = time.monotonic()
-        if "\n" in delta or (now - self._t) > 0.05:
+        if (now - self._t) > 0.15:
             self._live.update(self._render())
             self._live.refresh()
             self._t = now
