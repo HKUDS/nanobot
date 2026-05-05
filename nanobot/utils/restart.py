@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -26,11 +27,9 @@ def format_restart_completed_message(started_at_raw: str) -> str:
     """Build restart completion text and include elapsed time when available."""
     elapsed_suffix = ""
     if started_at_raw:
-        try:
+        with suppress(ValueError):
             elapsed_s = max(0.0, time.time() - float(started_at_raw))
             elapsed_suffix = f" in {elapsed_s:.1f}s"
-        except ValueError:
-            pass
     return f"Restart completed{elapsed_suffix}."
 
 

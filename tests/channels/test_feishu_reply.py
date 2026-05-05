@@ -446,6 +446,58 @@ async def test_on_message_no_extra_api_call_when_no_parent_id() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Inbound media tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_message_audio_publishes_downloaded_path_and_transcription() -> None:
+    channel = _make_feishu_channel()
+    channel._processed_message_ids.clear()
+    captured = []
+
+    async def capture(msg):
+        captured.append(msg)
+
+    channel.bus.publish_inbound = capture
+    channel._download_and_save_media = AsyncMock(
+        return_value=(r"C:\\Users\\dodre\\.nanobot\\media\\feishu\\voice.ogg", "[audio: voice.ogg]")
+    )
+    channel.transcribe_audio = AsyncMock(return_value="hello from voice")
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    event = _make_feishu_event(
+        msg_type="audio",
+        content='{"file_key": "audio_key", "duration": 1000}',
+        message_id="om_audio",
+    )
+    await channel._on_message(event)
+
+    channel._download_and_save_media.assert_awaited_once_with(
+        "audio", {"file_key": "audio_key", "duration": 1000}, "om_audio"
+    )
+    channel.transcribe_audio.assert_awaited_once_with(r"C:\\Users\\dodre\\.nanobot\\media\\feishu\\voice.ogg")
+    assert len(captured) == 1
+    assert captured[0].media == [r"C:\\Users\\dodre\\.nanobot\\media\\feishu\\voice.ogg"]
+    assert captured[0].content == "[transcription: hello from voice]"
+
+
+@pytest.mark.asyncio
+async def test_download_and_save_media_returns_absolute_path_in_content(monkeypatch, tmp_path) -> None:
+    channel = _make_feishu_channel()
+    monkeypatch.setattr(feishu, "get_media_dir", lambda _channel: tmp_path)
+    channel._download_file_sync = MagicMock(return_value=(b"voice-bytes", None))
+
+    file_path, content_text = await channel._download_and_save_media(
+        "audio", {"file_key": "voice_key"}, "om_audio"
+    )
+
+    assert file_path == str(tmp_path / "voice_key.ogg")
+    assert (tmp_path / "voice_key.ogg").read_bytes() == b"voice-bytes"
+    assert content_text == f"[audio: {file_path}]"
+
+
+# ---------------------------------------------------------------------------
 # Session key derivation tests
 # ---------------------------------------------------------------------------
 
@@ -578,6 +630,32 @@ async def test_reply_without_reply_in_thread_when_disabled() -> None:
 
     # No message_id in metadata → no reply attempt, direct create
     channel._client.im.v1.message.create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_topic_reply_does_not_force_reply_in_thread_when_disabled() -> None:
+    """Topic replies must not create new Feishu topics when reply_to_message is False."""
+    channel = _make_feishu_channel(reply_to_message=False)
+
+    reply_resp = MagicMock()
+    reply_resp.success.return_value = True
+    channel._client.im.v1.message.reply.return_value = reply_resp
+
+    await channel.send(OutboundMessage(
+        channel="feishu",
+        chat_id="oc_abc",
+        content="hello",
+        metadata={
+            "message_id": "om_child456",
+            "chat_type": "group",
+            "thread_id": "om_root123",
+        },
+    ))
+
+    channel._client.im.v1.message.reply.assert_called_once()
+    call_args = channel._client.im.v1.message.reply.call_args
+    request = call_args[0][0]
+    assert request.request_body.reply_in_thread is not True
 
 
 @pytest.mark.asyncio

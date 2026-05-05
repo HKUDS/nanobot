@@ -62,6 +62,7 @@
       "placeholderThread": "メッセージを入力…",
       "placeholderHero": "何を考えていますか？",
       "placeholderOpening": "新しいチャットを開いています…",
+      "placeholderStreaming": "モデルが応答しています…",
       "inputAria": "メッセージ入力欄",
       "sendHint": "Enter で送信 · Shift+Enter で改行",
       "send": "メッセージを送信",

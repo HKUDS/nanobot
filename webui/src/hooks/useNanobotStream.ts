@@ -37,6 +37,7 @@ export interface SendImage {
 export function useNanobotStream(
   chatId: string | null,
   initialMessages: UIMessage[] = [],
+  hasPendingToolCalls = false,
 ): {
   messages: UIMessage[];
   isStreaming: boolean;
@@ -51,9 +52,23 @@ export function useNanobotStream(
 } {
   const { client } = useClient();
   const [messages, setMessages] = useState<UIMessage[]>(initialMessages);
-  const [isStreaming, setIsStreaming] = useState(false);
+  /** If the last loaded message is a trace row (e.g. "Using 2 tools"),
+   * the model was still processing when the page loaded — keep the
+   * loading spinner alive so the user sees the model is active. */
+  const initialStreaming = initialMessages.length > 0
+    ? initialMessages[initialMessages.length - 1].kind === "trace"
+    : false;
+  const [isStreaming, setIsStreaming] = useState(initialStreaming || hasPendingToolCalls);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
   const buffer = useRef<StreamBuffer | null>(null);
+  /** Timer that defers ``isStreaming = false`` after ``stream_end``.
+   *
+   * When the model finishes a text segment and calls a tool, the server
+   * sends ``stream_end`` but the agent is still "thinking" while the tool
+   * executes.  By deferring the flag reset by a short window (1 s) we keep
+   * the loading spinner alive across tool-call boundaries without needing
+   * backend changes. */
+  const streamEndTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return client.onError((err) => setStreamError(err));
@@ -62,21 +77,43 @@ export function useNanobotStream(
   const dismissStreamError = useCallback(() => setStreamError(null), []);
 
   // Reset local state when switching chats. ``streamError`` is scoped to the
-  // send that triggered it, so a chat swap should wipe it out: a stale
-  // "Message too large" banner on a freshly-opened chat-B would confuse the
-  // user about which send actually failed (and in which chat).
-  useEffect(() => {
-    setMessages(initialMessages);
-    setIsStreaming(false);
-    setStreamError(null);
-    buffer.current = null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatId]);
+     // send that triggered it, so a chat swap should wipe it out: a stale
+     // "Message too large" banner on a freshly-opened chat-B would confuse the
+     // user about which send actually failed (and in which chat).
+     useEffect(() => {
+       setMessages(initialMessages);
+       // Check if the new chat's last message is a trace row — if so, the
+       // model may still be processing.
+       setIsStreaming(
+         initialMessages.length > 0
+           ? initialMessages[initialMessages.length - 1].kind === "trace"
+           : false,
+       );
+       // Also consider hasPendingToolCalls from session history.
+       if (hasPendingToolCalls) {
+         setIsStreaming(true);
+       }
+       setStreamError(null);
+       buffer.current = null;
+       if (streamEndTimerRef.current !== null) {
+         clearTimeout(streamEndTimerRef.current);
+         streamEndTimerRef.current = null;
+       }
+       // eslint-disable-next-line react-hooks/exhaustive-deps
+     }, [chatId, initialMessages, hasPendingToolCalls]);
 
   useEffect(() => {
     if (!chatId) return;
 
     const handle = (ev: InboundEvent) => {
+      // Any incoming event while the debounce timer is alive means the model
+      // is still working (e.g. tool result arrived, more text to stream).
+      // Cancel the pending "stream ended" timer so we don't hide the spinner.
+      if (streamEndTimerRef.current !== null) {
+        clearTimeout(streamEndTimerRef.current);
+        streamEndTimerRef.current = null;
+      }
+
       if (ev.event === "delta") {
         const id = buffer.current?.messageId ?? crypto.randomUUID();
         if (!buffer.current) {
@@ -103,17 +140,24 @@ export function useNanobotStream(
       }
 
       if (ev.event === "stream_end") {
-        if (!buffer.current) {
-          setIsStreaming(false);
-          return;
-        }
-        const finalId = buffer.current.messageId;
+        // stream_end only means the text segment finished — the model may
+        // still be executing tools.  Do NOT reset isStreaming here; the
+        // definitive "turn is complete" signal is ``turn_end``.
+        if (!buffer.current) return;
         buffer.current = null;
+        return;
+      }
+
+      if (ev.event === "turn_end") {
+        // Definitive signal that the turn is fully complete.  Cancel any
+        // pending debounce timer and stop the loading indicator immediately.
+        if (streamEndTimerRef.current !== null) {
+          clearTimeout(streamEndTimerRef.current);
+          streamEndTimerRef.current = null;
+        }
         setIsStreaming(false);
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === finalId ? { ...m, isStreaming: false } : m,
-          ),
+          prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)),
         );
         return;
       }
@@ -157,7 +201,8 @@ export function useNanobotStream(
         // flight, drop the placeholder so we don't render the text twice.
         const activeId = buffer.current?.messageId;
         buffer.current = null;
-        setIsStreaming(false);
+        // Do NOT reset isStreaming here — only ``turn_end`` signals that
+        // the full turn (all tool calls + final text) is complete.
         setMessages((prev) => {
           const filtered = activeId ? prev.filter((m) => m.id !== activeId) : prev;
           const content = ev.buttons?.length ? (ev.button_prompt ?? ev.text) : ev.text;
@@ -183,6 +228,10 @@ export function useNanobotStream(
     return () => {
       unsub();
       buffer.current = null;
+      if (streamEndTimerRef.current !== null) {
+        clearTimeout(streamEndTimerRef.current);
+        streamEndTimerRef.current = null;
+      }
     };
   }, [chatId, client]);
 
@@ -205,6 +254,9 @@ export function useNanobotStream(
           ...(previews ? { images: previews } : {}),
         },
       ]);
+      // Mark streaming immediately so the UI shows the loading indicator
+      // right away, before the first delta arrives from the server.
+      setIsStreaming(true);
       const wireMedia = hasImages ? images!.map((i) => i.media) : undefined;
       client.sendMessage(chatId, content, wireMedia);
     },

@@ -9,7 +9,7 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
 from loguru import logger
@@ -19,6 +19,10 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
+from nanobot.security.network import validate_resolved_url, validate_url_target
+
+DINGTALK_MAX_REMOTE_MEDIA_BYTES = 20 * 1024 * 1024
+DINGTALK_MAX_REMOTE_MEDIA_REDIRECTS = 3
 
 try:
     from dingtalk_stream import (
@@ -155,6 +159,8 @@ class DingTalkConfig(Base):
     client_id: str = ""
     client_secret: str = ""
     allow_from: list[str] = Field(default_factory=list)
+    allow_remote_media_redirects: bool = False
+    remote_media_redirect_allowed_hosts: list[str] = Field(default_factory=list)
 
 
 class DingTalkChannel(BaseChannel):
@@ -281,9 +287,12 @@ class DingTalkChannel(BaseChannel):
 
     def _guess_upload_type(self, media_ref: str) -> str:
         ext = Path(urlparse(media_ref).path).suffix.lower()
-        if ext in self._IMAGE_EXTS: return "image"
-        if ext in self._AUDIO_EXTS: return "voice"
-        if ext in self._VIDEO_EXTS: return "video"
+        if ext in self._IMAGE_EXTS:
+            return "image"
+        if ext in self._AUDIO_EXTS:
+            return "voice"
+        if ext in self._VIDEO_EXTS:
+            return "video"
         return "file"
 
     def _guess_filename(self, media_ref: str, upload_type: str) -> str:
@@ -315,6 +324,146 @@ class DingTalkChannel(BaseChannel):
             return self._zip_bytes(filename, data)
         return data, filename, content_type
 
+    def _validate_remote_media_url(self, media_ref: str) -> bool:
+        ok, err = validate_url_target(media_ref)
+        if not ok:
+            logger.warning("DingTalk remote media URL blocked ref={} reason={}", media_ref, err)
+            return False
+        return True
+
+    def _redirect_host_allowed(self, current_url: str, next_url: str) -> bool:
+        current_host = (urlparse(current_url).hostname or "").lower()
+        next_host = (urlparse(next_url).hostname or "").lower()
+        if not next_host:
+            return False
+        if next_host == current_host:
+            return True
+        allowed_hosts = {host.lower() for host in self.config.remote_media_redirect_allowed_hosts}
+        return next_host in allowed_hosts
+
+    def _next_remote_media_url(self, current_url: str, location: str | None) -> str | None:
+        if not self.config.allow_remote_media_redirects:
+            logger.warning("DingTalk media download redirect refused ref={}", current_url)
+            return None
+        if not location:
+            logger.warning("DingTalk media download redirect without Location ref={}", current_url)
+            return None
+        next_url = urljoin(current_url, location)
+        if not self._redirect_host_allowed(current_url, next_url):
+            logger.warning(
+                "DingTalk media download cross-host redirect refused ref={} next={}",
+                current_url,
+                next_url,
+            )
+            return None
+        if not self._validate_remote_media_url(next_url):
+            return None
+        return next_url
+
+    async def _fetch_remote_media_bytes(
+        self,
+        media_ref: str,
+    ) -> tuple[bytes | None, str | None]:
+        """Fetch a remote media URL with SSRF, redirect, and size checks."""
+        if not self._http:
+            return None, None
+
+        if not self._validate_remote_media_url(media_ref):
+            return None, None
+
+        try:
+            # Prefer streaming with a running byte cap so large responses are not
+            # materialized before the limit is enforced. Test fakes may only
+            # implement get(), so keep a small compatibility fallback below.
+            stream = getattr(self._http, "stream", None)
+            if stream is not None:
+                current_url = media_ref
+                for _ in range(DINGTALK_MAX_REMOTE_MEDIA_REDIRECTS + 1):
+                    async with stream("GET", current_url, follow_redirects=False) as resp:
+                        final_ok, final_err = validate_resolved_url(str(resp.url))
+                        if not final_ok:
+                            logger.warning(
+                                "DingTalk remote media redirect blocked ref={} final={} reason={}",
+                                media_ref,
+                                resp.url,
+                                final_err,
+                            )
+                            return None, None
+                        if 300 <= resp.status_code < 400:
+                            next_url = self._next_remote_media_url(
+                                str(resp.url), resp.headers.get("location")
+                            )
+                            if not next_url:
+                                return None, None
+                            current_url = next_url
+                            continue
+                        if resp.status_code >= 400:
+                            logger.warning(
+                                "DingTalk media download failed status={} ref={}",
+                                resp.status_code,
+                                current_url,
+                            )
+                            return None, None
+                        chunks: list[bytes] = []
+                        total = 0
+                        async for chunk in resp.aiter_bytes():
+                            total += len(chunk)
+                            if total > DINGTALK_MAX_REMOTE_MEDIA_BYTES:
+                                logger.warning(
+                                    "DingTalk media download too large ref={} bytes>{}",
+                                    current_url,
+                                    DINGTALK_MAX_REMOTE_MEDIA_BYTES,
+                                )
+                                return None, None
+                            chunks.append(chunk)
+                        return b"".join(chunks), (resp.headers.get("content-type") or "")
+                logger.warning("DingTalk media download exceeded redirect limit ref={}", media_ref)
+                return None, None
+
+            current_url = media_ref
+            for _ in range(DINGTALK_MAX_REMOTE_MEDIA_REDIRECTS + 1):
+                resp = await self._http.get(current_url, follow_redirects=False)
+                final_ok, final_err = validate_resolved_url(str(getattr(resp, "url", current_url)))
+                if not final_ok:
+                    logger.warning(
+                        "DingTalk remote media redirect blocked ref={} final={} reason={}",
+                        media_ref,
+                        getattr(resp, "url", current_url),
+                        final_err,
+                    )
+                    return None, None
+                if 300 <= resp.status_code < 400:
+                    next_url = self._next_remote_media_url(
+                        str(getattr(resp, "url", current_url)), resp.headers.get("location")
+                    )
+                    if not next_url:
+                        return None, None
+                    current_url = next_url
+                    continue
+                if resp.status_code >= 400:
+                    logger.warning(
+                        "DingTalk media download failed status={} ref={}",
+                        resp.status_code,
+                        current_url,
+                    )
+                    return None, None
+                if len(resp.content) > DINGTALK_MAX_REMOTE_MEDIA_BYTES:
+                    logger.warning(
+                        "DingTalk media download too large ref={} bytes>{}",
+                        current_url,
+                        DINGTALK_MAX_REMOTE_MEDIA_BYTES,
+                    )
+                    return None, None
+                return resp.content, (resp.headers.get("content-type") or "")
+            logger.warning("DingTalk media download exceeded redirect limit ref={}", media_ref)
+            return None, None
+        except httpx.TransportError as e:
+            logger.error("DingTalk media download network error ref={} err={}", media_ref, e)
+            raise
+        except Exception as e:
+            logger.error("DingTalk media download error ref={} err={}", media_ref, e)
+            return None, None
+
     async def _read_media_bytes(
         self,
         media_ref: str,
@@ -323,26 +472,12 @@ class DingTalkChannel(BaseChannel):
             return None, None, None
 
         if self._is_http_url(media_ref):
-            if not self._http:
+            data, raw_content_type = await self._fetch_remote_media_bytes(media_ref)
+            if data is None:
                 return None, None, None
-            try:
-                resp = await self._http.get(media_ref, follow_redirects=True)
-                if resp.status_code >= 400:
-                    logger.warning(
-                        "DingTalk media download failed status={} ref={}",
-                        resp.status_code,
-                        media_ref,
-                    )
-                    return None, None, None
-                content_type = (resp.headers.get("content-type") or "").split(";")[0].strip()
-                filename = self._guess_filename(media_ref, self._guess_upload_type(media_ref))
-                return resp.content, filename, content_type or None
-            except httpx.TransportError as e:
-                logger.error("DingTalk media download network error ref={} err={}", media_ref, e)
-                raise
-            except Exception as e:
-                logger.error("DingTalk media download error ref={} err={}", media_ref, e)
-                return None, None, None
+            content_type = (raw_content_type or "").split(";")[0].strip()
+            filename = self._guess_filename(media_ref, self._guess_upload_type(media_ref))
+            return data, filename, content_type or None
 
         try:
             if media_ref.startswith("file://"):
@@ -435,8 +570,10 @@ class DingTalkChannel(BaseChannel):
             if resp.status_code != 200:
                 logger.error("DingTalk send failed msgKey={} status={} body={}", msg_key, resp.status_code, body[:500])
                 return False
-            try: result = resp.json()
-            except Exception: result = {}
+            try:
+                result = resp.json()
+            except Exception:
+                result = {}
             errcode = result.get("errcode")
             if errcode not in (None, 0):
                 logger.error("DingTalk send api error msgKey={} errcode={} body={}", msg_key, errcode, body[:500])

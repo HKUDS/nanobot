@@ -537,6 +537,13 @@ class AnthropicProvider(LLMProvider):
     # Public API
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _is_streaming_required_error(e: Exception) -> bool:
+        """Anthropic SDK rejects long non-stream requests with a ValueError
+        whose message starts with 'Streaming is required'. Match defensively
+        on substring so a future SDK message tweak doesn't break detection."""
+        return isinstance(e, ValueError) and "streaming is required" in str(e).lower()
+
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -555,6 +562,21 @@ class AnthropicProvider(LLMProvider):
             response = await self._client.messages.create(**kwargs)
             return self._parse_response(response)
         except Exception as e:
+            if self._is_streaming_required_error(e):
+                # Anthropic SDK refuses non-stream calls when max_tokens (plus
+                # extended thinking budget) could push the request past the
+                # 10-minute server-side timeout (#2709). Transparently retry
+                # via the streaming path so callers don't need to know the
+                # provider-specific limit.
+                return await self.chat_stream(
+                    messages=messages,
+                    tools=tools,
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    reasoning_effort=reasoning_effort,
+                    tool_choice=tool_choice,
+                )
             return self._handle_error(e)
 
     async def chat_stream(
