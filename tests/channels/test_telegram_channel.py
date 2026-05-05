@@ -1802,3 +1802,32 @@ async def test_send_uses_native_keyboard_when_flag_on() -> None:
     sent = channel._app.bot.sent_messages[0]
     assert isinstance(sent.get("reply_markup"), InlineKeyboardMarkup)
     assert "[Yes]" not in sent["text"]  # native keyboard owns the rendering
+
+
+@pytest.mark.asyncio
+async def test_callback_query_ignores_unauthorized_user_before_side_effects() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], inline_keyboards=True),
+        MessageBus(),
+    )
+    channel._handle_message = AsyncMock()
+
+    query = SimpleNamespace(
+        id="cb_1",
+        data="Yes",
+        answer=AsyncMock(),
+        message=SimpleNamespace(
+            chat_id=123,
+            edit_reply_markup=AsyncMock(),
+        ),
+    )
+    update = SimpleNamespace(
+        callback_query=query,
+        effective_user=SimpleNamespace(id=12345, username="alice", first_name="Alice"),
+    )
+
+    await channel._on_callback_query(update, None)
+
+    query.answer.assert_not_awaited()
+    query.message.edit_reply_markup.assert_not_awaited()
+    channel._handle_message.assert_not_awaited()

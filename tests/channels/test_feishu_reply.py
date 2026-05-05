@@ -806,3 +806,26 @@ def test_on_background_task_done_removes_from_set() -> None:
         loop.close()
 
     assert task not in channel._background_tasks
+
+
+@pytest.mark.asyncio
+async def test_on_message_ignores_unauthorized_sender_before_side_effects() -> None:
+    channel = _make_feishu_channel(group_policy="open")
+    channel.config.allow_from = ["ou_allowed"]
+    channel._add_reaction = AsyncMock()
+    channel._download_and_save_media = AsyncMock(return_value=("/tmp/audio.ogg", "[audio]"))
+    channel.transcribe_audio = AsyncMock(return_value="transcript")
+    channel._handle_message = AsyncMock()
+
+    event = _make_feishu_event(
+        msg_type="audio",
+        content='{"file_key": "file_1"}',
+        sender_open_id="ou_blocked",
+    )
+
+    await channel._on_message(event)
+
+    channel._add_reaction.assert_not_awaited()
+    channel._download_and_save_media.assert_not_awaited()
+    channel.transcribe_audio.assert_not_awaited()
+    channel._handle_message.assert_not_awaited()

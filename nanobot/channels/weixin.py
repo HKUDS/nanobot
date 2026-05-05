@@ -588,19 +588,23 @@ class WeixinChannel(BaseChannel):
         if msg.get("message_type") == MESSAGE_TYPE_BOT:
             return
 
-        # Deduplication by message_id
         msg_id = str(msg.get("message_id", "") or msg.get("seq", ""))
         if not msg_id:
             msg_id = f"{msg.get('from_user_id', '')}_{msg.get('create_time_ms', '')}"
+
+        from_user_id = msg.get("from_user_id", "") or ""
+        if not from_user_id:
+            return
+
+        if not self.is_allowed(from_user_id):
+            return
+
+        # Deduplication by message_id
         if msg_id in self._processed_ids:
             return
         self._processed_ids[msg_id] = None
         while len(self._processed_ids) > 1000:
             self._processed_ids.popitem(last=False)
-
-        from_user_id = msg.get("from_user_id", "") or ""
-        if not from_user_id:
-            return
 
         # Cache context_token (required for all replies — inbound.ts:23-27)
         ctx_token = msg.get("context_token", "")

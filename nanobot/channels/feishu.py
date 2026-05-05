@@ -1644,15 +1644,7 @@ class FeishuChannel(BaseChannel):
             logger.debug("Feishu raw message: {}", message.content)
             logger.debug("Feishu mentions: {}", getattr(message, "mentions", None))
 
-            # Deduplication check
             message_id = message.message_id
-            if message_id in self._processed_message_ids:
-                return
-            self._processed_message_ids[message_id] = None
-
-            # Trim cache
-            while len(self._processed_message_ids) > 1000:
-                self._processed_message_ids.popitem(last=False)
 
             # Skip bot messages
             if sender.sender_type == "bot":
@@ -1663,9 +1655,21 @@ class FeishuChannel(BaseChannel):
             chat_type = message.chat_type
             msg_type = message.message_type
 
+            if not self.is_allowed(sender_id):
+                return
+
             if chat_type == "group" and not self._is_group_message_for_bot(message):
                 logger.debug("Feishu: skipping group message (not mentioned)")
                 return
+
+            # Deduplication check
+            if message_id in self._processed_message_ids:
+                return
+            self._processed_message_ids[message_id] = None
+
+            # Trim cache
+            while len(self._processed_message_ids) > 1000:
+                self._processed_message_ids.popitem(last=False)
 
             # Add reaction (non-blocking — tracked background task)
             task = asyncio.create_task(

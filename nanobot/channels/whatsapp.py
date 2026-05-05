@@ -8,8 +8,8 @@ import os
 import secrets
 import shutil
 import subprocess
-from contextlib import suppress
 from collections import OrderedDict
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal
 
@@ -214,13 +214,6 @@ class WhatsAppChannel(BaseChannel):
             content = data.get("content", "")
             message_id = data.get("id", "")
 
-            if message_id:
-                if message_id in self._processed_message_ids:
-                    return
-                self._processed_message_ids[message_id] = None
-                while len(self._processed_message_ids) > 1000:
-                    self._processed_message_ids.popitem(last=False)
-
             # Extract just the phone number or lid as chat_id
             is_group = data.get("isGroup", False)
             was_mentioned = data.get("wasMentioned", False)
@@ -246,9 +239,19 @@ class WhatsAppChannel(BaseChannel):
                 elif extracted and not phone_id:
                     phone_id = extracted  # best guess for bare values
 
+            sender_id = phone_id or self._lid_to_phone.get(lid_id, "") or lid_id or id_a or id_b
+            if not self.is_allowed(sender_id):
+                return
+
+            if message_id:
+                if message_id in self._processed_message_ids:
+                    return
+                self._processed_message_ids[message_id] = None
+                while len(self._processed_message_ids) > 1000:
+                    self._processed_message_ids.popitem(last=False)
+
             if phone_id and lid_id:
                 self._lid_to_phone[lid_id] = phone_id
-            sender_id = phone_id or self._lid_to_phone.get(lid_id, "") or lid_id or id_a or id_b
 
             logger.info("Sender phone={} lid={} → sender_id={}", phone_id or "(empty)", lid_id or "(empty)", sender_id)
 

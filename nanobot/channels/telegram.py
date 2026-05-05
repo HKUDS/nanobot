@@ -993,6 +993,9 @@ class TelegramChannel(BaseChannel):
             return
         message = update.message
         user = update.effective_user
+        sender_id = self._sender_id(user)
+        if not self.is_allowed(sender_id):
+            return
         self._remember_thread_context(message)
 
         # Strip @bot_username suffix if present
@@ -1004,7 +1007,7 @@ class TelegramChannel(BaseChannel):
         content = self._normalize_telegram_command(content)
 
         await self._handle_message(
-            sender_id=self._sender_id(user),
+            sender_id=sender_id,
             chat_id=str(message.chat_id),
             content=content,
             metadata=self._build_message_metadata(message, user),
@@ -1263,6 +1266,8 @@ class TelegramChannel(BaseChannel):
         sender_id = self._sender_id(user)
         if not chat_id:
             logger.warning("Callback query without chat_id")
+            return
+        if not self.is_allowed(sender_id):
             return
         button_label = query.data or ""
         await query.answer()

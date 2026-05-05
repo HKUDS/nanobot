@@ -474,23 +474,27 @@ class QQChannel(BaseChannel):
     async def _on_message(self, data: C2CMessage | GroupMessage, is_group: bool = False) -> None:
         """Parse inbound message, download attachments, and publish to the bus."""
         try:
-            if data.id in self._processed_ids:
-                return
-            self._processed_ids.append(data.id)
-
             if is_group:
                 chat_id = data.group_openid
                 user_id = data.author.member_openid
-                self._chat_type_cache[chat_id] = "group"
+                chat_type = "group"
             else:
                 chat_id = str(
                     getattr(data.author, "id", None)
                     or getattr(data.author, "user_openid", "unknown")
                 )
                 user_id = chat_id
-                self._chat_type_cache[chat_id] = "c2c"
+                chat_type = "c2c"
 
             content = (data.content or "").strip()
+
+            if not self.is_allowed(user_id):
+                return
+
+            if data.id in self._processed_ids:
+                return
+            self._processed_ids.append(data.id)
+            self._chat_type_cache[chat_id] = chat_type
 
             # the data used by tests don't contain attachments property
             # so we use getattr with a default of [] to avoid AttributeError in tests
