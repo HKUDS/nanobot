@@ -94,9 +94,10 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_subagent_manager_limits_concurrent_spawn_runs(tmp_path):
-    """Spawned subagents should not execute more than the configured limit at once."""
+async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
+    """SpawnTool should return an error string when the concurrency limit is reached."""
     from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.spawn import SpawnTool
     from nanobot.bus.queue import MessageBus
 
     bus = MessageBus()
@@ -107,25 +108,14 @@ async def test_subagent_manager_limits_concurrent_spawn_runs(tmp_path):
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        max_concurrent_subagents=1,
     )
     mgr._announce_result = AsyncMock()
 
-    active = 0
-    max_active = 0
-    started_count = 0
-    starts: asyncio.Queue[int] = asyncio.Queue()
-    releases = [asyncio.Event(), asyncio.Event()]
+    # Block the first subagent so it stays "running"
+    release = asyncio.Event()
 
     async def fake_run(spec):
-        nonlocal active, max_active, started_count
-        index = started_count
-        started_count += 1
-        active += 1
-        max_active = max(max_active, active)
-        await starts.put(index)
-        await releases[index].wait()
-        active -= 1
+        await release.wait()
         return SimpleNamespace(
             stop_reason="done",
             final_content="done",
@@ -135,21 +125,22 @@ async def test_subagent_manager_limits_concurrent_spawn_runs(tmp_path):
 
     mgr.runner.run = AsyncMock(side_effect=fake_run)
 
-    await mgr.spawn("first task", session_key="test:session")
-    await mgr.spawn("second task", session_key="test:session")
-    tasks = list(mgr._running_tasks.values())
+    tool = SpawnTool(mgr)
+    tool.set_context("test", "c1", "test:c1")
 
-    first_index = await asyncio.wait_for(starts.get(), timeout=0.5)
-    with pytest.raises(asyncio.TimeoutError):
-        await asyncio.wait_for(starts.get(), timeout=0.05)
+    # First spawn succeeds
+    result = await tool.execute(task="first task")
+    assert "started" in result
 
-    releases[first_index].set()
-    second_index = await asyncio.wait_for(starts.get(), timeout=0.5)
-    releases[second_index].set()
-    await asyncio.gather(*tasks)
+    # Second spawn should be rejected (default limit is 1)
+    result = await tool.execute(task="second task")
+    assert "Cannot spawn subagent" in result
+    assert "concurrency limit reached" in result
 
-    assert max_active == 1
-    assert mgr.runner.run.await_count == 2
+    # Release the first subagent
+    release.set()
+    # Allow cleanup
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
 
 
 def test_subagent_default_max_concurrent_matches_agent_defaults(tmp_path):
@@ -208,26 +199,6 @@ def test_agent_loop_passes_max_iterations_to_subagents(tmp_path):
     )
 
     assert loop.subagents.max_iterations == 42
-
-
-def test_agent_loop_passes_max_concurrent_subagents_to_subagents(tmp_path):
-    """AgentLoop's configured subagent concurrency limit should be shared with subagents."""
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.bus.queue import MessageBus
-
-    bus = MessageBus()
-    provider = MagicMock()
-    provider.get_default_model.return_value = "test-model"
-
-    loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=tmp_path,
-        model="test-model",
-        max_concurrent_subagents=2,
-    )
-
-    assert loop.subagents.max_concurrent_subagents == 2
 
 
 @pytest.mark.asyncio

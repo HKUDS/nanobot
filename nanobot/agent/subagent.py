@@ -82,7 +82,6 @@ class SubagentManager:
         restrict_to_workspace: bool = False,
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
-        max_concurrent_subagents: int | None = None,
     ):
         defaults = AgentDefaults()
         self.provider = provider
@@ -99,12 +98,7 @@ class SubagentManager:
             if max_iterations is not None
             else defaults.max_tool_iterations
         )
-        self.max_concurrent_subagents = (
-            max_concurrent_subagents
-            if max_concurrent_subagents is not None
-            else defaults.max_concurrent_subagents
-        )
-        self._concurrency_gate = asyncio.Semaphore(self.max_concurrent_subagents)
+        self.max_concurrent_subagents = defaults.max_concurrent_subagents
         self.runner = AgentRunner(provider)
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
@@ -138,9 +132,7 @@ class SubagentManager:
         self._task_statuses[task_id] = status
 
         bg_task = asyncio.create_task(
-            self._run_subagent_limited(
-                task_id, task, display_label, origin, status, origin_message_id
-            )
+            self._run_subagent(task_id, task, display_label, origin, status, origin_message_id)
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -158,19 +150,6 @@ class SubagentManager:
 
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
-
-    async def _run_subagent_limited(
-        self,
-        task_id: str,
-        task: str,
-        label: str,
-        origin: dict[str, str],
-        status: SubagentStatus,
-        origin_message_id: str | None = None,
-    ) -> None:
-        """Wait for an execution slot, then run the subagent."""
-        async with self._concurrency_gate:
-            await self._run_subagent(task_id, task, label, origin, status, origin_message_id)
 
     async def _run_subagent(
         self,
