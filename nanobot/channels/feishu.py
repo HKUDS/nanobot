@@ -1081,8 +1081,9 @@ class FeishuChannel(BaseChannel):
         if data and filename:
             file_path = media_dir / filename
             file_path.write_bytes(data)
-            logger.debug("Downloaded {} to {}", msg_type, file_path)
-            return str(file_path), f"[{msg_type}: {filename}]"
+            path_str = str(file_path)
+            logger.debug("Downloaded {} to {}", msg_type, path_str)
+            return path_str, f"[{msg_type}: {path_str}]"
 
         return None, f"[{msg_type}: download failed]"
 
