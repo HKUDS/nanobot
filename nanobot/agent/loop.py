@@ -973,6 +973,17 @@ class AgentLoop:
 
         # Extract document text from media at the processing boundary so all
         # channels benefit without format-specific logic in ContextBuilder.
+        if msg.media and self._extra_hooks:
+            ctx = AgentHookContext(iteration=0, messages=[], media=list(msg.media))
+            hook = CompositeHook(self._extra_hooks)
+            await hook.before_process(ctx)
+            if ctx.media_text:
+                msg = dataclasses.replace(
+                    msg, content=msg.content + "\n\n" + ctx.media_text,
+                )
+            if ctx.media != list(msg.media):
+                msg = dataclasses.replace(msg, media=ctx.media)
+
         if msg.media:
             new_content, image_only = extract_documents(msg.content, msg.media)
             msg = dataclasses.replace(msg, content=new_content, media=image_only)
