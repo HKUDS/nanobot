@@ -776,8 +776,6 @@ class AgentRunner:
             handled = self._classify_violation(
                 raw_text=prep_error,
                 soft_payload=prep_error + hint,
-                ssrf_payload=prep_error,
-                ssrf_error=RuntimeError(prep_error),
                 event=event,
                 tool_call=tool_call,
                 workspace_violation_counts=workspace_violation_counts,
@@ -808,8 +806,6 @@ class AgentRunner:
                 raw_text=str(exc),
                 # Preserve legacy exception payloads without the retry hint.
                 soft_payload=payload,
-                ssrf_payload=payload,
-                ssrf_error=exc,
                 event=event,
                 tool_call=tool_call,
                 workspace_violation_counts=workspace_violation_counts,
@@ -829,8 +825,6 @@ class AgentRunner:
             handled = self._classify_violation(
                 raw_text=result,
                 soft_payload=result + hint,
-                ssrf_payload=result,
-                ssrf_error=RuntimeError(result),
                 event=event,
                 tool_call=tool_call,
                 workspace_violation_counts=workspace_violation_counts,
@@ -849,8 +843,21 @@ class AgentRunner:
             detail = detail[:120] + "..."
         return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
 
-    # SSRF remains fatal; workspace path boundaries are soft + throttled.
-    _SSRF_MARKER: str = "internal/private url detected"
+    # SSRF is a hard security block at the tool boundary, but the agent turn
+    # should recover conversationally instead of aborting the runtime.
+    _SSRF_MARKERS: tuple[str, ...] = (
+        "internal/private url detected",
+        "private/internal address",
+        "private address",
+    )
+    _SSRF_BOUNDARY_NOTE: str = (
+        "This is a non-bypassable security boundary. Stop trying to access "
+        "private/internal URLs. Do not retry with curl, wget, encoded IPs, "
+        "alternate DNS, redirects, proxies, or another tool. Ask the user for "
+        "local files, logs, screenshots, or an explicit safe public URL instead. "
+        "If the user explicitly trusts this private URL, ask them to whitelist "
+        "the exact IP/CIDR via tools.ssrfWhitelist."
+    )
 
     # Non-SSRF boundary markers returned to the LLM as recoverable tool errors.
     _WORKSPACE_VIOLATION_MARKERS: tuple[str, ...] = (
@@ -864,7 +871,10 @@ class AgentRunner:
 
     @classmethod
     def _is_ssrf_violation(cls, text: str) -> bool:
-        return bool(text) and cls._SSRF_MARKER in text.lower()
+        if not text:
+            return False
+        lowered = text.lower()
+        return any(marker in lowered for marker in cls._SSRF_MARKERS)
 
     @classmethod
     def _is_workspace_violation(cls, text: str) -> bool:
@@ -872,7 +882,7 @@ class AgentRunner:
         if not text:
             return False
         lowered = text.lower()
-        if cls._SSRF_MARKER in lowered:
+        if cls._is_ssrf_violation(lowered):
             return True
         return any(marker in lowered for marker in cls._WORKSPACE_VIOLATION_MARKERS)
 
@@ -881,8 +891,6 @@ class AgentRunner:
         *,
         raw_text: str,
         soft_payload: str,
-        ssrf_payload: str,
-        ssrf_error: BaseException,
         event: dict[str, str],
         tool_call: ToolCallRequest,
         workspace_violation_counts: dict[str, int],
@@ -890,12 +898,12 @@ class AgentRunner:
         """Classify safety-boundary failures, or return ``None`` to pass through."""
         if self._is_ssrf_violation(raw_text):
             logger.warning(
-                "Tool {} blocked by SSRF guard; aborting turn: {}",
+                "Tool {} blocked by SSRF guard; returning non-retryable tool error: {}",
                 tool_call.name,
                 raw_text.replace("\n", " ").strip()[:200],
             )
-            event["detail"] = self._event_detail("workspace_violation: ", raw_text)
-            return ssrf_payload, event, ssrf_error
+            event["detail"] = self._event_detail("ssrf_violation: ", raw_text)
+            return self._ssrf_soft_payload(raw_text), event, None
 
         if self._is_workspace_violation(raw_text):
             escalation = repeated_workspace_violation_error(
@@ -917,6 +925,11 @@ class AgentRunner:
             return soft_payload, event, None
 
         return None
+
+    @classmethod
+    def _ssrf_soft_payload(cls, raw_text: str) -> str:
+        text = raw_text.strip() or "Error: request blocked by SSRF guard"
+        return f"{text}\n\n{cls._SSRF_BOUNDARY_NOTE}"
 
     @staticmethod
     def _event_detail(prefix: str, text: str, limit: int = 160) -> str:

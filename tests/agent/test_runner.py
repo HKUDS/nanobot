@@ -364,17 +364,15 @@ async def test_runner_does_not_abort_on_workspace_violation_anymore():
     assert "workspace_violation" in result.tool_events[0]["detail"]
 
 
-def test_is_ssrf_violation_remains_fatal():
-    """SSRF rejections are the only marker that stays turn-fatal.
-
-    A single successful internal-URL fetch can leak cloud metadata, so we
-    never let the LLM "retry" with a different URL phrasing -- contrast
-    this with workspace-bound rejections which are soft + throttled in v2.
-    """
+def test_is_ssrf_violation_recognizes_private_url_blocks():
+    """SSRF rejections are classified separately from workspace boundaries."""
     from nanobot.agent.runner import AgentRunner
 
     ssrf_msg = "Error: Command blocked by safety guard (internal/private URL detected)"
     assert AgentRunner._is_ssrf_violation(ssrf_msg) is True
+    assert AgentRunner._is_ssrf_violation(
+        "URL validation failed: Blocked: host resolves to private/internal address 192.168.1.2"
+    ) is True
 
     # Workspace-bound markers are NOT classified as SSRF.
     assert AgentRunner._is_ssrf_violation(
@@ -390,8 +388,8 @@ def test_is_ssrf_violation_remains_fatal():
 
 
 @pytest.mark.asyncio
-async def test_runner_aborts_on_ssrf_violation():
-    """SSRF still fatal-aborts the turn even though workspace ones are soft."""
+async def test_runner_returns_non_retryable_hint_on_ssrf_violation():
+    """SSRF stays blocked, but the runtime gives the LLM a final chance to recover."""
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
 
     provider = MagicMock()
@@ -404,7 +402,10 @@ async def test_runner_aborts_on_ssrf_violation():
                 arguments={"command": "curl http://169.254.169.254"},
             )],
         ),
-        LLMResponse(content="should NOT be reached", tool_calls=[]),
+        LLMResponse(
+            content="I cannot access that private URL. Please share local files.",
+            tool_calls=[],
+        ),
     ])
     tools = MagicMock()
     tools.get_definitions.return_value = []
@@ -421,9 +422,16 @@ async def test_runner_aborts_on_ssrf_violation():
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
     ))
 
-    assert provider.chat_with_retry.await_count == 1, "SSRF must abort immediately"
-    assert result.stop_reason == "tool_error"
-    assert "internal/private url detected" in (result.error or "").lower()
+    assert provider.chat_with_retry.await_count == 2
+    assert result.stop_reason == "completed"
+    assert result.error is None
+    assert result.final_content == "I cannot access that private URL. Please share local files."
+    assert result.tool_events and result.tool_events[0]["detail"].startswith("ssrf_violation:")
+    tool_messages = [m for m in result.messages if m.get("role") == "tool"]
+    assert tool_messages
+    assert "non-bypassable security boundary" in tool_messages[0]["content"]
+    assert "Do not retry" in tool_messages[0]["content"]
+    assert "tools.ssrfWhitelist" in tool_messages[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -1290,7 +1298,7 @@ async def test_streamed_flag_not_set_on_llm_error(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_streamed_flag_not_set_on_tool_error(tmp_path):
+async def test_ssrf_soft_block_can_finalize_after_streamed_tool_call(tmp_path):
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.events import InboundMessage
     from nanobot.bus.queue import MessageBus
@@ -1307,7 +1315,14 @@ async def test_streamed_flag_not_set_on_tool_error(tmp_path):
         )],
         usage={},
     )
-    provider.chat_stream_with_retry = AsyncMock(return_value=tool_call_resp)
+    provider.chat_stream_with_retry = AsyncMock(side_effect=[
+        tool_call_resp,
+        LLMResponse(
+            content="I cannot access private URLs. Please share the local file.",
+            tool_calls=[],
+            usage={},
+        ),
+    ])
 
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
@@ -1323,9 +1338,8 @@ async def test_streamed_flag_not_set_on_tool_error(tmp_path):
     )
 
     assert result is not None
-    assert "internal/private URL detected" in result.content
-    assert not result.metadata.get("_streamed"), \
-        "_streamed must not be set when stop_reason is tool_error"
+    assert result.content == "I cannot access private URLs. Please share the local file."
+    assert result.metadata.get("_streamed") is True
 
 
 @pytest.mark.asyncio
