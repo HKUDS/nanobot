@@ -375,6 +375,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Xiaomi MIMO",
         backend="openai_compat",
         default_api_base="https://api.xiaomimimo.com/v1",
+        thinking_style="thinking_type",
     ),
     # LongCat: OpenAI-compatible API
     ProviderSpec(
