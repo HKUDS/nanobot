@@ -63,6 +63,14 @@ if TYPE_CHECKING:
 
 UNIFIED_SESSION_KEY = "unified:default"
 
+# Hard ceiling on how long _connect_mcp will wait for `connect_mcp_servers`
+# to return. The MCP SDK's HTTP transports rely on anyio task groups whose
+# cancellation cleanup is fragile — if a connect hangs (unreachable host,
+# black-hole TCP, broken keepalive), an unbounded wait risks leaving the
+# event loop in a state where anyio's _deliver_cancellation reschedules
+# itself forever. See #935.
+_MCP_CONNECT_TIMEOUT_S = 10.0
+
 
 class _LoopHook(AgentHook):
     """Core hook for the main loop."""
@@ -401,26 +409,63 @@ class AgentLoop:
             )
 
     async def _connect_mcp(self) -> None:
-        """Connect to configured MCP servers (one-time, lazy)."""
+        """Connect to configured MCP servers (one-time, lazy).
+
+        Bounded by ``_MCP_CONNECT_TIMEOUT_S``. On any failure path, any
+        AsyncExitStacks already accumulated in ``self._mcp_stacks`` are
+        ``aclose()``-ed under a shielded CancelScope before being cleared.
+        Naively ``.clear()``-ing the dict abandons the stacks (and the
+        anyio task groups they contain), which causes anyio's
+        ``_deliver_cancellation`` to reschedule itself forever in the
+        event loop. See #935.
+        """
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
             return
         self._mcp_connecting = True
         from nanobot.agent.tools.mcp import connect_mcp_servers
 
         try:
-            self._mcp_stacks = await connect_mcp_servers(self._mcp_servers, self.tools)
+            self._mcp_stacks = await asyncio.wait_for(
+                connect_mcp_servers(self._mcp_servers, self.tools),
+                timeout=_MCP_CONNECT_TIMEOUT_S,
+            )
             if self._mcp_stacks:
                 self._mcp_connected = True
             else:
                 logger.warning("No MCP servers connected successfully (will retry next message)")
+        except asyncio.TimeoutError:
+            logger.warning(
+                "MCP connection timed out after {}s (will retry next message)",
+                _MCP_CONNECT_TIMEOUT_S,
+            )
+            await self._close_mcp_stacks_shielded()
         except asyncio.CancelledError:
             logger.warning("MCP connection cancelled (will retry next message)")
-            self._mcp_stacks.clear()
+            await self._close_mcp_stacks_shielded()
+            raise
         except BaseException as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
-            self._mcp_stacks.clear()
+            await self._close_mcp_stacks_shielded()
         finally:
             self._mcp_connecting = False
+
+    async def _close_mcp_stacks_shielded(self) -> None:
+        """Close any AsyncExitStacks left in ``self._mcp_stacks``.
+
+        The shielded scope ensures cleanup completes even if the enclosing
+        task is being cancelled — otherwise the stacks (and any anyio
+        task groups they hold) would be abandoned mid-close. See #935.
+        """
+        if not self._mcp_stacks:
+            return
+        import anyio
+        with anyio.CancelScope(shield=True):
+            for name, stack in list(self._mcp_stacks.items()):
+                try:
+                    await stack.aclose()
+                except BaseException as e:  # noqa: BLE001
+                    logger.debug("MCP server '{}' cleanup error (ignored): {}", name, e)
+        self._mcp_stacks.clear()
 
     def _set_tool_context(
         self, channel: str, chat_id: str,
