@@ -45,9 +45,16 @@ class LocalMemoryHook(AgentHook):
         await capture_candidate(tools, request, self._config)
 
     def _tools(self, context: AgentHookContext):
-        if context.agent is None:
+        agent = context.agent
+        if agent is None:
             return None
-        return context.agent.tools
+        tools = getattr(agent, "tools", None)
+        if tools is not None:
+            return tools
+        loop = getattr(agent, "loop", None)
+        if loop is not None:
+            return getattr(loop, "tools", None)
+        return None
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         tools = self._tools(context)
