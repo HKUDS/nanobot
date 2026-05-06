@@ -84,7 +84,7 @@ class LocalMemoryHook(AgentHook):
                 return
             _insert_supplemental_system_message(
                 context.messages,
-                _format_supplemental_recall(injection.content),
+                injection.content,
             )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
@@ -109,12 +109,6 @@ class LocalMemoryHook(AgentHook):
         if request is None:
             return
         await capture_candidate(tools, request, self._config)
-
-
-def _format_supplemental_recall(content: str) -> str:
-    if "Supplemental local-memory recall" in content:
-        return content
-    return f"Supplemental local-memory recall:\n\n{content}"
 
 
 def _insert_supplemental_system_message(messages: list[dict[str, Any]], content: str) -> None:
