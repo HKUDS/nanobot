@@ -208,6 +208,7 @@ class WeixinChannel(BaseChannel):
                 self.config.base_url = base_url
             return bool(self._token)
         except Exception:
+            self.logger.warning("Failed to load Weixin account state", exc_info=True)
             return False
 
     def _save_state(self) -> None:
