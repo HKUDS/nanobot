@@ -72,6 +72,26 @@ If your gateway listens on a non-default port, point the dev server at it:
 NANOBOT_API_URL=http://127.0.0.1:9000 bun run dev
 ```
 
+### Access from another device (LAN)
+
+To use the webui from another device on the same network, set `host` to `"0.0.0.0"` in `~/.nanobot/config.json`:
+
+```json
+{
+  "channels": {
+    "websocket": {
+      "enabled": true,
+      "host": "0.0.0.0",
+      "port": 8765
+    }
+  }
+}
+```
+
+Then open `http://<your-ip>:8765` on the other device. When `host` is `"0.0.0.0"`, the bootstrap endpoint accepts requests from any source instead of restricting to localhost.
+
+> **Note:** This exposes the gateway to all interfaces. Only use on trusted networks.
+
 ## Build for packaged runtime
 
 ```bash

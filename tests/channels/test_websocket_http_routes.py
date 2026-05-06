@@ -379,3 +379,41 @@ async def test_api_token_pool_purges_expired(bus: MagicMock, tmp_path: Path) -> 
         headers = {"Authorization": "Bearer live"}
 
     assert channel._check_api_token(_LiveReq()) is True
+
+
+class _FakeConn:
+    """Minimal connection stub with a configurable remote_address."""
+
+    def __init__(self, remote_address: tuple[str, int]):
+        self.remote_address = remote_address
+
+    def respond(self, status: int, body: str) -> Any:
+        from websockets.http11 import Response
+
+        return Response(status=status, body=body.encode())
+
+
+def test_bootstrap_rejects_non_localhost_by_default(bus: MagicMock) -> None:
+    channel = _ch(bus, host="127.0.0.1")
+    conn = _FakeConn(("192.168.1.5", 12345))
+    resp = channel._handle_webui_bootstrap(conn)
+    assert resp.status_code == 403
+
+
+def test_bootstrap_allows_non_localhost_when_host_is_wildcard(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0")
+    conn = _FakeConn(("192.168.1.5", 12345))
+    resp = channel._handle_webui_bootstrap(conn)
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["token"].startswith("nbwt_")
+    assert body["ws_path"] == "/"
+
+
+def test_bootstrap_allows_non_localhost_when_host_is_ipv6_wildcard(
+    bus: MagicMock,
+) -> None:
+    channel = _ch(bus, host="::")
+    conn = _FakeConn(("192.168.1.5", 12345))
+    resp = channel._handle_webui_bootstrap(conn)
+    assert resp.status_code == 200
