@@ -45,16 +45,16 @@ x-common-config: &common-config
     - apparmor=unconfined
     - seccomp=unconfined
   networks:
+    - dokploy-network
     - nanobot-net
 
 services:
   nanobot-gateway:
-    container_name: nanobot-gateway
     <<: *common-config
     command: ["gateway"]
     restart: unless-stopped
     ports:
-      - 18790:18790
+      - 18790
     deploy:
       resources:
         limits:
@@ -65,13 +65,12 @@ services:
           memory: 256M
 
   nanobot-api:
-    container_name: nanobot-api
     <<: *common-config
     command:
       ["serve", "--host", "0.0.0.0", "-w", "/home/nanobot/.nanobot/api-workspace"]
     restart: unless-stopped
     ports:
-      - 127.0.0.1:8900:8900
+      - 8900
     deploy:
       resources:
         limits:
@@ -83,7 +82,6 @@ services:
 
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: nanobot-postgres
     restart: unless-stopped
     environment:
       - POSTGRES_USER=nanobot
@@ -96,7 +94,6 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: nanobot-redis
     restart: unless-stopped
     volumes:
       - redis_data:/data
@@ -105,7 +102,6 @@ services:
 
   mongodb:
     image: mongo:latest
-    container_name: nanobot-mongodb
     restart: unless-stopped
     environment:
       - MONGO_INITDB_ROOT_USERNAME=nanobot
@@ -128,6 +124,8 @@ services:
 networks:
   nanobot-net:
     driver: bridge
+  dokploy-network:
+    external: true
 
 volumes:
   nanobot_data:
