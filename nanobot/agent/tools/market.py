@@ -3,16 +3,86 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
 from loguru import logger
 
-from nanobot.agent.tools.base import BaseTool
+from nanobot.agent.tools.base import Tool, tool_parameters
 
 
-class StockPriceTool(BaseTool):
+def _disable_proxy_for_akshare():
+    """Disable proxy for akshare requests to avoid connection issues."""
+    import requests
+    from urllib.request import getproxies, proxy_bypass
+    
+    # Save original proxy settings
+    original_proxies = {
+        'http': os.environ.get('HTTP_PROXY') or os.environ.get('http_proxy'),
+        'https': os.environ.get('HTTPS_PROXY') or os.environ.get('https_proxy'),
+    }
+    # Clear proxy environment variables
+    for key in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 
+                'ALL_PROXY', 'all_proxy']:
+        os.environ.pop(key, None)
+    
+    # Set NO_PROXY to bypass all proxies
+    os.environ['NO_PROXY'] = '*'
+    os.environ['no_proxy'] = '*'
+    
+    # Monkey patch urllib to ignore proxies
+    import urllib.request
+    urllib.request.getproxies = lambda: {}
+    
+    # Also set requests session to not use proxies
+    try:
+        sess = requests.Session()
+        sess.trust_env = False
+        sess.proxies = {}
+    except:
+        pass
+    
+    return original_proxies
+
+
+def _restore_proxy(original_proxies: dict):
+    """Restore original proxy settings."""
+    for key, value in original_proxies.items():
+        if value is not None:
+            os.environ[key.upper()] = value
+
+
+@tool_parameters({
+    "type": "object",
+    "properties": {
+        "symbol": {
+            "type": "string",
+            "description": "Stock code (e.g., '600519' for A-shares, 'AAPL' for US stocks)",
+        },
+        "market": {
+            "type": "string",
+            "enum": ["cn", "hk", "us"],
+            "description": "Market type: cn (A股), hk (港股), us (美股)",
+            "default": "cn",
+        },
+        "period": {
+            "type": "string",
+            "enum": ["realtime", "daily", "weekly", "monthly"],
+            "description": "Data period",
+            "default": "realtime",
+        },
+        "days": {
+            "type": "integer",
+            "description": "Number of days for historical data",
+            "default": 30,
+            "minimum": 1,
+        },
+    },
+    "required": ["symbol"],
+})
+class StockPriceTool(Tool):
     """Get real-time and historical stock prices using akshare."""
 
     name = "stock_price"
@@ -65,6 +135,8 @@ Examples:
                 logger.debug("Using cached data for {}", symbol)
                 return cached_data
 
+        # Disable proxy for akshare to avoid connection issues
+        original_proxies = _disable_proxy_for_akshare()
         try:
             if period == "realtime":
                 result = await self._get_realtime_price(ak, symbol, market)
@@ -74,17 +146,19 @@ Examples:
             # Cache the result
             self._cache[cache_key] = (result, now)
             return result
-
         except Exception as e:
             logger.error("Failed to get stock price for {}: {}", symbol, e)
             return f"Error fetching data for {symbol}: {str(e)}"
+        finally:
+            # Restore proxy settings
+            _restore_proxy(original_proxies)
 
     async def _get_realtime_price(self, ak: Any, symbol: str, market: str) -> str:
-        """Get real-time stock price."""
+        """Get real-time stock price using Sina API (more stable)."""
         try:
             if market == "cn":
-                # A股实时行情
-                df = ak.stock_zh_a_spot_em()
+                # A股实时行情 - 使用新浪财经API（更稳定）
+                df = ak.stock_zh_a_spot()
                 stock_data = df[df['代码'] == symbol]
 
                 if stock_data.empty:
@@ -94,8 +168,8 @@ Examples:
                 return self._format_cn_stock(row)
 
             elif market == "hk":
-                # 港股实时行情
-                df = ak.stock_hk_spot_em()
+                # 港股实时行情 - 使用新浪财经API
+                df = ak.stock_hk_spot()
                 stock_data = df[df['代码'] == symbol]
 
                 if stock_data.empty:
@@ -105,8 +179,8 @@ Examples:
                 return self._format_hk_stock(row)
 
             elif market == "us":
-                # 美股实时行情
-                df = ak.stock_us_spot_em()
+                # 美股实时行情 - 使用新浪财经API
+                df = ak.stock_us_spot()
                 stock_data = df[df['代码'] == symbol]
 
                 if stock_data.empty:
@@ -124,16 +198,15 @@ Examples:
     async def _get_historical_data(
         self, ak: Any, symbol: str, market: str, period: str, days: int
     ) -> str:
-        """Get historical stock data."""
+        """Get historical stock data using Sina API (more stable)."""
         try:
             if market == "cn":
-                # A股历史数据
+                # A股历史数据 - 使用新浪财经API
                 end_date = datetime.now().strftime("%Y%m%d")
                 start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
 
-                df = ak.stock_zh_a_hist(
+                df = ak.stock_zh_a_daily(
                     symbol=symbol,
-                    period="daily",
                     start_date=start_date,
                     end_date=end_date,
                     adjust="qfq"  # 前复权
@@ -145,16 +218,18 @@ Examples:
                 return self._format_historical_cn(df, symbol, days)
 
             elif market == "us":
-                # 美股历史数据
-                end_date = datetime.now().strftime("%Y%m%d")
-                start_date = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+                # 美股历史数据 - 使用雅虎财经API
+                end_date = datetime.now().strftime("%Y-%m-%d")
+                start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-                df = ak.stock_us_hist(
+                df = ak.stock_us_daily(
                     symbol=symbol,
-                    start_date=start_date,
-                    end_date=end_date,
                     adjust="qfq"
                 )
+                
+                # Filter by date range
+                df['date'] = pd.to_datetime(df['date'])
+                df = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
 
                 if df.empty:
                     return f"未找到 {symbol} 的历史数据"
@@ -168,7 +243,7 @@ Examples:
             raise RuntimeError(f"Historical data fetch failed: {e}")
 
     def _format_cn_stock(self, row: pd.Series) -> str:
-        """Format A-share stock data."""
+        """Format A-share stock data (Sina API format)."""
         name = row.get('名称', 'N/A')
         code = row.get('代码', 'N/A')
         price = row.get('最新价', 0)
@@ -208,7 +283,7 @@ Examples:
 """
 
     def _format_hk_stock(self, row: pd.Series) -> str:
-        """Format Hong Kong stock data."""
+        """Format Hong Kong stock data (Sina API format)."""
         name = row.get('名称', 'N/A')
         code = row.get('代码', 'N/A')
         price = row.get('最新价', 0)
@@ -226,7 +301,7 @@ Examples:
 """
 
     def _format_us_stock(self, row: pd.Series) -> str:
-        """Format US stock data."""
+        """Format US stock data (Sina API format)."""
         name = row.get('名称', 'N/A')
         code = row.get('代码', 'N/A')
         price = row.get('最新价', 0)
@@ -244,21 +319,23 @@ Examples:
 """
 
     def _format_historical_cn(self, df: pd.DataFrame, symbol: str, days: int) -> str:
-        """Format historical A-share data."""
-        # Get basic info
+        """Format historical A-share data (Sina API format)."""
+        # Get basic info - Sina API uses English field names
         latest = df.iloc[-1]
         earliest = df.iloc[0]
 
         name = self._get_stock_name(symbol)
-        current_price = latest['收盘']
-        start_price = earliest['收盘']
-        total_change = ((current_price - start_price) / start_price) * 100
+        
+        # Try both English and Chinese field names for compatibility
+        current_price = latest.get('close', latest.get('收盘', 0))
+        start_price = earliest.get('close', earliest.get('收盘', 0))
+        total_change = ((current_price - start_price) / start_price) * 100 if start_price != 0 else 0
 
         # Calculate statistics
-        avg_price = df['收盘'].mean()
-        max_price = df['最高'].max()
-        min_price = df['最低'].min()
-        avg_volume = df['成交量'].mean()
+        avg_price = df.get('close', df.get('收盘')).mean()
+        max_price = df.get('high', df.get('最高')).max()
+        min_price = df.get('low', df.get('最低')).min()
+        avg_volume = df.get('volume', df.get('成交量')).mean()
 
         trend = "📈" if total_change > 0 else "📉"
         change_sign = "+" if total_change > 0 else ""
@@ -266,7 +343,7 @@ Examples:
         # Get recent 5 days
         recent = df.tail(5)
         recent_data = "\n".join([
-            f"  • {row['日期']}: ¥{row['收盘']:.2f} ({'+' if row['涨跌幅'] > 0 else ''}{row['涨跌幅']:.2f}%)"
+            f"  • {row.get('date', row.get('日期', 'N/A'))}: ¥{row.get('close', row.get('收盘', 0)):.2f} ({'+' if row.get('pricechange', row.get('涨跌幅', 0)) > 0 else ''}{row.get('pricechange', row.get('涨跌幅', 0)):.2f}%)"
             for _, row in recent.iterrows()
         ])
 
@@ -286,24 +363,25 @@ Examples:
 📅 **最近5个交易日**:
 {recent_data}
 
-⏰ **数据范围**: {earliest['日期']} 至 {latest['日期']}
+⏰ **数据范围**: {earliest.get('date', earliest.get('日期', 'N/A'))} 至 {latest.get('date', latest.get('日期', 'N/A'))}
 """
 
     def _format_historical_us(self, df: pd.DataFrame, symbol: str, days: int) -> str:
-        """Format historical US stock data."""
+        """Format historical US stock data (Yahoo/Sina API format)."""
         latest = df.iloc[-1]
         earliest = df.iloc[0]
 
-        current_price = latest['收盘']
-        start_price = earliest['收盘']
-        total_change = ((current_price - start_price) / start_price) * 100
+        # Try both English and Chinese field names
+        current_price = latest.get('close', latest.get('收盘', 0))
+        start_price = earliest.get('close', earliest.get('收盘', 0))
+        total_change = ((current_price - start_price) / start_price) * 100 if start_price != 0 else 0
 
         trend = "📈" if total_change > 0 else "📉"
         change_sign = "+" if total_change > 0 else ""
 
         recent = df.tail(5)
         recent_data = "\n".join([
-            f"  • {row['日期']}: ${row['收盘']:.2f} ({'+' if row['涨跌幅'] > 0 else ''}{row['涨跌幅']:.2f}%)"
+            f"  • {row.get('date', row.get('日期', 'N/A'))}: ${row.get('close', row.get('收盘', 0)):.2f} ({'+' if row.get('pricechange', row.get('涨跌幅', 0)) > 0 else ''}{row.get('pricechange', row.get('涨跌幅', 0)):.2f}%)"
             for _, row in recent.iterrows()
         ])
 
@@ -317,7 +395,7 @@ Examples:
 📅 **最近5个交易日**:
 {recent_data}
 
-⏰ **数据范围**: {earliest['日期']} 至 {latest['日期']}
+⏰ **数据范围**: {earliest.get('date', earliest.get('日期', 'N/A'))} 至 {latest.get('date', latest.get('日期', 'N/A'))}
 """
 
     def _get_stock_name(self, symbol: str) -> str:
@@ -353,7 +431,17 @@ Examples:
             return f"¥{amount:.2f}"
 
 
-class CryptoPriceTool(BaseTool):
+@tool_parameters({
+    "type": "object",
+    "properties": {
+        "symbol": {
+            "type": "string",
+            "description": "Cryptocurrency symbol (e.g., 'BTC', 'ETH', 'SOL')",
+        },
+    },
+    "required": ["symbol"],
+})
+class CryptoPriceTool(Tool):
     """Get cryptocurrency prices using akshare."""
 
     name = "crypto_price"
@@ -372,26 +460,38 @@ Examples:
         except ImportError:
             return "Error: akshare not installed. Run: pip install akshare"
 
+        # Disable proxy for akshare to avoid connection issues
+        original_proxies = _disable_proxy_for_akshare()
         try:
-            # Use Binance spot prices
-            df = ak.crypto_bitcoin_cmc()
+            # Use crypto JS spot prices (more stable)
+            df = ak.crypto_js_spot()
 
             # Normalize symbol
             symbol_upper = symbol.upper()
             symbol_map = {
-                "BTC": "bitcoin",
-                "ETH": "ethereum",
-                "SOL": "solana",
-                "BNB": "binancecoin",
-                "XRP": "ripple",
-                "ADA": "cardano",
-                "DOGE": "dogecoin",
+                "BTC": "BTC",
+                "ETH": "ETH",
+                "SOL": "SOL",
+                "BNB": "BNB",
+                "XRP": "XRP",
+                "ADA": "ADA",
+                "DOGE": "DOGE",
             }
 
-            normalized = symbol_map.get(symbol_upper, symbol_lower())
+            normalized = symbol_map.get(symbol_upper, symbol_upper)
 
-            # Find the crypto
-            crypto_data = df[df['symbol'] == normalized]
+            # Find the crypto - try both 'symbol' and '交易对' column names
+            if 'symbol' in df.columns:
+                crypto_data = df[df['symbol'] == normalized]
+            elif '交易品种' in df.columns:
+                # For crypto_js_spot, symbol is like "BTCUSD", "ETHUSD", etc.
+                # Try to match with USD or USDT suffix
+                crypto_data = df[df['交易品种'].str.startswith(normalized, na=False)]
+                # If multiple matches, take the first one
+                if len(crypto_data) > 1:
+                    crypto_data = crypto_data.head(1)
+            else:
+                return f"无法解析加密货币数据格式\n可用列: {df.columns.tolist()}"
 
             if crypto_data.empty:
                 return f"未找到加密货币: {symbol}\n支持的币种: {', '.join(symbol_map.keys())}"
@@ -402,26 +502,36 @@ Examples:
         except Exception as e:
             logger.error("Failed to get crypto price for {}: {}", symbol, e)
             return f"Error fetching crypto data for {symbol}: {str(e)}"
+        finally:
+            # Restore proxy settings
+            _restore_proxy(original_proxies)
 
     def _format_crypto(self, row: pd.Series, symbol: str) -> str:
-        """Format cryptocurrency data."""
-        name = row.get('name', symbol)
-        price = row.get('price', 0)
-        change_24h = row.get('percent_change_24h', 0)
-        market_cap = row.get('market_cap', 0)
-        volume_24h = row.get('volume_24h', 0)
+        """Format cryptocurrency data (crypto_js_spot format)."""
+        # Try both English and Chinese field names
+        name = row.get('交易品种', row.get('name', symbol))
+        price = row.get('最近报价', row.get('price', 0))
+        change_24h = row.get('涨跌幅', row.get('percent_change_24h', 0))
+        change_amount = row.get('涨跌额', 0)
+        high_24h = row.get('24小时最高', 0)
+        low_24h = row.get('24小时最低', 0)
+        volume_24h = row.get('24小时成交量', row.get('volume_24h', 0))
+        market = row.get('市场', 'N/A')
 
         trend = "📈" if change_24h > 0 else "📉" if change_24h < 0 else "➡️"
         change_sign = "+" if change_24h > 0 else ""
 
-        return f"""{trend} **{name} ({symbol})** - 加密货币实时价格
+        return f"""{trend} **{symbol}** - 加密货币实时价格
 
 💰 **当前价格**: ${price:,.2f}
-📊 **24h涨跌**: {change_sign}{change_24h:.2f}%
+📊 **24h涨跌**: {change_sign}{change_24h:.2f}% ({change_sign}{change_amount:.2f})
 
-📈 **市场数据**:
-• 市值: ${market_cap:,.0f}
-• 24h成交量: ${volume_24h:,.0f}
+📈 **24h走势**:
+• 最高: ${high_24h:,.2f}
+• 最低: ${low_24h:,.2f}
+• 成交量: ${volume_24h:,.2f}
+
+🏢 **交易市场**: {market}
 
 ⏰ **更新时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
