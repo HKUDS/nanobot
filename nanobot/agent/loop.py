@@ -113,6 +113,11 @@ class _LoopHook(AgentHook):
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         self._loop._current_iteration = context.iteration
+        logger.debug(
+            "Starting agent loop iteration {} for session {}",
+            context.iteration,
+            self._session_key,
+        )
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if self._on_progress:
@@ -194,6 +199,7 @@ class AgentLoop:
         context_block_limit: int | None = None,
         max_tool_result_chars: int | None = None,
         provider_retry_mode: str = "standard",
+        tool_hint_max_length: int | None = None,
         web_config: WebToolsConfig | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -238,6 +244,10 @@ class AgentLoop:
             else defaults.max_tool_result_chars
         )
         self.provider_retry_mode = provider_retry_mode
+        self.tool_hint_max_length = (
+            tool_hint_max_length if tool_hint_max_length is not None
+            else defaults.tool_hint_max_length
+        )
         self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -418,7 +428,7 @@ class AgentLoop:
             logger.warning("MCP connection cancelled (will retry next message)")
             self._mcp_stacks.clear()
         except BaseException as e:
-            logger.error("Failed to connect MCP servers (will retry next message): {}", e)
+            logger.warning("Failed to connect MCP servers (will retry next message): {}", e)
             self._mcp_stacks.clear()
         finally:
             self._mcp_connecting = False
@@ -467,12 +477,11 @@ class AgentLoop:
         """Return the chat id shown in runtime metadata for the model."""
         return str(msg.metadata.get("context_chat_id") or msg.chat_id)
 
-    @staticmethod
-    def _tool_hint(tool_calls: list) -> str:
+    def _tool_hint(self, tool_calls: list) -> str:
         """Format tool calls as concise hints with smart abbreviation."""
         from nanobot.utils.tool_hints import format_tool_hints
 
-        return format_tool_hints(tool_calls)
+        return format_tool_hints(tool_calls, max_length=self.tool_hint_max_length)
 
     async def _dispatch_command_inline(
         self,
@@ -645,6 +654,7 @@ class AgentLoop:
                 context_block_limit=self.context_block_limit,
                 provider_retry_mode=self.provider_retry_mode,
                 progress_callback=on_progress,
+                stream_progress_deltas=on_stream is not None,
                 retry_wait_callback=on_retry_wait,
                 checkpoint_callback=_checkpoint,
                 injection_callback=_drain_pending,
@@ -927,6 +937,8 @@ class AgentLoop:
                 self.sessions.save(session)
 
             session, pending = self.auto_compact.prepare_session(session, key)
+            if pending:
+                logger.info("Memory compact triggered for session {}", key)
 
             await self.consolidator.maybe_consolidate_by_tokens(
                 session,
@@ -939,6 +951,7 @@ class AgentLoop:
             # LLM via the merged prompt. See _persist_subagent_followup.
             is_subagent = msg.sender_id == "subagent"
             if is_subagent and self._persist_subagent_followup(session, msg):
+                logger.debug("Subagent result persisted for session {}", key)
                 self.sessions.save(session)
             self._set_tool_context(
                 channel, chat_id, msg.metadata.get("message_id"),

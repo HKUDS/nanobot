@@ -156,7 +156,7 @@ class CronService:
                         updated_at_ms=j.get("updatedAtMs", 0),
                         delete_after_run=j.get("deleteAfterRun", False),
                     ))
-            except Exception as e:
+            except Exception:
                 # Preserve the corrupt file for forensic recovery instead of
                 # letting the next save overwrite it with an empty job list.
                 backup = self.store_path.with_suffix(
@@ -164,12 +164,11 @@ class CronService:
                 )
                 with suppress(OSError):
                     self.store_path.rename(backup)
-                logger.error(
-                    "Failed to load cron store at {}: {}. "
+                logger.exception(
+                    "Failed to load cron store at {}. "
                     "Corrupt file preserved at {}. "
                     "Refusing to overwrite to avoid data loss.",
                     self.store_path,
-                    e,
                     backup,
                 )
                 return None
@@ -202,8 +201,8 @@ class CronService:
                         else:
                             _update(action.get("params", {}))
                         changed = True
-                    except Exception as exp:
-                        logger.debug(f"load action line error: {exp}")
+                    except Exception:
+                        logger.exception("load action line error")
                         continue
             self._store.jobs = list(jobs_map.values())
             if self._running and changed:
@@ -434,7 +433,7 @@ class CronService:
         except Exception as e:
             job.state.last_status = "error"
             job.state.last_error = str(e)
-            logger.error("Cron: job '{}' failed: {}", job.name, e)
+            logger.exception("Cron: job '{}' failed", job.name)
 
         end_ms = _now_ms()
         job.state.last_run_at_ms = start_ms

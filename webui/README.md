@@ -72,6 +72,27 @@ If your gateway listens on a non-default port, point the dev server at it:
 NANOBOT_API_URL=http://127.0.0.1:9000 bun run dev
 ```
 
+### Access from another device (LAN)
+
+To use the webui from another device on the same network, set `host` to `"0.0.0.0"` and configure a `token` or `tokenIssueSecret` in `~/.nanobot/config.json`:
+
+```json
+{
+  "channels": {
+    "websocket": {
+      "enabled": true,
+      "host": "0.0.0.0",
+      "port": 8765,
+      "tokenIssueSecret": "your-secret-here"
+    }
+  }
+}
+```
+
+The gateway will refuse to start if `host` is `"0.0.0.0"` and neither `token` nor `tokenIssueSecret` is set.
+
+Then open `http://<your-ip>:8765` on the other device. The webui will show an authentication form where you enter the secret. It is saved in your browser so you only need to enter it once.
+
 ## Build for packaged runtime
 
 ```bash

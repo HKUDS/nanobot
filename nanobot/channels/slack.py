@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from loguru import logger
 from pydantic import Field
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
@@ -84,10 +83,10 @@ class SlackChannel(BaseChannel):
     async def start(self) -> None:
         """Start the Slack Socket Mode client."""
         if not self.config.bot_token or not self.config.app_token:
-            logger.error("Slack bot/app token not configured")
+            self.logger.error("bot/app token not configured")
             return
         if self.config.mode != "socket":
-            logger.error("Unsupported Slack mode: {}", self.config.mode)
+            self.logger.error("Unsupported mode: {}", self.config.mode)
             return
 
         self._running = True
@@ -104,11 +103,11 @@ class SlackChannel(BaseChannel):
         try:
             auth = await self._web_client.auth_test()
             self._bot_user_id = auth.get("user_id")
-            logger.info("Slack bot connected as {}", self._bot_user_id)
+            self.logger.info("bot connected as {}", self._bot_user_id)
         except Exception as e:
-            logger.warning("Slack auth_test failed: {}", e)
+            self.logger.warning("auth_test failed: {}", e)
 
-        logger.info("Starting Slack Socket Mode client...")
+        self.logger.info("Starting Socket Mode client...")
         await self._socket_client.connect()
 
         while self._running:
@@ -121,13 +120,13 @@ class SlackChannel(BaseChannel):
             try:
                 await self._socket_client.close()
             except Exception as e:
-                logger.warning("Slack socket close failed: {}", e)
+                self.logger.warning("socket close failed: {}", e)
             self._socket_client = None
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Slack."""
         if not self._web_client:
-            logger.warning("Slack client not running")
+            self.logger.warning("client not running")
             return
         try:
             target_chat_id = await self._resolve_target_chat_id(msg.chat_id)
@@ -162,16 +161,16 @@ class SlackChannel(BaseChannel):
                         file=media_path,
                         thread_ts=thread_ts_param,
                     )
-                except Exception as e:
-                    logger.error("Failed to upload file {}: {}", media_path, e)
+                except Exception:
+                    self.logger.exception("Failed to upload file {}", media_path)
 
             # Update reaction emoji when the final (non-progress) response is sent
             if not (msg.metadata or {}).get("_progress"):
                 event = slack_meta.get("event", {})
                 await self._update_react_emoji(origin_chat_id, event.get("ts"))
 
-        except Exception as e:
-            logger.error("Error sending Slack message: {}", e)
+        except Exception:
+            self.logger.exception("Error sending message")
             raise
 
     async def _resolve_target_chat_id(self, target: str) -> str:
@@ -328,8 +327,8 @@ class SlackChannel(BaseChannel):
             return
 
         # Debug: log basic event shape
-        logger.debug(
-            "Slack event: type={} subtype={} user={} channel={} channel_type={} text={}",
+        self.logger.debug(
+            "event: type={} subtype={} user={} channel={} channel_type={} text={}",
             event_type,
             subtype,
             sender_id,
@@ -371,7 +370,7 @@ class SlackChannel(BaseChannel):
                     timestamp=event.get("ts"),
                 )
         except Exception as e:
-            logger.debug("Slack reactions_add failed: {}", e)
+            self.logger.debug("reactions_add failed: {}", e)
 
         # Thread-scoped session key whenever the user is in a real thread
         # (raw_thread_ts is set). DM threads get their own session, separate
@@ -420,7 +419,7 @@ class SlackChannel(BaseChannel):
                 session_key=session_key,
             )
         except Exception:
-            logger.exception("Error handling Slack message from {}", sender_id)
+            self.logger.exception("Error handling message from {}", sender_id)
 
     async def _download_slack_file(self, file_info: dict[str, Any]) -> tuple[str | None, str]:
         """Download a Slack private file to the local media directory."""
@@ -453,7 +452,7 @@ class SlackChannel(BaseChannel):
             path.write_bytes(response.content)
             return str(path), marker
         except Exception as e:
-            logger.warning("Failed to download Slack file {}: {}", file_id, e)
+            self.logger.warning("Failed to download file {}: {}", file_id, e)
             return None, self._download_failure_marker(marker_type, name, "download failed")
 
     @staticmethod
@@ -500,7 +499,7 @@ class SlackChannel(BaseChannel):
                 session_key=session_key,
             )
         except Exception:
-            logger.exception("Error handling Slack button click from {}", sender_id)
+            self.logger.exception("Error handling button click from {}", sender_id)
 
     async def _with_thread_context(
         self,
@@ -537,7 +536,7 @@ class SlackChannel(BaseChannel):
                 limit=max(1, self.config.thread_context_limit),
             )
         except Exception as e:
-            logger.warning("Slack thread context unavailable for {}: {}", key, e)
+            self.logger.warning("thread context unavailable for {}: {}", key, e)
             return text
 
         lines = self._format_thread_context(
@@ -597,7 +596,7 @@ class SlackChannel(BaseChannel):
                 timestamp=ts,
             )
         except Exception as e:
-            logger.debug("Slack reactions_remove failed: {}", e)
+            self.logger.debug("reactions_remove failed: {}", e)
         if self.config.done_emoji:
             try:
                 await self._web_client.reactions_add(
@@ -606,7 +605,7 @@ class SlackChannel(BaseChannel):
                     timestamp=ts,
                 )
             except Exception as e:
-                logger.debug("Slack done reaction failed: {}", e)
+                self.logger.debug("done reaction failed: {}", e)
 
     def _is_allowed(self, sender_id: str, chat_id: str, channel_type: str) -> bool:
         if channel_type == "im":

@@ -76,6 +76,7 @@ class AgentRunSpec:
     context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
     progress_callback: Any | None = None
+    stream_progress_deltas: bool = True
     retry_wait_callback: Any | None = None
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
@@ -261,12 +262,11 @@ class AgentRunner:
                 # Snipping may have created new orphans; clean them up.
                 messages_for_model = self._drop_orphan_tool_results(messages_for_model)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
-            except Exception as exc:
-                logger.warning(
-                    "Context governance failed on turn {} for {}: {}; applying minimal repair",
+            except Exception:
+                logger.exception(
+                    "Context governance failed on turn {} for {}; applying minimal repair",
                     iteration,
                     spec.session_key or "default",
-                    exc,
                 )
                 try:
                     messages_for_model = self._drop_orphan_tool_results(messages)
@@ -616,6 +616,7 @@ class AgentRunner:
         wants_streaming = hook.wants_streaming()
         wants_progress_streaming = (
             not wants_streaming
+            and spec.stream_progress_deltas
             and spec.progress_callback is not None
             and getattr(self.provider, "supports_progress_deltas", False) is True
         )
@@ -981,12 +982,11 @@ class AgentRunner:
                 result,
                 max_chars=spec.max_tool_result_chars,
             )
-        except Exception as exc:
-            logger.warning(
-                "Tool result persist failed for {} in {}: {}; using raw result",
+        except Exception:
+            logger.exception(
+                "Tool result persist failed for {} in {}; using raw result",
                 tool_call_id,
                 spec.session_key or "default",
-                exc,
             )
             content = result
         if isinstance(content, str) and len(content) > spec.max_tool_result_chars:

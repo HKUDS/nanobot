@@ -129,6 +129,17 @@ class WebSocketConfig(Base):
             raise ValueError("token_issue_path must differ from path (the WebSocket upgrade path)")
         return self
 
+    @model_validator(mode="after")
+    def wildcard_host_requires_auth(self) -> Self:
+        if self.host not in ("0.0.0.0", "::"):
+            return self
+        if self.token.strip() or self.token_issue_secret.strip():
+            return self
+        raise ValueError(
+            "host is 0.0.0.0 (all interfaces) but neither token nor "
+            "token_issue_secret is set — set one to prevent unauthenticated access"
+        )
+
 
 def _http_json_response(data: dict[str, Any], *, status: int = 200) -> Response:
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -449,7 +460,7 @@ class WebSocketChannel(BaseChannel):
         except ConnectionClosed:
             self._cleanup_connection(connection)
         except Exception as e:
-            logger.warning("websocket: failed to send {} event: {}", event, e)
+            self.logger.warning("failed to send {} event: {}", event, e)
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -465,7 +476,7 @@ class WebSocketChannel(BaseChannel):
             return None
         if not cert or not key:
             raise ValueError(
-                "websocket: ssl_certfile and ssl_keyfile must both be set for WSS, or both left empty"
+                "ssl_certfile and ssl_keyfile must both be set for WSS, or both left empty"
             )
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -502,14 +513,14 @@ class WebSocketChannel(BaseChannel):
             if not _issue_route_secret_matches(request.headers, secret):
                 return connection.respond(401, "Unauthorized")
         else:
-            logger.warning(
-                "websocket: token_issue_path is set but token_issue_secret is empty; "
+            self.logger.warning(
+                "token_issue_path is set but token_issue_secret is empty; "
                 "any client can obtain connection tokens — set token_issue_secret for production."
             )
         self._purge_expired_issued_tokens()
         if len(self._issued_tokens) >= self._MAX_ISSUED_TOKENS:
-            logger.error(
-                "websocket: too many outstanding issued tokens ({}), rejecting issuance",
+            self.logger.error(
+                "too many outstanding issued tokens ({}), rejecting issuance",
                 len(self._issued_tokens),
             )
             return _http_json_response({"error": "too many outstanding tokens"}, status=429)
@@ -532,9 +543,9 @@ class WebSocketChannel(BaseChannel):
             if got == issue_expected:
                 return self._handle_token_issue_http(connection, request)
 
-        # 2. WebUI bootstrap: localhost-only, mints tokens for the embedded UI.
+        # 2. WebUI bootstrap: mints tokens for the embedded UI.
         if got == "/webui/bootstrap":
-            return self._handle_webui_bootstrap(connection)
+            return self._handle_webui_bootstrap(connection, request)
 
         # 3. REST surface for the embedded UI.
         if got == "/api/sessions":
@@ -610,8 +621,16 @@ class WebSocketChannel(BaseChannel):
             if now > expiry:
                 self._api_tokens.pop(token_key, None)
 
-    def _handle_webui_bootstrap(self, connection: Any) -> Response:
-        if not _is_localhost(connection):
+    def _handle_webui_bootstrap(self, connection: Any, request: Any) -> Response:
+        # When a secret is configured (token_issue_secret or static token),
+        # validate it regardless of source IP.  This secures deployments
+        # behind a reverse proxy where all connections appear as localhost.
+        secret = self.config.token_issue_secret.strip() or self.config.token.strip()
+        if secret:
+            if not _issue_route_secret_matches(request.headers, secret):
+                return _http_error(401, "Unauthorized")
+        elif not _is_localhost(connection):
+            # No secret configured: only allow localhost (local dev mode).
             return _http_error(403, "webui bootstrap is localhost-only")
         # Cap outstanding tokens to avoid runaway growth from a misbehaving client.
         self._purge_expired_issued_tokens()
@@ -830,7 +849,7 @@ class WebSocketChannel(BaseChannel):
             staged = media_dir / f"{uuid.uuid4().hex[:12]}-{safe_name}"
             shutil.copyfile(path, staged)
         except OSError as exc:
-            logger.warning("websocket: failed to stage outbound media {}: {}", path, exc)
+            self.logger.warning("failed to stage outbound media {}: {}", path, exc)
             return None
         signed = self._sign_media_path(staged)
         if signed is None:
@@ -926,7 +945,7 @@ class WebSocketChannel(BaseChannel):
         try:
             body = candidate.read_bytes()
         except OSError as e:
-            logger.warning("websocket static: failed to read {}: {}", candidate, e)
+            self.logger.warning("static: failed to read {}: {}", candidate, e)
             return _http_error(500, "Internal Server Error")
         ctype, _ = mimetypes.guess_type(candidate.name)
         if ctype is None:
@@ -981,7 +1000,7 @@ class WebSocketChannel(BaseChannel):
         async def handler(connection: ServerConnection) -> None:
             await self._connection_loop(connection)
 
-        logger.info(
+        self.logger.info(
             "WebSocket server listening on {}://{}:{}{}",
             scheme,
             self.config.host,
@@ -989,7 +1008,7 @@ class WebSocketChannel(BaseChannel):
             self.config.path,
         )
         if self.config.token_issue_path:
-            logger.info(
+            self.logger.info(
                 "WebSocket token issue route: {}://{}:{}{}",
                 scheme,
                 self.config.host,
@@ -1023,7 +1042,7 @@ class WebSocketChannel(BaseChannel):
         if not client_id:
             client_id = f"anon-{uuid.uuid4().hex[:12]}"
         elif len(client_id) > 128:
-            logger.warning("websocket: client_id too long ({} chars), truncating", len(client_id))
+            self.logger.warning("client_id too long ({} chars), truncating", len(client_id))
             client_id = client_id[:128]
 
         default_chat_id = str(uuid.uuid4())
@@ -1048,7 +1067,7 @@ class WebSocketChannel(BaseChannel):
                     try:
                         raw = raw.decode("utf-8")
                     except UnicodeDecodeError:
-                        logger.warning("websocket: ignoring non-utf8 binary frame")
+                        self.logger.warning("ignoring non-utf8 binary frame")
                         continue
 
                 envelope = _parse_envelope(raw)
@@ -1066,7 +1085,7 @@ class WebSocketChannel(BaseChannel):
                     metadata={"remote": getattr(connection, "remote_address", None)},
                 )
         except Exception as e:
-            logger.debug("websocket connection ended: {}", e)
+            self.logger.debug("connection ended: {}", e)
         finally:
             self._cleanup_connection(connection)
 
@@ -1106,8 +1125,8 @@ class WebSocketChannel(BaseChannel):
                 try:
                     Path(p).unlink(missing_ok=True)
                 except OSError as exc:
-                    logger.warning(
-                        "websocket: failed to unlink partial media {}: {}", p, exc
+                    self.logger.warning(
+                        "failed to unlink partial media {}: {}", p, exc
                     )
             return [], reason
 
@@ -1131,7 +1150,7 @@ class WebSocketChannel(BaseChannel):
             except FileSizeExceeded:
                 return _abort("size")
             except Exception as exc:
-                logger.warning("websocket: media decode failed: {}", exc)
+                self.logger.warning("media decode failed: {}", exc)
                 return _abort("decode")
             if saved is None:
                 return _abort("decode")
@@ -1216,7 +1235,7 @@ class WebSocketChannel(BaseChannel):
             try:
                 await self._server_task
             except Exception as e:
-                logger.warning("websocket: server task error during shutdown: {}", e)
+                self.logger.warning("server task error during shutdown: {}", e)
             self._server_task = None
         self._subs.clear()
         self._conn_chats.clear()
@@ -1230,16 +1249,16 @@ class WebSocketChannel(BaseChannel):
             await connection.send(raw)
         except ConnectionClosed:
             self._cleanup_connection(connection)
-            logger.warning("websocket{}connection gone", label)
-        except Exception as e:
-            logger.error("websocket{}send failed: {}", label, e)
+            self.logger.warning("connection gone{}", label)
+        except Exception:
+            self.logger.exception("send failed{}", label)
             raise
 
     async def send(self, msg: OutboundMessage) -> None:
         # Snapshot the subscriber set so ConnectionClosed cleanups mid-iteration are safe.
         conns = list(self._subs.get(msg.chat_id, ()))
         if not conns:
-            logger.warning("websocket: no active subscribers for chat_id={}", msg.chat_id)
+            self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
             return
         # Signal that the agent has fully finished processing the current turn.
         if msg.metadata.get("_turn_end"):

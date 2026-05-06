@@ -342,6 +342,8 @@ async def test_base_channel_passes_language_to_groq_transcription_provider():
 
 
 class _StubResponse:
+    status_code = 200
+
     def raise_for_status(self):
         return None
 

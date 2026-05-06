@@ -12,7 +12,6 @@ from typing import Any
 from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
-from loguru import logger
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
@@ -113,7 +112,7 @@ class NanobotDingTalkHandler(CallbackHandler):
                 content = content + "\n\nReceived files:\n" + file_list
 
             if not content:
-                logger.warning(
+                self.channel.logger.warning(
                     "Received empty or unsupported message type: {}",
                     chatbot_msg.message_type,
                 )
@@ -128,7 +127,7 @@ class NanobotDingTalkHandler(CallbackHandler):
                 or message.data.get("openConversationId")
             )
 
-            logger.info("Received DingTalk message from {} ({}): {}", sender_name, sender_id, content)
+            self.channel.logger.info("Received message from {} ({}): {}", sender_name, sender_id, content)
 
             # Forward to Nanobot via _on_message (non-blocking).
             # Store reference to prevent GC before task completes.
@@ -146,8 +145,8 @@ class NanobotDingTalkHandler(CallbackHandler):
 
             return AckMessage.STATUS_OK, "OK"
 
-        except Exception as e:
-            logger.error("Error processing DingTalk message: {}", e)
+        except Exception:
+            self.channel.logger.exception("Error processing message")
             # Return OK to avoid retry loop from DingTalk server
             return AckMessage.STATUS_OK, "Error"
 
@@ -204,20 +203,20 @@ class DingTalkChannel(BaseChannel):
         """Start the DingTalk bot with Stream Mode."""
         try:
             if not DINGTALK_AVAILABLE:
-                logger.error(
-                    "DingTalk Stream SDK not installed. Run: pip install dingtalk-stream"
+                self.logger.error(
+                    "Stream SDK not installed. Run: pip install dingtalk-stream"
                 )
                 return
 
             if not self.config.client_id or not self.config.client_secret:
-                logger.error("DingTalk client_id and client_secret not configured")
+                self.logger.error("client_id and client_secret not configured")
                 return
 
             self._running = True
             self._http = httpx.AsyncClient()
 
-            logger.info(
-                "Initializing DingTalk Stream Client with Client ID: {}...",
+            self.logger.info(
+                "Initializing Stream Client with Client ID: {}...",
                 self.config.client_id,
             )
             credential = Credential(self.config.client_id, self.config.client_secret)
@@ -227,20 +226,20 @@ class DingTalkChannel(BaseChannel):
             handler = NanobotDingTalkHandler(self)
             self._client.register_callback_handler(ChatbotMessage.TOPIC, handler)
 
-            logger.info("DingTalk bot started with Stream Mode")
+            self.logger.info("bot started with Stream Mode")
 
             # Reconnect loop: restart stream if SDK exits or crashes
             while self._running:
                 try:
                     await self._client.start()
                 except Exception as e:
-                    logger.warning("DingTalk stream error: {}", e)
+                    self.logger.warning("stream error: {}", e)
                 if self._running:
-                    logger.info("Reconnecting DingTalk stream in 5 seconds...")
+                    self.logger.info("Reconnecting stream in 5 seconds...")
                     await asyncio.sleep(5)
 
-        except Exception as e:
-            logger.exception("Failed to start DingTalk channel: {}", e)
+        except Exception:
+            self.logger.exception("Failed to start channel")
 
     async def stop(self) -> None:
         """Stop the DingTalk bot."""
@@ -266,7 +265,7 @@ class DingTalkChannel(BaseChannel):
         }
 
         if not self._http:
-            logger.warning("DingTalk HTTP client not initialized, cannot refresh token")
+            self.logger.warning("HTTP client not initialized, cannot refresh token")
             return None
 
         try:
@@ -277,8 +276,8 @@ class DingTalkChannel(BaseChannel):
             # Expire 60s early to be safe
             self._token_expiry = time.time() + int(res_data.get("expireIn", 7200)) - 60
             return self._access_token
-        except Exception as e:
-            logger.error("Failed to get DingTalk access token: {}", e)
+        except Exception:
+            self.logger.exception("Failed to get access token")
             return None
 
     @staticmethod
@@ -317,8 +316,8 @@ class DingTalkChannel(BaseChannel):
     ) -> tuple[bytes, str, str | None]:
         ext = Path(filename).suffix.lower()
         if ext in self._ZIP_BEFORE_UPLOAD_EXTS or content_type == "text/html":
-            logger.info(
-                "DingTalk does not accept raw HTML attachments, zipping {} before upload",
+            self.logger.info(
+                "does not accept raw HTML attachments, zipping {} before upload",
                 filename,
             )
             return self._zip_bytes(filename, data)
@@ -327,7 +326,7 @@ class DingTalkChannel(BaseChannel):
     def _validate_remote_media_url(self, media_ref: str) -> bool:
         ok, err = validate_url_target(media_ref)
         if not ok:
-            logger.warning("DingTalk remote media URL blocked ref={} reason={}", media_ref, err)
+            self.logger.warning("remote media URL blocked ref={} reason={}", media_ref, err)
             return False
         return True
 
@@ -343,15 +342,15 @@ class DingTalkChannel(BaseChannel):
 
     def _next_remote_media_url(self, current_url: str, location: str | None) -> str | None:
         if not self.config.allow_remote_media_redirects:
-            logger.warning("DingTalk media download redirect refused ref={}", current_url)
+            self.logger.warning("media download redirect refused ref={}", current_url)
             return None
         if not location:
-            logger.warning("DingTalk media download redirect without Location ref={}", current_url)
+            self.logger.warning("media download redirect without Location ref={}", current_url)
             return None
         next_url = urljoin(current_url, location)
         if not self._redirect_host_allowed(current_url, next_url):
-            logger.warning(
-                "DingTalk media download cross-host redirect refused ref={} next={}",
+            self.logger.warning(
+                "media download cross-host redirect refused ref={} next={}",
                 current_url,
                 next_url,
             )
@@ -382,8 +381,8 @@ class DingTalkChannel(BaseChannel):
                     async with stream("GET", current_url, follow_redirects=False) as resp:
                         final_ok, final_err = validate_resolved_url(str(resp.url))
                         if not final_ok:
-                            logger.warning(
-                                "DingTalk remote media redirect blocked ref={} final={} reason={}",
+                            self.logger.warning(
+                                "remote media redirect blocked ref={} final={} reason={}",
                                 media_ref,
                                 resp.url,
                                 final_err,
@@ -398,8 +397,8 @@ class DingTalkChannel(BaseChannel):
                             current_url = next_url
                             continue
                         if resp.status_code >= 400:
-                            logger.warning(
-                                "DingTalk media download failed status={} ref={}",
+                            self.logger.warning(
+                                "media download failed status={} ref={}",
                                 resp.status_code,
                                 current_url,
                             )
@@ -409,15 +408,15 @@ class DingTalkChannel(BaseChannel):
                         async for chunk in resp.aiter_bytes():
                             total += len(chunk)
                             if total > DINGTALK_MAX_REMOTE_MEDIA_BYTES:
-                                logger.warning(
-                                    "DingTalk media download too large ref={} bytes>{}",
+                                self.logger.warning(
+                                    "media download too large ref={} bytes>{}",
                                     current_url,
                                     DINGTALK_MAX_REMOTE_MEDIA_BYTES,
                                 )
                                 return None, None
                             chunks.append(chunk)
                         return b"".join(chunks), (resp.headers.get("content-type") or "")
-                logger.warning("DingTalk media download exceeded redirect limit ref={}", media_ref)
+                self.logger.warning("media download exceeded redirect limit ref={}", media_ref)
                 return None, None
 
             current_url = media_ref
@@ -425,8 +424,8 @@ class DingTalkChannel(BaseChannel):
                 resp = await self._http.get(current_url, follow_redirects=False)
                 final_ok, final_err = validate_resolved_url(str(getattr(resp, "url", current_url)))
                 if not final_ok:
-                    logger.warning(
-                        "DingTalk remote media redirect blocked ref={} final={} reason={}",
+                    self.logger.warning(
+                        "remote media redirect blocked ref={} final={} reason={}",
                         media_ref,
                         getattr(resp, "url", current_url),
                         final_err,
@@ -441,27 +440,27 @@ class DingTalkChannel(BaseChannel):
                     current_url = next_url
                     continue
                 if resp.status_code >= 400:
-                    logger.warning(
-                        "DingTalk media download failed status={} ref={}",
+                    self.logger.warning(
+                        "media download failed status={} ref={}",
                         resp.status_code,
                         current_url,
                     )
                     return None, None
                 if len(resp.content) > DINGTALK_MAX_REMOTE_MEDIA_BYTES:
-                    logger.warning(
-                        "DingTalk media download too large ref={} bytes>{}",
+                    self.logger.warning(
+                        "media download too large ref={} bytes>{}",
                         current_url,
                         DINGTALK_MAX_REMOTE_MEDIA_BYTES,
                     )
                     return None, None
                 return resp.content, (resp.headers.get("content-type") or "")
-            logger.warning("DingTalk media download exceeded redirect limit ref={}", media_ref)
+            self.logger.warning("media download exceeded redirect limit ref={}", media_ref)
             return None, None
-        except httpx.TransportError as e:
-            logger.error("DingTalk media download network error ref={} err={}", media_ref, e)
+        except httpx.TransportError:
+            self.logger.exception("media download network error ref={}", media_ref)
             raise
-        except Exception as e:
-            logger.error("DingTalk media download error ref={} err={}", media_ref, e)
+        except Exception:
+            self.logger.exception("media download error ref={}", media_ref)
             return None, None
 
     async def _read_media_bytes(
@@ -486,13 +485,13 @@ class DingTalkChannel(BaseChannel):
             else:
                 local_path = Path(os.path.expanduser(media_ref))
             if not local_path.is_file():
-                logger.warning("DingTalk media file not found: {}", local_path)
+                self.logger.warning("media file not found: {}", local_path)
                 return None, None, None
             data = await asyncio.to_thread(local_path.read_bytes)
             content_type = mimetypes.guess_type(local_path.name)[0]
             return data, local_path.name, content_type
-        except Exception as e:
-            logger.error("DingTalk media read error ref={} err={}", media_ref, e)
+        except Exception:
+            self.logger.exception("media read error ref={}", media_ref)
             return None, None, None
 
     async def _upload_media(
@@ -514,23 +513,23 @@ class DingTalkChannel(BaseChannel):
             text = resp.text
             result = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
             if resp.status_code >= 400:
-                logger.error("DingTalk media upload failed status={} type={} body={}", resp.status_code, media_type, text[:500])
+                self.logger.error("media upload failed status={} type={} body={}", resp.status_code, media_type, text[:500])
                 return None
             errcode = result.get("errcode", 0)
             if errcode != 0:
-                logger.error("DingTalk media upload api error type={} errcode={} body={}", media_type, errcode, text[:500])
+                self.logger.error("media upload api error type={} errcode={} body={}", media_type, errcode, text[:500])
                 return None
             sub = result.get("result") or {}
             media_id = result.get("media_id") or result.get("mediaId") or sub.get("media_id") or sub.get("mediaId")
             if not media_id:
-                logger.error("DingTalk media upload missing media_id body={}", text[:500])
+                self.logger.error("media upload missing media_id body={}", text[:500])
                 return None
             return str(media_id)
-        except httpx.TransportError as e:
-            logger.error("DingTalk media upload network error type={} err={}", media_type, e)
+        except httpx.TransportError:
+            self.logger.exception("media upload network error type={}", media_type)
             raise
-        except Exception as e:
-            logger.error("DingTalk media upload error type={} err={}", media_type, e)
+        except Exception:
+            self.logger.exception("media upload error type={}", media_type)
             return None
 
     async def _send_batch_message(
@@ -541,7 +540,7 @@ class DingTalkChannel(BaseChannel):
         msg_param: dict[str, Any],
     ) -> bool:
         if not self._http:
-            logger.warning("DingTalk HTTP client not initialized, cannot send")
+            self.logger.warning("HTTP client not initialized, cannot send")
             return False
 
         headers = {"x-acs-dingtalk-access-token": token}
@@ -568,7 +567,7 @@ class DingTalkChannel(BaseChannel):
             resp = await self._http.post(url, json=payload, headers=headers)
             body = resp.text
             if resp.status_code != 200:
-                logger.error("DingTalk send failed msgKey={} status={} body={}", msg_key, resp.status_code, body[:500])
+                self.logger.error("send failed msgKey={} status={} body={}", msg_key, resp.status_code, body[:500])
                 return False
             try:
                 result = resp.json()
@@ -576,15 +575,15 @@ class DingTalkChannel(BaseChannel):
                 result = {}
             errcode = result.get("errcode")
             if errcode not in (None, 0):
-                logger.error("DingTalk send api error msgKey={} errcode={} body={}", msg_key, errcode, body[:500])
+                self.logger.error("send api error msgKey={} errcode={} body={}", msg_key, errcode, body[:500])
                 return False
-            logger.debug("DingTalk message sent to {} with msgKey={}", chat_id, msg_key)
+            self.logger.debug("message sent to {} with msgKey={}", chat_id, msg_key)
             return True
-        except httpx.TransportError as e:
-            logger.error("DingTalk network error sending message msgKey={} err={}", msg_key, e)
+        except httpx.TransportError:
+            self.logger.exception("network error sending message msgKey={}", msg_key)
             raise
-        except Exception as e:
-            logger.error("Error sending DingTalk message msgKey={} err={}", msg_key, e)
+        except Exception:
+            self.logger.exception("Error sending message msgKey={}", msg_key)
             return False
 
     async def _send_markdown_text(self, token: str, chat_id: str, content: str) -> bool:
@@ -610,11 +609,11 @@ class DingTalkChannel(BaseChannel):
             )
             if ok:
                 return True
-            logger.warning("DingTalk image url send failed, trying upload fallback: {}", media_ref)
+            self.logger.warning("image url send failed, trying upload fallback: {}", media_ref)
 
         data, filename, content_type = await self._read_media_bytes(media_ref)
         if not data:
-            logger.error("DingTalk media read failed: {}", media_ref)
+            self.logger.error("media read failed: {}", media_ref)
             return False
 
         filename = filename or self._guess_filename(media_ref, upload_type)
@@ -646,7 +645,7 @@ class DingTalkChannel(BaseChannel):
             )
             if ok:
                 return True
-            logger.warning("DingTalk image media_id send failed, falling back to file: {}", media_ref)
+            self.logger.warning("image media_id send failed, falling back to file: {}", media_ref)
 
         return await self._send_batch_message(
             token,
@@ -668,7 +667,7 @@ class DingTalkChannel(BaseChannel):
             ok = await self._send_media_ref(token, msg.chat_id, media_ref)
             if ok:
                 continue
-            logger.error("DingTalk media send failed for {}", media_ref)
+            self.logger.error("media send failed for {}", media_ref)
             # Send visible fallback so failures are observable by the user.
             filename = self._guess_filename(media_ref, self._guess_upload_type(media_ref))
             await self._send_markdown_text(
@@ -691,7 +690,7 @@ class DingTalkChannel(BaseChannel):
         permission checks before publishing to the bus.
         """
         try:
-            logger.info("DingTalk inbound: {} from {}", content, sender_name)
+            self.logger.info("inbound: {} from {}", content, sender_name)
             is_group = conversation_type == "2" and conversation_id
             chat_id = f"group:{conversation_id}" if is_group else sender_id
             await self._handle_message(
@@ -704,8 +703,8 @@ class DingTalkChannel(BaseChannel):
                     "conversation_type": conversation_type,
                 },
             )
-        except Exception as e:
-            logger.error("Error publishing DingTalk message: {}", e)
+        except Exception:
+            self.logger.exception("Error publishing message")
 
     async def _download_dingtalk_file(
         self,
@@ -719,7 +718,7 @@ class DingTalkChannel(BaseChannel):
         try:
             token = await self._get_access_token()
             if not token or not self._http:
-                logger.error("DingTalk file download: no token or http client")
+                self.logger.error("file download: no token or http client")
                 return None
 
             # Step 1: Exchange downloadCode for a temporary download URL
@@ -728,19 +727,19 @@ class DingTalkChannel(BaseChannel):
             payload = {"downloadCode": download_code, "robotCode": self.config.client_id}
             resp = await self._http.post(api_url, json=payload, headers=headers)
             if resp.status_code != 200:
-                logger.error("DingTalk get download URL failed: status={}, body={}", resp.status_code, resp.text)
+                self.logger.error("get download URL failed: status={}, body={}", resp.status_code, resp.text)
                 return None
 
             result = resp.json()
             download_url = result.get("downloadUrl")
             if not download_url:
-                logger.error("DingTalk download URL not found in response: {}", result)
+                self.logger.error("download URL not found in response: {}", result)
                 return None
 
             # Step 2: Download the file content
             file_resp = await self._http.get(download_url, follow_redirects=True)
             if file_resp.status_code != 200:
-                logger.error("DingTalk file download failed: status={}", file_resp.status_code)
+                self.logger.error("file download failed: status={}", file_resp.status_code)
                 return None
 
             # Save to media directory (accessible under workspace)
@@ -748,8 +747,8 @@ class DingTalkChannel(BaseChannel):
             download_dir.mkdir(parents=True, exist_ok=True)
             file_path = download_dir / filename
             await asyncio.to_thread(file_path.write_bytes, file_resp.content)
-            logger.info("DingTalk file saved: {}", file_path)
+            self.logger.info("file saved: {}", file_path)
             return str(file_path)
-        except Exception as e:
-            logger.error("DingTalk file download error: {}", e)
+        except Exception:
+            self.logger.exception("file download error")
             return None

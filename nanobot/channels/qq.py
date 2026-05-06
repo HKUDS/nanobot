@@ -38,7 +38,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import Base
-from nanobot.security.network import validate_url_target
+from nanobot.utils.logging_bridge import redirect_lib_logging
 
 try:
     from nanobot.config.paths import get_media_dir
@@ -187,24 +187,25 @@ class QQChannel(BaseChannel):
             root = Path.home() / ".nanobot" / "media" / "qq"
 
         root.mkdir(parents=True, exist_ok=True)
-        logger.info("QQ media directory: {}", str(root))
+        self.logger.info("media directory: {}", str(root))
         return root
 
     async def start(self) -> None:
         """Start the QQ bot with auto-reconnect loop."""
+        redirect_lib_logging("botpy", level="WARNING")
         if not QQ_AVAILABLE:
-            logger.error("QQ SDK not installed. Run: pip install qq-botpy")
+            self.logger.error("SDK not installed. Run: pip install qq-botpy")
             return
 
         if not self.config.app_id or not self.config.secret:
-            logger.error("QQ app_id and secret not configured")
+            self.logger.error("app_id and secret not configured")
             return
 
         self._running = True
         self._http = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120))
 
         self._client = _make_bot_class(self)()
-        logger.info("QQ bot started (C2C & Group supported)")
+        self.logger.info("bot started (C2C & Group supported)")
         await self._run_bot()
 
     async def _run_bot(self) -> None:
@@ -213,9 +214,9 @@ class QQChannel(BaseChannel):
             try:
                 await self._client.start(appid=self.config.app_id, secret=self.config.secret)
             except Exception as e:
-                logger.warning("QQ bot error: {}", e)
+                self.logger.warning("bot error: {}", e)
             if self._running:
-                logger.info("Reconnecting QQ bot in 5 seconds...")
+                self.logger.info("Reconnecting bot in 5 seconds...")
                 await asyncio.sleep(5)
 
     async def stop(self) -> None:
@@ -231,7 +232,7 @@ class QQChannel(BaseChannel):
                 await self._http.close()
         self._http = None
 
-        logger.info("QQ bot stopped")
+        self.logger.info("bot stopped")
 
     # ---------------------------
     # Outbound (send)
@@ -241,7 +242,7 @@ class QQChannel(BaseChannel):
         """Send attachments first, then text."""
         try:
             if not self._client:
-                logger.warning("QQ client not initialized")
+                self.logger.warning("client not initialized")
                 return
 
             msg_id = msg.metadata.get("message_id")
@@ -281,7 +282,7 @@ class QQChannel(BaseChannel):
             # Network / transport errors — propagate so ChannelManager can retry
             raise
         except Exception:
-            logger.exception("Error sending QQ message to chat_id={}", msg.chat_id)
+            self.logger.exception("Error sending message to chat_id={}", msg.chat_id)
 
     async def _send_text_only(
         self,
@@ -339,7 +340,7 @@ class QQChannel(BaseChannel):
                 srv_send_msg=False,
             )
             if not media_obj:
-                logger.error("QQ media upload failed: empty response")
+                self.logger.error("media upload failed: empty response")
                 return False
 
             self._msg_seq += 1
@@ -360,15 +361,15 @@ class QQChannel(BaseChannel):
                     media=media_obj,
                 )
 
-            logger.info("QQ media sent: {}", filename)
+            self.logger.info("media sent: {}", filename)
             return True
         except (aiohttp.ClientError, OSError) as e:
             # Network / transport errors — propagate for retry by caller
-            logger.warning("QQ send media network error filename={} err={}", filename, e)
+            self.logger.warning("send media network error filename={} err={}", filename, e)
             raise
-        except Exception as e:
+        except Exception:
             # API-level or other non-network errors — return False so send() can fallback
-            logger.error("QQ send media failed filename={} err={}", filename, e)
+            self.logger.exception("send media failed filename={}", filename)
             return False
 
     async def _read_media_bytes(self, media_ref: str) -> tuple[bytes | None, str | None]:
@@ -389,19 +390,19 @@ class QQChannel(BaseChannel):
                     local_path = Path(os.path.expanduser(media_ref))
 
                 if not local_path.is_file():
-                    logger.warning("QQ outbound media file not found: {}", str(local_path))
+                    self.logger.warning("outbound media file not found: {}", str(local_path))
                     return None, None
 
                 data = await asyncio.to_thread(local_path.read_bytes)
                 return data, local_path.name
             except Exception as e:
-                logger.warning("QQ outbound media read error ref={} err={}", media_ref, e)
+                self.logger.warning("outbound media read error ref={} err={}", media_ref, e)
                 return None, None
 
         # Remote URL
         ok, err = validate_url_target(media_ref)
         if not ok:
-            logger.warning("QQ outbound media URL validation failed url={} err={}", media_ref, err)
+            self.logger.warning("outbound media URL validation failed url={} err={}", media_ref, err)
             return None, None
 
         if not self._http:
@@ -409,8 +410,8 @@ class QQChannel(BaseChannel):
         try:
             async with self._http.get(media_ref, allow_redirects=True) as resp:
                 if resp.status >= 400:
-                    logger.warning(
-                        "QQ outbound media download failed status={} url={}",
+                    self.logger.warning(
+                        "outbound media download failed status={} url={}",
                         resp.status,
                         media_ref,
                     )
@@ -421,7 +422,7 @@ class QQChannel(BaseChannel):
                 filename = os.path.basename(urlparse(media_ref).path) or "file.bin"
                 return data, filename
         except Exception as e:
-            logger.warning("QQ outbound media download error url={} err={}", media_ref, e)
+            self.logger.warning("outbound media download error url={} err={}", media_ref, e)
             return None, None
 
     # https://github.com/tencent-connect/botpy/issues/198
@@ -525,7 +526,7 @@ class QQChannel(BaseChannel):
                         content=self.config.ack_message,
                     )
                 except Exception:
-                    logger.debug("QQ ack message failed for chat_id={}", chat_id)
+                    self.logger.debug("ack message failed for chat_id={}", chat_id)
 
             await self._handle_message(
                 sender_id=user_id,
@@ -538,7 +539,7 @@ class QQChannel(BaseChannel):
                 },
             )
         except Exception:
-            logger.exception("Error handling QQ inbound message id={}", getattr(data, "id", "?"))
+            self.logger.exception("Error handling inbound message id={}", getattr(data, "id", "?"))
 
     async def _handle_attachments(
         self,
@@ -557,7 +558,7 @@ class QQChannel(BaseChannel):
             filename = getattr(att, "filename", None) or ""
             ctype = getattr(att, "content_type", None) or ""
 
-            logger.info("Downloading file from QQ: {}", filename or url)
+            self.logger.info("Downloading file: {}", filename or url)
             local_path = await self._download_to_media_dir_chunked(url, filename_hint=filename)
 
             att_meta.append(
@@ -608,7 +609,7 @@ class QQChannel(BaseChannel):
                 allow_redirects=True,
             ) as resp:
                 if resp.status != 200:
-                    logger.warning("QQ download failed: status={} url={}", resp.status, url)
+                    self.logger.warning("download failed: status={} url={}", resp.status, url)
                     return None
 
                 ctype = (resp.headers.get("Content-Type") or "").lower()
@@ -662,8 +663,8 @@ class QQChannel(BaseChannel):
                             continue
                         downloaded += len(chunk)
                         if downloaded > max_bytes:
-                            logger.warning(
-                                "QQ download exceeded max_bytes={} url={} -> abort",
+                            self.logger.warning(
+                                "download exceeded max_bytes={} url={} -> abort",
                                 max_bytes,
                                 url,
                             )
@@ -675,11 +676,11 @@ class QQChannel(BaseChannel):
                 # Atomic rename
                 await asyncio.to_thread(os.replace, tmp_path, target)
                 tmp_path = None  # mark as moved
-                logger.info("QQ file saved: {}", str(target))
+                self.logger.info("file saved: {}", str(target))
                 return str(target)
 
-        except Exception as e:
-            logger.error("QQ download error: {}", e)
+        except Exception:
+            self.logger.exception("download error")
             return None
         finally:
             # Cleanup partial file

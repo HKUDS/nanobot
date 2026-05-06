@@ -643,7 +643,7 @@ def test_persist_tool_result_logs_cleanup_failures(monkeypatch, tmp_path):
         lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("busy")),
     )
     monkeypatch.setattr(
-        "nanobot.utils.helpers.logger.warning",
+        "nanobot.utils.helpers.logger.exception",
         lambda message, *args: warnings.append(message.format(*args)),
     )
 
