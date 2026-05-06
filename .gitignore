@@ -52,6 +52,7 @@ coverage.xml
 # Lock files (project policy)
 poetry.lock
 uv.lock
+.claude/
 
 # Jupyter
 .ipynb_checkpoints/
@@ -74,6 +75,7 @@ Desktop.ini
 .cursor/
 .idea/
 .fleet/
+.claude/
 *.code-workspace
 *.sublime-project
 *.sublime-workspace
