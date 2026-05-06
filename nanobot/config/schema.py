@@ -254,10 +254,12 @@ class LocalMemoryIntegrationConfig(Base):
     search_first: bool = True
     auto_capture_candidates: bool = False
     auto_capture_personal_facts: bool = True
-    max_search_results: int = 3
-    min_query_length: int = 12
-    max_candidate_chars: int = 1200
-    max_context_chars: int = 1600
+    auto_capture_session_summaries: bool = True
+    max_search_results: int = Field(default=3, ge=1, le=10)
+    min_query_length: int = Field(default=12, ge=1, le=500)
+    max_candidate_chars: int = Field(default=1200, ge=200, le=8000)
+    max_context_chars: int = Field(default=1600, ge=200, le=12000)
+    session_summary_max_chars: int = Field(default=900, ge=200, le=4000)
     enable_bootstrap_recall: bool = True
 
 

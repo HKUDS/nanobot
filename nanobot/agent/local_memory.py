@@ -114,10 +114,12 @@ class LocalMemoryConfig:
     search_first: bool = True
     auto_capture_candidates: bool = False
     auto_capture_personal_facts: bool = True
+    auto_capture_session_summaries: bool = True
     max_search_results: int = 3
     min_query_length: int = 12
     max_candidate_chars: int = 1200
     max_context_chars: int = 1600
+    session_summary_max_chars: int = 900
     enable_bootstrap_recall: bool = True
 
 
@@ -137,6 +139,12 @@ class LocalMemoryCaptureRequest:
     tags: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     record_id: str | None = None
+
+
+@dataclass(slots=True)
+class SessionSummaryCapture:
+    summary_text: str
+    query_kind: str | None
 
 
 def has_local_memory_server(tool_registry: ToolRegistry, server_name: str = _LOCAL_MEMORY_SERVER_NAME) -> bool:
@@ -207,6 +215,93 @@ async def search_local_memory(
         heading="Supplemental local-memory recall",
         content=rendered,
     )
+
+
+def build_session_summary_capture(
+    user_text: str,
+    assistant_text: str,
+    cfg: LocalMemoryConfig,
+) -> SessionSummaryCapture | None:
+    if not cfg.auto_capture_session_summaries:
+        return None
+    cleaned_user = _strip_markdown(user_text).strip()
+    cleaned_assistant = _strip_markdown(assistant_text).strip()
+    if not cleaned_user or not cleaned_assistant:
+        return None
+    if len(cleaned_assistant) < 120:
+        return None
+    if any(secret_word in cleaned_assistant.lower() for secret_word in ("token", "password", "secret", "apikey", "api key")):
+        return None
+    query_kind = _classify_memory_query(cleaned_user)
+    if query_kind is None:
+        return None
+    bullets = [
+        f"User request: {_compact_text(cleaned_user, 220)}",
+        f"Assistant outcome: {_compact_text(cleaned_assistant, 420)}",
+    ]
+    summary_text = "\n".join(f"- {line}" for line in bullets if line)
+    summary_text = summary_text[: cfg.session_summary_max_chars].strip()
+    if len(summary_text) < 80:
+        return None
+    return SessionSummaryCapture(summary_text=summary_text, query_kind=query_kind)
+
+
+
+def build_session_summary_capture_request(
+    user_text: str,
+    assistant_text: str,
+    cfg: LocalMemoryConfig,
+) -> LocalMemoryCaptureRequest | None:
+    capture = build_session_summary_capture(user_text, assistant_text, cfg)
+    if capture is None:
+        return None
+    return build_session_summary_capture_request_from_summary(
+        capture.summary_text,
+        capture.query_kind,
+        cfg,
+    )
+
+
+
+def build_session_summary_capture_request_from_summary(
+    summary_text: str,
+    query_kind: str | None,
+    cfg: LocalMemoryConfig,
+) -> LocalMemoryCaptureRequest | None:
+    cleaned_summary = _strip_markdown(summary_text).strip()
+    if not cleaned_summary:
+        return None
+    cleaned_summary = cleaned_summary[: cfg.session_summary_max_chars].strip()
+    if len(cleaned_summary) < 80:
+        return None
+    domain = {
+        "preferences": "profile",
+        "project": "projects",
+        "operations": "operations",
+    }.get(query_kind or "", "operations")
+    kind_label = {
+        "preferences": "preference",
+        "project": "project",
+        "operations": "operations",
+    }.get(query_kind or "", "general")
+    title = f"Session summary: {kind_label}"
+    summary = _first_sentence(cleaned_summary.replace("\n", " "), limit=220)
+    return LocalMemoryCaptureRequest(
+        type="session_summary",
+        domain=domain,
+        title=title,
+        summary=summary,
+        content=cleaned_summary,
+        tags=["session-summary", kind_label, "candidate"],
+        metadata={
+            "source": "nanobot-session-summary",
+            "query_kind": query_kind,
+            "review_status": "unreviewed",
+            "trust_level": "candidate",
+            "capture_phase": "session-reset",
+        },
+    )
+
 
 
 def _flat_tool_name_candidates(server_name: str, operation: str, *aliases: str) -> list[str]:
@@ -292,6 +387,14 @@ def _build_context_query(user_text: str, query_kind: str | None) -> str:
     return text
 
 
+
+def _compact_text(text: str, limit: int) -> str:
+    compact = re.sub(r"\s+", " ", text).strip()
+    if len(compact) <= limit:
+        return compact
+    return compact[: max(0, limit - 1)].rstrip() + "…"
+
+
 def should_capture_candidate(
     user_text: str,
     assistant_text: str | None,
@@ -302,6 +405,10 @@ def should_capture_candidate(
     lowered_user = user_text.lower()
     if cfg.auto_capture_personal_facts and is_personal_fact_statement(user_text):
         return True
+    if cfg.auto_capture_session_summaries and assistant_text:
+        session_summary = build_session_summary_capture(user_text, assistant_text, cfg)
+        if session_summary is not None:
+            return True
     if not cfg.auto_capture_candidates:
         return False
     if not assistant_text:
@@ -322,6 +429,9 @@ def build_capture_request(
     personal_fact = build_personal_fact_capture_request(user_text, cfg)
     if personal_fact is not None:
         return personal_fact
+    session_summary = build_session_summary_capture_request(user_text, assistant_text, cfg)
+    if session_summary is not None:
+        return session_summary
     cleaned = _strip_markdown(assistant_text).strip()
     if not cleaned:
         return None

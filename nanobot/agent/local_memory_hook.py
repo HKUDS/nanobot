@@ -6,6 +6,8 @@ from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.local_memory import (
     LocalMemoryConfig,
     build_capture_request,
+    build_session_summary_capture,
+    build_session_summary_capture_request_from_summary,
     capture_candidate,
     forget_local_memory,
     has_local_memory_server,
@@ -18,6 +20,29 @@ from nanobot.agent.local_memory import (
 class LocalMemoryHook(AgentHook):
     def __init__(self, config: LocalMemoryConfig) -> None:
         self._config = config
+
+    async def capture_pre_reset_session_summary(
+        self,
+        context: AgentHookContext,
+        assistant_text: str,
+    ) -> None:
+        tools = self._tools(context)
+        if tools is None:
+            return
+        if not self._config.enabled or not has_local_memory_server(tools, self._config.server_name):
+            return
+        user_text = _latest_user_text(context.messages)
+        capture = build_session_summary_capture(user_text, assistant_text, self._config)
+        if capture is None:
+            return
+        request = build_session_summary_capture_request_from_summary(
+            capture.summary_text,
+            capture.query_kind,
+            self._config,
+        )
+        if request is None:
+            return
+        await capture_candidate(tools, request, self._config)
 
     def _tools(self, context: AgentHookContext):
         if context.agent is None:
@@ -52,7 +77,7 @@ class LocalMemoryHook(AgentHook):
                 return
             _insert_supplemental_system_message(
                 context.messages,
-                f"{injection.heading}:\n{injection.content}",
+                injection.content,
             )
 
     async def after_iteration(self, context: AgentHookContext) -> None:

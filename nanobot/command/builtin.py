@@ -8,6 +8,8 @@ import sys
 from contextlib import suppress
 
 from nanobot import __version__
+from nanobot.agent.hook import AgentHookContext
+from nanobot.agent.local_memory_hook import LocalMemoryHook
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
@@ -96,6 +98,30 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     await loop._cancel_active_tasks(ctx.key)
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
+
+    final_assistant_text = ""
+    for message in reversed(session.messages):
+        if message.get("role") == "assistant":
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                final_assistant_text = content.strip()
+                break
+
+    if final_assistant_text:
+        for hook in getattr(loop, "_extra_hooks", []):
+            if isinstance(hook, LocalMemoryHook):
+                hook_context = AgentHookContext(
+                    iteration=1,
+                    messages=list(session.messages),
+                    agent=loop,
+                    final_content=final_assistant_text,
+                    stop_reason="completed",
+                )
+                try:
+                    await hook.capture_pre_reset_session_summary(hook_context, final_assistant_text)
+                except Exception:
+                    pass
+
     snapshot = session.messages[session.last_consolidated:]
     session.clear()
     loop.sessions.save(session)
