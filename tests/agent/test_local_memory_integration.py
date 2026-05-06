@@ -105,6 +105,30 @@ def test_forget_local_memory_deprecates_matching_record():
     assert "forget" in call["reason"].lower()
 
 
+
+def test_forget_local_memory_prefers_duplicate_for_dedup():
+    registry, tools = _registry_with_tools(
+        (
+            "mcp_local_memory_memory_search",
+            {
+                "matches": [
+                    {"record_id": "rec_old", "title": "Preferred Git authentication on this host uses SSH", "summary": "Use SSH remotes."},
+                    {"record_id": "rec_new", "title": "Preferred Git authentication on this host uses SSH", "summary": "Use SSH remotes."},
+                ]
+            },
+        ),
+        ("mcp_local_memory_memory_deprecate", {"ok": True}),
+    )
+    cfg = LocalMemoryConfig(enabled=True, search_first=True)
+
+    result = asyncio.run(forget_local_memory(registry, "preferred git authentication on this host uses ssh", cfg))
+
+    assert result is True
+    call = tools["mcp_local_memory_memory_deprecate"].calls[0]
+    assert call["record_id"] == "rec_new"
+    assert "dedup" in call["reason"].lower()
+
+
 def test_local_memory_hook_marks_forget_request_before_iteration():
     cfg = LocalMemoryConfig(enabled=True, search_first=True)
     hook = LocalMemoryHook(cfg)

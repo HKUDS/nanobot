@@ -335,7 +335,7 @@ async def forget_local_memory(
             deprecate_tool,
             {
                 "record_id": record_id,
-                "reason": f"User requested forget: {query[:160]}",
+                "reason": _forget_reason(query, matches, record_id),
                 "deprecated_by": "user_request",
             },
         )
@@ -375,18 +375,64 @@ def _match_record_id(query: str, matches: list[dict[str, Any]]) -> str | None:
     needle = query.strip().lower()
     if not needle:
         return None
+
+    exact_title_matches: list[str] = []
+    partial_matches: list[str] = []
+    duplicate_candidates: dict[tuple[str, str], list[str]] = {}
+
     for item in matches:
         record_id = item.get("record_id") or item.get("id")
         if not isinstance(record_id, str) or not record_id.strip():
             continue
-        title = str(item.get("title") or item.get("name") or "").lower()
-        summary = str(item.get("summary") or item.get("content") or "").lower()
-        if needle in title or needle in summary:
-            return record_id.strip()
+        record_id = record_id.strip()
+        title = str(item.get("title") or item.get("name") or "").strip()
+        summary = str(item.get("summary") or item.get("content") or "").strip()
+        lowered_title = title.lower()
+        lowered_summary = summary.lower()
+
+        key = (lowered_title, lowered_summary)
+        duplicate_candidates.setdefault(key, []).append(record_id)
+
+        if needle == lowered_title and record_id not in exact_title_matches:
+            exact_title_matches.append(record_id)
+        elif needle in lowered_title or needle in lowered_summary:
+            partial_matches.append(record_id)
+
+    for ids in duplicate_candidates.values():
+        if len(ids) > 1:
+            return ids[-1]
+
+    if exact_title_matches:
+        return exact_title_matches[-1]
+    if partial_matches:
+        return partial_matches[0]
+
     first = matches[0].get("record_id") or matches[0].get("id")
     if isinstance(first, str) and first.strip():
         return first.strip()
     return None
+
+
+def _forget_reason(query: str, matches: list[dict[str, Any]], record_id: str) -> str:
+    needle = query.strip().lower()
+    selected: dict[str, Any] | None = None
+    duplicates = 0
+    for item in matches:
+        item_id = item.get("record_id") or item.get("id")
+        if item_id == record_id:
+            selected = item
+        title = str(item.get("title") or item.get("name") or "").strip().lower()
+        summary = str(item.get("summary") or item.get("content") or "").strip().lower()
+        if needle and (needle == title or needle in title or needle in summary):
+            duplicates += 1
+
+    if duplicates > 1:
+        return f"User requested forget/dedup for query: {query[:160]}"
+    if selected is not None:
+        title = str(selected.get("title") or selected.get("name") or "").strip()
+        if title:
+            return f"User requested forget: {title[:160]}"
+    return f"User requested forget: {query[:160]}"
 
 
 def _render_context_result(result: Any) -> str | None:
