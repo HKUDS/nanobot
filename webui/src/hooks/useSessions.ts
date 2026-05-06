@@ -61,6 +61,7 @@ export function useSessions(): {
         chatId,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        title: "",
         preview: "",
       },
       ...prev.filter((s) => s.key !== key),
@@ -221,7 +222,7 @@ export function sessionTitle(
   firstUserMessage?: string,
 ): string {
   return deriveTitle(
-    firstUserMessage || session.preview,
+    session.title || firstUserMessage || session.preview,
     i18n.t("chat.newChat"),
   );
 }

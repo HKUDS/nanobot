@@ -86,6 +86,26 @@ describe("ThreadShell", () => {
     );
   });
 
+  it("does not navigate away when clicking the chat title", async () => {
+    const client = makeClient();
+    const onGoHome = vi.fn();
+    render(wrap(
+      client,
+      <ThreadShell
+        session={session("chat-title")}
+        title="Important conversation"
+        onToggleSidebar={() => {}}
+        onGoHome={onGoHome}
+        onNewChat={() => {}}
+      />,
+    ));
+
+    await waitFor(() => expect(screen.getByText("Important conversation")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Important conversation"));
+
+    expect(onGoHome).not.toHaveBeenCalled();
+  });
+
   it("restores in-memory messages when switching away and back to a session", async () => {
     const client = makeClient();
     const onNewChat = vi.fn().mockResolvedValue("chat-a");
@@ -199,7 +219,67 @@ describe("ThreadShell", () => {
     await waitFor(() => {
       expect(screen.queryByText("delete me cleanly")).not.toBeInTheDocument();
     });
-    expect(screen.getByPlaceholderText("What's on your mind?")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument();
+  });
+
+  it("creates a chat only when the blank landing sends a first message", async () => {
+    const client = makeClient();
+    const onNewChat = vi.fn();
+    const onCreateChat = vi.fn().mockResolvedValue("chat-new");
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={null}
+          title="nanobot"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={onNewChat}
+          onCreateChat={onCreateChat}
+        />,
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "start for real" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(onCreateChat).toHaveBeenCalledTimes(1));
+    expect(onNewChat).not.toHaveBeenCalled();
+  });
+
+  it("sends quick action prompts from the empty thread landing", async () => {
+    const client = makeClient();
+    const onNewChat = vi.fn().mockResolvedValue("chat-a");
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-a")}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onGoHome={() => {}}
+          onNewChat={onNewChat}
+        />,
+      ),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Write code" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Write code" }));
+
+    await waitFor(() =>
+      expect(client.sendMessage).toHaveBeenCalledWith(
+        "chat-a",
+        "Help me write the code for this task, starting with the smallest useful change.",
+        undefined,
+      ),
+    );
   });
 
   it("does not leak the previous thread when opening a brand-new chat", async () => {
@@ -260,10 +340,10 @@ describe("ThreadShell", () => {
 
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByPlaceholderText("What's on your mind?")).toBeInTheDocument(),
+      expect(screen.getByPlaceholderText("Ask anything...")).toBeInTheDocument(),
     );
-    const input = screen.getByPlaceholderText("What's on your mind?");
-    expect(input.className).toContain("min-h-[96px]");
+    const input = screen.getByPlaceholderText("Ask anything...");
+    expect(input.className).toContain("min-h-[78px]");
     expect(screen.queryByText("old answer")).not.toBeInTheDocument();
   });
 

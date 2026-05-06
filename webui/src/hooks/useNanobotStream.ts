@@ -38,6 +38,7 @@ export function useNanobotStream(
   chatId: string | null,
   initialMessages: UIMessage[] = [],
   hasPendingToolCalls = false,
+  onTurnEnd?: () => void,
 ): {
   messages: UIMessage[];
   isStreaming: boolean;
@@ -159,6 +160,12 @@ export function useNanobotStream(
         setMessages((prev) =>
           prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)),
         );
+        onTurnEnd?.();
+        return;
+      }
+
+      if (ev.event === "session_updated") {
+        onTurnEnd?.();
         return;
       }
 
@@ -233,7 +240,7 @@ export function useNanobotStream(
         streamEndTimerRef.current = null;
       }
     };
-  }, [chatId, client]);
+  }, [chatId, client, onTurnEnd]);
 
   const send = useCallback(
     (content: string, images?: SendImage[]) => {

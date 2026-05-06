@@ -547,10 +547,13 @@ class SessionManager:
                         data = json.loads(first_line)
                         if data.get("_type") == "metadata":
                             key = data.get("key") or path.stem.replace("_", ":", 1)
+                            metadata = data.get("metadata", {})
+                            title = metadata.get("title") if isinstance(metadata, dict) else None
                             sessions.append({
                                 "key": key,
                                 "created_at": data.get("created_at"),
                                 "updated_at": data.get("updated_at"),
+                                "title": title if isinstance(title, str) else "",
                                 "path": str(path)
                             })
             except Exception:
@@ -560,6 +563,11 @@ class SessionManager:
                         "key": repaired.key,
                         "created_at": repaired.created_at.isoformat(),
                         "updated_at": repaired.updated_at.isoformat(),
+                        "title": (
+                            repaired.metadata.get("title")
+                            if isinstance(repaired.metadata.get("title"), str)
+                            else ""
+                        ),
                         "path": str(path)
                     })
                 continue

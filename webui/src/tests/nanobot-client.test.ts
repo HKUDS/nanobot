@@ -116,7 +116,7 @@ describe("NanobotClient", () => {
     // Attach is sent first because sendMessage adds to knownChats, which
     // handleOpen re-attaches; then the queued message follows.
     expect(lastSocket().sent).toContain(
-      JSON.stringify({ type: "message", chat_id: "chat-x", content: "hello" }),
+      JSON.stringify({ type: "message", chat_id: "chat-x", content: "hello", webui: true }),
     );
   });
 
@@ -196,6 +196,7 @@ describe("NanobotClient", () => {
       chat_id: "chat-x",
       content: "look",
       media: [{ data_url: "data:image/png;base64,AAAA", name: "shot.png" }],
+      webui: true,
     });
   });
 
@@ -214,6 +215,7 @@ describe("NanobotClient", () => {
       type: "message",
       chat_id: "chat-x",
       content: "hello",
+      webui: true,
     });
   });
 

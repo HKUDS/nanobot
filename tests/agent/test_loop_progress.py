@@ -1,5 +1,6 @@
 """Tests for structured tool-event progress metadata emitted by AgentLoop."""
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -243,6 +244,48 @@ class TestToolEventProgress:
         assert outbound[-1].content == ""
         assert (outbound[-1].metadata or {}).get("_turn_end") is True
         assert outbound[-1].chat_id == "chat1"
+
+    @pytest.mark.asyncio
+    async def test_webui_title_generation_runs_after_turn_end(self, tmp_path: Path) -> None:
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.get_default_model.return_value = "test-model"
+        title_started = asyncio.Event()
+        release_title = asyncio.Event()
+        calls = 0
+
+        async def chat_with_retry(*_args: object, **_kwargs: object) -> LLMResponse:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return LLMResponse(content="Done", tool_calls=[])
+            title_started.set()
+            await release_title.wait()
+            return LLMResponse(content="Generated title", tool_calls=[])
+
+        provider.chat_with_retry = AsyncMock(side_effect=chat_with_retry)
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        await asyncio.wait_for(loop._dispatch(InboundMessage(
+            channel="websocket",
+            sender_id="u1",
+            chat_id="chat1",
+            content="say hello",
+            metadata={"webui": True},
+        )), timeout=0.5)
+
+        outbound = [await bus.consume_outbound(), await bus.consume_outbound()]
+        assert outbound[0].content == "Done"
+        assert (outbound[1].metadata or {}).get("_turn_end") is True
+
+        await asyncio.wait_for(title_started.wait(), timeout=0.5)
+        release_title.set()
+        session_updated = await asyncio.wait_for(bus.consume_outbound(), timeout=0.5)
+
+        assert (session_updated.metadata or {}).get("_session_updated") is True
+        assert provider.chat_with_retry.await_count == 2
 
     @pytest.mark.asyncio
     async def test_non_websocket_dispatch_does_not_publish_turn_end_marker(self, tmp_path: Path) -> None:

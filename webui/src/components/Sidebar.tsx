@@ -1,109 +1,121 @@
-import { Moon, PanelLeftClose, RefreshCcw, Settings, SquarePen, Sun } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  PanelLeftClose,
+  Search,
+  SquarePen,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ChatList } from "@/components/ChatList";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import type { ChatSummary } from "@/lib/types";
 
 interface SidebarProps {
   sessions: ChatSummary[];
   activeKey: string | null;
   loading: boolean;
-  theme: "light" | "dark";
-  onToggleTheme: () => void;
   onNewChat: () => void;
   onSelect: (key: string) => void;
-  onRefresh: () => void;
   onRequestDelete: (key: string, label: string) => void;
   onCollapse: () => void;
-  activeView?: "chat" | "settings";
-  onOpenSettings: () => void;
 }
 
 export function Sidebar(props: SidebarProps) {
   const { t } = useTranslation();
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredSessions = useMemo(() => {
+    if (!normalizedQuery) return props.sessions;
+    return props.sessions.filter((session) => {
+      const haystack = [
+        session.preview,
+        session.chatId,
+        session.channel,
+        session.key,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(normalizedQuery);
+    });
+  }, [normalizedQuery, props.sessions]);
+
   return (
-    <aside className="flex h-full w-full flex-col border-r border-sidebar-border/70 bg-sidebar text-sidebar-foreground">
-      <div className="flex items-center justify-between px-3 pb-2 pt-3">
+    <nav
+      aria-label={t("sidebar.navigation")}
+      className="flex h-full w-full flex-col border-r border-sidebar-border/60 bg-sidebar text-sidebar-foreground"
+    >
+      <div className="flex items-center justify-between px-3 pb-2.5 pt-3">
         <picture className="block min-w-0">
           <source srcSet="/brand/nanobot_logo.webp" type="image/webp" />
           <img
             src="/brand/nanobot_logo.png"
             alt="nanobot"
-            className="h-7 w-auto select-none object-contain"
+            className="h-6 w-auto select-none object-contain opacity-95"
             draggable={false}
           />
         </picture>
-        <div className="flex items-center gap-0.5">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t("sidebar.toggleTheme")}
-            onClick={props.onToggleTheme}
-            className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
-          >
-            {props.theme === "dark" ? (
-              <Sun className="h-3.5 w-3.5" />
-            ) : (
-              <Moon className="h-3.5 w-3.5" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t("sidebar.collapse")}
-            onClick={props.onCollapse}
-            className="h-7 w-7 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
-          >
-            <PanelLeftClose className="h-3.5 w-3.5" />
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={t("sidebar.collapse")}
+          onClick={props.onCollapse}
+          className="h-7 w-7 rounded-lg text-muted-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+        >
+          <PanelLeftClose className="h-3.5 w-3.5" />
+        </Button>
       </div>
-      <div className="px-2 pb-2">
+
+      <div className="space-y-1.5 px-2 pb-2">
+        <label className="relative block">
+          <span className="sr-only">{t("sidebar.searchAria")}</span>
+          <Search
+            className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70"
+            aria-hidden
+          />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t("sidebar.searchPlaceholder")}
+            aria-label={t("sidebar.searchAria")}
+            className={cn(
+              "h-8 w-full rounded-full border border-transparent bg-sidebar-accent/45",
+              "pl-8 pr-3 text-[12.5px] text-sidebar-foreground outline-none",
+              "placeholder:text-muted-foreground/75",
+              "transition-colors hover:bg-sidebar-accent/65",
+              "focus:border-sidebar-border/80 focus:bg-sidebar-accent/70",
+              "focus:ring-1 focus:ring-sidebar-border/70",
+            )}
+          />
+        </label>
         <Button
           onClick={props.onNewChat}
-          className="h-9 w-full justify-start gap-2 rounded-full px-3 text-[13px] font-medium text-sidebar-foreground/90 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          className="h-8 w-full justify-start gap-2 rounded-full px-3 text-[12.5px] font-medium text-sidebar-foreground/92 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
           variant="ghost"
         >
           <SquarePen className="h-3.5 w-3.5" />
           {t("sidebar.newChat")}
         </Button>
       </div>
-      <div className="flex items-center justify-between px-3 pb-1.5 pt-2.5 text-[11px] font-medium text-muted-foreground">
-        <span>{t("sidebar.recent")}</span>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-6 w-6 rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
-          onClick={props.onRefresh}
-          aria-label={t("sidebar.refreshSessions")}
-        >
-          <RefreshCcw className="h-3.5 w-3.5" />
-        </Button>
-      </div>
       <div className="flex-1 overflow-hidden">
         <ChatList
-          sessions={props.sessions}
+          sessions={filteredSessions}
           activeKey={props.activeKey}
           loading={props.loading}
+          emptyLabel={
+            normalizedQuery ? t("sidebar.noSearchResults") : t("chat.noSessions")
+          }
           onSelect={props.onSelect}
           onRequestDelete={props.onRequestDelete}
         />
       </div>
       <Separator className="bg-sidebar-border/50" />
-      <div className="flex items-center justify-between gap-2 px-2.5 py-2 text-xs">
+      <div className="flex items-center px-2.5 py-2.5 text-xs">
         <ConnectionBadge />
-        <Button
-          onClick={props.onOpenSettings}
-          className="h-7 gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
-          variant={props.activeView === "settings" ? "secondary" : "ghost"}
-        >
-          <Settings className="h-3.5 w-3.5" />
-          Settings
-        </Button>
       </div>
-    </aside>
+    </nav>
   );
 }

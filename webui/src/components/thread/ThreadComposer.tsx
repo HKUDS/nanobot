@@ -10,7 +10,7 @@ import {
   ArrowUp,
   ImageIcon,
   Loader2,
-  Paperclip,
+  Plus,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -219,8 +219,8 @@ export function ThreadComposer({
         className={cn(
           "relative mx-auto flex w-full flex-col overflow-hidden transition-all duration-200",
           isHero
-            ? "max-w-[40rem] rounded-[24px] border border-border/75 bg-card shadow-[0_10px_30px_rgba(0,0,0,0.10)]"
-            : "max-w-[49.5rem] rounded-[16px] border border-border/70 bg-card",
+            ? "max-w-[58rem] rounded-[28px] border border-black/[0.035] bg-card shadow-[0_20px_55px_rgba(15,23,42,0.08)] dark:border-white/[0.06] dark:shadow-[0_24px_55px_rgba(0,0,0,0.34)]"
+            : "max-w-[49.5rem] rounded-[22px] border border-black/[0.035] bg-card shadow-[0_12px_30px_rgba(15,23,42,0.07)] dark:border-white/[0.06] dark:shadow-[0_16px_34px_rgba(0,0,0,0.28)]",
           "focus-within:ring-1 focus-within:ring-foreground/8",
           disabled && "opacity-60",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
@@ -268,9 +268,9 @@ export function ThreadComposer({
           className={cn(
             "w-full resize-none bg-transparent",
             isHero
-              ? "min-h-[96px] px-4 pb-2 pt-4 text-[15px] leading-6"
+              ? "min-h-[78px] px-5 pb-2 pt-5 text-[16px] leading-6"
               : "min-h-[50px] px-4 pb-1.5 pt-3 text-sm",
-            "placeholder:text-muted-foreground",
+            "placeholder:text-muted-foreground/70",
             "focus:outline-none focus-visible:outline-none",
             "disabled:cursor-not-allowed",
           )}
@@ -289,7 +289,7 @@ export function ThreadComposer({
         <div
           className={cn(
             "flex items-center justify-between gap-2",
-            isHero ? "px-3.5 pb-3.5" : "px-3 pb-2",
+            isHero ? "px-4 pb-4" : "px-3 pb-2",
           )}
         >
           <div className="flex min-w-0 items-center gap-2">
@@ -310,10 +310,12 @@ export function ThreadComposer({
               onClick={() => fileInputRef.current?.click()}
               className={cn(
                 "rounded-full text-muted-foreground hover:text-foreground",
-                isHero ? "h-8.5 w-8.5" : "h-7.5 w-7.5",
+                isHero
+                  ? "h-9 w-9 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card"
+                  : "h-7.5 w-7.5 border border-border/55 bg-card shadow-[0_2px_8px_rgba(15,23,42,0.05)] hover:bg-card",
               )}
             >
-              <Paperclip className={cn(isHero ? "h-4 w-4" : "h-3.5 w-3.5")} />
+              <Plus className={cn(isHero ? "h-5 w-5" : "h-4 w-4")} />
             </Button>
             {modelLabel ? (
               <span
@@ -321,7 +323,9 @@ export function ThreadComposer({
                 className={cn(
                   "inline-flex min-w-0 items-center gap-1.5 rounded-full border px-2.5 py-1",
                   "border-foreground/10 bg-foreground/[0.035] font-medium text-foreground/80",
-                  isHero ? "text-[11px]" : "text-[10.5px]",
+                  isHero
+                    ? "max-w-[13rem] text-[12px] shadow-[0_2px_8px_rgba(15,23,42,0.04)]"
+                    : "max-w-[10rem] text-[10.5px] shadow-[0_2px_8px_rgba(15,23,42,0.035)]",
                 )}
               >
                 <span
@@ -331,19 +335,23 @@ export function ThreadComposer({
                 <span className="truncate">{modelLabel}</span>
               </span>
             ) : null}
-            <span className="hidden select-none text-[10.5px] text-muted-foreground/60 sm:inline">
-              {t("thread.composer.sendHint")}
-            </span>
+            {!isHero ? (
+              <span className="hidden select-none text-[10.5px] text-muted-foreground/60 sm:inline">
+                {t("thread.composer.sendHint")}
+              </span>
+            ) : null}
           </div>
-          <span className="sm:hidden" aria-hidden />
+          <span className={cn(isHero ? "hidden" : "sm:hidden")} aria-hidden />
           <Button
             type="submit"
             size="icon"
             disabled={!canSend}
             aria-label={t("thread.composer.send")}
             className={cn(
-              "rounded-full border border-border/70 bg-secondary/85 text-secondary-foreground shadow-none transition-transform hover:bg-accent",
-              isHero ? "h-8.5 w-8.5" : "h-7.5 w-7.5",
+              isHero
+                ? "h-9 w-9 rounded-full border border-foreground bg-foreground text-background shadow-[0_4px_12px_rgba(15,23,42,0.20)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80"
+                : "rounded-full border border-foreground bg-foreground text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] transition-transform hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80",
+              isHero ? "" : "h-7.5 w-7.5",
               canSend && "hover:scale-[1.03] active:scale-95",
             )}
           >

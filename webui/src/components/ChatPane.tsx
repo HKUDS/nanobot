@@ -79,20 +79,8 @@ export function ChatPane({ session, onNewChat }: ChatPaneProps) {
       <section className="flex min-h-0 flex-1 flex-col">
         <div className="flex flex-1 flex-col items-center justify-center gap-8 px-4 pb-6">
           <div className="flex flex-col items-center gap-4 animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
-            <picture>
-              <source
-                srcSet="/brand/nanobot_logo.webp"
-                type="image/webp"
-              />
-              <img
-                src="/brand/nanobot_logo.png"
-                alt="nanobot"
-                className="h-12 w-auto select-none drop-shadow-sm"
-                draggable={false}
-              />
-            </picture>
             <h1 className="text-xl font-medium tracking-tight text-foreground/90">
-              What's on your mind?
+              What can I do for you?
             </h1>
             <p className="max-w-md text-center text-sm text-muted-foreground">
               Your conversations are persisted locally under the nanobot
@@ -105,7 +93,7 @@ export function ChatPane({ session, onNewChat }: ChatPaneProps) {
               disabled={booting}
               onSend={handleWelcomeSend}
               placeholder={
-                booting ? "Opening a new chat…" : "Type your message…"
+                booting ? "Opening a new chat…" : "Ask anything..."
               }
             />
           </div>

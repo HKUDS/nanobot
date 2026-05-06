@@ -1184,12 +1184,15 @@ class WebSocketChannel(BaseChannel):
 
             # Auto-attach on first use so clients can one-shot without a separate attach.
             self._attach(connection, cid)
+            metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
+            if envelope.get("webui") is True:
+                metadata["webui"] = True
             await self._handle_message(
                 sender_id=client_id,
                 chat_id=cid,
                 content=content,
                 media=media_paths or None,
-                metadata={"remote": getattr(connection, "remote_address", None)},
+                metadata=metadata,
             )
             return
         await self._send_event(connection, "error", detail=f"unknown type: {t!r}")
@@ -1232,6 +1235,9 @@ class WebSocketChannel(BaseChannel):
         # Signal that the agent has fully finished processing the current turn.
         if msg.metadata.get("_turn_end"):
             await self.send_turn_end(msg.chat_id)
+            return
+        if msg.metadata.get("_session_updated"):
+            await self.send_session_updated(msg.chat_id)
             return
         text = msg.content
         if msg.buttons:
@@ -1299,3 +1305,13 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_end ")
+
+    async def send_session_updated(self, chat_id: str) -> None:
+        """Notify clients that session metadata changed outside the main turn."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body: dict[str, Any] = {"event": "session_updated", "chat_id": chat_id}
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" session_updated ")

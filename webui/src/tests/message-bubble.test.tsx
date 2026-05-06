@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
 import type { UIMessage } from "@/lib/types";
@@ -19,6 +19,44 @@ describe("MessageBubble", () => {
 
     expect(row).toHaveClass("ml-auto", "flex");
     expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-[18px]");
+    expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
+  });
+
+  it("copies completed assistant replies from the action row", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const message: UIMessage = {
+      id: "a-copy",
+      role: "assistant",
+      content: "I can help with the next step.",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy reply" }));
+
+    expect(writeText).toHaveBeenCalledWith("I can help with the next step.");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Copied reply" })).toBeInTheDocument(),
+    );
+  });
+
+  it("does not show copy actions for streaming placeholders", () => {
+    const message: UIMessage = {
+      id: "a-streaming",
+      role: "assistant",
+      content: "",
+      isStreaming: true,
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
   });
 
   it("renders trace messages as collapsible tool groups", () => {

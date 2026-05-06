@@ -55,6 +55,7 @@ from nanobot.utils.progress_events import (
     on_progress_accepts_tool_events,
 )
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
+from nanobot.utils.webui_titles import mark_webui_session, maybe_generate_webui_title_after_turn
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, ToolsConfig, WebToolsConfig
@@ -804,6 +805,25 @@ class AgentLoop:
                             channel=msg.channel, chat_id=msg.chat_id,
                             content="", metadata={**msg.metadata, "_turn_end": True},
                         ))
+                        if msg.metadata.get("webui") is True:
+                            async def _generate_title_and_notify() -> None:
+                                generated = await maybe_generate_webui_title_after_turn(
+                                    channel=msg.channel,
+                                    metadata=msg.metadata,
+                                    sessions=self.sessions,
+                                    session_key=session_key,
+                                    provider=self.provider,
+                                    model=self.model,
+                                )
+                                if generated:
+                                    await self.bus.publish_outbound(OutboundMessage(
+                                        channel=msg.channel,
+                                        chat_id=msg.chat_id,
+                                        content="",
+                                        metadata={**msg.metadata, "_session_updated": True},
+                                    ))
+
+                            self._schedule_background(_generate_title_and_notify())
                 except asyncio.CancelledError:
                     logger.info("Task cancelled for session {}", session_key)
                     # Preserve partial context from the interrupted turn so
@@ -990,6 +1010,7 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
+        mark_webui_session(session, msg.metadata)
         if self._restore_runtime_checkpoint(session):
             self.sessions.save(session)
         if self._restore_pending_user_turn(session):

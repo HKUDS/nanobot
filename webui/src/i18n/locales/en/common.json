@@ -18,11 +18,19 @@
     }
   },
   "sidebar": {
+    "navigation": "Sidebar navigation",
+    "globalActions": "Global actions",
     "collapse": "Collapse sidebar",
     "toggleTheme": "Toggle theme",
+    "home": "Home",
     "newChat": "New chat",
+    "searchAria": "Search chats",
+    "searchPlaceholder": "Search chats",
+    "searchResults": "Results",
+    "noSearchResults": "No matching chats.",
     "recent": "Recent",
     "refreshSessions": "Refresh sessions",
+    "settings": "Settings",
     "language": {
       "label": "Language",
       "ariaLabel": "Change language"
@@ -34,7 +42,12 @@
     "noSessions": "No sessions yet.",
     "actions": "Chat actions for {{title}}",
     "delete": "Delete",
-    "newChat": "New chat"
+    "newChat": "New chat",
+    "groups": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "earlier": "Earlier"
+    }
   },
   "deleteConfirm": {
     "title": "Delete “{{title}}”?",
@@ -53,20 +66,55 @@
   "thread": {
     "loadingConversation": "Loading conversation…",
     "empty": {
-      "description": "Ask questions, continue local work, or start a new thread."
+      "greeting": "What can I do for you?",
+      "quickActions": {
+        "plan": {
+          "title": "Create a project plan",
+          "prompt": "Create a concise project plan for what I should build next."
+        },
+        "analyze": {
+          "title": "Analyze this data",
+          "prompt": "Help me analyze this data and call out the most important patterns."
+        },
+        "brainstorm": {
+          "title": "Brainstorm ideas",
+          "prompt": "Brainstorm a few practical ideas and tradeoffs for this problem."
+        },
+        "code": {
+          "title": "Write code",
+          "prompt": "Help me write the code for this task, starting with the smallest useful change."
+        },
+        "summarize": {
+          "title": "Summarize this document",
+          "prompt": "Summarize this document and list the key takeaways."
+        },
+        "more": {
+          "title": "More",
+          "prompt": "Show me a few useful ways you can help in this workspace."
+        }
+      }
     },
     "header": {
-      "toggleSidebar": "Toggle sidebar"
+      "toggleSidebar": "Toggle sidebar",
+      "newChat": "Start a new chat",
+      "toggleTheme": "Toggle theme from header",
+      "settings": "Open settings"
     },
     "composer": {
       "placeholderThread": "Type your message…",
-      "placeholderHero": "What's on your mind?",
+      "placeholderHero": "Ask anything...",
       "placeholderOpening": "Opening a new chat…",
       "placeholderStreaming": "Model is responding…",
       "inputAria": "Message input",
       "sendHint": "Enter to send · Shift+Enter for newline",
       "send": "Send message",
       "attachImage": "Attach image",
+      "tools": {
+        "search": "Search",
+        "reason": "Reason",
+        "deepResearch": "Deep research",
+        "voice": "Voice input"
+      },
       "encoding": "Encoding…",
       "remove": "Remove attachment",
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
@@ -86,7 +134,9 @@
     "assistantTyping": "Assistant is typing",
     "toolSingle": "Using a tool",
     "toolMany": "Used {{count}} tools",
-    "imageAttachment": "Image attachment"
+    "imageAttachment": "Image attachment",
+    "copyReply": "Copy reply",
+    "copiedReply": "Copied reply"
   },
   "lightbox": {
     "title": "Image preview",

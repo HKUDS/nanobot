@@ -6,21 +6,21 @@ import { useClient } from "@/providers/ClientProvider";
 import type { ConnectionStatus } from "@/lib/types";
 
 const COPY: Record<ConnectionStatus, { color: string }> = {
-  idle: { color: "bg-card/40 text-muted-foreground" },
+  idle: { color: "text-muted-foreground" },
   connecting: {
-    color: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    color: "text-amber-700 dark:text-amber-300",
   },
   open: {
-    color: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+    color: "text-emerald-700 dark:text-emerald-400",
   },
   reconnecting: {
-    color: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    color: "text-amber-700 dark:text-amber-300",
   },
   closed: {
-    color: "bg-card/40 text-muted-foreground",
+    color: "text-muted-foreground",
   },
   error: {
-    color: "bg-destructive/10 text-destructive",
+    color: "text-destructive",
   },
 };
 
@@ -39,7 +39,7 @@ export function ConnectionBadge() {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border border-border/60 px-2 py-1 text-[11px] font-medium transition-colors",
+        "inline-flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-medium transition-colors",
         meta.color,
       )}
       aria-live="polite"
