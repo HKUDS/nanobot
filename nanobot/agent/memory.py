@@ -7,7 +7,7 @@ import json
 import os
 import re
 import weakref
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 import tiktoken
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +17,8 @@ from loguru import logger
 
 from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, strip_think, truncate_text
+
+from filelock import FileLock
 
 from nanobot.agent.runner import AgentRunSpec, AgentRunner
 from nanobot.agent.tools.registry import ToolRegistry
@@ -52,6 +54,9 @@ class MemoryStore:
         self.user_file = workspace / "USER.md"
         self._cursor_file = self.memory_dir / ".cursor"
         self._dream_cursor_file = self.memory_dir / ".dream_cursor"
+        # Cross-process lock protecting history.jsonl + cursor updates.
+        # NOTE: This file is created lazily on first use.
+        self._history_lock_file = self.memory_dir / ".history.lock"
         self._corruption_logged = False  # rate-limit non-int cursor warning
         self._oversize_logged = False  # rate-limit oversized-entry warning
         self._git = GitStore(workspace, tracked_files=[
@@ -94,22 +99,53 @@ class MemoryStore:
 
         entries = self._parse_legacy_history(legacy_text)
         try:
-            if entries:
-                self._write_entries(entries)
-                last_cursor = entries[-1]["cursor"]
-                self._cursor_file.write_text(str(last_cursor), encoding="utf-8")
-                # Default to "already processed" so upgrades do not replay the
-                # user's entire historical archive into Dream on first start.
-                self._dream_cursor_file.write_text(str(last_cursor), encoding="utf-8")
+            with self._history_lock():
+                if entries:
+                    self._write_entries(entries)
+                    last_cursor = entries[-1]["cursor"]
+                    self._write_cursor(last_cursor)
+                    # Default to "already processed" so upgrades do not replay the
+                    # user's entire historical archive into Dream on first start.
+                    self._dream_cursor_file.write_text(str(last_cursor), encoding="utf-8")
 
-            backup_path = self._next_legacy_backup_path()
-            self.legacy_history_file.replace(backup_path)
-            logger.info(
-                "Migrated legacy HISTORY.md to history.jsonl ({} entries)",
-                len(entries),
-            )
+                backup_path = self._next_legacy_backup_path()
+                self.legacy_history_file.replace(backup_path)
+                logger.info(
+                    "Migrated legacy HISTORY.md to history.jsonl ({} entries)",
+                    len(entries),
+                )
         except Exception:
             logger.exception("Failed to migrate legacy HISTORY.md")
+
+    @contextmanager
+    def _history_lock(self) -> Iterator[None]:
+        """Cross-process lock for history.jsonl + cursor writes."""
+        self._history_lock_file.parent.mkdir(parents=True, exist_ok=True)
+        lock = FileLock(str(self._history_lock_file))
+        with lock:
+            yield
+
+    def _write_cursor(self, cursor: int) -> None:
+        """Atomically update .cursor to *cursor*.
+
+        Must be called while holding ``_history_lock()``.
+        """
+        tmp_path = self._cursor_file.with_name(self._cursor_file.name + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(str(cursor))
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self._cursor_file)
+            with suppress(PermissionError):
+                fd = os.open(str(self._cursor_file.parent), os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
     def _parse_legacy_history(self, text: str) -> list[dict[str, Any]]:
         normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
@@ -241,31 +277,34 @@ class MemoryStore:
         large writes (e.g. an LLM echoing its input back as a "summary").
         """
         limit = max_chars if max_chars is not None else _HISTORY_ENTRY_HARD_CAP
-        cursor = self._next_cursor()
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
-        raw = entry.rstrip()
-        if len(raw) > limit:
-            if not self._oversize_logged:
-                self._oversize_logged = True
-                logger.warning(
-                    "history entry exceeds {} chars ({}); truncating. "
-                    "Usually means a caller forgot its own cap; "
-                    "further occurrences suppressed.",
-                    limit, len(raw),
+        with self._history_lock():
+            cursor = self._next_cursor()
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+            raw = entry.rstrip()
+            if len(raw) > limit:
+                if not self._oversize_logged:
+                    self._oversize_logged = True
+                    logger.warning(
+                        "history entry exceeds {} chars ({}); truncating. "
+                        "Usually means a caller forgot its own cap; "
+                        "further occurrences suppressed.",
+                        limit, len(raw),
+                    )
+                raw = truncate_text(raw, limit)
+            content = strip_think(raw)
+            if raw and not content:
+                logger.debug(
+                    "history entry {} stripped to empty (likely template leak); "
+                    "persisting empty content to avoid re-polluting context",
+                    cursor,
                 )
-            raw = truncate_text(raw, limit)
-        content = strip_think(raw)
-        if raw and not content:
-            logger.debug(
-                "history entry {} stripped to empty (likely template leak); "
-                "persisting empty content to avoid re-polluting context",
-                cursor,
-            )
-        record = {"cursor": cursor, "timestamp": ts, "content": content}
-        with open(self.history_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        self._cursor_file.write_text(str(cursor), encoding="utf-8")
-        return cursor
+            record = {"cursor": cursor, "timestamp": ts, "content": content}
+            with open(self.history_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            self._write_cursor(cursor)
+            return cursor
 
     @staticmethod
     def _valid_cursor(value: Any) -> int | None:
@@ -316,11 +355,12 @@ class MemoryStore:
         """Drop oldest entries if the file exceeds *max_history_entries*."""
         if self.max_history_entries <= 0:
             return
-        entries = self._read_entries()
-        if len(entries) <= self.max_history_entries:
-            return
-        kept = entries[-self.max_history_entries:]
-        self._write_entries(kept)
+        with self._history_lock():
+            entries = self._read_entries()
+            if len(entries) <= self.max_history_entries:
+                return
+            kept = entries[-self.max_history_entries:]
+            self._write_entries(kept)
 
     # -- JSONL helpers -------------------------------------------------------
 
