@@ -289,3 +289,24 @@ class TestToolHintMaxLength:
         result = _hint([_tc("mcp_github__fetch", {"url": long_url})], max_length=80)
         result_40 = _hint([_tc("mcp_github__fetch", {"url": long_url})], max_length=40)
         assert len(result) >= len(result_40)
+
+    def test_path_type_respects_max_length(self):
+        """Path-type tools (read_file, write_file, etc.) should honor max_length."""
+        long_path = "/home/user/.local/share/uv/tools/nanobot/agent/loop.py"
+        short = _hint([_tc("read_file", {"path": long_path})], max_length=40)
+        long = _hint([_tc("read_file", {"path": long_path})], max_length=120)
+        assert len(long) > len(short)
+
+    def test_edit_path_respects_max_length(self):
+        """edit (is_path=True) should honor max_length, not stay hardcoded at 40."""
+        long_path = "/home/user/projects/nanobot/src/agent/loop.py"
+        short = _hint([_tc("edit", {"file_path": long_path})], max_length=40)
+        long = _hint([_tc("edit", {"file_path": long_path})], max_length=120)
+        assert len(long) > len(short)
+
+    def test_list_dir_path_respects_max_length(self):
+        """list_dir (is_path=True) should honor max_length."""
+        long_path = "/home/user/.local/share/uv/tools/nanobot/"
+        short = _hint([_tc("list_dir", {"path": long_path})], max_length=40)
+        long = _hint([_tc("list_dir", {"path": long_path})], max_length=120)
+        assert len(long) > len(short)

@@ -86,7 +86,7 @@ def _fmt_known(tc, fmt: tuple, max_length: int = 40) -> str:
     if val is None:
         return tc.name
     if fmt[2]:  # is_path
-        val = abbreviate_path(val)
+        val = abbreviate_path(val, max_len=max_length)
     elif fmt[3]:  # is_command
         val = _abbreviate_command(val, max_len=max_length)
     return fmt[1].format(val)
