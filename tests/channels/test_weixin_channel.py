@@ -1213,3 +1213,87 @@ async def test_send_media_network_error_does_not_double_api_calls() -> None:
     # _send_media_file called once, _send_text never called
     channel._send_media_file.assert_awaited_once()
     channel._send_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_send_without_context_token_still_delivers_message_via_getconfig_refresh() -> None:
+    """When context_token is missing (e.g. gateway restart or cron job),
+    send() should attempt to obtain a fresh context_token via the getconfig
+    API so the message is delivered instead of being silently dropped.
+
+    This is the cron-job regression: a scheduled task fires at 08:00 but the
+    user has not sent any message since yesterday, so the cached token is
+    gone / expired.  The bot must still be able to proactively send.
+    """
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._send_text = AsyncMock()
+
+    getconfig_calls: list[dict] = []
+
+    async def _mock_api_post(endpoint: str, body: dict | None = None) -> dict:
+        getconfig_calls.append({"endpoint": endpoint, "body": body})
+        if endpoint == "ilink/bot/getconfig":
+            return {
+                "ret": 0,
+                "typing_ticket": "ticket-refreshed",
+                "context_token": "ctx-refreshed",
+            }
+        return {"ret": 0}
+
+    channel._api_post = AsyncMock(side_effect=_mock_api_post)
+
+    msg = _make_outbound_msg(chat_id="wx-user", content="hello from cron")
+
+    await channel.send(msg)
+
+    channel._send_text.assert_awaited_once_with("wx-user", "hello from cron", "ctx-refreshed")
+    assert channel._context_tokens.get("wx-user") == "ctx-refreshed"
+    assert any(c["endpoint"] == "ilink/bot/getconfig" for c in getconfig_calls)
+
+
+@pytest.mark.asyncio
+async def test_send_retries_on_stale_context_token() -> None:
+    """When sendmessage rejects a stale context_token, send() should refresh
+    the token via getconfig and retry the sendmessage once.
+
+    Regression test: after a gateway restart or long idle period the cached
+    context_token may be present (persisted in account.json) but stale.
+    The first sendmessage returns a token-expired error; send() must refresh
+    the token and retry instead of silently dropping the message.
+    """
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._context_tokens["wx-user"] = "old-ctx"
+    channel._send_media_file = AsyncMock()
+
+    sendmessage_calls: list[dict] = []
+
+    async def _mock_api_post(
+        endpoint: str, body: dict | None = None, *, auth: bool = True,
+    ) -> dict:
+        if endpoint == "ilink/bot/sendmessage":
+            sendmessage_calls.append(body)
+            if len(sendmessage_calls) == 1:
+                return {"errcode": -6, "errmsg": "context_token expired"}
+            return {"ret": 0, "errcode": 0}
+        if endpoint == "ilink/bot/getconfig":
+            return {
+                "ret": 0,
+                "context_token": "ctx-refreshed",
+                "typing_ticket": "ticket-new",
+            }
+        return {"ret": 0}
+
+    channel._api_post = AsyncMock(side_effect=_mock_api_post)
+
+    msg = _make_outbound_msg(chat_id="wx-user", content="hello")
+    await channel.send(msg)
+
+    # sendmessage called twice: first with old token (failed), then with refreshed token
+    assert len(sendmessage_calls) == 2
+    assert sendmessage_calls[0]["msg"]["context_token"] == "old-ctx"
+    assert sendmessage_calls[1]["msg"]["context_token"] == "ctx-refreshed"
+    assert channel._context_tokens["wx-user"] == "ctx-refreshed"
