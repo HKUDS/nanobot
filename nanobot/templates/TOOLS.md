@@ -34,3 +34,10 @@ This file documents non-obvious constraints and usage patterns.
 ## cron — Scheduled Reminders
 
 - Please refer to cron skill for usage.
+
+## Web Hosting & Demos
+
+- The bot can host static web content (HTML, JS, CSS) via the `www` directory in its workspace.
+- To create a demo or show a web task, write files to `www/<task_id>/index.html`.
+- These files are served by the gateway and can be viewed by the user at `/www/<task_id>/`.
+- This is the preferred way to show interactive demos, dashboards, or any generated UI.

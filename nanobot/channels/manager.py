@@ -18,6 +18,7 @@ from nanobot.utils.restart import consume_restart_notice_from_env, format_restar
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
+    from nanobot.usage.manager import UsageManager
 
 
 def _default_webui_dist() -> Path | None:
@@ -54,10 +55,12 @@ class ChannelManager:
         bus: MessageBus,
         *,
         session_manager: "SessionManager | None" = None,
+        usage_manager: "UsageManager | None" = None,
     ):
         self.config = config
         self.bus = bus
         self._session_manager = session_manager
+        self._usage_manager = usage_manager
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
         self._origin_reply_fingerprints: dict[tuple[str, str, str], str] = {}
@@ -90,6 +93,7 @@ class ChannelManager:
                 # surface; other channels stay oblivious to these knobs.
                 if cls.name == "websocket" and self._session_manager is not None:
                     kwargs["session_manager"] = self._session_manager
+                    kwargs["usage_manager"] = self._usage_manager
                     static_path = _default_webui_dist()
                     if static_path is not None:
                         kwargs["static_dist_path"] = static_path

@@ -20,6 +20,7 @@ from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.subagent import SubagentManager
+from nanobot.usage.manager import UsageManager
 from nanobot.agent.tools.ask import (
     AskUserTool,
     ask_user_options_from_messages,
@@ -162,6 +163,15 @@ class _LoopHook(AgentHook):
             u.get("completion_tokens", 0),
             u.get("cached_tokens", 0),
         )
+        if self._loop.usage:
+            self._loop.usage.log_usage(
+                model=self._loop.model,
+                provider=type(self._loop.provider).__name__.lower().replace("provider", ""),
+                prompt_tokens=u.get("prompt_tokens", 0),
+                completion_tokens=u.get("completion_tokens", 0),
+                cached_tokens=u.get("cached_tokens", 0),
+                session_key=self._session_key,
+            )
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         return self._loop._strip_think(content)
@@ -247,6 +257,7 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
+        self.usage = UsageManager(workspace)
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.

@@ -42,6 +42,7 @@ from nanobot.utils.media_decode import (
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
+    from nanobot.usage.manager import UsageManager
 
 
 def _strip_trailing_slash(path: str) -> str:
@@ -391,6 +392,7 @@ class WebSocketChannel(BaseChannel):
         bus: MessageBus,
         *,
         session_manager: "SessionManager | None" = None,
+        usage_manager: "UsageManager | None" = None,
         static_dist_path: Path | None = None,
     ):
         if isinstance(config, dict):
@@ -410,6 +412,7 @@ class WebSocketChannel(BaseChannel):
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
         self._session_manager = session_manager
+        self._usage_manager = usage_manager
         self._static_dist_path: Path | None = (
             static_dist_path.resolve() if static_dist_path is not None else None
         )
@@ -541,6 +544,12 @@ class WebSocketChannel(BaseChannel):
 
         if got == "/api/settings":
             return self._handle_settings(request)
+        
+        if got == "/api/usage":
+            return self._handle_usage(request)
+
+        if got == "/api/mcp/status":
+            return self._handle_mcp_status(request)
 
         if got == "/api/settings/update":
             return self._handle_settings_update(request)
@@ -575,6 +584,10 @@ class WebSocketChannel(BaseChannel):
             if not self.is_allowed(client_id):
                 return connection.respond(403, "Forbidden")
             return self._authorize_websocket_handshake(connection, query)
+        
+        # Serve "www" directory from workspace for demos/tasks
+        if got.startswith("/www/") and self._usage_manager:
+            return self._handle_www_fetch(got[5:])
 
         # 5. Static SPA serving (only if a build directory was wired in).
         if self._static_dist_path is not None:
@@ -688,6 +701,77 @@ class WebSocketChannel(BaseChannel):
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
         return _http_json_response(self._settings_payload())
+
+    def _handle_usage(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        if self._usage_manager is None:
+            return _http_error(503, "usage manager unavailable")
+        return _http_json_response(self._usage_manager.get_summary())
+
+    def _handle_mcp_status(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        # Find the AgentLoop to get MCP status
+        # This is a bit of a hack since Channel doesn't directly know about the Loop
+        # but we can try to find it via the bus or just return empty if not found.
+        # For now, let's look at the usage_manager's workspace to at least show config.
+        from nanobot.config.loader import load_config
+        config = load_config()
+        mcp_servers = config.tools.mcp_servers
+        return _http_json_response({
+            "servers": [
+                {
+                    "name": name,
+                    "type": cfg.type or ("stdio" if cfg.command else "sse"),
+                    "enabled_tools": cfg.enabled_tools,
+                }
+                for name, cfg in mcp_servers.items()
+            ]
+        })
+
+    def _handle_www_fetch(self, path: str) -> Response:
+        """Serve a file from the workspace 'www' directory."""
+        if not self._usage_manager:
+            return _http_error(503, "Workspace unavailable")
+            
+        www_dir = self._usage_manager.workspace / "www"
+        if not www_dir.is_dir():
+            return _http_error(404, "WWW directory not found in workspace")
+
+        # Resolve path and check for traversal
+        rel = path.lstrip("/")
+        if not rel:
+            rel = "index.html"
+        
+        if ".." in rel.split("/") or rel.startswith("/"):
+            return _http_error(403, "Forbidden")
+            
+        candidate = (www_dir / rel).resolve()
+        try:
+            candidate.relative_to(www_dir)
+        except ValueError:
+            return _http_error(403, "Forbidden")
+
+        if candidate.is_dir():
+            candidate = candidate / "index.html"
+
+        if not candidate.is_file():
+            return _http_error(404, "File not found")
+
+        try:
+            body = candidate.read_bytes()
+            ctype, _ = mimetypes.guess_type(candidate.name)
+            if ctype is None:
+                ctype = "application/octet-stream"
+            if ctype.startswith("text/") or ctype in {"application/javascript", "application/json"}:
+                ctype = f"{ctype}; charset=utf-8"
+            
+            headers = [("Content-Type", ctype), ("Content-Length", str(len(body)))]
+            return Response(status=200, reason="OK", headers=headers, body=body)
+        except Exception as e:
+            logger.warning("websocket www fetch: failed to read {}: {}", candidate, e)
+            return _http_error(500, "Internal Server Error")
 
     def _handle_settings_update(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):

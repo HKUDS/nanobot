@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { Sidebar } from "@/components/Sidebar";
 import { SettingsView } from "@/components/settings/SettingsView";
+import { DashboardView } from "@/components/DashboardView";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { preloadMarkdownText } from "@/components/MarkdownText";
@@ -26,7 +27,7 @@ type BootState =
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
 const SIDEBAR_WIDTH = 279;
-type ShellView = "chat" | "settings";
+type ShellView = "chat" | "settings" | "dashboard";
 
 function readSidebarOpen(): boolean {
   if (typeof window === "undefined") return true;
@@ -282,6 +283,10 @@ function Shell({ onModelNameChange }: { onModelNameChange: (modelName: string | 
       setView("settings" as const);
       setMobileSidebarOpen(false);
     },
+    onOpenDashboard: () => {
+      setView("dashboard" as const);
+      setMobileSidebarOpen(false);
+    },
   };
 
   return (
@@ -326,6 +331,8 @@ function Shell({ onModelNameChange }: { onModelNameChange: (modelName: string | 
             onBackToChat={() => setView("chat")}
             onModelNameChange={onModelNameChange}
           />
+        ) : view === "dashboard" ? (
+          <DashboardView onBackToChat={() => setView("chat")} />
         ) : (
           <ThreadShell
             session={activeSession}

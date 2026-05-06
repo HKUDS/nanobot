@@ -1,4 +1,4 @@
-import { Moon, PanelLeftClose, RefreshCcw, Settings, SquarePen, Sun } from "lucide-react";
+import { BarChart3, Moon, PanelLeftClose, RefreshCcw, Settings, SquarePen, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ChatList } from "@/components/ChatList";
@@ -18,8 +18,9 @@ interface SidebarProps {
   onRefresh: () => void;
   onRequestDelete: (key: string, label: string) => void;
   onCollapse: () => void;
-  activeView?: "chat" | "settings";
+  activeView?: "chat" | "settings" | "dashboard";
   onOpenSettings: () => void;
+  onOpenDashboard: () => void;
 }
 
 export function Sidebar(props: SidebarProps) {
@@ -95,6 +96,14 @@ export function Sidebar(props: SidebarProps) {
       <Separator className="bg-sidebar-border/50" />
       <div className="flex items-center justify-between gap-2 px-2.5 py-2 text-xs">
         <ConnectionBadge />
+        <Button
+          onClick={props.onOpenDashboard}
+          className="h-7 gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
+          variant={props.activeView === "dashboard" ? "secondary" : "ghost"}
+        >
+          <BarChart3 className="h-3.5 w-3.5" />
+          Dashboard
+        </Button>
         <Button
           onClick={props.onOpenSettings}
           className="h-7 gap-1.5 rounded-md px-2 text-[11px] text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground"
