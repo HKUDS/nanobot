@@ -951,7 +951,7 @@ class WeixinChannel(BaseChannel):
         ctx_token = self._context_tokens.get(msg.chat_id, "")
         if not ctx_token:
             raise RuntimeError(
-                f"No context_token for chat_id={msg.chat_id}, cannot send"
+                f"WeChat context_token missing for chat_id={msg.chat_id}, cannot send"
             )
 
         typing_ticket = ""

@@ -325,7 +325,7 @@ async def test_send_without_context_token_raises() -> None:
     channel._token = "token"
     channel._send_text = AsyncMock()
 
-    with pytest.raises(RuntimeError, match="No context_token"):
+    with pytest.raises(RuntimeError, match="context_token missing"):
         await channel.send(
             type("Msg", (), {"chat_id": "unknown-user", "content": "pong", "media": [], "metadata": {}})()
         )
@@ -1227,7 +1227,7 @@ async def test_send_text_raises_on_api_error() -> None:
     """_send_text must raise RuntimeError when the API returns a non-zero errcode,
     matching _send_media_file behavior. This ensures ChannelManager can retry."""
     channel, _bus = _make_channel()
-    channel._client = httpx.AsyncClient()
+    channel._client = object()
     channel._token = "token"
     channel._api_post = AsyncMock(
         return_value={"errcode": -14, "errmsg": "session expired"}
@@ -1243,7 +1243,7 @@ async def test_send_text_raises_on_api_error() -> None:
 async def test_send_text_succeeds_on_zero_errcode() -> None:
     """_send_text must NOT raise when errcode is 0."""
     channel, _bus = _make_channel()
-    channel._client = httpx.AsyncClient()
+    channel._client = object()
     channel._token = "token"
     channel._api_post = AsyncMock(return_value={"errcode": 0})
 
