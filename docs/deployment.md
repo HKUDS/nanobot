@@ -168,3 +168,32 @@ launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/ai.nanobot.gateway.plist
 After editing the plist, run `launchctl bootout ...` and `launchctl bootstrap ...` again.
 
 > **Note:** if startup fails with "address already in use", stop the manually started `nanobot gateway` process first.
+
+## Exposing nanobot publicly
+
+nanobot is built for **one user, one machine, one long chat**. Publishing it through a public tunnel or reverse proxy works, but the trust boundary is not nanobot — it's whatever fronts it.
+
+> [!CAUTION]
+> Do **not** put the WebUI or `nanobot serve` behind a public tunnel without real authentication in front of `/`, `/webui/bootstrap`, `/api/*`, and the WebSocket upgrade path. nanobot does not authenticate human users for the embedded WebUI.
+
+For public WebSocket use, expose **only** the WS path with:
+
+- `webuiBootstrapDisabled: true` (or bind to a non-loopback host, which disables bootstrap automatically)
+- `websocketRequiresToken: true`
+- A strong `tokenIssueSecret`
+- TLS in front (terminated by the proxy or via `sslCertfile` / `sslKeyfile`)
+- A real auth boundary at the proxy (basic auth, OAuth, mTLS, IP allowlist)
+
+For the OpenAI-compatible API (`nanobot serve`):
+
+- Set a strong `api.authToken` (or pass `--auth-token`); requests to `/v1/*` will then require `Authorization: Bearer <token>`.
+- The CLI **refuses to start** when `--host` is non-loopback and no auth token is configured.
+- `/health` stays open so liveness probes don't need credentials.
+
+### Why nanobot fails loud on unsafe configs
+
+Heuristics (peer-IP, `X-Forwarded-For`) are easy to defeat with a custom proxy that strips or omits headers. nanobot therefore makes the unsafe combinations a hard error at startup rather than relying on heuristics:
+
+- WebSocket channel: refuses to start when `host` is not loopback and either `tokenIssuePath` is set without `tokenIssueSecret`, or `websocketRequiresToken: false` with no static `token`.
+- WebUI bootstrap: refuses to mint a token when the channel is bound to a non-loopback host, when `webuiBootstrapDisabled: true`, when the TCP peer isn't loopback, or when standard proxy-hop headers are present.
+- `nanobot serve`: refuses to start when the bind is non-loopback and no `api.authToken` is set.

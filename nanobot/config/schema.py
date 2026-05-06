@@ -178,6 +178,15 @@ class ApiConfig(Base):
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 8900
     timeout: float = 120.0  # Per-request timeout in seconds.
+    # Bearer token required on /v1/* when the API is reachable beyond loopback.
+    # Empty disables auth (only safe when the bind is loopback or another
+    # trust boundary fronts the server). The CLI refuses non-loopback binds
+    # without a token to make the unsafe case loud.
+    auth_token: str = ""
+    # Browser origins permitted to POST to /v1/*. Empty (default) rejects any
+    # request that carries an `Origin` header — closes browser-localhost CSRF
+    # without affecting non-browser clients (curl, openai-python, LiteLLM).
+    allowed_origins: list[str] = Field(default_factory=list)
 
 
 class GatewayConfig(Base):
