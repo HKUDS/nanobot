@@ -371,6 +371,70 @@ def _extract_matches(result: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _normalize_text(text: str) -> str:
+    lowered = text.lower()
+    cleaned = re.sub(r"[^a-z0-9]+", " ", lowered)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+_STOP_WORDS = {
+    "the",
+    "a",
+    "an",
+    "this",
+    "that",
+    "on",
+    "for",
+    "to",
+    "of",
+    "and",
+    "uses",
+    "use",
+    "using",
+    "preferred",
+    "preference",
+    "host",
+    "remotes",
+    "remote",
+    "authentication",
+    "auth",
+    "operations",
+    "operation",
+}
+
+
+def _tokenize_text(text: str) -> set[str]:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return set()
+    return {token for token in normalized.split() if token and token not in _STOP_WORDS}
+
+
+def _is_semantic_duplicate(
+    query: str,
+    left_title: str,
+    left_summary: str,
+    right_title: str,
+    right_summary: str,
+) -> bool:
+    left_tokens = _tokenize_text(f"{left_title} {left_summary}")
+    right_tokens = _tokenize_text(f"{right_title} {right_summary}")
+    query_tokens = _tokenize_text(query)
+    if not left_tokens or not right_tokens:
+        return False
+    overlap = left_tokens & right_tokens
+    union = left_tokens | right_tokens
+    if query_tokens and not (query_tokens & overlap):
+        return False
+    if left_tokens == right_tokens:
+        return True
+    if query_tokens and len(query_tokens & overlap) >= 2:
+        return True
+    if union and (len(overlap) / len(union)) >= 0.5:
+        return True
+    return False
+
+
 def _match_record_id(query: str, matches: list[dict[str, Any]]) -> str | None:
     needle = query.strip().lower()
     if not needle:
@@ -379,6 +443,7 @@ def _match_record_id(query: str, matches: list[dict[str, Any]]) -> str | None:
     exact_title_matches: list[str] = []
     partial_matches: list[str] = []
     duplicate_candidates: dict[tuple[str, str], list[str]] = {}
+    semantic_items: list[tuple[str, str, str]] = []
 
     for item in matches:
         record_id = item.get("record_id") or item.get("id")
@@ -392,6 +457,7 @@ def _match_record_id(query: str, matches: list[dict[str, Any]]) -> str | None:
 
         key = (lowered_title, lowered_summary)
         duplicate_candidates.setdefault(key, []).append(record_id)
+        semantic_items.append((record_id, title, summary))
 
         if needle == lowered_title and record_id not in exact_title_matches:
             exact_title_matches.append(record_id)
@@ -401,6 +467,11 @@ def _match_record_id(query: str, matches: list[dict[str, Any]]) -> str | None:
     for ids in duplicate_candidates.values():
         if len(ids) > 1:
             return ids[-1]
+
+    for i, (record_id, title, summary) in enumerate(semantic_items):
+        for other_id, other_title, other_summary in semantic_items[i + 1 :]:
+            if _is_semantic_duplicate(query, title, summary, other_title, other_summary):
+                return other_id
 
     if exact_title_matches:
         return exact_title_matches[-1]
@@ -417,16 +488,27 @@ def _forget_reason(query: str, matches: list[dict[str, Any]], record_id: str) ->
     needle = query.strip().lower()
     selected: dict[str, Any] | None = None
     duplicates = 0
+    semantic_records: list[tuple[str, str, str]] = []
     for item in matches:
         item_id = item.get("record_id") or item.get("id")
         if item_id == record_id:
             selected = item
-        title = str(item.get("title") or item.get("name") or "").strip().lower()
-        summary = str(item.get("summary") or item.get("content") or "").strip().lower()
-        if needle and (needle == title or needle in title or needle in summary):
+        title = str(item.get("title") or item.get("name") or "").strip()
+        summary = str(item.get("summary") or item.get("content") or "").strip()
+        lowered_title = title.lower()
+        lowered_summary = summary.lower()
+        if isinstance(item_id, str) and item_id.strip():
+            semantic_records.append((item_id.strip(), title, summary))
+        if needle and (needle == lowered_title or needle in lowered_title or needle in lowered_summary):
             duplicates += 1
 
-    if duplicates > 1:
+    semantic_duplicate_count = 0
+    for i, (_, title, summary) in enumerate(semantic_records):
+        for _, other_title, other_summary in semantic_records[i + 1 :]:
+            if _is_semantic_duplicate(query, title, summary, other_title, other_summary):
+                semantic_duplicate_count += 1
+
+    if duplicates > 1 or semantic_duplicate_count > 0:
         return f"User requested forget/dedup for query: {query[:160]}"
     if selected is not None:
         title = str(selected.get("title") or selected.get("name") or "").strip()
