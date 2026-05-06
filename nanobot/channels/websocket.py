@@ -128,6 +128,17 @@ class WebSocketConfig(Base):
             raise ValueError("token_issue_path must differ from path (the WebSocket upgrade path)")
         return self
 
+    @model_validator(mode="after")
+    def wildcard_host_requires_auth(self) -> Self:
+        if self.host not in ("0.0.0.0", "::"):
+            return self
+        if self.token.strip() or self.token_issue_secret.strip():
+            return self
+        raise ValueError(
+            "host is 0.0.0.0 (all interfaces) but neither token nor "
+            "token_issue_secret is set — set one to prevent unauthenticated access"
+        )
+
 
 def _http_json_response(data: dict[str, Any], *, status: int = 200) -> Response:
     body = json.dumps(data, ensure_ascii=False).encode("utf-8")
@@ -607,10 +618,10 @@ class WebSocketChannel(BaseChannel):
                 self._api_tokens.pop(token_key, None)
 
     def _handle_webui_bootstrap(self, connection: Any, request: Any) -> Response:
-        # When token_issue_secret is configured, validate it regardless of
-        # source IP.  This secures deployments behind a reverse proxy (e.g.
-        # nginx) where all connections appear as localhost.
-        secret = self.config.token_issue_secret.strip()
+        # When a secret is configured (token_issue_secret or static token),
+        # validate it regardless of source IP.  This secures deployments
+        # behind a reverse proxy where all connections appear as localhost.
+        secret = self.config.token_issue_secret.strip() or self.config.token.strip()
         if secret:
             if not _issue_route_secret_matches(request.headers, secret):
                 return _http_error(401, "Unauthorized")

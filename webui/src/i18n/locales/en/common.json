@@ -9,6 +9,18 @@
       "title": "Couldn't reach nanobot",
       "gatewayHint": "Make sure the gateway is running (`nanobot gateway`) and that this page is open on the same machine."
     },
+    "auth": {
+      "title": "Authentication required",
+      "hint": "Enter the secret configured as tokenIssueSecret in your gateway config.",
+      "placeholder": "Password",
+      "submit": "Connect",
+      "invalid": "Invalid password. Try again."
+    },
+    "account": {
+      "section": "Account",
+      "logoutHint": "Disconnect this browser from the gateway.",
+      "logout": "Sign out"
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"

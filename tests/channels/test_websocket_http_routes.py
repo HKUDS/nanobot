@@ -405,13 +405,52 @@ _LOCAL = _FakeConn(("127.0.0.1", 12345))
 _NO_HEADERS = _FakeReq()
 
 
-def test_bootstrap_rejects_non_localhost_without_secret(bus: MagicMock) -> None:
-    channel = _ch(bus, host="0.0.0.0")
-    resp = channel._handle_webui_bootstrap(_REMOTE, _NO_HEADERS)
-    assert resp.status_code == 403
+def test_wildcard_host_without_auth_raises_on_startup(bus: MagicMock) -> None:
+    import pytest
+    from pydantic_core import ValidationError
+
+    with pytest.raises(ValidationError, match="token"):
+        _ch(bus, host="0.0.0.0")
 
 
-def test_bootstrap_allows_localhost_without_secret(bus: MagicMock) -> None:
+def test_wildcard_host_with_token_is_valid(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0", token="my-token")
+    assert channel.config.host == "0.0.0.0"
+
+
+def test_wildcard_host_with_secret_is_valid(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
+    assert channel.config.host == "0.0.0.0"
+
+
+def test_wildcard_ipv6_without_auth_raises(bus: MagicMock) -> None:
+    import pytest
+    from pydantic_core import ValidationError
+
+    with pytest.raises(ValidationError, match="token"):
+        _ch(bus, host="::")
+
+
+def test_wildcard_ipv6_with_secret_is_valid(bus: MagicMock) -> None:
+    channel = _ch(bus, host="::", tokenIssueSecret="s3cret")
+    resp = channel._handle_webui_bootstrap(
+        _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
+    )
+    assert resp.status_code == 200
+
+
+def test_bootstrap_accepts_static_token_as_secret(bus: MagicMock) -> None:
+    """When only token (not token_issue_secret) is set, bootstrap accepts it."""
+    channel = _ch(bus, host="0.0.0.0", token="static-tok")
+    resp = channel._handle_webui_bootstrap(
+        _REMOTE, _FakeReq({"Authorization": "Bearer static-tok"})
+    )
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["token"].startswith("nbwt_")
+
+
+def test_localhost_without_auth_is_valid(bus: MagicMock) -> None:
     channel = _ch(bus, host="127.0.0.1")
     resp = channel._handle_webui_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 200

@@ -46,6 +46,9 @@ vi.mock("@/lib/bootstrap", () => ({
     expires_in: 300,
   }),
   deriveWsUrl: vi.fn(() => "ws://test"),
+  loadSavedSecret: vi.fn(() => ""),
+  saveSecret: vi.fn(),
+  clearSavedSecret: vi.fn(),
 }));
 
 vi.mock("@/lib/nanobot-client", () => {

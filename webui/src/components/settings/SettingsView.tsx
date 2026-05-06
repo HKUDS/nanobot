@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, Loader2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { Button } from "@/components/ui/button";
@@ -14,11 +15,13 @@ interface SettingsViewProps {
   onToggleTheme: () => void;
   onBackToChat: () => void;
   onModelNameChange: (modelName: string | null) => void;
+  onLogout?: () => void;
 }
 
 export function SettingsView({
   onBackToChat,
   onModelNameChange,
+  onLogout,
 }: SettingsViewProps) {
   const { token } = useClient();
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
@@ -115,6 +118,7 @@ export function SettingsView({
             dirty={dirty}
             saving={saving}
             onSave={save}
+            onLogout={onLogout}
           />
         ) : null}
       </main>
@@ -129,6 +133,7 @@ function SettingsSection({
   dirty,
   saving,
   onSave,
+  onLogout,
 }: {
   form: {
     model: string;
@@ -142,7 +147,9 @@ function SettingsSection({
   dirty: boolean;
   saving: boolean;
   onSave: () => void;
+  onLogout?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-7">
       <section>
@@ -192,6 +199,19 @@ function SettingsSection({
           </SettingsRow>
         </SettingsGroup>
       </section>
+
+      {onLogout && (
+        <section>
+          <h2 className="mb-2 px-2 text-xs font-medium text-muted-foreground">{t("app.account.section")}</h2>
+          <SettingsGroup>
+            <SettingsRow title={t("app.account.logoutHint")}>
+              <Button size="sm" variant="outline" onClick={onLogout}>
+                {t("app.account.logout")}
+              </Button>
+            </SettingsRow>
+          </SettingsGroup>
+        </section>
+      )}
     </div>
   );
 }
