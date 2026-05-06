@@ -13,6 +13,9 @@ from loguru import logger
 from nanobot.agent.tools.base import Tool
 from nanobot.agent.tools.registry import ToolRegistry
 
+
+_MCP_STDIO_ERRLOG = os.path.expanduser("~/.nanobot/logs/agent.log")
+
 # Transient connection errors that warrant a single retry.
 # These typically happen when an MCP server restarts or a network
 # connection is interrupted between calls.
@@ -476,7 +479,10 @@ async def connect_mcp_servers(
                     args=args,
                     env=env,
                 )
-                read, write = await server_stack.enter_async_context(stdio_client(params))
+                os.makedirs(os.path.dirname(_MCP_STDIO_ERRLOG), exist_ok=True)
+                errlog = open(_MCP_STDIO_ERRLOG, "a", encoding="utf-8")
+                server_stack.push_async_callback(asyncio.to_thread, errlog.close)
+                read, write = await server_stack.enter_async_context(stdio_client(params, errlog=errlog))
             elif transport_type == "sse":
 
                 def httpx_client_factory(

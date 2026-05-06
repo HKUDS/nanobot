@@ -270,7 +270,7 @@ class AgentRunner:
                     messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 except Exception:
                     messages_for_model = messages
-            context = AgentHookContext(iteration=iteration, messages=messages)
+            context = AgentHookContext(iteration=iteration, messages=messages, agent=self)
             await hook.before_iteration(context)
             response = await self._request_model(spec, messages_for_model, hook, context)
             raw_usage = self._usage_dict(response.usage)

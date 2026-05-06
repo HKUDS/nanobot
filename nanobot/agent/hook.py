@@ -16,6 +16,7 @@ class AgentHookContext:
 
     iteration: int
     messages: list[dict[str, Any]]
+    agent: Any | None = None
     response: LLMResponse | None = None
     usage: dict[str, int] = field(default_factory=dict)
     tool_calls: list[ToolCallRequest] = field(default_factory=list)

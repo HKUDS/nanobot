@@ -13,6 +13,19 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+
+def _is_known_mcp_shutdown_runtime_error(exc: BaseException) -> bool:
+    return "Attempted to exit cancel scope in a different task than it was entered in" in str(exc)
+
+
+def _is_known_mcp_shutdown_bug(exc: BaseException) -> bool:
+    if _is_known_mcp_shutdown_runtime_error(exc):
+        return True
+    if isinstance(exc, BaseExceptionGroup):
+        return any(_is_known_mcp_shutdown_bug(sub) for sub in exc.exceptions)
+    return False
+
+
 from nanobot.agent.autocompact import AutoCompact
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.hook import AgentHook, AgentHookContext, CompositeHook
@@ -855,9 +868,17 @@ class AgentLoop:
             self._background_tasks.clear()
         for name, stack in self._mcp_stacks.items():
             try:
-                await stack.aclose()
-            except (RuntimeError, BaseExceptionGroup):
-                logger.debug("MCP server '{}' cleanup error (can be ignored)", name)
+                await asyncio.shield(asyncio.create_task(stack.aclose()))
+            except BaseExceptionGroup as exc:
+                if _is_known_mcp_shutdown_bug(exc):
+                    pass
+                else:
+                    logger.debug("MCP server '{}' cleanup error (can be ignored): {}", name, exc)
+            except RuntimeError as exc:
+                if _is_known_mcp_shutdown_runtime_error(exc):
+                    pass
+                else:
+                    logger.debug("MCP server '{}' cleanup error (can be ignored): {}", name, exc)
         self._mcp_stacks.clear()
 
     def _schedule_background(self, coro) -> None:

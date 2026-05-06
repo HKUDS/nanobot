@@ -490,6 +490,8 @@ def serve(
 
     from loguru import logger
     from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.local_memory import LocalMemoryConfig
+    from nanobot.agent.local_memory_hook import LocalMemoryHook
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
     from nanobot.session.manager import SessionManager
@@ -508,6 +510,17 @@ def serve(
     bus = MessageBus()
     provider = _make_provider(runtime_config)
     session_manager = SessionManager(runtime_config.workspace_path)
+    local_memory_cfg = LocalMemoryConfig(
+        enabled=runtime_config.tools.local_memory.enabled,
+        server_name=runtime_config.tools.local_memory.server_name,
+        search_first=runtime_config.tools.local_memory.search_first,
+        auto_capture_candidates=runtime_config.tools.local_memory.auto_capture_candidates,
+        max_search_results=runtime_config.tools.local_memory.max_search_results,
+        min_query_length=runtime_config.tools.local_memory.min_query_length,
+        max_candidate_chars=runtime_config.tools.local_memory.max_candidate_chars,
+        max_context_chars=runtime_config.tools.local_memory.max_context_chars,
+        enable_bootstrap_recall=runtime_config.tools.local_memory.enable_bootstrap_recall,
+    )
     agent_loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -531,6 +544,7 @@ def serve(
         consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
         max_messages=runtime_config.agents.defaults.max_messages,
         tools_config=runtime_config.tools,
+        hooks=[LocalMemoryHook(local_memory_cfg)],
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -589,6 +603,8 @@ def _run_gateway(
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
     from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.local_memory import LocalMemoryConfig
+    from nanobot.agent.local_memory_hook import LocalMemoryHook
     from nanobot.agent.tools.cron import CronTool
     from nanobot.agent.tools.message import MessageTool
     from nanobot.bus.queue import MessageBus
@@ -620,6 +636,18 @@ def _run_gateway(
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
 
+    local_memory_cfg = LocalMemoryConfig(
+        enabled=config.tools.local_memory.enabled,
+        server_name=config.tools.local_memory.server_name,
+        search_first=config.tools.local_memory.search_first,
+        auto_capture_candidates=config.tools.local_memory.auto_capture_candidates,
+        max_search_results=config.tools.local_memory.max_search_results,
+        min_query_length=config.tools.local_memory.min_query_length,
+        max_candidate_chars=config.tools.local_memory.max_candidate_chars,
+        max_context_chars=config.tools.local_memory.max_context_chars,
+        enable_bootstrap_recall=config.tools.local_memory.enable_bootstrap_recall,
+    )
+
     # Create agent with cron service
     agent = AgentLoop(
         bus=bus,
@@ -645,6 +673,7 @@ def _run_gateway(
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         max_messages=config.agents.defaults.max_messages,
         tools_config=config.tools,
+        hooks=[LocalMemoryHook(local_memory_cfg)],
         provider_snapshot_loader=load_provider_snapshot,
         provider_signature=provider_snapshot.signature,
     )
@@ -991,6 +1020,8 @@ def agent(
     from loguru import logger
 
     from nanobot.agent.loop import AgentLoop
+    from nanobot.agent.local_memory import LocalMemoryConfig
+    from nanobot.agent.local_memory_hook import LocalMemoryHook
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
 
@@ -1012,6 +1043,18 @@ def agent(
         logger.enable("nanobot")
     else:
         logger.disable("nanobot")
+
+    local_memory_cfg = LocalMemoryConfig(
+        enabled=config.tools.local_memory.enabled,
+        server_name=config.tools.local_memory.server_name,
+        search_first=config.tools.local_memory.search_first,
+        auto_capture_candidates=config.tools.local_memory.auto_capture_candidates,
+        max_search_results=config.tools.local_memory.max_search_results,
+        min_query_length=config.tools.local_memory.min_query_length,
+        max_candidate_chars=config.tools.local_memory.max_candidate_chars,
+        max_context_chars=config.tools.local_memory.max_context_chars,
+        enable_bootstrap_recall=config.tools.local_memory.enable_bootstrap_recall,
+    )
 
     agent_loop = AgentLoop(
         bus=bus,
@@ -1036,6 +1079,7 @@ def agent(
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         max_messages=config.agents.defaults.max_messages,
         tools_config=config.tools,
+        hooks=[LocalMemoryHook(local_memory_cfg)],
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
