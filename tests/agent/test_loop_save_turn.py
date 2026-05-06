@@ -588,10 +588,14 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
     assert result.content == "next answer"
 
     session = loop.sessions.get_or_create("feishu:c4")
-    assert [
+    persisted_messages = [
         {k: v for k, v in m.items() if k in {"role", "content", "tool_call_id", "name"}}
         for m in session.messages
-    ] == [
+    ]
+    assert persisted_messages[-1] == {"role": "assistant", "content": "next answer"}
+    assert {"role": "user", "content": "continue here"} in persisted_messages
+    assert [m for m in persisted_messages if m.get("role") == "system"] == []
+    assert persisted_messages[:4] == [
         {"role": "user", "content": "keep progress"},
         {"role": "assistant", "content": "working"},
         {"role": "tool", "tool_call_id": "call_done", "name": "read_file", "content": "ok"},
@@ -601,11 +605,17 @@ async def test_stop_preserves_runtime_checkpoint_for_next_turn(tmp_path: Path) -
             "name": "exec",
             "content": "Error: Task interrupted before this tool finished.",
         },
-        {"role": "user", "content": "continue here"},
-        {"role": "assistant", "content": "next answer"},
     ]
     assert AgentLoop._PENDING_USER_TURN_KEY not in session.metadata
     assert AgentLoop._RUNTIME_CHECKPOINT_KEY not in session.metadata
+    for persisted in session.messages:
+        content = str(persisted.get("content", ""))
+        assert "[Runtime Context" not in content
+        assert "[/Runtime Context]" not in content
+        assert "Current Time:" not in content
+        assert "Channel:" not in content
+        assert "Chat ID:" not in content
+        assert "[Resumed Session]" not in content
 
 
 @pytest.mark.asyncio
@@ -652,7 +662,7 @@ async def test_system_subagent_followup_is_persisted_before_prompt_assembly(tmp_
     assert "[Message Time:" in non_system[0]["content"]
     assert "[Message Time:" not in non_system[1]["content"]
     assert non_system[2]["content"].count("subagent result") == 1
-    assert "Current Time:" in non_system[2]["content"]
+    assert "Current Time:" not in non_system[2]["content"]
 
     loop.sessions.invalidate("cli:test")
     persisted = loop.sessions.get_or_create("cli:test")

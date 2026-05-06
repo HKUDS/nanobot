@@ -96,6 +96,26 @@ class ContextBuilder:
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines) + "\n" + ContextBuilder._RUNTIME_CONTEXT_END
 
     @staticmethod
+    def contains_runtime_context_wrapper(text: str) -> bool:
+        return (
+            isinstance(text, str)
+            and ContextBuilder._RUNTIME_CONTEXT_TAG in text
+            and ContextBuilder._RUNTIME_CONTEXT_END in text
+        )
+
+    @staticmethod
+    def _strip_runtime_context_wrapper(text: str) -> str:
+        if not ContextBuilder.contains_runtime_context_wrapper(text):
+            return text
+        start = text.find(ContextBuilder._RUNTIME_CONTEXT_TAG)
+        end = text.find(ContextBuilder._RUNTIME_CONTEXT_END)
+        if start < 0 or end < 0:
+            return text
+        end += len(ContextBuilder._RUNTIME_CONTEXT_END)
+        stripped = (text[:start] + text[end:]).strip()
+        return stripped
+
+    @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
         if isinstance(left, str) and isinstance(right, str):
             return f"{left}\n\n{right}" if left else right
@@ -143,25 +163,50 @@ class ContextBuilder:
         sender_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
-        runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone, session_summary=session_summary, sender_id=sender_id)
+        if isinstance(current_message, str):
+            current_message = self._strip_runtime_context_wrapper(current_message)
+
+        runtime_ctx = self._build_runtime_context(
+            channel,
+            chat_id,
+            self.timezone,
+            session_summary=session_summary,
+            sender_id=sender_id,
+        )
         user_content = self._build_user_content(current_message, media)
 
-        # Merge runtime context and user content into a single user message
-        # to avoid consecutive same-role messages that some providers reject.
-        if isinstance(user_content, str):
-            merged = f"{runtime_ctx}\n\n{user_content}"
-        else:
-            merged = [{"type": "text", "text": runtime_ctx}] + user_content
+        if current_role == "user" and isinstance(user_content, str):
+            user_content = self._strip_runtime_context_wrapper(user_content)
+
+        system_prompt = self.build_system_prompt(skill_names, channel=channel)
+
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel)},
+            {"role": "system", "content": system_prompt},
             *history,
         ]
-        if messages[-1].get("role") == current_role:
-            last = dict(messages[-1])
-            last["content"] = self._merge_message_content(last.get("content"), merged)
-            messages[-1] = last
+        if runtime_ctx:
+            messages.append({"role": "system", "content": runtime_ctx})
+
+        if current_role != "user":
+            last_non_runtime = messages[-1]
+            if (
+                runtime_ctx
+                and len(messages) >= 2
+                and messages[-1].get("role") == "system"
+                and messages[-1].get("content") == runtime_ctx
+            ):
+                last_non_runtime = messages[-2]
+            if last_non_runtime.get("role") == current_role:
+                last = dict(last_non_runtime)
+                last["content"] = self._merge_message_content(last.get("content"), user_content)
+                replace_index = -2 if last_non_runtime is messages[-2] else -1
+                messages[replace_index] = last
+                return messages
+            messages.append({"role": current_role, "content": user_content})
             return messages
-        messages.append({"role": current_role, "content": merged})
+
+        user_message = {"role": current_role, "content": user_content}
+        messages.append(user_message)
         return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:

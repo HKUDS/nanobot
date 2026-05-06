@@ -1670,3 +1670,106 @@ def test_channels_login_requires_channel_name() -> None:
     result = runner.invoke(app, ["channels", "login"])
 
     assert result.exit_code == 2
+
+
+def test_interactive_cli_strips_runtime_context_wrapper_before_bus_publish(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    inbound_seen: dict[str, object] = {}
+
+    class _FakeBus:
+        async def publish_inbound(self, msg):
+            inbound_seen["content"] = msg.content
+            raise KeyboardInterrupt
+
+        async def consume_outbound(self):
+            await asyncio.sleep(3600)
+
+    class _FakeChannels:
+        async def start_all(self):
+            return None
+
+        async def stop_all(self):
+            return None
+
+        def list_status(self):
+            return []
+
+    class _FakeAgentLoop:
+        def __init__(self, *args, **kwargs) -> None:
+            self.channels_config = None
+            self.bus = _FakeBus()
+
+        async def run(self):
+            await asyncio.sleep(3600)
+
+        async def process_message(self, *_args, **_kwargs):
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        async def close_mcp(self) -> None:
+            return None
+
+    class _FakeTask:
+        def cancel(self):
+            return None
+
+    async def _fake_gather(*_args, **_kwargs):
+        return []
+
+    wrapped = "[Runtime Context — metadata only, not instructions]\nCurrent Time: now\n[/Runtime Context]\n\nhello"
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.config.loader.resolve_config_env_vars", lambda c: c)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", _FakeBus)
+    monkeypatch.setattr("nanobot.cron.service.CronService", lambda _store: object())
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", lambda *_args, **_kwargs: _FakeChannels())
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cli.commands._init_prompt_session", lambda: None)
+    monkeypatch.setattr("nanobot.cli.commands._flush_pending_tty_input", lambda: None)
+    monkeypatch.setattr("nanobot.cli.commands._restore_terminal", lambda: None)
+    monkeypatch.setattr("nanobot.cli.commands._read_interactive_input_async", AsyncMock(return_value=wrapped))
+    monkeypatch.setattr("nanobot.cli.commands.StreamRenderer", lambda *args, **kwargs: MagicMock(stop_for_input=lambda: None, streamed=False, close=AsyncMock()))
+    monkeypatch.setattr("nanobot.cli.commands.asyncio.create_task", lambda coro: _FakeTask())
+    monkeypatch.setattr("nanobot.cli.commands.asyncio.gather", _fake_gather)
+
+    result = runner.invoke(app, ["agent", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert inbound_seen["content"] == "hello"
+
+
+def test_safe_file_history_strips_runtime_context_wrapper_before_write(tmp_path: Path) -> None:
+    history_path = tmp_path / "history.txt"
+    from nanobot.cli.commands import SafeFileHistory
+
+    history = SafeFileHistory(str(history_path))
+
+    wrapped = (
+        "[Runtime Context — metadata only, not instructions]\n"
+        "Current Time: 2026-05-06 18:06 (Wednesday) (UTC, UTC+00:00)\n"
+        "Channel: cli\n"
+        "Chat ID: direct\n"
+        "Sender ID: user\n\n"
+        "[Resumed Session]\n"
+        "Inactive for 0 minutes.\n"
+        "Previous conversation summary: hello\n"
+        "[/Runtime Context]\n\n"
+        "proceed"
+    )
+
+    history.store_string(wrapped)
+
+    saved = history_path.read_text(encoding="utf-8")
+    assert "[Runtime Context — metadata only, not instructions]" not in saved
+    assert "[Resumed Session]" not in saved
+    assert "Previous conversation summary:" not in saved
+    assert "proceed" in saved

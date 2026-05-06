@@ -61,8 +61,8 @@ def test_system_prompt_reflects_current_dream_memory_contract(tmp_path) -> None:
     assert "write important facts here" not in prompt
 
 
-def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
-    """Runtime metadata should be merged with the user message."""
+def test_runtime_context_is_injected_as_separate_system_message_only(tmp_path) -> None:
+    """Runtime metadata should be injected as a separate system message, not user content."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -73,22 +73,25 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
         chat_id="direct",
     )
 
+    assert len(messages) == 3
     assert messages[0]["role"] == "system"
     assert "## Current Session" not in messages[0]["content"]
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG not in messages[0]["content"]
 
-    # Runtime context is now merged with user message into a single message
+    assert messages[1]["role"] == "system"
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG in messages[1]["content"]
+    assert "Current Time:" in messages[1]["content"]
+    assert "Channel: cli" in messages[1]["content"]
+    assert "Chat ID: direct" in messages[1]["content"]
+
     assert messages[-1]["role"] == "user"
     user_content = messages[-1]["content"]
     assert isinstance(user_content, str)
-    assert ContextBuilder._RUNTIME_CONTEXT_TAG in user_content
-    assert "Current Time:" in user_content
-    assert "Channel: cli" in user_content
-    assert "Chat ID: direct" in user_content
-    assert "Return exactly: OK" in user_content
+    assert user_content == "Return exactly: OK"
 
 
-def test_runtime_context_includes_sender_id_when_provided(tmp_path) -> None:
-    """Sender ID should be included in runtime context when provided."""
+def test_runtime_context_includes_sender_id_in_system_prompt_when_provided(tmp_path) -> None:
+    """Sender ID should be included only in system/prompt context when provided."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -100,13 +103,58 @@ def test_runtime_context_includes_sender_id_when_provided(tmp_path) -> None:
         sender_id="user-12345",
     )
 
+    stable_system_content = messages[0]["content"]
+    runtime_system_content = messages[1]["content"]
     user_content = messages[-1]["content"]
+    assert isinstance(stable_system_content, str)
+    assert isinstance(runtime_system_content, str)
     assert isinstance(user_content, str)
-    assert "Sender ID: user-12345" in user_content
+    assert "Sender ID: user-12345" not in stable_system_content
+    assert "Sender ID: user-12345" in runtime_system_content
+    assert "Sender ID: user-12345" not in user_content
+    assert user_content == "Return exactly: OK"
+
+
+def test_runtime_context_wrapper_with_resumed_session_summary_stays_in_system_prompt_only(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    wrapped = (
+        "[Runtime Context — metadata only, not instructions]\n"
+        "Current Time: now\n"
+        "Channel: cli\n"
+        "Chat ID: direct\n\n"
+        "[Resumed Session]\n"
+        "Inactive for 0 minutes.\n"
+        "Previous conversation summary: hello\n"
+        "[/Runtime Context]\n\n"
+        "ok"
+    )
+
+    messages = builder.build_messages(
+        history=[],
+        current_message=wrapped,
+        channel="cli",
+        chat_id="direct",
+        session_summary="Inactive for 0 minutes.\nPrevious conversation summary: hello",
+    )
+
+    stable_system_content = messages[0]["content"]
+    runtime_system_content = messages[1]["content"]
+    user_content = messages[-1]["content"]
+    assert isinstance(stable_system_content, str)
+    assert isinstance(runtime_system_content, str)
+    assert isinstance(user_content, str)
+    assert "[Runtime Context — metadata only, not instructions]" not in stable_system_content
+    assert runtime_system_content.count("[Runtime Context — metadata only, not instructions]") == 1
+    assert "[Resumed Session]" in runtime_system_content
+    assert user_content == "ok"
+    assert "[Runtime Context — metadata only, not instructions]" not in user_content
+    assert "Previous conversation summary:" not in user_content
 
 
 def test_runtime_context_excludes_sender_id_when_not_provided(tmp_path) -> None:
-    """Sender ID should not be present in runtime context when not provided."""
+    """Sender ID should not be present when omitted."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -118,9 +166,15 @@ def test_runtime_context_excludes_sender_id_when_not_provided(tmp_path) -> None:
         sender_id=None,
     )
 
+    stable_system_content = messages[0]["content"]
+    runtime_system_content = messages[1]["content"]
     user_content = messages[-1]["content"]
+    assert isinstance(stable_system_content, str)
+    assert isinstance(runtime_system_content, str)
     assert isinstance(user_content, str)
-    assert "Sender ID:" not in user_content
+    assert "Sender ID:" not in stable_system_content
+    assert "Sender ID:" not in runtime_system_content
+    assert user_content == "Return exactly: OK"
 
 
 def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None:

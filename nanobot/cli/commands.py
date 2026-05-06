@@ -59,8 +59,11 @@ class SafeFileHistory(FileHistory):
     """
 
     def store_string(self, string: str) -> None:
+        if ContextBuilder.contains_runtime_context_wrapper(string):
+            string = ContextBuilder._strip_runtime_context_wrapper(string).strip()
         safe = string.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
         super().store_string(safe)
+from nanobot.agent.context import ContextBuilder
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
@@ -1225,6 +1228,11 @@ def agent(
                         turn_done.clear()
                         turn_response.clear()
                         renderer = StreamRenderer(render_markdown=markdown)
+
+                        if ContextBuilder.contains_runtime_context_wrapper(user_input):
+                            user_input = ContextBuilder._strip_runtime_context_wrapper(user_input).strip()
+                            if not user_input:
+                                continue
 
                         await bus.publish_inbound(InboundMessage(
                             channel=cli_channel,
