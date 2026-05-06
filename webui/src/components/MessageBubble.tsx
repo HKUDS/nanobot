@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ChevronRight, FileIcon, ImageIcon, PlaySquare, Wrench } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, ChevronRight, Copy, FileIcon, ImageIcon, PlaySquare, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ImageLightbox } from "@/components/ImageLightbox";
@@ -21,7 +21,32 @@ interface MessageBubbleProps {
  * collapsible group so intermediate steps never masquerade as replies.
  */
 export function MessageBubble({ message }: MessageBubbleProps) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+  const copyResetRef = useRef<number | null>(null);
   const baseAnim = "animate-in fade-in-0 slide-in-from-bottom-1 duration-300";
+
+  useEffect(() => {
+    return () => {
+      if (copyResetRef.current !== null) {
+        window.clearTimeout(copyResetRef.current);
+      }
+    };
+  }, []);
+
+  const onCopyAssistantReply = useCallback(() => {
+    if (!navigator.clipboard) return;
+    void navigator.clipboard.writeText(message.content).then(() => {
+      setCopied(true);
+      if (copyResetRef.current !== null) {
+        window.clearTimeout(copyResetRef.current);
+      }
+      copyResetRef.current = window.setTimeout(() => {
+        setCopied(false);
+        copyResetRef.current = null;
+      }, 1_500);
+    });
+  }, [message.content]);
 
   if (message.kind === "trace") {
     return <TraceGroup message={message} animClass={baseAnim} />;
@@ -60,6 +85,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
   const empty = message.content.trim().length === 0;
   const media = message.media ?? [];
+  const showAssistantActions = message.role === "assistant" && !message.isStreaming && !empty;
   return (
     <div className={cn("w-full text-sm", baseAnim)} style={{ lineHeight: "var(--cjk-line-height)" }}>
       {empty && message.isStreaming ? (
@@ -69,6 +95,27 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           <MarkdownText>{message.content}</MarkdownText>
           {message.isStreaming && <StreamCursor />}
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
+          {showAssistantActions ? (
+            <div className="mt-2 flex items-center gap-1 text-muted-foreground">
+              <button
+                type="button"
+                onClick={onCopyAssistantReply}
+                aria-label={copied ? t("message.copiedReply") : t("message.copyReply")}
+                title={copied ? t("message.copiedReply") : t("message.copyReply")}
+                className={cn(
+                  "inline-flex h-8 w-8 items-center justify-center rounded-full",
+                  "transition-colors hover:bg-muted/55 hover:text-foreground",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                )}
+              >
+                {copied ? (
+                  <Check className="h-4 w-4" aria-hidden />
+                ) : (
+                  <Copy className="h-4 w-4" aria-hidden />
+                )}
+              </button>
+            </div>
+          ) : null}
         </>
       )}
     </div>

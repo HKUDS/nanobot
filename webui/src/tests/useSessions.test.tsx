@@ -170,6 +170,83 @@ describe("useSessions", () => {
     ]);
   });
 
+  it("flags history with trailing assistant tool calls as still pending", async () => {
+    vi.mocked(api.fetchSessionMessages).mockResolvedValue({
+      key: "websocket:chat-pending",
+      created_at: "2026-04-20T10:00:00Z",
+      updated_at: "2026-04-20T10:05:00Z",
+      messages: [
+        {
+          role: "assistant",
+          content: "Using 2 tools",
+          timestamp: "2026-04-20T10:00:01Z",
+          tool_calls: [{ id: "call-1" }],
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:chat-pending"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.hasPendingToolCalls).toBe(true);
+  });
+
+  it("keeps pending when tool result rows trail assistant tool calls", async () => {
+    vi.mocked(api.fetchSessionMessages).mockResolvedValue({
+      key: "websocket:chat-pending-tool-result",
+      created_at: "2026-04-20T10:00:00Z",
+      updated_at: "2026-04-20T10:05:00Z",
+      messages: [
+        {
+          role: "assistant",
+          content: "Using 1 tool",
+          timestamp: "2026-04-20T10:00:01Z",
+          tool_calls: [{ id: "call-1" }],
+        },
+        {
+          role: "tool",
+          content: "tool output",
+          timestamp: "2026-04-20T10:00:02Z",
+          tool_call_id: "call-1",
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:chat-pending-tool-result"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.hasPendingToolCalls).toBe(true);
+  });
+
+  it("does not flag history as pending once the assistant turn has no tool calls", async () => {
+    vi.mocked(api.fetchSessionMessages).mockResolvedValue({
+      key: "websocket:chat-done",
+      created_at: "2026-04-20T10:00:00Z",
+      updated_at: "2026-04-20T10:05:00Z",
+      messages: [
+        {
+          role: "assistant",
+          content: "All done",
+          timestamp: "2026-04-20T10:00:01Z",
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useSessionHistory("websocket:chat-done"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.hasPendingToolCalls).toBe(false);
+  });
+
   it("keeps the session in the list when delete fails", async () => {
     vi.mocked(api.listSessions).mockResolvedValue([
       {

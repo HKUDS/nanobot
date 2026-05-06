@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.hook import AgentHook
+from nanobot.agent.hook import AgentHook, SDKCaptureHook
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 
@@ -76,6 +76,7 @@ class Nanobot:
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
             provider_retry_mode=defaults.provider_retry_mode,
+            tool_hint_max_length=defaults.tool_hint_max_length,
             web_config=config.tools.web,
             exec_config=config.tools.exec,
             restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -104,9 +105,10 @@ class Nanobot:
                 Different keys get independent history.
             hooks: Optional lifecycle hooks for this run.
         """
+        capture = SDKCaptureHook()
         prev = self._loop._extra_hooks
-        if hooks is not None:
-            self._loop._extra_hooks = list(hooks)
+        base_hooks = list(hooks) if hooks is not None else list(prev or [])
+        self._loop._extra_hooks = [capture, *base_hooks]
         try:
             response = await self._loop.process_direct(
                 message, session_key=session_key,
@@ -115,7 +117,11 @@ class Nanobot:
             self._loop._extra_hooks = prev
 
         content = (response.content if response else None) or ""
-        return RunResult(content=content, tools_used=[], messages=[])
+        return RunResult(
+            content=content,
+            tools_used=capture.tools_used,
+            messages=capture.messages,
+        )
 
 
 def _make_provider(config: Any) -> Any:

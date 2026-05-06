@@ -8,7 +8,13 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.providers.base import LLMResponse
 from nanobot.session.manager import Session
+from nanobot.utils.webui_titles import (
+    WEBUI_SESSION_METADATA_KEY,
+    WEBUI_TITLE_METADATA_KEY,
+    maybe_generate_webui_title,
+)
 
 
 def _mk_loop() -> AgentLoop:
@@ -22,7 +28,54 @@ def _mk_loop() -> AgentLoop:
 def _make_full_loop(tmp_path: Path) -> AgentLoop:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
+    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Test title"))
     return AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+
+
+@pytest.mark.asyncio
+async def test_generate_webui_title_only_for_marked_webui_sessions(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content='"优化 WebUI 侧边栏。"', finish_reason="stop")
+    )
+    session = loop.sessions.get_or_create("websocket:chat-title")
+    session.metadata[WEBUI_SESSION_METADATA_KEY] = True
+    session.add_message("user", "帮我优化一下 webui 的 sidebar")
+    session.add_message("assistant", "可以，我会先调整布局和视觉层级。")
+    loop.sessions.save(session)
+
+    generated = await maybe_generate_webui_title(
+        sessions=loop.sessions,
+        session_key="websocket:chat-title",
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated is True
+    assert session.metadata[WEBUI_TITLE_METADATA_KEY] == "优化 WebUI 侧边栏"
+    loop.provider.chat_with_retry.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_generate_webui_title_skips_plain_websocket_sessions(tmp_path: Path) -> None:
+    loop = _make_full_loop(tmp_path)
+    loop.provider.chat_with_retry = AsyncMock(
+        return_value=LLMResponse(content="Plain websocket title", finish_reason="stop")
+    )
+    session = loop.sessions.get_or_create("websocket:custom-client")
+    session.add_message("user", "hello from a custom websocket client")
+    loop.sessions.save(session)
+
+    generated = await maybe_generate_webui_title(
+        sessions=loop.sessions,
+        session_key="websocket:custom-client",
+        provider=loop.provider,
+        model=loop.model,
+    )
+
+    assert generated is False
+    assert WEBUI_TITLE_METADATA_KEY not in session.metadata
+    loop.provider.chat_with_retry.assert_not_awaited()
 
 
 def test_save_turn_skips_multimodal_user_when_only_runtime_context() -> None:

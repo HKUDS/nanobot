@@ -42,6 +42,7 @@ export async function listSessions(
     key: string;
     created_at: string | null;
     updated_at: string | null;
+    title?: string;
     preview?: string;
   };
   const body = await request<{ sessions: Row[] }>(
@@ -53,6 +54,7 @@ export async function listSessions(
     ...splitKey(s.key),
     createdAt: s.created_at,
     updatedAt: s.updated_at,
+    title: s.title ?? "",
     preview: s.preview ?? "",
   }));
 }

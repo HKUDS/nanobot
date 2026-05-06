@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -94,7 +95,7 @@ def test_exec_blocks_writes_to_history_jsonl(command):
     tool = ExecTool()
     result = tool._guard_command(command, "/tmp")
     assert result is not None
-    assert "dangerous pattern" in result.lower()
+    assert "deny pattern filter" in result.lower()
 
 
 @pytest.mark.parametrize(
@@ -182,3 +183,63 @@ async def test_exec_ignores_workspace_check_when_not_restricted(tmp_path):
     result = await tool.execute(command="echo ok", working_dir=str(other))
     assert "ok" in result
     assert "outside the configured workspace" not in result
+
+
+# --- #3599: stdio redirects to /dev/null must not trip the workspace guard ----
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # The exact command from the #3599 reporter.
+        'rm test_print.txt 2>/dev/null; echo "done"',
+        # Plain redirect of stdout / stderr.
+        "find . -type f >/dev/null",
+        "noisy_cmd 2>/dev/null",
+        "noisy_cmd >/dev/null 2>&1",
+        # Read from /dev/urandom is also a benign device read.
+        "head -c 16 /dev/urandom | xxd",
+        "echo done >/dev/stderr",
+        "echo line </dev/stdin",
+        # Per-process FD aliases never escape the workspace.
+        "cat /dev/fd/3",
+    ],
+)
+def test_exec_allows_benign_device_targets_inside_workspace(tmp_path, command):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+    assert tool._guard_command(command, str(workspace)) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX rm and /dev/null syntax")
+async def test_exec_3599_regression_rm_with_dev_null_redirect(tmp_path):
+    """#3599: ``rm <ws-path> 2>/dev/null`` must succeed against the workspace guard."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    target = workspace / "test_print.txt"
+    target.write_text("scratch")
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True, timeout=5)
+    result = await tool.execute(
+        command=f'rm {target} 2>/dev/null; echo "done"',
+        working_dir=str(workspace),
+    )
+    assert "done" in result
+    assert "path outside working dir" not in result
+    assert not target.exists()
+
+
+def test_exec_still_blocks_real_outside_path_via_redirect(tmp_path):
+    """Redirect *targets* outside the workspace (not /dev/...) must still be blocked.
+
+    We only whitelist kernel device files; arbitrary outside redirects such as
+    ``> /etc/issue`` should remain caught by the workspace guard so a buggy
+    LLM cannot exfiltrate data outside the workspace via stderr redirection.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    tool = ExecTool(working_dir=str(workspace), restrict_to_workspace=True)
+    blocked = tool._guard_command("echo pwn > /etc/issue", str(workspace))
+    assert blocked is not None
+    assert "path outside working dir" in blocked

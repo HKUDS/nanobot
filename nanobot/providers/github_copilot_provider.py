@@ -29,7 +29,7 @@ _EXPIRY_SKEW_SECONDS = 60
 _LONG_LIVED_TOKEN_SECONDS = 315360000
 
 
-def _storage() -> FileTokenStorage:
+def get_storage() -> FileTokenStorage:
     return FileTokenStorage(
         token_filename=TOKEN_FILENAME,
         app_name=TOKEN_APP_NAME,
@@ -48,7 +48,7 @@ def _copilot_headers(token: str) -> dict[str, str]:
 
 
 def _load_github_token() -> OAuthToken | None:
-    token = _storage().load()
+    token = get_storage().load()
     if not token or not token.access:
         return None
     return token
@@ -150,7 +150,7 @@ def login_github_copilot(
         expires=expires_ms,
         account_id=str(account_id) if account_id else None,
     )
-    _storage().save(token)
+    get_storage().save(token)
     return token
 
 

@@ -9,9 +9,20 @@ from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
-from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
+from nanobot.agent.tools.schema import (
+    BooleanSchema,
+    IntegerSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.config.paths import get_media_dir
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
+
+_FS_WORKSPACE_BOUNDARY_NOTE = (
+    " (this is a hard policy boundary, not a transient failure; "
+    "do not retry with shell tricks or alternative tools, and ask "
+    "the user how to proceed if the resource is genuinely required)"
+)
 
 
 def _resolve_path(
@@ -35,8 +46,14 @@ def _resolve_path(
         if any(_is_under(resolved, d) for d in all_dirs):
             return resolved
         if allowed_dir:
-            raise PermissionError(f"Path {path} is outside allowed directory {allowed_dir}")
-        raise PermissionError("Path {} is not in the allowed file list".format(path))
+            raise PermissionError(
+                f"Path {path} is outside allowed directory {allowed_dir}"
+                + _FS_WORKSPACE_BOUNDARY_NOTE
+            )
+        raise PermissionError(
+            f"Path {path} is not in the allowed file list"
+            + _FS_WORKSPACE_BOUNDARY_NOTE
+        )
     return resolved
 
 

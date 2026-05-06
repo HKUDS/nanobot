@@ -185,8 +185,8 @@ export class NanobotClient {
     this.knownChats.add(chatId);
     const frame: Outbound =
       media && media.length > 0
-        ? { type: "message", chat_id: chatId, content, media }
-        : { type: "message", chat_id: chatId, content };
+        ? { type: "message", chat_id: chatId, content, media, webui: true }
+        : { type: "message", chat_id: chatId, content, webui: true };
     this.queueSend(frame);
   }
 

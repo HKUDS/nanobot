@@ -8,9 +8,9 @@ def _tc(name: str, args) -> ToolCallRequest:
     return ToolCallRequest(id="c1", name=name, arguments=args)
 
 
-def _hint(calls):
+def _hint(calls, max_length=40):
     """Shortcut for format_tool_hints."""
-    return format_tool_hints(calls)
+    return format_tool_hints(calls, max_length=max_length)
 
 
 class TestToolHintKnownTools:
@@ -254,3 +254,59 @@ class TestToolHintMixedFolding:
         assert "\u00d7" not in result
         parts = result.split(", ")
         assert len(parts) == 5
+
+
+class TestToolHintMaxLength:
+    """Test max_length parameter controls truncation of tool hints."""
+
+    def test_exec_default_truncates_at_40(self):
+        cmd = "cd /very/long/path/to/some/project && npm run build && npm test"
+        result = _hint([_tc("exec", {"command": cmd})], max_length=40)
+        assert len(result) <= 50  # "$ " prefix + 40 + ellipsis
+        assert "\u2026" in result
+
+    def test_exec_larger_max_length_shows_more(self):
+        cmd = "cd /very/long/path/to/some/project && npm run build && npm test"
+        short = _hint([_tc("exec", {"command": cmd})], max_length=40)
+        long = _hint([_tc("exec", {"command": cmd})], max_length=120)
+        assert len(long) > len(short)
+        assert "npm test" in long
+
+    def test_exec_max_length_120_shows_full_command(self):
+        cmd = "cd /home/user/project && npm install && npm run build"
+        result = _hint([_tc("exec", {"command": cmd})], max_length=120)
+        assert "npm run build" in result
+
+    def test_fallback_respects_max_length(self):
+        long_val = "a" * 100
+        result = _hint([_tc("custom_tool", {"data": long_val})], max_length=60)
+        assert "\u2026" in result
+        result_40 = _hint([_tc("custom_tool", {"data": long_val})], max_length=40)
+        assert len(result) > len(result_40)
+
+    def test_mcp_respects_max_length(self):
+        long_url = "https://example.com/very/long/path/to/resource"
+        result = _hint([_tc("mcp_github__fetch", {"url": long_url})], max_length=80)
+        result_40 = _hint([_tc("mcp_github__fetch", {"url": long_url})], max_length=40)
+        assert len(result) >= len(result_40)
+
+    def test_path_type_respects_max_length(self):
+        """Path-type tools (read_file, write_file, etc.) should honor max_length."""
+        long_path = "/home/user/.local/share/uv/tools/nanobot/agent/loop.py"
+        short = _hint([_tc("read_file", {"path": long_path})], max_length=40)
+        long = _hint([_tc("read_file", {"path": long_path})], max_length=120)
+        assert len(long) > len(short)
+
+    def test_edit_path_respects_max_length(self):
+        """edit (is_path=True) should honor max_length, not stay hardcoded at 40."""
+        long_path = "/home/user/projects/nanobot/src/agent/loop.py"
+        short = _hint([_tc("edit", {"file_path": long_path})], max_length=40)
+        long = _hint([_tc("edit", {"file_path": long_path})], max_length=120)
+        assert len(long) > len(short)
+
+    def test_list_dir_path_respects_max_length(self):
+        """list_dir (is_path=True) should honor max_length."""
+        long_path = "/home/user/.local/share/uv/tools/nanobot/"
+        short = _hint([_tc("list_dir", {"path": long_path})], max_length=40)
+        long = _hint([_tc("list_dir", {"path": long_path})], max_length=120)
+        assert len(long) > len(short)

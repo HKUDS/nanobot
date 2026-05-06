@@ -25,9 +25,9 @@
     --input: 0 0% 89.8%;
     --ring: 0 0% 3.9%;
     --radius: 0.4375rem;
-    --sidebar: 0 0% 98%;
+    --sidebar: 0 0% 98.5%;
     --sidebar-foreground: 0 0% 3.9%;
-    --sidebar-accent: 0 0% 96.1%;
+    --sidebar-accent: 0 0% 95.8%;
     --sidebar-accent-foreground: 0 0% 9%;
     --sidebar-border: 0 0% 89.8%;
   }
@@ -52,9 +52,9 @@
     --border: 0 0% 18%;
     --input: 0 0% 18%;
     --ring: 0 0% 83.1%;
-    --sidebar: 0 0% 12%;
+    --sidebar: 0 0% 11.5%;
     --sidebar-foreground: 0 0% 98%;
-    --sidebar-accent: 0 0% 16%;
+    --sidebar-accent: 0 0% 15.5%;
     --sidebar-accent-foreground: 0 0% 98%;
     --sidebar-border: 0 0% 18%;
   }
