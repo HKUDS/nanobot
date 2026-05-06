@@ -10,7 +10,6 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
@@ -103,11 +102,11 @@ class WecomChannel(BaseChannel):
     async def start(self) -> None:
         """Start the WeCom bot with WebSocket long connection."""
         if not WECOM_AVAILABLE:
-            logger.error("WeCom SDK not installed. Run: pip install nanobot-ai[wecom]")
+            self.logger.error("SDK not installed. Run: pip install nanobot-ai[wecom]")
             return
 
         if not self.config.bot_id or not self.config.secret:
-            logger.error("WeCom bot_id and secret not configured")
+            self.logger.error("bot_id and secret not configured")
             return
 
         from wecom_aibot_sdk import WSClient, generate_req_id
@@ -137,8 +136,8 @@ class WecomChannel(BaseChannel):
         self._client.on("message.mixed", self._on_mixed_message)
         self._client.on("event.enter_chat", self._on_enter_chat)
 
-        logger.info("WeCom bot starting with WebSocket long connection")
-        logger.info("No public IP required - using WebSocket to receive events")
+        self.logger.info("bot starting with WebSocket long connection")
+        self.logger.info("No public IP required - using WebSocket to receive events")
 
         # Connect
         await self._client.connect_async()
@@ -152,24 +151,24 @@ class WecomChannel(BaseChannel):
         self._running = False
         if self._client:
             await self._client.disconnect()
-        logger.info("WeCom bot stopped")
+        self.logger.info("bot stopped")
 
     async def _on_connected(self, frame: Any) -> None:
         """Handle WebSocket connected event."""
-        logger.info("WeCom WebSocket connected")
+        self.logger.info("WebSocket connected")
 
     async def _on_authenticated(self, frame: Any) -> None:
         """Handle authentication success event."""
-        logger.info("WeCom authenticated successfully")
+        self.logger.info("authenticated successfully")
 
     async def _on_disconnected(self, frame: Any) -> None:
         """Handle WebSocket disconnected event."""
         reason = frame.body if hasattr(frame, 'body') else str(frame)
-        logger.warning("WeCom WebSocket disconnected: {}", reason)
+        self.logger.warning("WebSocket disconnected: {}", reason)
 
     async def _on_error(self, frame: Any) -> None:
         """Handle error event."""
-        logger.error("WeCom error: {}", frame)
+        self.logger.error("error: {}", frame)
 
     async def _on_text_message(self, frame: Any) -> None:
         """Handle text message."""
@@ -212,8 +211,8 @@ class WecomChannel(BaseChannel):
                     "msgtype": "text",
                     "text": {"content": self.config.welcome_message},
                 })
-        except Exception as e:
-            logger.error("Error handling enter_chat: {}", e)
+        except Exception:
+            self.logger.exception("Error handling enter_chat")
 
     async def _process_message(self, frame: Any, msg_type: str) -> None:
         """Process incoming message and forward to bus."""
@@ -228,7 +227,7 @@ class WecomChannel(BaseChannel):
 
             # Ensure body is a dict
             if not isinstance(body, dict):
-                logger.warning("Invalid body type: {}", type(body))
+                self.logger.warning("Invalid body type: {}", type(body))
                 return
 
             # Extract message info
@@ -350,8 +349,8 @@ class WecomChannel(BaseChannel):
                 }
             )
 
-        except Exception as e:
-            logger.error("Error processing WeCom message: {}", e)
+        except Exception:
+            self.logger.exception("Error processing message")
 
     async def _download_and_save_media(
         self,
@@ -370,12 +369,12 @@ class WecomChannel(BaseChannel):
             data, fname = await self._client.download_file(file_url, aes_key)
 
             if not data:
-                logger.warning("Failed to download media from WeCom")
+                self.logger.warning("Failed to download media")
                 return None
 
             if len(data) > WECOM_UPLOAD_MAX_BYTES:
-                logger.warning(
-                    "WeCom inbound media too large: {} bytes (max {})",
+                self.logger.warning(
+                    "inbound media too large: {} bytes (max {})",
                     len(data),
                     WECOM_UPLOAD_MAX_BYTES,
                 )
@@ -388,11 +387,11 @@ class WecomChannel(BaseChannel):
 
             file_path = media_dir / filename
             await asyncio.to_thread(file_path.write_bytes, data)
-            logger.debug("Downloaded {} to {}", media_type, file_path)
+            self.logger.debug("Downloaded {} to {}", media_type, file_path)
             return str(file_path)
 
-        except Exception as e:
-            logger.error("Error downloading media: {}", e)
+        except Exception:
+            self.logger.exception("Error downloading media")
             return None
 
     async def _upload_media_ws(
@@ -445,11 +444,11 @@ class WecomChannel(BaseChannel):
                 "md5": md5_hash,
             }, "aibot_upload_media_init")
             if resp.errcode != 0:
-                logger.warning("WeCom upload init failed ({}): {}", resp.errcode, resp.errmsg)
+                self.logger.warning("upload init failed ({}): {}", resp.errcode, resp.errmsg)
                 return None, None
             upload_id = resp.body.get("upload_id") if resp.body else None
             if not upload_id:
-                logger.warning("WeCom upload init: no upload_id in response")
+                self.logger.warning("upload init: no upload_id in response")
                 return None, None
 
             # Step 2: send chunks
@@ -461,7 +460,7 @@ class WecomChannel(BaseChannel):
                     "base64_data": base64.b64encode(chunk).decode(),
                 }, "aibot_upload_media_chunk")
                 if resp.errcode != 0:
-                    logger.warning("WeCom upload chunk {} failed ({}): {}", i, resp.errcode, resp.errmsg)
+                    self.logger.warning("upload chunk {} failed ({}): {}", i, resp.errcode, resp.errmsg)
                     return None, None
 
             # Step 3: finish
@@ -470,29 +469,29 @@ class WecomChannel(BaseChannel):
                 "upload_id": upload_id,
             }, "aibot_upload_media_finish")
             if resp.errcode != 0:
-                logger.warning("WeCom upload finish failed ({}): {}", resp.errcode, resp.errmsg)
+                self.logger.warning("upload finish failed ({}): {}", resp.errcode, resp.errmsg)
                 return None, None
 
             media_id = resp.body.get("media_id") if resp.body else None
             if not media_id:
-                logger.warning("WeCom upload finish: no media_id in response body={}", resp.body)
+                self.logger.warning("upload finish: no media_id in response body={}", resp.body)
                 return None, None
 
             suffix = "..." if len(media_id) > 16 else ""
-            logger.debug("WeCom uploaded {} ({}) → media_id={}", fname, media_type, media_id[:16] + suffix)
+            self.logger.debug("uploaded {} ({}) → media_id={}", fname, media_type, media_id[:16] + suffix)
             return media_id, media_type
 
         except ValueError as e:
-            logger.warning("WeCom upload skipped for {}: {}", file_path, e)
+            self.logger.warning("upload skipped for {}: {}", file_path, e)
             return None, None
-        except Exception as e:
-            logger.error("WeCom _upload_media_ws error for {}: {}", file_path, e)
+        except Exception:
+            self.logger.exception("_upload_media_ws error for {}", file_path)
             return None, None
 
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through WeCom."""
         if not self._client:
-            logger.warning("WeCom client not initialized")
+            self.logger.warning("client not initialized")
             return
 
         try:
@@ -505,7 +504,7 @@ class WecomChannel(BaseChannel):
             # Send media files via WebSocket upload
             for file_path in msg.media or []:
                 if not os.path.isfile(file_path):
-                    logger.warning("WeCom media file not found: {}", file_path)
+                    self.logger.warning("media file not found: {}", file_path)
                     continue
                 media_id, media_type = await self._upload_media_ws(self._client, file_path)
                 if media_id:
@@ -519,7 +518,7 @@ class WecomChannel(BaseChannel):
                             "msgtype": media_type,
                             media_type: {"media_id": media_id},
                         })
-                    logger.debug("WeCom sent {} → {}", media_type, msg.chat_id)
+                    self.logger.debug("sent {} → {}", media_type, msg.chat_id)
                 else:
                     content += f"\n[file upload failed: {os.path.basename(file_path)}]"
 
@@ -537,8 +536,8 @@ class WecomChannel(BaseChannel):
                     content,
                     finish=not is_progress,
                 )
-                logger.debug(
-                    "WeCom {} sent to {}",
+                self.logger.debug(
+                    "{} sent to {}",
                     "progress" if is_progress else "message",
                     msg.chat_id,
                 )
@@ -548,7 +547,7 @@ class WecomChannel(BaseChannel):
                     "msgtype": "markdown",
                     "markdown": {"content": content},
                 })
-                logger.info("WeCom proactive send to {}", msg.chat_id)
+                self.logger.info("proactive send to {}", msg.chat_id)
 
         except Exception:
-            logger.exception("Error sending WeCom message to chat_id={}", msg.chat_id)
+            self.logger.exception("Error sending message to chat_id={}", msg.chat_id)

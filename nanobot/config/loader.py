@@ -49,7 +49,7 @@ def load_config(config_path: Path | None = None) -> Config:
             data = _migrate_config(data)
             config = Config.model_validate(data)
         except (json.JSONDecodeError, ValueError, pydantic.ValidationError) as e:
-            logger.warning(f"Failed to load config from {path}: {e}")
+            logger.warning("Failed to load config from {}: {}", path, e)
             logger.warning("Using default configuration.")
 
     _apply_ssrf_whitelist(config)

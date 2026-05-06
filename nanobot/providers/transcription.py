@@ -44,8 +44,8 @@ class OpenAITranscriptionProvider:
                     )
                     response.raise_for_status()
                     return response.json().get("text", "")
-        except Exception as e:
-            logger.error("OpenAI transcription error: {}", e)
+        except Exception:
+            logger.exception("OpenAI transcription error")
             return ""
 
 
@@ -109,6 +109,6 @@ class GroqTranscriptionProvider:
                     data = response.json()
                     return data.get("text", "")
 
-        except Exception as e:
-            logger.error("Groq transcription error: {}", e)
+        except Exception:
+            logger.exception("Groq transcription error")
             return ""

@@ -840,7 +840,7 @@ def _get_channel_info() -> dict[str, tuple[str, type[BaseModel]]]:
                 display_name = getattr(channel_cls, "display_name", name.capitalize())
                 result[name] = (display_name, config_cls)
         except Exception:
-            logger.warning(f"Failed to load channel module: {name}")
+            logger.warning("Failed to load channel module: {}", name)
     return result
 
 

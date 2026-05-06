@@ -366,14 +366,14 @@ class WeixinChannel(BaseChannel):
                         if base_url:
                             self.config.base_url = base_url
                         self._save_state()
-                        logger.info(
-                            "WeChat login successful! bot_id={} user_id={}",
+                        self.logger.info(
+                            "login successful! bot_id={} user_id={}",
                             bot_id,
                             user_id,
                         )
                         return True
                     else:
-                        logger.error("Login confirmed but no bot_token in response")
+                        self.logger.error("Login confirmed but no bot_token in response")
                         return False
                 elif status == "scaned_but_redirect":
                     redirect_host = str(status_data.get("redirect_host", "") or "").strip()
@@ -387,7 +387,7 @@ class WeixinChannel(BaseChannel):
                 elif status == "expired":
                     refresh_count += 1
                     if refresh_count > MAX_QR_REFRESH_COUNT:
-                        logger.warning(
+                        self.logger.warning(
                             "QR code expired too many times ({}/{}), giving up.",
                             refresh_count - 1,
                             MAX_QR_REFRESH_COUNT,
@@ -401,8 +401,8 @@ class WeixinChannel(BaseChannel):
 
                 await asyncio.sleep(1)
 
-        except Exception as e:
-            logger.error("WeChat QR login failed: {}", e)
+        except Exception:
+            self.logger.exception("QR login failed")
 
         return False
 
@@ -469,11 +469,11 @@ class WeixinChannel(BaseChannel):
             self._token = self.config.token
         elif not self._load_state():
             if not await self._qr_login():
-                logger.error("WeChat login failed. Run 'nanobot channels login weixin' to authenticate.")
+                self.logger.error("login failed. Run 'nanobot channels login weixin' to authenticate.")
                 self._running = False
                 return
 
-        logger.info("WeChat channel starting with long-poll...")
+        self.logger.info("channel starting with long-poll...")
 
         consecutive_failures = 0
         while self._running:
@@ -551,8 +551,8 @@ class WeixinChannel(BaseChannel):
             if errcode == ERRCODE_SESSION_EXPIRED or ret == ERRCODE_SESSION_EXPIRED:
                 self._pause_session()
                 remaining = self._session_pause_remaining_s()
-                logger.warning(
-                    "WeChat session expired (errcode {}). Pausing {} min.",
+                self.logger.warning(
+                    "session expired (errcode {}). Pausing {} min.",
                     errcode,
                     max((remaining + 59) // 60, 1),
                 )
@@ -759,8 +759,8 @@ class WeixinChannel(BaseChannel):
         if not content:
             return
 
-        logger.info(
-            "WeChat inbound: from={} items={} bodyLen={}",
+        self.logger.info(
+            "inbound: from={} items={} bodyLen={}",
             from_user_id,
             ",".join(str(i.get("type", 0)) for i in item_list),
             len(content),
@@ -843,8 +843,8 @@ class WeixinChannel(BaseChannel):
                         and self._is_retryable_media_download_error(e)
                     )
                     if should_fallback:
-                        logger.warning(
-                            "WeChat media download failed via full_url, falling back to encrypt_query_param: type={} err={}",
+                        self.logger.warning(
+                            "media download failed via full_url, falling back to encrypt_query_param: type={} err={}",
                             media_type,
                             e,
                         )
@@ -869,8 +869,8 @@ class WeixinChannel(BaseChannel):
             file_path.write_bytes(data)
             return str(file_path)
 
-        except Exception as e:
-            logger.error("Error downloading WeChat media: {}", e)
+        except Exception:
+            self.logger.exception("Error downloading media")
             return None
 
     # ------------------------------------------------------------------
@@ -940,7 +940,7 @@ class WeixinChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         if not self._client or not self._token:
-            logger.warning("WeChat client not initialized or not authenticated")
+            self.logger.warning("client not initialized or not authenticated")
             return
         try:
             self._assert_session_active()
@@ -954,8 +954,8 @@ class WeixinChannel(BaseChannel):
         content = msg.content.strip()
         ctx_token = self._context_tokens.get(msg.chat_id, "")
         if not ctx_token:
-            logger.warning(
-                "WeChat: no context_token for chat_id={}, cannot send",
+            self.logger.warning(
+                "no context_token for chat_id={}, cannot send",
                 msg.chat_id,
             )
             return
@@ -980,14 +980,13 @@ class WeixinChannel(BaseChannel):
             for media_path in (msg.media or []):
                 try:
                     await self._send_media_file(msg.chat_id, media_path, ctx_token)
-                except (httpx.TimeoutException, httpx.TransportError) as net_err:
+                except (httpx.TimeoutException, httpx.TransportError):
                     # Network/transport errors: do NOT fall back to text —
                     # the text send would also likely fail, and the outer
                     # except will re-raise so ChannelManager retries properly.
-                    logger.error(
-                        "Network error sending WeChat media {}: {}",
+                    self.logger.opt(exception=True).warning(
+                        "Network error sending media {}",
                         media_path,
-                        net_err,
                     )
                     raise
                 except httpx.HTTPStatusError as http_err:
@@ -998,27 +997,26 @@ class WeixinChannel(BaseChannel):
                     )
                     if status_code >= 500:
                         # Server-side / retryable HTTP error — same as network.
-                        logger.error(
-                            "Server error ({} {}) sending WeChat media {}: {}",
+                        self.logger.exception(
+                            "Server error ({} {}) sending media {}",
                             status_code,
                             http_err.response.reason_phrase
                             if http_err.response is not None
                             else "",
                             media_path,
-                            http_err,
                         )
                         raise
                     # 4xx client errors are NOT retryable — fall back to text.
                     filename = Path(media_path).name
-                    logger.error("Failed to send WeChat media {}: {}", media_path, http_err)
+                    self.logger.exception("Failed to send media {}", media_path)
                     await self._send_text(
                         msg.chat_id, f"[Failed to send: {filename}]", ctx_token,
                     )
-                except Exception as e:
+                except Exception:
                     # Non-network errors (format, file-not-found, etc.):
                     # notify the user via text fallback.
                     filename = Path(media_path).name
-                    logger.error("Failed to send WeChat media {}: {}", media_path, e)
+                    self.logger.exception("Failed to send media {}", media_path)
                     # Notify user about failure via text
                     await self._send_text(
                         msg.chat_id, f"[Failed to send: {filename}]", ctx_token,
@@ -1031,8 +1029,8 @@ class WeixinChannel(BaseChannel):
             chunks = split_message(content, WEIXIN_MAX_MESSAGE_LEN)
             for chunk in chunks:
                 await self._send_text(msg.chat_id, chunk, ctx_token)
-        except Exception as e:
-            logger.error("Error sending WeChat message: {}", e)
+        except Exception:
+            self.logger.exception("Error sending message")
             raise
         finally:
             if typing_keepalive_task:
@@ -1056,7 +1054,7 @@ class WeixinChannel(BaseChannel):
                 return
             await self._send_typing(chat_id, ticket, TYPING_STATUS_TYPING)
         except Exception as e:
-            logger.debug("WeChat typing indicator start failed for {}: {}", chat_id, e)
+            self.logger.debug("typing indicator start failed for {}: {}", chat_id, e)
             return
 
         stop_event = asyncio.Event()
@@ -1095,7 +1093,7 @@ class WeixinChannel(BaseChannel):
         try:
             await self._send_typing(chat_id, ticket, TYPING_STATUS_CANCEL)
         except Exception as e:
-            logger.debug("WeChat typing clear failed for {}: {}", chat_id, e)
+            self.logger.debug("typing clear failed for {}: {}", chat_id, e)
 
     async def _send_text(
         self,
@@ -1130,8 +1128,8 @@ class WeixinChannel(BaseChannel):
         data = await self._api_post("ilink/bot/sendmessage", body)
         errcode = data.get("errcode", 0)
         if errcode and errcode != 0:
-            logger.warning(
-                "WeChat send error (code {}): {}",
+            self.logger.warning(
+                "send error (code {}): {}",
                 errcode,
                 data.get("errmsg", ""),
             )

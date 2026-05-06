@@ -112,6 +112,11 @@ class _LoopHook(AgentHook):
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         self._loop._current_iteration = context.iteration
+        logger.debug(
+            "Starting agent loop iteration {} for session {}",
+            context.iteration,
+            self._session_key,
+        )
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         if self._on_progress:
@@ -417,7 +422,7 @@ class AgentLoop:
             logger.warning("MCP connection cancelled (will retry next message)")
             self._mcp_stacks.clear()
         except BaseException as e:
-            logger.error("Failed to connect MCP servers (will retry next message): {}", e)
+            logger.warning("Failed to connect MCP servers (will retry next message): {}", e)
             self._mcp_stacks.clear()
         finally:
             self._mcp_connecting = False
@@ -907,6 +912,8 @@ class AgentLoop:
                 self.sessions.save(session)
 
             session, pending = self.auto_compact.prepare_session(session, key)
+            if pending:
+                logger.info("Memory compact triggered for session {}", key)
 
             await self.consolidator.maybe_consolidate_by_tokens(
                 session,
@@ -919,6 +926,7 @@ class AgentLoop:
             # LLM via the merged prompt. See _persist_subagent_followup.
             is_subagent = msg.sender_id == "subagent"
             if is_subagent and self._persist_subagent_followup(session, msg):
+                logger.debug("Subagent result persisted for session {}", key)
                 self.sessions.save(session)
             self._set_tool_context(
                 channel, chat_id, msg.metadata.get("message_id"),

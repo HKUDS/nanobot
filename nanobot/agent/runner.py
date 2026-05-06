@@ -261,12 +261,11 @@ class AgentRunner:
                 # Snipping may have created new orphans; clean them up.
                 messages_for_model = self._drop_orphan_tool_results(messages_for_model)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
-            except Exception as exc:
-                logger.warning(
-                    "Context governance failed on turn {} for {}: {}; applying minimal repair",
+            except Exception:
+                logger.exception(
+                    "Context governance failed on turn {} for {}; applying minimal repair",
                     iteration,
                     spec.session_key or "default",
-                    exc,
                 )
                 try:
                     messages_for_model = self._drop_orphan_tool_results(messages)
@@ -981,12 +980,11 @@ class AgentRunner:
                 result,
                 max_chars=spec.max_tool_result_chars,
             )
-        except Exception as exc:
-            logger.warning(
-                "Tool result persist failed for {} in {}: {}; using raw result",
+        except Exception:
+            logger.exception(
+                "Tool result persist failed for {} in {}; using raw result",
                 tool_call_id,
                 spec.session_key or "default",
-                exc,
             )
             content = result
         if isinstance(content, str) and len(content) > spec.max_tool_result_chars:

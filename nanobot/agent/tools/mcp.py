@@ -198,11 +198,10 @@ class MCPToolWrapper(Tool):
                         await asyncio.sleep(1)  # Brief backoff before retry
                         continue
                     # Second transient failure — give up with retry-specific message
-                    logger.error(
-                        "MCP tool '{}' failed after retry: {}: {}",
+                    logger.exception(
+                        "MCP tool '{}' failed after retry: {}",
                         self._name,
                         type(exc).__name__,
-                        exc,
                     )
                     return f"(MCP tool call failed after retry: {type(exc).__name__})"
                 logger.exception(
@@ -287,11 +286,10 @@ class MCPResourceWrapper(Tool):
                         )
                         await asyncio.sleep(1)
                         continue
-                    logger.error(
-                        "MCP resource '{}' failed after retry: {}: {}",
+                    logger.exception(
+                        "MCP resource '{}' failed after retry: {}",
                         self._name,
                         type(exc).__name__,
-                        exc,
                     )
                     return f"(MCP resource read failed after retry: {type(exc).__name__})"
                 logger.exception(
@@ -383,7 +381,7 @@ class MCPPromptWrapper(Tool):
                 logger.warning("MCP prompt '{}' was cancelled by server/SDK", self._name)
                 return "(MCP prompt call was cancelled)"
             except McpError as exc:
-                logger.error(
+                logger.exception(
                     "MCP prompt '{}' failed: code={} message={}",
                     self._name,
                     exc.error.code,
@@ -400,11 +398,10 @@ class MCPPromptWrapper(Tool):
                         )
                         await asyncio.sleep(1)
                         continue
-                    logger.error(
-                        "MCP prompt '{}' failed after retry: {}: {}",
+                    logger.exception(
+                        "MCP prompt '{}' failed after retry: {}",
                         self._name,
                         type(exc).__name__,
-                        exc,
                     )
                     return f"(MCP prompt call failed after retry: {type(exc).__name__})"
                 logger.exception(
@@ -608,7 +605,7 @@ async def connect_mcp_servers(
                     " Hint: this looks like stdio protocol pollution. Make sure the MCP server writes "
                     "only JSON-RPC to stdout and sends logs/debug output to stderr instead."
                 )
-            logger.error("MCP server '{}': failed to connect: {}{}", name, e, hint)
+            logger.exception("MCP server '{}': failed to connect: {}", name, hint)
             with suppress(Exception):
                 await server_stack.aclose()
             return name, None
