@@ -24,6 +24,23 @@ docker compose logs -f nanobot-gateway                   # view logs
 docker compose down                                      # stop
 ```
 
+### Configuration via Environment Variables
+
+Instead of editing `config.json`, you can configure nanobot using environment variables. This is recommended for Docker and PaaS deployments (like Dokploy or Heroku).
+
+Nanobot maps environment variables starting with `NANOBOT_` using double underscores `__` as separators for nested keys:
+
+- **API Keys**: `NANOBOT_PROVIDERS__OPENROUTER__API_KEY=sk-or-v1-xxx`
+- **Default Model**: `NANOBOT_AGENTS__DEFAULTS__MODEL=anthropic/claude-3-5-sonnet`
+- **Default Provider**: `NANOBOT_AGENTS__DEFAULTS__PROVIDER=openrouter`
+- **Enable WebUI**: `NANOBOT_CHANNELS__WEBSOCKET__ENABLED=true`
+- **Telegram (List type)**: `NANOBOT_CHANNELS__TELEGRAM__ALLOW_FROM=["1234567"]`
+
+> [!NOTE]
+> For configuration keys that expect a list (like `ALLOW_FROM`), use JSON square brackets `[...]` in your environment variable value.
+
+In your `docker-compose.yml`, add these under the `environment:` section of your services.
+
 ### Docker
 
 ```bash

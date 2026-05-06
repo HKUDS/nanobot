@@ -20,10 +20,10 @@ RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
     uv pip install --system --no-cache . && \
     rm -rf nanobot bridge
 
-# Copy the full source and install
+# Copy the full source
 COPY nanobot/ nanobot/
 COPY bridge/ bridge/
-RUN uv pip install --system --no-cache .
+COPY webui/ webui/
 
 # Build the WhatsApp bridge
 WORKDIR /app/bridge
@@ -31,6 +31,12 @@ RUN git config --global --add url."https://github.com/".insteadOf ssh://git@gith
     git config --global --add url."https://github.com/".insteadOf git@github.com: && \
     npm install && npm run build
 WORKDIR /app
+
+# Build WebUI (outputs to nanobot/web/dist)
+RUN cd webui && npm install && npm run build
+
+# Final Python install with all assets present
+RUN uv pip install --system --no-cache .
 
 # Create non-root user and config directory
 RUN useradd -m -u 1000 -s /bin/bash nanobot && \

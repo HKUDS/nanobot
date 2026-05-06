@@ -3,7 +3,35 @@ x-common-config: &common-config
     context: .
     dockerfile: Dockerfile
   volumes:
-    - ~/.nanobot:/home/nanobot/.nanobot
+    - nanobot_data:/home/nanobot/.nanobot
+  environment:
+    # --- CORE ---
+    - NANOBOT_CHANNELS__WEBSOCKET__ENABLED=true
+    - NANOBOT_GATEWAY__HOST=0.0.0.0
+    - NANOBOT_API__HOST=0.0.0.0
+    - NANOBOT_AGENTS__DEFAULTS__TIMEZONE=UTC  # e.g., Asia/Kolkata, America/New_York
+
+    # --- AGENT DEFAULTS ---
+    - NANOBOT_AGENTS__DEFAULTS__PROVIDER=gemini
+    - NANOBOT_AGENTS__DEFAULTS__MODEL=gemini-1.5-pro
+
+    # --- LLM PROVIDERS ---
+    - NANOBOT_PROVIDERS__GEMINI__API_KEY=YOUR_GEMINI_API_KEY_HERE
+    - NANOBOT_PROVIDERS__OPENAI__API_KEY=
+    - NANOBOT_PROVIDERS__ANTHROPIC__API_KEY=
+    - NANOBOT_PROVIDERS__DEEPSEEK__API_KEY=
+    - NANOBOT_PROVIDERS__OPENROUTER__API_KEY=
+    - NANOBOT_PROVIDERS__GROQ__API_KEY=
+
+    # --- TELEGRAM ---
+    - NANOBOT_CHANNELS__TELEGRAM__ENABLED=true
+    - NANOBOT_CHANNELS__TELEGRAM__TOKEN=YOUR_TELEGRAM_BOT_TOKEN_HERE
+    - NANOBOT_CHANNELS__TELEGRAM__ALLOW_FROM=["YOUR_TELEGRAM_USER_ID_HERE"]
+
+    # --- WEB SEARCH (Optional) ---
+    # Provider options: tavily, brave, duckduckgo, jina, kagi, olostep
+    - NANOBOT_TOOLS__WEB__SEARCH__PROVIDER=duckduckgo
+    - NANOBOT_TOOLS__WEB__SEARCH__API_KEY=
   cap_drop:
     - ALL
   cap_add:
@@ -53,3 +81,6 @@ services:
     command: ["status"]
     stdin_open: true
     tty: true
+
+volumes:
+  nanobot_data:
