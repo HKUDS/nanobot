@@ -9,7 +9,7 @@ from nanobot.agent.tools.sandbox import wrap_command
 
 _SKIP_WINDOWS = pytest.mark.skipif(
     sys.platform == "win32",
-    reason="bwrap sandbox is Linux-only",
+    reason="tests use POSIX-style absolute paths; runs on Linux and macOS",
 )
 
 
