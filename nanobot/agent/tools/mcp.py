@@ -439,8 +439,8 @@ async def connect_mcp_servers(
     """Connect to configured MCP servers and register their tools, resources, prompts.
 
     Returns a dict mapping server name -> its dedicated AsyncExitStack.
-    Each server gets its own stack and runs in its own task to prevent
-    cancel scope conflicts when multiple MCP servers are configured.
+    Each server gets its own stack to prevent cancel scope conflicts
+    when multiple MCP servers are configured.
     """
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.sse import sse_client
@@ -615,19 +615,13 @@ async def connect_mcp_servers(
 
     server_stacks: dict[str, AsyncExitStack] = {}
 
-    tasks: list[asyncio.Task] = []
     for name, cfg in mcp_servers.items():
-        task = asyncio.create_task(connect_single_server(name, cfg))
-        tasks.append(task)
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    for i, result in enumerate(results):
-        name = list(mcp_servers.keys())[i]
-        if isinstance(result, BaseException):
-            if not isinstance(result, asyncio.CancelledError):
-                logger.error("MCP server '{}' connection task failed: {}", name, result)
-        elif result is not None and result[1] is not None:
+        try:
+            result = await connect_single_server(name, cfg)
+        except Exception as e:
+            logger.error("MCP server '{}' connection failed: {}", name, e)
+            continue
+        if result is not None and result[1] is not None:
             server_stacks[result[0]] = result[1]
 
     return server_stacks
