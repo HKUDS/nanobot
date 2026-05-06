@@ -95,6 +95,8 @@ Configure these **two parts** in your config (other options have defaults).
 }
 ```
 
+*Want to switch models mid-conversation?* Define [`modelPresets`](./configuration.md#model-presets) and switch instantly with `my(action="set", key="model_preset", value="fast")`.
+
 **3. Chat**
 
 ```bash

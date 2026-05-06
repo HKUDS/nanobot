@@ -104,8 +104,9 @@ class AgentDefaults(Base):
         validation_alias=AliasChoices("toolHintMaxLength"),
         serialization_alias="toolHintMaxLength",
     )  # Max characters for tool hint display (e.g. "$ cd …/project && npm test")
-    reasoning_effort: str | None = None  # low / medium / high / adaptive - enables LLM thinking mode
-    fallback_models: list[str] = Field(default_factory=list)
+    fallback_presets: list[str] = Field(
+        default_factory=list
+    )  # Ordered fallback chain. Each item must be a preset name defined in model_presets.
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
     disabled_skills: list[str] = Field(default_factory=list)  # Skill names to exclude from loading (e.g. ["summarize", "skill-creator"])
@@ -293,23 +294,51 @@ class Config(BaseSettings):
     model_presets: dict[str, ModelPresetConfig] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_model_preset(self) -> "Config":
-        name = self.agents.defaults.model_preset
-        if name and name not in self.model_presets:
-            raise ValueError(f"model_preset {name!r} not found in model_presets")
+    def _sync_and_validate_preset(self) -> "Config":
+        """Expose agents.defaults model fields as the implicit 'default' preset
+        and validate the active preset reference.
+
+        This guarantees that ``model_presets`` is never empty and that legacy
+        configs (which only set ``agents.defaults.model`` etc.) continue to work
+        without explicitly declaring a preset.
+        """
+        self._refresh_default_preset()
+        defaults = self.agents.defaults
+        if defaults.model_preset is None:
+            defaults.model_preset = "default"
+        if defaults.model_preset not in self.model_presets:
+            raise ValueError(f"model_preset {defaults.model_preset!r} not found in model_presets")
+        for fb in defaults.fallback_presets:
+            if fb not in self.model_presets:
+                raise ValueError(f"fallback_presets entry {fb!r} not found in model_presets")
         return self
 
-    def resolve_preset(self) -> ModelPresetConfig:
-        """Return effective model params: from active preset, or individual defaults."""
-        name = self.agents.defaults.model_preset
-        if name:
-            return self.model_presets[name]
+    def _refresh_default_preset(self) -> None:
+        """Rebuild the implicit 'default' preset from current agents.defaults.
+
+        Called inside ``_sync_and_validate_preset`` (model validator) and
+        ``resolve_preset()`` so that runtime mutations (e.g. tests directly
+        setting ``defaults.model``) are reflected.
+        """
         d = self.agents.defaults
-        return ModelPresetConfig(
-            model=d.model, provider=d.provider, max_tokens=d.max_tokens,
+        self.model_presets["default"] = ModelPresetConfig(
+            model=d.model,
+            provider=d.provider,
+            max_tokens=d.max_tokens,
             context_window_tokens=d.context_window_tokens,
-            temperature=d.temperature, reasoning_effort=d.reasoning_effort,
+            temperature=d.temperature,
+            reasoning_effort=d.reasoning_effort,
         )
+
+    def resolve_preset(self) -> ModelPresetConfig:
+        """Return the active preset.
+
+        The implicit ``"default"`` preset is rebuilt from current defaults every
+        time so that runtime mutations (e.g. tests setting ``defaults.model``)
+        are always reflected.
+        """
+        self._refresh_default_preset()
+        return self.model_presets[self.agents.defaults.model_preset]
 
     @property
     def workspace_path(self) -> Path:
@@ -322,15 +351,16 @@ class Config(BaseSettings):
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS, find_by_name
 
-        forced = self.resolve_preset().provider
+        resolved = self.resolve_preset()
+        forced = resolved.provider
         if forced != "auto":
             spec = find_by_name(forced)
             if spec:
-                p = getattr(self.providers, spec.name, None)
-                return (p, spec.name) if p else (None, None)
+                provider_cfg = getattr(self.providers, spec.name, None)
+                return (provider_cfg, spec.name) if provider_cfg else (None, None)
             return None, None
 
-        model_lower = (model or self.resolve_preset().model).lower()
+        model_lower = (model or resolved.model).lower()
         model_normalized = model_lower.replace("-", "_")
         model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
         normalized_prefix = model_prefix.replace("-", "_")

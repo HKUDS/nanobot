@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
@@ -12,68 +11,16 @@ from loguru import logger
 from nanobot.providers.base import GenerationSettings, LLMProvider, LLMResponse
 
 
-@dataclass(frozen=True)
-class ModelCandidate:
-    """A lazily resolved model/provider candidate."""
-
-    label: str
-    resolver: Callable[[], tuple[LLMProvider, str]]
-
-
 class ModelRouter(LLMProvider):
     """Try fallback model candidates for eligible transient final errors."""
-
-    supports_progress_deltas = False
-
-    _BLOCKED_STATUS_CODES = frozenset({400, 401, 403, 404, 422})
-    _QUOTA_MARKERS = (
-        "insufficient_quota",
-        "insufficient quota",
-        "quota exceeded",
-        "quota_exceeded",
-        "quota exhausted",
-        "quota_exhausted",
-        "billing hard limit",
-        "billing_hard_limit_reached",
-        "billing not active",
-        "insufficient balance",
-        "insufficient_balance",
-        "credit balance too low",
-        "payment required",
-        "out of credits",
-        "out of quota",
-        "exceeded your current quota",
-    )
-    _NON_FAILOVER_MARKERS = (
-        "context length",
-        "context_length",
-        "maximum context",
-        "max context",
-        "token budget",
-        "too many tokens",
-        "schema",
-        "invalid request",
-        "invalid_request",
-        "invalid parameter",
-        "invalid_parameter",
-        "unsupported",
-        "unauthorized",
-        "authentication",
-        "permission",
-        "forbidden",
-        "refusal",
-        "content policy",
-        "content_filter",
-        "policy violation",
-        "safety",
-    )
 
     def __init__(
         self,
         *,
         primary_provider: LLMProvider,
         primary_model: str,
-        fallback_candidates: list[ModelCandidate],
+        fallback_presets: list[str],
+        provider_factory: Callable[[str], LLMProvider] | None = None,
         per_candidate_timeout_s: float | None = None,
     ) -> None:
         super().__init__(
@@ -82,7 +29,9 @@ class ModelRouter(LLMProvider):
         )
         self.primary_provider = primary_provider
         self.primary_model = primary_model
-        self.fallback_candidates = list(fallback_candidates)
+        self.fallback_presets = list(fallback_presets)
+        self._provider_factory = provider_factory
+        self._provider_cache: dict[str, LLMProvider] = {}
         self.per_candidate_timeout_s = per_candidate_timeout_s
         self.generation = getattr(primary_provider, "generation", GenerationSettings())
 
@@ -90,41 +39,46 @@ class ModelRouter(LLMProvider):
         return self.primary_model
 
     async def chat(self, **kwargs: Any) -> LLMResponse:
-        return await self.primary_provider.chat(**kwargs)
+        async def call(provider: LLMProvider, candidate_model: str, _unused_delta: Any) -> LLMResponse:
+            return await provider.chat(**{**kwargs, "model": candidate_model})
+        return await self._route(call)
 
     async def chat_stream(self, **kwargs: Any) -> LLMResponse:
-        return await self.primary_provider.chat_stream(**kwargs)
+        async def call(provider: LLMProvider, candidate_model: str, content_delta: Any) -> LLMResponse:
+            return await provider.chat_stream(
+                **{**kwargs, "model": candidate_model, "on_content_delta": content_delta}
+            )
+        return await self._route(call, on_content_delta=kwargs.get("on_content_delta"))
 
-    @classmethod
-    def _is_quota_error(cls, response: LLMResponse) -> bool:
-        tokens = {
-            cls._normalize_error_token(response.error_type),
-            cls._normalize_error_token(response.error_code),
-        }
-        if any(token in cls._NON_RETRYABLE_429_ERROR_TOKENS for token in tokens if token):
-            return True
-        content = (response.content or "").lower()
-        return any(marker in content for marker in cls._QUOTA_MARKERS)
-
-    @classmethod
-    def _is_blocked_error(cls, response: LLMResponse) -> bool:
-        status = response.error_status_code
-        if status is not None and int(status) in cls._BLOCKED_STATUS_CODES:
-            return True
-        if response.finish_reason in {"refusal", "content_filter"}:
-            return True
-        content = (response.content or "").lower()
-        return any(marker in content for marker in cls._NON_FAILOVER_MARKERS)
+    @property
+    def supports_progress_deltas(self) -> bool:  # type: ignore[override]
+        return getattr(self.primary_provider, "supports_progress_deltas", False)
 
     @classmethod
     def _should_failover(cls, response: LLMResponse) -> bool:
         if response.finish_reason != "error":
             return False
-        if cls._is_blocked_error(response):
+        if response.error_should_retry is False:
             return False
-        if cls._is_quota_error(response):
+        if response.error_kind == "configuration":
             return False
-        return cls._is_transient_response(response)
+        return True
+
+    def _resolve(self, model: str) -> tuple[LLMProvider, str]:
+        """Return (provider, actual_model_name) for a preset name.
+
+        Caches results so factory is only invoked once per unique name.
+        """
+        if model in self._provider_cache:
+            cached_provider = self._provider_cache[model]
+            return cached_provider, cached_provider.get_default_model()
+        if self._provider_factory is None:
+            raise ValueError(
+                f"Cannot resolve fallback model {model!r}: no provider_factory configured"
+            )
+        provider = self._provider_factory(model)
+        self._provider_cache[model] = provider
+        return provider, provider.get_default_model()
 
     async def _with_timeout(self, coro: Awaitable[LLMResponse]) -> LLMResponse:
         timeout_s = self.per_candidate_timeout_s
@@ -140,23 +94,14 @@ class ModelRouter(LLMProvider):
             )
 
     @staticmethod
-    def _resolver_error(candidate: ModelCandidate, exc: Exception) -> LLMResponse:
-        logger.warning("Failed to resolve fallback model {}: {}", candidate.label, exc)
+    def _resolver_error(label: str, exc: Exception) -> LLMResponse:
+        logger.warning("Failed to resolve fallback model {}: {}", label, exc)
         return LLMResponse(
-            content=f"Error configuring fallback model {candidate.label}: {exc}",
+            content=f"Error configuring fallback model {label}: {exc}",
             finish_reason="error",
             error_kind="configuration",
             error_should_retry=False,
         )
-
-    def _candidate_chain(self) -> list[ModelCandidate]:
-        return [
-            ModelCandidate(
-                label=self.primary_model,
-                resolver=lambda: (self.primary_provider, self.primary_model),
-            ),
-            *self.fallback_candidates,
-        ]
 
     async def _route(
         self,
@@ -164,113 +109,75 @@ class ModelRouter(LLMProvider):
         *,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
-        last_response: LLMResponse | None = None
-        chain = self._candidate_chain()
-        for index, candidate in enumerate(chain):
+        """Try primary then each fallback candidate, lazily resolving providers."""
+
+        async def _try_one(label: str, provider: LLMProvider, model: str) -> LLMResponse:
             try:
-                provider, model = candidate.resolver()
+                return await self._with_timeout(call(provider, model, on_content_delta))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                response = self._resolver_error(candidate, exc)
-            else:
-                response = await self._with_timeout(call(provider, model, on_content_delta))
+                return self._resolver_error(label, exc)
 
+        # Primary
+        response = await _try_one("primary", self.primary_provider, self.primary_model)
+        if response.finish_reason != "error":
+            return response
+        if not self._should_failover(response):
+            return response
+
+        # Fallbacks
+        for name in self.fallback_presets:
+            try:
+                provider, model = self._resolve(name)
+            except Exception as exc:
+                logger.warning("Failed to resolve fallback model {}: {}", name, exc)
+                return self._resolver_error(name, exc)
+
+            response = await _try_one(name, provider, model)
             if response.finish_reason != "error":
-                if index > 0:
-                    logger.info("LLM failover selected model={}", candidate.label)
+                logger.info("LLM failover selected model={}", name)
                 return response
-
-            last_response = response
             if not self._should_failover(response):
                 return response
-            if index + 1 >= len(chain):
-                logger.warning("LLM failover exhausted after model={}", candidate.label)
-                return response
-            logger.warning(
-                "LLM failover model={} next_model={} status={} kind={}",
-                candidate.label,
-                chain[index + 1].label,
-                response.error_status_code,
-                response.error_kind or response.error_type or response.error_code or "unknown",
-            )
 
-        return last_response or LLMResponse(
-            content="No available fallback model candidate.",
-            finish_reason="error",
-            error_kind="configuration",
-            error_should_retry=False,
-        )
+        logger.warning("LLM failover exhausted after all candidates")
+        return response
 
-    async def chat_with_retry(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        model: str | None = None,
-        max_tokens: object = LLMProvider._SENTINEL,
-        temperature: object = LLMProvider._SENTINEL,
-        reasoning_effort: object = LLMProvider._SENTINEL,
-        tool_choice: str | dict[str, Any] | None = None,
-        retry_mode: str = "standard",
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
-    ) -> LLMResponse:
+    async def chat_with_retry(self, **kwargs: Any) -> LLMResponse:
         async def call(
-            provider: LLMProvider,
-            candidate_model: str,
-            _delta: Callable[[str], Awaitable[None]] | None,
+            provider: LLMProvider, candidate_model: str, _unused_delta: Any
         ) -> LLMResponse:
             return await provider.chat_with_retry(
-                messages=messages,
-                tools=tools,
-                model=candidate_model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                reasoning_effort=reasoning_effort,
-                tool_choice=tool_choice,
-                retry_mode=retry_mode,
-                on_retry_wait=on_retry_wait,
+                **{**kwargs, "model": candidate_model}
             )
-
         return await self._route(call)
 
-    async def chat_stream_with_retry(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        model: str | None = None,
-        max_tokens: object = LLMProvider._SENTINEL,
-        temperature: object = LLMProvider._SENTINEL,
-        reasoning_effort: object = LLMProvider._SENTINEL,
-        tool_choice: str | dict[str, Any] | None = None,
-        on_content_delta: Callable[[str], Awaitable[None]] | None = None,
-        retry_mode: str = "standard",
-        on_retry_wait: Callable[[str], Awaitable[None]] | None = None,
-    ) -> LLMResponse:
+    async def chat_stream_with_retry(self, **kwargs: Any) -> LLMResponse:
+        on_content_delta = kwargs.pop("on_content_delta", None)
+
         async def call(
             provider: LLMProvider,
             candidate_model: str,
-            external_delta: Callable[[str], Awaitable[None]] | None,
+            content_delta: Callable[[str], Awaitable[None]] | None,
         ) -> LLMResponse:
             buffered: list[str] = []
 
             async def buffer_delta(delta: str) -> None:
                 buffered.append(delta)
 
+            kwargs["on_content_delta"] = buffer_delta if content_delta else None
             response = await provider.chat_stream_with_retry(
-                messages=messages,
-                tools=tools,
-                model=candidate_model,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                reasoning_effort=reasoning_effort,
-                tool_choice=tool_choice,
-                on_content_delta=buffer_delta if external_delta else None,
-                retry_mode=retry_mode,
-                on_retry_wait=on_retry_wait,
+                **{**kwargs, "model": candidate_model}
             )
-            if response.finish_reason != "error" and external_delta:
-                for delta in buffered:
-                    await external_delta(delta)
+            if response.finish_reason != "error" and content_delta:
+                try:
+                    for delta in buffered:
+                        await content_delta(delta)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Failover delta callback failed for model={}", candidate_model)
             return response
 
         return await self._route(call, on_content_delta=on_content_delta)

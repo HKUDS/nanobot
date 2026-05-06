@@ -123,6 +123,7 @@
 - **Ultra-lightweight**: stable long-running agent behavior with a small, readable core.
 - **Research-ready**: the codebase is intentionally simple enough to study, modify, and extend.
 - **Practical**: chat channels, API, memory, MCP, and deployment paths are already built in.
+- **Runtime model switching**: define [model presets](docs/configuration.md#model-presets) and switch between cheap/fast and powerful models mid-conversation — no restart required.
 - **Hackable**: you can start fast, then go deeper through repo docs instead of a monolithic landing page.
 
 ## 📦 Install

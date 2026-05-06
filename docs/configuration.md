@@ -656,6 +656,146 @@ That's it! Environment variables, model routing, config matching, and `nanobot s
 
 </details>
 
+## Agent Settings
+
+### Model Presets
+
+Model presets let you define **named bundles** of model + generation parameters and switch between them instantly — no restart required.
+
+> [!NOTE]
+> Config fields in `config.json` use **camelCase** (`modelPreset`, `contextWindowTokens`).
+> The [`my` tool](./my-tool.md) uses **snake_case** (`model_preset`, `context_window_tokens`).
+> Both refer to the same thing — just different naming conventions for config vs. runtime API.
+
+**Why use presets?**
+- Switch between a cheap/fast model and a powerful model mid-conversation.
+- Share the same config across different tasks without manually editing `model`, `provider`, `temperature`, etc.
+- Runtime switching via the [`my` tool](./my-tool.md).
+
+> [!TIP]
+> The easiest way to set up presets and fallback models is through the interactive wizard:
+> ```bash
+> nanobot onboard --wizard
+> ```
+> Choose **"[M] Model Presets"** to create, edit, or delete presets interactively.
+
+**Configuration example:**
+
+```json
+{
+  "modelPresets": {
+    "fast": {
+      "model": "gpt-4.1-mini",
+      "provider": "openai",
+      "maxTokens": 4096,
+      "contextWindowTokens": 128000,
+      "temperature": 0.3
+    },
+    "deep": {
+      "model": "claude-opus-4-7",
+      "provider": "anthropic",
+      "maxTokens": 8192,
+      "contextWindowTokens": 200000,
+      "temperature": 0.1,
+      "reasoningEffort": "high"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "modelPreset": "fast"
+    }
+  }
+}
+```
+
+**Preset fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `model` | string | *(required)* | Model identifier, e.g. `anthropic/claude-opus-4-7` or `gpt-4.1` |
+| `provider` | string | `"auto"` | Provider name or `"auto"` to infer from the model string |
+| `maxTokens` | integer | `8192` | Max completion tokens per turn |
+| `contextWindowTokens` | integer | `65536` | Context window size for token budgeting |
+| `temperature` | float | `0.1` | Sampling temperature |
+| `reasoningEffort` | string or null | `null` | Thinking mode: `low`, `medium`, `high`, `adaptive` |
+
+**How it works:**
+- When `modelPreset` is set, the preset **completely overrides** all model-specific fields in `agents.defaults`.
+- When `modelPreset` is omitted, nanobot automatically creates an implicit `"default"` preset from your existing `agents.defaults.model`, `provider`, `temperature`, etc. — **zero migration required** for existing configs.
+
+**Runtime switching** (requires `tools.my.allowSet: true`):
+
+```text
+my(action="set", key="model_preset", value="deep")
+```
+
+This atomically swaps the model, provider, generation parameters, and context window for the next turn.
+
+If the preset name does not exist, the agent receives an error such as `model_preset 'unknown' not found. Available: fast, deep`.
+
+> [!NOTE]
+> Directly modifying `model` or `contextWindowTokens` via `my(action="set", key="model", ...)` still works, but it automatically clears the active preset because the live state no longer matches the preset bundle. Use `model_preset` for atomic switches instead.
+
+See [`my-tool.md`](./my-tool.md) for more runtime examples.
+
+---
+
+### Fallback Models
+
+When the primary model returns a transient error (rate limit, server overload, quota exhausted), nanobot can automatically fail over to a chain of backup models.
+
+**Configuration example:**
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "modelPreset": "fast",
+      "fallbackModels": ["deep", "backup"]
+    }
+  }
+}
+```
+
+**How it works:**
+1. nanobot tries the primary model first (the one from the active preset).
+2. The provider retries transient errors internally (e.g. 3 attempts with exponential backoff for 503/429).
+3. Only after the provider's own retries are exhausted and the final response still has `finish_reason == "error"` with a retryable error kind, nanobot moves to the next candidate in `fallbackModels`.
+4. Each candidate must be a preset name defined in `modelPresets`. The preset's full config (model, provider, generation params) is used.
+5. If all candidates are exhausted, the final error is returned to the user.
+
+**Failover triggers on:**
+- `server_error` (503, 502, 500)
+- `rate_limit` (429)
+- `insufficient_quota` / `quota_exhausted` (429)
+
+**Failover does NOT trigger on:**
+- Authentication errors (401) — rotating to another model with the same key won't help
+- Invalid request errors (400) — the request itself is malformed
+
+> [!TIP]
+> Fallback models must reference preset names defined in `modelPresets`. Define a preset for each fallback model you want to use: `["cheap-preset", "backup", "emergency"]`.
+
+---
+
+### Other Agent Defaults
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `agents.defaults.model` | string | `"anthropic/claude-opus-4-5"` | Default model when no preset is active |
+| `agents.defaults.provider` | string | `"auto"` | Default provider when no preset is active |
+| `agents.defaults.maxTokens` | integer | `8192` | Max completion tokens when no preset is active |
+| `agents.defaults.temperature` | float | `0.1` | Sampling temperature when no preset is active |
+| `agents.defaults.reasoningEffort` | string or null | `null` | Thinking mode when no preset is active |
+| `agents.defaults.maxToolIterations` | integer | `200` | Max tool calls per conversation turn |
+| `agents.defaults.maxToolResultChars` | integer | `16000` | Max characters per tool result |
+| `agents.defaults.providerRetryMode` | string | `"standard"` | `"standard"` or `"persistent"` — how aggressively to retry provider-level errors |
+| `agents.defaults.timezone` | string | `"UTC"` | IANA timezone for runtime context |
+| `agents.defaults.unifiedSession` | boolean | `false` | Share one session across all channels |
+| `agents.defaults.sessionTtlMinutes` | integer | `0` | Auto-compact idle threshold (0 = disabled) |
+| `agents.defaults.maxMessages` | integer | `120` | Max messages to replay from session history |
+| `agents.defaults.consolidationRatio` | float | `0.5` | Target ratio retained after context compression |
+
 ## Channel Settings
 
 Global settings that apply to all channels. Configure under the `channels` section in `~/.nanobot/config.json`:

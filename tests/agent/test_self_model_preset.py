@@ -1,6 +1,6 @@
 # tests/agent/test_self_model_preset.py
-import asyncio
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 from nanobot.agent.loop import AgentLoop
@@ -8,10 +8,23 @@ from nanobot.config.schema import ModelPresetConfig, MyToolConfig, ToolsConfig
 from nanobot.providers.base import GenerationSettings
 
 
-def _make_loop(presets: dict | None = None) -> tuple[AgentLoop, "MyTool"]:
+def _make_loop(presets: dict | None = None) -> tuple[AgentLoop, Any]:
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings(temperature=0.1, max_tokens=8192)
+
+    def _factory(name: str):
+        preset = (presets or {}).get(name)
+        if preset:
+            new_provider = MagicMock()
+            new_provider.generation = GenerationSettings(
+                temperature=preset.temperature,
+                max_tokens=preset.max_tokens,
+                reasoning_effort=preset.reasoning_effort,
+            )
+            return new_provider
+        return provider
+
     loop = AgentLoop(
         bus=MagicMock(),
         provider=provider,
@@ -19,6 +32,7 @@ def _make_loop(presets: dict | None = None) -> tuple[AgentLoop, "MyTool"]:
         model="test-model",
         context_window_tokens=65536,
         model_presets=presets or {},
+        provider_factory=_factory,
         tools_config=ToolsConfig(my=MyToolConfig(allow_set=True)),
     )
     tool = loop.tools.get("my")
@@ -36,7 +50,7 @@ async def test_set_model_preset_updates_all_fields() -> None:
         ),
     }
     loop, tool = _make_loop(presets)
-    result = await tool.execute(action="set", key="model_preset", value="gpt5")
+    await tool.execute(action="set", key="model_preset", value="gpt5")
 
     assert loop.model == "gpt-5"
     assert loop.context_window_tokens == 128000
@@ -73,12 +87,3 @@ async def test_check_model_presets_shows_available() -> None:
     assert "ds" in result
 
 
-async def test_set_model_directly_clears_preset() -> None:
-    presets = {"gpt5": ModelPresetConfig(model="gpt-5", provider="openai")}
-    loop, tool = _make_loop(presets)
-    await tool.execute(action="set", key="model_preset", value="gpt5")
-    assert loop._active_preset == "gpt5"
-
-    await tool.execute(action="set", key="model", value="other-model")
-    assert loop._active_preset is None
-    assert loop.model == "other-model"

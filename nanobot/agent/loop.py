@@ -188,6 +188,50 @@ class AgentLoop:
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
     _PENDING_USER_TURN_KEY = "pending_user_turn"
 
+    @classmethod
+    def from_config(
+        cls,
+        config: Any,
+        bus: MessageBus | None = None,
+        **extra: Any,
+    ) -> AgentLoop:
+        """Create an AgentLoop from config with the common parameter set."""
+        from nanobot.providers.factory import build_provider_for_preset, make_provider_factory
+
+        if bus is None:
+            bus = MessageBus()
+        defaults = config.agents.defaults
+        resolved_preset = config.resolve_preset()
+        provider = build_provider_for_preset(config, resolved_preset)
+        return cls(
+            bus=bus,
+            provider=provider,
+            workspace=config.workspace_path,
+            model=resolved_preset.model,
+            max_iterations=defaults.max_tool_iterations,
+            context_window_tokens=resolved_preset.context_window_tokens,
+            context_block_limit=defaults.context_block_limit,
+            max_tool_result_chars=defaults.max_tool_result_chars,
+            provider_retry_mode=defaults.provider_retry_mode,
+            fallback_presets=defaults.fallback_presets,
+            provider_factory=make_provider_factory(config),
+            web_config=config.tools.web,
+            exec_config=config.tools.exec,
+            restrict_to_workspace=config.tools.restrict_to_workspace,
+            mcp_servers=config.tools.mcp_servers,
+            channels_config=config.channels,
+            timezone=defaults.timezone,
+            unified_session=defaults.unified_session,
+            disabled_skills=defaults.disabled_skills,
+            session_ttl_minutes=defaults.session_ttl_minutes,
+            consolidation_ratio=defaults.consolidation_ratio,
+            max_messages=defaults.max_messages,
+            tools_config=config.tools,
+            model_presets=config.model_presets,
+            model_preset=defaults.model_preset,
+            **extra,
+        )
+
     def __init__(
         self,
         bus: MessageBus,
@@ -200,8 +244,8 @@ class AgentLoop:
         max_tool_result_chars: int | None = None,
         provider_retry_mode: str = "standard",
         tool_hint_max_length: int | None = None,
-        fallback_models: list[str] | None = None,
-        provider_factory: Any | None = None,
+        fallback_presets: list[str] | None = None,
+        provider_factory: Callable[[str], LLMProvider] | None = None,
         web_config: WebToolsConfig | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -228,7 +272,12 @@ class AgentLoop:
         defaults = AgentDefaults()
         self.bus = bus
         self.channels_config = channels_config
-        self.provider = provider
+        self.provider_factory = provider_factory
+        self.fallback_presets = fallback_presets or []
+        wrapped_provider = self._wrap_with_failover(
+            provider, model or provider.get_default_model()
+        )
+        self.provider = wrapped_provider
         self._provider_snapshot_loader = provider_snapshot_loader
         self._provider_signature = provider_signature
         self.workspace = workspace
@@ -252,7 +301,6 @@ class AgentLoop:
             tool_hint_max_length if tool_hint_max_length is not None
             else defaults.tool_hint_max_length
         )
-        self.fallback_models = fallback_models or []
         self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
@@ -260,15 +308,16 @@ class AgentLoop:
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
+
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore()
-        self.runner = AgentRunner(provider, provider_factory=provider_factory)
+        self.runner = AgentRunner(wrapped_provider)
         self.subagents = SubagentManager(
-            provider=provider,
+            provider=wrapped_provider,
             workspace=workspace,
             bus=bus,
             model=self.model,
@@ -300,13 +349,13 @@ class AgentLoop:
         )
         self.consolidator = Consolidator(
             store=self.context.memory,
-            provider=provider,
+            provider=wrapped_provider,
             model=self.model,
             sessions=self.sessions,
             context_window_tokens=self.context_window_tokens,
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
-            max_completion_tokens=provider.generation.max_tokens,
+            max_completion_tokens=wrapped_provider.generation.max_tokens,
             consolidation_ratio=consolidation_ratio,
         )
         self.auto_compact = AutoCompact(
@@ -316,11 +365,13 @@ class AgentLoop:
         )
         self.dream = Dream(
             store=self.context.memory,
-            provider=provider,
+            provider=wrapped_provider,
             model=self.model,
         )
         self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
-        self._active_preset: str | None = model_preset if model_presets and model_preset in model_presets else None
+        self._active_preset: str | None = (
+            model_preset if model_preset in self.model_presets else None
+        )
         self._register_default_tools()
         if _tc.my.enable:
             self.tools.register(MyTool(loop=self, modify_allowed=_tc.my.allow_set))
@@ -333,6 +384,38 @@ class AgentLoop:
         """Keep subagent runtime limits aligned with mutable loop settings."""
         self.subagents.max_iterations = self.max_iterations
 
+    def _wrap_with_failover(self, provider: LLMProvider, model: str) -> LLMProvider:
+        """Wrap provider with failover router when fallback_presets are configured."""
+        if not self.fallback_presets or not self.provider_factory:
+            return provider
+        from nanobot.providers.failover import ModelRouter
+
+        if isinstance(provider, ModelRouter):
+            return provider
+
+        return ModelRouter(
+            primary_provider=provider,
+            primary_model=model,
+            fallback_presets=self.fallback_presets,
+            provider_factory=self.provider_factory,
+        )
+
+    def _apply_provider_state(
+        self,
+        provider: LLMProvider,
+        model: str,
+        context_window_tokens: int,
+    ) -> None:
+        """Push provider/model/context_window to all LLM-consuming subsystems."""
+        self.provider = provider
+        # Bypass property setters so internal updates don't clear _active_preset.
+        object.__setattr__(self, "_model", model)
+        object.__setattr__(self, "_context_window_tokens", context_window_tokens)
+        self.runner.provider = provider
+        self.subagents.set_provider(provider, model)
+        self.consolidator.set_provider(provider, model, context_window_tokens)
+        self.dream.set_provider(provider, model)
+
     def _apply_provider_snapshot(self, snapshot: ProviderSnapshot) -> None:
         """Swap model/provider for future turns without disturbing an active one."""
         provider = snapshot.provider
@@ -341,14 +424,13 @@ class AgentLoop:
         if self.provider is provider and self.model == model:
             return
         old_model = self.model
-        self.provider = provider
-        self.model = model
-        self.context_window_tokens = context_window_tokens
-        self.runner.provider = provider
-        self.subagents.set_provider(provider, model)
-        self.consolidator.set_provider(provider, model, context_window_tokens)
-        self.dream.set_provider(provider, model)
+        provider = self._wrap_with_failover(provider, model)
+        self._apply_provider_state(provider, model, context_window_tokens)
         self._provider_signature = snapshot.signature
+        if self._active_preset:
+            preset = self.model_presets.get(self._active_preset)
+            if preset and preset.model != model:
+                self._active_preset = None
         logger.info("Runtime model switched for next turn: {} -> {}", old_model, model)
 
     def _refresh_provider_snapshot(self) -> None:
@@ -363,6 +445,28 @@ class AgentLoop:
             return
         self._apply_provider_snapshot(snapshot)
 
+    # -- model / context_window_tokens properties with preset invalidation --
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    @model.setter
+    def model(self, value: str) -> None:
+        self._model = value
+        if hasattr(self, "_active_preset"):
+            self._active_preset = None
+
+    @property
+    def context_window_tokens(self) -> int:
+        return self._context_window_tokens
+
+    @context_window_tokens.setter
+    def context_window_tokens(self, value: int) -> None:
+        self._context_window_tokens = value
+        if hasattr(self, "_active_preset"):
+            self._active_preset = None
+
     # -- model_preset property --
 
     @property
@@ -370,22 +474,27 @@ class AgentLoop:
         return self._active_preset
 
     @model_preset.setter
-    def model_preset(self, name: str | None) -> None:
-        """Resolve a preset by name and apply all fields atomically."""
-        from nanobot.providers.base import GenerationSettings
-
+    def model_preset(self, name: str) -> None:
+        """Resolve a preset by name and apply all fields."""
         if not isinstance(name, str) or not name.strip():
             raise ValueError("model_preset must be a non-empty string")
         if name not in self.model_presets:
-            raise KeyError(f"model_preset {name!r} not found. Available: {', '.join(self.model_presets) or '(none)'}")
+            raise KeyError(
+                f"model_preset {name!r} not found. Available: {', '.join(self.model_presets) or '(none)'}"
+            )
+        if self.provider_factory is None:
+            raise ValueError("provider_factory is not configured; cannot switch model preset")
+
         p = self.model_presets[name]
-        self.model = p.model
-        self.context_window_tokens = p.context_window_tokens
-        self.provider.generation = GenerationSettings(
-            temperature=p.temperature,
-            max_tokens=p.max_tokens,
-            reasoning_effort=p.reasoning_effort,
-        )
+        new_provider = self._wrap_with_failover(self.provider_factory(name), p.model)
+
+        # Preserve dream model_override if it differs from the current loop model.
+        old_dream_model = self.dream.model
+        dream_had_override = old_dream_model != self.model
+
+        self._apply_provider_state(new_provider, p.model, p.context_window_tokens)
+        if dream_had_override:
+            self.dream.model = old_dream_model
         self._active_preset = name
 
     def _register_default_tools(self) -> None:
@@ -684,7 +793,6 @@ class AgentLoop:
                 context_window_tokens=self.context_window_tokens,
                 context_block_limit=self.context_block_limit,
                 provider_retry_mode=self.provider_retry_mode,
-                fallback_models=self.fallback_models,
                 progress_callback=on_progress,
                 stream_progress_deltas=on_stream is not None,
                 retry_wait_callback=on_retry_wait,

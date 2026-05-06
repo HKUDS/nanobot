@@ -99,11 +99,23 @@ def test_preset_not_found_raises_error() -> None:
         })
 
 
+def test_fallback_presets_invalid_preset_raises_error() -> None:
+    import pytest
+    with pytest.raises(Exception, match="fallback_presets.*not found"):
+        Config.model_validate({
+            "model_presets": {
+                "valid": {"model": "gpt-4"},
+            },
+            "agents": {"defaults": {"fallback_presets": ["invalid_preset"]}},
+        })
+
+
 def test_resolve_preset_without_preset_returns_defaults() -> None:
-    """Backward compat: no preset → resolve_preset returns individual field values."""
+    """Backward compat: no explicit preset → resolve_preset returns the auto-created 'default' preset."""
     cfg = Config.model_validate({
         "agents": {"defaults": {"model": "deepseek-chat"}},
     })
+    assert cfg.agents.defaults.model_preset == "default"
     r = cfg.resolve_preset()
     assert r.model == "deepseek-chat"
     assert r.max_tokens == 8192
@@ -170,13 +182,14 @@ def test_preset_with_auto_provider_uses_keyword_matching() -> None:
 
 
 def test_backward_compat_no_preset() -> None:
-    """Existing configs without model_presets work exactly as before."""
+    """Existing configs without model_presets are automatically promoted to the 'default' preset."""
     cfg = Config.model_validate({
         "providers": {"anthropic": {"api_key": "test-key"}},
         "agents": {"defaults": {"model": "anthropic/claude-opus-4-5"}},
     })
     assert cfg.resolve_preset().model == "anthropic/claude-opus-4-5"
-    assert cfg.agents.defaults.model_preset is None
+    assert cfg.agents.defaults.model_preset == "default"
+    assert "default" in cfg.model_presets
     assert cfg.get_provider_name() == "anthropic"
 
 
@@ -204,3 +217,48 @@ def test_resolve_preset_overrides_all_model_fields() -> None:
 def test_empty_model_presets_dict_is_harmless() -> None:
     cfg = Config.model_validate({"model_presets": {}})
     assert cfg.resolve_preset().model == "anthropic/claude-opus-4-5"
+
+
+def test_factory_uses_preset_provider_not_defaults() -> None:
+    """When creating a provider for a non-active preset, the preset's own provider must be used."""
+    from nanobot.providers.factory import make_provider_factory
+
+    cfg = Config.model_validate({
+        "model_presets": {
+            "kimi": {"model": "kimi-k2.6", "provider": "moonshot"},
+            "zhipu": {"model": "glm-5.1", "provider": "zhipu"},
+        },
+        "providers": {
+            "moonshot": {"api_key": "moonshot-key", "api_base": "https://api.moonshot.ai/v1"},
+            "zhipu": {"api_key": "zhipu-key", "api_base": "https://open.bigmodel.cn/api/paas/v4"},
+        },
+        "agents": {"defaults": {"model_preset": "kimi"}},
+    })
+
+    factory = make_provider_factory(cfg)
+    zhipu_provider = factory("zhipu")
+
+    assert zhipu_provider.api_base == "https://open.bigmodel.cn/api/paas/v4"
+    assert getattr(zhipu_provider, "api_key", None) == "zhipu-key"
+
+    # Also verify the active preset provider is still correct
+    moonshot_provider = factory("kimi")
+    assert moonshot_provider.api_base == "https://api.moonshot.ai/v1"
+
+
+def test_factory_rejects_unknown_preset_name() -> None:
+    """Factory must raise ValueError when asked for a preset not in model_presets."""
+    import pytest
+
+    from nanobot.providers.factory import make_provider_factory
+
+    cfg = Config.model_validate({
+        "model_presets": {
+            "known": {"model": "gpt-4", "provider": "openai"},
+        },
+        "providers": {"openai": {"api_key": "test-key"}},
+    })
+
+    factory = make_provider_factory(cfg)
+    with pytest.raises(ValueError, match="Preset 'unknown' not found"):
+        factory("unknown")
