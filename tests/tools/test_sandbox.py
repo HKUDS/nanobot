@@ -1,10 +1,16 @@
 """Tests for nanobot.agent.tools.sandbox."""
 
 import shlex
+import sys
 
 import pytest
 
 from nanobot.agent.tools.sandbox import wrap_command
+
+_SKIP_WINDOWS = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="bwrap sandbox is Linux-only",
+)
 
 
 def _parse(cmd: str) -> list[str]:
@@ -109,6 +115,7 @@ class TestBwrapBackend:
         assert (str(fake_media), str(fake_media)) in try_pairs
 
 
+@_SKIP_WINDOWS
 class TestUserBinds:
     def test_default_no_extra_binds(self, tmp_path):
         ws = str(tmp_path / "project")
@@ -178,6 +185,7 @@ class TestUnknownBackend:
             wrap_command("", "ls", ws, ws)
 
 
+@_SKIP_WINDOWS
 class TestSandboxBindsConfig:
     """ExecToolConfig must reject relative or empty bind paths up front."""
 
