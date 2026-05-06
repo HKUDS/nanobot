@@ -61,8 +61,8 @@ def test_system_prompt_reflects_current_dream_memory_contract(tmp_path) -> None:
     assert "write important facts here" not in prompt
 
 
-def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
-    """Runtime metadata should be merged with the user message."""
+def test_runtime_context_is_ephemeral_system_message_after_cacheable_prompt(tmp_path) -> None:
+    """Runtime metadata should not be merged into the persisted user turn."""
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
 
@@ -75,16 +75,16 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
 
     assert messages[0]["role"] == "system"
     assert "## Current Session" not in messages[0]["content"]
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG not in messages[0]["content"]
 
-    # Runtime context is now merged with user message into a single message
-    assert messages[-1]["role"] == "user"
-    user_content = messages[-1]["content"]
-    assert isinstance(user_content, str)
-    assert ContextBuilder._RUNTIME_CONTEXT_TAG in user_content
-    assert "Current Time:" in user_content
-    assert "Channel: cli" in user_content
-    assert "Chat ID: direct" in user_content
-    assert "Return exactly: OK" in user_content
+    assert messages[1]["role"] == "system"
+    runtime_content = messages[1]["content"]
+    assert ContextBuilder._RUNTIME_CONTEXT_TAG in runtime_content
+    assert "Current Time:" in runtime_content
+    assert "Channel: cli" in runtime_content
+    assert "Chat ID: direct" in runtime_content
+
+    assert messages[-1] == {"role": "user", "content": "Return exactly: OK"}
 
 
 def test_runtime_context_includes_sender_id_when_provided(tmp_path) -> None:
@@ -100,9 +100,9 @@ def test_runtime_context_includes_sender_id_when_provided(tmp_path) -> None:
         sender_id="user-12345",
     )
 
-    user_content = messages[-1]["content"]
-    assert isinstance(user_content, str)
-    assert "Sender ID: user-12345" in user_content
+    assert messages[1]["role"] == "system"
+    assert "Sender ID: user-12345" in messages[1]["content"]
+    assert messages[-1] == {"role": "user", "content": "Return exactly: OK"}
 
 
 def test_runtime_context_excludes_sender_id_when_not_provided(tmp_path) -> None:
@@ -118,9 +118,57 @@ def test_runtime_context_excludes_sender_id_when_not_provided(tmp_path) -> None:
         sender_id=None,
     )
 
-    user_content = messages[-1]["content"]
-    assert isinstance(user_content, str)
-    assert "Sender ID:" not in user_content
+    assert messages[1]["role"] == "system"
+    assert "Sender ID:" not in messages[1]["content"]
+    assert messages[-1] == {"role": "user", "content": "Return exactly: OK"}
+
+
+def test_runtime_context_strip_removes_new_and_legacy_wrappers() -> None:
+    wrapped = (
+        "before\n"
+        f"{ContextBuilder._RUNTIME_CONTEXT_TAG}\n"
+        "Current Time: now\n"
+        f"{ContextBuilder._RUNTIME_CONTEXT_END}\n"
+        "after"
+    )
+    legacy = (
+        "legacy before\n"
+        f"{ContextBuilder._LEGACY_RUNTIME_CONTEXT_TAG}\n"
+        "current_time=now\n"
+        f"{ContextBuilder._LEGACY_RUNTIME_CONTEXT_END}\n"
+        "legacy after"
+    )
+
+    cleaned = ContextBuilder.strip_runtime_context_text(wrapped)
+    assert "before" in cleaned
+    assert "after" in cleaned
+    assert "Runtime Context" not in cleaned
+    assert "Current Time:" not in cleaned
+
+    legacy_cleaned = ContextBuilder.strip_runtime_context_text(legacy)
+    assert "legacy before" in legacy_cleaned
+    assert "legacy after" in legacy_cleaned
+    assert "nanobot_runtime_context" not in legacy_cleaned
+    assert "current_time=now" not in legacy_cleaned
+
+
+def test_runtime_context_strip_removes_runtime_only_text_blocks() -> None:
+    runtime = (
+        f"{ContextBuilder._RUNTIME_CONTEXT_TAG}\n"
+        "Current Time: now\n"
+        f"{ContextBuilder._RUNTIME_CONTEXT_END}"
+    )
+
+    cleaned = ContextBuilder.strip_runtime_context_from_content([
+        {"type": "text", "text": runtime},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+        {"type": "text", "text": "hello"},
+    ])
+
+    assert cleaned == [
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+        {"type": "text", "text": "hello"},
+    ]
 
 
 def test_unprocessed_history_injected_into_system_prompt(tmp_path) -> None:
