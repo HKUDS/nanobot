@@ -19,9 +19,11 @@ class ContextBuilder:
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
+    _RUNTIME_CONTEXT_END = "[/Runtime Context]"
+    _LEGACY_RUNTIME_CONTEXT_TAG = "<nanobot_runtime_context>"
+    _LEGACY_RUNTIME_CONTEXT_END = "</nanobot_runtime_context>"
     _MAX_RECENT_HISTORY = 50
     _MAX_HISTORY_CHARS = 32_000  # hard cap on recent history section size
-    _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
     def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
         self.workspace = workspace
@@ -95,6 +97,50 @@ class ContextBuilder:
             lines += ["", "[Resumed Session]", session_summary]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines) + "\n" + ContextBuilder._RUNTIME_CONTEXT_END
 
+    @classmethod
+    def strip_runtime_context_text(cls, text: str) -> str:
+        """Remove Nanobot runtime metadata blocks from persisted or displayed text.
+
+        Runtime context is prompt scaffolding only.  It must remain available to
+        the provider for the current turn, but it must never become saved chat
+        history, safe-file history, or user-visible transcript content.  Keep
+        support for the older XML-style wrapper so sessions produced by 0426-era
+        builds are also cleaned if they are replayed by a newer build.
+        """
+        cleaned = text
+        for start, end in (
+            (cls._RUNTIME_CONTEXT_TAG, cls._RUNTIME_CONTEXT_END),
+            (cls._LEGACY_RUNTIME_CONTEXT_TAG, cls._LEGACY_RUNTIME_CONTEXT_END),
+        ):
+            while start in cleaned:
+                prefix, remainder = cleaned.split(start, 1)
+                if end not in remainder:
+                    cleaned = prefix.rstrip()
+                    break
+                _, suffix = remainder.split(end, 1)
+                cleaned = (prefix + suffix).strip()
+        return cleaned
+
+    @classmethod
+    def strip_runtime_context_from_content(cls, content: Any) -> Any:
+        """Strip runtime metadata blocks from string or multimodal content."""
+        if isinstance(content, str):
+            return cls.strip_runtime_context_text(content)
+        if isinstance(content, list):
+            cleaned: list[Any] = []
+            for item in content:
+                if not isinstance(item, dict):
+                    cleaned.append(item)
+                    continue
+                next_item = dict(item)
+                if next_item.get("type") == "text":
+                    next_item["text"] = cls.strip_runtime_context_text(str(next_item.get("text") or ""))
+                    if not next_item["text"].strip():
+                        continue
+                cleaned.append(next_item)
+            return cleaned
+        return content
+
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
         if isinstance(left, str) and isinstance(right, str):
@@ -146,22 +192,28 @@ class ContextBuilder:
         runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone, session_summary=session_summary, sender_id=sender_id)
         user_content = self._build_user_content(current_message, media)
 
-        # Merge runtime context and user content into a single user message
-        # to avoid consecutive same-role messages that some providers reject.
-        if isinstance(user_content, str):
-            merged = f"{runtime_ctx}\n\n{user_content}"
-        else:
-            merged = [{"type": "text", "text": runtime_ctx}] + user_content
+        # Keep runtime context out of user/assistant turns.  It is dynamic
+        # metadata, so putting it in the stable system prompt would reduce KV
+        # cache reuse; putting it in a user turn makes it persist and replay as
+        # normal chat.  A separate ephemeral system message preserves the
+        # cacheable system prefix while keeping save/replay paths clean.
         messages = [
             {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel)},
             *history,
         ]
+        if runtime_ctx:
+            messages.append({"role": "system", "content": runtime_ctx})
+
+        has_current_content = bool(current_message) or bool(media)
+        if not has_current_content:
+            return messages
+
         if messages[-1].get("role") == current_role:
             last = dict(messages[-1])
-            last["content"] = self._merge_message_content(last.get("content"), merged)
+            last["content"] = self._merge_message_content(last.get("content"), user_content)
             messages[-1] = last
             return messages
-        messages.append({"role": current_role, "content": merged})
+        messages.append({"role": current_role, "content": user_content})
         return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
