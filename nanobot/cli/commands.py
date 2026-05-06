@@ -513,6 +513,29 @@ def _make_provider(config: Config):
     return provider
 
 
+def _make_cli_provider_factory(config: Config):
+    """Build a cached factory for fallback model providers (CLI side).
+
+    Supports preset names: if a model string matches a preset, the preset's
+    full config is used for provider creation.
+    """
+    from nanobot.nanobot import _make_provider_for_model
+
+    cache: dict[str, Any] = {}
+    presets = getattr(config, "model_presets", {}) or {}
+
+    def factory(model_or_preset: str):
+        preset = presets.get(model_or_preset)
+        actual_model = preset.model if preset else model_or_preset
+        provider_name = config.get_provider_name(actual_model)
+        key = provider_name or actual_model
+        if key not in cache:
+            cache[key] = _make_provider_for_model(config, actual_model, preset=preset)
+        return cache[key]
+
+    return factory
+
+
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
     from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
@@ -609,6 +632,8 @@ def serve(
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(runtime_config)
+    defaults = runtime_config.agents.defaults
+    pf = _make_cli_provider_factory(runtime_config) if defaults.fallback_models else None
     session_manager = SessionManager(runtime_config.workspace_path)
     _resolved = runtime_config.resolve_preset()
     agent_loop = AgentLoop(
@@ -616,12 +641,13 @@ def serve(
         provider=provider,
         workspace=runtime_config.workspace_path,
         model=_resolved.model,
-        max_iterations=runtime_config.agents.defaults.max_tool_iterations,
+        max_iterations=defaults.max_tool_iterations,
         context_window_tokens=_resolved.context_window_tokens,
-        context_block_limit=runtime_config.agents.defaults.context_block_limit,
-        max_tool_result_chars=runtime_config.agents.defaults.max_tool_result_chars,
-        provider_retry_mode=runtime_config.agents.defaults.provider_retry_mode,
-        tool_hint_max_length=runtime_config.agents.defaults.tool_hint_max_length,
+        context_block_limit=defaults.context_block_limit,
+        max_tool_result_chars=defaults.max_tool_result_chars,
+        provider_retry_mode=defaults.provider_retry_mode,
+        fallback_models=defaults.fallback_models,
+        provider_factory=pf,
         web_config=runtime_config.tools.web,
         exec_config=runtime_config.tools.exec,
         restrict_to_workspace=runtime_config.tools.restrict_to_workspace,
@@ -644,7 +670,7 @@ def serve(
     )
 
     model_name = _resolved.model
-    preset_name = runtime_config.agents.defaults.model_preset
+    preset_name = defaults.model_preset
     preset_tag = f" (preset: {preset_name})" if preset_name else ""
     console.print(f"{__logo__} Starting OpenAI-compatible API server")
     console.print(f"  [cyan]Endpoint[/cyan] : http://{host}:{port}/v1/chat/completions")
@@ -726,12 +752,14 @@ def _run_gateway(
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
     bus = MessageBus()
+    provider = _make_provider(config)
+    gw_defaults = config.agents.defaults
+    gw_pf = _make_cli_provider_factory(config) if gw_defaults.fallback_models else None
     try:
         provider_snapshot = build_provider_snapshot(config)
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
-    provider = provider_snapshot.provider
     session_manager = SessionManager(config.workspace_path)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
@@ -749,13 +777,14 @@ def _run_gateway(
         provider=provider,
         workspace=config.workspace_path,
         model=_resolved.model,
-        max_iterations=config.agents.defaults.max_tool_iterations,
+        max_iterations=gw_defaults.max_tool_iterations,
         context_window_tokens=_resolved.context_window_tokens,
         web_config=config.tools.web,
-        context_block_limit=config.agents.defaults.context_block_limit,
-        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
-        provider_retry_mode=config.agents.defaults.provider_retry_mode,
-        tool_hint_max_length=config.agents.defaults.tool_hint_max_length,
+        context_block_limit=gw_defaults.context_block_limit,
+        max_tool_result_chars=gw_defaults.max_tool_result_chars,
+        provider_retry_mode=gw_defaults.provider_retry_mode,
+        fallback_models=gw_defaults.fallback_models,
+        provider_factory=gw_pf,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -1132,6 +1161,8 @@ def agent(
 
     bus = MessageBus()
     provider = _make_provider(config)
+    chat_defaults = config.agents.defaults
+    chat_pf = _make_cli_provider_factory(config) if chat_defaults.fallback_models else None
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
@@ -1152,13 +1183,14 @@ def agent(
         provider=provider,
         workspace=config.workspace_path,
         model=_resolved.model,
-        max_iterations=config.agents.defaults.max_tool_iterations,
+        max_iterations=chat_defaults.max_tool_iterations,
         context_window_tokens=_resolved.context_window_tokens,
         web_config=config.tools.web,
-        context_block_limit=config.agents.defaults.context_block_limit,
-        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
-        provider_retry_mode=config.agents.defaults.provider_retry_mode,
-        tool_hint_max_length=config.agents.defaults.tool_hint_max_length,
+        context_block_limit=chat_defaults.context_block_limit,
+        max_tool_result_chars=chat_defaults.max_tool_result_chars,
+        provider_retry_mode=chat_defaults.provider_retry_mode,
+        fallback_models=chat_defaults.fallback_models,
+        provider_factory=chat_pf,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,

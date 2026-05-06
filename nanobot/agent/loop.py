@@ -209,6 +209,8 @@ class AgentLoop:
         max_tool_result_chars: int | None = None,
         provider_retry_mode: str = "standard",
         tool_hint_max_length: int | None = None,
+        fallback_models: list[str] | None = None,
+        provider_factory: Any | None = None,
         web_config: WebToolsConfig | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -261,6 +263,7 @@ class AgentLoop:
             tool_hint_max_length if tool_hint_max_length is not None
             else defaults.tool_hint_max_length
         )
+        self.fallback_models = fallback_models or []
         self.web_config = web_config or WebToolsConfig()
         self.exec_config = exec_config or ExecToolConfig()
         self.tools_config = _tc
@@ -281,7 +284,7 @@ class AgentLoop:
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
         self._file_state_store = FileStateStore()
-        self.runner = AgentRunner(provider)
+        self.runner = AgentRunner(provider, provider_factory=provider_factory)
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -707,6 +710,7 @@ class AgentLoop:
                 context_window_tokens=self.context_window_tokens,
                 context_block_limit=self.context_block_limit,
                 provider_retry_mode=self.provider_retry_mode,
+                fallback_models=self.fallback_models,
                 progress_callback=on_progress,
                 stream_progress_deltas=on_stream is not None,
                 retry_wait_callback=on_retry_wait,
