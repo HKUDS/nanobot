@@ -62,6 +62,18 @@ class Session:
 
     def add_message(self, role: str, content: str, **kwargs: Any) -> None:
         """Add a message to the session."""
+        if (
+            role == "user"
+            and self.metadata.get("pending_user_turn") is True
+            and self.messages
+        ):
+            last = self.messages[-1]
+            if (
+                last.get("role") == "user"
+                and last.get("content") == content
+                and last.get("media") == kwargs.get("media")
+            ):
+                return
         msg = {
             "role": role,
             "content": content,
