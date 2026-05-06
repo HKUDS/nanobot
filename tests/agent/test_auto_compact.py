@@ -7,6 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from types import SimpleNamespace
+
+from nanobot.agent.local_memory import LocalMemoryConfig
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
@@ -35,6 +38,15 @@ def _make_loop(
         session_ttl_minutes=session_ttl_minutes,
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
+    loop.consolidator.store.config = SimpleNamespace(
+        tools=SimpleNamespace(
+            local_memory=LocalMemoryConfig(
+                enabled=True,
+                auto_capture_candidates=True,
+                auto_capture_session_summaries=True,
+            )
+        )
+    )
     return loop
 
 
@@ -402,10 +414,13 @@ class TestAutoCompactIdleDetection:
         session.updated_at = datetime.now() - timedelta(minutes=20)
         loop.sessions.save(session)
 
+        captured: list[dict] = []
+
         async def _fake_archive(messages):
-            return "Summary."
+            return "- Objective: Continue the current implementation with lower-token continuity\n- Constraint: Keep token usage low while preserving resume value\n- Next: Resume from the latest context using the compact handoff"
 
         loop.consolidator.archive = _fake_archive
+        loop.consolidator.store.capture_candidate_memory = lambda payload: captured.append(payload)
 
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/new")
         response = await loop._process_message(msg)
@@ -416,6 +431,9 @@ class TestAutoCompactIdleDetection:
         session_after = loop.sessions.get_or_create("cli:test")
         # Session is empty (auto-new archived and cleared, /new cleared again)
         assert len(session_after.messages) == 0
+        assert captured
+        assert captured[-1]["type"] == "session_summary"
+        assert "- Objective: Continue the current implementation with lower-token continuity" in captured[-1]["content"]
         await loop.close_mcp()
 
 
@@ -977,7 +995,7 @@ class TestSummaryPersistence:
         loop.sessions.save(session)
 
         async def _fake_archive(messages):
-            return "User said hello."
+            return "- Objective: Help the user\n- Constraint: Keep token use low"
 
         loop.consolidator.archive = _fake_archive
 
@@ -987,7 +1005,7 @@ class TestSummaryPersistence:
         session_after = loop.sessions.get_or_create("cli:test")
         meta = session_after.metadata.get("_last_summary")
         assert meta is not None
-        assert meta["text"] == "User said hello."
+        assert meta["text"] == "- Objective: Help the user\n- Constraint: Keep token use low"
         assert "last_active" in meta
         await loop.close_mcp()
 
@@ -1002,7 +1020,7 @@ class TestSummaryPersistence:
         loop.sessions.save(session)
 
         async def _fake_archive(messages):
-            return "User said hello."
+            return "- Objective: Help the user\n- Next: Continue on resume"
 
         loop.consolidator.archive = _fake_archive
 
@@ -1019,7 +1037,8 @@ class TestSummaryPersistence:
         _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
 
         assert summary is not None
-        assert "User said hello." in summary
+        assert "- Objective: Help the user" in summary
+        assert "- Next: Continue on resume" in summary
         assert "Inactive for" in summary
         # Metadata should be cleaned up after consumption
         assert "_last_summary" not in reloaded.metadata

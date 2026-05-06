@@ -123,11 +123,17 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
                     pass
 
     snapshot = session.messages[session.last_consolidated:]
+    handoff = ""
+    if snapshot:
+        try:
+            handoff = await loop.auto_compact.build_working_handoff(snapshot)
+        except Exception:
+            handoff = ""
     session.clear()
     loop.sessions.save(session)
     loop.sessions.invalidate(session.key)
-    if snapshot:
-        loop._schedule_background(loop.consolidator.archive(snapshot))
+    if handoff:
+        loop.auto_compact._capture_local_memory_summary(handoff, "project")
     return OutboundMessage(
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",

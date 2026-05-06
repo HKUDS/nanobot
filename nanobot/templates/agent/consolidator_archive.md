@@ -1,13 +1,23 @@
-Extract key facts from this conversation. Only output items matching these categories, skip everything else:
-- User facts: personal info, preferences, stated opinions, habits
-- Decisions: choices made, conclusions reached
-- Solutions: working approaches discovered through trial and error, especially non-obvious methods that succeeded after failed attempts
-- Events: plans, deadlines, notable occurrences
-- Preferences: communication style, tool preferences
+Create a compact session handoff for future resume.
 
-Priority: user corrections and preferences > solutions > decisions > events > environment facts. The most valuable memory prevents the user from having to repeat themselves.
+Capture only the highest-value carry-forward state from this conversation:
+- Objective: the current goal or task
+- Decisions: concrete choices already made
+- Constraints: limits, preferences, or guardrails that affect next steps
+- Next step: the most likely immediate follow-up action
+- Blockers: open problems or missing prerequisites
+- Key refs: only essential file paths, branch names, commands, ids, or services
 
-Skip: code patterns derivable from source, git history, or anything already captured in existing memory.
+Rules:
+- Keep it very short and dense.
+- Prefer stable resume context over narration.
+- Do not repeat low-value chatter, obvious code facts, or generic status.
+- Omit anything derivable directly from source unless it is necessary to resume work correctly.
+- If a section has nothing useful, omit it.
+- If there is nothing worth carrying forward, output: (nothing)
 
-Output as concise bullet points, one fact per line. No preamble, no commentary.
-If nothing noteworthy happened, output: (nothing)
+Output format:
+- One bullet per fact.
+- Start each bullet with exactly one of: Objective:, Decision:, Constraint:, Next:, Blocker:, Ref:
+- No preamble. No commentary.
+- Keep the whole output compact.

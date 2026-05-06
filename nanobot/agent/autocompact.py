@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Collection
+from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
+
+from nanobot.agent.local_memory import LocalMemoryConfig, build_session_summary_capture_request_from_summary
 
 from loguru import logger
 from nanobot.session.manager import Session, SessionManager
@@ -23,6 +26,45 @@ class AutoCompact:
         self._ttl = session_ttl_minutes
         self._archiving: set[str] = set()
         self._summaries: dict[str, tuple[str, datetime]] = {}
+
+    @staticmethod
+    def _local_memory_config(consolidator: Consolidator) -> LocalMemoryConfig | None:
+        try:
+            config = consolidator.store.config
+            tools_cfg = getattr(config, "tools", None)
+            if tools_cfg is None:
+                return None
+            return getattr(tools_cfg, "local_memory", None)
+        except Exception:
+            return None
+
+    def _capture_local_memory_summary(
+        self,
+        summary_text: str,
+        query_kind: str | None,
+    ) -> None:
+        cfg = self._local_memory_config(self.consolidator)
+        if cfg is None:
+            return
+        request = build_session_summary_capture_request_from_summary(
+            summary_text,
+            query_kind,
+            cfg,
+        )
+        if request is None:
+            return
+        payload = request.model_dump() if hasattr(request, "model_dump") else asdict(request) if is_dataclass(request) else request
+        self.consolidator.store.capture_candidate_memory(payload)
+
+    async def build_working_handoff(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> str:
+        handoff = await self.consolidator.archive(messages)
+        handoff = (handoff or "").strip()
+        if not handoff or handoff == "(nothing)":
+            return ""
+        return handoff
 
     def _is_expired(self, ts: datetime | str | None,
                     now: datetime | None = None) -> bool:
@@ -85,10 +127,11 @@ class AutoCompact:
             last_active = session.updated_at
             summary = ""
             if archive_msgs:
-                summary = await self.consolidator.archive(archive_msgs) or ""
-            if summary and summary != "(nothing)":
+                summary = await self.build_working_handoff(archive_msgs)
+            if summary:
                 self._summaries[key] = (summary, last_active)
                 session.metadata["_last_summary"] = {"text": summary, "last_active": last_active.isoformat()}
+                self._capture_local_memory_summary(summary, "project")
             session.messages = kept_msgs
             session.last_consolidated = 0
             session.updated_at = datetime.now()
