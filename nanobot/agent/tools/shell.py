@@ -56,12 +56,16 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         sandbox: str = "",
+        sandbox_binds_ro: list[str] | None = None,
+        sandbox_binds_rw: list[str] | None = None,
         path_append: str = "",
         allowed_env_keys: list[str] | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
         self.sandbox = sandbox
+        self.sandbox_binds_ro = sandbox_binds_ro or []
+        self.sandbox_binds_rw = sandbox_binds_rw or []
         self.deny_patterns = (deny_patterns or []) + [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
@@ -158,7 +162,14 @@ class ExecTool(Tool):
                 )
             else:
                 workspace = self.working_dir or cwd
-                command = wrap_command(self.sandbox, command, workspace, cwd)
+                command = wrap_command(
+                    self.sandbox,
+                    command,
+                    workspace,
+                    cwd,
+                    binds_ro=self.sandbox_binds_ro,
+                    binds_rw=self.sandbox_binds_rw,
+                )
                 cwd = str(Path(workspace).resolve())
 
         effective_timeout = min(timeout or self.timeout, self._MAX_TIMEOUT)
