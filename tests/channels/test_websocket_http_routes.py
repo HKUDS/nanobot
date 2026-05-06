@@ -393,27 +393,58 @@ class _FakeConn:
         return Response(status=status, body=body.encode())
 
 
-def test_bootstrap_rejects_non_localhost_by_default(bus: MagicMock) -> None:
-    channel = _ch(bus, host="127.0.0.1")
-    conn = _FakeConn(("192.168.1.5", 12345))
-    resp = channel._handle_webui_bootstrap(conn)
+class _FakeReq:
+    """Minimal request stub with configurable headers."""
+
+    def __init__(self, headers: dict[str, str] | None = None):
+        self.headers = headers or {}
+
+
+_REMOTE = _FakeConn(("192.168.1.5", 12345))
+_LOCAL = _FakeConn(("127.0.0.1", 12345))
+_NO_HEADERS = _FakeReq()
+
+
+def test_bootstrap_rejects_non_localhost_without_secret(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0")
+    resp = channel._handle_webui_bootstrap(_REMOTE, _NO_HEADERS)
     assert resp.status_code == 403
 
 
-def test_bootstrap_allows_non_localhost_when_host_is_wildcard(bus: MagicMock) -> None:
-    channel = _ch(bus, host="0.0.0.0")
-    conn = _FakeConn(("192.168.1.5", 12345))
-    resp = channel._handle_webui_bootstrap(conn)
+def test_bootstrap_allows_localhost_without_secret(bus: MagicMock) -> None:
+    channel = _ch(bus, host="127.0.0.1")
+    resp = channel._handle_webui_bootstrap(_LOCAL, _NO_HEADERS)
+    assert resp.status_code == 200
+
+
+def test_bootstrap_rejects_wrong_secret(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="correct")
+    resp = channel._handle_webui_bootstrap(
+        _REMOTE, _FakeReq({"Authorization": "Bearer wrong"})
+    )
+    assert resp.status_code == 401
+
+
+def test_bootstrap_accepts_remote_with_valid_secret(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
+    resp = channel._handle_webui_bootstrap(
+        _REMOTE, _FakeReq({"Authorization": "Bearer s3cret"})
+    )
     assert resp.status_code == 200
     body = json.loads(resp.body)
     assert body["token"].startswith("nbwt_")
-    assert body["ws_path"] == "/"
 
 
-def test_bootstrap_allows_non_localhost_when_host_is_ipv6_wildcard(
-    bus: MagicMock,
-) -> None:
-    channel = _ch(bus, host="::")
-    conn = _FakeConn(("192.168.1.5", 12345))
-    resp = channel._handle_webui_bootstrap(conn)
+def test_bootstrap_accepts_x_nanobot_auth_header(bus: MagicMock) -> None:
+    channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
+    resp = channel._handle_webui_bootstrap(
+        _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
+    )
     assert resp.status_code == 200
+
+
+def test_bootstrap_secret_also_enforced_on_localhost(bus: MagicMock) -> None:
+    """When secret is set, even localhost must provide it (reverse-proxy safety)."""
+    channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
+    resp = channel._handle_webui_bootstrap(_LOCAL, _NO_HEADERS)
+    assert resp.status_code == 401

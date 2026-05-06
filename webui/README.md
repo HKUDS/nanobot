@@ -74,7 +74,7 @@ NANOBOT_API_URL=http://127.0.0.1:9000 bun run dev
 
 ### Access from another device (LAN)
 
-To use the webui from another device on the same network, set `host` to `"0.0.0.0"` in `~/.nanobot/config.json`:
+To use the webui from another device on the same network, set `host` to `"0.0.0.0"` and configure `token_issue_secret` in `~/.nanobot/config.json`:
 
 ```json
 {
@@ -82,15 +82,16 @@ To use the webui from another device on the same network, set `host` to `"0.0.0.
     "websocket": {
       "enabled": true,
       "host": "0.0.0.0",
-      "port": 8765
+      "port": 8765,
+      "tokenIssueSecret": "your-secret-here"
     }
   }
 }
 ```
 
-Then open `http://<your-ip>:8765` on the other device. When `host` is `"0.0.0.0"`, the bootstrap endpoint accepts requests from any source instead of restricting to localhost.
+Then open `http://<your-ip>:8765` on the other device. The bootstrap endpoint requires the secret via the `Authorization: Bearer <secret>` header (or `X-Nanobot-Auth`). Without a configured secret, only localhost connections can bootstrap.
 
-> **Note:** This exposes the gateway to all interfaces. Only use on trusted networks.
+> **Note:** This exposes the gateway to all interfaces. Always set `tokenIssueSecret` on non-local networks.
 
 ## Build for packaged runtime
 

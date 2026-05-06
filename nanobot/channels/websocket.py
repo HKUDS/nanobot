@@ -531,9 +531,9 @@ class WebSocketChannel(BaseChannel):
             if got == issue_expected:
                 return self._handle_token_issue_http(connection, request)
 
-        # 2. WebUI bootstrap: localhost-only, mints tokens for the embedded UI.
+        # 2. WebUI bootstrap: mints tokens for the embedded UI.
         if got == "/webui/bootstrap":
-            return self._handle_webui_bootstrap(connection)
+            return self._handle_webui_bootstrap(connection, request)
 
         # 3. REST surface for the embedded UI.
         if got == "/api/sessions":
@@ -606,10 +606,16 @@ class WebSocketChannel(BaseChannel):
             if now > expiry:
                 self._api_tokens.pop(token_key, None)
 
-    def _handle_webui_bootstrap(self, connection: Any) -> Response:
-        if self.config.host not in ("0.0.0.0", "::") and not _is_localhost(
-            connection,
-        ):
+    def _handle_webui_bootstrap(self, connection: Any, request: Any) -> Response:
+        # When token_issue_secret is configured, validate it regardless of
+        # source IP.  This secures deployments behind a reverse proxy (e.g.
+        # nginx) where all connections appear as localhost.
+        secret = self.config.token_issue_secret.strip()
+        if secret:
+            if not _issue_route_secret_matches(request.headers, secret):
+                return _http_error(401, "Unauthorized")
+        elif not _is_localhost(connection):
+            # No secret configured: only allow localhost (local dev mode).
             return _http_error(403, "webui bootstrap is localhost-only")
         # Cap outstanding tokens to avoid runaway growth from a misbehaving client.
         self._purge_expired_issued_tokens()
