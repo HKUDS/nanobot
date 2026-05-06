@@ -134,14 +134,13 @@ async def test_groq_does_not_retry_on_auth_error(audio_file: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_openai_missing_api_key_short_circuits(tmp_path: Path) -> None:
-    provider = OpenAITranscriptionProvider(api_key=None)
-    # Ensure env var doesn't accidentally satisfy it.
+async def test_openai_missing_api_key_short_circuits(audio_file: Path) -> None:
+    """Missing API key short-circuits before any HTTP call, even when the file exists."""
     with patch.dict("os.environ", {}, clear=True):
         provider = OpenAITranscriptionProvider(api_key=None)
         post = AsyncMock()
         with patch("httpx.AsyncClient.post", post):
-            assert await provider.transcribe(tmp_path / "voice.ogg") == ""
+            assert await provider.transcribe(audio_file) == ""
         assert post.await_count == 0
 
 
@@ -159,7 +158,7 @@ async def test_returns_empty_when_file_unreadable(audio_file: Path) -> None:
     """Existing file that cannot be read (PermissionError/OSError): "" with no HTTP attempt."""
     provider = OpenAITranscriptionProvider(api_key="sk-test")
     post = AsyncMock()
-    with patch.object(Path, "read_bytes", side_effect=PermissionError("denied")), patch(
+    with patch("pathlib.Path.read_bytes", side_effect=PermissionError("denied")), patch(
         "httpx.AsyncClient.post", post
     ):
         result = await provider.transcribe(audio_file)

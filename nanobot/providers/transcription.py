@@ -26,7 +26,7 @@ _RETRYABLE_EXCEPTIONS = (
 async def _post_transcription_with_retry(
     url: str,
     *,
-    api_key: str,
+    api_key: str | None,
     path: Path,
     model: str,
     provider_label: str,
@@ -115,8 +115,6 @@ async def _post_transcription_with_retry(
                 )
                 return ""
             return payload.get("text", "")
-
-    return ""
 
 
 class OpenAITranscriptionProvider:
