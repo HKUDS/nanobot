@@ -53,7 +53,34 @@
   "thread": {
     "loadingConversation": "Chargement de la conversation…",
     "empty": {
-      "description": "Posez des questions, poursuivez votre travail local ou démarrez un nouveau fil."
+      "description": "Posez des questions, poursuivez votre travail local ou démarrez un nouveau fil.",
+      "greeting": "Que puis-je faire pour vous ?",
+      "quickActions": {
+        "plan": {
+          "title": "Créer un plan de projet",
+          "prompt": "Créez un plan de projet concis pour ce que je devrais construire ensuite."
+        },
+        "analyze": {
+          "title": "Analyser ces données",
+          "prompt": "Aidez-moi à analyser ces données et à faire ressortir les tendances les plus importantes."
+        },
+        "brainstorm": {
+          "title": "Trouver des idées",
+          "prompt": "Proposez quelques idées pratiques et leurs compromis pour ce problème."
+        },
+        "code": {
+          "title": "Écrire du code",
+          "prompt": "Aidez-moi à écrire le code pour cette tâche, en commençant par le plus petit changement utile."
+        },
+        "summarize": {
+          "title": "Résumer ce document",
+          "prompt": "Résumez ce document et listez les points clés à retenir."
+        },
+        "more": {
+          "title": "Plus",
+          "prompt": "Montrez-moi quelques façons utiles dont vous pouvez m’aider dans cet espace de travail."
+        }
+      }
     },
     "header": {
       "toggleSidebar": "Afficher ou masquer la barre latérale"
@@ -77,6 +104,51 @@
         "decode_failed": "Impossible de décoder cette image",
         "too_large": "Image trop grande — essayez-en une plus petite",
         "io": "Impossible de lire ce fichier"
+      },
+      "slash": {
+        "ariaLabel": "Commandes slash",
+        "label": "commandes",
+        "navigateHint": "↑↓ Naviguer",
+        "selectHint": "Entrée/Tab Insérer",
+        "closeHint": "Échap Fermer",
+        "commands": {
+          "new": {
+            "title": "Nouvelle discussion",
+            "description": "Arrêter la tâche en cours et démarrer une nouvelle conversation."
+          },
+          "stop": {
+            "title": "Arrêter la tâche en cours",
+            "description": "Annuler le tour agent actif pour cette discussion."
+          },
+          "restart": {
+            "title": "Redémarrer nanobot",
+            "description": "Redémarrer le processus du bot sur place."
+          },
+          "status": {
+            "title": "Afficher l’état",
+            "description": "Afficher l’état du runtime, du provider et des channels."
+          },
+          "history": {
+            "title": "Afficher l’historique",
+            "description": "Afficher les N derniers messages persistés de la conversation."
+          },
+          "dream": {
+            "title": "Lancer Dream",
+            "description": "Déclencher manuellement la consolidation de la mémoire."
+          },
+          "dream_log": {
+            "title": "Afficher le journal Dream",
+            "description": "Afficher ce que la dernière consolidation Dream a changé."
+          },
+          "dream_restore": {
+            "title": "Restaurer la mémoire",
+            "description": "Revenir à un instantané Dream précédent."
+          },
+          "help": {
+            "title": "Afficher l’aide",
+            "description": "Lister les commandes slash disponibles."
+          }
+        }
       }
     },
     "scrollToBottom": "Faire défiler vers le bas"

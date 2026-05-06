@@ -53,7 +53,34 @@
   "thread": {
     "loadingConversation": "Memuat percakapan…",
     "empty": {
-      "description": "Ajukan pertanyaan, lanjutkan pekerjaan lokal, atau mulai thread baru."
+      "description": "Ajukan pertanyaan, lanjutkan pekerjaan lokal, atau mulai thread baru.",
+      "greeting": "Apa yang bisa saya bantu?",
+      "quickActions": {
+        "plan": {
+          "title": "Buat rencana proyek",
+          "prompt": "Buat rencana proyek ringkas untuk apa yang sebaiknya saya bangun berikutnya."
+        },
+        "analyze": {
+          "title": "Analisis data ini",
+          "prompt": "Bantu saya menganalisis data ini dan soroti pola yang paling penting."
+        },
+        "brainstorm": {
+          "title": "Brainstorm ide",
+          "prompt": "Brainstorm beberapa ide praktis dan tradeoff untuk masalah ini."
+        },
+        "code": {
+          "title": "Tulis kode",
+          "prompt": "Bantu saya menulis kode untuk tugas ini, mulai dari perubahan berguna yang paling kecil."
+        },
+        "summarize": {
+          "title": "Ringkas dokumen ini",
+          "prompt": "Ringkas dokumen ini dan daftar poin-poin utamanya."
+        },
+        "more": {
+          "title": "Lainnya",
+          "prompt": "Tunjukkan beberapa cara berguna Anda dapat membantu di workspace ini."
+        }
+      }
     },
     "header": {
       "toggleSidebar": "Tampilkan atau sembunyikan sidebar"
@@ -77,6 +104,51 @@
         "decode_failed": "Tidak dapat mendekode gambar ini",
         "too_large": "Gambar terlalu besar — coba yang lebih kecil",
         "io": "Tidak dapat membaca file ini"
+      },
+      "slash": {
+        "ariaLabel": "Perintah slash",
+        "label": "perintah",
+        "navigateHint": "↑↓ Pilih",
+        "selectHint": "Enter/Tab Sisipkan",
+        "closeHint": "Esc Tutup",
+        "commands": {
+          "new": {
+            "title": "Obrolan baru",
+            "description": "Hentikan tugas saat ini dan mulai percakapan baru."
+          },
+          "stop": {
+            "title": "Hentikan tugas saat ini",
+            "description": "Batalkan giliran agent yang sedang aktif di chat ini."
+          },
+          "restart": {
+            "title": "Mulai ulang nanobot",
+            "description": "Mulai ulang proses bot di tempat."
+          },
+          "status": {
+            "title": "Tampilkan status",
+            "description": "Tampilkan status runtime, provider, dan channel."
+          },
+          "history": {
+            "title": "Tampilkan riwayat",
+            "description": "Cetak N pesan percakapan tersimpan terbaru."
+          },
+          "dream": {
+            "title": "Jalankan Dream",
+            "description": "Picu konsolidasi memori secara manual."
+          },
+          "dream_log": {
+            "title": "Tampilkan log Dream",
+            "description": "Tampilkan perubahan dari konsolidasi Dream terakhir."
+          },
+          "dream_restore": {
+            "title": "Pulihkan memori",
+            "description": "Kembalikan memori ke snapshot Dream sebelumnya."
+          },
+          "help": {
+            "title": "Tampilkan bantuan",
+            "description": "Daftar perintah slash yang tersedia."
+          }
+        }
       }
     },
     "scrollToBottom": "Gulir ke bawah"

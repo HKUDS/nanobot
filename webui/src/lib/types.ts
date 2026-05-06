@@ -89,6 +89,14 @@ export interface SettingsUpdate {
   provider?: string;
 }
 
+export interface SlashCommand {
+  command: string;
+  title: string;
+  description: string;
+  icon: string;
+  argHint?: string;
+}
+
 export type ConnectionStatus =
   | "idle"
   | "connecting"

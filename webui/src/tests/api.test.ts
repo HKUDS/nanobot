@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { deleteSession, fetchSessionMessages, listSessions, updateSettings } from "@/lib/api";
+import {
+  deleteSession,
+  fetchSessionMessages,
+  listSessions,
+  listSlashCommands,
+  updateSettings,
+} from "@/lib/api";
 
 describe("webui API helpers", () => {
   beforeEach(() => {
@@ -71,5 +77,38 @@ describe("webui API helpers", () => {
         preview: "",
       },
     ]);
+  });
+
+  it("maps slash command metadata from the commands endpoint", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        commands: [
+          {
+            command: "/history",
+            title: "Show conversation history",
+            description: "Print the last N messages.",
+            icon: "history",
+            arg_hint: "[n]",
+          },
+        ],
+      }),
+    } as Response);
+
+    await expect(listSlashCommands("tok")).resolves.toEqual([
+      {
+        command: "/history",
+        title: "Show conversation history",
+        description: "Print the last N messages.",
+        icon: "history",
+        argHint: "[n]",
+      },
+    ]);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/commands",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
   });
 });

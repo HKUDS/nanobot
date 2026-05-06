@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { ThreadComposer } from "@/components/thread/ThreadComposer";
+import { resources } from "@/i18n";
+
+const QUICK_ACTION_KEYS = ["plan", "analyze", "brainstorm", "code", "summarize", "more"];
 
 describe("webui i18n", () => {
   it("switches UI copy and document locale through the language switcher", async () => {
@@ -40,5 +43,17 @@ describe("webui i18n", () => {
     });
 
     expect(screen.getByLabelText("メッセージ入力欄")).toBeInTheDocument();
+  });
+
+  it("keeps welcome quick actions localized for every registered locale", () => {
+    for (const resource of Object.values(resources)) {
+      const empty = resource.common.thread.empty;
+      expect(empty.greeting).toBeTruthy();
+      for (const key of QUICK_ACTION_KEYS) {
+        const action = empty.quickActions[key as keyof typeof empty.quickActions];
+        expect(action.title).toBeTruthy();
+        expect(action.prompt).toBeTruthy();
+      }
+    }
   });
 });

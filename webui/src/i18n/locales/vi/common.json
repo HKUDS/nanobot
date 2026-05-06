@@ -53,7 +53,34 @@
   "thread": {
     "loadingConversation": "Đang tải cuộc trò chuyện…",
     "empty": {
-      "description": "Hãy đặt câu hỏi, tiếp tục công việc cục bộ hoặc bắt đầu một luồng mới."
+      "description": "Hãy đặt câu hỏi, tiếp tục công việc cục bộ hoặc bắt đầu một luồng mới.",
+      "greeting": "Tôi có thể giúp gì cho bạn?",
+      "quickActions": {
+        "plan": {
+          "title": "Tạo kế hoạch dự án",
+          "prompt": "Tạo một kế hoạch dự án ngắn gọn cho việc tôi nên xây dựng tiếp theo."
+        },
+        "analyze": {
+          "title": "Phân tích dữ liệu này",
+          "prompt": "Giúp tôi phân tích dữ liệu này và chỉ ra các mẫu quan trọng nhất."
+        },
+        "brainstorm": {
+          "title": "Động não ý tưởng",
+          "prompt": "Động não vài ý tưởng thực tế và các đánh đổi cho vấn đề này."
+        },
+        "code": {
+          "title": "Viết mã",
+          "prompt": "Giúp tôi viết mã cho nhiệm vụ này, bắt đầu từ thay đổi hữu ích nhỏ nhất."
+        },
+        "summarize": {
+          "title": "Tóm tắt tài liệu này",
+          "prompt": "Tóm tắt tài liệu này và liệt kê các ý chính."
+        },
+        "more": {
+          "title": "Thêm",
+          "prompt": "Cho tôi xem vài cách hữu ích mà bạn có thể giúp trong workspace này."
+        }
+      }
     },
     "header": {
       "toggleSidebar": "Bật/tắt thanh bên"
@@ -77,6 +104,51 @@
         "decode_failed": "Không thể giải mã ảnh này",
         "too_large": "Ảnh quá lớn — hãy thử ảnh nhỏ hơn",
         "io": "Không thể đọc tệp này"
+      },
+      "slash": {
+        "ariaLabel": "Lệnh slash",
+        "label": "lệnh",
+        "navigateHint": "↑↓ Chọn",
+        "selectHint": "Enter/Tab Chèn",
+        "closeHint": "Esc Đóng",
+        "commands": {
+          "new": {
+            "title": "Cuộc trò chuyện mới",
+            "description": "Dừng tác vụ hiện tại và bắt đầu một cuộc trò chuyện mới."
+          },
+          "stop": {
+            "title": "Dừng tác vụ hiện tại",
+            "description": "Hủy lượt agent đang chạy trong cuộc trò chuyện này."
+          },
+          "restart": {
+            "title": "Khởi động lại nanobot",
+            "description": "Khởi động lại tiến trình bot tại chỗ."
+          },
+          "status": {
+            "title": "Hiển thị trạng thái",
+            "description": "Hiển thị trạng thái runtime, provider và channel."
+          },
+          "history": {
+            "title": "Hiển thị lịch sử",
+            "description": "In N tin nhắn hội thoại đã lưu gần nhất."
+          },
+          "dream": {
+            "title": "Chạy Dream",
+            "description": "Kích hoạt thủ công quá trình hợp nhất bộ nhớ."
+          },
+          "dream_log": {
+            "title": "Hiển thị nhật ký Dream",
+            "description": "Hiển thị những gì lần hợp nhất Dream gần nhất đã thay đổi."
+          },
+          "dream_restore": {
+            "title": "Khôi phục bộ nhớ",
+            "description": "Đưa bộ nhớ về một snapshot Dream trước đó."
+          },
+          "help": {
+            "title": "Hiển thị trợ giúp",
+            "description": "Liệt kê các lệnh slash có sẵn."
+          }
+        }
       }
     },
     "scrollToBottom": "Cuộn xuống cuối"

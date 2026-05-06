@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   BookOpen,
@@ -17,7 +17,8 @@ import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
 import { useNanobotStream } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
-import type { ChatSummary, UIMessage } from "@/lib/types";
+import { listSlashCommands } from "@/lib/api";
+import type { ChatSummary, SlashCommand, UIMessage } from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
 
 interface ThreadShellProps {
@@ -66,8 +67,9 @@ export function ThreadShell({
   const chatId = session?.chatId ?? null;
   const historyKey = session?.key ?? null;
   const { messages: historical, loading, hasPendingToolCalls } = useSessionHistory(historyKey);
-  const { client, modelName } = useClient();
+  const { client, modelName, token } = useClient();
   const [booting, setBooting] = useState(false);
+  const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
   const pendingFirstRef = useRef<string | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
   const lastCachedChatIdRef = useRef<string | null>(null);
@@ -116,17 +118,24 @@ export function ThreadShell({
     setMessages(historical);
   }, [chatId, historical, setMessages]);
 
-  useEffect(() => {
-    if (!chatId) return;
+  useLayoutEffect(() => {
+    if (!chatId) {
+      lastCachedChatIdRef.current = null;
+      return;
+    }
+    if (loading) return;
     // Skip the first cache write after a chat switch. During that render,
     // `messages` can still belong to the previous chat until the stream hook
     // resets its local state for the new session.
     if (lastCachedChatIdRef.current !== chatId) {
       lastCachedChatIdRef.current = chatId;
+      if (messages.length > 0) {
+        messageCacheRef.current.set(chatId, messages);
+      }
       return;
     }
     messageCacheRef.current.set(chatId, messages);
-  }, [chatId, messages]);
+  }, [chatId, loading, messages]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -145,6 +154,21 @@ export function ThreadShell({
     ]);
     setBooting(false);
   }, [chatId, client, setMessages]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const commands = await listSlashCommands(token);
+        if (!cancelled) setSlashCommands(commands);
+      } catch {
+        if (!cancelled) setSlashCommands([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const handleWelcomeSend = useCallback(
     async (content: string) => {
@@ -222,6 +246,7 @@ export function ThreadShell({
           }
           modelLabel={toModelBadgeLabel(modelName)}
           variant={showHeroComposer ? "hero" : "thread"}
+          slashCommands={slashCommands}
         />
       ) : (
         <ThreadComposer

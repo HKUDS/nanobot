@@ -53,7 +53,34 @@
   "thread": {
     "loadingConversation": "会話を読み込み中…",
     "empty": {
-      "description": "質問したり、ローカル作業を続けたり、新しいスレッドを始めたりできます。"
+      "description": "質問したり、ローカル作業を続けたり、新しいスレッドを始めたりできます。",
+      "greeting": "何をお手伝いしましょうか？",
+      "quickActions": {
+        "plan": {
+          "title": "プロジェクト計画を作成",
+          "prompt": "次に作るものについて、簡潔なプロジェクト計画を作成してください。"
+        },
+        "analyze": {
+          "title": "このデータを分析",
+          "prompt": "このデータを分析し、最も重要なパターンを指摘してください。"
+        },
+        "brainstorm": {
+          "title": "アイデアを出す",
+          "prompt": "この問題について、実用的なアイデアとトレードオフをいくつか出してください。"
+        },
+        "code": {
+          "title": "コードを書く",
+          "prompt": "このタスクのコードを書くのを手伝ってください。まず最小限の有用な変更から始めてください。"
+        },
+        "summarize": {
+          "title": "この文書を要約",
+          "prompt": "この文書を要約し、重要なポイントを列挙してください。"
+        },
+        "more": {
+          "title": "その他",
+          "prompt": "このワークスペースであなたが手伝える便利な方法をいくつか見せてください。"
+        }
+      }
     },
     "header": {
       "toggleSidebar": "サイドバーを切り替える"
@@ -77,6 +104,51 @@
         "decode_failed": "この画像をデコードできません",
         "too_large": "画像が大きすぎます。小さいものを選んでください",
         "io": "このファイルを読み込めません"
+      },
+      "slash": {
+        "ariaLabel": "スラッシュコマンド",
+        "label": "コマンド",
+        "navigateHint": "↑↓ 選択",
+        "selectHint": "Enter/Tab 入力",
+        "closeHint": "Esc 閉じる",
+        "commands": {
+          "new": {
+            "title": "新しいチャット",
+            "description": "現在のタスクを停止して、新しい会話を開始します。"
+          },
+          "stop": {
+            "title": "現在のタスクを停止",
+            "description": "このチャットで実行中の agent ターンをキャンセルします。"
+          },
+          "restart": {
+            "title": "nanobot を再起動",
+            "description": "bot プロセスをその場で再起動します。"
+          },
+          "status": {
+            "title": "ステータスを表示",
+            "description": "ランタイム、provider、channel の状態を表示します。"
+          },
+          "history": {
+            "title": "会話履歴を表示",
+            "description": "保存済みの直近 N 件の会話メッセージを表示します。"
+          },
+          "dream": {
+            "title": "Dream を実行",
+            "description": "メモリ統合を手動で開始します。"
+          },
+          "dream_log": {
+            "title": "Dream ログを表示",
+            "description": "直近の Dream 統合で変更された内容を表示します。"
+          },
+          "dream_restore": {
+            "title": "メモリを復元",
+            "description": "以前の Dream スナップショットへメモリを戻します。"
+          },
+          "help": {
+            "title": "ヘルプを表示",
+            "description": "利用可能なスラッシュコマンドを一覧表示します。"
+          }
+        }
       }
     },
     "scrollToBottom": "一番下へスクロール"

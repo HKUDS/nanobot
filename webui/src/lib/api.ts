@@ -1,4 +1,4 @@
-import type { ChatSummary, SettingsPayload, SettingsUpdate } from "./types";
+import type { ChatSummary, SettingsPayload, SettingsUpdate, SlashCommand } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -112,6 +112,27 @@ export async function fetchSettings(
   base: string = "",
 ): Promise<SettingsPayload> {
   return request<SettingsPayload>(`${base}/api/settings`, token);
+}
+
+export async function listSlashCommands(
+  token: string,
+  base: string = "",
+): Promise<SlashCommand[]> {
+  type Row = {
+    command: string;
+    title: string;
+    description: string;
+    icon: string;
+    arg_hint?: string;
+  };
+  const body = await request<{ commands: Row[] }>(`${base}/api/commands`, token);
+  return body.commands.map((command) => ({
+    command: command.command,
+    title: command.title,
+    description: command.description,
+    icon: command.icon,
+    argHint: command.arg_hint ?? "",
+  }));
 }
 
 export async function updateSettings(

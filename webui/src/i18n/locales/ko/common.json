@@ -53,7 +53,34 @@
   "thread": {
     "loadingConversation": "대화 불러오는 중…",
     "empty": {
-      "description": "질문을 하거나, 로컬 작업을 이어가거나, 새 스레드를 시작할 수 있습니다."
+      "description": "질문을 하거나, 로컬 작업을 이어가거나, 새 스레드를 시작할 수 있습니다.",
+      "greeting": "무엇을 도와드릴까요?",
+      "quickActions": {
+        "plan": {
+          "title": "프로젝트 계획 만들기",
+          "prompt": "다음에 만들 것에 대한 간결한 프로젝트 계획을 작성해 주세요."
+        },
+        "analyze": {
+          "title": "이 데이터 분석하기",
+          "prompt": "이 데이터를 분석하고 가장 중요한 패턴을 짚어 주세요."
+        },
+        "brainstorm": {
+          "title": "아이디어 브레인스토밍",
+          "prompt": "이 문제에 대한 실용적인 아이디어와 트레이드오프를 몇 가지 제안해 주세요."
+        },
+        "code": {
+          "title": "코드 작성하기",
+          "prompt": "이 작업을 위한 코드를 작성해 주세요. 가장 작은 유용한 변경부터 시작해 주세요."
+        },
+        "summarize": {
+          "title": "문서 요약하기",
+          "prompt": "이 문서를 요약하고 핵심 내용을 정리해 주세요."
+        },
+        "more": {
+          "title": "더 보기",
+          "prompt": "이 워크스페이스에서 도와줄 수 있는 유용한 방법을 몇 가지 보여 주세요."
+        }
+      }
     },
     "header": {
       "toggleSidebar": "사이드바 전환"
@@ -77,6 +104,51 @@
         "decode_failed": "이 이미지를 디코딩할 수 없습니다",
         "too_large": "이미지가 너무 큽니다. 더 작은 걸로 시도해 주세요",
         "io": "이 파일을 읽을 수 없습니다"
+      },
+      "slash": {
+        "ariaLabel": "슬래시 명령",
+        "label": "명령",
+        "navigateHint": "↑↓ 선택",
+        "selectHint": "Enter/Tab 입력",
+        "closeHint": "Esc 닫기",
+        "commands": {
+          "new": {
+            "title": "새 채팅",
+            "description": "현재 작업을 중지하고 새 대화를 시작합니다."
+          },
+          "stop": {
+            "title": "현재 작업 중지",
+            "description": "이 채팅에서 실행 중인 agent 턴을 취소합니다."
+          },
+          "restart": {
+            "title": "nanobot 재시작",
+            "description": "bot 프로세스를 제자리에서 재시작합니다."
+          },
+          "status": {
+            "title": "상태 보기",
+            "description": "런타임, provider, channel 상태를 표시합니다."
+          },
+          "history": {
+            "title": "대화 기록 보기",
+            "description": "저장된 최근 N개의 대화 메시지를 출력합니다."
+          },
+          "dream": {
+            "title": "Dream 실행",
+            "description": "메모리 정리를 수동으로 트리거합니다."
+          },
+          "dream_log": {
+            "title": "Dream 로그 보기",
+            "description": "마지막 Dream 정리에서 변경된 내용을 표시합니다."
+          },
+          "dream_restore": {
+            "title": "메모리 복원",
+            "description": "이전 Dream 스냅샷으로 메모리를 되돌립니다."
+          },
+          "help": {
+            "title": "도움말 보기",
+            "description": "사용 가능한 슬래시 명령을 나열합니다."
+          }
+        }
       }
     },
     "scrollToBottom": "맨 아래로 스크롤"
