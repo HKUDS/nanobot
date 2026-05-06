@@ -296,6 +296,98 @@ async def capture_candidate(
         logger.exception("Local memory candidate capture failed")
 
 
+async def forget_local_memory(
+    tool_registry: ToolRegistry,
+    query: str,
+    cfg: LocalMemoryConfig,
+) -> bool:
+    search_tool = _resolve_tool_name(tool_registry, cfg.server_name, "search")
+    deprecate_tool = _resolve_tool_name(tool_registry, cfg.server_name, "deprecate")
+    if not search_tool or not deprecate_tool:
+        return False
+
+    try:
+        result = await tool_registry.execute(
+            search_tool,
+            {
+                "query": query,
+                "limit": 5,
+                "include_candidates": True,
+                "include_deprecated": False,
+                "domain": None,
+                "type": None,
+            },
+        )
+    except Exception:
+        logger.exception("Local memory forget search failed")
+        return False
+
+    matches = _extract_matches(result)
+    if not matches:
+        return False
+
+    record_id = _match_record_id(query, matches)
+    if not record_id:
+        return False
+
+    try:
+        await tool_registry.execute(
+            deprecate_tool,
+            {
+                "record_id": record_id,
+                "reason": f"User requested forget: {query[:160]}",
+                "deprecated_by": "user_request",
+            },
+        )
+        return True
+    except Exception:
+        logger.exception("Local memory forget deprecate failed")
+        return False
+
+
+def _extract_matches(result: Any) -> list[dict[str, Any]]:
+    if result is None:
+        return []
+    data = result
+    if isinstance(result, str):
+        try:
+            data = json.loads(result)
+        except Exception:
+            return []
+    elif not isinstance(result, (dict, list)):
+        try:
+            data = json.loads(str(result))
+        except Exception:
+            return []
+
+    if isinstance(data, dict):
+        for key in ("results", "matches", "items"):
+            value = data.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+        return []
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    return []
+
+
+def _match_record_id(query: str, matches: list[dict[str, Any]]) -> str | None:
+    needle = query.strip().lower()
+    if not needle:
+        return None
+    for item in matches:
+        record_id = item.get("record_id") or item.get("id")
+        if not isinstance(record_id, str) or not record_id.strip():
+            continue
+        title = str(item.get("title") or item.get("name") or "").lower()
+        summary = str(item.get("summary") or item.get("content") or "").lower()
+        if needle in title or needle in summary:
+            return record_id.strip()
+    first = matches[0].get("record_id") or matches[0].get("id")
+    if isinstance(first, str) and first.strip():
+        return first.strip()
+    return None
+
 
 def _render_context_result(result: Any) -> str | None:
     if result is None:

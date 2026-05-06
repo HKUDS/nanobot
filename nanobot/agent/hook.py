@@ -26,6 +26,8 @@ class AgentHookContext:
     final_content: str | None = None
     stop_reason: str | None = None
     error: str | None = None
+    memory_action: str | None = None
+    memory_target_query: str | None = None
 
 
 class AgentHook:

@@ -7,6 +7,7 @@ from nanobot.agent.local_memory import (
     LocalMemoryConfig,
     build_capture_request,
     capture_candidate,
+    forget_local_memory,
     has_local_memory_server,
     search_local_memory,
     should_capture_candidate,
@@ -29,28 +30,43 @@ class LocalMemoryHook(AgentHook):
             return
         if not self._config.enabled or not has_local_memory_server(tools, self._config.server_name):
             return
-        if context.iteration != 1:
-            return
         user_text = _latest_user_text(context.messages)
-        if not user_text and not self._config.enable_bootstrap_recall:
-            return
-        if user_text and not should_search_local_memory(user_text, self._config):
-            return
-        if not user_text:
-            user_text = "continue with active project context and user preferences"
-        injection = await search_local_memory(tools, user_text, self._config)
-        if not injection or not injection.content:
-            return
-        _insert_supplemental_system_message(
-            context.messages,
-            f"{injection.heading}:\n{injection.content}",
-        )
+        if context.iteration == 1:
+            forget_query = _extract_forget_query(user_text)
+            if forget_query:
+                context.memory_action = "forget"
+                context.memory_target_query = forget_query
+                _insert_supplemental_system_message(
+                    context.messages,
+                    "Local memory instruction: the user asked to forget a remembered item. Confirm removal if matched, and do not rely on that memory.",
+                )
+                return
+            if not user_text and not self._config.enable_bootstrap_recall:
+                return
+            if user_text and not should_search_local_memory(user_text, self._config):
+                return
+            if not user_text:
+                user_text = "continue with active project context and user preferences"
+            injection = await search_local_memory(tools, user_text, self._config)
+            if not injection or not injection.content:
+                return
+            _insert_supplemental_system_message(
+                context.messages,
+                f"{injection.heading}:\n{injection.content}",
+            )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
         tools = self._tools(context)
         if tools is None:
             return
         if not self._config.enabled or not has_local_memory_server(tools, self._config.server_name):
+            return
+        if context.memory_action == "forget" and context.memory_target_query:
+            forgotten = await forget_local_memory(tools, context.memory_target_query, self._config)
+            if forgotten and context.final_content:
+                context.final_content = f"Forgot it from local memory: {context.memory_target_query}\n\n{context.final_content}"
+            elif context.final_content:
+                context.final_content = f"I tried to forget that from local memory but did not find a clear matching record.\n\n{context.final_content}"
             return
         if context.stop_reason != "completed" or not context.final_content:
             return
@@ -69,6 +85,28 @@ def _insert_supplemental_system_message(messages: list[dict[str, Any]], content:
         messages.insert(1, message)
         return
     messages.insert(0, message)
+
+
+def _extract_forget_query(user_text: str) -> str | None:
+    text = user_text.strip()
+    if not text:
+        return None
+    lowered = text.lower().strip()
+    prefixes = (
+        "forget that",
+        "forget this",
+        "forget it",
+        "stop remembering",
+        "deprecate that memory",
+        "deprecate this memory",
+    )
+    for prefix in prefixes:
+        if lowered == prefix:
+            return "recent memory"
+        if lowered.startswith(prefix + " "):
+            remainder = text[len(prefix):].strip(" :,-")
+            return remainder or "recent memory"
+    return None
 
 
 def _latest_user_text(messages: list[dict[str, Any]]) -> str:
