@@ -482,7 +482,12 @@ async def connect_mcp_servers(
                 os.makedirs(os.path.dirname(_MCP_STDIO_ERRLOG), exist_ok=True)
                 errlog = open(_MCP_STDIO_ERRLOG, "a", encoding="utf-8")
                 server_stack.push_async_callback(asyncio.to_thread, errlog.close)
-                read, write = await server_stack.enter_async_context(stdio_client(params, errlog=errlog))
+                try:
+                    read, write = await server_stack.enter_async_context(stdio_client(params, errlog=errlog))
+                except TypeError as exc:
+                    if "errlog" not in str(exc):
+                        raise
+                    read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
 
                 def httpx_client_factory(

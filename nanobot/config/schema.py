@@ -253,6 +253,7 @@ class LocalMemoryIntegrationConfig(Base):
     server_name: str = "local_memory"
     search_first: bool = True
     auto_capture_candidates: bool = False
+    auto_capture_personal_facts: bool = True
     max_search_results: int = 3
     min_query_length: int = 12
     max_candidate_chars: int = 1200

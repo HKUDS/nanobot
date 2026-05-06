@@ -122,9 +122,21 @@ class TestCreateInstance:
         """When default gateway port is occupied, script should pick a different one."""
         config_dir = tmp_home / ".nanobot-test"
 
-        # Bind to the default gateway port to simulate a running instance
+        # Bind to the default gateway port to simulate a running instance.
+        # If this host already uses 18790, reserve that port and assert the
+        # script still moves away from the blocked port.
+        blocked_port = 18790
+        while True:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                try:
+                    probe.bind(("127.0.0.1", blocked_port))
+                except OSError:
+                    blocked_port += 1
+                    continue
+                break
+
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as blocker:
-            blocker.bind(("127.0.0.1", 18790))
+            blocker.bind(("127.0.0.1", blocked_port))
             blocker.listen(1)
 
             result = _run_script(
@@ -135,7 +147,7 @@ class TestCreateInstance:
             assert result.returncode == 0, result.stderr
 
         data = json.loads((config_dir / "config.json").read_text(encoding="utf-8"))
-        assert data["gateway"]["port"] != 18790
+        assert data["gateway"]["port"] != blocked_port
 
     def test_inherits_api_key_from_current_instance(self, tmp_home: Path) -> None:
         """API keys from --inherit-config should be copied to new instance."""

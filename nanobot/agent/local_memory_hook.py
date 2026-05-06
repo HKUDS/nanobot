@@ -46,7 +46,7 @@ class LocalMemoryHook(AgentHook):
             if user_text and not should_search_local_memory(user_text, self._config):
                 return
             if not user_text:
-                user_text = "continue with active project context and user preferences"
+                user_text = "continue with active project context, next steps, and user preferences including preferred name and username"
             injection = await search_local_memory(tools, user_text, self._config)
             if not injection or not injection.content:
                 return

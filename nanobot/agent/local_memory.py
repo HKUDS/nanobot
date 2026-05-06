@@ -59,6 +59,10 @@ _PREFERENCE_KEYWORDS = (
     "format",
     "remember",
     "call me",
+    "my name",
+    "username",
+    "favorite",
+    "favourite",
     "i like",
     "i want",
 )
@@ -76,6 +80,30 @@ _PROJECT_KEYWORDS = (
     "todo",
     "task",
     "continue",
+    "active project",
+    "current work",
+    "what were we doing",
+    "where were we",
+)
+
+_PERSONAL_FACT_PATTERNS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("user_identity", "profile", ("call me ", "my name is ", "my full name is ", "my username is ", "username is ")),
+    ("user_preference", "profile", ("my favorite ", "my favourite ", "i like ", "i prefer ", "you can call me ")),
+    ("interaction_preference", "profile", ("don't ask ", "do not ask ", "stop asking ", "i prefer ", "please be ", "be more ", "be less ")),
+    ("relationship_context", "profile", ("my son ", "my daughter ", "my wife ", "my husband ", "my family ", "my mom ", "my mother ", "my dad ", "my father ")),
+    ("user_health_fact", "profile", ("i had ", "i have ", "i'm allergic ", "i am allergic ", "diagnosed with ", "heart attack", "stroke", "surgery")),
+)
+
+_SENSITIVE_PERSONAL_TERMS = (
+    "heart attack",
+    "stroke",
+    "allergic",
+    "allergy",
+    "diagnosed",
+    "hospital",
+    "medical",
+    "health",
+    "surgery",
 )
 
 
@@ -85,6 +113,7 @@ class LocalMemoryConfig:
     server_name: str = _LOCAL_MEMORY_SERVER_NAME
     search_first: bool = True
     auto_capture_candidates: bool = False
+    auto_capture_personal_facts: bool = True
     max_search_results: int = 3
     min_query_length: int = 12
     max_candidate_chars: int = 1200
@@ -193,13 +222,44 @@ def _resolve_tool_name(tool_registry: ToolRegistry, server_name: str, operation:
 
 
 def _is_bootstrap_recall_query(text: str) -> bool:
-    return any(phrase in text for phrase in ("continue", "pick up", "resume", "what next", "where were we"))
+    return any(
+        phrase in text
+        for phrase in (
+            "continue",
+            "pick up",
+            "resume",
+            "what next",
+            "where were we",
+            "what were we doing",
+            "current work",
+            "active project",
+        )
+    )
+
+
+def _is_profile_resume_query(text: str) -> bool:
+    return any(
+        phrase in text
+        for phrase in (
+            "what's my name",
+            "what is my name",
+            "what should you call me",
+            "what should i be called",
+            "what's my username",
+            "what is my username",
+            "what do you know about me",
+            "who am i",
+            "my preferred name",
+        )
+    )
 
 
 def _classify_memory_query(user_text: str) -> str | None:
     text = (user_text or "").strip().lower()
     if not text:
         return None
+    if _is_profile_resume_query(text):
+        return "preferences"
     if any(keyword in text for keyword in _PREFERENCE_KEYWORDS):
         return "preferences"
     if any(keyword in text for keyword in _PROJECT_KEYWORDS):
@@ -216,7 +276,7 @@ def _build_context_query(user_text: str, query_kind: str | None) -> str:
     text = raw[:400]
     if query_kind == "preferences":
         return (
-            f"user preferences, response style, operating preferences, personalization\n"
+            f"user preferences, response style, operating preferences, personalization, profile facts, preferred name, username, favorites\n"
             f"{text}"
         ).strip()
     if query_kind == "project":
@@ -237,7 +297,12 @@ def should_capture_candidate(
     assistant_text: str | None,
     cfg: LocalMemoryConfig,
 ) -> bool:
-    if not cfg.enabled or not cfg.auto_capture_candidates:
+    if not cfg.enabled:
+        return False
+    lowered_user = user_text.lower()
+    if cfg.auto_capture_personal_facts and is_personal_fact_statement(user_text):
+        return True
+    if not cfg.auto_capture_candidates:
         return False
     if not assistant_text:
         return False
@@ -246,7 +311,7 @@ def should_capture_candidate(
         return False
     if any(secret_word in text for secret_word in ("token", "password", "secret", "apikey", "api key")):
         return False
-    return any(keyword in user_text.lower() for keyword in _OPERATIONAL_KEYWORDS)
+    return any(keyword in lowered_user for keyword in _OPERATIONAL_KEYWORDS)
 
 
 def build_capture_request(
@@ -254,6 +319,9 @@ def build_capture_request(
     assistant_text: str,
     cfg: LocalMemoryConfig,
 ) -> LocalMemoryCaptureRequest | None:
+    personal_fact = build_personal_fact_capture_request(user_text, cfg)
+    if personal_fact is not None:
+        return personal_fact
     cleaned = _strip_markdown(assistant_text).strip()
     if not cleaned:
         return None
@@ -549,15 +617,32 @@ def _render_search_result(result: Any) -> str | None:
     if isinstance(data, dict):
         for key in ("results", "matches", "items"):
             if isinstance(data.get(key), list):
-                lines = [_render_match(item) for item in data[key][:5]]
-                lines = [line for line in lines if line]
-                return "\n".join(lines) if lines else None
+                return _render_match_list(data[key])
         return json.dumps(data, ensure_ascii=False)
     if isinstance(data, list):
-        lines = [_render_match(item) for item in data[:5]]
-        lines = [line for line in lines if line]
-        return "\n".join(lines) if lines else None
+        return _render_match_list(data)
     return str(data).strip() or None
+
+
+def _render_match_list(items: list[Any]) -> str | None:
+    ranked = sorted(items[:20], key=_match_priority, reverse=True)
+    lines = [_render_match(item) for item in ranked[:5]]
+    lines = [line for line in lines if line]
+    return "\n".join(lines) if lines else None
+
+
+def _match_priority(item: Any) -> tuple[int, int, int]:
+    if not isinstance(item, dict):
+        return (0, 0, 0)
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    profile_fields = metadata.get("profile_fields") if isinstance(metadata.get("profile_fields"), dict) else {}
+    title = str(item.get("title") or item.get("name") or "").lower()
+    tags = item.get("tags") if isinstance(item.get("tags"), list) else []
+    lowered_tags = {str(tag).lower() for tag in tags}
+    is_profile = 1 if (item.get("domain") == "profile" or "profile" in lowered_tags or profile_fields) else 0
+    is_identity = 1 if ({"identity", "preferred_name", "username", "preference"} & lowered_tags or "preferred name" in title or "username" in title) else 0
+    field_count = len(profile_fields)
+    return (is_profile, is_identity, field_count)
 
 
 def _render_match(item: Any) -> str | None:
@@ -567,12 +652,183 @@ def _render_match(item: Any) -> str | None:
         return str(item).strip() or None
     title = str(item.get("title") or item.get("name") or "memory").strip()
     summary = str(item.get("summary") or item.get("content") or "").strip()
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    profile_fields = metadata.get("profile_fields") if isinstance(metadata.get("profile_fields"), dict) else {}
+    if profile_fields:
+        preferred_name = profile_fields.get("preferred_name")
+        username = profile_fields.get("username")
+        favorite_food = profile_fields.get("favorite_food")
+        if preferred_name and title.lower() == "user preferred name":
+            summary = f"Preferred name: {preferred_name}"
+        elif username and title.lower() == "user username":
+            summary = f"Username: {username}"
+        elif favorite_food and title.lower() == "user preference":
+            summary = f"Favorite food: {favorite_food}"
     summary = re.sub(r"\s+", " ", summary)
     if len(summary) > 240:
         summary = summary[:237].rstrip() + "..."
     if not summary:
         return title
     return f"- {title}: {summary}"
+
+
+def is_personal_fact_statement(user_text: str) -> bool:
+    lowered = user_text.strip().lower()
+    if not lowered:
+        return False
+    for _memory_type, _domain, patterns in _PERSONAL_FACT_PATTERNS:
+        if any(pattern in lowered for pattern in patterns):
+            return True
+    return False
+
+
+def build_personal_fact_capture_request(
+    user_text: str,
+    cfg: LocalMemoryConfig,
+) -> LocalMemoryCaptureRequest | None:
+    if not cfg.auto_capture_personal_facts:
+        return None
+    normalized = _normalize_personal_fact_text(user_text)
+    if not normalized:
+        return None
+    lowered = normalized.lower()
+    extracted_fields = _extract_personal_fact_fields(normalized)
+    memory_type = "user_profile_fact"
+    domain = "profile"
+    tags = ["personal", "profile"]
+    title = "Personal fact"
+    summary = normalized[:240]
+    attributes: dict[str, Any] = {
+        "source": "user_stated",
+        "integration": "nanobot-bolt-on-local-memory",
+        "profile_fields": extracted_fields,
+    }
+
+    for candidate_type, candidate_domain, patterns in _PERSONAL_FACT_PATTERNS:
+        if any(pattern in lowered for pattern in patterns):
+            memory_type = candidate_type
+            domain = candidate_domain
+            break
+
+    if "call me " in lowered or "my name is " in lowered or "you can call me " in lowered:
+        title = "User preferred name"
+        tags.extend(["identity", "preferred_name"])
+        if extracted_fields.get("preferred_name"):
+            summary = f"Preferred name: {extracted_fields['preferred_name']}"
+    elif "username" in lowered:
+        title = "User username"
+        tags.extend(["identity", "username"])
+        if extracted_fields.get("username"):
+            summary = f"Username: {extracted_fields['username']}"
+    elif "favorite" in lowered or "favourite" in lowered:
+        title = "User preference"
+        tags.extend(["preference"])
+        if extracted_fields.get("favorite_food"):
+            summary = f"Favorite food: {extracted_fields['favorite_food']}"
+    elif any(term in lowered for term in ("heart attack", "stroke", "allergic", "diagnosed", "surgery")):
+        title = "Sensitive health fact"
+        tags.extend(["health", "sensitive"])
+        attributes["sensitivity"] = "high"
+    elif any(term in lowered for term in ("my son", "my daughter", "my wife", "my husband", "my family", "my mom", "my mother", "my dad", "my father")):
+        title = "Relationship context"
+        tags.extend(["family"])
+    elif any(term in lowered for term in ("don't ask", "do not ask", "stop asking", "please be", "be more", "be less")):
+        title = "Interaction preference"
+        tags.extend(["interaction"])
+
+    iso_date = _extract_iso_like_date(user_text)
+    if iso_date:
+        attributes["event_date"] = iso_date
+        tags.append("dated_fact")
+    if any(term in lowered for term in _SENSITIVE_PERSONAL_TERMS):
+        attributes.setdefault("sensitivity", "high")
+
+    return LocalMemoryCaptureRequest(
+        type=memory_type,
+        domain=domain,
+        title=title,
+        summary=summary,
+        content=normalized[: cfg.max_candidate_chars],
+        tags=_dedupe_preserve_order(tags),
+        metadata=attributes,
+    )
+
+
+def _normalize_personal_fact_text(user_text: str) -> str:
+    return re.sub(r"\s+", " ", user_text).strip()
+
+
+def _extract_personal_fact_fields(user_text: str) -> dict[str, str]:
+    text = _normalize_personal_fact_text(user_text)
+    lowered = text.lower()
+    fields: dict[str, str] = {}
+
+    preferred_name_match = re.search(r"\b(?:call me|you can call me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)", text)
+    if preferred_name_match:
+        fields["preferred_name"] = preferred_name_match.group(1).strip()
+
+    full_name_match = re.search(r"\bmy (?:full )?name is\s+(.+?)(?:\s+but\s+you\s+can\s+call\s+me\b|[.,;]|$)", text, re.IGNORECASE)
+    if full_name_match:
+        candidate_full_name = full_name_match.group(1).strip()
+        if re.match(r"^[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+){1,3}$", candidate_full_name):
+            fields["full_name"] = candidate_full_name
+            if "preferred_name" not in fields:
+                fields["preferred_name"] = fields["full_name"].split()[0]
+
+    username_match = re.search(r"\b(?:my username is|username is)\s+([A-Za-z0-9._-]+)", text, re.IGNORECASE)
+    if username_match:
+        fields["username"] = username_match.group(1).strip()
+
+    favorite_food_match = re.search(r"\bmy favou?rite food is\s+([^.,;]+)", lowered)
+    if favorite_food_match:
+        fields["favorite_food"] = favorite_food_match.group(1).strip()
+
+    event_date = _extract_iso_like_date(text)
+    if event_date:
+        fields["event_date"] = event_date
+
+    return fields
+
+
+def _extract_iso_like_date(user_text: str) -> str | None:
+    match = re.search(r"\b(20\d{2})-(\d{2})-(\d{2})\b", user_text)
+    if match:
+        return match.group(0)
+    month_match = re.search(
+        r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s*(20\d{2}))?\b",
+        user_text,
+        re.IGNORECASE,
+    )
+    if not month_match:
+        return None
+    month_names = {
+        "january": 1,
+        "february": 2,
+        "march": 3,
+        "april": 4,
+        "may": 5,
+        "june": 6,
+        "july": 7,
+        "august": 8,
+        "september": 9,
+        "october": 10,
+        "november": 11,
+        "december": 12,
+    }
+    month = month_names[month_match.group(1).lower()]
+    day = int(month_match.group(2))
+    year = int(month_match.group(3) or 2026)
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
 
 
 def _strip_markdown(text: str) -> str:
