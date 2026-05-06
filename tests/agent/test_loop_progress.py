@@ -130,11 +130,44 @@ class TestToolEventProgress:
         assert finish["result"] == "file.txt"
 
     @pytest.mark.asyncio
-    async def test_bus_progress_streams_provider_deltas_for_codex_style_provider(
+    async def test_non_streaming_channel_does_not_publish_codex_progress_deltas(
         self,
         tmp_path: Path,
     ) -> None:
-        """Providers that opt in can stream content deltas through _progress messages."""
+        """Non-streaming channels should get one final reply, not token progress spam."""
+        bus = MessageBus()
+        provider = MagicMock()
+        provider.supports_progress_deltas = True
+        provider.get_default_model.return_value = "openai-codex/gpt-5.5"
+        provider.chat_with_retry = AsyncMock(return_value=LLMResponse(content="Hello", tool_calls=[]))
+        provider.chat_stream_with_retry = AsyncMock()
+        loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="openai-codex/gpt-5.5")
+        loop.tools.get_definitions = MagicMock(return_value=[])
+        loop.consolidator.maybe_consolidate_by_tokens = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        await loop._dispatch(InboundMessage(
+            channel="whatsapp",
+            sender_id="u1",
+            chat_id="chat1",
+            content="say hello",
+        ))
+
+        outbound = []
+        while bus.outbound_size > 0:
+            outbound.append(await bus.consume_outbound())
+
+        assert [m.content for m in outbound] == ["Hello"]
+        assert not any(m.metadata.get("_progress") for m in outbound)
+        assert not any(m.metadata.get("_streamed") for m in outbound)
+        provider.chat_stream_with_retry.assert_not_awaited()
+        provider.chat_with_retry.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_streaming_channel_streams_provider_deltas_for_codex_style_provider(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Streaming channels still receive provider deltas through _stream_delta messages."""
         bus = MessageBus()
         provider = MagicMock()
         provider.supports_progress_deltas = True
@@ -156,18 +189,27 @@ class TestToolEventProgress:
             sender_id="u1",
             chat_id="chat1",
             content="say hello",
+            metadata={"_wants_stream": True},
         ))
 
         outbound = []
         while bus.outbound_size > 0:
             outbound.append(await bus.consume_outbound())
 
-        progress = [m for m in outbound if m.metadata.get("_progress")]
-        final = [m for m in outbound if not m.metadata.get("_progress")]
+        deltas = [m for m in outbound if m.metadata.get("_stream_delta")]
+        stream_end = [m for m in outbound if m.metadata.get("_stream_end")]
+        final = [
+            m for m in outbound
+            if not m.metadata.get("_stream_delta")
+            and not m.metadata.get("_stream_end")
+            and not m.metadata.get("_turn_end")
+        ]
 
-        assert [m.content for m in progress] == ["Hel", "lo"]
-        assert final[-2].content == "Hello"
-        assert (final[-1].metadata or {}).get("_turn_end") is True
+        assert [m.content for m in deltas] == ["Hel", "lo"]
+        assert len(stream_end) == 1
+        assert final[-1].content == "Hello"
+        assert final[-1].metadata.get("_streamed") is True
+        assert outbound[-1].metadata.get("_turn_end") is True
         provider.chat_with_retry.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -197,7 +239,11 @@ class TestToolEventProgress:
         loop.tools.prepare_call = MagicMock(return_value=(None, {"path": "foo.txt"}, None))
         loop.tools.execute = AsyncMock(return_value="ok")
 
+        streamed: list[str] = []
         progress: list[tuple[str, bool, list[dict] | None]] = []
+
+        async def on_stream(delta: str) -> None:
+            streamed.append(delta)
 
         async def on_progress(
             content: str,
@@ -207,14 +253,15 @@ class TestToolEventProgress:
         ) -> None:
             progress.append((content, tool_hint, tool_events))
 
-        final_content, _, _, _, _ = await loop._run_agent_loop([], on_progress=on_progress)
+        final_content, _, _, _, _ = await loop._run_agent_loop(
+            [],
+            on_progress=on_progress,
+            on_stream=on_stream,
+        )
 
         assert final_content == "Done"
-        assert [item[0] for item in progress[:3]] == [
-            "I will",
-            " inspect it.",
-            'custom_tool("foo.txt")',
-        ]
+        assert streamed == ["I will", " inspect it."]
+        assert progress[0][0] == 'custom_tool("foo.txt")'
         assert all(item[0] != "I will inspect it." for item in progress)
 
     @pytest.mark.asyncio

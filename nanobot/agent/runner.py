@@ -76,6 +76,7 @@ class AgentRunSpec:
     context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
     progress_callback: Any | None = None
+    stream_progress_deltas: bool = True
     retry_wait_callback: Any | None = None
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
@@ -616,6 +617,7 @@ class AgentRunner:
         wants_streaming = hook.wants_streaming()
         wants_progress_streaming = (
             not wants_streaming
+            and spec.stream_progress_deltas
             and spec.progress_callback is not None
             and getattr(self.provider, "supports_progress_deltas", False) is True
         )
