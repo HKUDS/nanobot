@@ -266,6 +266,40 @@ class SessionManager:
         """Public helper used by HTTP handlers to map an arbitrary key to a stable filename stem."""
         return safe_filename(key.replace(":", "_"))
 
+    @staticmethod
+    def _is_runtime_context_message(message: dict[str, Any]) -> bool:
+        if message.get("role") != "system":
+            return False
+        content = message.get("content")
+        if not isinstance(content, str):
+            return False
+        return (
+            "[Runtime Context" in content
+            or "[/Runtime Context]" in content
+            or "<nanobot_runtime_context>" in content
+            or "</nanobot_runtime_context>" in content
+        )
+
+    @staticmethod
+    def _dedupe_adjacent_user_turns(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        cleaned: list[dict[str, Any]] = []
+        for message in messages:
+            if cleaned:
+                previous = cleaned[-1]
+                if (
+                    message.get("role") == previous.get("role") == "user"
+                    and message.get("content") == previous.get("content")
+                    and message.get("media") == previous.get("media")
+                ):
+                    continue
+            cleaned.append(message)
+        return cleaned
+
+    @classmethod
+    def _sanitize_persisted_messages(cls, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        without_runtime = [m for m in messages if not cls._is_runtime_context_message(m)]
+        return cls._dedupe_adjacent_user_turns(without_runtime)
+
     def _get_session_path(self, key: str) -> Path:
         """Get the file path for a session."""
         return self.sessions_dir / f"{self.safe_key(key)}.jsonl"
@@ -422,6 +456,7 @@ class SessionManager:
         write-back caching (e.g. rclone VFS, NFS, FUSE mounts) do not lose
         the most recent writes.
         """
+        session.messages = self._sanitize_persisted_messages(session.messages)
         path = self._get_session_path(session.key)
         tmp_path = path.with_suffix(".jsonl.tmp")
 
