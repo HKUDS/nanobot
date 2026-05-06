@@ -11,13 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
-from pydantic import Field
 
 WECOM_AVAILABLE = importlib.util.find_spec("wecom_aibot_sdk") is not None
 
@@ -204,6 +204,9 @@ class WecomChannel(BaseChannel):
 
             chat_id = body.get("chatid", "") if isinstance(body, dict) else ""
 
+            if chat_id and not self.is_allowed(chat_id):
+                return
+
             if chat_id and self.config.welcome_message:
                 await self._client.reply_welcome(frame, {
                     "msgtype": "text",
@@ -233,6 +236,12 @@ class WecomChannel(BaseChannel):
             if not msg_id:
                 msg_id = f"{body.get('chatid', '')}_{body.get('sendertime', '')}"
 
+            # Extract sender info from "from" field (SDK format)
+            from_info = body.get("from", {})
+            sender_id = from_info.get("userid", "unknown") if isinstance(from_info, dict) else "unknown"
+            if not self.is_allowed(sender_id):
+                return
+
             # Deduplication check
             if msg_id in self._processed_message_ids:
                 return
@@ -241,10 +250,6 @@ class WecomChannel(BaseChannel):
             # Trim cache
             while len(self._processed_message_ids) > 1000:
                 self._processed_message_ids.popitem(last=False)
-
-            # Extract sender info from "from" field (SDK format)
-            from_info = body.get("from", {})
-            sender_id = from_info.get("userid", "unknown") if isinstance(from_info, dict) else "unknown"
 
             # For single chat, chatid is the sender's userid
             # For group chat, chatid is provided in body
@@ -424,9 +429,9 @@ class WecomChannel(BaseChannel):
             # MD5 is used for file integrity only, not cryptographic security
             md5_hash = hashlib.md5(data).hexdigest()
 
-            CHUNK_SIZE = 512 * 1024  # 512 KB raw (before base64)
+            chunk_size = 512 * 1024  # 512 KB raw (before base64)
             mv = memoryview(data)
-            chunk_list = [bytes(mv[i : i + CHUNK_SIZE]) for i in range(0, file_size, CHUNK_SIZE)]
+            chunk_list = [bytes(mv[i : i + chunk_size]) for i in range(0, file_size, chunk_size)]
             n_chunks = len(chunk_list)
             del mv, data
 

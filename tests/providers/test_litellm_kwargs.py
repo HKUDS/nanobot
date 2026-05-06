@@ -620,7 +620,8 @@ def _tool_call(call_id: str) -> dict:
     }
 
 
-def test_deepseek_thinking_drops_tool_history_missing_reasoning_content() -> None:
+def test_deepseek_thinking_backfills_missing_reasoning_content_on_tool_history() -> None:
+    """Backfill reasoning_content="" instead of dropping the turn (#3554, #3584)."""
     kwargs = _deepseek_kwargs([
         {"role": "system", "content": "system"},
         {"role": "user", "content": "can we use wechat?"},
@@ -629,10 +630,12 @@ def test_deepseek_thinking_drops_tool_history_missing_reasoning_content() -> Non
         {"role": "user", "content": "continue"},
     ])
 
-    assert kwargs["messages"] == [
-        {"role": "system", "content": "system"},
-        {"role": "user", "content": "continue"},
+    assert [m["role"] for m in kwargs["messages"]] == [
+        "system", "user", "assistant", "tool", "user",
     ]
+    assistant = kwargs["messages"][2]
+    assert assistant["reasoning_content"] == ""
+    assert assistant["tool_calls"][0]["function"]["name"] == "my"
 
 
 def test_deepseek_thinking_keeps_tool_history_with_reasoning_content() -> None:
@@ -652,20 +655,6 @@ def test_deepseek_thinking_keeps_tool_history_with_reasoning_content() -> None:
     assert assistant["role"] == "assistant"
     assert assistant["reasoning_content"] == "I should inspect supported channels."
     assert kwargs["messages"][2]["role"] == "tool"
-
-
-def test_deepseek_thinking_drops_current_bad_tool_turn_without_followup_user() -> None:
-    kwargs = _deepseek_kwargs([
-        {"role": "system", "content": "system"},
-        {"role": "user", "content": "can we use wechat?"},
-        {"role": "assistant", "content": "", "tool_calls": [_tool_call("call_bad")]},
-        {"role": "tool", "tool_call_id": "call_bad", "name": "my", "content": "channels"},
-    ])
-
-    assert kwargs["messages"] == [
-        {"role": "system", "content": "system"},
-        {"role": "user", "content": "can we use wechat?"},
-    ]
 
 
 def test_openai_compat_keeps_tool_calls_after_consecutive_assistant_messages() -> None:
@@ -913,8 +902,8 @@ def test_deepseek_backfills_reasoning_content_on_legacy_tool_call_messages() -> 
             assert msg["reasoning_content"] == ""
 
 
-def test_backfill_does_not_touch_messages_when_thinking_off() -> None:
-    """When reasoning_effort is None or minimal, legacy messages must NOT be altered."""
+def test_backfill_does_not_touch_messages_when_thinking_explicitly_off() -> None:
+    """When thinking is explicitly disabled, legacy messages must NOT be altered."""
     spec = find_by_name("deepseek")
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
         p = OpenAICompatProvider(api_key="k", default_model="deepseek-v4-pro", spec=spec)
@@ -926,7 +915,7 @@ def test_backfill_does_not_touch_messages_when_thinking_off() -> None:
         {"role": "tool", "tool_call_id": "tc1", "content": "result"},
         {"role": "user", "content": "thanks"},
     ]
-    for effort in (None, "minimal"):
+    for effort in ("minimal", "none"):
         kw = p._build_kwargs(
             messages=list(messages), tools=None, model="deepseek-v4-pro",
             max_tokens=1024, temperature=0.7,
@@ -935,6 +924,61 @@ def test_backfill_does_not_touch_messages_when_thinking_off() -> None:
         for msg in kw["messages"]:
             if msg.get("role") == "assistant" and msg.get("tool_calls"):
                 assert "reasoning_content" not in msg
+
+
+def test_deepseek_v4_backfills_incomplete_reasoning_history_when_effort_implicit() -> None:
+    """DeepSeek-V4 reasons natively: backfill even without explicit reasoning_effort."""
+    spec = find_by_name("deepseek")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        p = OpenAICompatProvider(api_key="k", default_model="deepseek-v4-pro", spec=spec)
+    messages = [
+        {"role": "system", "content": "system"},
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "tc1", "type": "function", "function": {"name": "web_search", "arguments": "{}"}}
+        ]},
+        {"role": "tool", "tool_call_id": "tc1", "content": "result"},
+        {"role": "user", "content": "thanks"},
+    ]
+
+    kw = p._build_kwargs(
+        messages=list(messages), tools=None, model="deepseek-v4-pro",
+        max_tokens=1024, temperature=0.7,
+        reasoning_effort=None, tool_choice=None,
+    )
+
+    assert [msg["role"] for msg in kw["messages"]] == [
+        "system", "user", "assistant", "tool", "user",
+    ]
+    assert kw["messages"][2]["reasoning_content"] == ""
+    assert kw["messages"][-1]["content"] == "thanks"
+
+
+def test_deepseek_chat_keeps_tool_history_when_effort_implicit() -> None:
+    """Non-thinking deepseek-chat must keep history untouched and must NOT
+    receive backfilled reasoning_content (#3554, #3584)."""
+    spec = find_by_name("deepseek")
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+        p = OpenAICompatProvider(api_key="k", default_model="deepseek-chat", spec=spec)
+    messages = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "tc1", "type": "function", "function": {"name": "web_search", "arguments": "{}"}}
+        ]},
+        {"role": "tool", "tool_call_id": "tc1", "content": "result"},
+        {"role": "user", "content": "thanks"},
+    ]
+
+    kw = p._build_kwargs(
+        messages=list(messages), tools=None, model="deepseek-chat",
+        max_tokens=1024, temperature=0.7,
+        reasoning_effort=None, tool_choice=None,
+    )
+
+    roles = [msg["role"] for msg in kw["messages"]]
+    assert roles == ["user", "assistant", "tool", "user"]
+    assert kw["messages"][1]["tool_calls"]
+    assert "reasoning_content" not in kw["messages"][1]
 
 
 def test_deepseek_coerces_list_content_to_string() -> None:
@@ -1061,7 +1105,7 @@ def test_kimi_k2_thinking_series_no_thinking_injection() -> None:
 
 
 # ---------------------------------------------------------------------------
-# reasoning_effort="none" — treated as thinking disabled 
+# reasoning_effort="none" — treated as thinking disabled
 # ---------------------------------------------------------------------------
 
 def test_deepseek_thinking_disabled_for_none_string() -> None:

@@ -1,14 +1,13 @@
-from email.message import EmailMessage
-from datetime import date
-from pathlib import Path
 import imaplib
+from datetime import date
+from email.message import EmailMessage
+from pathlib import Path
 
 import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.email import EmailChannel
-from nanobot.channels.email import EmailConfig
+from nanobot.channels.email import EmailChannel, EmailConfig
 
 
 def _make_config(**overrides) -> EmailConfig:
@@ -24,6 +23,7 @@ def _make_config(**overrides) -> EmailConfig:
         smtp_username="bot@example.com",
         smtp_password="secret",
         mark_seen=True,
+        allow_from=["*"],
         # Disable auth verification by default so existing tests are unaffected
         verify_dkim=False,
         verify_spf=False,
@@ -707,8 +707,8 @@ def test_email_content_tagged_with_email_context(monkeypatch) -> None:
 
 def test_check_authentication_results_method() -> None:
     """Unit test for the _check_authentication_results static method."""
-    from email.parser import BytesParser
     from email import policy
+    from email.parser import BytesParser
 
     # No Authentication-Results header
     msg_no_auth = EmailMessage()
@@ -786,6 +786,32 @@ def _make_raw_email_with_attachment(
         filename=attachment_name,
     )
     return msg.as_bytes()
+
+
+def test_fetch_new_messages_ignores_unauthorized_sender_before_attachments(monkeypatch) -> None:
+    raw = _make_raw_email_with_attachment(from_addr="blocked@example.com")
+    fake = _make_fake_imap(raw)
+    monkeypatch.setattr("nanobot.channels.email.imaplib.IMAP4_SSL", lambda _h, _p: fake)
+
+    called = {"attachments": False}
+
+    def _extract_attachments(*_args, **_kwargs):
+        called["attachments"] = True
+        return []
+
+    monkeypatch.setattr(EmailChannel, "_extract_attachments", _extract_attachments)
+
+    cfg = _make_config(
+        allow_from=["allowed@example.com"],
+        allowed_attachment_types=["application/pdf"],
+        verify_dkim=False,
+        verify_spf=False,
+    )
+    channel = EmailChannel(cfg, MessageBus())
+
+    assert channel._fetch_new_messages() == []
+    assert called["attachments"] is False
+    assert fake.store_calls == [(b"1", "+FLAGS", "\\Seen")]
 
 
 def test_extract_attachments_saves_pdf(tmp_path, monkeypatch) -> None:

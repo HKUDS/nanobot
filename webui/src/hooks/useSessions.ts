@@ -84,6 +84,9 @@ export function useSessionHistory(key: string | null): {
   messages: UIMessage[];
   loading: boolean;
   error: string | null;
+  /** ``true`` when the last persisted assistant turn has ``tool_calls`` but no
+   *  final text yet — the model was still processing when the page loaded. */
+  hasPendingToolCalls: boolean;
 } {
   const { token } = useClient();
   const [state, setState] = useState<{
@@ -91,11 +94,13 @@ export function useSessionHistory(key: string | null): {
     messages: UIMessage[];
     loading: boolean;
     error: string | null;
+    hasPendingToolCalls: boolean;
   }>({
     key: null,
     messages: [],
     loading: false,
     error: null,
+    hasPendingToolCalls: false,
   });
 
   useEffect(() => {
@@ -105,6 +110,7 @@ export function useSessionHistory(key: string | null): {
         messages: [],
         loading: false,
         error: null,
+        hasPendingToolCalls: false,
       });
       return;
     }
@@ -116,6 +122,7 @@ export function useSessionHistory(key: string | null): {
       messages: [],
       loading: true,
       error: null,
+      hasPendingToolCalls: false,
     });
     (async () => {
       try {
@@ -146,11 +153,21 @@ export function useSessionHistory(key: string | null): {
             },
           ];
         });
+        // Tool result rows can trail the assistant tool-call row while the turn
+        // is still running, so check the last conversational row.
+        const lastRaw = [...body.messages]
+          .reverse()
+          .find((m) => m.role === "user" || m.role === "assistant");
+        const hasPending =
+          lastRaw?.role === "assistant" &&
+          Array.isArray(lastRaw.tool_calls) &&
+          lastRaw.tool_calls.length > 0;
         setState({
           key,
           messages: ui,
           loading: false,
           error: null,
+          hasPendingToolCalls: hasPending,
         });
       } catch (e) {
         if (cancelled) return;
@@ -162,6 +179,7 @@ export function useSessionHistory(key: string | null): {
             messages: [],
             loading: false,
             error: null,
+            hasPendingToolCalls: false,
           });
         } else {
           setState({
@@ -169,6 +187,7 @@ export function useSessionHistory(key: string | null): {
             messages: [],
             loading: false,
             error: (e as Error).message,
+            hasPendingToolCalls: false,
           });
         }
       }
@@ -179,19 +198,20 @@ export function useSessionHistory(key: string | null): {
   }, [key, token]);
 
   if (!key) {
-    return { messages: EMPTY_MESSAGES, loading: false, error: null };
+    return { messages: EMPTY_MESSAGES, loading: false, error: null, hasPendingToolCalls: false };
   }
 
   // Even before the effect above commits its loading state, never surface the
   // previous session's payload for a brand-new key.
   if (state.key !== key) {
-    return { messages: EMPTY_MESSAGES, loading: true, error: null };
+    return { messages: EMPTY_MESSAGES, loading: true, error: null, hasPendingToolCalls: false };
   }
 
   return {
     messages: state.messages,
     loading: state.loading,
     error: state.error,
+    hasPendingToolCalls: state.hasPendingToolCalls,
   };
 }
 

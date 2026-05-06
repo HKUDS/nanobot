@@ -6,6 +6,7 @@ import imaplib
 import re
 import smtplib
 import ssl
+from contextlib import suppress
 from datetime import date
 from email import policy
 from email.header import decode_header, make_header
@@ -406,6 +407,12 @@ class EmailChannel(BaseChannel):
                     self._remember_processed_uid(uid, dedupe, cycle_uids)
                     continue
 
+                if not self.is_allowed(sender):
+                    self._remember_processed_uid(uid, dedupe, cycle_uids)
+                    if mark_seen:
+                        client.store(imap_id, "+FLAGS", "\\Seen")
+                    continue
+
                 subject = self._decode_header_value(parsed.get("Subject", ""))
                 date_value = parsed.get("Date", "")
                 message_id = parsed.get("Message-ID", "").strip()
@@ -460,10 +467,8 @@ class EmailChannel(BaseChannel):
                 if mark_seen:
                     client.store(imap_id, "+FLAGS", "\\Seen")
         finally:
-            try:
+            with suppress(Exception):
                 client.logout()
-            except Exception:
-                pass
 
     def _collect_self_addresses(self) -> set[str]:
         """Return normalized email addresses owned by this channel instance."""

@@ -22,7 +22,7 @@ interface ChatPaneProps {
 export function ChatPane({ session, onNewChat }: ChatPaneProps) {
   const chatId = session?.chatId ?? null;
   const historyKey = session?.key ?? null;
-  const { messages: historical, loading } = useSessionHistory(historyKey);
+  const { messages: historical, loading, hasPendingToolCalls } = useSessionHistory(historyKey);
   const { client } = useClient();
   const [booting, setBooting] = useState(false);
   const pendingFirstRef = useRef<string | null>(null);
@@ -31,6 +31,7 @@ export function ChatPane({ session, onNewChat }: ChatPaneProps) {
   const { messages, isStreaming, send, setMessages } = useNanobotStream(
     chatId,
     initial,
+    hasPendingToolCalls,
   );
 
   useEffect(() => {

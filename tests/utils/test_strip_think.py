@@ -102,6 +102,16 @@ class TestStripThinkMalformedLeaks:
         assert strip_think("<channel|>喷泉策略：09:00 开启") == ("喷泉策略：09:00 开启")
         assert strip_think("<|channel|>answer") == "answer"
 
+    def test_partial_trailing_think_tag_after_visible_text(self):
+        assert strip_think("喷泉策略说明 <thin") == "喷泉策略说明"
+        assert strip_think("answer <thought") == "answer"
+        assert strip_think("answer <think>") == "answer"
+
+    def test_partial_trailing_channel_marker_after_visible_text(self):
+        assert strip_think("喷泉策略说明 <|chan") == "喷泉策略说明"
+        assert strip_think("answer <channel") == "answer"
+        assert strip_think("answer <|channel|>") == "answer"
+
 
 class TestStripThinkConservativePreserve:
     """Regression: the malformed-tag / orphan cleanup must NOT touch

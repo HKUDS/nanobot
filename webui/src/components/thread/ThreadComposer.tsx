@@ -40,6 +40,7 @@ interface ThreadComposerProps {
   onSend: (content: string, images?: SendImage[]) => void;
   disabled?: boolean;
   placeholder?: string;
+  isStreaming?: boolean;
   modelLabel?: string | null;
   variant?: "thread" | "hero";
 }
@@ -48,6 +49,7 @@ export function ThreadComposer({
   onSend,
   disabled,
   placeholder,
+  isStreaming = false,
   modelLabel = null,
   variant = "thread",
 }: ThreadComposerProps) {
@@ -58,8 +60,9 @@ export function ThreadComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const isHero = variant === "hero";
-  const resolvedPlaceholder =
-    placeholder ?? t("thread.composer.placeholderThread");
+  const resolvedPlaceholder = isStreaming
+    ? t("thread.composer.placeholderStreaming")
+    : placeholder ?? t("thread.composer.placeholderThread");
 
   const { images, enqueue, remove, clear, encoding, full } =
     useAttachedImages();
@@ -344,7 +347,11 @@ export function ThreadComposer({
               canSend && "hover:scale-[1.03] active:scale-95",
             )}
           >
-            <ArrowUp className={cn(isHero ? "h-4.5 w-4.5" : "h-4 w-4")} />
+            {isStreaming ? (
+              <Loader2 className={cn(isHero ? "h-4.5 w-4.5" : "h-4 w-4", "animate-spin")} />
+            ) : (
+              <ArrowUp className={cn(isHero ? "h-4.5 w-4.5" : "h-4 w-4")} />
+            )}
           </Button>
         </div>
       </div>

@@ -6,6 +6,8 @@ import { useNanobotStream } from "@/hooks/useNanobotStream";
 import type { InboundEvent } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 
+const EMPTY_MESSAGES: import("@/lib/types").UIMessage[] = [];
+
 function fakeClient() {
   const handlers = new Map<string, Set<(ev: InboundEvent) => void>>();
   return {
@@ -51,9 +53,27 @@ function wrap(client: ReturnType<typeof fakeClient>["client"]) {
 }
 
 describe("useNanobotStream", () => {
+  it("starts in streaming mode when history shows pending tool calls", () => {
+    const fake = fakeClient();
+    const initialMessages = [{
+      id: "m1",
+      role: "assistant" as const,
+      content: "Using tools",
+      createdAt: Date.now(),
+    }];
+    const { result } = renderHook(
+      () => useNanobotStream("chat-p", initialMessages, true),
+      {
+        wrapper: wrap(fake.client),
+      },
+    );
+
+    expect(result.current.isStreaming).toBe(true);
+  });
+
   it("collapses consecutive tool_hint frames into one trace row", () => {
     const fake = fakeClient();
-    const { result } = renderHook(() => useNanobotStream("chat-t", []), {
+    const { result } = renderHook(() => useNanobotStream("chat-t", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
     });
 
@@ -95,7 +115,7 @@ describe("useNanobotStream", () => {
 
   it("attaches assistant media_urls to complete messages", () => {
     const fake = fakeClient();
-    const { result } = renderHook(() => useNanobotStream("chat-m", []), {
+    const { result } = renderHook(() => useNanobotStream("chat-m", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
     });
 
@@ -116,7 +136,7 @@ describe("useNanobotStream", () => {
 
   it("keeps assistant buttons on complete messages", () => {
     const fake = fakeClient();
-    const { result } = renderHook(() => useNanobotStream("chat-q", []), {
+    const { result } = renderHook(() => useNanobotStream("chat-q", EMPTY_MESSAGES), {
       wrapper: wrap(fake.client),
     });
 
@@ -135,5 +155,61 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[0].buttons).toEqual([
       ["Short answer", "Detailed answer"],
     ]);
+  });
+
+  it("keeps streaming alive across stream_end and completes on turn_end", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-s", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-s", {
+        event: "delta",
+        chat_id: "chat-s",
+        text: "Hello",
+      });
+    });
+
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.messages[0]).toMatchObject({
+      role: "assistant",
+      content: "Hello",
+      isStreaming: true,
+    });
+
+    act(() => {
+      fake.emit("chat-s", {
+        event: "stream_end",
+        chat_id: "chat-s",
+      });
+    });
+
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.messages[0].isStreaming).toBe(true);
+
+    act(() => {
+      fake.emit("chat-s", {
+        event: "message",
+        chat_id: "chat-s",
+        text: "Hello world",
+      });
+    });
+
+    expect(result.current.isStreaming).toBe(true);
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      content: "Hello world",
+    });
+
+    act(() => {
+      fake.emit("chat-s", {
+        event: "turn_end",
+        chat_id: "chat-s",
+      });
+    });
+
+    expect(result.current.isStreaming).toBe(false);
+    expect(result.current.messages.every((message) => !message.isStreaming)).toBe(true);
   });
 });

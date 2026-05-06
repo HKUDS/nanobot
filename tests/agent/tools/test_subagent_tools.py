@@ -93,6 +93,75 @@ async def test_subagent_uses_configured_max_iterations(tmp_path):
     mgr.runner.run.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
+    """SpawnTool should return an error string when the concurrency limit is reached."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.agent.tools.spawn import SpawnTool
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+    mgr._announce_result = AsyncMock()
+
+    # Block the first subagent so it stays "running"
+    release = asyncio.Event()
+
+    async def fake_run(spec):
+        await release.wait()
+        return SimpleNamespace(
+            stop_reason="done",
+            final_content="done",
+            error=None,
+            tool_events=[],
+        )
+
+    mgr.runner.run = AsyncMock(side_effect=fake_run)
+
+    tool = SpawnTool(mgr)
+    tool.set_context("test", "c1", "test:c1")
+
+    # First spawn succeeds
+    result = await tool.execute(task="first task")
+    assert "started" in result
+
+    # Second spawn should be rejected (default limit is 1)
+    result = await tool.execute(task="second task")
+    assert "Cannot spawn subagent" in result
+    assert "concurrency limit reached" in result
+
+    # Release the first subagent
+    release.set()
+    # Allow cleanup
+    await asyncio.gather(*mgr._running_tasks.values(), return_exceptions=True)
+
+
+def test_subagent_default_max_concurrent_matches_agent_defaults(tmp_path):
+    """Direct SubagentManager construction should use the agent default concurrency limit."""
+    from nanobot.agent.subagent import SubagentManager
+    from nanobot.bus.queue import MessageBus
+
+    bus = MessageBus()
+    provider = MagicMock()
+    provider.get_default_model.return_value = "test-model"
+
+    mgr = SubagentManager(
+        provider=provider,
+        workspace=tmp_path,
+        bus=bus,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+    )
+
+    assert mgr.max_concurrent_subagents == AgentDefaults().max_concurrent_subagents
+
+
 def test_subagent_default_max_iterations_matches_agent_defaults(tmp_path):
     """Direct SubagentManager construction should use the agent default limit."""
     from nanobot.agent.subagent import SubagentManager

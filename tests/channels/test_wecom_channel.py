@@ -3,7 +3,6 @@
 import os
 import tempfile
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -449,6 +448,39 @@ async def test_process_text_message() -> None:
     assert msg.chat_id == "chat1"
     assert msg.content == "hello wecom"
     assert msg.metadata["msg_type"] == "text"
+
+
+@pytest.mark.asyncio
+async def test_enter_chat_ignores_unauthorized_user_before_welcome() -> None:
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["allowed"]), MessageBus())
+    client = _FakeWeComClient()
+    channel._client = client
+    channel.config.welcome_message = "hello"
+
+    await channel._on_enter_chat(_FakeFrame(body={"chatid": "blocked"}))
+
+    client.reply_welcome.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_message_ignores_unauthorized_sender_before_download() -> None:
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["allowed"]), MessageBus())
+    client = _FakeWeComClient()
+    channel._client = client
+    channel._handle_message = AsyncMock()
+
+    frame = _FakeFrame(body={
+        "msgid": "msg_blocked",
+        "chatid": "chat1",
+        "from": {"userid": "blocked"},
+        "image": {"url": "https://example.com/img.png", "aeskey": "key123"},
+    })
+
+    await channel._process_message(frame, "image")
+
+    client.download_file.assert_not_awaited()
+    channel._handle_message.assert_not_awaited()
+    assert channel.bus.inbound_size == 0
 
 
 @pytest.mark.asyncio

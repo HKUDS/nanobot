@@ -5,6 +5,7 @@ import json
 import logging
 import mimetypes
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypeAlias
@@ -214,7 +215,7 @@ class MatrixConfig(Base):
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention", "allowlist"] = "open"
     group_allow_from: list[str] = Field(default_factory=list)
-    allow_room_mentions: bool = False,
+    allow_room_mentions: bool = False
     streaming: bool = False
 
 
@@ -251,11 +252,13 @@ class MatrixChannel(BaseChannel):
         self._server_upload_limit_bytes: int | None = None
         self._server_upload_limit_checked = False
         self._stream_bufs: dict[str, _StreamBuf] = {}
+        self._started_at_ms: int = 0
 
 
     async def start(self) -> None:
         """Start Matrix client and begin sync loop."""
         self._running = True
+        self._started_at_ms = int(time.time() * 1000)
         _configure_nio_logging_bridge()
 
         self.store_path = get_data_dir() / "matrix-store"
@@ -341,10 +344,8 @@ class MatrixChannel(BaseChannel):
                                        timeout=self.config.sync_stop_grace_seconds)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 self._sync_task.cancel()
-                try:
+                with suppress(asyncio.CancelledError):
                     await self._sync_task
-                except asyncio.CancelledError:
-                    pass
         if self.client:
             await self.client.close()
 
@@ -523,7 +524,7 @@ class MatrixChannel(BaseChannel):
                         failures.append(fail)
             if failures:
                 text = f"{text.rstrip()}\n{chr(10).join(failures)}" if text.strip() else "\n".join(failures)
-            if text or not candidates:
+            if text.strip():
                 content = _build_matrix_text_content(text)
                 if relates_to:
                     content["m.relates_to"] = relates_to
@@ -589,15 +590,26 @@ class MatrixChannel(BaseChannel):
         self.client.add_response_callback(self._on_join_error, JoinError)
         self.client.add_response_callback(self._on_send_error, RoomSendError)
 
-    def _log_response_error(self, label: str, response: Any) -> None:
-        """Log Matrix response errors — auth errors at ERROR level, rest at WARNING."""
+    def _is_fatal_auth_response(self, response: Any) -> bool:
         code = getattr(response, "status_code", None)
         is_auth = code in {"M_UNKNOWN_TOKEN", "M_FORBIDDEN", "M_UNAUTHORIZED"}
-        is_fatal = is_auth or getattr(response, "soft_logout", False)
+        return is_auth or bool(getattr(response, "soft_logout", False))
+
+    def _log_response_error(self, label: str, response: Any) -> None:
+        """Log Matrix response errors — auth errors at ERROR level, rest at WARNING."""
+        is_fatal = self._is_fatal_auth_response(response)
         (logger.error if is_fatal else logger.warning)("Matrix {} failed: {}", label, response)
 
     async def _on_sync_error(self, response: SyncError) -> None:
         self._log_response_error("sync", response)
+        if self._is_fatal_auth_response(response):
+            # Auth errors won't recover by retry; stop the sync loop instead of
+            # spamming the homeserver every 2s (#1851).
+            logger.error("Matrix authentication failed irrecoverably; stopping sync loop")
+            self._running = False
+            if self.client:
+                with suppress(Exception):
+                    self.client.stop_sync_forever()
 
     async def _on_join_error(self, response: JoinError) -> None:
         self._log_response_error("join", response)
@@ -609,13 +621,11 @@ class MatrixChannel(BaseChannel):
         """Best-effort typing indicator update."""
         if not self.client:
             return
-        try:
+        with suppress(Exception):
             response = await self.client.room_typing(room_id=room_id, typing_state=typing,
                                                      timeout=TYPING_NOTICE_TIMEOUT_MS)
             if isinstance(response, RoomTypingError):
                 logger.debug("Matrix typing failed for {}: {}", room_id, response)
-        except Exception:
-            pass
 
     async def _start_typing_keepalive(self, room_id: str) -> None:
         """Start periodic typing refresh (spec-recommended keepalive)."""
@@ -625,33 +635,34 @@ class MatrixChannel(BaseChannel):
             return
 
         async def loop() -> None:
-            try:
+            with suppress(asyncio.CancelledError):
                 while self._running:
                     await asyncio.sleep(TYPING_KEEPALIVE_INTERVAL_MS / 1000)
                     await self._set_typing(room_id, True)
-            except asyncio.CancelledError:
-                pass
 
         self._typing_tasks[room_id] = asyncio.create_task(loop())
 
     async def _stop_typing_keepalive(self, room_id: str, *, clear_typing: bool) -> None:
         if task := self._typing_tasks.pop(room_id, None):
             task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
         if clear_typing:
             await self._set_typing(room_id, False)
 
     async def _sync_loop(self) -> None:
+        backoff = 2.0
         while self._running:
             try:
                 await self.client.sync_forever(timeout=30000, full_state=True)
+                backoff = 2.0
             except asyncio.CancelledError:
                 break
             except Exception:
-                await asyncio.sleep(2)
+                if not self._running:
+                    break
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60.0)
 
     async def _on_room_invite(self, room: MatrixRoom, event: InviteEvent) -> None:
         if self.is_allowed(event.sender):
@@ -673,6 +684,16 @@ class MatrixChannel(BaseChannel):
         if isinstance(user_ids, list) and self.config.user_id in user_ids:
             return True
         return bool(self.config.allow_room_mentions and mentions.get("room") is True)
+
+    def _is_pre_startup_event(self, event: RoomMessage) -> bool:
+        """Skip events that landed in the timeline before this process started.
+
+        Matrix sync replays the room timeline on each startup/restart; without
+        this filter old messages would be re-handled as if they were fresh
+        (#3553).
+        """
+        ts = getattr(event, "server_timestamp", None)
+        return isinstance(ts, int) and ts < self._started_at_ms
 
     def _should_process_message(self, room: MatrixRoom, event: RoomMessage) -> bool:
         """Apply sender and room policy checks."""
@@ -858,7 +879,11 @@ class MatrixChannel(BaseChannel):
         return meta
 
     async def _on_message(self, room: MatrixRoom, event: RoomMessageText) -> None:
-        if event.sender == self.config.user_id or not self._should_process_message(room, event):
+        if (
+            event.sender == self.config.user_id
+            or self._is_pre_startup_event(event)
+            or not self._should_process_message(room, event)
+        ):
             return
         await self._start_typing_keepalive(room.room_id)
         try:
@@ -871,7 +896,11 @@ class MatrixChannel(BaseChannel):
             raise
 
     async def _on_media_message(self, room: MatrixRoom, event: MatrixMediaEvent) -> None:
-        if event.sender == self.config.user_id or not self._should_process_message(room, event):
+        if (
+            event.sender == self.config.user_id
+            or self._is_pre_startup_event(event)
+            or not self._should_process_message(room, event)
+        ):
             return
         attachment, marker = await self._fetch_media_attachment(room, event)
         parts: list[str] = []

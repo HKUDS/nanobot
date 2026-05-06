@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -612,12 +613,11 @@ class FeishuChannel(BaseChannel):
         """Callback: store reaction_id after background add-reaction completes."""
         if task.cancelled():
             return
-        try:
+        # Failures already logged by _on_background_task_done.
+        with suppress(Exception):
             reaction_id = task.result()
             if reaction_id:
                 self._reaction_ids[message_id] = reaction_id
-        except Exception:
-            pass  # already logged by _on_background_task_done
         # Trim cache to prevent unbounded growth
         if len(self._reaction_ids) > 500:
             self._reaction_ids.pop(next(iter(self._reaction_ids)))
@@ -1081,8 +1081,9 @@ class FeishuChannel(BaseChannel):
         if data and filename:
             file_path = media_dir / filename
             file_path.write_bytes(data)
-            logger.debug("Downloaded {} to {}", msg_type, file_path)
-            return str(file_path), f"[{msg_type}: {filename}]"
+            path_str = str(file_path)
+            logger.debug("Downloaded {} to {}", msg_type, path_str)
+            return path_str, f"[{msg_type}: {path_str}]"
 
         return None, f"[{msg_type}: download failed]"
 
@@ -1643,15 +1644,7 @@ class FeishuChannel(BaseChannel):
             logger.debug("Feishu raw message: {}", message.content)
             logger.debug("Feishu mentions: {}", getattr(message, "mentions", None))
 
-            # Deduplication check
             message_id = message.message_id
-            if message_id in self._processed_message_ids:
-                return
-            self._processed_message_ids[message_id] = None
-
-            # Trim cache
-            while len(self._processed_message_ids) > 1000:
-                self._processed_message_ids.popitem(last=False)
 
             # Skip bot messages
             if sender.sender_type == "bot":
@@ -1662,9 +1655,21 @@ class FeishuChannel(BaseChannel):
             chat_type = message.chat_type
             msg_type = message.message_type
 
+            if not self.is_allowed(sender_id):
+                return
+
             if chat_type == "group" and not self._is_group_message_for_bot(message):
                 logger.debug("Feishu: skipping group message (not mentioned)")
                 return
+
+            # Deduplication check
+            if message_id in self._processed_message_ids:
+                return
+            self._processed_message_ids[message_id] = None
+
+            # Trim cache
+            while len(self._processed_message_ids) > 1000:
+                self._processed_message_ids.popitem(last=False)
 
             # Add reaction (non-blocking — tracked background task)
             task = asyncio.create_task(

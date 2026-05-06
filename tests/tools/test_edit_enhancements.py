@@ -27,12 +27,16 @@ class TestEditReadTracking:
     """edit_file should warn when file hasn't been read first."""
 
     @pytest.fixture()
-    def read_tool(self, tmp_path):
-        return ReadFileTool(workspace=tmp_path)
+    def file_states(self):
+        return file_state.FileStates()
 
     @pytest.fixture()
-    def edit_tool(self, tmp_path):
-        return EditFileTool(workspace=tmp_path)
+    def read_tool(self, tmp_path, file_states):
+        return ReadFileTool(workspace=tmp_path, file_states=file_states)
+
+    @pytest.fixture()
+    def edit_tool(self, tmp_path, file_states):
+        return EditFileTool(workspace=tmp_path, file_states=file_states)
 
     @pytest.mark.asyncio
     async def test_edit_warns_if_file_not_read_first(self, edit_tool, tmp_path):

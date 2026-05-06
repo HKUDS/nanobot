@@ -643,6 +643,14 @@ def test_slack_download_rejects_login_html() -> None:
     assert SlackChannel._looks_like_html_download(markdown_response) is False
 
 
+def test_slack_download_failure_marker_is_actionable() -> None:
+    marker = SlackChannel._download_failure_marker("image", "screenshot.png", "download failed")
+
+    assert "not available to nanobot" in marker
+    assert "files:read" in marker
+    assert "reinstall the Slack app" in marker
+
+
 def test_slack_channel_uses_channel_aware_allow_policy() -> None:
     channel = SlackChannel(SlackConfig(enabled=True, allow_from=[]), MessageBus())
     assert channel.is_allowed("U1") is True

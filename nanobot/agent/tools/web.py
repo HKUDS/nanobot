@@ -388,6 +388,7 @@ class WebFetchTool(Tool):
         max_chars: int | None = None,
         **kwargs: Any,
     ) -> Any:
+        url = url.strip(" \t\r\n`\"'")
         extract_mode = kwargs.pop("extractMode", extract_mode)
         max_chars = kwargs.pop("maxChars", max_chars) or self.max_chars
         is_valid, error_msg = _validate_url_safe(url)
