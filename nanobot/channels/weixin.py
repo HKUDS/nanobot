@@ -940,12 +940,8 @@ class WeixinChannel(BaseChannel):
 
     async def send(self, msg: OutboundMessage) -> None:
         if not self._client or not self._token:
-            self.logger.warning("client not initialized or not authenticated")
-            return
-        try:
-            self._assert_session_active()
-        except RuntimeError:
-            return
+            raise RuntimeError("WeChat client not initialized or not authenticated")
+        self._assert_session_active()
 
         is_progress = bool((msg.metadata or {}).get("_progress", False))
         if not is_progress:
@@ -954,11 +950,9 @@ class WeixinChannel(BaseChannel):
         content = msg.content.strip()
         ctx_token = self._context_tokens.get(msg.chat_id, "")
         if not ctx_token:
-            self.logger.warning(
-                "no context_token for chat_id={}, cannot send",
-                msg.chat_id,
+            raise RuntimeError(
+                f"No context_token for chat_id={msg.chat_id}, cannot send"
             )
-            return
 
         typing_ticket = ""
         with suppress(Exception):
@@ -1128,10 +1122,8 @@ class WeixinChannel(BaseChannel):
         data = await self._api_post("ilink/bot/sendmessage", body)
         errcode = data.get("errcode", 0)
         if errcode and errcode != 0:
-            self.logger.warning(
-                "send error (code {}): {}",
-                errcode,
-                data.get("errmsg", ""),
+            raise RuntimeError(
+                f"WeChat send text error (code {errcode}): {data.get('errmsg', '')}"
             )
 
     async def _send_media_file(
