@@ -370,6 +370,8 @@ def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
     assert find_by_name("github-copilot").name == "github_copilot"
     assert find_by_name("longcat") is not None
     assert find_by_name("longcat").name == "longcat"
+    assert find_by_name("qiniu") is not None
+    assert find_by_name("qiniu").name == "qiniu"
 
 
 def test_config_explicit_longcat_provider_resolves_provider_name():
@@ -402,6 +404,38 @@ def test_config_auto_detects_longcat_from_model_keyword():
     )
 
     assert config.get_provider_name() == "longcat"
+
+
+def test_config_explicit_qiniu_provider_resolves_provider_name():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "qiniu",
+                    "model": "deepseek-v3",
+                }
+            },
+            "providers": {
+                "qiniu": {
+                    "apiKey": "test-key",
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "qiniu"
+    assert config.get_api_base() == "https://api.qnaigc.com/v1"
+
+
+def test_config_auto_detects_qiniu_from_model_keyword():
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"provider": "auto", "model": "qiniu/deepseek-v3"}},
+            "providers": {"qiniu": {"apiKey": "test-key"}},
+        }
+    )
+
+    assert config.get_provider_name() == "qiniu"
 
 
 def test_config_explicit_xiaomi_mimo_provider_uses_default_api_base():
