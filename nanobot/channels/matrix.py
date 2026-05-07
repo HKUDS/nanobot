@@ -412,7 +412,7 @@ class MatrixChannel(BaseChannel):
         try:
             response = await self.client.content_repository_config()
         except Exception:
-            self.logger.warning("Failed to fetch server upload limit", exc_info=True)
+            self.logger.error("Failed to fetch server upload limit", exc_info=True)
             return None
         upload_size = getattr(response, "upload_size", None)
         if isinstance(upload_size, int) and upload_size > 0:
@@ -458,8 +458,7 @@ class MatrixChannel(BaseChannel):
                     filesize=size_bytes,
                 )
         except Exception:
-            self.logger.warning("Media upload failed", exc_info=True)
-            return fail
+            raise
 
         upload_response = upload_result[0] if isinstance(upload_result, tuple) else upload_result
         encryption_info = upload_result[1] if isinstance(upload_result, tuple) and isinstance(upload_result[1], dict) else None
@@ -478,8 +477,7 @@ class MatrixChannel(BaseChannel):
         try:
             await self._send_room_content(room_id, content)
         except Exception:
-            self.logger.warning("Failed to send room content to room_id=%s", room_id, exc_info=True)
-            return fail
+            raise
         return None
 
     async def send(self, msg: OutboundMessage) -> None:
@@ -556,8 +554,9 @@ class MatrixChannel(BaseChannel):
                     # we are editing the same message all the time, so only the first time the event id needs to be set
                     buf.event_id = response.event_id
             except Exception:
-                self.logger.warning("Stream send/edit failed for chat_id=%s", chat_id, exc_info=True)
+                self.logger.error("Stream send/edit failed for chat_id=%s", chat_id, exc_info=True)
                 await self._stop_typing_keepalive(chat_id, clear_typing=True)
+                raise
 
 
     def _register_event_callbacks(self) -> None:
