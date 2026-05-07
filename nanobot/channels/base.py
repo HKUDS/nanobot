@@ -84,22 +84,38 @@ class BaseChannel(ABC):
                 language=cfg.language,
                 max_duration_seconds=cfg.max_duration_seconds,
             )
+            if not provider.is_available:
+                logger.warning(
+                    "{}: transcription unavailable — {}",
+                    self.name,
+                    provider.unavailable_reason,
+                )
+                return ""
         else:
-            # Legacy path — flat attributes
-            provider = WhisperTranscriptionProvider(
-                self.transcription_provider,
-                api_key=self.transcription_api_key or None,
-                api_base=self.transcription_api_base or None,
-                language=self.transcription_language,
-            )
+            # Legacy path — flat attributes.
+            # Access provider classes via the module object so that test patches on
+            # GroqTranscriptionProvider / OpenAITranscriptionProvider remain effective.
+            from nanobot.providers import transcription as _tmod
 
-        if not provider.is_available:
-            logger.warning(
-                "{}: transcription unavailable — {}",
-                self.name,
-                provider.unavailable_reason,
-            )
-            return ""
+            if self.transcription_provider == "openai":
+                provider = _tmod.OpenAITranscriptionProvider(
+                    api_key=self.transcription_api_key or None,
+                    api_base=self.transcription_api_base or None,
+                    language=self.transcription_language,
+                )
+            elif self.transcription_provider == "groq":
+                provider = _tmod.GroqTranscriptionProvider(
+                    api_key=self.transcription_api_key or None,
+                    api_base=self.transcription_api_base or None,
+                    language=self.transcription_language,
+                )
+            else:
+                provider = WhisperTranscriptionProvider(
+                    self.transcription_provider,
+                    api_key=self.transcription_api_key or None,
+                    api_base=self.transcription_api_base or None,
+                    language=self.transcription_language,
+                )
 
         try:
             return await provider.transcribe(file_path)
@@ -239,3 +255,4 @@ class BaseChannel(ABC):
     def is_running(self) -> bool:
         """Check if the channel is running."""
         return self._running
+
