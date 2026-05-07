@@ -16,8 +16,8 @@ import makeWASocket, {
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
-import { writeFile, mkdir } from 'fs/promises';
-import { join } from 'path';
+import { readFile, writeFile, mkdir } from 'fs/promises';
+import { join, basename, resolve, sep } from 'path';
 import { randomBytes } from 'crypto';
 
 const VERSION = '0.1.0';
@@ -29,6 +29,7 @@ export interface InboundMessage {
   content: string;
   timestamp: number;
   isGroup: boolean;
+  wasMentioned?: boolean;
   media?: string[];
 }
 
@@ -46,6 +47,31 @@ export class WhatsAppClient {
 
   constructor(options: WhatsAppClientOptions) {
     this.options = options;
+  }
+
+  private normalizeJid(jid: string | undefined | null): string {
+    return (jid || '').split(':')[0];
+  }
+
+  private wasMentioned(msg: any): boolean {
+    if (!msg?.key?.remoteJid?.endsWith('@g.us')) return false;
+
+    const candidates = [
+      msg?.message?.extendedTextMessage?.contextInfo?.mentionedJid,
+      msg?.message?.imageMessage?.contextInfo?.mentionedJid,
+      msg?.message?.videoMessage?.contextInfo?.mentionedJid,
+      msg?.message?.documentMessage?.contextInfo?.mentionedJid,
+      msg?.message?.audioMessage?.contextInfo?.mentionedJid,
+    ];
+    const mentioned = candidates.flatMap((items) => (Array.isArray(items) ? items : []));
+    if (mentioned.length === 0) return false;
+
+    const selfIds = new Set(
+      [this.sock?.user?.id, this.sock?.user?.lid, this.sock?.user?.jid]
+        .map((jid) => this.normalizeJid(jid))
+        .filter(Boolean),
+    );
+    return mentioned.some((jid: string) => selfIds.has(this.normalizeJid(jid)));
   }
 
   async connect(): Promise<void> {
@@ -139,12 +165,17 @@ export class WhatsAppClient {
           fallbackContent = '[Video]';
           const path = await this.downloadMedia(msg, unwrapped.videoMessage.mimetype ?? undefined);
           if (path) mediaPaths.push(path);
+        } else if (unwrapped.audioMessage) {
+          fallbackContent = '[Voice Message]';
+          const path = await this.downloadMedia(msg, unwrapped.audioMessage.mimetype ?? undefined);
+          if (path) mediaPaths.push(path);
         }
 
         const finalContent = content || (mediaPaths.length === 0 ? fallbackContent : '') || '';
         if (!finalContent && mediaPaths.length === 0) continue;
 
         const isGroup = msg.key.remoteJid?.endsWith('@g.us') || false;
+        const wasMentioned = this.wasMentioned(msg);
 
         this.options.onMessage({
           id: msg.key.id || '',
@@ -153,6 +184,7 @@ export class WhatsAppClient {
           content: finalContent,
           timestamp: msg.messageTimestamp as number,
           isGroup,
+          ...(isGroup ? { wasMentioned } : {}),
           ...(mediaPaths.length > 0 ? { media: mediaPaths } : {}),
         });
       }
@@ -168,17 +200,18 @@ export class WhatsAppClient {
 
       let outFilename: string;
       if (fileName) {
-        // Documents have a filename — use it with a unique prefix to avoid collisions
-        const prefix = `wa_${Date.now()}_${randomBytes(4).toString('hex')}_`;
-        outFilename = prefix + fileName;
+        const safeName = basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
+        outFilename = `wa_${Date.now()}_${randomBytes(4).toString('hex')}_${safeName}`;
       } else {
         const mime = mimetype || 'application/octet-stream';
-        // Derive extension from mimetype subtype (e.g. "image/png" → ".png", "application/pdf" → ".pdf")
         const ext = '.' + (mime.split('/').pop()?.split(';')[0] || 'bin');
         outFilename = `wa_${Date.now()}_${randomBytes(4).toString('hex')}${ext}`;
       }
 
-      const filepath = join(mediaDir, outFilename);
+      const filepath = resolve(mediaDir, outFilename);
+      if (!filepath.startsWith(resolve(mediaDir) + sep)) {
+        throw new Error(`Path traversal blocked: ${outFilename}`);
+      }
       await writeFile(filepath, buffer);
 
       return filepath;
@@ -228,6 +261,32 @@ export class WhatsAppClient {
     }
 
     await this.sock.sendMessage(to, { text });
+  }
+
+  async sendMedia(
+    to: string,
+    filePath: string,
+    mimetype: string,
+    caption?: string,
+    fileName?: string,
+  ): Promise<void> {
+    if (!this.sock) {
+      throw new Error('Not connected');
+    }
+
+    const buffer = await readFile(filePath);
+    const category = mimetype.split('/')[0];
+
+    if (category === 'image') {
+      await this.sock.sendMessage(to, { image: buffer, caption: caption || undefined, mimetype });
+    } else if (category === 'video') {
+      await this.sock.sendMessage(to, { video: buffer, caption: caption || undefined, mimetype });
+    } else if (category === 'audio') {
+      await this.sock.sendMessage(to, { audio: buffer, mimetype });
+    } else {
+      const name = fileName || basename(filePath);
+      await this.sock.sendMessage(to, { document: buffer, mimetype, fileName: name });
+    }
   }
 
   async disconnect(): Promise<void> {

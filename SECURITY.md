@@ -64,12 +64,26 @@ chmod 600 ~/.nanobot/config.json
 
 The `exec` tool can execute shell commands. While dangerous command patterns are blocked, you should:
 
+- ✅ **Enable the bwrap sandbox** (`"tools.exec.sandbox": "bwrap"`) for kernel-level isolation (Linux only)
 - ✅ Review all tool usage in agent logs
 - ✅ Understand what commands the agent is running
 - ✅ Use a dedicated user account with limited privileges
 - ✅ Never run nanobot as root
 - ❌ Don't disable security checks
 - ❌ Don't run on systems with sensitive data without careful review
+
+**Exec sandbox (bwrap):**
+
+On Linux, set `"tools.exec.sandbox": "bwrap"` to wrap every shell command in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox. This uses Linux kernel namespaces to restrict what the process can see:
+
+- Workspace directory → **read-write** (agent works normally)
+- Media directory → **read-only** (can read uploaded attachments)
+- System directories (`/usr`, `/bin`, `/lib`) → **read-only** (commands still work)
+- Config files and API keys (`~/.nanobot/config.json`) → **hidden** (masked by tmpfs)
+
+Requires `bwrap` installed (`apt install bubblewrap`). Pre-installed in the official Docker image. **Not available on macOS or Windows** — bubblewrap depends on Linux kernel namespaces.
+
+Enabling the sandbox also automatically activates `restrictToWorkspace` for file tools.
 
 **Blocked patterns:**
 - `rm -rf /` - Root filesystem deletion
@@ -82,6 +96,7 @@ The `exec` tool can execute shell commands. While dangerous command patterns are
 
 File operations have path traversal protection, but:
 
+- ✅ Enable `restrictToWorkspace` or the bwrap sandbox to confine file access
 - ✅ Run nanobot with a dedicated user account
 - ✅ Use filesystem permissions to protect sensitive directories
 - ✅ Regularly audit file operations in logs
@@ -232,7 +247,7 @@ If you suspect a security breach:
 1. **No Rate Limiting** - Users can send unlimited messages (add your own if needed)
 2. **Plain Text Config** - API keys stored in plain text (use keyring for production)
 3. **No Session Management** - No automatic session expiry
-4. **Limited Command Filtering** - Only blocks obvious dangerous patterns
+4. **Limited Command Filtering** - Only blocks obvious dangerous patterns (enable the bwrap sandbox for kernel-level isolation on Linux)
 5. **No Audit Trail** - Limited security event logging (enhance as needed)
 
 ## Security Checklist
@@ -243,6 +258,7 @@ Before deploying nanobot:
 - [ ] Config file permissions set to 0600
 - [ ] `allowFrom` lists configured for all channels
 - [ ] Running as non-root user
+- [ ] Exec sandbox enabled (`"tools.exec.sandbox": "bwrap"`) on Linux deployments
 - [ ] File system permissions properly restricted
 - [ ] Dependencies updated to latest secure versions
 - [ ] Logs monitored for security events
@@ -252,7 +268,7 @@ Before deploying nanobot:
 
 ## Updates
 
-**Last Updated**: 2026-02-03
+**Last Updated**: 2026-04-05
 
 For the latest security updates and announcements, check:
 - GitHub Security Advisories: https://github.com/HKUDS/nanobot/security/advisories
