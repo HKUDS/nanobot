@@ -45,7 +45,7 @@ async def _post_transcription_with_retry(
     try:
         data = path.read_bytes()
     except OSError as e:
-        logger.error("{} transcription error: cannot read audio file: {}", provider_label, e)
+        logger.exception("{} transcription error: cannot read audio file: {}", provider_label, e)
         return ""
     headers = {"Authorization": f"Bearer {api_key}"}
 
@@ -70,7 +70,7 @@ async def _post_transcription_with_retry(
                     )
                     await asyncio.sleep(_BACKOFF_S[attempt])
                     continue
-                logger.error(
+                logger.exception(
                     "{} transcription error after {} attempts: {}",
                     provider_label,
                     _MAX_RETRIES + 1,
@@ -78,7 +78,7 @@ async def _post_transcription_with_retry(
                 )
                 return ""
             except Exception as e:
-                logger.error("{} transcription error: {}", provider_label, e)
+                logger.exception("{} transcription error: {}", provider_label, e)
                 return ""
 
             if response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
@@ -95,13 +95,13 @@ async def _post_transcription_with_retry(
             try:
                 response.raise_for_status()
             except Exception as e:
-                logger.error("{} transcription error: {}", provider_label, e)
+                logger.exception("{} transcription error: {}", provider_label, e)
                 return ""
 
             try:
                 payload = response.json()
             except Exception as e:
-                logger.error(
+                logger.exception(
                     "{} transcription error: malformed response body: {}",
                     provider_label,
                     e,
