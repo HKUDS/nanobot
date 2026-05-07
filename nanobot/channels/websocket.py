@@ -1104,6 +1104,8 @@ class WebSocketChannel(BaseChannel):
 
         Shape: ``list[{"data_url": str, "name"?: str | None}]``.
         """
+        from loguru import logger
+
         image_count = 0
         video_count = 0
         for item in media:
@@ -1125,7 +1127,7 @@ class WebSocketChannel(BaseChannel):
                 try:
                     Path(p).unlink(missing_ok=True)
                 except OSError as exc:
-                    self.logger.warning(
+                    logger.warning(
                         "failed to unlink partial media {}: {}", p, exc
                     )
             return [], reason
@@ -1150,7 +1152,7 @@ class WebSocketChannel(BaseChannel):
             except FileSizeExceeded:
                 return _abort("size")
             except Exception as exc:
-                self.logger.warning("media decode failed: {}", exc)
+                logger.warning("media decode failed: {}", exc)
                 return _abort("decode")
             if saved is None:
                 return _abort("decode")

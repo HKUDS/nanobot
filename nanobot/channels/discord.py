@@ -314,13 +314,15 @@ if DISCORD_AVAILABLE:
             reply_to: str | None,
         ) -> tuple[discord.PartialMessage | None, discord.AllowedMentions]:
             """Build reply context for outbound messages."""
+            from loguru import logger
+
             mention_settings = discord.AllowedMentions(replied_user=False)
             if not reply_to:
                 return None, mention_settings
             try:
                 message_id = int(reply_to)
             except ValueError:
-                self._channel.logger.warning("Invalid reply target: {}", reply_to)
+                logger.warning("Invalid reply target: {}", reply_to)
                 return None, mention_settings
 
             return channel.get_partial_message(message_id), mention_settings
