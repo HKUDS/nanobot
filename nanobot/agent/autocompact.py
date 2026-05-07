@@ -34,8 +34,19 @@ class AutoCompact:
 
     @staticmethod
     def _format_summary(text: str, last_active: datetime) -> str:
-        idle_min = int((datetime.now() - last_active).total_seconds() / 60)
+        idle_min = max(0, int((datetime.now() - last_active).total_seconds() / 60))
         return f"Inactive for {idle_min} minutes.\nPrevious conversation summary: {text}"
+
+    @staticmethod
+    def _format_summaries(summaries: list[dict[str, Any]]) -> str:
+        """Format a rolling list of summaries for the runtime context."""
+        most_recent = summaries[-1]
+        last_active = datetime.fromisoformat(most_recent["last_active"])
+        idle_min = max(0, int((datetime.now() - last_active).total_seconds() / 60))
+        lines = [f"Inactive for {idle_min} minutes.", "Previous conversation summaries:"]
+        for s in summaries:
+            lines.append(f"- {s['text']}")
+        return "\n".join(lines)
 
     def _split_unconsolidated(
         self, session: Session,
@@ -88,8 +99,7 @@ class AutoCompact:
                 summary = await self.consolidator.archive(archive_msgs) or ""
             if summary and summary != "(nothing)":
                 self._summaries[key] = (summary, last_active)
-                session.metadata["_last_summary"] = {"text": summary, "last_active": last_active.isoformat()}
-                session.metadata.pop("_last_summary_used", None)
+                self.consolidator.update_session_summary(session, summary, last_active=last_active)
             session.messages = kept_msgs
             session.last_consolidated = 0
             session.updated_at = datetime.now()
@@ -115,10 +125,20 @@ class AutoCompact:
         entry = self._summaries.pop(key, None)
         if entry:
             session.metadata["_last_summary_used"] = True
+            # If the cached session already carries a rolling summary list,
+            # prefer that over the single in-memory entry.
+            summaries = session.metadata.get("_last_summaries")
+            if summaries:
+                return session, self._format_summaries(summaries)
             return session, self._format_summary(entry[0], entry[1])
         # Cold path: summary persisted in session metadata (process restarted).
         # Keep it in metadata so it survives restarts; only inject once per
         # turn via the _last_summary_used sentinel.
+        summaries = session.metadata.get("_last_summaries")
+        if summaries and not session.metadata.get("_last_summary_used"):
+            session.metadata["_last_summary_used"] = True
+            return session, self._format_summaries(summaries)
+        # Backward compat: sessions created before rolling summaries.
         meta = session.metadata.get("_last_summary")
         if meta and not session.metadata.get("_last_summary_used"):
             session.metadata["_last_summary_used"] = True

@@ -586,6 +586,34 @@ class Consolidator:
             self.store.raw_archive(messages)
             return None
 
+    def update_session_summary(
+        self,
+        session: Session,
+        summary: str,
+        *,
+        last_active: datetime | None = None,
+    ) -> None:
+        """Update session metadata with a new summary, maintaining a rolling buffer.
+
+        Both ``AutoCompact._archive()`` and ``maybe_consolidate_by_tokens()`` use
+        this helper so that ``_last_summary`` is managed through a single code path.
+        The rolling buffer (``_last_summaries``) keeps up to 3 entries and caps
+        total text at ~2000 chars to prevent metadata bloat.
+        """
+        if not isinstance(summary, str) or not summary or summary == "(nothing)":
+            return
+        ts = (last_active or session.updated_at).isoformat()
+        summaries = session.metadata.setdefault("_last_summaries", [])
+        summaries.append({"text": summary, "last_active": ts})
+        while len(summaries) > 3:
+            summaries.pop(0)
+        total_chars = sum(len(s["text"]) for s in summaries)
+        while len(summaries) > 1 and total_chars > 2000:
+            removed = summaries.pop(0)
+            total_chars -= len(removed["text"])
+        session.metadata["_last_summary"] = summaries[-1]
+        session.metadata.pop("_last_summary_used", None)
+
     async def maybe_consolidate_by_tokens(
         self,
         session: Session,
@@ -684,11 +712,7 @@ class Consolidator:
             # into the runtime context on the next prepare_session() call, aligning
             # the summary injection strategy with AutoCompact._archive().
             if last_summary and last_summary != "(nothing)":
-                session.metadata["_last_summary"] = {
-                    "text": last_summary,
-                    "last_active": session.updated_at.isoformat(),
-                }
-                session.metadata.pop("_last_summary_used", None)
+                self.update_session_summary(session, last_summary)
                 self.sessions.save(session)
 
 
