@@ -6,6 +6,9 @@ import asyncio
 import hashlib
 import json
 import re
+import secrets
+import shutil
+import time
 from pathlib import Path
 from typing import Any, Literal
 
@@ -27,8 +30,12 @@ _SENDS_FILE_RE = re.compile(r"\bsends\s+file\s+([^\s]+)", flags=re.IGNORECASE)
 _VOICE_PLACEHOLDER_RE = re.compile(r"^voice\s+message\s*\([0-9:]+\)$", flags=re.IGNORECASE)
 _FR_HINT_RE = re.compile(r"\s*\n?\s*use\s+/fr\s+\d+[^\n]*", flags=re.IGNORECASE)
 _FSTATUS_PATH_RE = re.compile(r"\bpath:\s*(.+)\s*$", flags=re.IGNORECASE)
+_FSTATUS_PROGRESS_COMPLETE_RE = re.compile(r"\bprogress\s+100%\b", flags=re.IGNORECASE)
+_FR_SAVING_PATH_RE = re.compile(r"\bsaving\s+file\s+\d+.+\sto\s+(.+)\s*$", flags=re.IGNORECASE)
 _MEDIA_SETTLE_ATTEMPTS = 20
 _MEDIA_SETTLE_DELAY_S = 0.25
+_FSTATUS_POLL_ATTEMPTS = 45
+_FSTATUS_POLL_DELAY_S = 1.0
 
 
 class SimplexConfig(Base):
@@ -42,6 +49,7 @@ class SimplexConfig(Base):
     contact: str = ""
     simplex_cmd: str = "simplex-chat"
     simplex_timeout: int = Field(default=3, ge=1)
+    simplex_file_timeout: int = Field(default=3, ge=3)
     state_file: str = ""
     poll_interval: float = Field(default=2.0, ge=0.1)
     receive_limit: int = Field(default=20, ge=1)
@@ -183,13 +191,13 @@ class SimplexChannel(BaseChannel):
         self._recent_content_tokens: list[str] = []
         self._inbound_media_dir = get_media_dir("simplex")
 
-    async def _run_simplex_command(self, command_text: str) -> tuple[int, str, str]:
+    async def _run_simplex_command(self, command_text: str, timeout: int | None = None) -> tuple[int, str, str]:
         proc = await asyncio.create_subprocess_exec(
             self.config.simplex_cmd,
             "-e",
             command_text,
             "-t",
-            str(self.config.simplex_timeout),
+            str(timeout if timeout is not None else self.config.simplex_timeout),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -235,14 +243,21 @@ class SimplexChannel(BaseChannel):
         filename = file_match.group(1) if file_match else None
         return file_ref, filename
 
-    async def _resolve_non_empty_media(self, candidate: Path) -> str | None:
+    async def _resolve_non_empty_media(
+        self,
+        candidate: Path,
+        *,
+        attempts: int = _MEDIA_SETTLE_ATTEMPTS,
+        delay_s: float = _MEDIA_SETTLE_DELAY_S,
+    ) -> str | None:
         path = candidate.expanduser().resolve(strict=False)
-        for _ in range(_MEDIA_SETTLE_ATTEMPTS):
+        for idx in range(attempts):
             if path.exists() and path.is_file():
                 size = path.stat().st_size
                 if size > 0:
                     return str(path)
-            await asyncio.sleep(_MEDIA_SETTLE_DELAY_S)
+            if idx < attempts - 1 and delay_s > 0:
+                await asyncio.sleep(delay_s)
         if path.exists() and path.is_file() and path.stat().st_size == 0:
             logger.warning("SimpleX retrieved zero-byte file: {}", path)
         return None
@@ -258,66 +273,208 @@ class SimplexChannel(BaseChannel):
             name = f"simplex_{file_ref}.bin"
         return (self._inbound_media_dir / Path(name).name).resolve(strict=False)
 
-    async def _query_fstatus_path(self, file_ref: int) -> str | None:
+    def _tmp_inbound_target_path(self, file_ref: int, filename_hint: str | None) -> Path:
+        name = filename_hint.strip() if filename_hint else ""
+        if not name:
+            name = f"simplex_{file_ref}.bin"
+        safe_name = Path(name).name
+        token = secrets.token_hex(4)
+        return (Path("/tmp") / f"nanobot-simplex-{token}-{safe_name}").resolve(strict=False)
+
+    @staticmethod
+    def _has_non_empty_file(path: Path | None) -> str | None:
+        if path is None:
+            return None
+        resolved = path.expanduser().resolve(strict=False)
+        if resolved.exists() and resolved.is_file() and resolved.stat().st_size > 0:
+            return str(resolved)
+        return None
+
+    @staticmethod
+    def _extract_saved_path_from_output(output: str) -> Path | None:
+        for raw_line in output.splitlines():
+            match = _FR_SAVING_PATH_RE.search(raw_line.strip())
+            if match:
+                return Path(match.group(1).strip())
+        return None
+
+    @staticmethod
+    def _latest_non_empty_xftp_file(max_age_s: float = 300.0) -> Path | None:
+        tmp_root = Path("/tmp")
+        if not tmp_root.exists():
+            return None
+
+        now = time.time()
+        newest: Path | None = None
+        newest_mtime = -1.0
+        for candidate in tmp_root.glob("*_rcv.xftp/xftp.decrypted"):
+            try:
+                stat = candidate.stat()
+            except OSError:
+                continue
+            if not candidate.is_file() or stat.st_size <= 0:
+                continue
+            age = now - stat.st_mtime
+            if age < 0 or age > max_age_s:
+                continue
+            if stat.st_mtime > newest_mtime:
+                newest = candidate
+                newest_mtime = stat.st_mtime
+        return newest
+
+    async def _query_fstatus(self, file_ref: int) -> tuple[Path | None, bool]:
         rc, stdout, _ = await self._run_simplex_command(f"/fstatus {file_ref}")
         if rc != 0:
-            return None
+            return None, False
+        progress_complete = bool(_FSTATUS_PROGRESS_COMPLETE_RE.search(stdout))
         for raw_line in stdout.splitlines():
             match = _FSTATUS_PATH_RE.search(raw_line.strip())
             if match:
-                resolved = await self._resolve_non_empty_media(Path(match.group(1).strip()))
-                if resolved:
-                    return resolved
+                return Path(match.group(1).strip()), progress_complete
+        return None, progress_complete
+
+    async def _wait_for_inbound_completion(
+        self,
+        file_ref: int,
+        target_path: Path,
+        *,
+        max_attempts: int = _FSTATUS_POLL_ATTEMPTS,
+        extra_paths: tuple[Path, ...] = (),
+    ) -> str | None:
+        """Wait for inbound transfer completion without reissuing receive commands too early."""
+        status_path: Path | None = None
+        complete_without_path_polls = 0
+        for attempt in range(max_attempts):
+            resolved_target = self._has_non_empty_file(target_path)
+            if resolved_target:
+                return resolved_target
+
+            for extra in extra_paths:
+                resolved_extra = self._has_non_empty_file(extra)
+                if resolved_extra:
+                    return resolved_extra
+
+            if status_path is None or attempt % 3 == 0:
+                status_path, progress_complete = await self._query_fstatus(file_ref)
+                if status_path is None and progress_complete:
+                    complete_without_path_polls += 1
+                    if complete_without_path_polls >= 3:
+                        logger.debug(
+                            "SimpleX inbound completion for /fr {} reached 100% without path; stopping wait",
+                            file_ref,
+                        )
+                        return None
+                else:
+                    complete_without_path_polls = 0
+            if status_path is not None:
+                resolved_status = self._has_non_empty_file(status_path)
+                if resolved_status:
+                    return resolved_status
+
+            await asyncio.sleep(_FSTATUS_POLL_DELAY_S)
+
         return None
 
     async def _retrieve_inbound_file(self, file_ref: int, filename_hint: str | None) -> str | None:
         self._inbound_media_dir.mkdir(parents=True, exist_ok=True)
         target_path = self._inbound_target_path(file_ref, filename_hint)
-        commands = [
-            f"/freceive {file_ref} {_quote_simplex_arg(str(target_path))}",
-            f"/fr {file_ref} {_quote_simplex_arg(str(target_path))}",
-        ]
+        commands = [f"/fr {file_ref}"]
 
         last_stdout = ""
         last_stderr = ""
         saw_already_receiving = False
+        saved_path: Path | None = None
 
+        file_timeout = self.config.simplex_file_timeout
+        # Keep completion polling bounded even if runtime timeout is large.
+        wait_attempts = max(6, min(12, int(max(file_timeout, 3) * 2)))
         for command in commands:
-            rc, stdout, stderr = await self._run_simplex_command(command)
+            rc, stdout, stderr = await self._run_simplex_command(command, timeout=file_timeout)
             last_stdout = stdout
             last_stderr = stderr
             logger.debug("SimpleX inbound retrieve cmd='{}' rc={}", command, rc)
             if rc != 0:
                 continue
 
-            if "already being received" in stdout.lower():
+            output_text = f"{stdout}\n{stderr}".lower()
+            parsed_saved_path = self._extract_saved_path_from_output(f"{stdout}\n{stderr}")
+            if parsed_saved_path is not None:
+                saved_path = parsed_saved_path
+
+            if "already being received" in output_text:
                 saw_already_receiving = True
 
-            resolved = await self._resolve_non_empty_media(target_path)
+            extra_paths = (saved_path,) if saved_path is not None else ()
+            resolved = await self._wait_for_inbound_completion(
+                file_ref,
+                target_path,
+                max_attempts=wait_attempts,
+                extra_paths=extra_paths,
+            )
             if resolved:
-                return resolved
-
-            status_path = await self._query_fstatus_path(file_ref)
-            if status_path:
-                return status_path
+                resolved_path = Path(resolved).expanduser().resolve(strict=False)
+                if resolved_path != target_path:
+                    try:
+                        target_path.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(resolved_path, target_path)
+                        copied = self._has_non_empty_file(target_path)
+                        if copied:
+                            return copied
+                    except OSError as exc:
+                        logger.warning("SimpleX copy from {} to {} failed: {}", resolved_path, target_path, exc)
+                return str(resolved_path)
 
         if saw_already_receiving:
             cancel_cmd = f"/fcancel {file_ref}"
             cancel_rc, cancel_stdout, cancel_stderr = await self._run_simplex_command(cancel_cmd)
             logger.debug("SimpleX inbound retrieve cmd='{}' rc={}", cancel_cmd, cancel_rc)
             if cancel_rc == 0:
-                retry_cmd = f"/freceive {file_ref} {_quote_simplex_arg(str(target_path))}"
-                retry_rc, retry_stdout, retry_stderr = await self._run_simplex_command(retry_cmd)
+                retry_cmd = f"/fr {file_ref}"
+                retry_rc, retry_stdout, retry_stderr = await self._run_simplex_command(retry_cmd, timeout=file_timeout)
                 logger.debug("SimpleX inbound retrieve cmd='{}' rc={}", retry_cmd, retry_rc)
                 last_stdout = retry_stdout or cancel_stdout
                 last_stderr = retry_stderr or cancel_stderr
+                parsed_saved_path = self._extract_saved_path_from_output(f"{retry_stdout}\n{retry_stderr}")
+                if parsed_saved_path is not None:
+                    saved_path = parsed_saved_path
                 if retry_rc == 0:
-                    resolved = await self._resolve_non_empty_media(target_path)
+                    extra_paths = (saved_path,) if saved_path is not None else ()
+                    resolved = await self._wait_for_inbound_completion(
+                        file_ref,
+                        target_path,
+                        max_attempts=wait_attempts,
+                        extra_paths=extra_paths,
+                    )
                     if resolved:
-                        return resolved
-                    status_path = await self._query_fstatus_path(file_ref)
-                    if status_path:
-                        return status_path
+                        resolved_path = Path(resolved).expanduser().resolve(strict=False)
+                        if resolved_path != target_path:
+                            try:
+                                target_path.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.copy2(resolved_path, target_path)
+                                copied = self._has_non_empty_file(target_path)
+                                if copied:
+                                    return copied
+                            except OSError as exc:
+                                logger.warning("SimpleX copy from {} to {} failed: {}", resolved_path, target_path, exc)
+                        return str(resolved_path)
+
+        tmp_xftp_path = self._latest_non_empty_xftp_file()
+        if tmp_xftp_path is not None:
+            logger.warning(
+                "SimpleX inbound retrieval fallback for /fr {}. Using tmp xftp file {}",
+                file_ref,
+                tmp_xftp_path,
+            )
+            try:
+                target_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(tmp_xftp_path, target_path)
+                copied = self._has_non_empty_file(target_path)
+                if copied:
+                    return copied
+            except OSError as exc:
+                logger.warning("SimpleX fallback copy from {} to {} failed: {}", tmp_xftp_path, target_path, exc)
+
+            return str(tmp_xftp_path)
 
         logger.warning(
             "SimpleX inbound file retrieval produced no local file for /fr {}. stdout='{}' stderr='{}'",
