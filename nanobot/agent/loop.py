@@ -943,6 +943,7 @@ class AgentLoop:
             await self.consolidator.maybe_consolidate_by_tokens(
                 session,
                 session_summary=pending,
+                replay_max_messages=self._max_messages,
             )
             # Persist subagent follow-ups into durable history BEFORE prompt
             # assembly. ContextBuilder merges adjacent same-role messages for
@@ -987,7 +988,12 @@ class AgentLoop:
             session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
             self._clear_runtime_checkpoint(session)
             self.sessions.save(session)
-            self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
+            self._schedule_background(
+                self.consolidator.maybe_consolidate_by_tokens(
+                    session,
+                    replay_max_messages=self._max_messages,
+                )
+            )
             options = ask_user_options_from_messages(all_msgs) if stop_reason == "ask_user" else []
             content, buttons = ask_user_outbound(
                 final_content or "Background task completed.",
@@ -1040,6 +1046,7 @@ class AgentLoop:
         await self.consolidator.maybe_consolidate_by_tokens(
             session,
             session_summary=pending,
+            replay_max_messages=self._max_messages,
         )
 
         self._set_tool_context(
@@ -1148,7 +1155,12 @@ class AgentLoop:
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
-        self._schedule_background(self.consolidator.maybe_consolidate_by_tokens(session))
+        self._schedule_background(
+            self.consolidator.maybe_consolidate_by_tokens(
+                session,
+                replay_max_messages=self._max_messages,
+            )
+        )
 
         # When follow-up messages were injected mid-turn, a later natural
         # language reply may address those follow-ups and should not be

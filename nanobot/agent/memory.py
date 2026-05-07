@@ -17,6 +17,7 @@ from loguru import logger
 
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.session.manager import Session
 from nanobot.utils.gitstore import GitStore
 from nanobot.utils.helpers import (
     ensure_dir,
@@ -29,7 +30,7 @@ from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
-    from nanobot.session.manager import Session, SessionManager
+    from nanobot.session.manager import SessionManager
 
 
 # ---------------------------------------------------------------------------
@@ -508,14 +509,85 @@ class Consolidator:
 
         return last_boundary
 
+    @staticmethod
+    def _full_unconsolidated_history(
+        session: Session,
+        *,
+        include_timestamps: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return the whole unconsolidated tail for consolidation decisions."""
+        unconsolidated_count = len(session.messages) - session.last_consolidated
+        if unconsolidated_count <= 0:
+            return []
+        return session.get_history(
+            max_messages=unconsolidated_count,
+            include_timestamps=include_timestamps,
+        )
+
+    @staticmethod
+    def _replay_overflow_boundary(
+        session: Session,
+        replay_max_messages: int | None,
+    ) -> int | None:
+        if not replay_max_messages or replay_max_messages <= 0:
+            return None
+        tail = list(session.messages[session.last_consolidated:])
+        if len(tail) <= replay_max_messages:
+            return None
+
+        probe = Session(
+            key=session.key,
+            messages=[dict(message) for message in tail],
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            metadata={},
+            last_consolidated=0,
+        )
+        probe.retain_recent_legal_suffix(replay_max_messages)
+        cut = len(tail) - len(probe.messages)
+        if cut <= 0:
+            return None
+        return session.last_consolidated + cut
+
+    async def _consolidate_replay_overflow(
+        self,
+        session: Session,
+        replay_max_messages: int | None,
+    ) -> str | None:
+        """Archive messages that would be hidden by the replay message window."""
+        end_idx = self._replay_overflow_boundary(session, replay_max_messages)
+        if end_idx is None:
+            return None
+        chunk = session.messages[session.last_consolidated:end_idx]
+        if not chunk:
+            return None
+        logger.info(
+            "Replay-window consolidation for {}: chunk={} msgs, replay_max={}",
+            session.key,
+            len(chunk),
+            replay_max_messages,
+        )
+        summary = await self.archive(chunk)
+        session.last_consolidated = end_idx
+        self.sessions.save(session)
+        return summary
+
+    def _persist_last_summary(self, session: Session, summary: str | None) -> None:
+        if summary and summary != "(nothing)":
+            session.metadata["_last_summary"] = {
+                "text": summary,
+                "last_active": session.updated_at.isoformat(),
+            }
+            self.sessions.save(session)
+
     def estimate_session_prompt_tokens(
         self,
         session: Session,
         *,
         session_summary: str | None = None,
     ) -> tuple[int, str]:
-        """Estimate current prompt size for the normal session history view."""
-        history = session.get_history(max_messages=0, include_timestamps=True)
+        """Estimate prompt size from the full unconsolidated session tail."""
+        history = self._full_unconsolidated_history(session, include_timestamps=True)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
         probe_messages = self._build_messages(
             history=history,
@@ -591,6 +663,7 @@ class Consolidator:
         session: Session,
         *,
         session_summary: str | None = None,
+        replay_max_messages: int | None = None,
     ) -> None:
         """Loop: archive old messages until prompt fits within safe budget.
 
@@ -604,6 +677,10 @@ class Consolidator:
         async with lock:
             budget = self._input_token_budget
             target = int(budget * self.consolidation_ratio)
+            last_summary = await self._consolidate_replay_overflow(
+                session,
+                replay_max_messages,
+            )
             try:
                 estimated, source = self.estimate_session_prompt_tokens(
                     session,
@@ -613,6 +690,7 @@ class Consolidator:
                 logger.exception("Token estimation failed for {}", session.key)
                 estimated, source = 0, "error"
             if estimated <= 0:
+                self._persist_last_summary(session, last_summary)
                 return
             if estimated < budget:
                 unconsolidated_count = len(session.messages) - session.last_consolidated
@@ -624,9 +702,9 @@ class Consolidator:
                     source,
                     unconsolidated_count,
                 )
+                self._persist_last_summary(session, last_summary)
                 return
 
-            last_summary = None
             for round_num in range(self._MAX_CONSOLIDATION_ROUNDS):
                 if estimated <= target:
                     break
@@ -683,12 +761,7 @@ class Consolidator:
             # Persist the last summary to session metadata so it can be injected
             # into the runtime context on the next prepare_session() call, aligning
             # the summary injection strategy with AutoCompact._archive().
-            if last_summary and last_summary != "(nothing)":
-                session.metadata["_last_summary"] = {
-                    "text": last_summary,
-                    "last_active": session.updated_at.isoformat(),
-                }
-                self.sessions.save(session)
+            self._persist_last_summary(session, last_summary)
 
 
 # ---------------------------------------------------------------------------

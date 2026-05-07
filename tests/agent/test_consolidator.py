@@ -1,15 +1,15 @@
 """Tests for the lightweight Consolidator — append-only to HISTORY.md."""
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from nanobot.agent.memory import (
+    _ARCHIVE_SUMMARY_MAX_CHARS,
     Consolidator,
     MemoryStore,
-    _ARCHIVE_SUMMARY_MAX_CHARS,
-    _RAW_ARCHIVE_MAX_CHARS,
 )
+from nanobot.session.manager import Session
 
 
 @pytest.fixture
@@ -121,6 +121,51 @@ class TestConsolidatorTokenBudget:
         consolidator.archive = AsyncMock(return_value=True)
         await consolidator.maybe_consolidate_by_tokens(session)
         consolidator.archive.assert_not_called()
+
+    async def test_estimate_uses_full_unconsolidated_tail(self, consolidator):
+        """Consolidation pressure must see messages hidden by the replay window."""
+        session = Session(key="test:full-tail")
+        for i in range(160):
+            session.add_message("user", f"msg-{i}")
+
+        captured: dict[str, list[dict]] = {}
+
+        def build_messages(**kwargs):
+            captured["history"] = kwargs["history"]
+            return kwargs["history"]
+
+        consolidator._build_messages = build_messages
+
+        consolidator.estimate_session_prompt_tokens(session)
+
+        assert len(captured["history"]) == 160
+        assert captured["history"][0]["content"].endswith("msg-0")
+
+    async def test_replay_window_overflow_is_archived_even_under_token_budget(
+        self,
+        consolidator,
+    ):
+        """Old messages that cannot be replayed should be materialized first."""
+        consolidator._SAFETY_BUFFER = 0
+        session = Session(key="test:replay-overflow")
+        for i in range(10):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
+        consolidator.archive = AsyncMock(return_value="old conversation summary")
+
+        await consolidator.maybe_consolidate_by_tokens(
+            session,
+            replay_max_messages=6,
+        )
+
+        archived_chunk = consolidator.archive.await_args.args[0]
+        assert archived_chunk[0]["content"] == "u0"
+        assert archived_chunk[-1]["content"] == "a6"
+        assert session.last_consolidated == 14
+        assert session.metadata["_last_summary"]["text"] == "old conversation summary"
+        consolidator.sessions.save.assert_called()
 
     async def test_large_chunk_archived_without_cap(self, consolidator):
         """Without chunk cap, the full range from pick_consolidation_boundary is archived."""
