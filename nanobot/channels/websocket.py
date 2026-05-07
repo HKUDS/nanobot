@@ -1089,8 +1089,8 @@ class WebSocketChannel(BaseChannel):
         finally:
             self._cleanup_connection(connection)
 
-    @staticmethod
     def _save_envelope_media(
+        self,
         media: list[Any],
     ) -> tuple[list[str], str | None]:
         """Decode and persist ``media`` items from a ``message`` envelope.
@@ -1125,7 +1125,7 @@ class WebSocketChannel(BaseChannel):
                 try:
                     Path(p).unlink(missing_ok=True)
                 except OSError as exc:
-                    logger.warning(
+                    self.logger.warning(
                         "failed to unlink partial media {}: {}", p, exc
                     )
             return [], reason
@@ -1150,7 +1150,7 @@ class WebSocketChannel(BaseChannel):
             except FileSizeExceeded:
                 return _abort("size")
             except Exception as exc:
-                logger.warning("media decode failed: {}", exc)
+                self.logger.warning("media decode failed: {}", exc)
                 return _abort("decode")
             if saved is None:
                 return _abort("decode")

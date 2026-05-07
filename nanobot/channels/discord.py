@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from loguru import logger
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
@@ -309,8 +308,8 @@ if DISCORD_AVAILABLE:
             fallback = "\n".join(f"[attachment: {name} - send failed]" for name in failed_media)
             return split_message(fallback, MAX_MESSAGE_LEN)
 
-        @staticmethod
         def _build_reply_context(
+            self,
             channel: Messageable,
             reply_to: str | None,
         ) -> tuple[discord.PartialMessage | None, discord.AllowedMentions]:
@@ -321,7 +320,7 @@ if DISCORD_AVAILABLE:
             try:
                 message_id = int(reply_to)
             except ValueError:
-                logger.warning("Invalid reply target: {}", reply_to)
+                self._channel.logger.warning("Invalid reply target: {}", reply_to)
                 return None, mention_settings
 
             return channel.get_partial_message(message_id), mention_settings
