@@ -179,21 +179,81 @@ Examples:
                 return self._format_hk_stock(row)
 
             elif market == "us":
-                # 美股实时行情 - 使用新浪财经API
-                df = ak.stock_us_spot()
-                stock_data = df[df['代码'] == symbol]
+                # 美股实时行情 - 使用新浪财经API（带错误处理）
+                try:
+                    df = ak.stock_us_spot()
+                    stock_data = df[df['代码'] == symbol]
 
-                if stock_data.empty:
-                    return f"未找到美股代码: {symbol}"
+                    if stock_data.empty:
+                        return f"未找到美股代码: {symbol}\n提示: 美股数据可能受网络影响，请稍后重试"
 
-                row = stock_data.iloc[0]
-                return self._format_us_stock(row)
+                    row = stock_data.iloc[0]
+                    return self._format_us_stock(row)
+                except Exception as us_error:
+                    logger.warning(f"美股API失败: {us_error}，尝试备用方案")
+                    # 备用方案：尝试使用历史数据API获取最新价格
+                    try:
+                        return await self._get_us_stock_fallback(ak, symbol)
+                    except Exception:
+                        raise RuntimeError(f"美股数据获取失败: {us_error}")
 
             else:
                 return f"不支持的市场类型: {market} (支持: cn, hk, us)"
 
         except Exception as e:
             raise RuntimeError(f"Real-time price fetch failed: {e}")
+
+    async def _get_us_stock_fallback(self, ak: Any, symbol: str) -> str:
+        """Fallback method for US stocks when spot API fails."""
+        # Try to get recent data from historical API
+        try:
+            end_date = datetime.now().strftime("%Y%m%d")
+            start_date = (datetime.now() - timedelta(days=5)).strftime("%Y%m%d")
+            
+            df = ak.stock_us_hist(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                adjust=""
+            )
+            
+            if df.empty:
+                return f"无法获取 {symbol} 的数据"
+            
+            # Get the latest row
+            latest = df.iloc[-1]
+            
+            # Map historical data fields to real-time format
+            class FakeRow:
+                def __init__(self, data):
+                    self.data = data
+                def get(self, key, default=None):
+                    # Map Chinese field names from stock_us_hist
+                    field_map = {
+                        '名称': 'name',
+                        '代码': 'symbol',
+                        '最新价': 'close',
+                        '收盘价': 'close',
+                        '涨跌幅': 'pct_change',
+                        '涨跌额': 'change',
+                        '成交量': 'volume',
+                        '成交额': 'turnover',
+                        '最高': 'high',
+                        '最低': 'low',
+                        '今开': 'open',
+                        '开盘': 'open',
+                        '昨收': 'prev_close',
+                    }
+                    mapped_key = field_map.get(key, key)
+                    return self.data.get(mapped_key, self.data.get(key, default))
+            
+            fake_row = FakeRow(latest.to_dict())
+            fake_row.data['名称'] = symbol  # Use symbol as name if not available
+            fake_row.data['代码'] = symbol
+            
+            return self._format_us_stock(fake_row)
+        except Exception as e:
+            raise RuntimeError(f"美股备用方案也失败: {e}")
 
     async def _get_historical_data(
         self, ak: Any, symbol: str, market: str, period: str, days: int
@@ -494,7 +554,14 @@ Examples:
                 return f"无法解析加密货币数据格式\n可用列: {df.columns.tolist()}"
 
             if crypto_data.empty:
-                return f"未找到加密货币: {symbol}\n支持的币种: {', '.join(symbol_map.keys())}"
+                # Get available symbols for user reference
+                if '交易品种' in df.columns:
+                    available = df['交易品种'].unique().tolist()
+                elif 'symbol' in df.columns:
+                    available = df['symbol'].unique().tolist()
+                else:
+                    available = []
+                return f"未找到加密货币: {symbol}\n当前可用的币种: {', '.join(available[:10])}"
 
             row = crypto_data.iloc[0]
             return self._format_crypto(row, symbol_upper)
