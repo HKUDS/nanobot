@@ -1020,14 +1020,14 @@ class TestSummaryPersistence:
 
         assert summary is not None
         assert "User said hello." in summary
-        assert "Inactive for" in summary
-        # Metadata should be cleaned up after consumption
-        assert "_last_summary" not in reloaded.metadata
+        assert "Previous conversation summary" in summary
+        # _last_summary persists in metadata for restart survival.
+        assert "_last_summary" in reloaded.metadata
         await loop.close_mcp()
 
     @pytest.mark.asyncio
-    async def test_metadata_cleanup_no_leak(self, tmp_path):
-        """_last_summary should be removed from metadata after being consumed."""
+    async def test_metadata_persists_for_restart(self, tmp_path):
+        """_last_summary stays in metadata so it survives process restarts."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="hello")
@@ -1046,14 +1046,14 @@ class TestSummaryPersistence:
         loop.sessions.invalidate("cli:test")
         reloaded = loop.sessions.get_or_create("cli:test")
 
-        # First call: consumes from metadata
+        # Every call returns the summary from metadata (no _consumed_keys gate)
         _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
         assert summary is not None
-
-        # Second call: no summary (already consumed)
         _, summary2 = loop.auto_compact.prepare_session(reloaded, "cli:test")
-        assert summary2 is None
-        assert "_last_summary" not in reloaded.metadata
+        assert summary2 is not None
+        assert "Summary." in summary2
+        # _last_summary persists in metadata for restart survival.
+        assert "_last_summary" in reloaded.metadata
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -1081,6 +1081,79 @@ class TestSummaryPersistence:
         # In-memory path is taken (no restart)
         _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
         assert summary is not None
-        # Metadata should also be cleaned up
-        assert "_last_summary" not in reloaded.metadata
+        # _last_summary persists in metadata for restart survival.
+        assert "_last_summary" in reloaded.metadata
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_new_summary_overrides_old(self, tmp_path):
+        """A fresh archive writes a new summary that replaces the old one."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        _add_turns(session, 6, prefix="hello")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        async def _fake_archive(messages):
+            return "First summary."
+
+        loop.consolidator.archive = _fake_archive
+        await loop.auto_compact._archive("cli:test")
+
+        # Consume the first summary via hot path
+        _, summary1 = loop.auto_compact.prepare_session(
+            loop.sessions.get_or_create("cli:test"), "cli:test"
+        )
+        assert summary1 is not None
+        assert "First summary." in summary1
+        assert "cli:test" not in loop.auto_compact._summaries  # popped by hot path
+
+        # Add new messages and archive again (simulating a later turn)
+        _add_turns(session, 4, prefix="world")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        async def _fake_archive2(messages):
+            return "Second summary."
+
+        loop.consolidator.archive = _fake_archive2
+        await loop.auto_compact._archive("cli:test")
+
+        # The second archive writes a new summary
+        assert "cli:test" in loop.auto_compact._summaries
+
+        # prepare_session must return the new summary
+        reloaded = loop.sessions.get_or_create("cli:test")
+        _, summary2 = loop.auto_compact.prepare_session(reloaded, "cli:test")
+        assert summary2 is not None
+        assert "Second summary." in summary2
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_new_command_clears_last_summary(self, tmp_path):
+        """/new should clear _last_summary so the new session starts fresh."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        _add_turns(session, 6, prefix="hello")
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        async def _fake_archive(messages):
+            return "Old summary."
+
+        loop.consolidator.archive = _fake_archive
+        await loop.auto_compact._archive("cli:test")
+
+        # Verify summary exists before /new
+        reloaded = loop.sessions.get_or_create("cli:test")
+        assert "_last_summary" in reloaded.metadata
+
+        # Simulate /new command
+        session.clear()
+        loop.sessions.save(session)
+        loop.sessions.invalidate(session.key)
+
+        # After /new, metadata should no longer contain _last_summary
+        fresh = loop.sessions.get_or_create("cli:test")
+        assert "_last_summary" not in fresh.metadata
         await loop.close_mcp()
