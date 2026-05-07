@@ -1251,7 +1251,7 @@ class WebSocketChannel(BaseChannel):
             return
         if t == "message":
             cid = envelope.get("chat_id")
-            content = envelope.get("content")
+            content = envelope.get("content") or ""
             if not _is_valid_chat_id(cid):
                 await self._send_event(connection, "error", detail="invalid chat_id")
                 return
@@ -1393,6 +1393,11 @@ class WebSocketChannel(BaseChannel):
     ) -> None:
         conns = list(self._subs.get(chat_id, ()))
         if not conns:
+            conns = list(self._conn_default.keys())
+            if conns:
+                logger.debug("send_delta broadcast to {} connections", len(conns))
+        if not conns:
+            logger.warning("send_delta: no connections to broadcast to!")
             return
         meta = metadata or {}
         if meta.get("_stream_end"):
