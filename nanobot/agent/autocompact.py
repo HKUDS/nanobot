@@ -89,6 +89,7 @@ class AutoCompact:
             if summary and summary != "(nothing)":
                 self._summaries[key] = (summary, last_active)
                 session.metadata["_last_summary"] = {"text": summary, "last_active": last_active.isoformat()}
+                session.metadata.pop("_last_summary_used", None)
             session.messages = kept_msgs
             session.last_consolidated = 0
             session.updated_at = datetime.now()
@@ -111,13 +112,15 @@ class AutoCompact:
             logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
             session = self.sessions.get_or_create(key)
         # Hot path: summary from in-memory dict (process hasn't restarted).
-        # Also clean metadata copy so stale _last_summary never leaks to disk.
         entry = self._summaries.pop(key, None)
         if entry:
-            session.metadata.pop("_last_summary", None)
+            session.metadata["_last_summary_used"] = True
             return session, self._format_summary(entry[0], entry[1])
-        if "_last_summary" in session.metadata:
-            meta = session.metadata.pop("_last_summary")
-            self.sessions.save(session)
+        # Cold path: summary persisted in session metadata (process restarted).
+        # Keep it in metadata so it survives restarts; only inject once per
+        # turn via the _last_summary_used sentinel.
+        meta = session.metadata.get("_last_summary")
+        if meta and not session.metadata.get("_last_summary_used"):
+            session.metadata["_last_summary_used"] = True
             return session, self._format_summary(meta["text"], datetime.fromisoformat(meta["last_active"]))
         return session, None

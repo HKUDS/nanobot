@@ -585,6 +585,7 @@ class Consolidator:
                 "text": summary,
                 "last_active": session.updated_at.isoformat(),
             }
+            session.metadata.pop("_last_summary_used", None)
             self.sessions.save(session)
 
     def estimate_session_prompt_tokens(

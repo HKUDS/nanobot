@@ -1021,13 +1021,15 @@ class TestSummaryPersistence:
         assert summary is not None
         assert "User said hello." in summary
         assert "Inactive for" in summary
-        # Metadata should be cleaned up after consumption
-        assert "_last_summary" not in reloaded.metadata
+        # Metadata persists so the summary survives restarts; _last_summary_used
+        # sentinel prevents duplicate injection within the same turn.
+        assert "_last_summary" in reloaded.metadata
+        assert reloaded.metadata.get("_last_summary_used") is True
         await loop.close_mcp()
 
     @pytest.mark.asyncio
     async def test_metadata_cleanup_no_leak(self, tmp_path):
-        """_last_summary should be removed from metadata after being consumed."""
+        """_last_summary persists in metadata for restart survival; _last_summary_used sentinel prevents duplicate injection."""
         loop = _make_loop(tmp_path, session_ttl_minutes=15)
         session = loop.sessions.get_or_create("cli:test")
         _add_turns(session, 6, prefix="hello")
@@ -1050,10 +1052,13 @@ class TestSummaryPersistence:
         _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
         assert summary is not None
 
-        # Second call: no summary (already consumed)
+        # Second call: no summary (already consumed this turn)
         _, summary2 = loop.auto_compact.prepare_session(reloaded, "cli:test")
         assert summary2 is None
-        assert "_last_summary" not in reloaded.metadata
+        # _last_summary stays in metadata for restart survival;
+        # _last_summary_used sentinel prevents duplicate injection.
+        assert "_last_summary" in reloaded.metadata
+        assert reloaded.metadata.get("_last_summary_used") is True
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -1081,6 +1086,8 @@ class TestSummaryPersistence:
         # In-memory path is taken (no restart)
         _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
         assert summary is not None
-        # Metadata should also be cleaned up
-        assert "_last_summary" not in reloaded.metadata
+        # _last_summary stays in metadata for restart survival;
+        # _last_summary_used sentinel prevents duplicate injection.
+        assert "_last_summary" in reloaded.metadata
+        assert reloaded.metadata.get("_last_summary_used") is True
         await loop.close_mcp()

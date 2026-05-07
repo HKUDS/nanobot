@@ -190,7 +190,10 @@ async def test_consolidation_persists_summary_for_next_prepare_session(tmp_path,
     reloaded, pending = loop.auto_compact.prepare_session(reloaded, "cli:test")
     assert pending is not None
     assert "User discussed project status." in pending
-    assert "_last_summary" not in reloaded.metadata
+    # _last_summary persists for restart survival; _last_summary_used prevents
+    # duplicate injection within the same turn.
+    assert "_last_summary" in reloaded.metadata
+    assert reloaded.metadata.get("_last_summary_used") is True
 
 
 @pytest.mark.asyncio
