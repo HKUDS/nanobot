@@ -458,7 +458,8 @@ class MatrixChannel(BaseChannel):
                     filesize=size_bytes,
                 )
         except Exception:
-            raise
+            self.logger.error("Matrix media upload failed for %s", filename, exc_info=True)
+            return fail
 
         upload_response = upload_result[0] if isinstance(upload_result, tuple) else upload_result
         encryption_info = upload_result[1] if isinstance(upload_result, tuple) and isinstance(upload_result[1], dict) else None
@@ -477,7 +478,8 @@ class MatrixChannel(BaseChannel):
         try:
             await self._send_room_content(room_id, content)
         except Exception:
-            raise
+            self.logger.error("Matrix room content send failed for room_id=%s", room_id, exc_info=True)
+            return fail
         return None
 
     async def send(self, msg: OutboundMessage) -> None:
@@ -556,7 +558,6 @@ class MatrixChannel(BaseChannel):
             except Exception:
                 self.logger.error("Stream send/edit failed for chat_id=%s", chat_id, exc_info=True)
                 await self._stop_typing_keepalive(chat_id, clear_typing=True)
-                raise
 
 
     def _register_event_callbacks(self) -> None:
