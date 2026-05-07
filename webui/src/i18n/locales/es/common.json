@@ -1,0 +1,185 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "Conectando con nanobot…",
+      "boot": "Cargando nanobot…"
+    },
+    "error": {
+      "title": "No se pudo conectar con nanobot",
+      "gatewayHint": "Asegúrate de que la gateway esté en ejecución (`nanobot gateway`) y de que esta página esté abierta en la misma máquina."
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "Interfaz web de nanobot: conversa con tu espacio de trabajo de nanobot."
+    }
+  },
+  "sidebar": {
+    "collapse": "Contraer barra lateral",
+    "toggleTheme": "Cambiar tema",
+    "newChat": "Nuevo chat",
+    "recent": "Recientes",
+    "refreshSessions": "Actualizar sesiones",
+    "language": {
+      "label": "Idioma",
+      "ariaLabel": "Cambiar idioma"
+    }
+  },
+  "chat": {
+    "fallbackTitle": "Chat {{id}}",
+    "loading": "Cargando…",
+    "noSessions": "Todavía no hay sesiones.",
+    "actions": "Acciones del chat {{title}}",
+    "delete": "Eliminar",
+    "newChat": "Nuevo chat"
+  },
+  "deleteConfirm": {
+    "title": "¿Eliminar “{{title}}”?",
+    "description": "El archivo de sesión se eliminará del disco. Esta acción no se puede deshacer.",
+    "cancel": "Cancelar",
+    "confirm": "Eliminar"
+  },
+  "connection": {
+    "idle": "Inactivo",
+    "connecting": "Conectando…",
+    "open": "Conectado",
+    "reconnecting": "Reconectando…",
+    "closed": "Desconectado",
+    "error": "Error de conexión"
+  },
+  "thread": {
+    "loadingConversation": "Cargando conversación…",
+    "empty": {
+      "description": "Haz preguntas, continúa tu trabajo local o inicia un nuevo hilo.",
+      "greeting": "¿Qué puedo hacer por ti?",
+      "quickActions": {
+        "plan": {
+          "title": "Crear un plan de proyecto",
+          "prompt": "Crea un plan de proyecto conciso para lo que debería construir después."
+        },
+        "analyze": {
+          "title": "Analizar estos datos",
+          "prompt": "Ayúdame a analizar estos datos y destaca los patrones más importantes."
+        },
+        "brainstorm": {
+          "title": "Lluvia de ideas",
+          "prompt": "Propón algunas ideas prácticas y sus compensaciones para este problema."
+        },
+        "code": {
+          "title": "Escribir código",
+          "prompt": "Ayúdame a escribir el código para esta tarea, empezando por el cambio útil más pequeño."
+        },
+        "summarize": {
+          "title": "Resumir este documento",
+          "prompt": "Resume este documento y enumera las conclusiones clave."
+        },
+        "more": {
+          "title": "Más",
+          "prompt": "Muéstrame algunas formas útiles en las que puedes ayudar en este workspace."
+        }
+      }
+    },
+    "header": {
+      "toggleSidebar": "Mostrar u ocultar la barra lateral"
+    },
+    "composer": {
+      "placeholderThread": "Escribe tu mensaje…",
+      "placeholderHero": "¿Qué tienes en mente?",
+      "placeholderOpening": "Abriendo un nuevo chat…",
+      "placeholderStreaming": "El modelo está respondiendo…",
+      "inputAria": "Entrada de mensaje",
+      "sendHint": "Enter para enviar · Shift+Enter para nueva línea",
+      "send": "Enviar mensaje",
+      "attachImage": "Adjuntar imagen",
+      "encoding": "Procesando…",
+      "remove": "Quitar adjunto",
+      "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "imageRejected": {
+        "unsupported_type": "Tipo de archivo no compatible",
+        "too_many_images": "Máximo {{max}} imágenes por mensaje",
+        "magic_mismatch": "El archivo no parece una imagen real",
+        "decode_failed": "No se pudo decodificar esta imagen",
+        "too_large": "Imagen demasiado grande — prueba una más pequeña",
+        "io": "No se pudo leer este archivo"
+      },
+      "slash": {
+        "ariaLabel": "Comandos slash",
+        "label": "comandos",
+        "navigateHint": "↑↓ Navegar",
+        "selectHint": "Enter/Tab Insertar",
+        "closeHint": "Esc Cerrar",
+        "commands": {
+          "new": {
+            "title": "Nuevo chat",
+            "description": "Detiene la tarea actual e inicia una conversación nueva."
+          },
+          "stop": {
+            "title": "Detener tarea actual",
+            "description": "Cancela el turno activo del agent en este chat."
+          },
+          "restart": {
+            "title": "Reiniciar nanobot",
+            "description": "Reinicia el proceso del bot en el mismo lugar."
+          },
+          "status": {
+            "title": "Mostrar estado",
+            "description": "Muestra el estado del runtime, provider y channels."
+          },
+          "history": {
+            "title": "Mostrar historial",
+            "description": "Imprime los últimos N mensajes persistidos de la conversación."
+          },
+          "dream": {
+            "title": "Ejecutar Dream",
+            "description": "Activa manualmente la consolidación de memoria."
+          },
+          "dream_log": {
+            "title": "Mostrar registro de Dream",
+            "description": "Muestra qué cambió la última consolidación Dream."
+          },
+          "dream_restore": {
+            "title": "Restaurar memoria",
+            "description": "Revierte la memoria a una instantánea Dream anterior."
+          },
+          "help": {
+            "title": "Mostrar ayuda",
+            "description": "Lista los comandos slash disponibles."
+          }
+        }
+      }
+    },
+    "scrollToBottom": "Desplazarse al final"
+  },
+  "message": {
+    "streaming": "transmitiendo",
+    "assistantTyping": "El asistente está escribiendo",
+    "toolSingle": "Usando una herramienta",
+    "toolMany": "Se usaron {{count}} herramientas",
+    "imageAttachment": "Imagen adjunta"
+  },
+  "lightbox": {
+    "title": "Vista previa de imagen",
+    "open": "Ver imagen",
+    "prev": "Imagen anterior",
+    "next": "Imagen siguiente",
+    "close": "Cerrar vista previa"
+  },
+  "code": {
+    "fallbackLanguage": "código",
+    "copyAria": "Copiar código",
+    "copy": "Copiar",
+    "copied": "Copiado"
+  },
+  "common": {
+    "dismiss": "Cerrar"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "Mensaje demasiado grande",
+      "body": "El servidor rechazó tu último mensaje por superar el tamaño permitido. Quita algunas imágenes o usa archivos más pequeños y vuelve a enviarlo."
+    }
+  }
+}

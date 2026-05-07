@@ -1,0 +1,220 @@
+{
+  "app": {
+    "brand": "nanobot",
+    "loading": {
+      "connecting": "Connecting to nanobot…",
+      "boot": "Loading nanobot…"
+    },
+    "error": {
+      "title": "Couldn't reach nanobot",
+      "gatewayHint": "Make sure the gateway is running (`nanobot gateway`) and that this page is open on the same machine."
+    },
+    "auth": {
+      "title": "Authentication required",
+      "hint": "Enter the secret configured as tokenIssueSecret in your gateway config.",
+      "placeholder": "Password",
+      "submit": "Connect",
+      "invalid": "Invalid password. Try again."
+    },
+    "account": {
+      "section": "Account",
+      "logoutHint": "Disconnect this browser from the gateway.",
+      "logout": "Sign out"
+    },
+    "documentTitle": {
+      "base": "nanobot",
+      "chat": "{{title}} · nanobot"
+    },
+    "meta": {
+      "description": "nanobot web UI — chat with your nanobot workspace."
+    }
+  },
+  "sidebar": {
+    "navigation": "Sidebar navigation",
+    "globalActions": "Global actions",
+    "collapse": "Collapse sidebar",
+    "toggleTheme": "Toggle theme",
+    "home": "Home",
+    "newChat": "New chat",
+    "searchAria": "Search chats",
+    "searchPlaceholder": "Search chats",
+    "searchResults": "Results",
+    "noSearchResults": "No matching chats.",
+    "recent": "Recent",
+    "refreshSessions": "Refresh sessions",
+    "settings": "Settings",
+    "language": {
+      "label": "Language",
+      "ariaLabel": "Change language"
+    }
+  },
+  "chat": {
+    "fallbackTitle": "Chat {{id}}",
+    "loading": "Loading…",
+    "noSessions": "No sessions yet.",
+    "actions": "Chat actions for {{title}}",
+    "delete": "Delete",
+    "newChat": "New chat",
+    "groups": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "earlier": "Earlier"
+    }
+  },
+  "deleteConfirm": {
+    "title": "Delete “{{title}}”?",
+    "description": "The session file will be removed from disk. This cannot be undone.",
+    "cancel": "Cancel",
+    "confirm": "Delete"
+  },
+  "connection": {
+    "idle": "Idle",
+    "connecting": "Connecting…",
+    "open": "Connected",
+    "reconnecting": "Reconnecting…",
+    "closed": "Disconnected",
+    "error": "Connection error"
+  },
+  "thread": {
+    "loadingConversation": "Loading conversation…",
+    "empty": {
+      "greeting": "What can I do for you?",
+      "quickActions": {
+        "plan": {
+          "title": "Create a project plan",
+          "prompt": "Create a concise project plan for what I should build next."
+        },
+        "analyze": {
+          "title": "Analyze this data",
+          "prompt": "Help me analyze this data and call out the most important patterns."
+        },
+        "brainstorm": {
+          "title": "Brainstorm ideas",
+          "prompt": "Brainstorm a few practical ideas and tradeoffs for this problem."
+        },
+        "code": {
+          "title": "Write code",
+          "prompt": "Help me write the code for this task, starting with the smallest useful change."
+        },
+        "summarize": {
+          "title": "Summarize this document",
+          "prompt": "Summarize this document and list the key takeaways."
+        },
+        "more": {
+          "title": "More",
+          "prompt": "Show me a few useful ways you can help in this workspace."
+        }
+      }
+    },
+    "header": {
+      "toggleSidebar": "Toggle sidebar",
+      "newChat": "Start a new chat",
+      "toggleTheme": "Toggle theme from header",
+      "settings": "Open settings"
+    },
+    "composer": {
+      "placeholderThread": "Type your message…",
+      "placeholderHero": "Ask anything...",
+      "placeholderOpening": "Opening a new chat…",
+      "placeholderStreaming": "Model is responding…",
+      "inputAria": "Message input",
+      "sendHint": "Enter to send · Shift+Enter for newline",
+      "send": "Send message",
+      "attachImage": "Attach image",
+      "tools": {
+        "search": "Search",
+        "reason": "Reason",
+        "deepResearch": "Deep research",
+        "voice": "Voice input"
+      },
+      "slash": {
+        "ariaLabel": "Slash commands",
+        "label": "commands",
+        "navigateHint": "↑↓ Navigate",
+        "selectHint": "Enter/Tab Select",
+        "closeHint": "Esc Close",
+        "commands": {
+          "new": {
+            "title": "New chat",
+            "description": "Stop the current task and start a fresh conversation."
+          },
+          "stop": {
+            "title": "Stop current task",
+            "description": "Cancel the active agent turn for this chat."
+          },
+          "restart": {
+            "title": "Restart nanobot",
+            "description": "Restart the bot process in place."
+          },
+          "status": {
+            "title": "Show status",
+            "description": "Display runtime, provider, and channel status."
+          },
+          "history": {
+            "title": "Show conversation history",
+            "description": "Print the last N persisted conversation messages."
+          },
+          "dream": {
+            "title": "Run Dream",
+            "description": "Manually trigger memory consolidation."
+          },
+          "dream_log": {
+            "title": "Show Dream log",
+            "description": "Show what the last Dream consolidation changed."
+          },
+          "dream_restore": {
+            "title": "Restore memory",
+            "description": "Revert memory to a previous Dream snapshot."
+          },
+          "help": {
+            "title": "Show help",
+            "description": "List available slash commands."
+          }
+        }
+      },
+      "encoding": "Encoding…",
+      "remove": "Remove attachment",
+      "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
+      "imageRejected": {
+        "unsupported_type": "Unsupported file type",
+        "too_many_images": "Max {{max}} images per message",
+        "magic_mismatch": "File doesn't look like a real image",
+        "decode_failed": "Couldn't decode this image",
+        "too_large": "Image is too large — try a smaller one",
+        "io": "Couldn't read this file"
+      }
+    },
+    "scrollToBottom": "Scroll to bottom"
+  },
+  "message": {
+    "streaming": "streaming",
+    "assistantTyping": "Assistant is typing",
+    "toolSingle": "Using a tool",
+    "toolMany": "Used {{count}} tools",
+    "imageAttachment": "Image attachment",
+    "copyReply": "Copy reply",
+    "copiedReply": "Copied reply"
+  },
+  "lightbox": {
+    "title": "Image preview",
+    "open": "View image",
+    "prev": "Previous image",
+    "next": "Next image",
+    "close": "Close image preview"
+  },
+  "code": {
+    "fallbackLanguage": "code",
+    "copyAria": "Copy code",
+    "copy": "Copy",
+    "copied": "Copied"
+  },
+  "common": {
+    "dismiss": "Dismiss"
+  },
+  "errors": {
+    "messageTooBig": {
+      "title": "Message too large",
+      "body": "The server rejected your last message because it exceeded the size limit. Remove some images or try smaller files, then send again."
+    }
+  }
+}

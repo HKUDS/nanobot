@@ -1,0 +1,135 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the sections below to help us diagnose the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear description of what went wrong.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this behavior?
+      placeholder: |
+        1. Configure nanobot with ...
+        2. Send message ...
+        3. See error ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: |
+        Paste any relevant log output. You can run nanobot with `--log-level DEBUG` for more verbose logs.
+        **Remember to redact any sensitive information (tokens, API keys, passwords, etc.)**
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: nanobot Version
+      description: Run `nanobot --version` or `pip show nanobot-ai`
+      placeholder: e.g., 0.1.5
+    validations:
+      required: true
+
+  - type: dropdown
+    id: python_version
+    attributes:
+      label: Python Version
+      description: What Python version are you using?
+      options:
+        - "3.11"
+        - "3.12"
+        - "3.13"
+        - Other (specify below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Docker
+        - Other (specify below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Channel / Platform
+      description: Which messaging platform are you using?
+      options:
+        - Weixin (Personal WeChat)
+        - WeCom (Enterprise WeChat)
+        - Feishu (Lark)
+        - DingTalk
+        - Telegram
+        - Discord
+        - Slack
+        - QQ
+        - WhatsApp
+        - Email
+        - MS Teams
+        - Matrix
+        - WebSocket
+        - API Server
+        - Other (specify below)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: llm_provider
+    attributes:
+      label: LLM Provider
+      description: Which LLM provider are you using?
+      options:
+        - OpenAI
+        - Anthropic (Claude)
+        - DeepSeek
+        - Google (Gemini)
+        - Ollama (Local)
+        - OpenRouter
+        - Azure OpenAI
+        - Other (specify below)
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration (Optional)
+      description: |
+        Relevant parts of your nanobot configuration. **Remember to redact any sensitive information.**
+      render: yaml
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other context, screenshots, or information that might help.

@@ -59,6 +59,7 @@ class HeartbeatService:
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
+        timezone: str | None = None,
     ):
         self.workspace = workspace
         self.provider = provider
@@ -67,6 +68,7 @@ class HeartbeatService:
         self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
+        self.timezone = timezone
         self._running = False
         self._task: asyncio.Task | None = None
 
@@ -87,10 +89,13 @@ class HeartbeatService:
 
         Returns (action, tasks) where action is 'skip' or 'run'.
         """
-        response = await self.provider.chat(
+        from nanobot.utils.helpers import current_time_str
+
+        response = await self.provider.chat_with_retry(
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
                 {"role": "user", "content": (
+                    f"Current Time: {current_time_str(self.timezone)}\n\n"
                     "Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n"
                     f"{content}"
                 )},
@@ -99,7 +104,12 @@ class HeartbeatService:
             model=self.model,
         )
 
-        if not response.has_tool_calls:
+        if not response.should_execute_tools:
+            if response.has_tool_calls:
+                logger.warning(
+                    "Ignoring heartbeat tool calls under finish_reason='{}'",
+                    response.finish_reason,
+                )
             return "skip", ""
 
         args = response.tool_calls[0].arguments
@@ -134,11 +144,47 @@ class HeartbeatService:
                     await self._tick()
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error("Heartbeat error: {}", e)
+            except Exception:
+                logger.exception("Heartbeat error")
+
+    @staticmethod
+    def _is_deliverable(response: str) -> bool:
+        """Check if a heartbeat response is suitable for user delivery.
+
+        Filters out two classes of bad output before the evaluator runs:
+
+        1. **Finalization fallback** — the runner hit empty-response retries
+           and produced a canned error message.  For heartbeat, empty output
+           is a valid "nothing to report" outcome, not a failure.
+        2. **Leaked reasoning** — the model reflected internal file names,
+           decision logic, or meta-commentary instead of a user-facing report.
+        """
+        text = response.lower()
+
+        # Runner finalization fallback
+        if "couldn't produce a final answer" in text:
+            return False
+
+        # Leaked internal reasoning patterns
+        leaked_patterns = [
+            "heartbeat.md",
+            "awareness.md",
+            "judgment call:",
+            "decision logic",
+            "valid options are",
+            "my instructions",
+            "i am supposed to",
+            "strict heartbeat interpretation",
+        ]
+        if any(pattern in text for pattern in leaked_patterns):
+            return False
+
+        return True
 
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
+        from nanobot.utils.evaluator import evaluate_response
+
         content = self._read_heartbeat_file()
         if not content:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
@@ -156,9 +202,26 @@ class HeartbeatService:
             logger.info("Heartbeat: tasks found, executing...")
             if self.on_execute:
                 response = await self.on_execute(tasks)
-                if response and self.on_notify:
+
+                if not response:
+                    logger.info("Heartbeat: no response from execution")
+                    return
+
+                if not self._is_deliverable(response):
+                    logger.info(
+                        "Heartbeat: suppressed non-deliverable response ({})",
+                        response[:80],
+                    )
+                    return
+
+                should_notify = await evaluate_response(
+                    response, tasks, self.provider, self.model,
+                )
+                if should_notify and self.on_notify:
                     logger.info("Heartbeat: completed, delivering response")
                     await self.on_notify(response)
+                else:
+                    logger.info("Heartbeat: silenced by post-run evaluation")
         except Exception:
             logger.exception("Heartbeat execution failed")
 
