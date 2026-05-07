@@ -33,7 +33,7 @@ jobs:
       run: uv sync --all-extras
 
     - name: Lint with ruff
-      run: uv run ruff check nanobot --select F401,F841
+      run: uv run ruff check nanobot --select F
 
     - name: Run tests
       run: uv run pytest tests/

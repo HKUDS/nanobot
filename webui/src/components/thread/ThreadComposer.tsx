@@ -7,11 +7,21 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import {
+  Activity,
   ArrowUp,
+  BookOpen,
+  CircleHelp,
+  History,
   ImageIcon,
   Loader2,
   Plus,
+  RotateCw,
+  Sparkles,
+  Square,
+  SquarePen,
+  Undo2,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -24,6 +34,7 @@ import {
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
 import type { SendImage } from "@/hooks/useNanobotStream";
+import type { SlashCommand } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** ``<input accept>``: aligned with the server's MIME whitelist. SVG is
@@ -43,6 +54,23 @@ interface ThreadComposerProps {
   isStreaming?: boolean;
   modelLabel?: string | null;
   variant?: "thread" | "hero";
+  slashCommands?: SlashCommand[];
+}
+
+const COMMAND_ICONS: Record<string, LucideIcon> = {
+  activity: Activity,
+  "book-open": BookOpen,
+  "circle-help": CircleHelp,
+  history: History,
+  "rotate-cw": RotateCw,
+  sparkles: Sparkles,
+  square: Square,
+  "square-pen": SquarePen,
+  "undo-2": Undo2,
+};
+
+function slashCommandI18nKey(command: string): string {
+  return command.replace(/^\//, "").replace(/-/g, "_");
 }
 
 export function ThreadComposer({
@@ -52,10 +80,13 @@ export function ThreadComposer({
   isStreaming = false,
   modelLabel = null,
   variant = "thread",
+  slashCommands = [],
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const [inlineError, setInlineError] = useState<string | null>(null);
+  const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -119,6 +150,66 @@ export function ThreadComposer({
     && !hasErrors
     && (value.trim().length > 0 || readyImages.length > 0);
 
+  const slashQuery = useMemo(() => {
+    if (disabled || slashMenuDismissed || !value.startsWith("/")) return null;
+    const commandToken = value.slice(1);
+    if (/\s/.test(commandToken)) return null;
+    return commandToken.toLowerCase();
+  }, [disabled, slashMenuDismissed, value]);
+
+  const filteredSlashCommands = useMemo(() => {
+    if (slashQuery === null) return [];
+    return slashCommands
+      .filter((command) => {
+        const haystack = [
+          command.command,
+          command.title,
+          command.description,
+          command.argHint ?? "",
+          t(`thread.composer.slash.commands.${slashCommandI18nKey(command.command)}.title`, {
+            defaultValue: "",
+          }),
+          t(`thread.composer.slash.commands.${slashCommandI18nKey(command.command)}.description`, {
+            defaultValue: "",
+          }),
+        ].join(" ").toLowerCase();
+        return haystack.includes(slashQuery);
+      })
+      .slice(0, 8);
+  }, [slashCommands, slashQuery, t]);
+
+  const showSlashMenu = filteredSlashCommands.length > 0;
+
+  useEffect(() => {
+    setSelectedCommandIndex(0);
+  }, [slashQuery]);
+
+  useEffect(() => {
+    if (selectedCommandIndex >= filteredSlashCommands.length) {
+      setSelectedCommandIndex(0);
+    }
+  }, [filteredSlashCommands.length, selectedCommandIndex]);
+
+  const resizeTextarea = useCallback(() => {
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
+      el.focus();
+    });
+  }, []);
+
+  const chooseSlashCommand = useCallback(
+    (command: SlashCommand) => {
+      setValue(command.argHint ? `${command.command} ` : command.command);
+      setSlashMenuDismissed(true);
+      setInlineError(null);
+      resizeTextarea();
+    },
+    [resizeTextarea],
+  );
+
   const submit = useCallback(() => {
     if (!canSend) return;
     const trimmed = value.trim();
@@ -142,16 +233,35 @@ export function ThreadComposer({
     // Bubble owns the data URL copy; safe to revoke every staged blob
     // preview here without affecting the rendered message.
     clear();
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (el) {
-        el.style.height = "auto";
-        el.focus();
-      }
-    });
-  }, [canSend, clear, onSend, readyImages, value]);
+    setSlashMenuDismissed(false);
+    resizeTextarea();
+  }, [canSend, clear, onSend, readyImages, resizeTextarea, value]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (showSlashMenu) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedCommandIndex((idx) => (idx + 1) % filteredSlashCommands.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedCommandIndex(
+          (idx) => (idx - 1 + filteredSlashCommands.length) % filteredSlashCommands.length,
+        );
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+        e.preventDefault();
+        chooseSlashCommand(filteredSlashCommands[selectedCommandIndex]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashMenuDismissed(true);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submit();
@@ -213,8 +323,17 @@ export function ThreadComposer({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className={cn("w-full", isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0")}
+      className={cn("relative w-full", isHero ? "px-0" : "px-1 pb-1.5 pt-1 sm:px-0")}
     >
+      {showSlashMenu ? (
+        <SlashCommandPalette
+          commands={filteredSlashCommands}
+          selectedIndex={selectedCommandIndex}
+          isHero={isHero}
+          onHover={setSelectedCommandIndex}
+          onChoose={chooseSlashCommand}
+        />
+      ) : null}
       <div
         className={cn(
           "relative mx-auto flex w-full flex-col overflow-hidden transition-all duration-200",
@@ -257,7 +376,10 @@ export function ThreadComposer({
         <textarea
           ref={textareaRef}
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setSlashMenuDismissed(false);
+          }}
           onInput={onInput}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
@@ -364,6 +486,106 @@ export function ThreadComposer({
         </div>
       </div>
     </form>
+  );
+}
+
+interface SlashCommandPaletteProps {
+  commands: SlashCommand[];
+  selectedIndex: number;
+  isHero: boolean;
+  onHover: (index: number) => void;
+  onChoose: (command: SlashCommand) => void;
+}
+
+function SlashCommandPalette({
+  commands,
+  selectedIndex,
+  isHero,
+  onHover,
+  onChoose,
+}: SlashCommandPaletteProps) {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="listbox"
+      aria-label={t("thread.composer.slash.ariaLabel")}
+      className={cn(
+        "absolute bottom-full left-1/2 z-30 mb-2 max-h-[22rem] w-[calc(100%-0.5rem)] -translate-x-1/2 overflow-hidden rounded-[18px] border",
+        "border-border/65 bg-popover/98 p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)] backdrop-blur",
+        "dark:border-white/10 dark:shadow-[0_22px_55px_rgba(0,0,0,0.45)]",
+        isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
+      )}
+    >
+      <div className="px-2 pb-1 pt-1 text-[11px] font-medium tracking-[0.08em] text-muted-foreground/70">
+        {t("thread.composer.slash.label")}
+      </div>
+      <div className="max-h-[18rem] overflow-y-auto pr-0.5">
+        {commands.map((command, index) => {
+          const Icon = COMMAND_ICONS[command.icon] ?? CircleHelp;
+          const selected = index === selectedIndex;
+          const commandKey = slashCommandI18nKey(command.command);
+          const title = t(`thread.composer.slash.commands.${commandKey}.title`, {
+            defaultValue: command.title,
+          });
+          const description = t(`thread.composer.slash.commands.${commandKey}.description`, {
+            defaultValue: command.description,
+          });
+          return (
+            <button
+              key={command.command}
+              type="button"
+              role="option"
+              aria-selected={selected}
+              onMouseEnter={() => onHover(index)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onChoose(command);
+              }}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-[13px] px-3 py-2.5 text-left transition-colors",
+                selected
+                  ? "bg-primary/10 text-foreground"
+                  : "text-foreground/86 hover:bg-accent/55",
+              )}
+            >
+              <span
+                className={cn(
+                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] border",
+                  selected
+                    ? "border-primary/25 bg-primary/12 text-primary"
+                    : "border-border/65 bg-muted/45 text-muted-foreground",
+                )}
+              >
+                <Icon className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex min-w-0 items-baseline gap-2">
+                  <span className="font-mono text-[13px] font-semibold text-foreground">
+                    {command.command}
+                  </span>
+                  {command.argHint ? (
+                    <span className="font-mono text-[12px] text-muted-foreground">
+                      {command.argHint}
+                    </span>
+                  ) : null}
+                  <span className="truncate text-[13px] font-medium">
+                    {title}
+                  </span>
+                </span>
+                <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+                  {description}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-2 px-2 pt-1.5 text-[10.5px] text-muted-foreground/70">
+        <span>{t("thread.composer.slash.navigateHint")}</span>
+        <span>{t("thread.composer.slash.selectHint")}</span>
+        <span>{t("thread.composer.slash.closeHint")}</span>
+      </div>
+    </div>
   );
 }
 

@@ -127,6 +127,51 @@
         "deepResearch": "Deep research",
         "voice": "Voice input"
       },
+      "slash": {
+        "ariaLabel": "Slash commands",
+        "label": "commands",
+        "navigateHint": "↑↓ Navigate",
+        "selectHint": "Enter/Tab Select",
+        "closeHint": "Esc Close",
+        "commands": {
+          "new": {
+            "title": "New chat",
+            "description": "Stop the current task and start a fresh conversation."
+          },
+          "stop": {
+            "title": "Stop current task",
+            "description": "Cancel the active agent turn for this chat."
+          },
+          "restart": {
+            "title": "Restart nanobot",
+            "description": "Restart the bot process in place."
+          },
+          "status": {
+            "title": "Show status",
+            "description": "Display runtime, provider, and channel status."
+          },
+          "history": {
+            "title": "Show conversation history",
+            "description": "Print the last N persisted conversation messages."
+          },
+          "dream": {
+            "title": "Run Dream",
+            "description": "Manually trigger memory consolidation."
+          },
+          "dream_log": {
+            "title": "Show Dream log",
+            "description": "Show what the last Dream consolidation changed."
+          },
+          "dream_restore": {
+            "title": "Restore memory",
+            "description": "Revert memory to a previous Dream snapshot."
+          },
+          "help": {
+            "title": "Show help",
+            "description": "List available slash commands."
+          }
+        }
+      },
       "encoding": "Encoding…",
       "remove": "Remove attachment",
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",

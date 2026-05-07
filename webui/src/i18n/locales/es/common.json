@@ -53,7 +53,34 @@
   "thread": {
     "loadingConversation": "Cargando conversación…",
     "empty": {
-      "description": "Haz preguntas, continúa tu trabajo local o inicia un nuevo hilo."
+      "description": "Haz preguntas, continúa tu trabajo local o inicia un nuevo hilo.",
+      "greeting": "¿Qué puedo hacer por ti?",
+      "quickActions": {
+        "plan": {
+          "title": "Crear un plan de proyecto",
+          "prompt": "Crea un plan de proyecto conciso para lo que debería construir después."
+        },
+        "analyze": {
+          "title": "Analizar estos datos",
+          "prompt": "Ayúdame a analizar estos datos y destaca los patrones más importantes."
+        },
+        "brainstorm": {
+          "title": "Lluvia de ideas",
+          "prompt": "Propón algunas ideas prácticas y sus compensaciones para este problema."
+        },
+        "code": {
+          "title": "Escribir código",
+          "prompt": "Ayúdame a escribir el código para esta tarea, empezando por el cambio útil más pequeño."
+        },
+        "summarize": {
+          "title": "Resumir este documento",
+          "prompt": "Resume este documento y enumera las conclusiones clave."
+        },
+        "more": {
+          "title": "Más",
+          "prompt": "Muéstrame algunas formas útiles en las que puedes ayudar en este workspace."
+        }
+      }
     },
     "header": {
       "toggleSidebar": "Mostrar u ocultar la barra lateral"
@@ -77,6 +104,51 @@
         "decode_failed": "No se pudo decodificar esta imagen",
         "too_large": "Imagen demasiado grande — prueba una más pequeña",
         "io": "No se pudo leer este archivo"
+      },
+      "slash": {
+        "ariaLabel": "Comandos slash",
+        "label": "comandos",
+        "navigateHint": "↑↓ Navegar",
+        "selectHint": "Enter/Tab Insertar",
+        "closeHint": "Esc Cerrar",
+        "commands": {
+          "new": {
+            "title": "Nuevo chat",
+            "description": "Detiene la tarea actual e inicia una conversación nueva."
+          },
+          "stop": {
+            "title": "Detener tarea actual",
+            "description": "Cancela el turno activo del agent en este chat."
+          },
+          "restart": {
+            "title": "Reiniciar nanobot",
+            "description": "Reinicia el proceso del bot en el mismo lugar."
+          },
+          "status": {
+            "title": "Mostrar estado",
+            "description": "Muestra el estado del runtime, provider y channels."
+          },
+          "history": {
+            "title": "Mostrar historial",
+            "description": "Imprime los últimos N mensajes persistidos de la conversación."
+          },
+          "dream": {
+            "title": "Ejecutar Dream",
+            "description": "Activa manualmente la consolidación de memoria."
+          },
+          "dream_log": {
+            "title": "Mostrar registro de Dream",
+            "description": "Muestra qué cambió la última consolidación Dream."
+          },
+          "dream_restore": {
+            "title": "Restaurar memoria",
+            "description": "Revierte la memoria a una instantánea Dream anterior."
+          },
+          "help": {
+            "title": "Mostrar ayuda",
+            "description": "Lista los comandos slash disponibles."
+          }
+        }
       }
     },
     "scrollToBottom": "Desplazarse al final"

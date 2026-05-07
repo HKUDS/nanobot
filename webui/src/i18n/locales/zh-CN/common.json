@@ -115,6 +115,51 @@
         "deepResearch": "深度研究",
         "voice": "语音输入"
       },
+      "slash": {
+        "ariaLabel": "斜杠命令",
+        "label": "命令",
+        "navigateHint": "↑↓ 选择",
+        "selectHint": "Enter/Tab 填入",
+        "closeHint": "Esc 关闭",
+        "commands": {
+          "new": {
+            "title": "新建对话",
+            "description": "停止当前任务，并开始一个新的对话。"
+          },
+          "stop": {
+            "title": "停止当前任务",
+            "description": "取消这个对话中正在运行的 agent 回合。"
+          },
+          "restart": {
+            "title": "重启 nanobot",
+            "description": "原地重启 bot 进程。"
+          },
+          "status": {
+            "title": "查看状态",
+            "description": "显示运行时、provider 和 channel 状态。"
+          },
+          "history": {
+            "title": "查看对话历史",
+            "description": "打印最近 N 条已持久化的对话消息。"
+          },
+          "dream": {
+            "title": "运行 Dream",
+            "description": "手动触发记忆整理。"
+          },
+          "dream_log": {
+            "title": "查看 Dream 日志",
+            "description": "查看上一次 Dream 整理改变了什么。"
+          },
+          "dream_restore": {
+            "title": "恢复记忆",
+            "description": "将记忆恢复到之前的 Dream 快照。"
+          },
+          "help": {
+            "title": "查看帮助",
+            "description": "列出可用的斜杠命令。"
+          }
+        }
+      },
       "encoding": "处理中…",
       "remove": "移除附件",
       "normalizedSizeHint": "{{orig}} → {{current}}（已自动压缩）",

@@ -53,7 +53,34 @@
   "thread": {
     "loadingConversation": "正在載入對話…",
     "empty": {
-      "description": "你可以提問、延續本地工作，或是開始新的執行緒。"
+      "description": "你可以提問、延續本地工作，或是開始新的執行緒。",
+      "greeting": "我可以幫你做什麼？",
+      "quickActions": {
+        "plan": {
+          "title": "建立專案計畫",
+          "prompt": "幫我為接下來要做的事情寫一份簡潔的專案計畫。"
+        },
+        "analyze": {
+          "title": "分析這些資料",
+          "prompt": "幫我分析這些資料，並指出最重要的模式。"
+        },
+        "brainstorm": {
+          "title": "腦力激盪想法",
+          "prompt": "圍繞這個問題腦力激盪幾個實用方案，並說明取捨。"
+        },
+        "code": {
+          "title": "撰寫程式碼",
+          "prompt": "幫我為這個任務撰寫程式碼，先從最小可用改動開始。"
+        },
+        "summarize": {
+          "title": "總結這份文件",
+          "prompt": "幫我總結這份文件，並列出關鍵重點。"
+        },
+        "more": {
+          "title": "更多",
+          "prompt": "展示幾個你在這個工作區裡可以幫我的實用方式。"
+        }
+      }
     },
     "header": {
       "toggleSidebar": "切換側邊欄"
@@ -77,6 +104,51 @@
         "decode_failed": "無法解碼這張圖片",
         "too_large": "圖片太大，請換一張小一點的",
         "io": "無法讀取這個檔案"
+      },
+      "slash": {
+        "ariaLabel": "斜線命令",
+        "label": "命令",
+        "navigateHint": "↑↓ 選擇",
+        "selectHint": "Enter/Tab 填入",
+        "closeHint": "Esc 關閉",
+        "commands": {
+          "new": {
+            "title": "新增對話",
+            "description": "停止目前任務，並開始新的對話。"
+          },
+          "stop": {
+            "title": "停止目前任務",
+            "description": "取消這個對話中正在執行的 agent 回合。"
+          },
+          "restart": {
+            "title": "重新啟動 nanobot",
+            "description": "原地重新啟動 bot 進程。"
+          },
+          "status": {
+            "title": "查看狀態",
+            "description": "顯示執行環境、provider 和 channel 狀態。"
+          },
+          "history": {
+            "title": "查看對話歷史",
+            "description": "列印最近 N 則已持久化的對話訊息。"
+          },
+          "dream": {
+            "title": "執行 Dream",
+            "description": "手動觸發記憶整理。"
+          },
+          "dream_log": {
+            "title": "查看 Dream 日誌",
+            "description": "查看上一次 Dream 整理變更了什麼。"
+          },
+          "dream_restore": {
+            "title": "恢復記憶",
+            "description": "將記憶恢復到之前的 Dream 快照。"
+          },
+          "help": {
+            "title": "查看說明",
+            "description": "列出可用的斜線命令。"
+          }
+        }
       }
     },
     "scrollToBottom": "捲動到底部"

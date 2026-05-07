@@ -434,6 +434,138 @@ describe("ThreadShell", () => {
     });
   });
 
+  it("keeps live assistant replies after visiting the blank new-chat page", async () => {
+    const client = makeClient();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("websocket%3Achat-a/messages")) {
+          return httpJson({
+            key: "websocket:chat-a",
+            created_at: null,
+            updated_at: null,
+            // Simulate a stale history response that has not persisted the
+            // just-received assistant reply yet.
+            messages: [{ role: "user", content: "hello" }],
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    const { rerender } = render(
+      wrap(
+        client,
+        <ThreadShell
+          session={session("chat-a")}
+          title="Chat chat-a"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByText("hello")).toBeInTheDocument());
+    await act(async () => {
+      client._emitChat("chat-a", {
+        event: "message",
+        chat_id: "chat-a",
+        text: "live assistant reply",
+      });
+    });
+    expect(screen.getByText("live assistant reply")).toBeInTheDocument();
+
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={null}
+            title="nanobot"
+            onToggleSidebar={() => {}}
+            onNewChat={() => {}}
+          />,
+        ),
+      );
+    });
+
+    expect(screen.queryByText("live assistant reply")).not.toBeInTheDocument();
+    expect(screen.getByText("What can I do for you?")).toBeInTheDocument();
+
+    await act(async () => {
+      rerender(
+        wrap(
+          client,
+          <ThreadShell
+            session={session("chat-a")}
+            title="Chat chat-a"
+            onToggleSidebar={() => {}}
+            onNewChat={() => {}}
+          />,
+        ),
+      );
+    });
+
+    await waitFor(() => expect(screen.getByText("live assistant reply")).toBeInTheDocument());
+  });
+
+  it("does not open slash commands on the blank welcome page", async () => {
+    const client = makeClient();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/commands")) {
+          return httpJson({
+            commands: [
+              {
+                command: "/stop",
+                title: "Stop current task",
+                description: "Cancel the active agent turn.",
+                icon: "square",
+              },
+            ],
+          });
+        }
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({}),
+        };
+      }),
+    );
+
+    render(
+      wrap(
+        client,
+        <ThreadShell
+          session={null}
+          title="nanobot"
+          onToggleSidebar={() => {}}
+          onNewChat={() => {}}
+        />,
+      ),
+    );
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      "/api/commands",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    ));
+
+    fireEvent.change(screen.getByLabelText("Message input"), {
+      target: { value: "/" },
+    });
+
+    expect(screen.queryByRole("listbox", { name: "Slash commands" })).not.toBeInTheDocument();
+  });
+
   it("surfaces a dismissible banner when the stream reports message_too_big", async () => {
     const client = makeClient();
     const onNewChat = vi.fn().mockResolvedValue("chat-a");
@@ -454,6 +586,7 @@ describe("ThreadShell", () => {
     // No banner yet: only appears once the client emits a matching error.
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
+    await act(async () => {});
     await act(async () => {
       client._emitError({ kind: "message_too_big" });
     });
@@ -485,6 +618,7 @@ describe("ThreadShell", () => {
       ),
     );
 
+    await act(async () => {});
     await act(async () => {
       client._emitError({ kind: "message_too_big" });
     });
