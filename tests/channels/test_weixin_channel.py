@@ -1394,8 +1394,8 @@ async def test_send_text_retries_without_context_token_on_ret_minus_two() -> Non
 
 
 @pytest.mark.asyncio
-async def test_send_text_raises_when_ret_minus_two_retry_also_fails() -> None:
-    """If both attempts (with and without token) return ret=-2, raise."""
+async def test_send_text_swallows_ret_minus_two_when_retry_also_fails() -> None:
+    """If both attempts return ret=-2, swallow the error (matching openclaw)."""
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
@@ -1408,8 +1408,8 @@ async def test_send_text_raises_when_ret_minus_two_retry_also_fails() -> None:
         ]
     )
 
-    with pytest.raises(RuntimeError, match="ret=-2"):
-        await channel._send_text("wx-user", "hello", "bad-token")
+    # Should NOT raise
+    await channel._send_text("wx-user", "hello", "bad-token")
 
     assert channel._api_post.await_count == 2
     # Token is NOT cleared because retry also failed
@@ -1417,16 +1417,16 @@ async def test_send_text_raises_when_ret_minus_two_retry_also_fails() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_text_does_not_retry_without_token_when_no_context_token() -> None:
-    """If no context_token was provided, ret=-2 should raise immediately."""
+async def test_send_text_swallows_ret_minus_two_when_no_context_token() -> None:
+    """If no context_token was provided, ret=-2 is swallowed without retry."""
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
 
     channel._api_post = AsyncMock(return_value={"ret": -2})
 
-    with pytest.raises(RuntimeError, match="ret=-2"):
-        await channel._send_text("wx-user", "hello", "")
+    # Should NOT raise
+    await channel._send_text("wx-user", "hello", "")
 
     # Only one API call (no retry)
     channel._api_post.assert_awaited_once()

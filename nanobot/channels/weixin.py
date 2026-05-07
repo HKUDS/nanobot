@@ -18,7 +18,6 @@ import os
 import random
 import re
 import time
-import uuid
 from collections import OrderedDict
 from contextlib import suppress
 from pathlib import Path
@@ -1109,6 +1108,14 @@ class WeixinChannel(BaseChannel):
         except Exception as e:
             self.logger.debug("typing clear failed for {}: {}", chat_id, e)
 
+    @staticmethod
+    def _generate_client_id() -> str:
+        """Generate a client_id matching the reference plugin format.
+
+        openclaw-weixin uses ``{prefix}:{timestamp}-{8-char hex}``.
+        """
+        return f"nanobot:{int(time.time() * 1000)}-{os.urandom(4).hex()}"
+
     async def _send_text(
         self,
         to_user_id: str,
@@ -1116,7 +1123,7 @@ class WeixinChannel(BaseChannel):
         context_token: str,
     ) -> None:
         """Send a text message matching the exact protocol from send.ts."""
-        client_id = f"nanobot-{uuid.uuid4().hex[:12]}"
+        client_id = self._generate_client_id()
 
         item_list: list[dict] = []
         if text:
@@ -1143,32 +1150,48 @@ class WeixinChannel(BaseChannel):
         ret = data.get("ret", 0)
         errcode = data.get("errcode", 0)
 
-        # If ret=-2 (parameter error / rate limit / expired token) and we sent
-        # with a context_token, retry once without it.  The openclaw reference
-        # plugin can send without a token (it just warns), and issue #61174
-        # shows that expired context_tokens are a common cause of ret=-2.
-        if ret == -2 and context_token:
+        # The iLink sendmessage API frequently returns ret=-2 (parameter
+        # error / rate limit / expired token) even though HTTP status is 200.
+        # The openclaw reference plugin ignores the JSON body for sendmessage
+        # and only checks HTTP status.  We retry once without context_token
+        # (a common fix for token expiry per openclaw#61174), but if that
+        # also fails we swallow ret=-2 to avoid silent message drops.
+        if ret == -2:
+            if context_token:
+                self.logger.warning(
+                    "WeChat send text returned ret=-2 for {} (client_id={}); "
+                    "retrying without context_token",
+                    to_user_id,
+                    client_id,
+                )
+                body_no_ctx = copy.deepcopy(body)
+                body_no_ctx["msg"].pop("context_token", None)
+                data = await self._api_post("ilink/bot/sendmessage", body_no_ctx)
+                ret = data.get("ret", 0)
+                errcode = data.get("errcode", 0)
+                if ret == 0 and (errcode == 0 or errcode is None):
+                    self.logger.warning(
+                        "WeChat send text succeeded WITHOUT context_token for {}; "
+                        "clearing expired token from cache",
+                        to_user_id,
+                    )
+                    self._context_tokens.pop(to_user_id, None)
+                    self._save_state()
+                    self.logger.debug(
+                        "WeChat text sent to {} (client_id={})", to_user_id, client_id
+                    )
+                    return
+            # Treat persistent ret=-2 as non-fatal (matching reference plugin).
             self.logger.warning(
                 "WeChat send text returned ret=-2 for {} (client_id={}); "
-                "retrying without context_token",
+                "treating as non-fatal. Request body: {}. Response: {}",
                 to_user_id,
                 client_id,
+                json.dumps(body, ensure_ascii=False, default=str),
+                json.dumps(data, ensure_ascii=False, default=str),
             )
-            body_no_ctx = copy.deepcopy(body)
-            body_no_ctx["msg"].pop("context_token", None)
-            data = await self._api_post("ilink/bot/sendmessage", body_no_ctx)
-            ret = data.get("ret", 0)
-            errcode = data.get("errcode", 0)
-            if ret == 0 and (errcode == 0 or errcode is None):
-                self.logger.warning(
-                    "WeChat send text succeeded WITHOUT context_token for {}; "
-                    "clearing expired token from cache",
-                    to_user_id,
-                )
-                self._context_tokens.pop(to_user_id, None)
-                self._save_state()
-                self.logger.debug("WeChat text sent to {} (client_id={})", to_user_id, client_id)
-                return
+            self.logger.debug("WeChat text sent to {} (client_id={})", to_user_id, client_id)
+            return
 
         self._check_response_error(data, "send text", body=body)
         self.logger.debug("WeChat text sent to {} (client_id={})", to_user_id, client_id)
@@ -1297,7 +1320,7 @@ class WeixinChannel(BaseChannel):
             media_item["len"] = str(raw_size)
 
         # Send each media item as its own message (matching reference plugin)
-        client_id = f"nanobot-{uuid.uuid4().hex[:12]}"
+        client_id = self._generate_client_id()
         item_list: list[dict] = [{"type": item_type, item_key: media_item}]
 
         weixin_msg: dict[str, Any] = {
@@ -1317,6 +1340,15 @@ class WeixinChannel(BaseChannel):
         }
 
         data = await self._api_post("ilink/bot/sendmessage", body)
+        ret = data.get("ret", 0)
+        if ret == -2:
+            # See _send_text for rationale: openclaw ignores ret on sendmessage.
+            self.logger.warning(
+                "WeChat send media returned ret=-2 for {} (client_id={}); treating as non-fatal",
+                to_user_id,
+                client_id,
+            )
+            return
         self._check_response_error(data, "send media", body=body)
 
 
