@@ -1104,8 +1104,6 @@ class WebSocketChannel(BaseChannel):
 
         Shape: ``list[{"data_url": str, "name"?: str | None}]``.
         """
-        from loguru import logger
-
         image_count = 0
         video_count = 0
         for item in media:

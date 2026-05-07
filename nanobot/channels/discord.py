@@ -19,6 +19,7 @@ from nanobot.command.builtin import build_help_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.utils.helpers import safe_filename, split_message
+from loguru import logger
 
 DISCORD_AVAILABLE = importlib.util.find_spec("discord") is not None
 if TYPE_CHECKING:
@@ -314,8 +315,6 @@ if DISCORD_AVAILABLE:
             reply_to: str | None,
         ) -> tuple[discord.PartialMessage | None, discord.AllowedMentions]:
             """Build reply context for outbound messages."""
-            from loguru import logger
-
             mention_settings = discord.AllowedMentions(replied_user=False)
             if not reply_to:
                 return None, mention_settings
