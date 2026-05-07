@@ -486,6 +486,7 @@ class WeixinChannel(BaseChannel):
             except Exception:
                 if not self._running:
                     break
+                self.logger.exception("WeChat poll loop error")
                 consecutive_failures += 1
                 if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
                     consecutive_failures = 0
@@ -575,8 +576,10 @@ class WeixinChannel(BaseChannel):
         # Process messages (WeixinMessage[] from types.ts)
         msgs: list[dict] = data.get("msgs", []) or []
         for msg in msgs:
-            with suppress(Exception):
+            try:
                 await self._process_message(msg)
+            except Exception:
+                self.logger.exception("Failed to process WeChat message")
 
     # ------------------------------------------------------------------
     # Inbound message processing  (matches inbound.ts + process-message.ts)

@@ -1250,3 +1250,95 @@ async def test_send_text_succeeds_on_zero_errcode() -> None:
     await channel._send_text("wx-user", "hello", "ctx-ok")
 
     channel._api_post.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Tests for _poll_once not silently dropping messages on processing errors
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_poll_once_logs_exception_on_process_message_failure(monkeypatch) -> None:
+    """When _process_message raises, _poll_once must log the error and continue
+    processing remaining messages instead of silently swallowing the exception."""
+    channel, _bus = _make_channel()
+    channel._client = SimpleNamespace(timeout=None)
+    channel._token = "token"
+    channel._get_updates_buf = "old-buf"
+
+    calls = []
+    logged_messages: list[str] = []
+
+    async def _failing_process(msg: dict) -> None:
+        calls.append(msg.get("message_id"))
+        if msg.get("message_id") == "msg-1":
+            raise RuntimeError("processing failed")
+
+    channel._process_message = _failing_process  # type: ignore[method-assign]
+
+    monkeypatch.setattr(
+        channel.logger,
+        "exception",
+        lambda message, *args, **kwargs: logged_messages.append(str(message)),
+    )
+
+    channel._api_post = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "ret": 0,
+            "errcode": 0,
+            "get_updates_buf": "new-buf",
+            "msgs": [
+                {"message_id": "msg-1", "message_type": 1},
+                {"message_id": "msg-2", "message_type": 1},
+            ],
+        }
+    )
+
+    await channel._poll_once()
+
+    # Both messages should have been attempted
+    assert calls == ["msg-1", "msg-2"]
+    # Buffer should still advance (already updated before processing)
+    assert channel._get_updates_buf == "new-buf"
+    # Error should be logged
+    assert any("Failed to process WeChat message" in m for m in logged_messages)
+
+
+@pytest.mark.asyncio
+async def test_poll_loop_logs_exception_and_continues_on_poll_failure(monkeypatch) -> None:
+    """When _poll_once raises a non-timeout exception, the start() loop must log
+    the error and continue polling instead of exiting silently."""
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel.config.token = "token"  # skip QR login in start()
+    channel._running = True
+
+    call_count = 0
+    logged_messages: list[str] = []
+
+    async def _failing_poll() -> None:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise RuntimeError("poll exploded")
+        channel._running = False  # Stop after second call
+
+    channel._poll_once = _failing_poll  # type: ignore[method-assign]
+
+    monkeypatch.setattr(
+        channel.logger,
+        "exception",
+        lambda message, *args, **kwargs: logged_messages.append(str(message)),
+    )
+
+    # Use a tiny retry delay so the test finishes quickly
+    original_retry = weixin_mod.RETRY_DELAY_S
+    weixin_mod.RETRY_DELAY_S = 0.01
+    try:
+        await channel.start()
+    finally:
+        weixin_mod.RETRY_DELAY_S = original_retry
+
+    assert call_count == 2
+    assert any("WeChat poll loop error" in m for m in logged_messages)
