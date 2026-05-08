@@ -1,10 +1,9 @@
 """Tests for the Dream class — two-phase memory consolidation via AgentRunner."""
 
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from nanobot.agent.memory import Dream, MemoryStore
 from nanobot.agent.runner import AgentRunResult
@@ -60,6 +59,23 @@ class TestDreamRun:
     async def test_noop_when_no_unprocessed_history(self, dream, mock_provider, mock_runner, store):
         """Dream should not call LLM when there's nothing to process."""
         result = await dream.run()
+        assert result is False
+        mock_provider.chat_with_retry.assert_not_called()
+        mock_runner.run.assert_not_called()
+
+    async def test_noop_when_disabled(self, store, mock_provider, mock_runner):
+        """Disabled Dream should not inspect history or call either phase."""
+        store.append_history("User prefers dark mode")
+        d = Dream(
+            store=store,
+            provider=mock_provider,
+            model="test-model",
+            enabled=False,
+        )
+        d._runner = mock_runner
+
+        result = await d.run()
+
         assert result is False
         mock_provider.chat_with_retry.assert_not_called()
         mock_runner.run.assert_not_called()
@@ -126,6 +142,71 @@ class TestDreamRun:
         assert "Successfully wrote" in result
         assert (store.workspace / "skills" / "test-skill" / "SKILL.md").exists()
 
+    async def test_memory_scope_disables_context_and_skill_updates(
+        self, store, mock_provider, mock_runner,
+    ):
+        """`update_scope=memory` should only expose MEMORY.md to Dream tools/prompts."""
+        store.append_history("User prefers dark mode")
+        d = Dream(
+            store=store,
+            provider=mock_provider,
+            model="test-model",
+            max_batch_size=5,
+            update_scope="memory",
+        )
+        d._runner = mock_runner
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[MEMORY] prefers dark mode")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        await d.run()
+
+        phase1_user = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        assert "## Current MEMORY.md" in phase1_user
+        assert "## Current SOUL.md" not in phase1_user
+        assert "## Current USER.md" not in phase1_user
+
+        spec = mock_runner.run.call_args[0][0]
+        phase2_system = spec.initial_messages[0]["content"]
+        assert "memory/MEMORY.md" in phase2_system
+        assert "SOUL.md" not in phase2_system
+        assert "skills/<name>/SKILL.md" not in phase2_system
+        assert "Skill creation disabled" in phase2_system
+        assert d._tools.get("write_file") is None
+
+        edit_tool = d._tools.get("edit_file")
+        result = await edit_tool.execute(path="SOUL.md", old_text="", new_text="x")
+        assert "not in the allowed file list" in result
+
+    async def test_memory_context_scope_allows_identity_files_but_not_skills(
+        self, store, mock_provider, mock_runner,
+    ):
+        """`memory_context` keeps SOUL/USER writable while blocking skill drift."""
+        store.append_history("Bot should be concise")
+        d = Dream(
+            store=store,
+            provider=mock_provider,
+            model="test-model",
+            max_batch_size=5,
+            update_scope="memory_context",
+        )
+        d._runner = mock_runner
+        mock_provider.chat_with_retry.return_value = MagicMock(content="[SOUL] be concise")
+        mock_runner.run = AsyncMock(return_value=_make_run_result())
+
+        await d.run()
+
+        phase1_user = mock_provider.chat_with_retry.call_args.kwargs["messages"][1]["content"]
+        assert "## Current MEMORY.md" in phase1_user
+        assert "## Current SOUL.md" in phase1_user
+        assert "## Current USER.md" in phase1_user
+
+        spec = mock_runner.run.call_args[0][0]
+        phase2_system = spec.initial_messages[0]["content"]
+        assert "SOUL.md" in phase2_system
+        assert "USER.md" in phase2_system
+        assert "skills/<name>/SKILL.md" not in phase2_system
+        assert d._tools.get("write_file") is None
+
     async def test_phase1_prompt_includes_line_age_annotations(self, dream, mock_provider, mock_runner, store):
         """Phase 1 prompt should have per-line age suffixes in MEMORY.md when git is available."""
         store.append_history("some event")
@@ -157,7 +238,6 @@ class TestDreamRun:
         call_args = mock_provider.chat_with_retry.call_args
         user_msg = call_args.kwargs.get("messages", call_args[1].get("messages"))[1]["content"]
         # The ← suffix should only appear in MEMORY.md section
-        memory_section = user_msg.split("## Current MEMORY.md")[1].split("## Current SOUL.md")[0]
         soul_section = user_msg.split("## Current SOUL.md")[1].split("## Current USER.md")[0]
         user_section = user_msg.split("## Current USER.md")[1]
         # SOUL and USER should not contain age arrows

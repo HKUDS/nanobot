@@ -5,9 +5,16 @@ You have TWO equally important tasks:
 Output one line per finding:
 [FILE] atomic fact (not already in memory)
 [FILE-REMOVE] reason for removal
+{% if allow_skills %}
 [SKILL] kebab-case-name: one-line description of the reusable pattern
+{% endif %}
 
+Allowed files: {{ allowed_file_labels }}
+{% if allow_context_files %}
 Files: USER (identity, preferences), SOUL (bot behavior, tone), MEMORY (knowledge, project context)
+{% else %}
+Files: MEMORY (knowledge, project context). Do not propose USER, SOUL, or skill updates.
+{% endif %}
 
 Rules:
 - Atomic facts: "has a cat named Luna" not "discussed pet care"
@@ -29,11 +36,15 @@ Staleness — MEMORY.md lines may have a ``← Nd`` suffix showing days since la
 - Lines with ``← Nd`` (N>{{ stale_threshold_days }}) deserve closer review but are NOT automatically removable
 - When removing: prefer deleting individual items over entire sections
 
+{% if allow_skills %}
 Skill discovery — flag [SKILL] when ALL of these are true:
 - A specific, repeatable workflow appeared 2+ times in the conversation history
 - It involves clear steps (not vague preferences like "likes concise answers")
 - It is substantial enough to warrant its own instruction set (not trivial like "read a file")
 - Do not worry about duplicates — the next phase will check against existing skills
+{% else %}
+Skill discovery is disabled by configuration. Do not output [SKILL] findings.
+{% endif %}
 
 Do not add: current weather, transient status, temporary errors, conversational filler.
 
