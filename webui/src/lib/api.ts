@@ -1,4 +1,4 @@
-import type { ChatSummary, SettingsPayload, SettingsUpdate } from "./types";
+import type { ChatSummary, SettingsPayload, SettingsUpdate, SlashCommand } from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -42,6 +42,7 @@ export async function listSessions(
     key: string;
     created_at: string | null;
     updated_at: string | null;
+    title?: string;
     preview?: string;
   };
   const body = await request<{ sessions: Row[] }>(
@@ -53,6 +54,7 @@ export async function listSessions(
     ...splitKey(s.key),
     createdAt: s.created_at,
     updatedAt: s.updated_at,
+    title: s.title ?? "",
     preview: s.preview ?? "",
   }));
 }
@@ -110,6 +112,29 @@ export async function fetchSettings(
   base: string = "",
 ): Promise<SettingsPayload> {
   return request<SettingsPayload>(`${base}/api/settings`, token);
+}
+
+export async function listSlashCommands(
+  token: string,
+  base: string = "",
+): Promise<SlashCommand[]> {
+  type Row = {
+    command: string;
+    title: string;
+    description: string;
+    icon: string;
+    arg_hint?: string;
+  };
+  const body = await request<{ commands: Row[] }>(`${base}/api/commands`, token);
+  return body.commands
+    .filter((command) => !["/stop", "/restart"].includes(command.command))
+    .map((command) => ({
+      command: command.command,
+      title: command.title,
+      description: command.description,
+      icon: command.icon,
+      argHint: command.arg_hint ?? "",
+    }));
 }
 
 export async function updateSettings(

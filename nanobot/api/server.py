@@ -239,7 +239,6 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         resp.content_type = "text/event-stream"
         resp.headers["Cache-Control"] = "no-cache"
         resp.headers["Connection"] = "keep-alive"
-        resp.enable_compression()
         await resp.prepare(request)
 
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"

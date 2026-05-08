@@ -33,6 +33,7 @@ from nanobot.utils.runtime import (
     ensure_nonempty_tool_result,
     is_blank_text,
     repeated_external_lookup_error,
+    repeated_workspace_violation_error,
 )
 
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
@@ -75,6 +76,7 @@ class AgentRunSpec:
     context_block_limit: int | None = None
     provider_retry_mode: str = "standard"
     progress_callback: Any | None = None
+    stream_progress_deltas: bool = True
     retry_wait_callback: Any | None = None
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
@@ -239,6 +241,8 @@ class AgentRunner:
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
+        # Per-turn throttle for repeated attempts against the same outside target.
+        workspace_violation_counts: dict[str, int] = {}
         empty_content_retries = 0
         length_recovery_count = 0
         had_injections = False
@@ -258,12 +262,11 @@ class AgentRunner:
                 # Snipping may have created new orphans; clean them up.
                 messages_for_model = self._drop_orphan_tool_results(messages_for_model)
                 messages_for_model = self._backfill_missing_tool_results(messages_for_model)
-            except Exception as exc:
-                logger.warning(
-                    "Context governance failed on turn {} for {}: {}; applying minimal repair",
+            except Exception:
+                logger.exception(
+                    "Context governance failed on turn {} for {}; applying minimal repair",
                     iteration,
                     spec.session_key or "default",
-                    exc,
                 )
                 try:
                     messages_for_model = self._drop_orphan_tool_results(messages)
@@ -314,6 +317,7 @@ class AgentRunner:
                     spec,
                     tool_calls,
                     external_lookup_counts,
+                    workspace_violation_counts,
                 )
                 tool_events.extend(new_events)
                 context.tool_results = list(results)
@@ -612,6 +616,7 @@ class AgentRunner:
         wants_streaming = hook.wants_streaming()
         wants_progress_streaming = (
             not wants_streaming
+            and spec.stream_progress_deltas
             and spec.progress_callback is not None
             and getattr(self.provider, "supports_progress_deltas", False) is True
         )
@@ -698,20 +703,25 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_calls: list[ToolCallRequest],
         external_lookup_counts: dict[str, int],
+        workspace_violation_counts: dict[str, int],
     ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
         batches = self._partition_tool_batches(spec, tool_calls)
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
         for batch in batches:
             if spec.concurrent_tools and len(batch) > 1:
                 batch_results = await asyncio.gather(*(
-                    self._run_tool(spec, tool_call, external_lookup_counts)
+                    self._run_tool(
+                        spec, tool_call, external_lookup_counts, workspace_violation_counts,
+                    )
                     for tool_call in batch
                 ))
                 tool_results.extend(batch_results)
             else:
                 batch_results = []
                 for tool_call in batch:
-                    result = await self._run_tool(spec, tool_call, external_lookup_counts)
+                    result = await self._run_tool(
+                        spec, tool_call, external_lookup_counts, workspace_violation_counts,
+                    )
                     tool_results.append(result)
                     batch_results.append(result)
                     if isinstance(result[2], AskUserInterrupt):
@@ -734,6 +744,7 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
+        workspace_violation_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None]:
         hint = "\n\n[Analyze the error above and try a different approach.]"
         lookup_error = repeated_external_lookup_error(
@@ -763,16 +774,18 @@ class AgentRunner:
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
-            if self._is_workspace_violation(prep_error):
-                logger.warning(
-                    "Tool {} blocked by workspace/safety guard during preparation; aborting turn: {}",
-                    tool_call.name,
-                    prep_error.replace("\n", " ").strip()[:200],
-                )
-                event["detail"] = ("workspace_violation: "
-                                   + prep_error.replace("\n", " ").strip())[:160]
-                return prep_error, event, RuntimeError(prep_error)
-            return prep_error + hint, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
+            handled = self._classify_violation(
+                raw_text=prep_error,
+                soft_payload=prep_error + hint,
+                event=event,
+                tool_call=tool_call,
+                workspace_violation_counts=workspace_violation_counts,
+            )
+            if handled is not None:
+                return handled
+            return prep_error + hint, event, (
+                RuntimeError(prep_error) if spec.fail_on_tool_error else None
+            )
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -789,18 +802,20 @@ class AgentRunner:
             if isinstance(exc, AskUserInterrupt):
                 event["status"] = "waiting"
                 return "", event, exc
-            if self._is_workspace_violation(str(exc)):
-                logger.warning(
-                    "Tool {} blocked by workspace/safety guard; aborting turn: {}",
-                    tool_call.name,
-                    str(exc).replace("\n", " ").strip()[:200],
-                )
-                event["detail"] = ("workspace_violation: "
-                                   + str(exc).replace("\n", " ").strip())[:160]
-                return f"Error: {type(exc).__name__}: {exc}", event, exc
+            payload = f"Error: {type(exc).__name__}: {exc}"
+            handled = self._classify_violation(
+                raw_text=str(exc),
+                # Preserve legacy exception payloads without the retry hint.
+                soft_payload=payload,
+                event=event,
+                tool_call=tool_call,
+                workspace_violation_counts=workspace_violation_counts,
+            )
+            if handled is not None:
+                return handled
             if spec.fail_on_tool_error:
-                return f"Error: {type(exc).__name__}: {exc}", event, exc
-            return f"Error: {type(exc).__name__}: {exc}", event, None
+                return payload, event, exc
+            return payload, event, None
 
         if isinstance(result, str) and result.startswith("Error"):
             event = {
@@ -808,17 +823,15 @@ class AgentRunner:
                 "status": "error",
                 "detail": result.replace("\n", " ").strip()[:120],
             }
-
-            # check the outside workspace error and break loop
-            if self._is_workspace_violation(result):
-                logger.warning(
-                    "Tool {} blocked by workspace/safety guard; aborting turn: {}",
-                    tool_call.name,
-                    result.replace("\n", " ").strip()[:200],
-                )
-                event["detail"] = ("workspace_violation: "
-                                   + result.replace("\n", " ").strip())[:160]
-                return result, event, RuntimeError(result)
+            handled = self._classify_violation(
+                raw_text=result,
+                soft_payload=result + hint,
+                event=event,
+                tool_call=tool_call,
+                workspace_violation_counts=workspace_violation_counts,
+            )
+            if handled is not None:
+                return handled
             if spec.fail_on_tool_error:
                 return result + hint, event, RuntimeError(result)
             return result + hint, event, None
@@ -831,23 +844,97 @@ class AgentRunner:
             detail = detail[:120] + "..."
         return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
 
-    # Markers identifying tool results that represent a workspace / safety boundary rejection.
-    _WORKSPACE_BLOCK_MARKERS: tuple[str, ...] = (
-        "blocked by safety guard",
+    # SSRF is a hard security block at the tool boundary, but the agent turn
+    # should recover conversationally instead of aborting the runtime.
+    _SSRF_MARKERS: tuple[str, ...] = (
+        "internal/private url detected",
+        "private/internal address",
+        "private address",
+    )
+    _SSRF_BOUNDARY_NOTE: str = (
+        "This is a non-bypassable security boundary. Stop trying to access "
+        "private/internal URLs. Do not retry with curl, wget, encoded IPs, "
+        "alternate DNS, redirects, proxies, or another tool. Ask the user for "
+        "local files, logs, screenshots, or an explicit safe public URL instead. "
+        "If the user explicitly trusts this private URL, ask them to whitelist "
+        "the exact IP/CIDR via tools.ssrfWhitelist."
+    )
+
+    # Non-SSRF boundary markers returned to the LLM as recoverable tool errors.
+    _WORKSPACE_VIOLATION_MARKERS: tuple[str, ...] = (
         "outside the configured workspace",
         "outside allowed directory",
         "working_dir is outside",
         "working_dir could not be resolved",
-        "path traversal detected",
         "path outside working dir",
+        "path traversal detected",
     )
 
     @classmethod
-    def _is_workspace_violation(cls, text: str) -> bool:
+    def _is_ssrf_violation(cls, text: str) -> bool:
         if not text:
             return False
         lowered = text.lower()
-        return any(marker in lowered for marker in cls._WORKSPACE_BLOCK_MARKERS)
+        return any(marker in lowered for marker in cls._SSRF_MARKERS)
+
+    @classmethod
+    def _is_workspace_violation(cls, text: str) -> bool:
+        """True when *text* looks like any policy boundary rejection."""
+        if not text:
+            return False
+        lowered = text.lower()
+        if cls._is_ssrf_violation(lowered):
+            return True
+        return any(marker in lowered for marker in cls._WORKSPACE_VIOLATION_MARKERS)
+
+    def _classify_violation(
+        self,
+        *,
+        raw_text: str,
+        soft_payload: str,
+        event: dict[str, str],
+        tool_call: ToolCallRequest,
+        workspace_violation_counts: dict[str, int],
+    ) -> tuple[Any, dict[str, str], BaseException | None] | None:
+        """Classify safety-boundary failures, or return ``None`` to pass through."""
+        if self._is_ssrf_violation(raw_text):
+            logger.warning(
+                "Tool {} blocked by SSRF guard; returning non-retryable tool error: {}",
+                tool_call.name,
+                raw_text.replace("\n", " ").strip()[:200],
+            )
+            event["detail"] = self._event_detail("ssrf_violation: ", raw_text)
+            return self._ssrf_soft_payload(raw_text), event, None
+
+        if self._is_workspace_violation(raw_text):
+            escalation = repeated_workspace_violation_error(
+                tool_call.name,
+                tool_call.arguments,
+                workspace_violation_counts,
+            )
+            event["detail"] = self._event_detail("workspace_violation: ", raw_text)
+            if escalation is not None:
+                logger.warning(
+                    "Tool {} hit workspace boundary repeatedly; escalating hint",
+                    tool_call.name,
+                )
+                event["detail"] = self._event_detail(
+                    "workspace_violation_escalated: ",
+                    raw_text,
+                )
+                return escalation, event, None
+            return soft_payload, event, None
+
+        return None
+
+    @classmethod
+    def _ssrf_soft_payload(cls, raw_text: str) -> str:
+        text = raw_text.strip() or "Error: request blocked by SSRF guard"
+        return f"{text}\n\n{cls._SSRF_BOUNDARY_NOTE}"
+
+    @staticmethod
+    def _event_detail(prefix: str, text: str, limit: int = 160) -> str:
+        return (prefix + text.replace("\n", " ").strip())[:limit]
 
     async def _emit_checkpoint(
         self,
@@ -895,12 +982,11 @@ class AgentRunner:
                 result,
                 max_chars=spec.max_tool_result_chars,
             )
-        except Exception as exc:
-            logger.warning(
-                "Tool result persist failed for {} in {}: {}; using raw result",
+        except Exception:
+            logger.exception(
+                "Tool result persist failed for {} in {}; using raw result",
                 tool_call_id,
                 spec.session_key or "default",
-                exc,
             )
             content = result
         if isinstance(content, str) and len(content) > spec.max_tool_result_chars:

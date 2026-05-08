@@ -6,12 +6,95 @@ import asyncio
 import os
 import sys
 from contextlib import suppress
+from dataclasses import dataclass
 
 from nanobot import __version__
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.utils.helpers import build_status_content
 from nanobot.utils.restart import set_restart_notice_to_env
+
+
+@dataclass(frozen=True)
+class BuiltinCommandSpec:
+    command: str
+    title: str
+    description: str
+    icon: str
+    arg_hint: str = ""
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "command": self.command,
+            "title": self.title,
+            "description": self.description,
+            "icon": self.icon,
+            "arg_hint": self.arg_hint,
+        }
+
+
+BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
+    BuiltinCommandSpec(
+        "/new",
+        "New chat",
+        "Stop the current task and start a fresh conversation.",
+        "square-pen",
+    ),
+    BuiltinCommandSpec(
+        "/stop",
+        "Stop current task",
+        "Cancel the active agent turn for this chat.",
+        "square",
+    ),
+    BuiltinCommandSpec(
+        "/restart",
+        "Restart nanobot",
+        "Restart the bot process in place.",
+        "rotate-cw",
+    ),
+    BuiltinCommandSpec(
+        "/status",
+        "Show status",
+        "Display runtime, provider, and channel status.",
+        "activity",
+    ),
+    BuiltinCommandSpec(
+        "/history",
+        "Show conversation history",
+        "Print the last N persisted conversation messages.",
+        "history",
+        "[n]",
+    ),
+    BuiltinCommandSpec(
+        "/dream",
+        "Run Dream",
+        "Manually trigger memory consolidation.",
+        "sparkles",
+    ),
+    BuiltinCommandSpec(
+        "/dream-log",
+        "Show Dream log",
+        "Show what the last Dream consolidation changed.",
+        "book-open",
+    ),
+    BuiltinCommandSpec(
+        "/dream-restore",
+        "Restore memory",
+        "Revert memory to a previous Dream snapshot.",
+        "undo-2",
+    ),
+    BuiltinCommandSpec(
+        "/help",
+        "Show help",
+        "List available slash commands.",
+        "circle-help",
+    ),
+)
+
+
+def builtin_command_palette() -> list[dict[str, str]]:
+    """Return structured command metadata for UI command palettes."""
+    return [spec.as_dict() for spec in BUILTIN_COMMAND_SPECS]
 
 
 async def cmd_stop(ctx: CommandContext) -> OutboundMessage:
@@ -378,18 +461,12 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
 
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
-    lines = [
-        "🐈 nanobot commands:",
-        "/new — Stop current task and start a new conversation",
-        "/stop — Stop the current task",
-        "/restart — Restart the bot",
-        "/status — Show bot status",
-        "/history [n] — Show the last N conversation messages (default 10)",
-        "/dream — Manually trigger Dream consolidation",
-        "/dream-log — Show what the last Dream changed",
-        "/dream-restore — Revert memory to a previous state",
-        "/help — Show available commands",
-    ]
+    lines = ["🐈 nanobot commands:"]
+    for spec in BUILTIN_COMMAND_SPECS:
+        command = spec.command
+        if spec.arg_hint:
+            command = f"{command} {spec.arg_hint}"
+        lines.append(f"{command} — {spec.description}")
     return "\n".join(lines)
 
 

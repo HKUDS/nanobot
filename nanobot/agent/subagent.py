@@ -83,6 +83,7 @@ class SubagentManager:
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
     ):
+        defaults = AgentDefaults()
         self.provider = provider
         self.workspace = workspace
         self.bus = bus
@@ -95,8 +96,9 @@ class SubagentManager:
         self.max_iterations = (
             max_iterations
             if max_iterations is not None
-            else AgentDefaults().max_tool_iterations
+            else defaults.max_tool_iterations
         )
+        self.max_concurrent_subagents = defaults.max_concurrent_subagents
         self.runner = AgentRunner(provider)
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
@@ -188,6 +190,8 @@ class SubagentManager:
                     sandbox=self.exec_config.sandbox,
                     path_append=self.exec_config.path_append,
                     allowed_env_keys=self.exec_config.allowed_env_keys,
+                    allow_patterns=self.exec_config.allow_patterns,
+                    deny_patterns=self.exec_config.deny_patterns,
                 ))
             if self.web_config.enable:
                 tools.register(
@@ -246,7 +250,7 @@ class SubagentManager:
         except Exception as e:
             status.phase = "error"
             status.error = str(e)
-            logger.error("Subagent [{}] failed: {}", task_id, e)
+            logger.exception("Subagent [{}] failed", task_id)
             await self._announce_result(task_id, label, task, f"Error: {e}", origin, "error", origin_message_id)
 
     async def _announce_result(

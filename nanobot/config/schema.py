@@ -78,8 +78,16 @@ class AgentDefaults(Base):
     context_block_limit: int | None = None
     temperature: float = 0.1
     max_tool_iterations: int = 200
+    max_concurrent_subagents: int = Field(default=1, ge=1)
     max_tool_result_chars: int = 16_000
     provider_retry_mode: Literal["standard", "persistent"] = "standard"
+    tool_hint_max_length: int = Field(
+        default=40,
+        ge=20,
+        le=500,
+        validation_alias=AliasChoices("toolHintMaxLength"),
+        serialization_alias="toolHintMaxLength",
+    )  # Max characters for tool hint display (e.g. "$ cd …/project && npm test")
     reasoning_effort: str | None = None  # low / medium / high / adaptive - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
     unified_session: bool = False  # Share one session across all channels (single-user multi-device)
@@ -223,6 +231,8 @@ class ExecToolConfig(Base):
     path_append: str = ""
     sandbox: str = ""  # sandbox backend: "" (none) or "bwrap"
     allowed_env_keys: list[str] = Field(default_factory=list)  # Env var names to pass through to subprocess (e.g. ["GOPATH", "JAVA_HOME"])
+    allow_patterns: list[str] = Field(default_factory=list)  # Regex patterns that bypass deny_patterns (e.g. [r"rm\s+-rf\s+/tmp/"])
+    deny_patterns: list[str] = Field(default_factory=list)  # Extra regex patterns to block (appended to built-in list)
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
@@ -243,12 +253,25 @@ class MyToolConfig(Base):
     allow_set: bool = False  # let `my` modify loop state (read-only if False)
 
 
+class ImageGenerationToolConfig(Base):
+    """Image generation tool configuration."""
+
+    enabled: bool = False
+    provider: str = "openrouter"
+    model: str = "openai/gpt-5.4-image-2"
+    default_aspect_ratio: str = "1:1"
+    default_image_size: str = "1K"
+    max_images_per_turn: int = Field(default=4, ge=1, le=8)
+    save_dir: str = "generated"
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     my: MyToolConfig = Field(default_factory=MyToolConfig)
+    image_generation: ImageGenerationToolConfig = Field(default_factory=ImageGenerationToolConfig)
     restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)

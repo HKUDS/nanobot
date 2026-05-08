@@ -32,7 +32,6 @@ except ImportError:  # pragma: no cover
     fcntl = None
 
 import httpx
-from loguru import logger
 from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
@@ -134,16 +133,16 @@ class MSTeamsChannel(BaseChannel):
     async def start(self) -> None:
         """Start the Teams webhook listener."""
         if not MSTEAMS_AVAILABLE:
-            logger.error("PyJWT not installed. Run: pip install nanobot-ai[msteams]")
+            self.logger.error("PyJWT not installed. Run: pip install nanobot-ai[msteams]")
             return
 
         if not self.config.app_id or not self.config.app_password:
-            logger.error("MSTeams app_id/app_password not configured")
+            self.logger.error("app_id/app_password not configured")
             return
 
         if not self.config.validate_inbound_auth:
-            logger.warning(
-                "MSTeams inbound auth validation was explicitly DISABLED in config. "
+            self.logger.warning(
+                "Inbound auth validation was explicitly DISABLED in config. "
                 "Anyone who knows the webhook URL can send messages as any user. "
                 "Only disable this for local development or controlled testing."
             )
@@ -166,7 +165,7 @@ class MSTeamsChannel(BaseChannel):
                     raw = self.rfile.read(length) if length > 0 else b"{}"
                     payload = json.loads(raw.decode("utf-8"))
                 except Exception as e:
-                    logger.warning("MSTeams invalid request body: {}", e)
+                    channel.logger.warning("Invalid request body: {}", e)
                     self.send_response(400)
                     self.end_headers()
                     return
@@ -180,7 +179,7 @@ class MSTeamsChannel(BaseChannel):
                         )
                         fut.result(timeout=15)
                     except Exception as e:
-                        logger.warning("MSTeams inbound auth validation failed: {}", e)
+                        channel.logger.warning("Inbound auth validation failed: {}", e)
                         self.send_response(401)
                         self.send_header("Content-Type", "application/json")
                         self.end_headers()
@@ -193,7 +192,7 @@ class MSTeamsChannel(BaseChannel):
                     )
                     fut.result(timeout=15)
                 except Exception as e:
-                    logger.warning("MSTeams activity handling failed: {}", e)
+                    channel.logger.warning("Activity handling failed: {}", e)
 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -211,8 +210,8 @@ class MSTeamsChannel(BaseChannel):
         )
         self._server_thread.start()
 
-        logger.info(
-            "MSTeams webhook listening on http://{}:{}{}",
+        self.logger.info(
+            "Webhook listening on http://{}:{}{}",
             self.config.host,
             self.config.port,
             self.config.path,
@@ -261,10 +260,10 @@ class MSTeamsChannel(BaseChannel):
         try:
             resp = await self._http.post(base_url, headers=headers, json=payload)
             resp.raise_for_status()
-            logger.info("MSTeams message sent to {}", ref.conversation_id)
+            self.logger.info("Message sent to {}", ref.conversation_id)
             self._touch_conversation_ref(str(msg.chat_id), persist=True)
-        except Exception as e:
-            logger.error("MSTeams send failed: {}", e)
+        except Exception:
+            self.logger.exception("Send failed")
             raise
 
     async def _handle_activity(self, activity: dict[str, Any]) -> None:
@@ -291,18 +290,18 @@ class MSTeamsChannel(BaseChannel):
 
         # DM-only MVP: ignore group/channel traffic for now
         if conversation_type and conversation_type not in ("personal", ""):
-            logger.debug("MSTeams ignoring non-DM conversation {}", conversation_type)
+            self.logger.debug("Ignoring non-DM conversation {}", conversation_type)
             return
 
         text = self._sanitize_inbound_text(activity)
         if not text:
             text = self.config.mention_only_response.strip()
             if not text:
-                logger.debug("MSTeams ignoring empty message after Teams text sanitization")
+                self.logger.debug("Ignoring empty message after Teams text sanitization")
                 return
 
         if not self.is_allowed(sender_id):
-            logger.warning(
+            self.logger.warning(
                 "Access denied for sender {} on channel {}. "
                 "Add them to allowFrom list in config to grant access.",
                 sender_id, self.name,
@@ -554,7 +553,7 @@ class MSTeamsChannel(BaseChannel):
                 if isinstance(loaded, dict):
                     main_data = loaded
             except Exception as e:
-                logger.warning("Failed to load MSTeams conversation refs: {}", e)
+                self.logger.warning("Failed to load conversation refs: {}", e)
 
         if meta_exists:
             try:
@@ -562,7 +561,7 @@ class MSTeamsChannel(BaseChannel):
                 if isinstance(loaded_meta, dict):
                     meta_data = loaded_meta
             except Exception as e:
-                logger.warning("Failed to load MSTeams conversation refs metadata: {}", e)
+                self.logger.warning("Failed to load conversation refs metadata: {}", e)
 
         return main_data, meta_data, meta_exists
 
@@ -660,8 +659,8 @@ class MSTeamsChannel(BaseChannel):
 
         for key in keys_to_drop:
             self._conversation_refs.pop(key, None)
-        logger.info(
-            "MSTeams pruned {} stale/unsupported conversation refs (ttl={} days)",
+        self.logger.info(
+            "Pruned {} stale/unsupported conversation refs (ttl={} days)",
             len(keys_to_drop),
             ttl_days,
         )
@@ -742,7 +741,7 @@ class MSTeamsChannel(BaseChannel):
                 self._write_json_atomically(self._refs_path, refs_data)
                 self._write_json_atomically(self._refs_meta_path, refs_meta)
         except Exception as e:
-            logger.warning("Failed to save MSTeams conversation refs: {}", e)
+            self.logger.warning("Failed to save conversation refs: {}", e)
 
     def _save_refs(self, *, prune: bool = True) -> None:
         """Persist conversation references."""

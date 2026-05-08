@@ -2,8 +2,10 @@
 
 import asyncio
 import json
+import os
 import time
 import uuid
+from contextlib import suppress
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -12,7 +14,14 @@ from typing import Any, Callable, Coroutine, Literal
 from filelock import FileLock
 from loguru import logger
 
-from nanobot.cron.types import CronJob, CronJobState, CronPayload, CronRunRecord, CronSchedule, CronStore
+from nanobot.cron.types import (
+    CronJob,
+    CronJobState,
+    CronPayload,
+    CronRunRecord,
+    CronSchedule,
+    CronStore,
+)
 
 
 def _now_ms() -> int:
@@ -83,8 +92,20 @@ class CronService:
         self._timer_active = False
         self.max_sleep_ms = max_sleep_ms
 
-    def _load_jobs(self) -> tuple[list[CronJob], int]:
-        jobs = []
+    def _load_jobs(self) -> tuple[list[CronJob], int] | None:
+        """Load jobs from disk.
+
+        Returns:
+            ``(jobs, version)`` tuple on success or when no store file exists
+            (in which case an empty list and version 1 are returned).
+            ``None`` when the store file exists but cannot be parsed; the
+            corrupt file is preserved with a ``.corrupt-<ts>`` suffix so the
+            caller can decide whether to overwrite or bail out.  Returning a
+            sentinel here is important: silently treating a parse error as an
+            empty job list would cause the next ``_save_store`` to wipe every
+            job from disk.
+        """
+        jobs: list[CronJob] = []
         version = 1
         if self.store_path.exists():
             try:
@@ -135,8 +156,22 @@ class CronService:
                         updated_at_ms=j.get("updatedAtMs", 0),
                         delete_after_run=j.get("deleteAfterRun", False),
                     ))
-            except Exception as e:
-                logger.warning("Failed to load cron store: {}", e)
+            except Exception:
+                # Preserve the corrupt file for forensic recovery instead of
+                # letting the next save overwrite it with an empty job list.
+                backup = self.store_path.with_suffix(
+                    self.store_path.suffix + f".corrupt-{int(time.time())}"
+                )
+                with suppress(OSError):
+                    self.store_path.rename(backup)
+                logger.exception(
+                    "Failed to load cron store at {}. "
+                    "Corrupt file preserved at {}. "
+                    "Refusing to overwrite to avoid data loss.",
+                    self.store_path,
+                    backup,
+                )
+                return None
         return jobs, version
 
     def _merge_action(self):
@@ -166,8 +201,8 @@ class CronService:
                         else:
                             _update(action.get("params", {}))
                         changed = True
-                    except Exception as exp:
-                        logger.debug(f"load action line error: {exp}")
+                    except Exception:
+                        logger.exception("load action line error")
                         continue
             self._store.jobs = list(jobs_map.values())
             if self._running and changed:
@@ -175,15 +210,28 @@ class CronService:
                 self._save_store()
         return
 
-    def _load_store(self) -> CronStore:
+    def _load_store(self) -> CronStore | None:
         """Load jobs from disk. Reloads automatically if file was modified externally.
         - Reload every time because it needs to merge operations on the jobs object from other instances.
         - During _on_timer execution, return the existing store to prevent concurrent
           _load_store calls (e.g. from list_jobs polling) from replacing it mid-execution.
+        - When the on-disk store exists but is unreadable: keep using the
+          previous in-memory ``self._store`` if we already have one (so a
+          transient corruption does not drop live jobs); only the very first
+          load (during ``start``) can return ``None`` to signal an unrecoverable
+          state to the caller.
         """
         if self._timer_active and self._store:
             return self._store
-        jobs, version = self._load_jobs()
+        loaded = self._load_jobs()
+        if loaded is None:
+            # Corrupt store on disk.  Prefer the last good in-memory snapshot
+            # over wiping live jobs; ``_load_jobs`` has already moved the
+            # corrupt file aside with a ``.corrupt-<ts>`` suffix.
+            if self._store is not None:
+                return self._store
+            return None
+        jobs, version = loaded
         self._store = CronStore(version=version, jobs=jobs)
         self._merge_action()
 
@@ -242,12 +290,56 @@ class CronService:
             ]
         }
 
-        self.store_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        self._atomic_write(self.store_path, json.dumps(data, indent=2, ensure_ascii=False))
+
+    @staticmethod
+    def _atomic_write(path: Path, content: str) -> None:
+        """Write *content* to *path* atomically with fsync.
+
+        Uses a temp-file + ``os.replace`` + ``fsync`` pattern so a crash or
+        SIGKILL mid-write cannot leave the destination truncated or invalid.
+        Mirrors ``nanobot.session.manager.SessionManager.save`` (see
+        commit 512bf59, ``fix(session): fsync sessions on graceful shutdown
+        to prevent data loss``).  Without this, ``jobs.json`` could be
+        corrupted on container shutdown and silently re-created empty on
+        next start, wiping every scheduled job.
+        """
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)
+            # fsync the parent directory so the rename itself is durable.
+            # Skip on Windows where opening a directory raises PermissionError;
+            # NTFS journals metadata synchronously so this is a no-op there.
+            with suppress(PermissionError):
+                fd = os.open(str(path.parent), os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
     async def start(self) -> None:
         """Start the cron service."""
         self._running = True
-        self._load_store()
+        loaded = self._load_store()
+        if loaded is None:
+            # Store file existed but was corrupt and has been preserved with
+            # a ``.corrupt-<ts>`` suffix.  Bail out instead of starting with
+            # an empty store; that would call ``_save_store`` and overwrite
+            # the now-renamed (but still recoverable) data with [].
+            self._running = False
+            raise RuntimeError(
+                f"cron store at {self.store_path} is corrupt and was preserved; "
+                "refusing to start with an empty job list. "
+                "Inspect the .corrupt-<ts> backup and restore manually."
+            )
         self._recompute_next_runs()
         self._save_store()
         self._arm_timer()
@@ -302,6 +394,9 @@ class CronService:
     async def _on_timer(self) -> None:
         """Handle timer tick - run due jobs."""
         self._load_store()
+        # If a hot reload found a corrupt store on disk, ``self._store`` may
+        # still hold the previous, known-good in-memory snapshot.  Keep using
+        # it rather than crashing the timer or wiping live jobs.
         if not self._store:
             self._arm_timer()
             return
@@ -338,7 +433,7 @@ class CronService:
         except Exception as e:
             job.state.last_status = "error"
             job.state.last_error = str(e)
-            logger.error("Cron: job '{}' failed: {}", job.name, e)
+            logger.exception("Cron: job '{}' failed", job.name)
 
         end_ms = _now_ms()
         job.state.last_run_at_ms = start_ms

@@ -116,7 +116,34 @@ describe("NanobotClient", () => {
     // Attach is sent first because sendMessage adds to knownChats, which
     // handleOpen re-attaches; then the queued message follows.
     expect(lastSocket().sent).toContain(
-      JSON.stringify({ type: "message", chat_id: "chat-x", content: "hello" }),
+      JSON.stringify({ type: "message", chat_id: "chat-x", content: "hello", webui: true }),
+    );
+  });
+
+  it("includes image generation options in outbound messages", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage(
+      "chat-img",
+      "draw a banner",
+      undefined,
+      { imageGeneration: { enabled: true, aspect_ratio: "16:9" } },
+    );
+
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({
+        type: "message",
+        chat_id: "chat-img",
+        content: "draw a banner",
+        image_generation: { enabled: true, aspect_ratio: "16:9" },
+        webui: true,
+      }),
     );
   });
 
@@ -196,6 +223,7 @@ describe("NanobotClient", () => {
       chat_id: "chat-x",
       content: "look",
       media: [{ data_url: "data:image/png;base64,AAAA", name: "shot.png" }],
+      webui: true,
     });
   });
 
@@ -214,6 +242,7 @@ describe("NanobotClient", () => {
       type: "message",
       chat_id: "chat-x",
       content: "hello",
+      webui: true,
     });
   });
 

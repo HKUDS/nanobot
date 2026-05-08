@@ -168,6 +168,40 @@ def test_issue_route_secret_matches_empty_secret() -> None:
 
 
 @pytest.mark.asyncio
+async def test_webui_message_envelope_marks_inbound_metadata(bus: MagicMock) -> None:
+    channel = _ch(bus)
+    conn = MagicMock()
+    conn.remote_address = ("127.0.0.1", 50123)
+
+    await channel._dispatch_envelope(
+        conn,
+        "webui-client",
+        {"type": "message", "chat_id": "chat-1", "content": "hello", "webui": True},
+    )
+
+    msg = bus.publish_inbound.await_args.args[0]
+    assert msg.channel == "websocket"
+    assert msg.chat_id == "chat-1"
+    assert msg.metadata["webui"] is True
+    assert msg.metadata["_wants_stream"] is True
+
+
+@pytest.mark.asyncio
+async def test_plain_websocket_message_does_not_mark_webui(bus: MagicMock) -> None:
+    channel = _ch(bus)
+    conn = MagicMock()
+
+    await channel._dispatch_envelope(
+        conn,
+        "custom-client",
+        {"type": "message", "chat_id": "chat-1", "content": "hello"},
+    )
+
+    msg = bus.publish_inbound.await_args.args[0]
+    assert "webui" not in msg.metadata
+
+
+@pytest.mark.asyncio
 async def test_send_delivers_json_message_with_media_and_reply() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
@@ -285,6 +319,44 @@ async def test_send_delta_emits_delta_and_stream_end() -> None:
     assert second["event"] == "stream_end"
     assert second["chat_id"] == "chat-1"
     assert second["stream_id"] == "sid"
+
+
+@pytest.mark.asyncio
+async def test_send_turn_end_emits_turn_end_event() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={"_turn_end": True},
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {"event": "turn_end", "chat_id": "chat-1"}
+
+
+@pytest.mark.asyncio
+async def test_send_session_updated_emits_session_updated_event() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={"_session_updated": True},
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {"event": "session_updated", "chat_id": "chat-1"}
 
 
 @pytest.mark.asyncio
@@ -491,6 +563,34 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         await server_task
 
 
+@pytest.mark.asyncio
+async def test_commands_api_returns_slash_command_metadata(bus: MagicMock) -> None:
+    port = 29892
+    channel = _ch(bus, port=port)
+    channel._api_tokens["tok"] = time.monotonic() + 300
+
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+
+    try:
+        denied = await _http_get(f"http://127.0.0.1:{port}/api/commands")
+        assert denied.status_code == 401
+
+        response = await _http_get(
+            f"http://127.0.0.1:{port}/api/commands",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        commands = {row["command"]: row for row in body["commands"]}
+        assert commands["/stop"]["title"] == "Stop current task"
+        assert commands["/history"]["arg_hint"] == "[n]"
+        assert all("description" in row for row in body["commands"])
+    finally:
+        await channel.stop()
+        await server_task
+
+
 def test_settings_payload_normalizes_camel_case_provider(
     bus: MagicMock,
     monkeypatch,
@@ -545,6 +645,16 @@ async def test_end_to_end_server_pushes_streaming_deltas_to_client(bus: MagicMoc
             end = json.loads(await client.recv())
             assert end["event"] == "stream_end"
             assert end["stream_id"] == "s1"
+
+            await channel.send(OutboundMessage(
+                channel="websocket",
+                chat_id=chat_id,
+                content="",
+                metadata={"_turn_end": True},
+            ))
+
+            turn_end = json.loads(await client.recv())
+            assert turn_end == {"event": "turn_end", "chat_id": chat_id}
     finally:
         await channel.stop()
         await server_task

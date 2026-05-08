@@ -56,6 +56,25 @@ async def test_message_tool_marks_channel_delivery_only_when_enabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_message_tool_records_media_deliveries() -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+
+    await tool.execute(
+        content="image",
+        channel="websocket",
+        chat_id="chat-1",
+        media=["/tmp/generated.png"],
+    )
+
+    assert sent[0].metadata == {"_record_channel_delivery": True}
+
+
+@pytest.mark.asyncio
 async def test_message_tool_inherits_metadata_for_same_target() -> None:
     sent: list[OutboundMessage] = []
 

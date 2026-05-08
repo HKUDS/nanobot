@@ -835,7 +835,7 @@ async def test_start_logs_install_hint_when_pyjwt_missing(make_channel, monkeypa
     ch = make_channel()
     errors = []
     monkeypatch.setattr(msteams_module, "MSTEAMS_AVAILABLE", False)
-    monkeypatch.setattr(msteams_module.logger, "error", lambda message, *args: errors.append(message.format(*args)))
+    monkeypatch.setattr(ch.logger, "error", lambda message, *args: errors.append(message.format(*args)))
 
     await ch.start()
 

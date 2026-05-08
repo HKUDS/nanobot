@@ -158,7 +158,7 @@ class MessageTool(Tool):
         metadata = dict(self._default_metadata.get()) if same_target else {}
         if message_id:
             metadata["message_id"] = message_id
-        if self._record_channel_delivery_var.get():
+        if self._record_channel_delivery_var.get() or media:
             metadata["_record_channel_delivery"] = True
 
         msg = OutboundMessage(

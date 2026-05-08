@@ -915,6 +915,12 @@ If you want to always use the local conversion, you can force it using:
 |--------|------|---------|-------------|
 | `useJinaReader` | boolean | `true` | If true, Jina Reader will be preferred over the local conversion |
 
+## Image Generation
+
+Image generation is configured under `tools.imageGeneration` and uses provider credentials from `providers.openrouter` or `providers.aihubmix`.
+
+See [Image Generation](./image-generation.md) for WebUI usage, provider examples, artifact storage, and troubleshooting.
+
 ## MCP (Model Context Protocol)
 
 > [!TIP]
@@ -1007,6 +1013,28 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
 
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
+
+
+## Subagent Concurrency
+
+By default, nanobot only allows one spawned subagent at a time. When the limit is
+reached, the `spawn` tool returns an error so the agent can decide to wait or
+rearrange its work. This protects local LLM servers from loading multiple KV caches
+at once. If your provider can handle more parallel work, raise the limit:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "maxConcurrentSubagents": 2
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Attempts to spawn beyond this limit return an error. |
 
 
 ## Auto Compact
@@ -1109,3 +1137,23 @@ Disabled skills are excluded from the main agent's skill summary, from always-on
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.disabledSkills` | `[]` | List of skill directory names to exclude from loading. Applies to both built-in skills and workspace skills. |
+
+## Tool Hint Max Length
+
+Tool hints are the short progress messages shown when the agent calls tools (e.g. `$ cd …/project && npm test`). By default, these are truncated at 40 characters, which can make long commands hard to read.
+
+Set `agents.defaults.toolHintMaxLength` to control the truncation threshold:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "toolHintMaxLength": 120
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.toolHintMaxLength` | `40` | Maximum characters for tool hint display. Range: 20–500. Higher values show more of the command or path; lower values keep hints compact. |
