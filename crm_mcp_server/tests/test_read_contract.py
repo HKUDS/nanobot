@@ -31,14 +31,26 @@ def test_allow_listed_query_can_construct_fixed_operation():
 
     operation = build_read_operation(
         "listProject",
-        variables={"search": {"skip": 0, "limit": 10}},
+        variables={
+            "search": {},
+            "pagination": {"skip": 0, "limit": 10},
+            "sort_by": {"by": "updatedAt", "order": -1},
+        },
     )
 
     assert operation.operation_type == "query"
     assert operation.operation_name == "listProject"
-    assert operation.variables == {"search": {"skip": 0, "limit": 10}}
+    assert operation.variables == {
+        "search": {},
+        "pagination": {"skip": 0, "limit": 10},
+        "sort_by": {"by": "updatedAt", "order": -1},
+    }
     assert operation.query.startswith("query listProject")
-    assert "listProject" in operation.query
+    assert "$search: ProjectSearchParam!" in operation.query
+    assert "$pagination: PaginationParam" in operation.query
+    assert "$sort_by: SortBy!" in operation.query
+    assert "listProject(search: $search, pagination: $pagination, sort_by: $sort_by)" in operation.query
+    assert "claimBy { id user { name } }" in operation.query
     assert "mutation" not in operation.query.lower()
 
 

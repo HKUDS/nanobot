@@ -1273,6 +1273,30 @@ Gaps:
 
 - This does not prove the user's interactive shell, service manager, or other terminal sessions lack these variables; it only proves they are not visible to this OpenCode process.
 
+### 2026-05-08 10:22
+
+Claim: The current OpenCode worker process can access non-empty `CRM_GRAPHQL_ENDPOINT` and `CRM_GRAPHQL_TOKEN` environment variables.
+
+Verdict: NOT VERIFIED
+
+Commands:
+
+- `env | sort` — completed; output did not include either CRM variable.
+- `if [ -n "${CRM_GRAPHQL_ENDPOINT+x}" ] && [ -n "$CRM_GRAPHQL_ENDPOINT" ]; then endpoint_status=configured; endpoint_len=${#CRM_GRAPHQL_ENDPOINT}; else endpoint_status=missing; endpoint_len=0; fi; if [ -n "${CRM_GRAPHQL_TOKEN+x}" ] && [ -n "$CRM_GRAPHQL_TOKEN" ]; then token_status=configured; token_len=${#CRM_GRAPHQL_TOKEN}; else token_status=missing; token_len=0; fi; printf 'CRM_GRAPHQL_ENDPOINT=%s len=%s\nCRM_GRAPHQL_TOKEN=%s len=%s\n' "$endpoint_status" "$endpoint_len" "$token_status" "$token_len"` — completed without printing values.
+
+Evidence:
+
+- `CRM_GRAPHQL_ENDPOINT`: treatment=`missing`, length=`0`, threshold=non-empty.
+- `CRM_GRAPHQL_TOKEN`: treatment=`missing`, length=`0`, threshold=non-empty.
+
+Reasoning:
+
+The code path `crm_mcp_server/crm_mcp_server/real_smoke.py` reads `CRM_GRAPHQL_ENDPOINT` and `CRM_GRAPHQL_TOKEN`. The current OpenCode worker environment did not expose either variable, and the targeted masked probe reported both as missing with zero length. No secret value was printed or read from `.env*` files.
+
+Gaps:
+
+- This only verifies the environment visible to the current OpenCode worker process. It does not prove the variables are absent from another shell, `.env` file, launch wrapper, or service manager configuration.
+
 ## 2026-05-08 - Task 15J: Cleanup review / inventory proposal only
 
 15I status confirmation:
@@ -1540,3 +1564,562 @@ Final verification:
 - Requested plain safety assertion result: did not start because `python` is not on PATH in this shell (`zsh:1: command not found: python`).
 - Equivalent safety assertion command: `uv run python - <<'PY' ... PY`
 - Equivalent safety assertion result: `16B source safety assertions passed`.
+
+## 2026-05-08 - Task 15I real smoke sanitized diagnostic classification
+
+Scope:
+
+- Diagnosed the inconsistent real smoke output where `http_status_category=crm_unavailable` was previously paired with `reason=empty_result` and `errors=[]`.
+- Used systematic debugging to trace the diagnostic flow before fixing: transport category was set independently, while missing/invalid response shapes collapsed to `data_count=0` and then `empty_result`.
+- Implemented diagnostic-only classification changes; no business logic, query scope, mutation behavior, or CRM data normalization expansion was changed.
+
+TDD cycle:
+
+- Failing test command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py crm_mcp_server/tests/test_smoke_check.py`
+- Failing test result: `6 failed, 16 passed`; failures showed missing requested diagnostic fields, `crm_unavailable` still reporting `empty_result`, missing operation data reporting `empty_result`, missing records field reporting `OK`, and missing data root reporting `empty_result`.
+- Minimal implementation: added sanitized boundary fields to `crm_smoke_check`, split transport-category failures from response-shape failures, added safe error messages for `invalid_response`, `operation_data_missing`, and `records_field_missing`, and removed synthetic non-list record counting from the smoke path.
+- Focused passing command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py crm_mcp_server/tests/test_smoke_check.py`
+- Focused passing result: `22 passed in 0.02s`.
+
+Files changed:
+
+- `crm_mcp_server/crm_mcp_server/diagnostics.py`
+- `crm_mcp_server/crm_mcp_server/redaction.py`
+- `crm_mcp_server/tests/test_smoke_check.py`
+- `crm_mcp_server/tests/test_real_smoke.py`
+- `crm_mcp_server/tests/test_redaction.py`
+- `.dek/tasks/crm-ai-analysis-layer/EVIDENCE.md`
+- `.dek/tasks/crm-ai-analysis-layer/PROGRESS.md`
+- `.dek/tasks/crm-ai-analysis-layer/HANDOFF.md`
+
+New/updated test coverage:
+
+- `crm_unavailable` cannot be reported together with `empty_result`.
+- Empty `listProject.data` list reports `http_status_category=success` and `reason=empty_result`.
+- Missing `data.listProject` reports `reason=operation_data_missing`.
+- Missing `listProject.data` reports `reason=records_field_missing`.
+- Missing `data` root reports `reason=invalid_response`.
+- Raw response content containing token/project/customer/name/amount/contact/note markers is not included in diagnostics output.
+- Module stdout excludes raw response/query/variables/endpoint/token markers and remains sanitized JSON only.
+- Redaction allow-list test updated to include the new sanitized diagnostic keys.
+
+Final verification:
+
+- Targeted test command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py crm_mcp_server/tests/test_smoke_check.py`
+- Targeted test result: `22 passed in 0.02s`.
+- Full CRM MCP test command: `uv run --extra dev pytest crm_mcp_server/tests`
+- Full CRM MCP test result: `90 passed in 0.06s`.
+- Lint command: `uv run --extra dev ruff check crm_mcp_server`
+- Lint result: `All checks passed!`.
+
+Real smoke sanitized result:
+
+- Command: `uv run --project crm_mcp_server python -m crm_mcp_server.real_smoke`
+- Result status: `ERROR`.
+- Result reason: `crm_unavailable`.
+- `runtime_enabled`: `true`.
+- `transport_attempted`: `true`.
+- `response_json_parsed`: `true`.
+- `http_status_category`: `crm_unavailable`.
+- `data_root_present`: `false`.
+- `operation_data_present`: `false`.
+- `records_field_present`: `false`.
+- `records_is_list`: `false`.
+- `reported_total`: `null`.
+- `data_count`: `0`.
+- `normalized_count`: `0`.
+- `graphql_errors_count`: `0`.
+- `mutation_used`: `false`.
+
+Current layer diagnosis:
+
+- The real smoke is now localized to the network/endpoint/service availability layer category, not to a successful empty query result and not to GraphQL response-shape parsing.
+- The earlier inconsistent `crm_unavailable` plus `empty_result` pairing is covered by tests and no longer appears in the real smoke output.
+
+Scope confirmations:
+
+- Did not read `.env*`.
+- Did not run `env`, `printenv`, or `set`.
+- Did not print environment values.
+- Did not output endpoint, token/Auth/Bearer/cookie material, raw GraphQL request, raw GraphQL response, or variables.
+- Did not output customer name, project name, contact details, amount, address, note/free-text, or real CRM data.
+- Did not expand the query scope; real smoke remains fixed to `listProject` with limit `1`.
+- Did not execute Mutation.
+
+## 2026-05-08 - Task 17A: real transport behind explicit `crm_list_projects` runtime flag
+
+Scope:
+
+- Started branch `17a-real-crm-list-projects` from the current local `main` state per user choice, carrying existing dirty worktree changes forward.
+- Wired `crm_list_projects` so default/mock mode remains network-free and real mode requires explicit `runtime_enabled=true`.
+- Reused the existing sanitized bearer real-smoke transport and config loader instead of adding another env/network module.
+- Did not add CLI surface, DingTalk, WebUI, writeback, Mutation, or broader GraphQL operations.
+
+TDD cycle:
+
+- Initial failing test command: `uv run --extra dev pytest crm_mcp_server/tests/test_list_projects.py`.
+- Initial failing test result: failed because test attempted to replace shared `os.environ`, causing pytest internals to error; test seam was corrected to patch the project config loader instead.
+- Failing test command after seam fix: `uv run --extra dev pytest crm_mcp_server/tests/test_list_projects.py`.
+- Failing test result: `15 failed, 7 passed`; failures showed missing `runtime_enabled` API, missing default no-transport behavior, missing real transport import seam, and missing real-runtime sanitized diagnostics fields.
+- Minimal implementation: added optional `transport=None`, `runtime_enabled=false`, explicit env/config loading only when real mode is enabled and no transport is injected, bearer real transport construction, sanitized `config_missing` behavior, sanitized HTTP/auth/transport error mapping, and expanded safe diagnostics categories.
+- Focused passing command: `uv run --extra dev pytest crm_mcp_server/tests/test_list_projects.py`.
+- Focused passing result before final full verification: `22 passed in 0.05s`.
+
+Final verification:
+
+- Focused test command: `uv run --extra dev pytest crm_mcp_server/tests/test_list_projects.py`.
+- Focused test result: `22 passed in 0.03s`.
+- Full CRM MCP test command: `uv run --extra dev pytest crm_mcp_server/tests`.
+- Full CRM MCP test result: `122 passed in 0.09s`.
+- Lint command: `uv run --extra dev ruff check crm_mcp_server`.
+- Lint result: `All checks passed!`.
+
+Safety confirmations:
+
+- Default `crm_list_projects` does not load real runtime config and does not access real CRM.
+- `runtime_enabled=false` with injected transport does not load real runtime config.
+- `runtime_enabled=true` with missing runtime config returns sanitized `config_missing`.
+- `runtime_enabled=true` builds bearer real transport when runtime config exists.
+- Unit tests use fake/injected transports only and do not access real CRM.
+- Real-mode fake responses containing sensitive fields still return sanitized minimal records only.
+- GraphQL, HTTP/auth, unavailable, and rate-limit errors return sanitized categories only.
+- Pagination caps remain enforced.
+- Output does not include endpoint, token/Auth/Bearer/cookie values, raw GraphQL request/response/error text, variables, project names, customer names, contacts, phone, email, amount, address, or note/free-text.
+- `mutation_used=false`; no Mutation or writeback was added.
+- No real `crm_list_projects` manual call was run because 17A did not add a CLI/helper surface and real manual execution requires explicit later approval.
+
+Next recommended step:
+
+- 17B should add an approved manual/helper invocation path if needed, still behind explicit runtime enablement and sanitized output only.
+
+## 2026-05-08 - Task 17B: real transport behind explicit `crm_list_business_chances` runtime flag
+
+Scope:
+
+- Wired `crm_list_business_chances` so default/mock mode remains network-free and real mode requires explicit `runtime_enabled=true`.
+- Reused the existing sanitized bearer real-smoke transport and config loader; no duplicate HTTP/auth code was added.
+- Kept the tool fixed to allow-listed `list_business_chance` with existing pagination and `max_records` caps.
+- Did not add CLI surface, DingTalk, WebUI, writeback, Mutation, broad real reads, or changes to the superseded `RealCRMAdapter` route.
+
+TDD cycle:
+
+- Failing test command: `uv run --extra dev pytest crm_mcp_server/tests/test_list_business_chances.py`.
+- Failing test result: `15 failed, 7 passed`; failures showed missing optional `transport=None`, missing `runtime_enabled` API, missing real transport import seam, and missing real-runtime sanitized diagnostics fields.
+- Minimal implementation: added optional `transport=None`, `runtime_enabled=false`, explicit config loading only when real mode is enabled and no transport is injected, bearer real transport construction, sanitized `config_missing`, sanitized HTTP/auth/unavailable/rate-limit handling, and safe runtime/auth/transport diagnostics.
+- Focused passing command before final verification: `uv run --extra dev pytest crm_mcp_server/tests/test_list_business_chances.py`.
+- Focused passing result before final full verification: `22 passed in 0.03s`.
+
+Final verification:
+
+- Focused test command: `uv run --extra dev pytest crm_mcp_server/tests/test_list_business_chances.py`.
+- Focused test result: `22 passed in 0.03s`.
+- Full CRM MCP test command: `uv run --extra dev pytest crm_mcp_server/tests`.
+- Full CRM MCP test result: `130 passed in 0.08s`.
+- Lint command: `uv run --extra dev ruff check crm_mcp_server`.
+- Lint result: `All checks passed!`.
+
+Safety confirmations:
+
+- Default `crm_list_business_chances` does not load real runtime config and does not access real CRM.
+- `runtime_enabled=false` with injected transport does not load real runtime config.
+- `runtime_enabled=true` with missing runtime config returns sanitized `config_missing`.
+- `runtime_enabled=true` builds bearer real transport when runtime config exists.
+- Unit tests use fake/injected transports only and do not access real CRM.
+- Real-mode fake responses containing sensitive fields still return sanitized minimal records only.
+- GraphQL, HTTP/auth, unavailable, and rate-limit errors return sanitized categories only.
+- Empty result returns sanitized `empty_result`.
+- Pagination uses `skip` and `limit`; pagination caps remain enforced.
+- Source refs include `query=list_business_chance`, `entity_type=BusinessChance`, `source_id`, and safe field names only.
+- Output does not include endpoint, token/Auth/Bearer/cookie values, raw GraphQL request/response/error text, variables, project names, customer names, contacts, phone, email, amount, address, or note/free-text.
+- `.env*` was not read; `env`, `printenv`, and `set` were not run.
+- `mutation_used=false`; no Mutation or writeback was added.
+- No real `crm_list_business_chances` check was run. The existing optional `real_smoke` command was also not run for 17B; it only confirms bearer `listProject`, not `list_business_chance`.
+
+Next recommended step:
+
+- 17C should either add a dedicated approved sanitized real business-chance smoke/helper if real `list_business_chance` shape needs validation, or proceed to real-mode daily report facts only after that read path is explicitly verified.
+
+## 2026-05-08 - Task 15I-fix: sanitized transport diagnostics
+
+Scope:
+
+- Further refined real-smoke diagnostics after the previous result localized the failure to `crm_unavailable`.
+- Used systematic debugging and TDD to split the transport layer into safe categories without exposing endpoint, token, proxy, request body, response body, variables, exception text, or CRM data.
+- Changed only real-smoke transport diagnostics and smoke diagnostics allow-list fields; report tools, `crm_list_projects`, `crm_list_business_chances`, and the old `RealCRMAdapter` route were not changed.
+
+TDD cycle:
+
+- Failing test command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py`
+- Failing test result: `9 failed, 9 passed`; failures showed missing `transport_error_category`, `status_code_category`, endpoint/token/proxy booleans, and JSON parse state, plus non-JSON success still reported as response-shape `invalid_response`.
+- Minimal implementation: added transport-safe fields to `RealGraphQLSmokeTransport` and `crm_smoke_check`, mapped `HTTPError`, `URLError`, timeout, DNS, refused/reset/TLS/network cases to fixed categories, mapped HTTP status code families to `2xx`/`3xx`/`4xx`/`5xx`/`not_available`, and reported proxy as a boolean only.
+- Focused passing command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py`
+- Focused passing result: `18 passed in 0.02s` before final full verification, then `18 passed in 0.02s` after final import-order fix.
+
+Files changed:
+
+- `crm_mcp_server/crm_mcp_server/real_smoke.py`
+- `crm_mcp_server/crm_mcp_server/diagnostics.py`
+- `crm_mcp_server/tests/test_real_smoke.py`
+- `crm_mcp_server/tests/test_smoke_check.py`
+- `crm_mcp_server/tests/test_redaction.py`
+- `.dek/tasks/crm-ai-analysis-layer/EVIDENCE.md`
+- `.dek/tasks/crm-ai-analysis-layer/PROGRESS.md`
+- `.dek/tasks/crm-ai-analysis-layer/HANDOFF.md`
+
+New/updated test coverage:
+
+- Timeout maps to `transport_error_category=connect_timeout`.
+- DNS/name-resolution failure maps to `transport_error_category=dns_error`.
+- Connection refused maps to `transport_error_category=connection_refused`.
+- HTTP 401/403 maps to `http_status_category=unauthorized_or_forbidden`, `reason=unauthorized_or_forbidden`, `transport_error_category=http_4xx`, and `status_code_category=4xx`.
+- HTTP 500 maps to `transport_error_category=http_5xx` and `status_code_category=5xx`.
+- HTTP success with non-JSON response maps to `transport_error_category=non_json_response` and `response_json_parsed=false`.
+- HTTP success with empty JSON shape maps to `reason=invalid_response`, `transport_error_category=null`, and `status_code_category=2xx`.
+- Module stdout reports proxy presence only as `proxy_configured=true` and does not include proxy value.
+- All tested diagnostics avoid sensitive endpoint/token/Auth/Bearer/raw GraphQL request/raw GraphQL response/variables/customer/project/contact/name/amount/note markers.
+
+Final verification:
+
+- Focused test command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py`
+- Focused test result: `18 passed in 0.02s`.
+- Full CRM MCP test command: `uv run --extra dev pytest crm_mcp_server/tests`
+- Full CRM MCP test result: `99 passed in 0.05s`.
+- Lint command: `uv run --extra dev ruff check crm_mcp_server`
+- Lint result: `All checks passed!`.
+
+Real smoke sanitized result:
+
+- Command: `uv run --project crm_mcp_server python -m crm_mcp_server.real_smoke`
+- Result status: `ERROR`.
+- Result reason: `crm_unavailable`.
+- `runtime_enabled`: `true`.
+- `operation_name`: `listProject`.
+- `mutation_used`: `false`.
+- `transport_attempted`: `true`.
+- `transport_error_category`: `http_4xx`.
+- `http_status_category`: `crm_unavailable`.
+- `status_code_category`: `4xx`.
+- `endpoint_configured`: `true`.
+- `token_configured`: `true`.
+- `proxy_configured`: `false`.
+- `response_json_parsed`: `false`.
+- `data_root_present`: `false`.
+- `operation_data_present`: `false`.
+- `records_field_present`: `false`.
+- `records_is_list`: `false`.
+- `reported_total`: `null`.
+- `data_count`: `0`.
+- `normalized_count`: `0`.
+- `graphql_errors_count`: `0`.
+
+Current layer diagnosis:
+
+- The real smoke is now localized to HTTP 4xx transport status category, not DNS, timeout, connection refused/reset, TLS, proxy/network unreachable, non-JSON success response, JSON shape mismatch, GraphQL error, empty result, or successful records.
+- Because the HTTP status category is not the special 401/403 unauthorized category and not 429 rate-limited, the current sanitized classification points to a non-auth-specific HTTP 4xx service/request availability layer. Raw status code and response body were intentionally not recorded.
+
+Scope confirmations:
+
+- Did not read `.env*`.
+- Did not run `env`, `printenv`, or `set`.
+- Did not print environment values.
+- Did not output endpoint value, token/Auth/Bearer/cookie material, proxy value, raw GraphQL request, raw GraphQL response, or variables.
+- Did not output customer name, project name, contact details, amount, address, note/free-text, or real CRM data.
+- Did not expand the query scope; real smoke remains fixed to `listProject` with limit `1`.
+- Did not execute Mutation.
+
+## 2026-05-08 - Task 15I-fix: sanitized GraphQL error diagnostics
+
+Scope:
+
+- Continued 15I-fix after real smoke advanced from HTTP 4xx to HTTP success plus JSON-parsed GraphQL error.
+- Used `/Users/yang/Desktop/crm_graphql_templates_all.md` as a local reference only.
+- Extracted only sanitized `listProject` facts needed for this task; the full template was not copied into repo, docs, tests, or `.dek`.
+- Did not change `crm_list_business_chances`, daily/weekly/dashboard facts, Nanobot runtime, DingTalk, or the old `RealCRMAdapter` route.
+
+Sanitized template facts extracted:
+
+- `listProject` field name is `listProject`.
+- `listProject` uses `search` argument with `ProjectSearchParam!` type.
+- `listProject` uses `pagination` argument with `{skip, limit}` shape.
+- `listProject` uses required `sort_by` argument with `{by, order}` shape.
+- Safe smoke selection includes connection counts/records fields and non-contact project fields only.
+- The local reference contains `list_business_chance`, but 16A was not changed in this task.
+
+TDD cycle:
+
+- Failing test command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py`
+- Failing test result: `7 failed, 17 passed`; failures showed missing `graphql_error_category`, `graphql_error_path_present`, and `graphql_error_extensions_present`.
+- Minimal implementation: added internal GraphQL error inspection in `crm_smoke_check`, emitting only fixed category and boolean presence fields. Raw error message, raw extensions details, path values, request, response, endpoint, token, and variables are not output.
+- First focused passing command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py`
+- First focused passing result: `24 passed in 0.03s`.
+
+New/updated test coverage:
+
+- Validation-style GraphQL error maps to a safe validation/unknown-field category.
+- Variable-style GraphQL error maps to `graphql_variable_error`.
+- GraphQL auth/scope-style error maps to `graphql_auth_scope_error`.
+- GraphQL execution-style error maps to `graphql_execution_error`.
+- Unknown GraphQL error maps to `graphql_unknown_error`.
+- Raw error message containing endpoint/token/customer/project/amount/contact/note markers never appears in output.
+- `graphql_errors_count` remains count-only.
+- Module stdout excludes raw GraphQL error/request/response/variables.
+- `listProject` smoke operation remains template-aligned and read-only with limit `1`.
+- Mutation and raw GraphQL passthrough remain absent.
+
+Final verification:
+
+- Real smoke test command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py`
+- Real smoke test result: `24 passed in 0.03s`.
+- Read contract test command: `uv run --extra dev pytest crm_mcp_server/tests/test_read_contract.py`
+- Read contract test result: `5 passed in 0.01s`.
+- Full CRM MCP test command: `uv run --extra dev pytest crm_mcp_server/tests`
+- Full CRM MCP test result: `105 passed in 0.09s`.
+- Lint command: `uv run --extra dev ruff check crm_mcp_server`
+- Lint result: `All checks passed!`.
+
+Real smoke sanitized result:
+
+- Command: `uv run --project crm_mcp_server python -m crm_mcp_server.real_smoke`
+- `status`: `ERROR`.
+- `reason`: `graphql_error`.
+- `http_status_category`: `success`.
+- `response_json_parsed`: `true`.
+- `graphql_errors_count`: `1`.
+- `graphql_error_category`: `graphql_unknown_error`.
+- `graphql_error_path_present`: `true`.
+- `graphql_error_extensions_present`: `false`.
+- `data_root_present`: `false`.
+- `operation_data_present`: `false`.
+- `records_field_present`: `false`.
+- `records_is_list`: `false`.
+- `data_count`: `0`.
+- `normalized_count`: `0`.
+- `mutation_used`: `false`.
+
+Current layer diagnosis:
+
+- The real smoke now reaches HTTP success and parses JSON.
+- It returns one GraphQL error with a path present and no extensions present.
+- The safe category is currently `graphql_unknown_error`; there is not enough sanitized evidence to distinguish validation, unknown field, variable coercion, auth/scope, or execution failure.
+
+Scope confirmations:
+
+- Did not read `.env*`.
+- Did not run `env`, `printenv`, or `set`.
+- Did not print environment values.
+- Did not output endpoint, token/Auth/Bearer/cookie material, proxy value, raw GraphQL request, raw GraphQL response, raw GraphQL error message, or variables.
+- Did not output customer name, project name, contact details, amount, address, note/free-text, or real CRM data.
+- Did not expand the query scope; real smoke remains fixed to `listProject` with limit `1`.
+- Did not execute Mutation.
+
+## 2026-05-08 - Task 15I-fix closeout: successful sanitized real smoke
+
+Scope:
+
+- Recorded user-provided sanitized 15I real-smoke success result only.
+- Closed the 15I-fix diagnostic loop after bearer auth was confirmed as the successful mode.
+- Re-ran the default sanitized real-smoke command after bearer became the default/documented auth mode.
+- Did not rerun local raw inspection mode.
+- Did not change query shape, selection fields, pagination limit, Nanobot runtime, DingTalk, WebUI, report tools, or the superseded direct adapter route.
+
+Fresh verification after closeout request:
+
+- Focused real-smoke test command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py`.
+- Focused real-smoke test result: `33 passed in 0.04s`.
+- Full CRM MCP test command: `uv run --extra dev pytest crm_mcp_server/tests`.
+- Full CRM MCP test result: `114 passed in 0.08s`.
+- Lint command: `uv run --extra dev ruff check crm_mcp_server`.
+- Lint result: `All checks passed!`.
+- Default real-smoke command: `uv run --project crm_mcp_server python -m crm_mcp_server.real_smoke`.
+- Default real-smoke result: sanitized `OK/ok`, `auth_mode=bearer`, `data_count=1`, `normalized_count=1`, `reported_total=703`, `graphql_errors_count=0`, `mutation_used=false`, `errors=[]`.
+
+Sanitized successful real-smoke result:
+
+- `status`: `OK`.
+- `reason`: `ok`.
+- `auth_mode`: `bearer`.
+- `runtime_enabled`: `true`.
+- `http_status_category`: `success`.
+- `status_code_category`: `2xx`.
+- `response_json_parsed`: `true`.
+- `graphql_errors_count`: `0`.
+- `data_root_present`: `true`.
+- `operation_data_present`: `true`.
+- `records_field_present`: `true`.
+- `records_is_list`: `true`.
+- `data_count`: `1`.
+- `normalized_count`: `1`.
+- `reported_total`: `703`.
+- `mutation_used`: `false`.
+- `mutations_allowed`: `false`.
+- `errors`: `[]`.
+
+Final diagnosis:
+
+- Bearer is the current successful CRM GraphQL auth mode.
+- Bearer is now the real-smoke code default and documented default.
+- `private_token` and `cookie` remain diagnostic modes and produced sanitized `auth_error_category=not_login` in prior auth-mode checks.
+- 15I real minimum read-only smoke succeeded with fixed `listProject` limit `1`.
+- Next recommended implementation sequence: proceed to 17A to connect the real transport to `crm_list_projects` behind the existing read-only/sanitized boundary; do not proceed directly to WebUI or DingTalk.
+
+Scope confirmations:
+
+- Did not record endpoint.
+- Did not record token.
+- Did not record auth header values.
+- Did not record raw GraphQL request or response.
+- Did not record real project, customer, contact, amount, or note/free-text data.
+- Recorded only sanitized counts/categories/status fields.
+- Did not rerun inspect raw mode.
+- Did not execute Mutation.
+- Did not expand true query scope beyond read-only `listProject` limit `1`.
+
+## 2026-05-08 - Task 15I-followup: bearer documented/default auth mode
+
+Scope:
+
+- Changed optional real smoke so the default CRM GraphQL auth mode is `bearer`.
+- Kept `--auth-mode private_token` and `--auth-mode cookie` as explicit sanitized diagnostic modes.
+- Updated CRM docs and this task handoff to show the default command no longer needs `--auth-mode bearer`.
+- Did not change query shape, selection fields, pagination limit, Nanobot runtime, DingTalk, report tools, or the superseded direct adapter route.
+
+TDD cycle:
+
+- Failing test command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py`.
+- Failing test result: `2 failed, 31 passed`; failures showed the old default still reported `auth_mode=private_token` and did not use the default bearer header path.
+- Minimal implementation: changed `RealSmokeConfig`, environment loader, real-smoke runners, CLI `--auth-mode` default, and diagnostics safe fallback/base result to `bearer`.
+- Focused passing command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py`.
+- Focused passing result: `33 passed in 0.04s`.
+
+Verification:
+
+- Full CRM MCP test command: `uv run --extra dev pytest crm_mcp_server/tests`.
+- Full CRM MCP test result: `114 passed in 0.07s`.
+- Lint command: `uv run --extra dev ruff check crm_mcp_server`.
+- Lint result: `All checks passed!`.
+
+Default real-smoke status at that point:
+
+- Real smoke was not run in this followup because the user asked to run it only after confirming runtime config is present in the current shell.
+- Expected command after confirmation: `uv run --project crm_mcp_server python -m crm_mcp_server.real_smoke`.
+- Default auth diagnostic field is now `auth_mode=bearer`.
+- Superseded by the later 15I-fix closeout entry above, where the default command was run and returned sanitized `OK/ok` with `auth_mode=bearer`.
+
+Scope confirmations:
+
+- Did not read `.env*`.
+- Did not run `env`, `printenv`, or `set`.
+- Did not print environment values.
+- Did not output endpoint, token/Auth/Bearer/cookie material, proxy value, raw GraphQL request, raw GraphQL response, raw GraphQL error message, or variables.
+- Did not output customer name, project name, contact details, amount, address, note/free-text, or real CRM data.
+- Did not expand the query scope; real smoke remains fixed to `listProject` with limit `1`.
+- Did not execute Mutation.
+
+## 2026-05-08 - Task 15I-fix: sanitized auth strategy diagnostics
+
+Scope:
+
+- Continued 15I-fix after local-only inspection identified the GraphQL error message category as not logged in.
+- Did not change query, selection, variables, report tools, DingTalk/Nanobot runtime, or old `RealCRMAdapter` route.
+- Added explicit auth strategy selection and sanitized auth diagnostics to identify the working CRM GraphQL auth mode.
+
+TDD cycle:
+
+- Failing test command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py`
+- Failing test result: `8 failed, 24 passed`; failures showed missing auth mode config, missing CLI `--auth-mode`, missing sanitized `auth_mode` / `auth_error_category`, and `not login` not classified as auth.
+- Minimal implementation: added `RealSmokeConfig.auth_mode`, CLI `--auth-mode`, supported modes `private_token`, `bearer`, and `cookie`, auth header construction, safe `auth_mode` and `auth_error_category` diagnostics, and `not login` mapping to `graphql_auth_scope_error` plus `auth_error_category=not_login`.
+
+Verification:
+
+- Real smoke test command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py`
+- Real smoke test result: `32 passed in 0.04s`.
+- Full CRM MCP test command: `uv run --extra dev pytest crm_mcp_server/tests`
+- Full CRM MCP test result before final verification: `113 passed in 0.09s`.
+- Lint command: `uv run --extra dev ruff check crm_mcp_server`
+- Lint result before final verification: `All checks passed!`.
+
+Sanitized auth-mode smoke results:
+
+- `private_token`: `status=ERROR`, `reason=graphql_error`, `http_status_category=success`, `graphql_errors_count=1`, `graphql_error_category=graphql_auth_scope_error`, `auth_error_category=not_login`, `data_count=0`, `normalized_count=0`, `mutation_used=false`.
+- `bearer`: `status=OK`, `reason=ok`, `http_status_category=success`, `graphql_errors_count=0`, `auth_error_category=null`, `data_count=1`, `normalized_count=1`, `records_is_list=true`, `reported_total` recorded as a count only, `mutation_used=false`.
+- `cookie`: `status=ERROR`, `reason=graphql_error`, `http_status_category=success`, `graphql_errors_count=1`, `graphql_error_category=graphql_auth_scope_error`, `auth_error_category=not_login`, `data_count=0`, `normalized_count=0`, `mutation_used=false`.
+
+Current diagnosis:
+
+- CRM GraphQL auth strategy must use bearer auth for this runtime token.
+- `private_token` and `cookie` modes reach GraphQL but produce sanitized `not_login` auth errors.
+- `bearer` mode returns one record with `listProject` limit `1` and no GraphQL errors.
+
+Scope confirmations:
+
+- Did not read `.env*`.
+- Did not run `env`, `printenv`, or `set`.
+- Did not print environment values.
+- Did not output endpoint, token/Auth/Bearer/cookie material, proxy value, raw GraphQL request, raw GraphQL response, raw GraphQL error message, or variables.
+- Did not output customer name, project name, contact details, amount, address, note/free-text, or real CRM data.
+- Did not expand the query scope; real smoke remains fixed to `listProject` with limit `1`.
+- Did not execute Mutation.
+
+## 2026-05-08 - Task 15I-fix: local-only GraphQL error inspection mode
+
+Scope:
+
+- Added an explicit local-only CLI inspection mode for GraphQL error messages after sanitized diagnostics reached `graphql_unknown_error`.
+- Default smoke behavior remains sanitized JSON only.
+- The inspection mode is opt-in via CLI flag only and writes no files.
+- Raw inspection output was not run or recorded in `.dek`.
+- No report tools, DingTalk/Nanobot runtime, or old `RealCRMAdapter` route were changed.
+
+Behavior added:
+
+- Default command remains `uv run --project crm_mcp_server python -m crm_mcp_server.real_smoke`.
+- Local-only command exists: `uv run --project crm_mcp_server python -m crm_mcp_server.real_smoke --inspect-graphql-error-local`.
+- Inspection mode prints a warning that output is local-only, should not be pasted into chat, and should not be committed.
+- Inspection mode can display redacted GraphQL error message text locally.
+- Inspection mode redacts endpoint, token/Auth/Bearer/cookie markers, request/response/variables markers, and CRM/customer/contact/free-text markers.
+
+TDD cycle:
+
+- Failing test command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py`
+- Failing test result: `3 failed, 24 passed`; failures showed `main()` had no explicit argv path and no inspection mode.
+- Minimal implementation: added argparse-gated `--inspect-graphql-error-local`, a local inspection runner, transport response capture, and local redaction helper.
+- Follow-up focused test result after implementation fix: `27 passed in 0.03s`.
+
+Final verification:
+
+- Real smoke test command: `uv run --extra dev pytest crm_mcp_server/tests/test_real_smoke.py`
+- Real smoke test result: `27 passed in 0.03s`.
+- Full CRM MCP test command: `uv run --extra dev pytest crm_mcp_server/tests`
+- Full CRM MCP test result: `108 passed in 0.07s`.
+- Lint command: `uv run --extra dev ruff check crm_mcp_server`
+- Lint result: `All checks passed!`.
+
+Default real smoke sanitized result:
+
+- Command: `uv run --project crm_mcp_server python -m crm_mcp_server.real_smoke`
+- `status`: `ERROR`.
+- `reason`: `graphql_error`.
+- `http_status_category`: `success`.
+- `response_json_parsed`: `true`.
+- `graphql_errors_count`: `1`.
+- `graphql_error_category`: `graphql_unknown_error`.
+- `graphql_error_path_present`: `true`.
+- `graphql_error_extensions_present`: `false`.
+- `data_root_present`: `false`.
+- `operation_data_present`: `false`.
+- `records_field_present`: `false`.
+- `records_is_list`: `false`.
+- `data_count`: `0`.
+- `normalized_count`: `0`.
+- `mutation_used`: `false`.
+
+Scope confirmations:
+
+- Did not run inspection mode in this session.
+- Did not read `.env*`.
+- Did not run `env`, `printenv`, or `set`.
+- Did not print environment values.
+- Did not output endpoint, token/Auth/Bearer/cookie material, proxy value, raw GraphQL request, raw GraphQL response, raw GraphQL error message, or variables.
+- Did not output customer name, project name, contact details, amount, address, note/free-text, or real CRM data.
+- Did not expand the query scope; real smoke remains fixed to `listProject` with limit `1`.
+- Did not execute Mutation.

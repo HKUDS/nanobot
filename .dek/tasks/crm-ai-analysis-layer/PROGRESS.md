@@ -28,6 +28,15 @@ Task id: `crm-ai-analysis-layer`
 - Task 15K Option B cleanup complete: superseded direct GraphQL docs and direct-route Python module docstrings are marked reference-only, `docs/crm/` remains canonical, CRM MCP Server remains the production real CRM access direction, and direct adapter code/tests are retained as reference/safety material.
 - Task 16A complete: `crm_list_business_chances` is implemented as a read-only mocked GraphQL data tool using fixed allow-listed `list_business_chance`, sanitized minimal records/source refs/errors/diagnostics, validation-before-transport, pagination caps, and sensitive-output tests.
 - Task 16B complete: `crm_generate_daily_report_facts` is implemented as a read-only mocked report-facts composer using injected `crm_list_projects`/`crm_list_business_chances`-style dependency outputs, deterministic daily metrics, sanitized unavailable metrics, deduped source refs, and sensitive-output tests.
+- Task 15I real-smoke diagnostics refined: sanitized smoke fields now distinguish transport attempted, JSON parse status, data root presence, operation data presence, records field presence/list-ness, reported total, counts, safe reason, and safe HTTP category. Real smoke now returns consistent sanitized `ERROR/crm_unavailable` with `runtime_enabled=true` and `transport_attempted=true`, not `empty_result`.
+- Task 15I-fix complete: real-smoke transport diagnostics now include safe `transport_error_category`, `status_code_category`, endpoint/token/proxy configured booleans, and non-JSON/HTTP/network category mapping. Current real smoke is sanitized `transport_error_category=http_4xx`, `status_code_category=4xx`, `proxy_configured=false`.
+- Task 15I-fix GraphQL diagnostics complete: local `crm_graphql_templates_all.md` was used only as a reference for sanitized `listProject` shape facts, and real-smoke GraphQL errors now emit safe `graphql_error_category`, `graphql_error_path_present`, and `graphql_error_extensions_present`. Current real smoke is HTTP success + JSON parsed + `graphql_error_category=graphql_unknown_error`, with path present and extensions absent.
+- Task 15I-fix local-only inspection mode complete: default smoke remains sanitized; explicit `--inspect-graphql-error-local` can print redacted GraphQL error messages locally with warning text and no file writes. Raw inspection output was not run or recorded.
+- Task 15I-fix auth diagnostics complete: `--auth-mode` supports `private_token`, `bearer`, and `cookie`; sanitized auth-mode smoke checks show `bearer` succeeds with `status=OK`, `data_count=1`, `graphql_errors_count=0`, while `private_token` and `cookie` return sanitized `auth_error_category=not_login`.
+- Task 15I-followup complete: real smoke now uses `bearer` as the documented/default CRM GraphQL auth mode; `private_token` and `cookie` remain explicit optional diagnostics.
+- Task 15I-fix closeout complete: default sanitized real smoke succeeded with `status=OK`, `reason=ok`, `auth_mode=bearer`, `runtime_enabled=true`, `status_code_category=2xx`, `data_count=1`, `normalized_count=1`, `reported_total=703`, `graphql_errors_count=0`, `mutation_used=false`, and `errors=[]`.
+- Task 17A complete: `crm_list_projects` now supports default network-free mock/injected transport mode and explicit `runtime_enabled=true` real mode using the sanitized bearer real transport behind complete runtime config. Verification passed with focused tests, full CRM MCP tests, and ruff.
+- Task 17B complete: `crm_list_business_chances` now supports default network-free mock/injected transport mode and explicit `runtime_enabled=true` real mode using the sanitized bearer real transport behind complete runtime config. Verification passed with focused tests, full CRM MCP tests, and ruff. No real business-chance check was run.
 - No runtime behavior was changed in 15K. No MCP server production wiring was changed. No files were deleted, moved, or renamed. `.env*` was not read. No real CRM endpoint was accessed.
 
 ## Completed
@@ -76,16 +85,26 @@ Task id: `crm-ai-analysis-layer`
 - Completed task 15K from `.dek/changes/crm-opportunity-intelligence/TASKS.md`: executed approved Option B cleanup by strengthening superseded-reference docs and module docstrings while retaining direct adapter code/tests.
 - Completed task 16A: Implement `crm_list_business_chances` with mocked GraphQL responses.
 - Completed task 16B: Implement `crm_generate_daily_report_facts` backed by mocked CRM MCP read-tool outputs.
+- Completed 15I real-smoke sanitized diagnostic classification refinement and reran the approved real smoke command once.
+- Completed 15I-fix: added sanitized transport diagnostics and reran the approved real smoke command once.
+- Completed 15I-fix GraphQL layer safe categorization and reran the approved real smoke command once.
+- Completed 15I-fix local-only raw GraphQL error inspection command, without running inspect mode.
+- Completed 15I-fix sanitized auth strategy diagnostics; bearer auth is the working real-smoke mode for the current runtime token.
+- Completed 15I-followup: made bearer the default real-smoke auth mode and updated CRM docs plus `.dek` handoff artifacts.
+- Completed 15I-fix closeout: recorded sanitized successful real smoke result and reran CRM MCP tests plus ruff.
+- Completed 17A implementation and verification.
+- Completed 17B implementation and verification.
 
 ## Pending
 
-- User decision whether to push branch / PR, or continue with weekly report facts.
-- Next MCP report candidate: implement `crm_generate_weekly_report_facts` using the same mocked dependency-reader pattern.
+- User decision whether to push branch / PR after 17B verification.
+- Recommended 17C: add a dedicated approved sanitized real business-chance smoke/helper if `list_business_chance` shape needs validation, or proceed to real-mode daily report facts only after that read path is explicitly verified.
+- Keep WebUI and DingTalk deferred; do not jump there before the real `crm_list_projects` transport path is safely integrated.
 - Future user decision only if deeper cleanup is desired after Option B/15K. Direct adapter code/tests remain superseded-reference material.
 - Option C remains deferred until MCP tools cover equivalent behavior and the user explicitly approves removal.
-- If user wants a real MCP smoke result before deeper cleanup, diagnose runtime config outside chat before retrying 15I; do not rerun real smoke without explicit approval.
+- Current real smoke default is bearer auth and the sanitized 15I minimum read-only default-command smoke has succeeded.
+- Do not paste or commit local inspection output.
 - DingTalk CRM delivery remains deferred until the CRM MCP Server contract and Nanobot MCP configuration are settled.
-- Optional real CRM smoke remains deferred and must not run without explicit user approval.
 
 ## Superseded By MCP Route
 

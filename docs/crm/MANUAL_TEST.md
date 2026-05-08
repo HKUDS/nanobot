@@ -97,13 +97,45 @@ Never record:
 - Customer names, contact details, phone numbers, email addresses, physical addresses, attachments, or free-text CRM notes.
 - Generated production reports.
 
-15I optional real smoke command, after explicit approval and runtime configuration outside chat:
+15I optional real smoke command, after explicit approval and runtime configuration outside chat. The default CRM GraphQL auth mode is `bearer`; use the default command unless you are intentionally comparing diagnostic modes:
 
 ```bash
 uv run --project crm_mcp_server python -m crm_mcp_server.real_smoke
 ```
 
+Optional auth-mode diagnostic comparison, still read-only and still fixed to `listProject` limit `1`:
+
+```bash
+uv run --project crm_mcp_server python -m crm_mcp_server.real_smoke --auth-mode private_token
+uv run --project crm_mcp_server python -m crm_mcp_server.real_smoke --auth-mode cookie
+```
+
 Record only sanitized status, reason, count fields, operation name, and error categories. If the result is `INCONCLUSIVE/config_missing`, stop and fix runtime configuration outside chat; do not broaden scope or print environment values.
+
+17A `crm_list_projects` real-runtime library check, after explicit approval and runtime configuration outside chat:
+
+- Default/mock mode must not access real CRM.
+- Real mode must be explicitly enabled by the caller with `runtime_enabled=true`.
+- Do not add CLI surface just for 17A if no helper exists.
+- Record only sanitized status, reason, count fields, operation name, auth mode category, HTTP/status categories, and pagination counters.
+- Never record endpoint values, tokens, auth header values, raw GraphQL request/response/error text, variables, project names, customer names, contact details, amount-like fields, addresses, or free-text notes.
+
+17B `crm_list_business_chances` real-runtime library check, after explicit approval and runtime configuration outside chat:
+
+- Default/mock mode must not access real CRM.
+- Real mode must be explicitly enabled by the caller with `runtime_enabled=true`.
+- Do not add CLI surface just for 17B if no helper exists.
+- If a dedicated real business-chance check is added later, limit it to `max_records=1` and record only sanitized status, reason, count fields, operation name, auth mode category, HTTP/status categories, pagination counters, and source-reference shape.
+- The existing optional real-smoke command below only confirms bearer `listProject` smoke; it does not prove a real `list_business_chance` read.
+- Never record endpoint values, tokens, auth header values, raw GraphQL request/response/error text, variables, project names, customer names, contact details, amount-like fields, addresses, or free-text notes.
+
+Safe 17B verification commands without real CRM access:
+
+```bash
+uv run --extra dev pytest crm_mcp_server/tests/test_list_business_chances.py
+uv run --extra dev pytest crm_mcp_server/tests
+uv run --extra dev ruff check crm_mcp_server
+```
 
 ## Mock MCP Configuration Checks
 

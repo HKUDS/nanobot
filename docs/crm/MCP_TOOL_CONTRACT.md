@@ -92,6 +92,8 @@ Allowed diagnostic fields across v1 tools are:
 - `operation_name`
 - `status`
 - `reason`
+- `auth_mode`
+- `endpoint_configured`
 - `http_status_category`
 - `graphql_errors_count`
 - `data_count`
@@ -100,6 +102,10 @@ Allowed diagnostic fields across v1 tools are:
 - `pages_read`
 - `max_records`
 - `pagination_limit_reached`
+- `runtime_enabled`
+- `status_code_category`
+- `token_configured`
+- `transport_error_category`
 
 Diagnostics must not include endpoint values, tokens, Authorization headers, cookies, raw query text, raw variables, raw GraphQL responses, customer names, project names, contact details, amount-like values, or free-text CRM notes.
 
@@ -165,7 +171,9 @@ Input and output match the shared report-facts shape, except `report_type` is `d
 
 ### `crm_list_projects`
 
-Purpose: read allow-listed `listProject` data and return sanitized minimal project records for report facts and evidence traces. Current implementation tasks use mocked GraphQL responses only.
+Purpose: read allow-listed `listProject` data and return sanitized minimal project records for report facts and evidence traces. Default mode uses injected/mock transport only and does not access real CRM. 17A real-runtime mode requires an explicit `runtime_enabled=true` library call plus complete runtime configuration outside chat/docs.
+
+Real-runtime mode reuses the sanitized bearer real transport proven by 15I and remains fixed to allow-listed `listProject` with pagination caps.
 
 Input:
 
@@ -177,6 +185,7 @@ Input:
 | `scope.owner_ids` | string array | No | Stable owner ids only. |
 | `scope.group_ids` | string array | No | Stable group ids only. |
 | `options.max_records` | integer | No | Must be positive and no greater than the server cap. |
+| `runtime_enabled` | boolean | No | Library/runtime flag only. Defaults to `false`; must be explicit for real CRM reads. |
 
 Output:
 
@@ -199,13 +208,15 @@ Allowed record fields:
 | `updated_at` | string | Timestamp from allow-listed selection set. |
 | `source_ref_ids` | string array | References into `source_refs`. |
 
-Diagnostics fields are restricted to `read_only`, `mutations_allowed`, `mutation_used`, `operation_name`, `graphql_errors_count`, `records_returned`, `pages_read`, `max_records`, `pagination_limit_reached`, `status`, and `reason`.
+Diagnostics fields are restricted to `auth_mode`, `endpoint_configured`, `http_status_category`, `read_only`, `mutations_allowed`, `mutation_used`, `operation_name`, `graphql_errors_count`, `records_returned`, `pages_read`, `max_records`, `pagination_limit_reached`, `runtime_enabled`, `status`, `status_code_category`, `token_configured`, `transport_error_category`, and `reason`.
 
 Forbidden output for `crm_list_projects` includes project names, customer names, amount-like fields, phone, email, contact, address, notes/free text, raw CRM fields outside the allowed record shape, endpoint values, tokens, Authorization headers, cookies, and raw GraphQL request or response payloads.
 
 ### `crm_list_business_chances`
 
-Purpose: read allow-listed `list_business_chance` data and return sanitized minimal business chance records for report facts and evidence traces. Current implementation tasks use mocked GraphQL responses only.
+Purpose: read allow-listed `list_business_chance` data and return sanitized minimal business chance records for report facts and evidence traces. Default mode uses injected/mock transport only and does not access real CRM. 17B real-runtime mode requires an explicit `runtime_enabled=true` library call plus complete runtime configuration outside chat/docs.
+
+Real-runtime mode reuses the sanitized bearer real transport proven by 15I and remains fixed to allow-listed `list_business_chance` with pagination caps. The default real-runtime auth mode is `bearer`.
 
 Input:
 
@@ -217,6 +228,7 @@ Input:
 | `scope.owner_ids` | string array | No | Stable owner ids only. |
 | `scope.group_ids` | string array | No | Stable group ids only. |
 | `options.max_records` | integer | No | Must be positive and no greater than the server cap. |
+| `runtime_enabled` | boolean | No | Library/runtime flag only. Defaults to `false`; must be explicit for real CRM reads. |
 
 Output:
 
@@ -242,9 +254,9 @@ Allowed record fields:
 | `updated_at` | string | Timestamp from allow-listed response data. |
 | `source_ref_ids` | string array | References into `source_refs`. |
 
-Diagnostics fields are restricted to `read_only`, `mutations_allowed`, `mutation_used`, `operation_name`, `graphql_errors_count`, `records_returned`, `pages_read`, `max_records`, `pagination_limit_reached`, `status`, and `reason`.
+Diagnostics fields are restricted to `auth_mode`, `endpoint_configured`, `http_status_category`, `read_only`, `mutations_allowed`, `mutation_used`, `operation_name`, `graphql_errors_count`, `records_returned`, `pages_read`, `max_records`, `pagination_limit_reached`, `runtime_enabled`, `status`, `status_code_category`, `token_configured`, `transport_error_category`, and `reason`.
 
-Forbidden output for `crm_list_business_chances` includes project names, customer names, amount-like fields, phone, email, contact, address, notes/free text, raw CRM fields outside the allowed record shape, endpoint values, tokens, Authorization headers, cookies, and raw GraphQL request or response payloads.
+Forbidden output for `crm_list_business_chances` includes project names, customer names, amount-like fields, phone, email, contact, address, notes/free text, raw CRM fields outside the allowed record shape, endpoint values, tokens, Authorization headers, cookies, raw GraphQL request or response payloads, raw GraphQL error text, and variables.
 
 ### `crm_check_read_boundary`
 

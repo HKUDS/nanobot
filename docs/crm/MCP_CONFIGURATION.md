@@ -8,7 +8,7 @@ This document records safe configuration patterns for the CRM MCP Server. The ch
 - Task 15H adds a Nanobot mock-mode config example and schema parse test only.
 - `crm_smoke_check` is a diagnostics tool.
 - `crm_list_projects` is a mocked read tool backed by synthetic mocked GraphQL responses.
-- Future real smoke can only happen in task 15I, after explicit user approval, with runtime configuration provided outside chat.
+- Future real smoke can only happen in task 15I, after explicit user approval, with runtime configuration provided outside chat. Its documented/default CRM GraphQL auth mode is `bearer`; `private_token` and `cookie` remain explicit diagnostic modes only.
 
 The current implementation does not provide a production CRM HTTP transport, active Nanobot runtime wiring, DingTalk integration, or CRM writeback.
 
@@ -123,6 +123,14 @@ CRM_GRAPHQL_TOKEN -> <CRM_GRAPHQL_TOKEN>
 ```
 
 OpenCode should not run commands that print the environment, including `env`, `printenv`, or plain Compose config output. Real smoke output must be limited to sanitized status, counts, operation names, and error categories.
+
+Real smoke uses `bearer` auth by default:
+
+```bash
+uv run --project crm_mcp_server python -m crm_mcp_server.real_smoke
+```
+
+Only use `--auth-mode private_token` or `--auth-mode cookie` for explicit sanitized diagnostics. Do not paste or record auth header values.
 
 ## Manual Verification
 
