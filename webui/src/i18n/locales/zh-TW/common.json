@@ -12,7 +12,8 @@
     "system": {
       "section": "系統",
       "restartHint": "重新啟動 nanobot 以套用執行階段變更。",
-      "restart": "重新啟動 nanobot"
+      "restart": "重新啟動 nanobot",
+      "restarting": "正在重新啟動..."
     },
     "restart": {
       "completed": "重新啟動已完成，耗時 {{seconds}} 秒。"
@@ -31,9 +32,79 @@
     "newChat": "新增對話",
     "recent": "最近對話",
     "refreshSessions": "重新整理會話",
+    "settings": "設定",
     "language": {
       "label": "語言",
       "ariaLabel": "切換語言"
+    }
+  },
+  "settings": {
+    "backToChat": "返回對話",
+    "sidebar": {
+      "title": "設定",
+      "ariaLabel": "設定分區"
+    },
+    "nav": {
+      "general": "一般",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "介面",
+      "ai": "AI",
+      "system": "系統"
+    },
+    "rows": {
+      "theme": "主題",
+      "language": "語言",
+      "provider": "提供者",
+      "model": "模型",
+      "restart": "重新啟動 nanobot",
+      "configPath": "設定檔路徑"
+    },
+    "help": {
+      "theme": "在淺色與深色外觀之間切換。",
+      "language": "選擇 WebUI 使用的語言。",
+      "provider": "選擇新模型請求使用的服務提供者。",
+      "model": "設定 nanobot 預設使用的模型名稱。",
+      "configPath": "目前閘道正在使用的設定檔。"
+    },
+    "values": {
+      "light": "淺色",
+      "dark": "深色",
+      "notAvailable": "不可用"
+    },
+    "status": {
+      "loading": "正在載入設定...",
+      "loadError": "無法載入設定",
+      "unsaved": "有未儲存的變更。",
+      "savedRestart": "已儲存。重新啟動 nanobot 後生效。"
+    },
+    "actions": {
+      "save": "儲存",
+      "saving": "儲存中",
+      "edit": "編輯",
+      "cancel": "取消"
+    },
+    "byok": {
+      "description": "自帶 provider key。Nanobot 會從目前 config 讀取這些值，只有已設定的 provider 才能在一般設定中選擇。",
+      "configured": "已設定",
+      "notConfigured": "未設定",
+      "configuredSection": "已設定",
+      "notConfiguredSection": "未設定",
+      "showMore": "再顯示 {{count}} 個",
+      "showLess": "收合",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "輸入 API key",
+      "apiKeyConfiguredPlaceholder": "留空則保留目前 key",
+      "configuredKeyHint": "已設定的 key",
+      "apiBasePlaceholder": "使用 provider 預設地址",
+      "apiKeyRequired": "需要 API key 才能設定此 provider。",
+      "showApiKey": "顯示 API key",
+      "hideApiKey": "隱藏 API key",
+      "noConfiguredProviders": "沒有已設定的 provider",
+      "configureFirst": "請先在 BYOK 設定 provider。",
+      "openByok": "開啟 BYOK"
     }
   },
   "chat": {

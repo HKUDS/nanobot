@@ -1,4 +1,4 @@
-import { Menu, Moon, Settings, Sun } from "lucide-react";
+import { Menu, Moon, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,6 @@ interface ThreadHeaderProps {
   onToggleSidebar: () => void;
   theme: "light" | "dark";
   onToggleTheme: () => void;
-  onOpenSettings: () => void;
   hideSidebarToggleOnDesktop?: boolean;
   minimal?: boolean;
 }
@@ -19,7 +18,6 @@ export function ThreadHeader({
   onToggleSidebar,
   theme,
   onToggleTheme,
-  onOpenSettings,
   hideSidebarToggleOnDesktop = false,
   minimal = false,
 }: ThreadHeaderProps) {
@@ -39,30 +37,7 @@ export function ThreadHeader({
         >
           <Menu className="h-3.5 w-3.5" />
         </Button>
-        <div className="flex items-center gap-0.5">
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t("thread.header.toggleTheme")}
-            onClick={onToggleTheme}
-            className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
-          >
-            {theme === "dark" ? (
-              <Sun className="h-4 w-4" />
-            ) : (
-              <Moon className="h-4 w-4" />
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t("thread.header.settings")}
-            onClick={onOpenSettings}
-            className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
-          >
-            <Settings className="h-4 w-4" />
-          </Button>
-        </div>
+        <ThemeButton theme={theme} onToggleTheme={onToggleTheme} label={t("thread.header.toggleTheme")} />
       </div>
     );
   }
@@ -87,32 +62,35 @@ export function ThreadHeader({
         </div>
       </div>
 
-      <div className="flex items-center gap-0.5">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t("thread.header.toggleTheme")}
-          onClick={onToggleTheme}
-          className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
-        >
-          {theme === "dark" ? (
-            <Sun className="h-4 w-4" />
-          ) : (
-            <Moon className="h-4 w-4" />
-          )}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t("thread.header.settings")}
-          onClick={onOpenSettings}
-          className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
-        >
-          <Settings className="h-4 w-4" />
-        </Button>
-      </div>
+      <ThemeButton theme={theme} onToggleTheme={onToggleTheme} label={t("thread.header.toggleTheme")} />
 
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-full h-4" />
     </div>
+  );
+}
+
+function ThemeButton({
+  theme,
+  onToggleTheme,
+  label,
+}: {
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
+  label: string;
+}) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      aria-label={label}
+      onClick={onToggleTheme}
+      className="h-8 w-8 rounded-full text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
+    >
+      {theme === "dark" ? (
+        <Sun className="h-4 w-4" />
+      ) : (
+        <Moon className="h-4 w-4" />
+      )}
+    </Button>
   );
 }

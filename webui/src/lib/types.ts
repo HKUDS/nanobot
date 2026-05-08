@@ -77,6 +77,10 @@ export interface SettingsPayload {
   providers: Array<{
     name: string;
     label: string;
+    configured: boolean;
+    api_key_hint?: string | null;
+    api_base?: string | null;
+    default_api_base?: string | null;
   }>;
   runtime: {
     config_path: string;
@@ -87,6 +91,12 @@ export interface SettingsPayload {
 export interface SettingsUpdate {
   model?: string;
   provider?: string;
+}
+
+export interface ProviderSettingsUpdate {
+  provider: string;
+  apiKey?: string;
+  apiBase?: string;
 }
 
 export interface SlashCommand {

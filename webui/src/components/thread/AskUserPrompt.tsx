@@ -49,7 +49,7 @@ export function AskUserPrompt({
         <div className="mt-0.5 rounded-full bg-primary/10 p-1.5 text-primary">
           <MessageSquareText className="h-3.5 w-3.5" aria-hidden />
         </div>
-        <p className="min-w-0 flex-1 text-sm font-medium leading-5 text-foreground">
+        <p className="min-w-0 flex-1 text-[13.5px] font-medium leading-5 text-foreground">
           {question}
         </p>
       </div>
@@ -94,7 +94,7 @@ export function AskUserPrompt({
             placeholder="Type your own answer..."
             className={cn(
               "min-h-9 flex-1 resize-none rounded-[10px] border border-border/70 bg-background",
-              "px-3 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground",
+              "px-3 py-2 text-[13.5px] leading-5 outline-none placeholder:text-muted-foreground",
               "focus-visible:ring-1 focus-visible:ring-primary/40",
             )}
           />

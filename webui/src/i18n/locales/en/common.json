@@ -24,7 +24,8 @@
     "system": {
       "section": "System",
       "restartHint": "Restart nanobot to apply runtime changes.",
-      "restart": "Restart nanobot"
+      "restart": "Restart nanobot",
+      "restarting": "Restarting..."
     },
     "restart": {
       "completed": "Restart completed in {{seconds}}s."
@@ -54,6 +55,75 @@
     "language": {
       "label": "Language",
       "ariaLabel": "Change language"
+    }
+  },
+  "settings": {
+    "backToChat": "Back to chat",
+    "sidebar": {
+      "title": "Settings",
+      "ariaLabel": "Settings sections"
+    },
+    "nav": {
+      "general": "General",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "Interface",
+      "ai": "AI",
+      "system": "System"
+    },
+    "rows": {
+      "theme": "Theme",
+      "language": "Language",
+      "provider": "Provider",
+      "model": "Model",
+      "restart": "Restart nanobot",
+      "configPath": "Config path"
+    },
+    "help": {
+      "theme": "Switch between light and dark appearance.",
+      "language": "Choose the language used by the WebUI.",
+      "provider": "Select the provider that should serve new model requests.",
+      "model": "Set the default model name used by nanobot.",
+      "configPath": "The gateway configuration file currently in use."
+    },
+    "values": {
+      "light": "Light",
+      "dark": "Dark",
+      "notAvailable": "Not available"
+    },
+    "status": {
+      "loading": "Loading settings...",
+      "loadError": "Could not load settings",
+      "unsaved": "Unsaved changes.",
+      "savedRestart": "Saved. Restart nanobot to apply."
+    },
+    "actions": {
+      "save": "Save",
+      "saving": "Saving",
+      "edit": "Edit",
+      "cancel": "Cancel"
+    },
+    "byok": {
+      "description": "Bring your own provider keys. Nanobot reads these values from the current config and only configured providers can be selected in General.",
+      "configured": "Configured",
+      "notConfigured": "Not configured",
+      "configuredSection": "Configured",
+      "notConfiguredSection": "Not configured",
+      "showMore": "Show {{count}} more",
+      "showLess": "Show fewer",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "Enter API key",
+      "apiKeyConfiguredPlaceholder": "Leave blank to keep the current key",
+      "configuredKeyHint": "Configured key",
+      "apiBasePlaceholder": "Use provider default",
+      "apiKeyRequired": "API key is required to configure this provider.",
+      "showApiKey": "Show API key",
+      "hideApiKey": "Hide API key",
+      "noConfiguredProviders": "No configured providers",
+      "configureFirst": "Configure a provider in BYOK first.",
+      "openByok": "Open BYOK"
     }
   },
   "chat": {

@@ -12,7 +12,8 @@
     "system": {
       "section": "Sistem",
       "restartHint": "Mulai ulang nanobot untuk menerapkan perubahan runtime.",
-      "restart": "Mulai ulang nanobot"
+      "restart": "Mulai ulang nanobot",
+      "restarting": "Memulai ulang..."
     },
     "restart": {
       "completed": "Mulai ulang selesai dalam {{seconds}} dtk."
@@ -31,9 +32,79 @@
     "newChat": "Obrolan baru",
     "recent": "Terbaru",
     "refreshSessions": "Segarkan sesi",
+    "settings": "Pengaturan",
     "language": {
       "label": "Bahasa",
       "ariaLabel": "Ganti bahasa"
+    }
+  },
+  "settings": {
+    "backToChat": "Kembali ke obrolan",
+    "sidebar": {
+      "title": "Pengaturan",
+      "ariaLabel": "Bagian pengaturan"
+    },
+    "nav": {
+      "general": "Umum",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "Antarmuka",
+      "ai": "AI",
+      "system": "Sistem"
+    },
+    "rows": {
+      "theme": "Tema",
+      "language": "Bahasa",
+      "provider": "Penyedia",
+      "model": "Model",
+      "restart": "Mulai ulang nanobot",
+      "configPath": "Path konfigurasi"
+    },
+    "help": {
+      "theme": "Beralih antara tampilan terang dan gelap.",
+      "language": "Pilih bahasa yang digunakan WebUI.",
+      "provider": "Pilih penyedia untuk permintaan model baru.",
+      "model": "Atur nama model default yang digunakan nanobot.",
+      "configPath": "File konfigurasi gateway yang sedang digunakan."
+    },
+    "values": {
+      "light": "Terang",
+      "dark": "Gelap",
+      "notAvailable": "Tidak tersedia"
+    },
+    "status": {
+      "loading": "Memuat pengaturan...",
+      "loadError": "Tidak dapat memuat pengaturan",
+      "unsaved": "Ada perubahan yang belum disimpan.",
+      "savedRestart": "Tersimpan. Mulai ulang nanobot untuk menerapkan."
+    },
+    "actions": {
+      "save": "Simpan",
+      "saving": "Menyimpan",
+      "edit": "Edit",
+      "cancel": "Batal"
+    },
+    "byok": {
+      "description": "Gunakan kunci provider Anda sendiri. Nanobot membaca nilai ini dari config saat ini, dan hanya provider yang sudah dikonfigurasi yang bisa dipilih di Umum.",
+      "configured": "Terkonfigurasi",
+      "notConfigured": "Belum dikonfigurasi",
+      "configuredSection": "Terkonfigurasi",
+      "notConfiguredSection": "Belum dikonfigurasi",
+      "showMore": "Tampilkan {{count}} lagi",
+      "showLess": "Tampilkan lebih sedikit",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "Masukkan API key",
+      "apiKeyConfiguredPlaceholder": "Kosongkan untuk mempertahankan key saat ini",
+      "configuredKeyHint": "Key terkonfigurasi",
+      "apiBasePlaceholder": "Gunakan default provider",
+      "apiKeyRequired": "API key diperlukan untuk mengonfigurasi provider ini.",
+      "showApiKey": "Tampilkan API key",
+      "hideApiKey": "Sembunyikan API key",
+      "noConfiguredProviders": "Belum ada provider terkonfigurasi",
+      "configureFirst": "Konfigurasikan provider di BYOK terlebih dahulu.",
+      "openByok": "Buka BYOK"
     }
   },
   "chat": {

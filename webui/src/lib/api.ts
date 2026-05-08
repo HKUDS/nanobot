@@ -1,4 +1,10 @@
-import type { ChatSummary, SettingsPayload, SettingsUpdate, SlashCommand } from "./types";
+import type {
+  ChatSummary,
+  ProviderSettingsUpdate,
+  SettingsPayload,
+  SettingsUpdate,
+  SlashCommand,
+} from "./types";
 
 export class ApiError extends Error {
   status: number;
@@ -146,4 +152,19 @@ export async function updateSettings(
   if (update.model !== undefined) query.set("model", update.model);
   if (update.provider !== undefined) query.set("provider", update.provider);
   return request<SettingsPayload>(`${base}/api/settings/update?${query}`, token);
+}
+
+export async function updateProviderSettings(
+  token: string,
+  update: ProviderSettingsUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  query.set("provider", update.provider);
+  if (update.apiKey !== undefined) query.set("api_key", update.apiKey);
+  if (update.apiBase !== undefined) query.set("api_base", update.apiBase);
+  return request<SettingsPayload>(
+    `${base}/api/settings/provider/update?${query}`,
+    token,
+  );
 }

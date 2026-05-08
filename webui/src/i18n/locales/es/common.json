@@ -12,7 +12,8 @@
     "system": {
       "section": "Sistema",
       "restartHint": "Reinicia nanobot para aplicar los cambios de ejecución.",
-      "restart": "Reiniciar nanobot"
+      "restart": "Reiniciar nanobot",
+      "restarting": "Reiniciando..."
     },
     "restart": {
       "completed": "Reinicio completado en {{seconds}} s."
@@ -31,9 +32,79 @@
     "newChat": "Nuevo chat",
     "recent": "Recientes",
     "refreshSessions": "Actualizar sesiones",
+    "settings": "Configuración",
     "language": {
       "label": "Idioma",
       "ariaLabel": "Cambiar idioma"
+    }
+  },
+  "settings": {
+    "backToChat": "Volver al chat",
+    "sidebar": {
+      "title": "Configuración",
+      "ariaLabel": "Secciones de configuración"
+    },
+    "nav": {
+      "general": "General",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "Interfaz",
+      "ai": "IA",
+      "system": "Sistema"
+    },
+    "rows": {
+      "theme": "Tema",
+      "language": "Idioma",
+      "provider": "Proveedor",
+      "model": "Modelo",
+      "restart": "Reiniciar nanobot",
+      "configPath": "Ruta de configuración"
+    },
+    "help": {
+      "theme": "Cambia entre apariencia clara y oscura.",
+      "language": "Elige el idioma usado por la WebUI.",
+      "provider": "Selecciona el proveedor para nuevas solicitudes de modelo.",
+      "model": "Define el nombre del modelo predeterminado que usa nanobot.",
+      "configPath": "El archivo de configuración que usa actualmente el gateway."
+    },
+    "values": {
+      "light": "Claro",
+      "dark": "Oscuro",
+      "notAvailable": "No disponible"
+    },
+    "status": {
+      "loading": "Cargando configuración...",
+      "loadError": "No se pudo cargar la configuración",
+      "unsaved": "Hay cambios sin guardar.",
+      "savedRestart": "Guardado. Reinicia nanobot para aplicar."
+    },
+    "actions": {
+      "save": "Guardar",
+      "saving": "Guardando",
+      "edit": "Editar",
+      "cancel": "Cancelar"
+    },
+    "byok": {
+      "description": "Usa tus propias claves de proveedor. Nanobot lee estos valores desde la configuración actual, y solo los proveedores configurados se pueden elegir en General.",
+      "configured": "Configurado",
+      "notConfigured": "Sin configurar",
+      "configuredSection": "Configurados",
+      "notConfiguredSection": "Sin configurar",
+      "showMore": "Mostrar {{count}} más",
+      "showLess": "Mostrar menos",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "Introduce la API key",
+      "apiKeyConfiguredPlaceholder": "Deja vacío para conservar la key actual",
+      "configuredKeyHint": "Key configurada",
+      "apiBasePlaceholder": "Usar el valor predeterminado del proveedor",
+      "apiKeyRequired": "Se requiere una API key para configurar este proveedor.",
+      "showApiKey": "Mostrar API key",
+      "hideApiKey": "Ocultar API key",
+      "noConfiguredProviders": "No hay proveedores configurados",
+      "configureFirst": "Configura primero un proveedor en BYOK.",
+      "openByok": "Abrir BYOK"
     }
   },
   "chat": {

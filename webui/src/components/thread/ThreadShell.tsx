@@ -34,7 +34,6 @@ interface ThreadShellProps {
   onTurnEnd?: () => void;
   theme?: "light" | "dark";
   onToggleTheme?: () => void;
-  onOpenSettings?: () => void;
   hideSidebarToggleOnDesktop?: boolean;
 }
 
@@ -78,7 +77,6 @@ export function ThreadShell({
   onTurnEnd,
   theme = "light",
   onToggleTheme = () => {},
-  onOpenSettings = () => {},
   hideSidebarToggleOnDesktop = false,
 }: ThreadShellProps) {
   const { t } = useTranslation();
@@ -312,7 +310,6 @@ export function ThreadShell({
         onToggleSidebar={onToggleSidebar}
         theme={theme}
         onToggleTheme={onToggleTheme}
-        onOpenSettings={onOpenSettings}
         hideSidebarToggleOnDesktop={hideSidebarToggleOnDesktop}
         minimal={!session && !loading}
       />

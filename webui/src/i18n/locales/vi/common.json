@@ -12,7 +12,8 @@
     "system": {
       "section": "Hệ thống",
       "restartHint": "Khởi động lại nanobot để áp dụng thay đổi runtime.",
-      "restart": "Khởi động lại nanobot"
+      "restart": "Khởi động lại nanobot",
+      "restarting": "Đang khởi động lại..."
     },
     "restart": {
       "completed": "Khởi động lại hoàn tất sau {{seconds}} giây."
@@ -31,9 +32,79 @@
     "newChat": "Cuộc trò chuyện mới",
     "recent": "Gần đây",
     "refreshSessions": "Làm mới phiên",
+    "settings": "Cài đặt",
     "language": {
       "label": "Ngôn ngữ",
       "ariaLabel": "Đổi ngôn ngữ"
+    }
+  },
+  "settings": {
+    "backToChat": "Quay lại trò chuyện",
+    "sidebar": {
+      "title": "Cài đặt",
+      "ariaLabel": "Các mục cài đặt"
+    },
+    "nav": {
+      "general": "Chung",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "Giao diện",
+      "ai": "AI",
+      "system": "Hệ thống"
+    },
+    "rows": {
+      "theme": "Giao diện",
+      "language": "Ngôn ngữ",
+      "provider": "Nhà cung cấp",
+      "model": "Mô hình",
+      "restart": "Khởi động lại nanobot",
+      "configPath": "Đường dẫn cấu hình"
+    },
+    "help": {
+      "theme": "Chuyển giữa giao diện sáng và tối.",
+      "language": "Chọn ngôn ngữ dùng trong WebUI.",
+      "provider": "Chọn nhà cung cấp cho các yêu cầu mô hình mới.",
+      "model": "Đặt tên mô hình mặc định mà nanobot sử dụng.",
+      "configPath": "Tệp cấu hình gateway hiện đang dùng."
+    },
+    "values": {
+      "light": "Sáng",
+      "dark": "Tối",
+      "notAvailable": "Không khả dụng"
+    },
+    "status": {
+      "loading": "Đang tải cài đặt...",
+      "loadError": "Không thể tải cài đặt",
+      "unsaved": "Có thay đổi chưa lưu.",
+      "savedRestart": "Đã lưu. Khởi động lại nanobot để áp dụng."
+    },
+    "actions": {
+      "save": "Lưu",
+      "saving": "Đang lưu",
+      "edit": "Sửa",
+      "cancel": "Hủy"
+    },
+    "byok": {
+      "description": "Dùng key provider của riêng bạn. Nanobot đọc các giá trị này từ config hiện tại, và chỉ provider đã cấu hình mới có thể chọn trong Chung.",
+      "configured": "Đã cấu hình",
+      "notConfigured": "Chưa cấu hình",
+      "configuredSection": "Đã cấu hình",
+      "notConfiguredSection": "Chưa cấu hình",
+      "showMore": "Hiển thị thêm {{count}}",
+      "showLess": "Thu gọn",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "Nhập API key",
+      "apiKeyConfiguredPlaceholder": "Để trống để giữ key hiện tại",
+      "configuredKeyHint": "Key đã cấu hình",
+      "apiBasePlaceholder": "Dùng mặc định của provider",
+      "apiKeyRequired": "Cần API key để cấu hình provider này.",
+      "showApiKey": "Hiển thị API key",
+      "hideApiKey": "Ẩn API key",
+      "noConfiguredProviders": "Chưa có provider đã cấu hình",
+      "configureFirst": "Hãy cấu hình provider trong BYOK trước.",
+      "openByok": "Mở BYOK"
     }
   },
   "chat": {

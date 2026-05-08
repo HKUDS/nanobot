@@ -473,8 +473,8 @@ export function ThreadComposer({
           className={cn(
             "w-full resize-none bg-transparent",
             isHero
-              ? "min-h-[78px] px-5 pb-2 pt-5 text-[16px] leading-6"
-              : "min-h-[50px] px-4 pb-1.5 pt-3 text-sm",
+              ? "min-h-[78px] px-5 pb-2 pt-5 text-[15px] leading-6"
+              : "min-h-[50px] px-4 pb-1.5 pt-3 text-[13.5px] leading-5",
             "placeholder:text-muted-foreground/70",
             "focus:outline-none focus-visible:outline-none",
             "disabled:cursor-not-allowed",

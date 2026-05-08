@@ -5,6 +5,7 @@ import {
   fetchSessionMessages,
   listSessions,
   listSlashCommands,
+  updateProviderSettings,
   updateSettings,
 } from "@/lib/api";
 
@@ -49,6 +50,21 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/update?model=openrouter%2Ftest&provider=openrouter",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("serializes provider settings updates without returning secrets", async () => {
+    await updateProviderSettings("tok", {
+      provider: "openrouter",
+      apiKey: "sk-or-test",
+      apiBase: "https://openrouter.ai/api/v1",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/provider/update?provider=openrouter&api_key=sk-or-test&api_base=https%3A%2F%2Fopenrouter.ai%2Fapi%2Fv1",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

@@ -12,7 +12,8 @@
     "system": {
       "section": "システム",
       "restartHint": "実行時の変更を適用するには nanobot を再起動します。",
-      "restart": "nanobot を再起動"
+      "restart": "nanobot を再起動",
+      "restarting": "再起動中..."
     },
     "restart": {
       "completed": "{{seconds}} 秒で再起動が完了しました。"
@@ -31,9 +32,79 @@
     "newChat": "新しいチャット",
     "recent": "最近のチャット",
     "refreshSessions": "セッションを更新",
+    "settings": "設定",
     "language": {
       "label": "言語",
       "ariaLabel": "言語を変更"
+    }
+  },
+  "settings": {
+    "backToChat": "チャットに戻る",
+    "sidebar": {
+      "title": "設定",
+      "ariaLabel": "設定セクション"
+    },
+    "nav": {
+      "general": "一般",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "インターフェース",
+      "ai": "AI",
+      "system": "システム"
+    },
+    "rows": {
+      "theme": "テーマ",
+      "language": "言語",
+      "provider": "プロバイダー",
+      "model": "モデル",
+      "restart": "nanobot を再起動",
+      "configPath": "設定パス"
+    },
+    "help": {
+      "theme": "ライト表示とダーク表示を切り替えます。",
+      "language": "WebUI で使用する言語を選択します。",
+      "provider": "新しいモデルリクエストに使うプロバイダーを選択します。",
+      "model": "nanobot が既定で使用するモデル名を設定します。",
+      "configPath": "現在ゲートウェイが使用している設定ファイルです。"
+    },
+    "values": {
+      "light": "ライト",
+      "dark": "ダーク",
+      "notAvailable": "利用不可"
+    },
+    "status": {
+      "loading": "設定を読み込んでいます...",
+      "loadError": "設定を読み込めませんでした",
+      "unsaved": "未保存の変更があります。",
+      "savedRestart": "保存しました。反映するには nanobot を再起動してください。"
+    },
+    "actions": {
+      "save": "保存",
+      "saving": "保存中",
+      "edit": "編集",
+      "cancel": "キャンセル"
+    },
+    "byok": {
+      "description": "自分の provider キーを使います。Nanobot は現在の config から値を読み込み、設定済みの provider だけを一般設定で選択できます。",
+      "configured": "設定済み",
+      "notConfigured": "未設定",
+      "configuredSection": "設定済み",
+      "notConfiguredSection": "未設定",
+      "showMore": "さらに {{count}} 件表示",
+      "showLess": "折りたたむ",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "API key を入力",
+      "apiKeyConfiguredPlaceholder": "空欄のままなら現在の key を保持",
+      "configuredKeyHint": "設定済み key",
+      "apiBasePlaceholder": "provider の既定値を使用",
+      "apiKeyRequired": "この provider を設定するには API key が必要です。",
+      "showApiKey": "API key を表示",
+      "hideApiKey": "API key を隠す",
+      "noConfiguredProviders": "設定済み provider がありません",
+      "configureFirst": "先に BYOK で provider を設定してください。",
+      "openByok": "BYOK を開く"
     }
   },
   "chat": {

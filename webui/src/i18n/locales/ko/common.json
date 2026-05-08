@@ -12,7 +12,8 @@
     "system": {
       "section": "시스템",
       "restartHint": "런타임 변경 사항을 적용하려면 nanobot을 다시 시작하세요.",
-      "restart": "nanobot 다시 시작"
+      "restart": "nanobot 다시 시작",
+      "restarting": "다시 시작 중..."
     },
     "restart": {
       "completed": "{{seconds}}초 만에 다시 시작되었습니다."
@@ -31,9 +32,79 @@
     "newChat": "새 채팅",
     "recent": "최근 대화",
     "refreshSessions": "세션 새로고침",
+    "settings": "설정",
     "language": {
       "label": "언어",
       "ariaLabel": "언어 변경"
+    }
+  },
+  "settings": {
+    "backToChat": "채팅으로 돌아가기",
+    "sidebar": {
+      "title": "설정",
+      "ariaLabel": "설정 섹션"
+    },
+    "nav": {
+      "general": "일반",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "인터페이스",
+      "ai": "AI",
+      "system": "시스템"
+    },
+    "rows": {
+      "theme": "테마",
+      "language": "언어",
+      "provider": "제공자",
+      "model": "모델",
+      "restart": "nanobot 재시작",
+      "configPath": "설정 경로"
+    },
+    "help": {
+      "theme": "밝은 모드와 어두운 모드를 전환합니다.",
+      "language": "WebUI에서 사용할 언어를 선택합니다.",
+      "provider": "새 모델 요청에 사용할 제공자를 선택합니다.",
+      "model": "nanobot이 기본으로 사용할 모델 이름을 설정합니다.",
+      "configPath": "현재 게이트웨이가 사용하는 설정 파일입니다."
+    },
+    "values": {
+      "light": "라이트",
+      "dark": "다크",
+      "notAvailable": "사용할 수 없음"
+    },
+    "status": {
+      "loading": "설정을 불러오는 중...",
+      "loadError": "설정을 불러올 수 없습니다",
+      "unsaved": "저장되지 않은 변경 사항이 있습니다.",
+      "savedRestart": "저장되었습니다. 적용하려면 nanobot을 재시작하세요."
+    },
+    "actions": {
+      "save": "저장",
+      "saving": "저장 중",
+      "edit": "편집",
+      "cancel": "취소"
+    },
+    "byok": {
+      "description": "직접 provider 키를 가져옵니다. Nanobot은 현재 config에서 값을 읽고, 설정된 provider만 일반 설정에서 선택할 수 있습니다.",
+      "configured": "설정됨",
+      "notConfigured": "설정 안 됨",
+      "configuredSection": "설정됨",
+      "notConfiguredSection": "설정 안 됨",
+      "showMore": "{{count}}개 더 보기",
+      "showLess": "접기",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "API key 입력",
+      "apiKeyConfiguredPlaceholder": "비워 두면 현재 key 유지",
+      "configuredKeyHint": "설정된 key",
+      "apiBasePlaceholder": "provider 기본값 사용",
+      "apiKeyRequired": "이 provider를 설정하려면 API key가 필요합니다.",
+      "showApiKey": "API key 표시",
+      "hideApiKey": "API key 숨기기",
+      "noConfiguredProviders": "설정된 provider가 없습니다",
+      "configureFirst": "먼저 BYOK에서 provider를 설정하세요.",
+      "openByok": "BYOK 열기"
     }
   },
   "chat": {

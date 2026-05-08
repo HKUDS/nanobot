@@ -12,7 +12,8 @@
     "system": {
       "section": "系统",
       "restartHint": "重启 nanobot 以应用运行时更改。",
-      "restart": "重启 nanobot"
+      "restart": "重启 nanobot",
+      "restarting": "正在重启..."
     },
     "restart": {
       "completed": "重启已完成，用时 {{seconds}} 秒。"
@@ -42,6 +43,75 @@
     "language": {
       "label": "语言",
       "ariaLabel": "切换语言"
+    }
+  },
+  "settings": {
+    "backToChat": "返回对话",
+    "sidebar": {
+      "title": "设置",
+      "ariaLabel": "设置分区"
+    },
+    "nav": {
+      "general": "通用",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "界面",
+      "ai": "AI",
+      "system": "系统"
+    },
+    "rows": {
+      "theme": "主题",
+      "language": "语言",
+      "provider": "提供商",
+      "model": "模型",
+      "restart": "重启 nanobot",
+      "configPath": "配置路径"
+    },
+    "help": {
+      "theme": "在浅色和深色外观之间切换。",
+      "language": "选择 WebUI 使用的语言。",
+      "provider": "选择新模型请求使用的服务提供商。",
+      "model": "设置 nanobot 默认使用的模型名称。",
+      "configPath": "当前网关正在使用的配置文件。"
+    },
+    "values": {
+      "light": "浅色",
+      "dark": "深色",
+      "notAvailable": "不可用"
+    },
+    "status": {
+      "loading": "正在加载设置...",
+      "loadError": "无法加载设置",
+      "unsaved": "有未保存的更改。",
+      "savedRestart": "已保存。重启 nanobot 后生效。"
+    },
+    "actions": {
+      "save": "保存",
+      "saving": "保存中",
+      "edit": "编辑",
+      "cancel": "取消"
+    },
+    "byok": {
+      "description": "自带 provider key。Nanobot 会从当前 config 读取这些值，只有已配置的 provider 才能在通用设置里选择。",
+      "configured": "已配置",
+      "notConfigured": "未配置",
+      "configuredSection": "已配置",
+      "notConfiguredSection": "未配置",
+      "showMore": "再显示 {{count}} 个",
+      "showLess": "收起",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "输入 API key",
+      "apiKeyConfiguredPlaceholder": "留空则保留当前 key",
+      "configuredKeyHint": "已配置的 key",
+      "apiBasePlaceholder": "使用 provider 默认地址",
+      "apiKeyRequired": "需要 API key 才能配置此 provider。",
+      "showApiKey": "显示 API key",
+      "hideApiKey": "隐藏 API key",
+      "noConfiguredProviders": "没有已配置的 provider",
+      "configureFirst": "请先在 BYOK 里配置 provider。",
+      "openByok": "打开 BYOK"
     }
   },
   "chat": {
