@@ -1,0 +1,30 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "~/.nanobot/sen/workspace",
+      "provider": "openrouter",
+      "model": "moonshotai/kimi-k2.6",
+      "maxTokens": 8192,
+      "contextWindowTokens": 65536,
+      "temperature": 0.1,
+      "timezone": "Asia/Ho_Chi_Minh"
+    }
+  },
+  "providers": {
+    "openrouter": {
+      "apiKey": "${OPENROUTER_API_KEY}"
+    }
+  },
+  "tools": {
+    "restrictToWorkspace": false,
+    "mcpServers": {
+      "gbrain": {
+        "type": "stdio",
+        "command": "/Users/dzungbui/.bun/bin/gbrain",
+        "args": ["serve"],
+        "toolTimeout": 60,
+        "enabledTools": ["*"]
+      }
+    }
+  }
+}
