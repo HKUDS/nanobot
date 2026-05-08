@@ -1539,10 +1539,11 @@ class FeishuChannel(BaseChannel):
             # same topic automatically when the target message is inside a topic.
             reply_message_id: str | None = None
             _msg_id = msg.metadata.get("message_id")
+            has_thread_id = msg.metadata.get("thread_id")
             if self.config.reply_to_message and not msg.metadata.get("_progress", False):
                 reply_message_id = _msg_id
             # For topic group messages, always reply to keep context in thread
-            elif msg.metadata.get("thread_id"):
+            elif has_thread_id:
                 reply_message_id = _msg_id
 
             first_send = True  # tracks whether the reply has already been used
@@ -1555,14 +1556,24 @@ class FeishuChannel(BaseChannel):
                 existing topic must not create a new topic.
                 """
                 nonlocal first_send
-                if reply_message_id and first_send:
-                    first_send = False
-                    ok = self._reply_message_sync(
-                        reply_message_id, m_type, content,
-                        reply_in_thread=self._should_use_reply_in_thread(msg.metadata),
-                    )
-                    if ok:
-                        return
+                if reply_message_id:
+                    # If we're in a topic, always use reply to stay in the topic
+                    if has_thread_id:
+                        ok = self._reply_message_sync(
+                            reply_message_id, m_type, content,
+                            reply_in_thread=self._should_use_reply_in_thread(msg.metadata),
+                        )
+                        if ok:
+                            return
+                    elif first_send:
+                        # If we're not in a topic but replying to message, only first uses reply
+                        first_send = False
+                        ok = self._reply_message_sync(
+                            reply_message_id, m_type, content,
+                            reply_in_thread=self._should_use_reply_in_thread(msg.metadata),
+                        )
+                        if ok:
+                            return
                     # Fall back to regular send if reply fails
                 self._send_message_sync(receive_id_type, msg.chat_id, m_type, content)
 

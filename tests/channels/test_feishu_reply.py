@@ -346,6 +346,89 @@ async def test_send_fallback_to_create_when_reply_fails() -> None:
     channel._client.im.v1.message.create.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_send_multiple_messages_all_use_reply_when_in_topic(tmp_path: Path) -> None:
+    """When in a topic (has thread_id), all messages use reply API to stay in topic."""
+    channel = _make_feishu_channel(reply_to_message=False)
+
+    file1 = tmp_path / "file1.png"
+    file2 = tmp_path / "file2.png"
+    file1.write_bytes(b"demo1")
+    file2.write_bytes(b"demo2")
+
+    reply_calls = []
+    create_calls = []
+
+    def _mock_reply(*args, **kwargs) -> bool:
+        reply_calls.append((args, kwargs))
+        return True
+
+    def _mock_create(*args, **kwargs) -> str:
+        create_calls.append((args, kwargs))
+        return "msg_id"
+
+    with patch.object(channel, "_upload_file_sync", return_value="file-key"), \
+         patch.object(channel, "_upload_image_sync", return_value="image-key"), \
+         patch.object(channel, "_reply_message_sync", side_effect=_mock_reply), \
+         patch.object(channel, "_send_message_sync", side_effect=_mock_create):
+        await channel.send(OutboundMessage(
+            channel="feishu",
+            chat_id="oc_abc",
+            content="hello",
+            media=[str(file1), str(file2)],
+            metadata={
+                "message_id": "om_001",
+                "thread_id": "om_thread",
+                "chat_type": "group",
+            },
+        ))
+
+    # All 3 sends (text + 2 images) should use reply
+    assert len(reply_calls) == 3
+    assert len(create_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_send_multiple_messages_only_first_uses_reply_when_reply_to_message(tmp_path: Path) -> None:
+    """When reply_to_message is enabled but not in topic, only first message uses reply."""
+    channel = _make_feishu_channel(reply_to_message=True)
+
+    file1 = tmp_path / "file1.png"
+    file2 = tmp_path / "file2.png"
+    file1.write_bytes(b"demo1")
+    file2.write_bytes(b"demo2")
+
+    reply_calls = []
+    create_calls = []
+
+    def _mock_reply(*args, **kwargs) -> bool:
+        reply_calls.append((args, kwargs))
+        return True
+
+    def _mock_create(*args, **kwargs) -> str:
+        create_calls.append((args, kwargs))
+        return "msg_id"
+
+    with patch.object(channel, "_upload_file_sync", return_value="file-key"), \
+         patch.object(channel, "_upload_image_sync", return_value="image-key"), \
+         patch.object(channel, "_reply_message_sync", side_effect=_mock_reply), \
+         patch.object(channel, "_send_message_sync", side_effect=_mock_create):
+        await channel.send(OutboundMessage(
+            channel="feishu",
+            chat_id="oc_abc",
+            content="hello",
+            media=[str(file1), str(file2)],
+            metadata={
+                "message_id": "om_001",
+                "chat_type": "group",
+            },
+        ))
+
+    # Only first send uses reply, rest use create
+    assert len(reply_calls) == 1
+    assert len(create_calls) == 2
+
+
 # ---------------------------------------------------------------------------
 # _on_message — parent_id / root_id metadata tests
 # ---------------------------------------------------------------------------
