@@ -32,6 +32,23 @@ ALLOWED_KEYS = {
     "normalized_count",
     "reason",
     "errors",
+    "transport_attempted",
+    "response_json_parsed",
+    "data_root_present",
+    "operation_data_present",
+    "records_field_present",
+    "records_is_list",
+    "reported_total",
+    "transport_error_category",
+    "status_code_category",
+    "endpoint_configured",
+    "token_configured",
+    "proxy_configured",
+    "graphql_error_category",
+    "graphql_error_path_present",
+    "graphql_error_extensions_present",
+    "auth_mode",
+    "auth_error_category",
 }
 
 
@@ -75,11 +92,117 @@ def test_mocked_successful_empty_result_returns_empty_result():
     assert result["status"] == "INCONCLUSIVE"
     assert result["reason"] == "empty_result"
     assert result["http_status_category"] == "success"
+    assert result["transport_attempted"] is True
+    assert result["response_json_parsed"] is True
+    assert result["data_root_present"] is True
+    assert result["operation_data_present"] is True
+    assert result["records_field_present"] is True
+    assert result["records_is_list"] is True
+    assert result["reported_total"] == 0
     assert result["graphql_errors_count"] == 0
     assert result["data_count"] == 0
     assert result["normalized_count"] == 0
     assert result["mutation_used"] is False
     assert transport.calls == ["listProject"]
+
+
+def test_crm_unavailable_does_not_report_empty_result():
+    from crm_mcp_server.diagnostics import MockGraphQLTransport, crm_smoke_check
+
+    transport = MockGraphQLTransport(response={}, http_status_category="crm_unavailable")
+
+    result = crm_smoke_check(runtime_enabled=True, transport=transport)
+
+    assert result["status"] == "ERROR"
+    assert result["reason"] == "crm_unavailable"
+    assert result["http_status_category"] == "crm_unavailable"
+    assert result["transport_attempted"] is True
+    assert result["response_json_parsed"] is True
+    assert result["data_root_present"] is False
+
+
+def test_empty_list_uses_success_http_category_and_empty_result_reason():
+    from crm_mcp_server.diagnostics import MockGraphQLTransport, crm_smoke_check
+
+    transport = MockGraphQLTransport(response={"data": {"listProject": {"data": []}}})
+
+    result = crm_smoke_check(runtime_enabled=True, transport=transport)
+
+    assert result["status"] == "INCONCLUSIVE"
+    assert result["reason"] == "empty_result"
+    assert result["http_status_category"] == "success"
+
+
+def test_operation_data_missing_returns_operation_data_missing():
+    from crm_mcp_server.diagnostics import MockGraphQLTransport, crm_smoke_check
+
+    transport = MockGraphQLTransport(response={"data": {}})
+
+    result = crm_smoke_check(runtime_enabled=True, transport=transport)
+
+    assert result["status"] == "ERROR"
+    assert result["reason"] == "operation_data_missing"
+    assert result["data_root_present"] is True
+    assert result["operation_data_present"] is False
+    assert result["records_field_present"] is False
+
+
+def test_records_field_missing_returns_records_field_missing():
+    from crm_mcp_server.diagnostics import MockGraphQLTransport, crm_smoke_check
+
+    transport = MockGraphQLTransport(response={"data": {"listProject": {"total": 0}}})
+
+    result = crm_smoke_check(runtime_enabled=True, transport=transport)
+
+    assert result["status"] == "ERROR"
+    assert result["reason"] == "records_field_missing"
+    assert result["data_root_present"] is True
+    assert result["operation_data_present"] is True
+    assert result["records_field_present"] is False
+    assert result["reported_total"] == 0
+
+
+def test_invalid_response_when_data_root_missing():
+    from crm_mcp_server.diagnostics import MockGraphQLTransport, crm_smoke_check
+
+    transport = MockGraphQLTransport(response={})
+
+    result = crm_smoke_check(runtime_enabled=True, transport=transport)
+
+    assert result["status"] == "ERROR"
+    assert result["reason"] == "invalid_response"
+    assert result["data_root_present"] is False
+
+
+
+def test_raw_response_with_sensitive_content_does_not_leak():
+    from crm_mcp_server.diagnostics import MockGraphQLTransport, crm_smoke_check
+
+    transport = MockGraphQLTransport(
+        response={
+            "data": {
+                "listProject": {
+                    "data": [
+                        {
+                            "token": "fake-token-123",
+                            "project": "Synthetic Project Name",
+                            "customer": "Synthetic Customer Name",
+                            "name": "Synthetic Customer Name",
+                            "amount": "20000",
+                            "contact": "contact",
+                            "note": "free-text CRM note",
+                        }
+                    ],
+                    "total": 1,
+                }
+            }
+        }
+    )
+
+    result = crm_smoke_check(runtime_enabled=True, transport=transport)
+
+    assert result["status"] == "OK"
+    assert_no_sensitive_output(result)
 
 
 def test_mocked_one_record_path_returns_sanitized_counts():

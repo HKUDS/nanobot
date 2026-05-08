@@ -67,7 +67,7 @@ _FIXED_SELECTION_SETS: Mapping[str, str] = MappingProxyType(
             total
             skip
             limit
-            data { id name stage claimBy { user { id name } } created_at updated_at }
+            data { id name stage claimBy { id user { name } } created_at updated_at }
         """,
         "projectInfo": """
             id
@@ -167,6 +167,14 @@ def _is_write_like_name(operation_name: str) -> bool:
 
 def _build_fixed_query(operation_name: str) -> str:
     selection = _FIXED_SELECTION_SETS[operation_name].strip()
+    if operation_name == "listProject":
+        return (
+            f"query {operation_name}($search: ProjectSearchParam!, $pagination: PaginationParam, $sort_by: SortBy!) {{\n"
+            f"  {operation_name}(search: $search, pagination: $pagination, sort_by: $sort_by) {{\n"
+            f"{_indent(selection)}\n"
+            "  }\n"
+            "}"
+        )
     return f"query {operation_name}($search: SearchParam, $id: ID) {{\n  {operation_name} {{\n{_indent(selection)}\n  }}\n}}"
 
 

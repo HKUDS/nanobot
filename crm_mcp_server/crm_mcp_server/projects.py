@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Protocol
 
 from crm_mcp_server.graphql import build_read_operation
+from crm_mcp_server.real_smoke import RealGraphQLSmokeTransport, load_real_smoke_config_from_env
 from crm_mcp_server.redaction import sanitize_errors
 
 DEFAULT_PAGE_SIZE = 50
@@ -22,11 +23,12 @@ class ProjectTransport(Protocol):
 def crm_list_projects(
     request: Mapping[str, Any],
     *,
-    transport: ProjectTransport,
+    transport: ProjectTransport | None = None,
+    runtime_enabled: bool = False,
     page_size: int = DEFAULT_PAGE_SIZE,
     max_pages: int = MAX_PAGES,
 ) -> dict[str, object]:
-    """Return sanitized project records from mocked listProject responses."""
+    """Return sanitized project records from listProject responses."""
 
     max_records = _requested_max_records(request)
     validation_reason = _validate_request(request, max_records=max_records)
@@ -41,8 +43,24 @@ def crm_list_projects(
                 records_returned=0,
                 pages_read=0,
                 max_records=max_records,
+                runtime_enabled=runtime_enabled,
+                transport=transport,
             ),
         )
+
+    if transport is None:
+        if not runtime_enabled:
+            return _config_missing_result(max_records=max_records, auth_mode="mock")
+        config = load_real_smoke_config_from_env()
+        if config is None:
+            return _config_missing_result(
+                max_records=max_records,
+                auth_mode="bearer",
+                runtime_enabled=False,
+                endpoint_configured=False,
+                token_configured=False,
+            )
+        transport = RealGraphQLSmokeTransport(config=config)
 
     records: list[dict[str, object]] = []
     source_refs: list[dict[str, object]] = []
@@ -54,6 +72,38 @@ def crm_list_projects(
     while len(records) < max_records and pages_read < max_pages:
         response = _read_page(request, transport=transport, skip=skip, limit=limit)
         pages_read += 1
+        transport_error = _transport_error_category(transport)
+        http_status = _http_status_category(transport)
+        if http_status in {"unauthorized_or_forbidden", "crm_unavailable", "rate_limited"}:
+            return _result(
+                records=[],
+                source_refs=[],
+                errors=[http_status],
+                diagnostics=_diagnostics(
+                    status="ERROR",
+                    reason=http_status,
+                    records_returned=0,
+                    pages_read=pages_read,
+                    max_records=max_records,
+                    runtime_enabled=runtime_enabled,
+                    transport=transport,
+                ),
+            )
+        if transport_error in {"non_json_response", "empty_response"}:
+            return _result(
+                records=[],
+                source_refs=[],
+                errors=["crm_unavailable"],
+                diagnostics=_diagnostics(
+                    status="ERROR",
+                    reason="crm_unavailable",
+                    records_returned=0,
+                    pages_read=pages_read,
+                    max_records=max_records,
+                    runtime_enabled=runtime_enabled,
+                    transport=transport,
+                ),
+            )
         errors = response.get("errors")
         if isinstance(errors, list) and errors:
             return _result(
@@ -67,6 +117,8 @@ def crm_list_projects(
                     records_returned=0,
                     pages_read=pages_read,
                     max_records=max_records,
+                    runtime_enabled=runtime_enabled,
+                    transport=transport,
                 ),
             )
 
@@ -87,6 +139,8 @@ def crm_list_projects(
                         records_returned=0,
                         pages_read=pages_read,
                         max_records=max_records,
+                        runtime_enabled=runtime_enabled,
+                        transport=transport,
                     ),
                 )
             record, source_ref = _normalize_project(raw_record)
@@ -120,6 +174,8 @@ def crm_list_projects(
             records_returned=len(records),
             pages_read=pages_read,
             max_records=max_records,
+            runtime_enabled=runtime_enabled,
+            transport=transport,
         ),
     )
 
@@ -139,10 +195,15 @@ def _read_page(
         "scope_id": scope["scope_id"],
         "owner_ids": list(scope.get("owner_ids", [])),
         "group_ids": list(scope.get("group_ids", [])),
-        "skip": skip,
-        "limit": limit,
     }
-    operation = build_read_operation(OPERATION_NAME, variables={"search": search})
+    operation = build_read_operation(
+        OPERATION_NAME,
+        variables={
+            "search": search,
+            "pagination": {"skip": skip, "limit": limit},
+            "sort_by": {"by": "updatedAt", "order": -1},
+        },
+    )
     return transport.execute(operation.operation_name, operation.query, operation.variables)
 
 
@@ -226,7 +287,7 @@ def _extract_owner(raw_record: Mapping[str, Any]) -> dict[str, str]:
     user = claim_by.get("user") if isinstance(claim_by, Mapping) else None
     if not isinstance(user, Mapping):
         return {"id": "", "name": ""}
-    return {"id": _safe_string(user.get("id")), "name": _safe_string(user.get("name"))}
+    return {"id": _safe_string(claim_by.get("id")), "name": _safe_string(user.get("name"))}
 
 
 def _safe_string(value: object) -> str:
@@ -241,8 +302,16 @@ def _diagnostics(
     pages_read: int,
     max_records: int,
     graphql_errors_count: int = 0,
+    runtime_enabled: bool = False,
+    transport: ProjectTransport | None = None,
+    auth_mode: str | None = None,
+    endpoint_configured: bool = False,
+    token_configured: bool = False,
 ) -> dict[str, object]:
     return {
+        "auth_mode": _auth_mode(transport, auth_mode=auth_mode),
+        "endpoint_configured": endpoint_configured,
+        "http_status_category": _http_status_category(transport),
         "read_only": True,
         "mutations_allowed": False,
         "mutation_used": False,
@@ -252,9 +321,78 @@ def _diagnostics(
         "pages_read": pages_read,
         "max_records": max_records,
         "pagination_limit_reached": reason == "max_pages_reached",
+        "runtime_enabled": runtime_enabled,
         "status": status,
+        "status_code_category": _status_code_category(transport),
+        "token_configured": token_configured,
+        "transport_error_category": _transport_error_category(transport),
         "reason": reason,
     }
+
+
+def _config_missing_result(
+    *,
+    max_records: int,
+    auth_mode: str,
+    runtime_enabled: bool = False,
+    endpoint_configured: bool = False,
+    token_configured: bool = False,
+) -> dict[str, object]:
+    return _result(
+        records=[],
+        source_refs=[],
+        errors=["config_missing"],
+        diagnostics=_diagnostics(
+            status="ERROR",
+            reason="config_missing",
+            records_returned=0,
+            pages_read=0,
+            max_records=max_records,
+            runtime_enabled=runtime_enabled,
+            auth_mode=auth_mode,
+            endpoint_configured=endpoint_configured,
+            token_configured=token_configured,
+        ),
+    )
+
+
+def _auth_mode(transport: ProjectTransport | None, *, auth_mode: str | None) -> str:
+    value = getattr(transport, "auth_mode", auth_mode or "mock")
+    return value if value in {"mock", "bearer", "private_token", "cookie"} else "mock"
+
+
+def _http_status_category(transport: ProjectTransport | None) -> str:
+    value = getattr(transport, "http_status_category", "not_attempted")
+    if value in {"not_attempted", "success", "unauthorized_or_forbidden", "crm_unavailable", "rate_limited"}:
+        return value
+    return "crm_unavailable"
+
+
+def _status_code_category(transport: ProjectTransport | None) -> str | None:
+    value = getattr(transport, "status_code_category", None)
+    if value in {"2xx", "3xx", "4xx", "5xx", "not_available"}:
+        return value
+    return None
+
+
+def _transport_error_category(transport: ProjectTransport | None) -> str | None:
+    value = getattr(transport, "transport_error_category", None)
+    allowed = {
+        "dns_error",
+        "connect_timeout",
+        "read_timeout",
+        "connection_refused",
+        "connection_reset",
+        "tls_error",
+        "invalid_url",
+        "http_4xx",
+        "http_5xx",
+        "non_json_response",
+        "empty_response",
+        "network_unreachable",
+        "unknown_transport_error",
+    }
+    return value if value in allowed else None
 
 
 def _result(

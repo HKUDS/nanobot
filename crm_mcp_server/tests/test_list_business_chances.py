@@ -35,6 +35,9 @@ ALLOWED_RECORD_KEYS = {
 }
 ALLOWED_OWNER_KEYS = {"id", "name"}
 BUSINESS_CHANCE_DIAGNOSTIC_ALLOWED_KEYS = {
+    "auth_mode",
+    "endpoint_configured",
+    "http_status_category",
     "status",
     "reason",
     "read_only",
@@ -46,6 +49,10 @@ BUSINESS_CHANCE_DIAGNOSTIC_ALLOWED_KEYS = {
     "pages_read",
     "max_records",
     "pagination_limit_reached",
+    "runtime_enabled",
+    "status_code_category",
+    "token_configured",
+    "transport_error_category",
 }
 
 
@@ -59,6 +66,10 @@ class RecordingTransport:
         if not self.responses:
             raise AssertionError("unexpected extra transport call")
         return self.responses.pop(0)
+
+
+def explode_config_load(*args: object, **kwargs: object) -> object:
+    raise AssertionError("unexpected real config load")
 
 
 def valid_request(max_records: int = 50) -> dict[str, object]:
@@ -131,6 +142,9 @@ def test_mocked_list_business_chance_response_returns_sanitized_records_and_sour
 
     assert result["errors"] == []
     assert result["diagnostics"] == {
+        "auth_mode": "mock",
+        "endpoint_configured": False,
+        "http_status_category": "not_attempted",
         "read_only": True,
         "mutations_allowed": False,
         "mutation_used": False,
@@ -140,7 +154,11 @@ def test_mocked_list_business_chance_response_returns_sanitized_records_and_sour
         "pages_read": 1,
         "max_records": 1,
         "pagination_limit_reached": False,
+        "runtime_enabled": False,
         "status": "OK",
+        "status_code_category": None,
+        "token_configured": False,
+        "transport_error_category": None,
         "reason": "ok",
     }
     assert result["records"] == [
@@ -178,6 +196,152 @@ def test_mocked_list_business_chance_response_returns_sanitized_records_and_sour
     ]
     assert set(result["records"][0]) == ALLOWED_RECORD_KEYS
     assert set(result["records"][0]["owner"]) == ALLOWED_OWNER_KEYS
+    assert_no_sensitive_output(result)
+
+
+def test_default_without_transport_does_not_access_real_runtime(monkeypatch: pytest.MonkeyPatch):
+    from crm_mcp_server import business_chances
+
+    monkeypatch.setattr(business_chances, "load_real_smoke_config_from_env", explode_config_load, raising=False)
+
+    result = business_chances.crm_list_business_chances(valid_request(max_records=1))
+
+    assert result["records"] == []
+    assert result["source_refs"] == []
+    assert result["errors"] == [expected_error("config_missing", "Required runtime configuration is missing.")]
+    assert result["diagnostics"]["runtime_enabled"] is False
+    assert result["diagnostics"]["reason"] == "config_missing"
+    assert result["diagnostics"]["mutation_used"] is False
+    assert_no_sensitive_output(result)
+
+
+def test_runtime_disabled_does_not_read_env(monkeypatch: pytest.MonkeyPatch):
+    from crm_mcp_server import business_chances
+
+    monkeypatch.setattr(business_chances, "load_real_smoke_config_from_env", explode_config_load, raising=False)
+    transport = RecordingTransport([list_business_chance_response([business_chance_record("chance-1")])])
+
+    result = business_chances.crm_list_business_chances(
+        valid_request(max_records=1), transport=transport, runtime_enabled=False
+    )
+
+    assert result["diagnostics"]["runtime_enabled"] is False
+    assert transport.calls
+    assert_no_sensitive_output(result)
+
+
+def test_runtime_enabled_missing_env_returns_sanitized_config_missing(monkeypatch: pytest.MonkeyPatch):
+    from crm_mcp_server.business_chances import crm_list_business_chances
+
+    monkeypatch.delenv("CRM_GRAPHQL_ENDPOINT", raising=False)
+    monkeypatch.delenv("CRM_GRAPHQL_TOKEN", raising=False)
+
+    result = crm_list_business_chances(valid_request(max_records=1), runtime_enabled=True)
+
+    assert result["records"] == []
+    assert result["source_refs"] == []
+    assert result["errors"] == [expected_error("config_missing", "Required runtime configuration is missing.")]
+    assert result["diagnostics"]["runtime_enabled"] is False
+    assert result["diagnostics"]["auth_mode"] == "bearer"
+    assert result["diagnostics"]["endpoint_configured"] is False
+    assert result["diagnostics"]["token_configured"] is False
+    assert result["diagnostics"]["reason"] == "config_missing"
+    assert_no_sensitive_output(result)
+
+
+def test_runtime_enabled_builds_bearer_real_transport(monkeypatch: pytest.MonkeyPatch):
+    from crm_mcp_server import business_chances
+
+    seen_configs: list[object] = []
+
+    class FakeRealTransport(RecordingTransport):
+        auth_mode = "bearer"
+        http_status_category = "success"
+        status_code_category = "2xx"
+        transport_error_category = None
+
+        def __init__(self, config: object) -> None:
+            seen_configs.append(config)
+            super().__init__([list_business_chance_response([business_chance_record("chance-1")])])
+
+    monkeypatch.setenv("CRM_GRAPHQL_ENDPOINT", "https://crm.example.internal/query")
+    monkeypatch.setenv("CRM_GRAPHQL_TOKEN", "fake-token-123")
+    monkeypatch.setattr(business_chances, "RealGraphQLSmokeTransport", FakeRealTransport)
+
+    result = business_chances.crm_list_business_chances(valid_request(max_records=1), runtime_enabled=True)
+
+    assert len(seen_configs) == 1
+    assert seen_configs[0].auth_mode == "bearer"
+    assert result["diagnostics"]["runtime_enabled"] is True
+    assert result["diagnostics"]["auth_mode"] == "bearer"
+    assert result["diagnostics"]["http_status_category"] == "success"
+    assert result["diagnostics"]["status_code_category"] == "2xx"
+    assert result["diagnostics"]["mutation_used"] is False
+    assert_no_sensitive_output(result)
+
+
+def test_runtime_enabled_fake_response_stays_sanitized():
+    from crm_mcp_server.business_chances import crm_list_business_chances
+
+    transport = RecordingTransport([list_business_chance_response([business_chance_record("chance-1")])])
+    transport.http_status_category = "success"
+    transport.status_code_category = "2xx"
+    transport.transport_error_category = None
+    transport.auth_mode = "bearer"
+
+    result = crm_list_business_chances(valid_request(max_records=1), transport=transport, runtime_enabled=True)
+
+    assert result["records"] == [
+        {
+            "id": "chance-1",
+            "project_id": "project-1",
+            "status": "open",
+            "apply_status": "approved",
+            "owner": {"id": "owner-1", "name": "Synthetic Owner"},
+            "due_at": "2026-02-01T00:00:00Z",
+            "created_at": "2026-01-02T00:00:00Z",
+            "updated_at": "2026-01-03T00:00:00Z",
+            "source_ref_ids": ["src-chance-1"],
+        }
+    ]
+    assert set(result["records"][0]) == ALLOWED_RECORD_KEYS
+    assert result["diagnostics"]["runtime_enabled"] is True
+    assert result["diagnostics"]["auth_mode"] == "bearer"
+    assert_no_sensitive_output(result)
+
+
+@pytest.mark.parametrize(
+    ("http_status_category", "expected_error_category", "expected_reason"),
+    [
+        ("unauthorized_or_forbidden", "unauthorized_or_forbidden", "unauthorized_or_forbidden"),
+        ("crm_unavailable", "crm_unavailable", "crm_unavailable"),
+        ("rate_limited", "rate_limited", "rate_limited"),
+    ],
+)
+def test_runtime_enabled_transport_errors_are_sanitized(
+    http_status_category: str,
+    expected_error_category: str,
+    expected_reason: str,
+):
+    from crm_mcp_server.business_chances import crm_list_business_chances
+
+    transport = RecordingTransport([{}])
+    transport.http_status_category = http_status_category
+    transport.status_code_category = "4xx"
+    transport.transport_error_category = "http_4xx"
+    transport.auth_mode = "bearer"
+
+    result = crm_list_business_chances(valid_request(max_records=1), transport=transport, runtime_enabled=True)
+
+    assert result["records"] == []
+    assert result["source_refs"] == []
+    assert result["errors"][0]["category"] == expected_error_category
+    assert isinstance(result["errors"][0]["message"], str)
+    assert isinstance(result["errors"][0]["retryable"], bool)
+    assert result["diagnostics"]["status"] == "ERROR"
+    assert result["diagnostics"]["reason"] == expected_reason
+    assert result["diagnostics"]["http_status_category"] == http_status_category
+    assert result["diagnostics"]["transport_error_category"] == "http_4xx"
     assert_no_sensitive_output(result)
 
 

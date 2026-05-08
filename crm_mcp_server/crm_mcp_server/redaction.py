@@ -13,6 +13,9 @@ SAFE_ERROR_MESSAGES: dict[str, str] = {
     "missing_required_fields": "The CRM response is missing required fields.",
     "empty_result": "The CRM query returned no records.",
     "rate_limited": "The CRM service rate limit was reached.",
+    "invalid_response": "The CRM response shape is invalid.",
+    "operation_data_missing": "The CRM response is missing the requested operation data.",
+    "records_field_missing": "The CRM response is missing the records field.",
     "internal_error": "An internal error occurred.",
 }
 
