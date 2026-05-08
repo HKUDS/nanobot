@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   BookOpen,
   ChevronRight,
   Code2,
+  ImageIcon,
   LayoutGrid,
   Lightbulb,
   MoreHorizontal,
+  Palette,
+  Sparkles,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -15,9 +18,10 @@ import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { ThreadHeader } from "@/components/thread/ThreadHeader";
 import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
-import { useNanobotStream } from "@/hooks/useNanobotStream";
+import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
-import type { ChatSummary, UIMessage } from "@/lib/types";
+import { listSlashCommands } from "@/lib/api";
+import type { ChatSummary, SlashCommand, UIMessage } from "@/lib/types";
 import { useClient } from "@/providers/ClientProvider";
 
 interface ThreadShellProps {
@@ -51,6 +55,21 @@ const QUICK_ACTION_KEYS = [
   { key: "more", icon: MoreHorizontal, tone: "text-muted-foreground/65" },
 ] as const;
 
+const IMAGE_QUICK_ACTION_KEYS = [
+  { key: "icon", icon: ImageIcon, tone: "text-[#4f9de8]" },
+  { key: "sticker", icon: Sparkles, tone: "text-[#f25b8f]" },
+  { key: "poster", icon: Palette, tone: "text-[#eba45d]" },
+  { key: "product", icon: LayoutGrid, tone: "text-[#53c59d]" },
+  { key: "portrait", icon: ImageIcon, tone: "text-[#a877e7]" },
+  { key: "edit", icon: MoreHorizontal, tone: "text-muted-foreground/65" },
+] as const;
+
+interface PendingFirstMessage {
+  content: string;
+  images?: SendImage[];
+  options?: SendOptions;
+}
+
 export function ThreadShell({
   session,
   title,
@@ -66,9 +85,11 @@ export function ThreadShell({
   const chatId = session?.chatId ?? null;
   const historyKey = session?.key ?? null;
   const { messages: historical, loading, hasPendingToolCalls } = useSessionHistory(historyKey);
-  const { client, modelName } = useClient();
+  const { modelName, token } = useClient();
   const [booting, setBooting] = useState(false);
-  const pendingFirstRef = useRef<string | null>(null);
+  const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const [heroImageMode, setHeroImageMode] = useState(false);
+  const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
   const lastCachedChatIdRef = useRef<string | null>(null);
 
@@ -80,6 +101,7 @@ export function ThreadShell({
     messages,
     isStreaming,
     send,
+    stop,
     setMessages,
     streamError,
     dismissStreamError,
@@ -107,7 +129,11 @@ export function ThreadShell({
     // When the user switches away and back, keep the local in-memory thread
     // state (including not-yet-persisted messages) instead of replacing it with
     // whatever the history endpoint currently knows about.
-    setMessages(cached && cached.length > 0 ? cached : historical);
+    setMessages((prev) => {
+      if (cached && cached.length > 0) return cached;
+      if (historical.length === 0 && prev.length > 0) return prev;
+      return historical;
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, chatId, historical]);
 
@@ -116,41 +142,54 @@ export function ThreadShell({
     setMessages(historical);
   }, [chatId, historical, setMessages]);
 
-  useEffect(() => {
-    if (!chatId) return;
+  useLayoutEffect(() => {
+    if (!chatId) {
+      lastCachedChatIdRef.current = null;
+      return;
+    }
+    if (loading) return;
     // Skip the first cache write after a chat switch. During that render,
     // `messages` can still belong to the previous chat until the stream hook
     // resets its local state for the new session.
     if (lastCachedChatIdRef.current !== chatId) {
       lastCachedChatIdRef.current = chatId;
+      if (messages.length > 0) {
+        messageCacheRef.current.set(chatId, messages);
+      }
       return;
     }
     messageCacheRef.current.set(chatId, messages);
-  }, [chatId, messages]);
+  }, [chatId, loading, messages]);
 
   useEffect(() => {
     if (!chatId) return;
     const pending = pendingFirstRef.current;
     if (!pending) return;
     pendingFirstRef.current = null;
-    client.sendMessage(chatId, pending);
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        role: "user",
-        content: pending,
-        createdAt: Date.now(),
-      },
-    ]);
+    send(pending.content, pending.images, pending.options);
     setBooting(false);
-  }, [chatId, client, setMessages]);
+  }, [chatId, send]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const commands = await listSlashCommands(token);
+        if (!cancelled) setSlashCommands(commands);
+      } catch {
+        if (!cancelled) setSlashCommands([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const handleWelcomeSend = useCallback(
-    async (content: string) => {
+    async (content: string, images?: SendImage[], options?: SendOptions) => {
       if (booting) return;
       setBooting(true);
-      pendingFirstRef.current = content;
+      pendingFirstRef.current = { content, images, options };
       const newId = await onCreateChat?.();
       if (!newId) {
         pendingFirstRef.current = null;
@@ -162,20 +201,27 @@ export function ThreadShell({
 
   const handleQuickAction = useCallback(
     (prompt: string) => {
+      const options: SendOptions | undefined = heroImageMode
+        ? { imageGeneration: { enabled: true, aspect_ratio: null } }
+        : undefined;
       if (session) {
-        send(prompt);
+        send(prompt, undefined, options);
         return;
       }
-      void handleWelcomeSend(prompt);
+      void handleWelcomeSend(prompt, undefined, options);
     },
-    [handleWelcomeSend, send, session],
+    [handleWelcomeSend, heroImageMode, send, session],
   );
 
+  const quickActionItems = heroImageMode ? IMAGE_QUICK_ACTION_KEYS : QUICK_ACTION_KEYS;
+  const quickActionPrefix = heroImageMode
+    ? "thread.empty.imageQuickActions"
+    : "thread.empty.quickActions";
   const quickActions = (
     <div className="mx-auto grid w-full max-w-[58rem] grid-cols-2 gap-3 pt-4 sm:grid-cols-3 lg:grid-cols-6 lg:gap-4">
-      {QUICK_ACTION_KEYS.map(({ key, icon: Icon, tone }) => {
-        const title = t(`thread.empty.quickActions.${key}.title`);
-        const prompt = t(`thread.empty.quickActions.${key}.prompt`);
+      {quickActionItems.map(({ key, icon: Icon, tone }) => {
+        const title = t(`${quickActionPrefix}.${key}.title`);
+        const prompt = t(`${quickActionPrefix}.${key}.prompt`);
         return (
           <button
             key={key}
@@ -222,6 +268,10 @@ export function ThreadShell({
           }
           modelLabel={toModelBadgeLabel(modelName)}
           variant={showHeroComposer ? "hero" : "thread"}
+          slashCommands={slashCommands}
+          imageMode={showHeroComposer ? heroImageMode : undefined}
+          onImageModeChange={showHeroComposer ? setHeroImageMode : undefined}
+          onStop={stop}
         />
       ) : (
         <ThreadComposer
@@ -235,6 +285,8 @@ export function ThreadShell({
           }
           modelLabel={toModelBadgeLabel(modelName)}
           variant="hero"
+          imageMode={heroImageMode}
+          onImageModeChange={setHeroImageMode}
         />
       )}
       {showHeroComposer ? quickActions : null}

@@ -616,7 +616,7 @@ async def connect_mcp_servers(
         try:
             result = await connect_single_server(name, cfg)
         except Exception as e:
-            logger.error("MCP server '{}' connection failed: {}", name, e)
+            logger.exception("MCP server '{}' connection failed: {}", name, e)
             continue
         if result is not None and result[1] is not None:
             server_stacks[result[0]] = result[1]

@@ -32,6 +32,7 @@ from websockets.http11 import Response
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.command.builtin import builtin_command_palette
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.utils.helpers import safe_filename
@@ -127,6 +128,17 @@ class WebSocketConfig(Base):
         if _normalize_config_path(self.token_issue_path) == _normalize_config_path(self.path):
             raise ValueError("token_issue_path must differ from path (the WebSocket upgrade path)")
         return self
+
+    @model_validator(mode="after")
+    def wildcard_host_requires_auth(self) -> Self:
+        if self.host not in ("0.0.0.0", "::"):
+            return self
+        if self.token.strip() or self.token_issue_secret.strip():
+            return self
+        raise ValueError(
+            "host is 0.0.0.0 (all interfaces) but neither token nor "
+            "token_issue_secret is set — set one to prevent unauthenticated access"
+        )
 
 
 def _http_json_response(data: dict[str, Any], *, status: int = 200) -> Response:
@@ -531,9 +543,9 @@ class WebSocketChannel(BaseChannel):
             if got == issue_expected:
                 return self._handle_token_issue_http(connection, request)
 
-        # 2. WebUI bootstrap: localhost-only, mints tokens for the embedded UI.
+        # 2. WebUI bootstrap: mints tokens for the embedded UI.
         if got == "/webui/bootstrap":
-            return self._handle_webui_bootstrap(connection)
+            return self._handle_webui_bootstrap(connection, request)
 
         # 3. REST surface for the embedded UI.
         if got == "/api/sessions":
@@ -541,6 +553,9 @@ class WebSocketChannel(BaseChannel):
 
         if got == "/api/settings":
             return self._handle_settings(request)
+
+        if got == "/api/commands":
+            return self._handle_commands(request)
 
         if got == "/api/settings/update":
             return self._handle_settings_update(request)
@@ -606,10 +621,16 @@ class WebSocketChannel(BaseChannel):
             if now > expiry:
                 self._api_tokens.pop(token_key, None)
 
-    def _handle_webui_bootstrap(self, connection: Any) -> Response:
-        if self.config.host not in ("0.0.0.0", "::") and not _is_localhost(
-            connection,
-        ):
+    def _handle_webui_bootstrap(self, connection: Any, request: Any) -> Response:
+        # When a secret is configured (token_issue_secret or static token),
+        # validate it regardless of source IP.  This secures deployments
+        # behind a reverse proxy where all connections appear as localhost.
+        secret = self.config.token_issue_secret.strip() or self.config.token.strip()
+        if secret:
+            if not _issue_route_secret_matches(request.headers, secret):
+                return _http_error(401, "Unauthorized")
+        elif not _is_localhost(connection):
+            # No secret configured: only allow localhost (local dev mode).
             return _http_error(403, "webui bootstrap is localhost-only")
         # Cap outstanding tokens to avoid runaway growth from a misbehaving client.
         self._purge_expired_issued_tokens()
@@ -690,6 +711,11 @@ class WebSocketChannel(BaseChannel):
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
         return _http_json_response(self._settings_payload())
+
+    def _handle_commands(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        return _http_json_response({"commands": builtin_command_palette()})
 
     def _handle_settings_update(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
@@ -1063,8 +1089,8 @@ class WebSocketChannel(BaseChannel):
         finally:
             self._cleanup_connection(connection)
 
-    @staticmethod
     def _save_envelope_media(
+        self,
         media: list[Any],
     ) -> tuple[list[str], str | None]:
         """Decode and persist ``media`` items from a ``message`` envelope.
@@ -1189,6 +1215,13 @@ class WebSocketChannel(BaseChannel):
             metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
             if envelope.get("webui") is True:
                 metadata["webui"] = True
+            image_generation = envelope.get("image_generation")
+            if isinstance(image_generation, dict) and image_generation.get("enabled") is True:
+                aspect_ratio = image_generation.get("aspect_ratio")
+                metadata["image_generation"] = {
+                    "enabled": True,
+                    "aspect_ratio": aspect_ratio if isinstance(aspect_ratio, str) else None,
+                }
             await self._handle_message(
                 sender_id=client_id,
                 chat_id=cid,
@@ -1232,7 +1265,14 @@ class WebSocketChannel(BaseChannel):
         # Snapshot the subscriber set so ConnectionClosed cleanups mid-iteration are safe.
         conns = list(self._subs.get(msg.chat_id, ()))
         if not conns:
-            self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
+            if (
+                msg.metadata.get("_progress")
+                or msg.metadata.get("_turn_end")
+                or msg.metadata.get("_session_updated")
+            ):
+                self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
+            else:
+                self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
             return
         # Signal that the agent has fully finished processing the current turn.
         if msg.metadata.get("_turn_end"):

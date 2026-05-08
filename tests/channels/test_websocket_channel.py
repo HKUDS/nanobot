@@ -563,6 +563,34 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         await server_task
 
 
+@pytest.mark.asyncio
+async def test_commands_api_returns_slash_command_metadata(bus: MagicMock) -> None:
+    port = 29892
+    channel = _ch(bus, port=port)
+    channel._api_tokens["tok"] = time.monotonic() + 300
+
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+
+    try:
+        denied = await _http_get(f"http://127.0.0.1:{port}/api/commands")
+        assert denied.status_code == 401
+
+        response = await _http_get(
+            f"http://127.0.0.1:{port}/api/commands",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        commands = {row["command"]: row for row in body["commands"]}
+        assert commands["/stop"]["title"] == "Stop current task"
+        assert commands["/history"]["arg_hint"] == "[n]"
+        assert all("description" in row for row in body["commands"])
+    finally:
+        await channel.stop()
+        await server_task
+
+
 def test_settings_payload_normalizes_camel_case_provider(
     bus: MagicMock,
     monkeypatch,

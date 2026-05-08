@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
 import nanobot.agent.memory as memory_module
+from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMResponse
 
@@ -205,9 +205,10 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
 
     await loop.process_direct("hello", session_key="cli:test")
 
-    loop.consolidator.maybe_consolidate_by_tokens.assert_awaited_once_with(
+    loop.consolidator.maybe_consolidate_by_tokens.assert_any_await(
         session,
         session_summary="Previous conversation summary: earlier context",
+        replay_max_messages=loop._max_messages,
     )
 
 

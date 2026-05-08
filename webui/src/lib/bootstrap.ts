@@ -1,15 +1,51 @@
 import type { BootstrapResponse } from "./types";
 
+const SECRET_STORAGE_KEY = "nanobot-webui.bootstrap-secret";
+
+/** Read a previously saved bootstrap secret from localStorage. */
+export function loadSavedSecret(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(SECRET_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Persist the bootstrap secret so page reloads don't re-prompt. */
+export function saveSecret(secret: string): void {
+  try {
+    window.localStorage.setItem(SECRET_STORAGE_KEY, secret);
+  } catch {
+    // ignore storage errors (private mode, etc.)
+  }
+}
+
+/** Clear the saved bootstrap secret (sign out). */
+export function clearSavedSecret(): void {
+  try {
+    window.localStorage.removeItem(SECRET_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 /**
  * Fetch a short-lived token + the WebSocket path from the gateway's
- * ``/webui/bootstrap`` endpoint. Localhost-only on the server side.
+ * ``/webui/bootstrap`` endpoint.
  */
 export async function fetchBootstrap(
   baseUrl: string = "",
+  secret: string = "",
 ): Promise<BootstrapResponse> {
+  const headers: Record<string, string> = {};
+  if (secret) {
+    headers["X-Nanobot-Auth"] = secret;
+  }
   const res = await fetch(`${baseUrl}/webui/bootstrap`, {
     method: "GET",
     credentials: "same-origin",
+    headers,
   });
   if (!res.ok) {
     throw new Error(`bootstrap failed: HTTP ${res.status}`);

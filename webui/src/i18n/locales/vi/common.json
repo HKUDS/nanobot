@@ -9,6 +9,14 @@
       "title": "Không thể kết nối tới nanobot",
       "gatewayHint": "Hãy chắc chắn gateway đang chạy (`nanobot gateway`) và trang này được mở trên cùng máy."
     },
+    "system": {
+      "section": "Hệ thống",
+      "restartHint": "Khởi động lại nanobot để áp dụng thay đổi runtime.",
+      "restart": "Khởi động lại nanobot"
+    },
+    "restart": {
+      "completed": "Khởi động lại hoàn tất sau {{seconds}} giây."
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -37,8 +45,8 @@
     "newChat": "Cuộc trò chuyện mới"
   },
   "deleteConfirm": {
-    "title": "Xóa “{{title}}”?",
-    "description": "Tệp phiên sẽ bị xóa khỏi đĩa. Không thể hoàn tác thao tác này.",
+    "title": "Xóa cuộc trò chuyện này?",
+    "description": "Không thể hoàn tác thao tác này.",
     "cancel": "Hủy",
     "confirm": "Xóa"
   },
@@ -53,7 +61,60 @@
   "thread": {
     "loadingConversation": "Đang tải cuộc trò chuyện…",
     "empty": {
-      "description": "Hãy đặt câu hỏi, tiếp tục công việc cục bộ hoặc bắt đầu một luồng mới."
+      "description": "Hãy đặt câu hỏi, tiếp tục công việc cục bộ hoặc bắt đầu một luồng mới.",
+      "greeting": "Tôi có thể giúp gì cho bạn?",
+      "quickActions": {
+        "plan": {
+          "title": "Tạo kế hoạch dự án",
+          "prompt": "Tạo một kế hoạch dự án ngắn gọn cho việc tôi nên xây dựng tiếp theo."
+        },
+        "analyze": {
+          "title": "Phân tích dữ liệu này",
+          "prompt": "Giúp tôi phân tích dữ liệu này và chỉ ra các mẫu quan trọng nhất."
+        },
+        "brainstorm": {
+          "title": "Động não ý tưởng",
+          "prompt": "Động não vài ý tưởng thực tế và các đánh đổi cho vấn đề này."
+        },
+        "code": {
+          "title": "Viết mã",
+          "prompt": "Giúp tôi viết mã cho nhiệm vụ này, bắt đầu từ thay đổi hữu ích nhỏ nhất."
+        },
+        "summarize": {
+          "title": "Tóm tắt tài liệu này",
+          "prompt": "Tóm tắt tài liệu này và liệt kê các ý chính."
+        },
+        "more": {
+          "title": "Thêm",
+          "prompt": "Cho tôi xem vài cách hữu ích mà bạn có thể giúp trong workspace này."
+        }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "Thiết kế biểu tượng app",
+          "prompt": "Tạo một biểu tượng ứng dụng 1:1 gọn gàng cho nanobot: robot thân thiện, phong cách vector đơn giản, bảng màu xanh trắng dịu, không có chữ."
+        },
+        "sticker": {
+          "title": "Tạo sticker",
+          "prompt": "Tạo một hình kiểu sticker dễ thương của trợ lý robot nhỏ, nền trông như trong suốt, biểu cảm và vui nhộn."
+        },
+        "poster": {
+          "title": "Tạo poster",
+          "prompt": "Tạo một ý tưởng poster chỉn chu cho trợ lý AI cá nhân, bố cục hiện đại, phân cấp thị giác rõ, phù hợp cho landing page."
+        },
+        "product": {
+          "title": "Mockup sản phẩm",
+          "prompt": "Tạo một hình mockup sản phẩm gọn gàng cho ứng dụng web AI hội thoại, giao diện tối giản, ánh sáng cao cấp, khung thiết bị chân thực."
+        },
+        "portrait": {
+          "title": "Chân dung cách điệu",
+          "prompt": "Tạo chân dung cách điệu của một người bạn đồng hành AI thân thiện, ánh sáng mềm, chi tiết nhưng dễ gần, phong cách minh họa hiện đại."
+        },
+        "edit": {
+          "title": "Chỉnh sửa ảnh",
+          "prompt": "Giúp tôi chỉnh sửa một ảnh. Trước tiên hãy yêu cầu tôi tải lên hoặc chỉ định ảnh, rồi tạo kết quả đã chỉnh sửa."
+        }
+      }
     },
     "header": {
       "toggleSidebar": "Bật/tắt thanh bên"
@@ -66,7 +127,23 @@
       "inputAria": "Ô nhập tin nhắn",
       "sendHint": "Enter để gửi · Shift+Enter để xuống dòng",
       "send": "Gửi tin nhắn",
+      "stop": "Dừng phản hồi",
       "attachImage": "Đính kèm ảnh",
+      "imageMode": {
+        "label": "Tạo ảnh",
+        "toggle": "Bật/tắt chế độ tạo ảnh",
+        "placeholder": "Mô tả hoặc chỉnh sửa ảnh…",
+        "aspectAria": "Tỷ lệ khung hình ảnh",
+        "aspectLabel": "Tỷ lệ ảnh",
+        "aspect": {
+          "auto": "Tự động",
+          "1_1": "Vuông 1:1",
+          "3_4": "Dọc 3:4",
+          "9_16": "Story 9:16",
+          "4_3": "Ngang 4:3",
+          "16_9": "Rộng 16:9"
+        }
+      },
       "encoding": "Đang xử lý…",
       "remove": "Xóa tệp đính kèm",
       "normalizedSizeHint": "{{orig}} → {{current}} (tự động)",
@@ -77,6 +154,51 @@
         "decode_failed": "Không thể giải mã ảnh này",
         "too_large": "Ảnh quá lớn — hãy thử ảnh nhỏ hơn",
         "io": "Không thể đọc tệp này"
+      },
+      "slash": {
+        "ariaLabel": "Lệnh slash",
+        "label": "lệnh",
+        "navigateHint": "↑↓ Chọn",
+        "selectHint": "Enter/Tab Chèn",
+        "closeHint": "Esc Đóng",
+        "commands": {
+          "new": {
+            "title": "Cuộc trò chuyện mới",
+            "description": "Dừng tác vụ hiện tại và bắt đầu một cuộc trò chuyện mới."
+          },
+          "stop": {
+            "title": "Dừng tác vụ hiện tại",
+            "description": "Hủy lượt agent đang chạy trong cuộc trò chuyện này."
+          },
+          "restart": {
+            "title": "Khởi động lại nanobot",
+            "description": "Khởi động lại tiến trình bot tại chỗ."
+          },
+          "status": {
+            "title": "Hiển thị trạng thái",
+            "description": "Hiển thị trạng thái runtime, provider và channel."
+          },
+          "history": {
+            "title": "Hiển thị lịch sử",
+            "description": "In N tin nhắn hội thoại đã lưu gần nhất."
+          },
+          "dream": {
+            "title": "Chạy Dream",
+            "description": "Kích hoạt thủ công quá trình hợp nhất bộ nhớ."
+          },
+          "dream_log": {
+            "title": "Hiển thị nhật ký Dream",
+            "description": "Hiển thị những gì lần hợp nhất Dream gần nhất đã thay đổi."
+          },
+          "dream_restore": {
+            "title": "Khôi phục bộ nhớ",
+            "description": "Đưa bộ nhớ về một snapshot Dream trước đó."
+          },
+          "help": {
+            "title": "Hiển thị trợ giúp",
+            "description": "Liệt kê các lệnh slash có sẵn."
+          }
+        }
       }
     },
     "scrollToBottom": "Cuộn xuống cuối"

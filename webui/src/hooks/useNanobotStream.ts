@@ -5,6 +5,7 @@ import { toMediaAttachment } from "@/lib/media";
 import type { StreamError } from "@/lib/nanobot-client";
 import type {
   InboundEvent,
+  OutboundImageGeneration,
   OutboundMedia,
   UIImage,
   UIMessage,
@@ -34,6 +35,10 @@ export interface SendImage {
   preview: UIImage;
 }
 
+export interface SendOptions {
+  imageGeneration?: OutboundImageGeneration;
+}
+
 export function useNanobotStream(
   chatId: string | null,
   initialMessages: UIMessage[] = [],
@@ -42,7 +47,8 @@ export function useNanobotStream(
 ): {
   messages: UIMessage[];
   isStreaming: boolean;
-  send: (content: string, images?: SendImage[]) => void;
+  send: (content: string, images?: SendImage[], options?: SendOptions) => void;
+  stop: () => void;
   setMessages: React.Dispatch<React.SetStateAction<UIMessage[]>>;
   /** Latest transport-level fault raised since the last ``dismissStreamError``.
    * ``null`` when there is nothing to show. */
@@ -62,6 +68,7 @@ export function useNanobotStream(
   const [isStreaming, setIsStreaming] = useState(initialStreaming || hasPendingToolCalls);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
   const buffer = useRef<StreamBuffer | null>(null);
+  const suppressStreamUntilTurnEndRef = useRef(false);
   /** Timer that defers ``isStreaming = false`` after ``stream_end``.
    *
    * When the model finishes a text segment and calls a tool, the server
@@ -77,31 +84,29 @@ export function useNanobotStream(
 
   const dismissStreamError = useCallback(() => setStreamError(null), []);
 
-  // Reset local state when switching chats. ``streamError`` is scoped to the
-     // send that triggered it, so a chat swap should wipe it out: a stale
-     // "Message too large" banner on a freshly-opened chat-B would confuse the
-     // user about which send actually failed (and in which chat).
-     useEffect(() => {
-       setMessages(initialMessages);
-       // Check if the new chat's last message is a trace row — if so, the
-       // model may still be processing.
-       setIsStreaming(
-         initialMessages.length > 0
-           ? initialMessages[initialMessages.length - 1].kind === "trace"
-           : false,
-       );
-       // Also consider hasPendingToolCalls from session history.
-       if (hasPendingToolCalls) {
-         setIsStreaming(true);
-       }
-       setStreamError(null);
-       buffer.current = null;
-       if (streamEndTimerRef.current !== null) {
-         clearTimeout(streamEndTimerRef.current);
-         streamEndTimerRef.current = null;
-       }
-       // eslint-disable-next-line react-hooks/exhaustive-deps
-     }, [chatId, initialMessages, hasPendingToolCalls]);
+  // Reset local state when switching chats. Do not reset on every
+  // ``initialMessages`` update: a brand-new chat can receive an empty/404
+  // history response after the optimistic first message has already rendered.
+  useEffect(() => {
+    setMessages(initialMessages);
+    setIsStreaming(
+      (initialMessages.length > 0
+        ? initialMessages[initialMessages.length - 1].kind === "trace"
+        : false) || hasPendingToolCalls,
+    );
+    setStreamError(null);
+    buffer.current = null;
+    suppressStreamUntilTurnEndRef.current = false;
+    if (streamEndTimerRef.current !== null) {
+      clearTimeout(streamEndTimerRef.current);
+      streamEndTimerRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatId]);
+
+  useEffect(() => {
+    if (hasPendingToolCalls) setIsStreaming(true);
+  }, [hasPendingToolCalls]);
 
   useEffect(() => {
     if (!chatId) return;
@@ -116,6 +121,7 @@ export function useNanobotStream(
       }
 
       if (ev.event === "delta") {
+        if (suppressStreamUntilTurnEndRef.current) return;
         const id = buffer.current?.messageId ?? crypto.randomUUID();
         if (!buffer.current) {
           buffer.current = { messageId: id, parts: [] };
@@ -141,6 +147,10 @@ export function useNanobotStream(
       }
 
       if (ev.event === "stream_end") {
+        if (suppressStreamUntilTurnEndRef.current) {
+          buffer.current = null;
+          return;
+        }
         // stream_end only means the text segment finished — the model may
         // still be executing tools.  Do NOT reset isStreaming here; the
         // definitive "turn is complete" signal is ``turn_end``.
@@ -160,6 +170,7 @@ export function useNanobotStream(
         setMessages((prev) =>
           prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)),
         );
+        suppressStreamUntilTurnEndRef.current = false;
         onTurnEnd?.();
         return;
       }
@@ -170,6 +181,12 @@ export function useNanobotStream(
       }
 
       if (ev.event === "message") {
+        if (
+          suppressStreamUntilTurnEndRef.current &&
+          (ev.kind === "tool_hint" || ev.kind === "progress")
+        ) {
+          return;
+        }
         // Intermediate agent breadcrumbs (tool-call hints, raw progress).
         // Attach them to the last trace row if it was the last emitted item
         // so a sequence of calls collapses into one compact trace group.
@@ -203,6 +220,7 @@ export function useNanobotStream(
         const media = ev.media_urls?.length
           ? ev.media_urls.map((m) => toMediaAttachment(m))
           : ev.media?.map((url) => toMediaAttachment({ url }));
+        const hasMedia = !!media && media.length > 0;
 
         // A complete (non-streamed) assistant message. If a stream was in
         // flight, drop the placeholder so we don't render the text twice.
@@ -221,10 +239,13 @@ export function useNanobotStream(
               content,
               createdAt: Date.now(),
               ...(ev.buttons && ev.buttons.length > 0 ? { buttons: ev.buttons } : {}),
-              ...(media && media.length > 0 ? { media } : {}),
+              ...(hasMedia ? { media } : {}),
             },
           ];
         });
+        if (hasMedia) {
+          suppressStreamUntilTurnEndRef.current = true;
+        }
         return;
       }
       // ``attached`` / ``error`` frames aren't actionable here; the client
@@ -243,7 +264,7 @@ export function useNanobotStream(
   }, [chatId, client, onTurnEnd]);
 
   const send = useCallback(
-    (content: string, images?: SendImage[]) => {
+    (content: string, images?: SendImage[], options?: SendOptions) => {
       if (!chatId) return;
       const hasImages = !!images && images.length > 0;
       // Text is optional when images are attached — the agent will still see
@@ -265,15 +286,30 @@ export function useNanobotStream(
       // right away, before the first delta arrives from the server.
       setIsStreaming(true);
       const wireMedia = hasImages ? images!.map((i) => i.media) : undefined;
-      client.sendMessage(chatId, content, wireMedia);
+      if (options) {
+        client.sendMessage(chatId, content, wireMedia, options);
+      } else {
+        client.sendMessage(chatId, content, wireMedia);
+      }
     },
     [chatId, client],
   );
+
+  const stop = useCallback(() => {
+    if (!chatId) return;
+    setIsStreaming(false);
+    setMessages((prev) =>
+      prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m)),
+    );
+    suppressStreamUntilTurnEndRef.current = false;
+    client.sendMessage(chatId, "/stop");
+  }, [chatId, client]);
 
   return {
     messages,
     isStreaming,
     send,
+    stop,
     setMessages,
     streamError,
     dismissStreamError,

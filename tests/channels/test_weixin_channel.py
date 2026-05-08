@@ -319,21 +319,22 @@ async def test_process_message_does_not_fallback_when_top_level_media_exists_but
 
 
 @pytest.mark.asyncio
-async def test_send_without_context_token_does_not_send_text() -> None:
+async def test_send_without_context_token_raises() -> None:
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
     channel._send_text = AsyncMock()
 
-    await channel.send(
-        type("Msg", (), {"chat_id": "unknown-user", "content": "pong", "media": [], "metadata": {}})()
-    )
+    with pytest.raises(RuntimeError, match="context_token missing"):
+        await channel.send(
+            type("Msg", (), {"chat_id": "unknown-user", "content": "pong", "media": [], "metadata": {}})()
+        )
 
     channel._send_text.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_send_does_not_send_when_session_is_paused() -> None:
+async def test_send_raises_when_session_is_paused() -> None:
     channel, _bus = _make_channel()
     channel._client = object()
     channel._token = "token"
@@ -341,9 +342,10 @@ async def test_send_does_not_send_when_session_is_paused() -> None:
     channel._pause_session(60)
     channel._send_text = AsyncMock()
 
-    await channel.send(
-        type("Msg", (), {"chat_id": "wx-user", "content": "pong", "media": [], "metadata": {}})()
-    )
+    with pytest.raises(RuntimeError, match="session paused"):
+        await channel.send(
+            type("Msg", (), {"chat_id": "wx-user", "content": "pong", "media": [], "metadata": {}})()
+        )
 
     channel._send_text.assert_not_awaited()
 
@@ -772,15 +774,24 @@ async def test_send_typing_uses_keepalive_until_send_finishes() -> None:
     channel._client = object()
     channel._token = "token"
     channel._context_tokens["wx-user"] = "ctx-typing-loop"
+
+    typing_statuses: list[int] = []
+    keepalive_seen = asyncio.Event()
+
     async def _api_post_side_effect(endpoint: str, _body: dict | None = None, *, auth: bool = True):
         if endpoint == "ilink/bot/getconfig":
             return {"ret": 0, "typing_ticket": "ticket-keepalive"}
+        if endpoint == "ilink/bot/sendtyping" and _body is not None:
+            status = int(_body["status"])
+            typing_statuses.append(status)
+            if status == 1 and typing_statuses.count(1) >= 2:
+                keepalive_seen.set()
         return {"ret": 0}
 
     channel._api_post = AsyncMock(side_effect=_api_post_side_effect)
 
     async def _slow_send_text(*_args, **_kwargs) -> None:
-        await asyncio.sleep(0.03)
+        await asyncio.wait_for(keepalive_seen.wait(), timeout=1.0)
 
     channel._send_text = AsyncMock(side_effect=_slow_send_text)
 
@@ -793,13 +804,8 @@ async def test_send_typing_uses_keepalive_until_send_finishes() -> None:
     finally:
         weixin_mod.TYPING_KEEPALIVE_INTERVAL_S = old_interval
 
-    status_calls = [
-        c.args[1]["status"]
-        for c in channel._api_post.await_args_list
-        if c.args and c.args[0] == "ilink/bot/sendtyping"
-    ]
-    assert status_calls.count(1) >= 2
-    assert status_calls[-1] == 2
+    assert typing_statuses.count(1) >= 2
+    assert typing_statuses[-1] == 2
 
 
 @pytest.mark.asyncio
@@ -1213,3 +1219,38 @@ async def test_send_media_network_error_does_not_double_api_calls() -> None:
     # _send_media_file called once, _send_text never called
     channel._send_media_file.assert_awaited_once()
     channel._send_text.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Tests for _send_text raising on API errors (previously silently swallowed)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_text_raises_on_api_error() -> None:
+    """_send_text must raise RuntimeError when the API returns a non-zero errcode,
+    matching _send_media_file behavior. This ensures ChannelManager can retry."""
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._api_post = AsyncMock(
+        return_value={"errcode": -14, "errmsg": "session expired"}
+    )
+
+    with pytest.raises(RuntimeError, match="WeChat send text error.*-14"):
+        await channel._send_text("wx-user", "hello", "ctx-expired")
+
+    channel._api_post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_send_text_succeeds_on_zero_errcode() -> None:
+    """_send_text must NOT raise when errcode is 0."""
+    channel, _bus = _make_channel()
+    channel._client = object()
+    channel._token = "token"
+    channel._api_post = AsyncMock(return_value={"errcode": 0})
+
+    await channel._send_text("wx-user", "hello", "ctx-ok")
+
+    channel._api_post.assert_awaited_once()
