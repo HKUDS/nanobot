@@ -1418,3 +1418,64 @@ Verification:
 Remaining pending decision:
 
 - 15K Option B cleanup is complete. Next choice is to finish branch / commit / PR, or continue building the next MCP data tool. Deeper cleanup such as moving/deleting direct adapter code/tests or handling `nanobot/crm/real_smoke_diagnostics.py` still requires future explicit user approval.
+
+## 2026-05-08 - Task 16A: Implement `crm_list_business_chances` with mocked GraphQL responses
+
+Scope:
+
+- Implemented CRM MCP Server read-only tool `crm_list_business_chances` using mocked transport only.
+- Fixed GraphQL operation name is `list_business_chance`.
+- No real CRM access, real smoke, `.env*` reads, token handling, DingTalk work, Mutation, writeback, or raw GraphQL passthrough was performed.
+
+TDD cycle:
+
+- Failing test command: `uv run --extra dev pytest crm_mcp_server/tests/test_list_business_chances.py`
+- Failing test result: `14 failed`; `crm_list_business_chances` was not in `list_v1_tools()` and `crm_mcp_server.business_chances` did not exist.
+- Minimal implementation: added `crm_mcp_server/crm_mcp_server/business_chances.py`, added `crm_list_business_chances` to the read-only tool contract and server metadata, and implemented validation-before-transport, fixed `list_business_chance` operation construction, pagination using `search.skip`/`search.limit`, caps, sanitized record normalization, source refs, diagnostics, and sanitized errors.
+- Focused passing command: `uv run --extra dev pytest crm_mcp_server/tests/test_list_business_chances.py`
+- Focused passing result: `14 passed in 0.02s`.
+
+Systematic debugging note:
+
+- Full MCP test command after focused pass initially returned `1 failed, 65 passed`.
+- Root cause: `crm_mcp_server/tests/test_forbidden_tools.py` intentionally has an exact read-only tool-list assertion and still encoded the pre-16A list.
+- Minimal fix: added `crm_list_business_chances` to that exact expected tuple while preserving write-like tool-name assertions.
+- Full MCP test re-run result after fix: `66 passed in 0.05s`.
+
+Files changed:
+
+- `crm_mcp_server/crm_mcp_server/business_chances.py`
+- `crm_mcp_server/crm_mcp_server/contract.py`
+- `crm_mcp_server/crm_mcp_server/server.py`
+- `crm_mcp_server/tests/test_list_business_chances.py`
+- `crm_mcp_server/tests/test_forbidden_tools.py`
+- `docs/crm/MCP_TOOL_CONTRACT.md`
+- `.dek/tasks/crm-ai-analysis-layer/EVIDENCE.md`
+- `.dek/tasks/crm-ai-analysis-layer/PROGRESS.md`
+- `.dek/tasks/crm-ai-analysis-layer/HANDOFF.md`
+
+Scope confirmations:
+
+- `crm_list_business_chances` is exposed as a read-only tool name.
+- `crm_list_business_chances` uses fixed allow-listed GraphQL operation `list_business_chance` through `build_read_operation`.
+- Input validation happens before `transport.execute(...)` for missing `window.start`, missing `window.end`, `window.start > window.end`, missing `scope.scope_id`, `max_records <= 0`, and `max_records` above server cap.
+- Pagination uses `search.skip` and `search.limit`.
+- Default page size is `50`; `MAX_RECORDS_CAP` is `200`; `MAX_PAGES` is `5`.
+- Mocked `list_business_chance` responses normalize only allowed record fields: `id`, `project_id`, `status`, `apply_status`, `owner.id`, `owner.name`, `due_at`, `created_at`, `updated_at`, and `source_ref_ids`.
+- Source refs include `id`, `system=crm-graphql`, `query=list_business_chance`, `entity_type=BusinessChance`, `source_id`, and allowed `fields`.
+- Diagnostics include `read_only=true`, `mutations_allowed=false`, `mutation_used=false`, `operation_name=list_business_chance`, `graphql_errors_count`, `records_returned`, `pages_read`, `max_records`, `pagination_limit_reached`, `status`, and `reason` only.
+- GraphQL errors return sanitized `graphql_error` category without original message or extensions.
+- Empty result returns empty `records`, empty `source_refs`, no errors, and sanitized `empty_result` diagnostics.
+- Tests verify raw GraphQL request/response markers, endpoint, token, Authorization, Bearer, cookie, synthetic project/customer names, amount, phone, email, contact, address, and free-text CRM note markers do not appear in output.
+- No real HTTP transport was implemented.
+- No real CRM endpoint was accessed.
+- No `.env*` file, including `.env.nanobot`, was read.
+- No token, secret, endpoint auth header, cookie, raw GraphQL payload, project/customer names, amount, or contact detail was output.
+- No Mutation behavior, raw GraphQL passthrough, Nanobot MCP config wiring, DingTalk integration, or Nanobot runtime core change was added.
+
+Final verification:
+
+- Requested full test command: `uv run --extra dev pytest crm_mcp_server/tests`
+- Requested full test result: `66 passed in 0.05s`.
+- Requested lint command: `uv run --extra dev ruff check crm_mcp_server`
+- Requested lint result: `All checks passed!`.

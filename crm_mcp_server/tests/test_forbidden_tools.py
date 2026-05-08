@@ -31,6 +31,7 @@ def test_v1_tool_names_are_read_only_contract_tools():
         "crm_check_read_boundary",
         "crm_smoke_check",
         "crm_list_projects",
+        "crm_list_business_chances",
     )
 
 

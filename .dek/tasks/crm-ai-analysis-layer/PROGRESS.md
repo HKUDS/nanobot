@@ -26,6 +26,7 @@ Task id: `crm-ai-analysis-layer`
 - Task 15J phase-one cleanup review complete: `docs/crm/REAL_ADAPTER_CLEANUP_REVIEW.md` inventories superseded direct GraphQL / `RealCRMAdapter` docs, code, tests, and task artifacts without deleting, moving, renaming, or changing runtime code. Recommended current choice is Option B: archive or strongly mark superseded docs first, while keeping direct adapter code/tests as reference until the MCP path proves stable.
 - Task 15J Option B cleanup complete: `docs/crm-graphql-contract.md` is archived in place with a strong superseded-reference header. Direct adapter code/tests remain in place as reference material.
 - Task 15K Option B cleanup complete: superseded direct GraphQL docs and direct-route Python module docstrings are marked reference-only, `docs/crm/` remains canonical, CRM MCP Server remains the production real CRM access direction, and direct adapter code/tests are retained as reference/safety material.
+- Task 16A complete: `crm_list_business_chances` is implemented as a read-only mocked GraphQL data tool using fixed allow-listed `list_business_chance`, sanitized minimal records/source refs/errors/diagnostics, validation-before-transport, pagination caps, and sensitive-output tests.
 - No runtime behavior was changed in 15K. No MCP server production wiring was changed. No files were deleted, moved, or renamed. `.env*` was not read. No real CRM endpoint was accessed.
 
 ## Completed
@@ -72,10 +73,12 @@ Task id: `crm-ai-analysis-layer`
 - Completed task 15J phase one from `.dek/changes/crm-opportunity-intelligence/TASKS.md`: Cleanup superseded RealCRMAdapter docs/code review and inventory proposal only. No deletion, archive, move, rename, runtime-code change, or test skip was performed.
 - Completed task 15J Option B from `.dek/changes/crm-opportunity-intelligence/TASKS.md`: archived superseded root GraphQL doc in place and updated cleanup docs/status. No file was deleted, moved, or renamed; direct adapter code/tests were not edited.
 - Completed task 15K from `.dek/changes/crm-opportunity-intelligence/TASKS.md`: executed approved Option B cleanup by strengthening superseded-reference docs and module docstrings while retaining direct adapter code/tests.
+- Completed task 16A: Implement `crm_list_business_chances` with mocked GraphQL responses.
 
 ## Pending
 
 - User decision whether to finish branch / commit / PR, or continue building the next MCP data tool.
+- Next MCP data tool candidate: implement another allow-listed mocked read tool, or start report-facts aggregation using existing `crm_list_projects` and `crm_list_business_chances` outputs.
 - Future user decision only if deeper cleanup is desired after Option B/15K. Direct adapter code/tests remain superseded-reference material.
 - Option C remains deferred until MCP tools cover equivalent behavior and the user explicitly approves removal.
 - If user wants a real MCP smoke result before deeper cleanup, diagnose runtime config outside chat before retrying 15I; do not rerun real smoke without explicit approval.

@@ -16,6 +16,7 @@ _TOOL_DESCRIPTIONS = {
     "crm_check_read_boundary": "Report read-only boundary status without secrets.",
     "crm_smoke_check": "Return sanitized CRM read-boundary diagnostics using mocked transport.",
     "crm_list_projects": "Return sanitized project records from mocked listProject responses.",
+    "crm_list_business_chances": "Return sanitized business chance records from mocked list_business_chance responses.",
 }
 
 

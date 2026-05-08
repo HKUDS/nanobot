@@ -9,6 +9,7 @@ V1_READ_ONLY_TOOL_NAMES: tuple[str, ...] = (
     "crm_check_read_boundary",
     "crm_smoke_check",
     "crm_list_projects",
+    "crm_list_business_chances",
 )
 
 V1_ALLOWED_QUERY_NAMES: tuple[str, ...] = (

@@ -181,6 +181,49 @@ Diagnostics fields are restricted to `read_only`, `mutations_allowed`, `mutation
 
 Forbidden output for `crm_list_projects` includes project names, customer names, amount-like fields, phone, email, contact, address, notes/free text, raw CRM fields outside the allowed record shape, endpoint values, tokens, Authorization headers, cookies, and raw GraphQL request or response payloads.
 
+### `crm_list_business_chances`
+
+Purpose: read allow-listed `list_business_chance` data and return sanitized minimal business chance records for report facts and evidence traces. Current implementation tasks use mocked GraphQL responses only.
+
+Input:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `window.start` | ISO date string | Yes | Validated before transport. |
+| `window.end` | ISO date string | Yes | Must be greater than or equal to `window.start`. |
+| `scope.scope_id` | string | Yes | Logical scope label. |
+| `scope.owner_ids` | string array | No | Stable owner ids only. |
+| `scope.group_ids` | string array | No | Stable group ids only. |
+| `options.max_records` | integer | No | Must be positive and no greater than the server cap. |
+
+Output:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `records` | object array | Sanitized business chance records only. |
+| `source_refs` | `SourceRef[]` | Sanitized source references. |
+| `errors` | `ToolError[]` | Sanitized categories only. |
+| `diagnostics` | object | Read-only, pagination, and status counters only. |
+
+Allowed record fields:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | string | Stable business chance source id. |
+| `project_id` | string | Stable project id only when present; project name remains forbidden. |
+| `status` | string | Sanitized business chance status. |
+| `apply_status` | string | Sanitized review/application status. |
+| `owner.id` | string | Stable owner id. |
+| `owner.name` | string | Owner display name only. |
+| `due_at` | string | Due timestamp from allow-listed response data. |
+| `created_at` | string | Timestamp from allow-listed response data. |
+| `updated_at` | string | Timestamp from allow-listed response data. |
+| `source_ref_ids` | string array | References into `source_refs`. |
+
+Diagnostics fields are restricted to `read_only`, `mutations_allowed`, `mutation_used`, `operation_name`, `graphql_errors_count`, `records_returned`, `pages_read`, `max_records`, `pagination_limit_reached`, `status`, and `reason`.
+
+Forbidden output for `crm_list_business_chances` includes project names, customer names, amount-like fields, phone, email, contact, address, notes/free text, raw CRM fields outside the allowed record shape, endpoint values, tokens, Authorization headers, cookies, and raw GraphQL request or response payloads.
+
 ### `crm_check_read_boundary`
 
 Purpose: verify that the MCP server is configured for read-only operation without exposing sensitive runtime values.

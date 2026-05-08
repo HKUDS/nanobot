@@ -1,0 +1,296 @@
+"""Sanitized read-only business chance listing with mocked GraphQL responses."""
+
+from __future__ import annotations
+
+from typing import Any, Mapping, Protocol
+
+from crm_mcp_server.graphql import build_read_operation
+from crm_mcp_server.redaction import sanitize_errors
+
+DEFAULT_PAGE_SIZE = 50
+MAX_RECORDS_CAP = 200
+MAX_PAGES = 5
+OPERATION_NAME = "list_business_chance"
+SOURCE_REF_FIELDS = [
+    "id",
+    "project_id",
+    "status",
+    "apply_status",
+    "owner.id",
+    "owner.name",
+    "due_at",
+    "created_at",
+    "updated_at",
+]
+
+
+class BusinessChanceTransport(Protocol):
+    def execute(self, operation_name: str, query: str, variables: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Execute a mocked GraphQL operation."""
+
+
+def crm_list_business_chances(
+    request: Mapping[str, Any],
+    *,
+    transport: BusinessChanceTransport,
+    page_size: int = DEFAULT_PAGE_SIZE,
+    max_pages: int = MAX_PAGES,
+) -> dict[str, object]:
+    """Return sanitized business chance records from mocked list_business_chance responses."""
+
+    max_records = _requested_max_records(request)
+    validation_reason = _validate_request(request, max_records=max_records)
+    if validation_reason is not None:
+        return _result(
+            records=[],
+            source_refs=[],
+            errors=["invalid_request"],
+            diagnostics=_diagnostics(
+                status="ERROR",
+                reason=validation_reason,
+                records_returned=0,
+                pages_read=0,
+                max_records=max_records,
+            ),
+        )
+
+    records: list[dict[str, object]] = []
+    source_refs: list[dict[str, object]] = []
+    pages_read = 0
+    skip = 0
+    limit = min(page_size, max_records)
+    reached_page_limit = False
+
+    while len(records) < max_records and pages_read < max_pages:
+        response = _read_page(request, transport=transport, skip=skip, limit=limit)
+        pages_read += 1
+        errors = response.get("errors")
+        if isinstance(errors, list) and errors:
+            return _result(
+                records=[],
+                source_refs=[],
+                errors=["graphql_error"],
+                diagnostics=_diagnostics(
+                    status="ERROR",
+                    reason="graphql_error",
+                    graphql_errors_count=len(errors),
+                    records_returned=0,
+                    pages_read=pages_read,
+                    max_records=max_records,
+                ),
+            )
+
+        page_records = _extract_page_records(response)
+        if not page_records:
+            break
+        for raw_record in page_records:
+            if len(records) >= max_records:
+                break
+            if not _safe_string(raw_record.get("id")):
+                return _result(
+                    records=[],
+                    source_refs=[],
+                    errors=["missing_required_fields"],
+                    diagnostics=_diagnostics(
+                        status="ERROR",
+                        reason="missing_required_fields",
+                        records_returned=0,
+                        pages_read=pages_read,
+                        max_records=max_records,
+                    ),
+                )
+            record, source_ref = _normalize_business_chance(raw_record)
+            records.append(record)
+            source_refs.append(source_ref)
+        if len(records) >= _extract_total(response) or len(records) >= max_records:
+            break
+        skip += len(page_records)
+        limit = min(page_size, max_records - len(records))
+    else:
+        reached_page_limit = len(records) < _last_total(records, source_refs)
+
+    status = "OK"
+    reason = "ok"
+    errors = []
+    if reached_page_limit:
+        status = "INCONCLUSIVE"
+        reason = "max_pages_reached"
+        errors = ["pagination_limit_reached"]
+    elif not records:
+        status = "INCONCLUSIVE"
+        reason = "empty_result"
+
+    return _result(
+        records=records,
+        source_refs=source_refs,
+        errors=errors,
+        diagnostics=_diagnostics(
+            status=status,
+            reason=reason,
+            records_returned=len(records),
+            pages_read=pages_read,
+            max_records=max_records,
+        ),
+    )
+
+
+def _read_page(
+    request: Mapping[str, Any],
+    *,
+    transport: BusinessChanceTransport,
+    skip: int,
+    limit: int,
+) -> Mapping[str, Any]:
+    window = request["window"]
+    scope = request["scope"]
+    search = {
+        "start": window["start"],
+        "end": window["end"],
+        "scope_id": scope["scope_id"],
+        "owner_ids": list(scope.get("owner_ids", [])),
+        "group_ids": list(scope.get("group_ids", [])),
+        "skip": skip,
+        "limit": limit,
+    }
+    operation = build_read_operation(OPERATION_NAME, variables={"search": search})
+    return transport.execute(operation.operation_name, operation.query, operation.variables)
+
+
+def _validate_request(request: Mapping[str, Any], *, max_records: int) -> str | None:
+    window = request.get("window")
+    if not isinstance(window, Mapping) or not window.get("start"):
+        return "missing_window_start"
+    if not window.get("end"):
+        return "missing_window_end"
+    if str(window["start"]) > str(window["end"]):
+        return "invalid_window"
+    scope = request.get("scope")
+    if not isinstance(scope, Mapping) or not scope.get("scope_id"):
+        return "missing_scope_id"
+    if max_records <= 0:
+        return "invalid_max_records"
+    if max_records > MAX_RECORDS_CAP:
+        return "max_records_exceeds_cap"
+    return None
+
+
+def _requested_max_records(request: Mapping[str, Any]) -> int:
+    options = request.get("options", {})
+    if not isinstance(options, Mapping):
+        return DEFAULT_PAGE_SIZE
+    value = options.get("max_records", DEFAULT_PAGE_SIZE)
+    if not isinstance(value, int):
+        return 0
+    return value
+
+
+def _extract_page_records(response: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    connection = _business_chance_connection(response)
+    data = connection.get("data")
+    if not isinstance(data, list):
+        return []
+    return [record for record in data if isinstance(record, Mapping)]
+
+
+def _extract_total(response: Mapping[str, Any]) -> int:
+    connection = _business_chance_connection(response)
+    total = connection.get("total", 0)
+    return total if isinstance(total, int) else 0
+
+
+def _business_chance_connection(response: Mapping[str, Any]) -> Mapping[str, Any]:
+    data = response.get("data")
+    if not isinstance(data, Mapping):
+        return {}
+    connection = data.get(OPERATION_NAME)
+    if not isinstance(connection, Mapping):
+        return {}
+    return connection
+
+
+def _normalize_business_chance(raw_record: Mapping[str, Any]) -> tuple[dict[str, object], dict[str, object]]:
+    source_id = _safe_string(raw_record.get("id"))
+    source_ref_id = f"src-{source_id}"
+    record = {
+        "id": source_id,
+        "project_id": _extract_project_id(raw_record),
+        "status": _safe_string(raw_record.get("status")),
+        "apply_status": _safe_string(raw_record.get("apply_status")),
+        "owner": _extract_owner(raw_record),
+        "due_at": _safe_string(raw_record.get("due_at")),
+        "created_at": _safe_string(raw_record.get("created_at")),
+        "updated_at": _safe_string(raw_record.get("updated_at")),
+        "source_ref_ids": [source_ref_id],
+    }
+    source_ref = {
+        "id": source_ref_id,
+        "system": "crm-graphql",
+        "query": OPERATION_NAME,
+        "entity_type": "BusinessChance",
+        "source_id": source_id,
+        "fields": SOURCE_REF_FIELDS,
+    }
+    return record, source_ref
+
+
+def _extract_project_id(raw_record: Mapping[str, Any]) -> str:
+    project = raw_record.get("project")
+    if isinstance(project, Mapping):
+        project_id = _safe_string(project.get("id"))
+        if project_id:
+            return project_id
+    return _safe_string(raw_record.get("project_id"))
+
+
+def _extract_owner(raw_record: Mapping[str, Any]) -> dict[str, str]:
+    claim_by = raw_record.get("claim_by")
+    if not isinstance(claim_by, Mapping):
+        return {"id": "", "name": ""}
+    return {"id": _safe_string(claim_by.get("id")), "name": _safe_string(claim_by.get("name"))}
+
+
+def _safe_string(value: object) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _diagnostics(
+    *,
+    status: str,
+    reason: str,
+    records_returned: int,
+    pages_read: int,
+    max_records: int,
+    graphql_errors_count: int = 0,
+) -> dict[str, object]:
+    return {
+        "read_only": True,
+        "mutations_allowed": False,
+        "mutation_used": False,
+        "operation_name": OPERATION_NAME,
+        "graphql_errors_count": graphql_errors_count,
+        "records_returned": records_returned,
+        "pages_read": pages_read,
+        "max_records": max_records,
+        "pagination_limit_reached": reason == "max_pages_reached",
+        "status": status,
+        "reason": reason,
+    }
+
+
+def _result(
+    *,
+    records: list[dict[str, object]],
+    source_refs: list[dict[str, object]],
+    errors: list[str],
+    diagnostics: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "records": records,
+        "source_refs": source_refs,
+        "errors": sanitize_errors(errors),
+        "diagnostics": diagnostics,
+    }
+
+
+def _last_total(records: list[dict[str, object]], source_refs: list[dict[str, object]]) -> int:
+    return max(len(records), len(source_refs) + 1)
