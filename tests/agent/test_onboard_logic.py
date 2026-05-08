@@ -4,7 +4,6 @@ These tests focus on the business logic behind the onboard wizard,
 without testing the interactive UI components.
 """
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -13,18 +12,15 @@ import pytest
 from pydantic import BaseModel, Field
 
 from nanobot.cli import onboard as onboard_wizard
-
-# Import functions to test
 from nanobot.cli.commands import _merge_missing_defaults
 from nanobot.cli.onboard import (
     _BACK_PRESSED,
     _configure_pydantic_model,
     _format_value,
+    _get_constraint_hint,
     _get_field_display_name,
     _get_field_type_info,
-    _get_constraint_hint,
     _input_text,
-    _validate_field_constraint,
     run_onboard,
 )
 from nanobot.config.schema import Config
@@ -960,3 +956,121 @@ class TestMainMenuUpdate:
 
         assert result.should_save is True
         assert pause_called["n"] == 1
+
+
+class TestInputTextEmptyString:
+    """Tests for _input_text empty-string handling bug fix."""
+
+    def test_empty_string_returned_not_none(self, monkeypatch):
+        """_input_text should return empty string, not None, when user enters ''."""
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_questionary",
+            lambda: SimpleNamespace(text=lambda *a, **kw: SimpleNamespace(ask=lambda: "")),
+        )
+
+        result = _input_text("Name", "old", "str")
+        assert result == ""
+
+    def test_none_still_returns_none(self, monkeypatch):
+        """_input_text should return None when questionary returns None."""
+        monkeypatch.setattr(
+            onboard_wizard,
+            "_get_questionary",
+            lambda: SimpleNamespace(text=lambda *a, **kw: SimpleNamespace(ask=lambda: None)),
+        )
+
+        result = _input_text("Name", "old", "str")
+        assert result is None
+
+
+class TestIsStrOrNone:
+    """Tests for _is_str_or_none helper."""
+
+    def test_str_or_none_true(self):
+        from nanobot.cli.onboard import _is_str_or_none
+
+        assert _is_str_or_none(str | None) is True
+
+    def test_optional_str_true(self):
+        from typing import Optional
+        from nanobot.cli.onboard import _is_str_or_none
+
+        assert _is_str_or_none(Optional[str]) is True
+
+    def test_str_only_false(self):
+        from nanobot.cli.onboard import _is_str_or_none
+
+        assert _is_str_or_none(str) is False
+
+    def test_int_or_none_false(self):
+        from nanobot.cli.onboard import _is_str_or_none
+
+        assert _is_str_or_none(int | None) is False
+
+
+class TestConfigurePydanticModelEmptyString:
+    """Tests that optional string fields are cleared when empty string is entered."""
+
+    def test_optional_str_empty_string_becomes_none(self, monkeypatch):
+        """Entering '' for an optional str field should set it to None."""
+        from pydantic import BaseModel
+        from nanobot.cli.onboard import _is_str_or_none
+
+        class M(BaseModel):
+            api_key: str | None = None
+
+        model = M(api_key="secret")
+
+        call_count = {"select": 0}
+
+        def fake_select(_prompt, choices, default=None):
+            call_count["select"] += 1
+            # First call: select the api_key field, then Done
+            if call_count["select"] == 1:
+                for c in choices:
+                    if "Api Key" in c:
+                        return c
+                return choices[0]
+            return "[Done]"
+
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select)
+        monkeypatch.setattr(onboard_wizard, "_show_config_panel", lambda *a, **kw: None)
+        # Simulate user entering empty string
+        monkeypatch.setattr(
+            onboard_wizard, "_input_with_existing", lambda *a, **kw: ""
+        )
+
+        result = _configure_pydantic_model(model, "Test")
+        assert result is not None
+        assert result.api_key is None
+
+    def test_required_str_empty_string_kept(self, monkeypatch):
+        """Entering '' for a required str field should keep the empty string."""
+        from pydantic import BaseModel
+
+        class M(BaseModel):
+            api_key: str = ""
+
+        model = M(api_key="secret")
+
+        call_count = {"select": 0}
+
+        def fake_select(_prompt, choices, default=None):
+            call_count["select"] += 1
+            if call_count["select"] == 1:
+                for c in choices:
+                    if "Api Key" in c:
+                        return c
+                return choices[0]
+            return "[Done]"
+
+        monkeypatch.setattr(onboard_wizard, "_select_with_back", fake_select)
+        monkeypatch.setattr(onboard_wizard, "_show_config_panel", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            onboard_wizard, "_input_with_existing", lambda *a, **kw: ""
+        )
+
+        result = _configure_pydantic_model(model, "Test")
+        assert result is not None
+        assert result.api_key == ""
