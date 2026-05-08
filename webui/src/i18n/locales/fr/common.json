@@ -9,6 +9,14 @@
       "title": "Impossible de joindre nanobot",
       "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot gateway`) et que cette page est ouverte sur la même machine."
     },
+    "system": {
+      "section": "Système",
+      "restartHint": "Redémarrez nanobot pour appliquer les changements d’exécution.",
+      "restart": "Redémarrer nanobot"
+    },
+    "restart": {
+      "completed": "Redémarrage terminé en {{seconds}} s."
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -80,6 +88,32 @@
           "title": "Plus",
           "prompt": "Montrez-moi quelques façons utiles dont vous pouvez m’aider dans cet espace de travail."
         }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "Créer une icône d’app",
+          "prompt": "Générez une icône d’application 1:1 propre pour nanobot : robot sympathique, style vectoriel simple, palette douce bleu et blanc, sans texte."
+        },
+        "sticker": {
+          "title": "Créer un sticker",
+          "prompt": "Générez une image façon sticker d’un petit assistant robot, avec un fond d’apparence transparente, expressive et ludique."
+        },
+        "poster": {
+          "title": "Créer une affiche",
+          "prompt": "Générez un concept d’affiche soigné pour un assistant IA personnel, composition moderne, hiérarchie visuelle forte, adapté à une landing page."
+        },
+        "product": {
+          "title": "Maquette produit",
+          "prompt": "Générez une maquette produit propre pour une application web d’IA conversationnelle, interface minimale, éclairage premium, cadre d’appareil réaliste."
+        },
+        "portrait": {
+          "title": "Portrait stylisé",
+          "prompt": "Générez un portrait stylisé d’un compagnon IA sympathique, lumière douce, détaillé mais accessible, style illustration moderne."
+        },
+        "edit": {
+          "title": "Modifier une image",
+          "prompt": "Aidez-moi à modifier une image. Demandez-moi d’abord de téléverser ou d’indiquer l’image, puis générez le résultat modifié."
+        }
       }
     },
     "header": {
@@ -93,7 +127,23 @@
       "inputAria": "Champ de message",
       "sendHint": "Entrée pour envoyer · Maj+Entrée pour un retour à la ligne",
       "send": "Envoyer le message",
+      "stop": "Arrêter la réponse",
       "attachImage": "Joindre une image",
+      "imageMode": {
+        "label": "Génération d’image",
+        "toggle": "Activer ou désactiver le mode génération d’image",
+        "placeholder": "Décrire ou modifier une image…",
+        "aspectAria": "Format de l’image",
+        "aspectLabel": "Format de l’image",
+        "aspect": {
+          "auto": "Auto",
+          "1_1": "Carré 1:1",
+          "3_4": "Portrait 3:4",
+          "9_16": "Story 9:16",
+          "4_3": "Paysage 4:3",
+          "16_9": "Large 16:9"
+        }
+      },
       "encoding": "Traitement…",
       "remove": "Retirer la pièce jointe",
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",

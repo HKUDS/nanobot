@@ -915,6 +915,12 @@ If you want to always use the local conversion, you can force it using:
 |--------|------|---------|-------------|
 | `useJinaReader` | boolean | `true` | If true, Jina Reader will be preferred over the local conversion |
 
+## Image Generation
+
+Image generation is configured under `tools.imageGeneration` and uses provider credentials from `providers.openrouter` or `providers.aihubmix`.
+
+See [Image Generation](./image-generation.md) for WebUI usage, provider examples, artifact storage, and troubleshooting.
+
 ## MCP (Model Context Protocol)
 
 > [!TIP]

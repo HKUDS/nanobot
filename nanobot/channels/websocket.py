@@ -1215,6 +1215,13 @@ class WebSocketChannel(BaseChannel):
             metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
             if envelope.get("webui") is True:
                 metadata["webui"] = True
+            image_generation = envelope.get("image_generation")
+            if isinstance(image_generation, dict) and image_generation.get("enabled") is True:
+                aspect_ratio = image_generation.get("aspect_ratio")
+                metadata["image_generation"] = {
+                    "enabled": True,
+                    "aspect_ratio": aspect_ratio if isinstance(aspect_ratio, str) else None,
+                }
             await self._handle_message(
                 sender_id=client_id,
                 chat_id=cid,
@@ -1258,7 +1265,14 @@ class WebSocketChannel(BaseChannel):
         # Snapshot the subscriber set so ConnectionClosed cleanups mid-iteration are safe.
         conns = list(self._subs.get(msg.chat_id, ()))
         if not conns:
-            self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
+            if (
+                msg.metadata.get("_progress")
+                or msg.metadata.get("_turn_end")
+                or msg.metadata.get("_session_updated")
+            ):
+                self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
+            else:
+                self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
             return
         # Signal that the agent has fully finished processing the current turn.
         if msg.metadata.get("_turn_end"):

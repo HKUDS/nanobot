@@ -9,6 +9,14 @@
       "title": "No se pudo conectar con nanobot",
       "gatewayHint": "Asegúrate de que la gateway esté en ejecución (`nanobot gateway`) y de que esta página esté abierta en la misma máquina."
     },
+    "system": {
+      "section": "Sistema",
+      "restartHint": "Reinicia nanobot para aplicar los cambios de ejecución.",
+      "restart": "Reiniciar nanobot"
+    },
+    "restart": {
+      "completed": "Reinicio completado en {{seconds}} s."
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -80,6 +88,32 @@
           "title": "Más",
           "prompt": "Muéstrame algunas formas útiles en las que puedes ayudar en este workspace."
         }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "Diseñar un icono de app",
+          "prompt": "Genera un icono de app 1:1 limpio para nanobot: robot amigable, estilo vectorial simple, paleta suave azul y blanca, sin texto."
+        },
+        "sticker": {
+          "title": "Crear un sticker",
+          "prompt": "Genera una imagen estilo sticker de un pequeño asistente robot, con fondo de apariencia transparente, expresivo y divertido."
+        },
+        "poster": {
+          "title": "Crear un póster",
+          "prompt": "Genera un concepto de póster pulido para un asistente personal de IA, composición moderna, jerarquía visual fuerte, apto para una landing page."
+        },
+        "product": {
+          "title": "Mockup de producto",
+          "prompt": "Genera una imagen limpia de mockup de producto para una app web de IA conversacional, interfaz mínima, iluminación premium, marco de dispositivo realista."
+        },
+        "portrait": {
+          "title": "Retrato estilizado",
+          "prompt": "Genera un retrato estilizado de un compañero de IA amigable, luz suave, detallado pero cercano, estilo de ilustración moderna."
+        },
+        "edit": {
+          "title": "Editar una imagen",
+          "prompt": "Ayúdame a editar una imagen. Primero pídeme que suba o indique la imagen, y luego genera el resultado editado."
+        }
       }
     },
     "header": {
@@ -93,7 +127,23 @@
       "inputAria": "Entrada de mensaje",
       "sendHint": "Enter para enviar · Shift+Enter para nueva línea",
       "send": "Enviar mensaje",
+      "stop": "Detener respuesta",
       "attachImage": "Adjuntar imagen",
+      "imageMode": {
+        "label": "Generar imagen",
+        "toggle": "Activar o desactivar modo de generación de imágenes",
+        "placeholder": "Describe o edita una imagen…",
+        "aspectAria": "Relación de aspecto de imagen",
+        "aspectLabel": "Formato de imagen",
+        "aspect": {
+          "auto": "Auto",
+          "1_1": "Cuadrado 1:1",
+          "3_4": "Vertical 3:4",
+          "9_16": "Historia 9:16",
+          "4_3": "Horizontal 4:3",
+          "16_9": "Panorámico 16:9"
+        }
+      },
       "encoding": "Procesando…",
       "remove": "Quitar adjunto",
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",

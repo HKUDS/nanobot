@@ -528,6 +528,7 @@ def serve(
         raise typer.Exit(1)
 
     from loguru import logger
+
     from nanobot.agent.loop import AgentLoop
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
@@ -571,6 +572,10 @@ def serve(
         consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
         max_messages=runtime_config.agents.defaults.max_messages,
         tools_config=runtime_config.tools,
+        image_generation_provider_configs={
+            "openrouter": runtime_config.providers.openrouter,
+            "aihubmix": runtime_config.providers.aihubmix,
+        },
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -696,6 +701,10 @@ def _run_gateway(
         consolidation_ratio=config.agents.defaults.consolidation_ratio,
         max_messages=config.agents.defaults.max_messages,
         tools_config=config.tools,
+        image_generation_provider_configs={
+            "openrouter": config.providers.openrouter,
+            "aihubmix": config.providers.aihubmix,
+        },
         provider_snapshot_loader=load_provider_snapshot,
         provider_signature=provider_snapshot.signature,
     )
@@ -735,7 +744,10 @@ def _run_gateway(
         ):
             key = session_key or _channel_session_key(msg.channel, msg.chat_id)
             session = session_manager.get_or_create(key)
-            session.add_message("assistant", msg.content, _channel_delivery=True)
+            extra: dict[str, Any] = {"_channel_delivery": True}
+            if msg.media:
+                extra["media"] = list(msg.media)
+            session.add_message("assistant", msg.content, **extra)
             session_manager.save(session)
         await bus.publish_outbound(msg)
 

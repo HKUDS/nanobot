@@ -9,6 +9,14 @@
       "title": "Tidak dapat menjangkau nanobot",
       "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot gateway`) dan halaman ini dibuka pada mesin yang sama."
     },
+    "system": {
+      "section": "Sistem",
+      "restartHint": "Mulai ulang nanobot untuk menerapkan perubahan runtime.",
+      "restart": "Mulai ulang nanobot"
+    },
+    "restart": {
+      "completed": "Mulai ulang selesai dalam {{seconds}} dtk."
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -80,6 +88,32 @@
           "title": "Lainnya",
           "prompt": "Tunjukkan beberapa cara berguna Anda dapat membantu di workspace ini."
         }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "Desain ikon aplikasi",
+          "prompt": "Buat ikon aplikasi 1:1 yang bersih untuk nanobot: robot ramah, gaya vektor sederhana, palet biru dan putih lembut, tanpa teks."
+        },
+        "sticker": {
+          "title": "Buat stiker",
+          "prompt": "Buat gambar gaya stiker yang lucu dari asisten robot kecil, latar terlihat transparan, ekspresif dan menyenangkan."
+        },
+        "poster": {
+          "title": "Buat poster",
+          "prompt": "Buat konsep poster yang rapi untuk asisten AI pribadi, komposisi modern, hierarki visual kuat, cocok untuk landing page."
+        },
+        "product": {
+          "title": "Mockup produk",
+          "prompt": "Buat gambar mockup produk yang bersih untuk aplikasi web AI percakapan, antarmuka minimal, pencahayaan premium, bingkai perangkat realistis."
+        },
+        "portrait": {
+          "title": "Potret bergaya",
+          "prompt": "Buat potret bergaya dari pendamping AI yang ramah, pencahayaan lembut, detail tetapi tetap mudah didekati, gaya ilustrasi modern."
+        },
+        "edit": {
+          "title": "Edit gambar",
+          "prompt": "Bantu saya mengedit gambar. Minta saya mengunggah atau menyebutkan gambar terlebih dahulu, lalu buat hasil editnya."
+        }
       }
     },
     "header": {
@@ -93,7 +127,23 @@
       "inputAria": "Input pesan",
       "sendHint": "Enter untuk kirim · Shift+Enter untuk baris baru",
       "send": "Kirim pesan",
+      "stop": "Hentikan respons",
       "attachImage": "Lampirkan gambar",
+      "imageMode": {
+        "label": "Buat gambar",
+        "toggle": "Alihkan mode pembuatan gambar",
+        "placeholder": "Deskripsikan atau edit gambar…",
+        "aspectAria": "Rasio aspek gambar",
+        "aspectLabel": "Rasio gambar",
+        "aspect": {
+          "auto": "Otomatis",
+          "1_1": "Persegi 1:1",
+          "3_4": "Potret 3:4",
+          "9_16": "Story 9:16",
+          "4_3": "Lanskap 4:3",
+          "16_9": "Lebar 16:9"
+        }
+      },
       "encoding": "Memproses…",
       "remove": "Hapus lampiran",
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",

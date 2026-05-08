@@ -9,6 +9,14 @@
       "title": "無法連線到 nanobot",
       "gatewayHint": "請確認 gateway 已啟動（`nanobot gateway`），並且目前頁面與 gateway 在同一台機器上開啟。"
     },
+    "system": {
+      "section": "系統",
+      "restartHint": "重新啟動 nanobot 以套用執行階段變更。",
+      "restart": "重新啟動 nanobot"
+    },
+    "restart": {
+      "completed": "重新啟動已完成，耗時 {{seconds}} 秒。"
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -80,6 +88,32 @@
           "title": "更多",
           "prompt": "展示幾個你在這個工作區裡可以幫我的實用方式。"
         }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "設計應用程式圖示",
+          "prompt": "生成一個乾淨的 1:1 nanobot 應用程式圖示：友善的機器人、簡潔向量風格、柔和藍白配色，不要文字。"
+        },
+        "sticker": {
+          "title": "製作貼圖",
+          "prompt": "生成一張可愛貼圖風格的小型機器人助理圖片，背景像透明貼紙，表情活潑有趣。"
+        },
+        "poster": {
+          "title": "建立海報",
+          "prompt": "生成一張個人 AI 助理的精緻海報概念圖，現代構圖、清楚的視覺層級，適合登陸頁展示。"
+        },
+        "product": {
+          "title": "產品樣機",
+          "prompt": "生成一張對話式 AI Web 應用的乾淨產品樣機圖，極簡介面、高級光影、真實裝置邊框。"
+        },
+        "portrait": {
+          "title": "風格化頭像",
+          "prompt": "生成一個友善 AI 夥伴的風格化頭像，柔和光線、細節豐富但親切，現代插畫風格。"
+        },
+        "edit": {
+          "title": "編輯圖片",
+          "prompt": "幫我編輯一張圖片。先請我上傳或指定要編輯的圖片，然後生成編輯後的結果。"
+        }
       }
     },
     "header": {
@@ -93,7 +127,23 @@
       "inputAria": "訊息輸入框",
       "sendHint": "Enter 送出 · Shift+Enter 換行",
       "send": "送出訊息",
+      "stop": "停止回覆",
       "attachImage": "附加圖片",
+      "imageMode": {
+        "label": "圖片生成",
+        "toggle": "切換圖片生成模式",
+        "placeholder": "描述或編輯圖片…",
+        "aspectAria": "圖片畫幅",
+        "aspectLabel": "圖片畫幅",
+        "aspect": {
+          "auto": "自動",
+          "1_1": "方形 1:1",
+          "3_4": "直式 3:4",
+          "9_16": "故事版 9:16",
+          "4_3": "橫式 4:3",
+          "16_9": "寬螢幕 16:9"
+        }
+      },
       "encoding": "處理中…",
       "remove": "移除附件",
       "normalizedSizeHint": "{{orig}} → {{current}}（已自動壓縮）",

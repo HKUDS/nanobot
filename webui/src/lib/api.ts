@@ -126,13 +126,15 @@ export async function listSlashCommands(
     arg_hint?: string;
   };
   const body = await request<{ commands: Row[] }>(`${base}/api/commands`, token);
-  return body.commands.map((command) => ({
-    command: command.command,
-    title: command.title,
-    description: command.description,
-    icon: command.icon,
-    argHint: command.arg_hint ?? "",
-  }));
+  return body.commands
+    .filter((command) => !["/stop", "/restart"].includes(command.command))
+    .map((command) => ({
+      command: command.command,
+      title: command.title,
+      description: command.description,
+      icon: command.icon,
+      argHint: command.arg_hint ?? "",
+    }));
 }
 
 export async function updateSettings(

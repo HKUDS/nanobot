@@ -253,12 +253,25 @@ class MyToolConfig(Base):
     allow_set: bool = False  # let `my` modify loop state (read-only if False)
 
 
+class ImageGenerationToolConfig(Base):
+    """Image generation tool configuration."""
+
+    enabled: bool = False
+    provider: str = "openrouter"
+    model: str = "openai/gpt-5.4-image-2"
+    default_aspect_ratio: str = "1:1"
+    default_image_size: str = "1K"
+    max_images_per_turn: int = Field(default=4, ge=1, le=8)
+    save_dir: str = "generated"
+
+
 class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     my: MyToolConfig = Field(default_factory=MyToolConfig)
+    image_generation: ImageGenerationToolConfig = Field(default_factory=ImageGenerationToolConfig)
     restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)

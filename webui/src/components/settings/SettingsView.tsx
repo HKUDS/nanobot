@@ -16,12 +16,14 @@ interface SettingsViewProps {
   onBackToChat: () => void;
   onModelNameChange: (modelName: string | null) => void;
   onLogout?: () => void;
+  onRestart?: () => void;
 }
 
 export function SettingsView({
   onBackToChat,
   onModelNameChange,
   onLogout,
+  onRestart,
 }: SettingsViewProps) {
   const { token } = useClient();
   const [settings, setSettings] = useState<SettingsPayload | null>(null);
@@ -119,6 +121,7 @@ export function SettingsView({
             saving={saving}
             onSave={save}
             onLogout={onLogout}
+            onRestart={onRestart}
           />
         ) : null}
       </main>
@@ -134,6 +137,7 @@ function SettingsSection({
   saving,
   onSave,
   onLogout,
+  onRestart,
 }: {
   form: {
     model: string;
@@ -148,6 +152,7 @@ function SettingsSection({
   saving: boolean;
   onSave: () => void;
   onLogout?: () => void;
+  onRestart?: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -199,6 +204,19 @@ function SettingsSection({
           </SettingsRow>
         </SettingsGroup>
       </section>
+
+      {onRestart && (
+        <section>
+          <h2 className="mb-2 px-2 text-xs font-medium text-muted-foreground">{t("app.system.section")}</h2>
+          <SettingsGroup>
+            <SettingsRow title={t("app.system.restartHint")}>
+              <Button size="sm" variant="outline" onClick={onRestart}>
+                {t("app.system.restart")}
+              </Button>
+            </SettingsRow>
+          </SettingsGroup>
+        </section>
+      )}
 
       {onLogout && (
         <section>
