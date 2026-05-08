@@ -1479,3 +1479,64 @@ Final verification:
 - Requested full test result: `66 passed in 0.05s`.
 - Requested lint command: `uv run --extra dev ruff check crm_mcp_server`
 - Requested lint result: `All checks passed!`.
+
+## 2026-05-08 - Task 16B: Implement `crm_generate_daily_report_facts` with mocked read-tool outputs
+
+Scope:
+
+- Implemented CRM MCP Server report facts tool `crm_generate_daily_report_facts` using mocked dependency readers only.
+- The tool composes sanitized report facts from `crm_list_projects`-style and `crm_list_business_chances`-style outputs.
+- No real CRM access, real smoke, `.env*` reads, token handling, DingTalk work, Mutation, writeback, or raw GraphQL passthrough was performed.
+
+Branch setup:
+
+- The session started on branch `16A`, while the requested precondition said 16A was already merged into `main` and current work should start from latest `main`.
+- Local `main` did not contain commit `3e8e4c5c feat(crm-mcp): add business chance read tool`; only branch `16A` did.
+- Local `main` was fast-forwarded to `16A`, then branch `16B` was created from updated `main`.
+
+TDD cycle:
+
+- Failing test command: `uv run --extra dev pytest crm_mcp_server/tests/test_daily_report_facts.py`
+- Failing test result: `16 failed, 1 passed`; `crm_mcp_server.daily_report` did not exist. The existing static metadata already exposed `crm_generate_daily_report_facts` as read-only.
+- Minimal implementation: added `crm_mcp_server/crm_mcp_server/daily_report.py` with validation-before-reader-calls, sanitized request echoing, dependency reader injection, project/business chance count metrics, business chance status/apply-status distributions, due-today and overdue counts, source-ref merge/deduplication, unavailable metric handling for dependency errors, and allow-listed diagnostics.
+- Focused passing command: `uv run --extra dev pytest crm_mcp_server/tests/test_daily_report_facts.py`
+- Focused passing result: `17 passed in 0.02s`.
+
+Files changed:
+
+- `crm_mcp_server/crm_mcp_server/daily_report.py`
+- `crm_mcp_server/tests/test_daily_report_facts.py`
+- `docs/crm/MCP_TOOL_CONTRACT.md`
+- `.dek/tasks/crm-ai-analysis-layer/EVIDENCE.md`
+- `.dek/tasks/crm-ai-analysis-layer/PROGRESS.md`
+- `.dek/tasks/crm-ai-analysis-layer/HANDOFF.md`
+
+Scope confirmations:
+
+- `crm_generate_daily_report_facts` is exposed as a read-only tool name in the existing static contract and server metadata.
+- Validation happens before dependency reader calls for missing `window.start`, missing `window.end`, non-daily windows where `start != end`, missing `scope.scope_id`, invalid `max_records`, and `max_records` above the server cap.
+- Implemented metrics: `project_count`, `business_chance_count`, `business_chance_status_distribution`, `business_chance_apply_status_distribution`, `business_chance_due_today_count`, and `business_chance_overdue_count`.
+- Dependency errors produce sanitized unavailable metric records with `reason=dependency_error`; dependent values are not inferred.
+- `include_source_refs=false` returns empty `source_refs` and empty metric `source_ref_ids`.
+- `include_unavailable_metrics=false` omits unavailable metric records.
+- Source refs are merged from project and business chance dependency outputs and deduplicated by `id`.
+- Diagnostics include only `status`, `reason`, `read_only`, `mutations_allowed`, `mutation_used`, `dependency_tools`, `project_records_count`, `business_chance_records_count`, `metrics_count`, and `unavailable_metrics_count`.
+- Tests verify raw GraphQL request/response markers, endpoint, token, Authorization, Bearer, synthetic project/customer names, amount, phone, email, contact, address, and free-text CRM note markers do not appear in report output.
+- No real HTTP transport was implemented.
+- No real CRM endpoint was accessed.
+- No `.env*` file, including `.env.nanobot`, was read.
+- No token, secret, endpoint auth header, cookie, raw GraphQL payload, project/customer names, amount, contact detail, or free-text CRM note was output.
+- No Mutation behavior, raw GraphQL passthrough, Nanobot MCP config wiring, DingTalk integration, old `RealCRMAdapter` route change, or Nanobot runtime core change was added.
+
+Final verification:
+
+- Focused test command: `uv run --extra dev pytest crm_mcp_server/tests/test_daily_report_facts.py`
+- Focused test result: `17 passed in 0.02s`.
+- Full MCP test command: `uv run --extra dev pytest crm_mcp_server/tests`
+- Full MCP test result: `83 passed in 0.06s`.
+- Lint command: `uv run --extra dev ruff check crm_mcp_server`
+- Lint result: `All checks passed!`.
+- Requested plain safety assertion command: `python - <<'PY' ... PY`
+- Requested plain safety assertion result: did not start because `python` is not on PATH in this shell (`zsh:1: command not found: python`).
+- Equivalent safety assertion command: `uv run python - <<'PY' ... PY`
+- Equivalent safety assertion result: `16B source safety assertions passed`.

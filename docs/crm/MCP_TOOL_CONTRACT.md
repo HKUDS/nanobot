@@ -107,15 +107,20 @@ Diagnostics must not include endpoint values, tokens, Authorization headers, coo
 
 ### `crm_generate_daily_report_facts`
 
-Purpose: read CRM source data for one business date and return daily report facts for Nanobot report assembly.
+Purpose: compose sanitized daily report facts for one business date from mocked CRM MCP read-tool outputs. Current implementation depends on `crm_list_projects` and `crm_list_business_chances`; it does not access real CRM directly.
 
 Input:
 
-| Field | Type | Required |
-| --- | --- | --- |
-| `window` | `ReportWindow` | Yes |
-| `scope` | `ReportScope` | Yes |
-| `options` | `ReadOptions` | No |
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `window.start` | ISO date string | Yes | Must equal `window.end`; daily reports reject ranges before dependency calls. |
+| `window.end` | ISO date string | Yes | Must equal `window.start`. |
+| `scope.scope_id` | string | Yes | Logical scope label. |
+| `scope.owner_ids` | string array | No | Stable owner ids only. |
+| `scope.group_ids` | string array | No | Stable group ids only. |
+| `options.max_records` | integer | No | Forwarded to dependency read tools and capped by the server. |
+| `options.include_source_refs` | boolean | No | Defaults to `true`; when `false`, output `source_refs` and metric `source_ref_ids` are empty. |
+| `options.include_unavailable_metrics` | boolean | No | Defaults to `true`; when `false`, dependency failures do not emit unavailable metrics. |
 
 Output:
 
@@ -128,6 +133,23 @@ Output:
 | `unavailable_metrics` | `UnavailableMetric[]` | Metrics that could not be computed. |
 | `source_refs` | `SourceRef[]` | Sanitized source references. |
 | `errors` | `ToolError[]` | Empty on success. |
+
+Initial daily metrics:
+
+| Name | Value | Unit | Inputs |
+| --- | --- | --- | --- |
+| `project_count` | Number of project records. | `count` | `crm_list_projects.records` |
+| `business_chance_count` | Number of business chance records. | `count` | `crm_list_business_chances.records` |
+| `business_chance_status_distribution` | Object mapping status to count. | `count_by_status` | `crm_list_business_chances.records.status` |
+| `business_chance_apply_status_distribution` | Object mapping apply status to count. | `count_by_apply_status` | `crm_list_business_chances.records.apply_status` |
+| `business_chance_due_today_count` | Count where `due_at` date equals report date. | `count` | `crm_list_business_chances.records.due_at` |
+| `business_chance_overdue_count` | Count where `due_at` date is before report date and status is not `won`, `lost`, or `closed`. | `count` | `crm_list_business_chances.records.due_at/status` |
+
+If a dependency read tool returns errors, dependent metrics must not be inferred. The tool returns sanitized unavailable metric records with `reason=dependency_error` when `include_unavailable_metrics` is not `false`.
+
+Diagnostics fields are restricted to `status`, `reason`, `read_only`, `mutations_allowed`, `mutation_used`, `dependency_tools`, `project_records_count`, `business_chance_records_count`, `metrics_count`, and `unavailable_metrics_count`.
+
+Forbidden output for `crm_generate_daily_report_facts` includes raw dependency outputs, raw GraphQL request or response payloads, GraphQL variables, endpoint values, tokens, Authorization headers, cookies, project names, customer names, amount-like fields, phone, email, contact, address, notes/free text, and raw CRM fields outside the documented metric/source-ref shapes.
 
 ### `crm_generate_weekly_report_facts`
 
