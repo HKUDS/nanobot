@@ -4,6 +4,8 @@ x-common-config: &common-config
     dockerfile: Dockerfile
   volumes:
     - ~/.nanobot:/home/nanobot/.nanobot
+  env_file:
+    - .env.nanobot
   cap_drop:
     - ALL
   cap_add:

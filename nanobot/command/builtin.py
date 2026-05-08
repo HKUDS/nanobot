@@ -89,6 +89,27 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "List available slash commands.",
         "circle-help",
     ),
+    BuiltinCommandSpec(
+        "/crm-daily",
+        "CRM daily report",
+        "Generate a synthetic CRM daily report for a business date.",
+        "activity",
+        "YYYY-MM-DD",
+    ),
+    BuiltinCommandSpec(
+        "/crm-weekly",
+        "CRM weekly report",
+        "Generate a synthetic CRM weekly report for a date range.",
+        "activity",
+        "YYYY-MM-DD YYYY-MM-DD",
+    ),
+    BuiltinCommandSpec(
+        "/crm-dashboard",
+        "CRM dashboard summary",
+        "Generate a synthetic CRM opportunity dashboard summary for a date range.",
+        "activity",
+        "YYYY-MM-DD YYYY-MM-DD",
+    ),
 )
 
 
@@ -459,6 +480,72 @@ async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_crm_daily(ctx: CommandContext) -> OutboundMessage:
+    """Generate a CRM daily report from synthetic mock data."""
+
+    from datetime import date
+
+    from nanobot.crm.cli import generate_mock_report, render_report_output
+    from nanobot.crm.models import ReportType
+
+    report_date = date.fromisoformat(ctx.args.strip())
+    report = generate_mock_report(
+        ReportType.DAILY,
+        report_date=report_date,
+        start=None,
+        end=None,
+        scope_id="synthetic-team",
+    )
+    return _crm_outbound(ctx, render_report_output(report))
+
+
+async def cmd_crm_weekly(ctx: CommandContext) -> OutboundMessage:
+    """Generate a CRM weekly report from synthetic mock data."""
+
+    from datetime import date
+
+    from nanobot.crm.cli import generate_mock_report, render_report_output
+    from nanobot.crm.models import ReportType
+
+    start_raw, end_raw = ctx.args.split(maxsplit=1)
+    report = generate_mock_report(
+        ReportType.WEEKLY,
+        report_date=None,
+        start=date.fromisoformat(start_raw),
+        end=date.fromisoformat(end_raw),
+        scope_id="synthetic-team",
+    )
+    return _crm_outbound(ctx, render_report_output(report))
+
+
+async def cmd_crm_dashboard(ctx: CommandContext) -> OutboundMessage:
+    """Generate a CRM dashboard summary from synthetic mock data."""
+
+    from datetime import date
+
+    from nanobot.crm.cli import generate_mock_report, render_report_output
+    from nanobot.crm.models import ReportType
+
+    start_raw, end_raw = ctx.args.split(maxsplit=1)
+    report = generate_mock_report(
+        ReportType.DASHBOARD,
+        report_date=None,
+        start=date.fromisoformat(start_raw),
+        end=date.fromisoformat(end_raw),
+        scope_id="synthetic-team",
+    )
+    return _crm_outbound(ctx, render_report_output(report))
+
+
+def _crm_outbound(ctx: CommandContext, content: str) -> OutboundMessage:
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content=content,
+        metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+    )
+
+
 def build_help_text() -> str:
     """Build canonical help text shared across channels."""
     lines = ["🐈 nanobot commands:"]
@@ -485,3 +572,6 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
     router.exact("/help", cmd_help)
+    router.prefix("/crm-daily ", cmd_crm_daily)
+    router.prefix("/crm-weekly ", cmd_crm_weekly)
+    router.prefix("/crm-dashboard ", cmd_crm_dashboard)

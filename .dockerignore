@@ -7,7 +7,11 @@ dist/
 build/
 .git
 .env
+.env*
+.env.nanobot
 .assets
+.dek
+.dek/
 node_modules/
 bridge/dist/
 workspace/

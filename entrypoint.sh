@@ -12,4 +12,7 @@ Fix (pick one):
 EOF
     exit 1
 fi
+if [ "${1:-}" = "nanobot" ]; then
+    shift
+fi
 exec nanobot "$@"
