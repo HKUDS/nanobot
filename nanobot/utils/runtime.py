@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import json
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +100,41 @@ def repeated_external_lookup_error(
     return (
         "Error: repeated external lookup blocked. "
         "Use the results you already have to answer, or try a meaningfully different source."
+    )
+
+
+def tool_call_signature(tool_name: str, arguments: dict[str, Any]) -> str:
+    """Stable signature for repeated tool-call pattern detection."""
+    payload = arguments if isinstance(arguments, dict) else {"_raw_args": arguments}
+    try:
+        normalized_args = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    except (TypeError, ValueError):
+        normalized_args = str(payload)
+    return f"{tool_name}:{normalized_args}"
+
+
+def repeated_tool_call_escalation_error(
+    tool_name: str,
+    arguments: dict[str, Any],
+    seen_counts: dict[str, int],
+    threshold: int | None,
+) -> str | None:
+    """Return an escalation error once repeated identical tool-call threshold is exceeded."""
+    if threshold is None or threshold < 1:
+        return None
+    signature = tool_call_signature(tool_name, arguments)
+    count = seen_counts.get(signature, 0) + 1
+    seen_counts[signature] = count
+    if count <= threshold:
+        return None
+    logger.warning(
+        "Escalating repeated tool-call pattern {} on attempt {}",
+        signature[:160],
+        count,
+    )
+    return (
+        "Error: repetitive tool-call loop detected. "
+        "Stop reusing the same tool call and choose a different strategy."
     )
 
 

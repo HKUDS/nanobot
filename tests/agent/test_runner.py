@@ -1025,6 +1025,7 @@ async def test_runner_batches_read_only_tools_before_exclusive_work():
         ],
         {},
         {},
+        {},
     )
 
     assert shared_events[0:2] == ["start:read_a", "start:read_b"]
@@ -1068,6 +1069,7 @@ async def test_runner_does_not_batch_exclusive_read_only_tools():
             ToolCallRequest(id="ddg1", name="ddg_like", arguments={}),
             ToolCallRequest(id="ro2", name="read_b", arguments={}),
         ],
+        {},
         {},
         {},
     )
@@ -1117,6 +1119,86 @@ async def test_runner_blocks_repeated_external_fetches():
         if msg.get("role") == "tool" and msg.get("tool_call_id") == "call_3"
     ][0]
     assert "repeated external lookup blocked" in blocked_tool_message["content"]
+
+
+@pytest.mark.asyncio
+async def test_runner_escalates_repeated_identical_tool_call_patterns():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(**kwargs):
+        call_count["n"] += 1
+        if call_count["n"] <= 3:
+            return LLMResponse(
+                content="working",
+                tool_calls=[ToolCallRequest(id=f"call_{call_count['n']}", name="read_file", arguments={"path": "/tmp/a.txt"})],
+                usage={},
+            )
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="ok")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=4,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        repeated_tool_call_escalation_threshold=2,
+    ))
+
+    assert result.stop_reason == "tool_error"
+    assert "repetitive tool-call loop detected" in (result.final_content or "")
+    assert tools.execute.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_runner_does_not_escalate_when_tool_call_arguments_change():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+
+    async def chat_with_retry(**kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content="working",
+                tool_calls=[ToolCallRequest(id="call_1", name="read_file", arguments={"path": "/tmp/a.txt"})],
+                usage={},
+            )
+        if call_count["n"] == 2:
+            return LLMResponse(
+                content="working",
+                tool_calls=[ToolCallRequest(id="call_2", name="read_file", arguments={"path": "/tmp/b.txt"})],
+                usage={},
+            )
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value="ok")
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "task"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        repeated_tool_call_escalation_threshold=1,
+    ))
+
+    assert result.stop_reason == "completed"
+    assert result.final_content == "done"
+    assert tools.execute.await_count == 2
 
 
 @pytest.mark.asyncio

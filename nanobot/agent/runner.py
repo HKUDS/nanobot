@@ -33,6 +33,7 @@ from nanobot.utils.runtime import (
     ensure_nonempty_tool_result,
     is_blank_text,
     repeated_external_lookup_error,
+    repeated_tool_call_escalation_error,
     repeated_workspace_violation_error,
 )
 
@@ -81,6 +82,7 @@ class AgentRunSpec:
     checkpoint_callback: Any | None = None
     injection_callback: Any | None = None
     llm_timeout_s: float | None = None
+    repeated_tool_call_escalation_threshold: int | None = None
 
 
 @dataclass(slots=True)
@@ -95,6 +97,10 @@ class AgentRunResult:
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
     had_injections: bool = False
+
+
+class ToolLoopEscalationInterrupt(RuntimeError):
+    """Raised when repeated identical tool-call patterns indicate a loop."""
 
 
 class AgentRunner:
@@ -241,6 +247,7 @@ class AgentRunner:
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
         external_lookup_counts: dict[str, int] = {}
+        repeated_tool_call_counts: dict[str, int] = {}
         # Per-turn throttle for repeated attempts against the same outside target.
         workspace_violation_counts: dict[str, int] = {}
         empty_content_retries = 0
@@ -317,6 +324,7 @@ class AgentRunner:
                     spec,
                     tool_calls,
                     external_lookup_counts,
+                    repeated_tool_call_counts,
                     workspace_violation_counts,
                 )
                 tool_events.extend(new_events)
@@ -703,6 +711,7 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_calls: list[ToolCallRequest],
         external_lookup_counts: dict[str, int],
+        repeated_tool_call_counts: dict[str, int],
         workspace_violation_counts: dict[str, int],
     ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
         batches = self._partition_tool_batches(spec, tool_calls)
@@ -711,7 +720,11 @@ class AgentRunner:
             if spec.concurrent_tools and len(batch) > 1:
                 batch_results = await asyncio.gather(*(
                     self._run_tool(
-                        spec, tool_call, external_lookup_counts, workspace_violation_counts,
+                        spec,
+                        tool_call,
+                        external_lookup_counts,
+                        repeated_tool_call_counts,
+                        workspace_violation_counts,
                     )
                     for tool_call in batch
                 ))
@@ -720,7 +733,11 @@ class AgentRunner:
                 batch_results = []
                 for tool_call in batch:
                     result = await self._run_tool(
-                        spec, tool_call, external_lookup_counts, workspace_violation_counts,
+                        spec,
+                        tool_call,
+                        external_lookup_counts,
+                        repeated_tool_call_counts,
+                        workspace_violation_counts,
                     )
                     tool_results.append(result)
                     batch_results.append(result)
@@ -744,9 +761,23 @@ class AgentRunner:
         spec: AgentRunSpec,
         tool_call: ToolCallRequest,
         external_lookup_counts: dict[str, int],
+        repeated_tool_call_counts: dict[str, int],
         workspace_violation_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None]:
         hint = "\n\n[Analyze the error above and try a different approach.]"
+        escalation_error = repeated_tool_call_escalation_error(
+            tool_call.name,
+            tool_call.arguments,
+            repeated_tool_call_counts,
+            spec.repeated_tool_call_escalation_threshold,
+        )
+        if escalation_error:
+            event = {
+                "name": tool_call.name,
+                "status": "error",
+                "detail": "repeated tool-call escalation triggered",
+            }
+            return escalation_error, event, ToolLoopEscalationInterrupt(escalation_error)
         lookup_error = repeated_external_lookup_error(
             tool_call.name,
             tool_call.arguments,
