@@ -23,6 +23,7 @@ from nanobot.utils.helpers import (
     ensure_dir,
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
+    find_legal_message_start,
     strip_think,
     truncate_text,
 )
@@ -531,23 +532,29 @@ class Consolidator:
     ) -> int | None:
         if not replay_max_messages or replay_max_messages <= 0:
             return None
-        tail = list(session.messages[session.last_consolidated:])
+        tail = list(enumerate(session.messages[session.last_consolidated:], session.last_consolidated))
         if len(tail) <= replay_max_messages:
             return None
 
-        probe = Session(
-            key=session.key,
-            messages=[dict(message) for message in tail],
-            created_at=session.created_at,
-            updated_at=session.updated_at,
-            metadata={},
-            last_consolidated=0,
-        )
-        probe.retain_recent_legal_suffix(replay_max_messages)
-        cut = len(tail) - len(probe.messages)
-        if cut <= 0:
+        sliced = tail[-replay_max_messages:]
+        for i, (_idx, message) in enumerate(sliced):
+            if message.get("role") == "user":
+                start = i
+                if i > 0 and sliced[i - 1][1].get("_channel_delivery"):
+                    start = i - 1
+                sliced = sliced[start:]
+                break
+
+        legal_start = find_legal_message_start([message for _idx, message in sliced])
+        if legal_start:
+            sliced = sliced[legal_start:]
+        if not sliced:
+            return len(session.messages)
+
+        first_visible_idx = sliced[0][0]
+        if first_visible_idx <= session.last_consolidated:
             return None
-        return session.last_consolidated + cut
+        return first_visible_idx
 
     async def _consolidate_replay_overflow(
         self,

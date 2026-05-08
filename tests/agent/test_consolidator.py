@@ -167,6 +167,36 @@ class TestConsolidatorTokenBudget:
         assert session.metadata["_last_summary"]["text"] == "old conversation summary"
         consolidator.sessions.save.assert_called()
 
+    async def test_replay_window_overflow_matches_history_tool_boundary(
+        self,
+        consolidator,
+    ):
+        """Archive the exact prefix hidden by get_history's legal-start trimming."""
+        session = Session(key="test:replay-tool-boundary")
+        session.add_message("user", "run the tool")
+        session.add_message(
+            "assistant",
+            "",
+            tool_calls=[
+                {"id": "call-1", "type": "function", "function": {"name": "x", "arguments": "{}"}}
+            ],
+        )
+        session.add_message("tool", "tool result", tool_call_id="call-1", name="x")
+        session.add_message("assistant", "final answer")
+
+        consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
+        consolidator.archive = AsyncMock(return_value="tool turn summary")
+
+        await consolidator.maybe_consolidate_by_tokens(
+            session,
+            replay_max_messages=2,
+        )
+
+        archived_chunk = consolidator.archive.await_args.args[0]
+        assert [m["role"] for m in archived_chunk] == ["user", "assistant", "tool"]
+        assert session.last_consolidated == 3
+        assert session.get_history(max_messages=2) == [{"role": "assistant", "content": "final answer"}]
+
     async def test_large_chunk_archived_without_cap(self, consolidator):
         """Without chunk cap, the full range from pick_consolidation_boundary is archived."""
         consolidator._SAFETY_BUFFER = 0
