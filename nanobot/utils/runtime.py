@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import json
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from loguru import logger
 from nanobot.utils.helpers import stringify_text_blocks
 
 _MAX_REPEAT_EXTERNAL_LOOKUPS = 2
+_MAX_REPEAT_IDENTICAL_LOCAL_CALLS = 2
 
 # Third same-target workspace violation in a turn escalates to "stop retrying".
 _MAX_REPEAT_WORKSPACE_VIOLATIONS = 2
@@ -100,6 +102,39 @@ def repeated_external_lookup_error(
         "Error: repeated external lookup blocked. "
         "Use the results you already have to answer, or try a meaningfully different source."
     )
+
+
+def local_tool_call_signature(tool_name: str, arguments: dict[str, Any]) -> str | None:
+    """Stable signature for repeated identical local tool calls we want to throttle."""
+    if tool_name not in {"read_file", "list_dir", "glob", "grep"}:
+        return None
+    payload = arguments if isinstance(arguments, dict) else {"_raw_args": arguments}
+    try:
+        normalized_args = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    except (TypeError, ValueError):
+        normalized_args = str(payload)
+    return f"{tool_name}:{normalized_args}"
+
+
+def repeated_identical_local_call_error(
+    tool_name: str,
+    arguments: dict[str, Any],
+    seen_counts: dict[str, int],
+) -> str | None:
+    """Block repeated identical local tool calls after a small retry budget."""
+    signature = local_tool_call_signature(tool_name, arguments)
+    if signature is None:
+        return None
+    count = seen_counts.get(signature, 0) + 1
+    seen_counts[signature] = count
+    if count <= _MAX_REPEAT_IDENTICAL_LOCAL_CALLS:
+        return None
+    logger.warning(
+        "Blocking repeated identical local tool call {} on attempt {}",
+        signature[:160],
+        count,
+    )
+    return "Error: repeated identical tool call blocked. Use the prior result or choose a different tool."
 
 
 # Workspace-boundary violations are soft errors, with per-target throttling.
