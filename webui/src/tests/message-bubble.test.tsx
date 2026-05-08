@@ -121,7 +121,8 @@ describe("MessageBubble", () => {
     const { container } = render(<MessageBubble message={message} />);
 
     const imageButton = screen.getByRole("button", { name: /view image/i });
-    expect(imageButton).toHaveClass("h-56", "sm:h-72");
-    expect(container.querySelector("img")).toHaveClass("object-contain");
+    expect(imageButton).toHaveClass("w-[min(100%,34rem)]", "rounded-[20px]");
+    expect(imageButton).not.toHaveAttribute("title");
+    expect(container.querySelector("img")).toHaveClass("h-auto", "w-full", "object-contain");
   });
 });

@@ -282,7 +282,7 @@ function UserImageCell({
   const tileClasses = cn(
     "relative overflow-hidden border border-border/60 bg-muted/40",
     size === "large"
-      ? "h-56 w-[min(100%,22rem)] rounded-[18px] sm:h-72 sm:w-[26rem]"
+      ? "w-[min(100%,34rem)] rounded-[20px] bg-transparent"
       : "h-24 w-24 rounded-[14px]",
     "shadow-[0_6px_18px_-14px_rgba(0,0,0,0.45)]",
   );
@@ -293,11 +293,10 @@ function UserImageCell({
         type="button"
         onClick={onOpen}
         aria-label={image.name ? `${openLabel}: ${image.name}` : openLabel}
-        title={image.name ?? undefined}
         className={cn(
           tileClasses,
-          "cursor-zoom-in transition-transform duration-150 motion-reduce:transition-none",
-          "hover:scale-[1.02] hover:ring-2 hover:ring-primary/30",
+          "block cursor-zoom-in p-0 transition-transform duration-150 motion-reduce:transition-none",
+          "hover:scale-[1.01] hover:ring-2 hover:ring-primary/25",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
         )}
       >
@@ -307,7 +306,12 @@ function UserImageCell({
           loading="lazy"
           decoding="async"
           draggable={false}
-          className={cn("h-full w-full", size === "large" ? "object-contain" : "object-cover")}
+          className={cn(
+            "block",
+            size === "large"
+              ? "h-auto max-h-[36rem] w-full rounded-[inherit] object-contain"
+              : "h-full w-full object-cover",
+          )}
         />
       </button>
     );
