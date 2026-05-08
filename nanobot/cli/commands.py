@@ -61,7 +61,7 @@ class SafeFileHistory(FileHistory):
     def store_string(self, string: str) -> None:
         safe = string.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="replace")
         super().store_string(safe)
-from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
+from nanobot.cli.stream import StreamRenderer, ThinkingSpinner, _make_panel
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.utils.helpers import sync_workspace_templates
@@ -171,8 +171,7 @@ def _print_agent_response(
     content = response or ""
     body = _response_renderable(content, render_markdown, metadata)
     console.print()
-    console.print(f"[cyan]{__logo__} nanobot[/cyan]")
-    console.print(body)
+    console.print(_make_panel(body))
     console.print()
 
 
@@ -204,11 +203,11 @@ async def _print_interactive_response(
     """Print async interactive replies with prompt_toolkit-safe Rich styling."""
     def _write() -> None:
         content = response or ""
+        body = _response_renderable(content, render_markdown, metadata)
         ansi = _render_interactive_ansi(
             lambda c: (
                 c.print(),
-                c.print(f"[cyan]{__logo__} nanobot[/cyan]"),
-                c.print(_response_renderable(content, render_markdown, metadata)),
+                c.print(_make_panel(body)),
                 c.print(),
             )
         )
