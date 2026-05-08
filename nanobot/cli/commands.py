@@ -1,4 +1,5 @@
 """CLI commands for nanobot."""
+# ruff: noqa: E402
 
 import asyncio
 import os
@@ -78,8 +79,79 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+crm_app = typer.Typer(help="Generate CRM opportunity intelligence reports")
+crm_report_app = typer.Typer(help="Generate CRM reports")
+crm_app.add_typer(crm_report_app, name="report")
+app.add_typer(crm_app, name="crm")
+
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
+
+
+def _run_crm_report(
+    report_type: str,
+    adapter: str,
+    scope: str,
+    report_date: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
+) -> None:
+    from datetime import date
+
+    from nanobot.crm.cli import generate_mock_report, render_report_output
+    from nanobot.crm.models import ReportType
+
+    if adapter != "mock":
+        raise typer.BadParameter("only mock adapter is supported for CLI verification")
+
+    parsed_type = ReportType(report_type)
+    try:
+        report = generate_mock_report(
+            parsed_type,
+            report_date=date.fromisoformat(report_date) if report_date else None,
+            start=date.fromisoformat(start) if start else None,
+            end=date.fromisoformat(end) if end else None,
+            scope_id=scope,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    console.print(render_report_output(report))
+
+
+@crm_report_app.command("daily")
+def crm_report_daily(
+    adapter: str = typer.Option("mock", "--adapter"),
+    report_date: str | None = typer.Option(None, "--date"),
+    scope: str = typer.Option("synthetic-team", "--scope"),
+) -> None:
+    """Generate a CRM daily report."""
+
+    _run_crm_report("daily", adapter, scope, report_date=report_date)
+
+
+@crm_report_app.command("weekly")
+def crm_report_weekly(
+    adapter: str = typer.Option("mock", "--adapter"),
+    start: str | None = typer.Option(None, "--start"),
+    end: str | None = typer.Option(None, "--end"),
+    scope: str = typer.Option("synthetic-team", "--scope"),
+) -> None:
+    """Generate a CRM weekly report."""
+
+    _run_crm_report("weekly", adapter, scope, start=start, end=end)
+
+
+@crm_report_app.command("dashboard")
+def crm_report_dashboard(
+    adapter: str = typer.Option("mock", "--adapter"),
+    start: str | None = typer.Option(None, "--start"),
+    end: str | None = typer.Option(None, "--end"),
+    scope: str = typer.Option("synthetic-team", "--scope"),
+) -> None:
+    """Generate a CRM dashboard summary."""
+
+    _run_crm_report("dashboard", adapter, scope, start=start, end=end)
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -527,7 +599,6 @@ def serve(
         console.print("[red]aiohttp is required. Install with: pip install 'nanobot-ai[api]'[/red]")
         raise typer.Exit(1)
 
-    from loguru import logger
     from nanobot.agent.loop import AgentLoop
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus

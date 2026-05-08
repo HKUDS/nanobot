@@ -1,0 +1,16 @@
+tools:
+  mcpServers:
+    crm:
+      type: stdio
+      command: uv
+      args:
+        - run
+        - --project
+        - crm_mcp_server
+        - python
+        - -m
+        - crm_mcp_server
+      enabledTools:
+        - crm_smoke_check
+        - crm_list_projects
+      toolTimeout: 30
