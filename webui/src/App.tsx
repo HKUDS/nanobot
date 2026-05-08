@@ -17,7 +17,7 @@ import {
   saveSecret,
 } from "@/lib/bootstrap";
 import { NanobotClient } from "@/lib/nanobot-client";
-import { ClientProvider } from "@/providers/ClientProvider";
+import { ClientProvider, useClient } from "@/providers/ClientProvider";
 import type { ChatSummary } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +34,7 @@ type BootState =
     };
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
+const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 const SIDEBAR_WIDTH = 272;
 type ShellView = "chat" | "settings";
 
@@ -237,6 +238,7 @@ export default function App() {
 
 function Shell({ onModelNameChange, onLogout }: { onModelNameChange: (modelName: string | null) => void; onLogout: () => void }) {
   const { t, i18n } = useTranslation();
+  const { client } = useClient();
   const { theme, toggle } = useTheme();
   const { sessions, loading, refresh, createChat, deleteChat } = useSessions();
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -249,6 +251,8 @@ function Shell({ onModelNameChange, onLogout }: { onModelNameChange: (modelName:
     label: string;
   } | null>(null);
   const lastSessionsLen = useRef(0);
+  const restartSawDisconnectRef = useRef(false);
+  const [restartToast, setRestartToast] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -325,6 +329,43 @@ function Shell({ onModelNameChange, onLogout }: { onModelNameChange: (modelName:
     setView("settings");
     setMobileSidebarOpen(false);
   }, []);
+
+  const onRestart = useCallback(() => {
+    const chatId = activeSession?.chatId ?? client.defaultChatId;
+    if (!chatId) return;
+    restartSawDisconnectRef.current = false;
+    try {
+      window.localStorage.setItem(RESTART_STARTED_KEY, String(Date.now()));
+    } catch {
+      // ignore storage errors
+    }
+    client.sendMessage(chatId, "/restart");
+  }, [activeSession?.chatId, client]);
+
+  useEffect(() => {
+    return client.onStatus((status) => {
+      let startedAt = 0;
+      try {
+        startedAt = Number(window.localStorage.getItem(RESTART_STARTED_KEY) ?? "0");
+      } catch {
+        startedAt = 0;
+      }
+      if (!startedAt) return;
+      if (status !== "open") {
+        restartSawDisconnectRef.current = true;
+        return;
+      }
+      const elapsedMs = Date.now() - startedAt;
+      if (!restartSawDisconnectRef.current && elapsedMs < 1500) return;
+      try {
+        window.localStorage.removeItem(RESTART_STARTED_KEY);
+      } catch {
+        // ignore storage errors
+      }
+      setRestartToast(t("app.restart.completed", { seconds: (elapsedMs / 1000).toFixed(1) }));
+      window.setTimeout(() => setRestartToast(null), 3_500);
+    });
+  }, [client, t]);
 
   const onTurnEnd = useCallback(() => {
     void refresh();
@@ -414,6 +455,7 @@ function Shell({ onModelNameChange, onLogout }: { onModelNameChange: (modelName:
             onBackToChat={() => setView("chat")}
             onModelNameChange={onModelNameChange}
             onLogout={onLogout}
+            onRestart={onRestart}
           />
         ) : (
           <ThreadShell
@@ -437,6 +479,14 @@ function Shell({ onModelNameChange, onLogout }: { onModelNameChange: (modelName:
         onCancel={() => setPendingDelete(null)}
         onConfirm={onConfirmDelete}
       />
+      {restartToast ? (
+        <div
+          role="status"
+          className="fixed left-1/2 top-4 z-50 -translate-x-1/2 rounded-full border border-border/70 bg-popover px-4 py-2 text-sm font-medium text-popover-foreground shadow-lg"
+        >
+          {restartToast}
+        </div>
+      ) : null}
     </div>
   );
 }

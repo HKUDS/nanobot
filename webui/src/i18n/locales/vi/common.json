@@ -9,6 +9,14 @@
       "title": "Không thể kết nối tới nanobot",
       "gatewayHint": "Hãy chắc chắn gateway đang chạy (`nanobot gateway`) và trang này được mở trên cùng máy."
     },
+    "system": {
+      "section": "Hệ thống",
+      "restartHint": "Khởi động lại nanobot để áp dụng thay đổi runtime.",
+      "restart": "Khởi động lại nanobot"
+    },
+    "restart": {
+      "completed": "Khởi động lại hoàn tất sau {{seconds}} giây."
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -80,6 +88,32 @@
           "title": "Thêm",
           "prompt": "Cho tôi xem vài cách hữu ích mà bạn có thể giúp trong workspace này."
         }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "Thiết kế biểu tượng app",
+          "prompt": "Tạo một biểu tượng ứng dụng 1:1 gọn gàng cho nanobot: robot thân thiện, phong cách vector đơn giản, bảng màu xanh trắng dịu, không có chữ."
+        },
+        "sticker": {
+          "title": "Tạo sticker",
+          "prompt": "Tạo một hình kiểu sticker dễ thương của trợ lý robot nhỏ, nền trông như trong suốt, biểu cảm và vui nhộn."
+        },
+        "poster": {
+          "title": "Tạo poster",
+          "prompt": "Tạo một ý tưởng poster chỉn chu cho trợ lý AI cá nhân, bố cục hiện đại, phân cấp thị giác rõ, phù hợp cho landing page."
+        },
+        "product": {
+          "title": "Mockup sản phẩm",
+          "prompt": "Tạo một hình mockup sản phẩm gọn gàng cho ứng dụng web AI hội thoại, giao diện tối giản, ánh sáng cao cấp, khung thiết bị chân thực."
+        },
+        "portrait": {
+          "title": "Chân dung cách điệu",
+          "prompt": "Tạo chân dung cách điệu của một người bạn đồng hành AI thân thiện, ánh sáng mềm, chi tiết nhưng dễ gần, phong cách minh họa hiện đại."
+        },
+        "edit": {
+          "title": "Chỉnh sửa ảnh",
+          "prompt": "Giúp tôi chỉnh sửa một ảnh. Trước tiên hãy yêu cầu tôi tải lên hoặc chỉ định ảnh, rồi tạo kết quả đã chỉnh sửa."
+        }
       }
     },
     "header": {
@@ -93,7 +127,23 @@
       "inputAria": "Ô nhập tin nhắn",
       "sendHint": "Enter để gửi · Shift+Enter để xuống dòng",
       "send": "Gửi tin nhắn",
+      "stop": "Dừng phản hồi",
       "attachImage": "Đính kèm ảnh",
+      "imageMode": {
+        "label": "Tạo ảnh",
+        "toggle": "Bật/tắt chế độ tạo ảnh",
+        "placeholder": "Mô tả hoặc chỉnh sửa ảnh…",
+        "aspectAria": "Tỷ lệ khung hình ảnh",
+        "aspectLabel": "Tỷ lệ ảnh",
+        "aspect": {
+          "auto": "Tự động",
+          "1_1": "Vuông 1:1",
+          "3_4": "Dọc 3:4",
+          "9_16": "Story 9:16",
+          "4_3": "Ngang 4:3",
+          "16_9": "Rộng 16:9"
+        }
+      },
       "encoding": "Đang xử lý…",
       "remove": "Xóa tệp đính kèm",
       "normalizedSizeHint": "{{orig}} → {{current}} (tự động)",

@@ -21,6 +21,14 @@
       "logoutHint": "Disconnect this browser from the gateway.",
       "logout": "Sign out"
     },
+    "system": {
+      "section": "System",
+      "restartHint": "Restart nanobot to apply runtime changes.",
+      "restart": "Restart nanobot"
+    },
+    "restart": {
+      "completed": "Restart completed in {{seconds}}s."
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -104,6 +112,32 @@
           "title": "More",
           "prompt": "Show me a few useful ways you can help in this workspace."
         }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "Design an app icon",
+          "prompt": "Generate a clean 1:1 app icon for nanobot: friendly robot, simple vector style, soft blue and white palette, no text."
+        },
+        "sticker": {
+          "title": "Make a sticker",
+          "prompt": "Generate a cute sticker-style image of a tiny robot assistant, transparent-looking background, expressive and playful."
+        },
+        "poster": {
+          "title": "Create a poster",
+          "prompt": "Generate a polished poster concept for a personal AI assistant, modern composition, strong visual hierarchy, suitable for a landing page."
+        },
+        "product": {
+          "title": "Product mockup",
+          "prompt": "Generate a clean product mockup image for a conversational AI web app, minimal interface, premium lighting, realistic device frame."
+        },
+        "portrait": {
+          "title": "Stylized portrait",
+          "prompt": "Generate a stylized portrait of a friendly AI companion, soft lighting, detailed but approachable, modern illustration style."
+        },
+        "edit": {
+          "title": "Edit an image",
+          "prompt": "Help me edit an image. Ask me to upload or reference the image first, then generate the edited result."
+        }
       }
     },
     "header": {
@@ -120,7 +154,23 @@
       "inputAria": "Message input",
       "sendHint": "Enter to send · Shift+Enter for newline",
       "send": "Send message",
+      "stop": "Stop response",
       "attachImage": "Attach image",
+      "imageMode": {
+        "label": "Image Generation",
+        "toggle": "Toggle image generation mode",
+        "placeholder": "Describe or edit an image…",
+        "aspectAria": "Image aspect ratio",
+        "aspectLabel": "Image aspect",
+        "aspect": {
+          "auto": "Auto",
+          "1_1": "Square 1:1",
+          "3_4": "Portrait 3:4",
+          "9_16": "Story 9:16",
+          "4_3": "Landscape 4:3",
+          "16_9": "Wide 16:9"
+        }
+      },
       "tools": {
         "search": "Search",
         "reason": "Reason",
