@@ -7,6 +7,7 @@ import { ThreadComposer } from "@/components/thread/ThreadComposer";
 import { resources } from "@/i18n";
 
 const QUICK_ACTION_KEYS = ["plan", "analyze", "brainstorm", "code", "summarize", "more"];
+const IMAGE_QUICK_ACTION_KEYS = ["icon", "sticker", "poster", "product", "portrait", "edit"];
 
 describe("webui i18n", () => {
   it("switches UI copy and document locale through the language switcher", async () => {
@@ -51,6 +52,11 @@ describe("webui i18n", () => {
       expect(empty.greeting).toBeTruthy();
       for (const key of QUICK_ACTION_KEYS) {
         const action = empty.quickActions[key as keyof typeof empty.quickActions];
+        expect(action.title).toBeTruthy();
+        expect(action.prompt).toBeTruthy();
+      }
+      for (const key of IMAGE_QUICK_ACTION_KEYS) {
+        const action = empty.imageQuickActions[key as keyof typeof empty.imageQuickActions];
         expect(action.title).toBeTruthy();
         expect(action.prompt).toBeTruthy();
       }

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import {
-  PanelLeftClose,
+  Menu,
   Search,
   SquarePen,
 } from "lucide-react";
@@ -65,7 +65,7 @@ export function Sidebar(props: SidebarProps) {
           onClick={props.onCollapse}
           className="h-7 w-7 rounded-lg text-muted-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
         >
-          <PanelLeftClose className="h-3.5 w-3.5" />
+          <Menu className="h-3.5 w-3.5" />
         </Button>
       </div>
 

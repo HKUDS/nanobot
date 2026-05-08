@@ -2,6 +2,7 @@ import type {
   ConnectionStatus,
   InboundEvent,
   Outbound,
+  OutboundImageGeneration,
   OutboundMedia,
 } from "./types";
 
@@ -181,12 +182,21 @@ export class NanobotClient {
     }
   }
 
-  sendMessage(chatId: string, content: string, media?: OutboundMedia[]): void {
+  sendMessage(
+    chatId: string,
+    content: string,
+    media?: OutboundMedia[],
+    options?: { imageGeneration?: OutboundImageGeneration },
+  ): void {
     this.knownChats.add(chatId);
-    const frame: Outbound =
-      media && media.length > 0
-        ? { type: "message", chat_id: chatId, content, media, webui: true }
-        : { type: "message", chat_id: chatId, content, webui: true };
+    const frame: Outbound = {
+      type: "message",
+      chat_id: chatId,
+      content,
+      ...(media && media.length > 0 ? { media } : {}),
+      ...(options?.imageGeneration ? { image_generation: options.imageGeneration } : {}),
+      webui: true,
+    };
     this.queueSend(frame);
   }
 

@@ -142,7 +142,9 @@ function MessageMedia({
         align === "right" ? "justify-end" : "justify-start",
       )}
     >
-      {images.length > 0 ? <UserImages images={images} align={align} /> : null}
+      {images.length > 0 ? (
+        <UserImages images={images} align={align} size={align === "left" ? "large" : "compact"} />
+      ) : null}
       {nonImages.map((item, i) => (
         <MediaCell key={`${item.url ?? item.name ?? item.kind}-${i}`} media={item} />
       ))}
@@ -208,9 +210,11 @@ function MediaCell({ media }: { media: UIMediaAttachment }) {
 function UserImages({
   images,
   align = "right",
+  size = "compact",
 }: {
   images: UIImage[];
   align?: "left" | "right";
+  size?: "compact" | "large";
 }) {
   const { t } = useTranslation();
   // Only real-URL images can open in the lightbox; historical-replay
@@ -230,6 +234,7 @@ function UserImages({
       <div
         className={cn(
           "flex flex-wrap items-end gap-2",
+          size === "large" && "gap-3",
           align === "right" ? "ml-auto justify-end" : "mr-auto justify-start",
         )}
       >
@@ -237,6 +242,7 @@ function UserImages({
           <UserImageCell
             key={`${img.url ?? "placeholder"}-${i}`}
             image={img}
+            size={size}
             placeholderLabel={t("message.imageAttachment")}
             openLabel={t("lightbox.open")}
             onOpen={
@@ -261,18 +267,23 @@ function UserImages({
 
 function UserImageCell({
   image,
+  size,
   placeholderLabel,
   openLabel,
   onOpen,
 }: {
   image: UIImage;
+  size: "compact" | "large";
   placeholderLabel: string;
   openLabel: string;
   onOpen?: () => void;
 }) {
   const hasUrl = typeof image.url === "string" && image.url.length > 0;
   const tileClasses = cn(
-    "relative h-24 w-24 overflow-hidden rounded-[14px] border border-border/60 bg-muted/40",
+    "relative overflow-hidden border border-border/60 bg-muted/40",
+    size === "large"
+      ? "h-56 w-[min(100%,22rem)] rounded-[18px] sm:h-72 sm:w-[26rem]"
+      : "h-24 w-24 rounded-[14px]",
     "shadow-[0_6px_18px_-14px_rgba(0,0,0,0.45)]",
   );
 
@@ -296,7 +307,7 @@ function UserImageCell({
           loading="lazy"
           decoding="async"
           draggable={false}
-          className="h-full w-full object-cover"
+          className={cn("h-full w-full", size === "large" ? "object-contain" : "object-cover")}
         />
       </button>
     );

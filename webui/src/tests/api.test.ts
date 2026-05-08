@@ -85,6 +85,18 @@ describe("webui API helpers", () => {
       json: async () => ({
         commands: [
           {
+            command: "/stop",
+            title: "Stop current task",
+            description: "Cancel the active task.",
+            icon: "square",
+          },
+          {
+            command: "/restart",
+            title: "Restart nanobot",
+            description: "Restart the bot process.",
+            icon: "rotate-cw",
+          },
+          {
             command: "/history",
             title: "Show conversation history",
             description: "Print the last N messages.",

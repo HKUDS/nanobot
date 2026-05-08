@@ -774,15 +774,24 @@ async def test_send_typing_uses_keepalive_until_send_finishes() -> None:
     channel._client = object()
     channel._token = "token"
     channel._context_tokens["wx-user"] = "ctx-typing-loop"
+
+    typing_statuses: list[int] = []
+    keepalive_seen = asyncio.Event()
+
     async def _api_post_side_effect(endpoint: str, _body: dict | None = None, *, auth: bool = True):
         if endpoint == "ilink/bot/getconfig":
             return {"ret": 0, "typing_ticket": "ticket-keepalive"}
+        if endpoint == "ilink/bot/sendtyping" and _body is not None:
+            status = int(_body["status"])
+            typing_statuses.append(status)
+            if status == 1 and typing_statuses.count(1) >= 2:
+                keepalive_seen.set()
         return {"ret": 0}
 
     channel._api_post = AsyncMock(side_effect=_api_post_side_effect)
 
     async def _slow_send_text(*_args, **_kwargs) -> None:
-        await asyncio.sleep(0.03)
+        await asyncio.wait_for(keepalive_seen.wait(), timeout=1.0)
 
     channel._send_text = AsyncMock(side_effect=_slow_send_text)
 
@@ -795,13 +804,8 @@ async def test_send_typing_uses_keepalive_until_send_finishes() -> None:
     finally:
         weixin_mod.TYPING_KEEPALIVE_INTERVAL_S = old_interval
 
-    status_calls = [
-        c.args[1]["status"]
-        for c in channel._api_post.await_args_list
-        if c.args and c.args[0] == "ilink/bot/sendtyping"
-    ]
-    assert status_calls.count(1) >= 2
-    assert status_calls[-1] == 2
+    assert typing_statuses.count(1) >= 2
+    assert typing_statuses[-1] == 2
 
 
 @pytest.mark.asyncio

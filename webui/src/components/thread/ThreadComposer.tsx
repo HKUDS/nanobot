@@ -10,6 +10,8 @@ import {
   Activity,
   ArrowUp,
   BookOpen,
+  Check,
+  ChevronDown,
   CircleHelp,
   History,
   ImageIcon,
@@ -33,7 +35,7 @@ import {
   MAX_IMAGES_PER_MESSAGE,
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
-import type { SendImage } from "@/hooks/useNanobotStream";
+import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
 import type { SlashCommand } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -48,13 +50,16 @@ function formatBytes(n: number): string {
 }
 
 interface ThreadComposerProps {
-  onSend: (content: string, images?: SendImage[]) => void;
+  onSend: (content: string, images?: SendImage[], options?: SendOptions) => void;
   disabled?: boolean;
   placeholder?: string;
   isStreaming?: boolean;
   modelLabel?: string | null;
   variant?: "thread" | "hero";
   slashCommands?: SlashCommand[];
+  imageMode?: boolean;
+  onImageModeChange?: (enabled: boolean) => void;
+  onStop?: () => void;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -69,8 +74,26 @@ const COMMAND_ICONS: Record<string, LucideIcon> = {
   "undo-2": Undo2,
 };
 
+type ImageAspectRatio = "auto" | "1:1" | "3:4" | "9:16" | "4:3" | "16:9";
+
+const IMAGE_ASPECT_RATIOS: ImageAspectRatio[] = ["auto", "1:1", "3:4", "9:16", "4:3", "16:9"];
+
 function slashCommandI18nKey(command: string): string {
   return command.replace(/^\//, "").replace(/-/g, "_");
+}
+
+function scrollNearestOverflowParent(target: EventTarget | null, deltaY: number) {
+  if (!(target instanceof Element) || deltaY === 0) return;
+  let el: HTMLElement | null = target.parentElement;
+  while (el) {
+    const style = window.getComputedStyle(el);
+    const canScroll = /(auto|scroll)/.test(style.overflowY) && el.scrollHeight > el.clientHeight;
+    if (canScroll) {
+      el.scrollTop += deltaY;
+      return;
+    }
+    el = el.parentElement;
+  }
 }
 
 export function ThreadComposer({
@@ -81,19 +104,38 @@ export function ThreadComposer({
   modelLabel = null,
   variant = "thread",
   slashCommands = [],
+  imageMode: controlledImageMode,
+  onImageModeChange,
+  onStop,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [slashMenuDismissed, setSlashMenuDismissed] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [uncontrolledImageMode, setUncontrolledImageMode] = useState(false);
+  const [imageAspectRatio, setImageAspectRatio] = useState<ImageAspectRatio>("auto");
+  const [aspectMenuOpen, setAspectMenuOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const aspectControlRef = useRef<HTMLDivElement>(null);
   const chipRefs = useRef(new Map<string, HTMLButtonElement>());
   const isHero = variant === "hero";
+  const imageMode = controlledImageMode ?? uncontrolledImageMode;
+  const setImageMode = useCallback(
+    (enabled: boolean) => {
+      if (controlledImageMode === undefined) {
+        setUncontrolledImageMode(enabled);
+      }
+      onImageModeChange?.(enabled);
+    },
+    [controlledImageMode, onImageModeChange],
+  );
   const resolvedPlaceholder = isStreaming
     ? t("thread.composer.placeholderStreaming")
-    : placeholder ?? t("thread.composer.placeholderThread");
+    : imageMode
+      ? t("thread.composer.imageMode.placeholder")
+      : placeholder ?? t("thread.composer.placeholderThread");
 
   const { images, enqueue, remove, clear, encoding, full } =
     useAttachedImages();
@@ -190,6 +232,38 @@ export function ThreadComposer({
     }
   }, [filteredSlashCommands.length, selectedCommandIndex]);
 
+  useEffect(() => {
+    if (!aspectMenuOpen) return;
+
+    const closeOnPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && aspectControlRef.current?.contains(target)) return;
+      setAspectMenuOpen(false);
+    };
+    const closeOnKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setAspectMenuOpen(false);
+        textareaRef.current?.focus();
+      }
+    };
+    const closeOnScroll = () => setAspectMenuOpen(false);
+    const closeOnWheel = (event: WheelEvent) => {
+      setAspectMenuOpen(false);
+      scrollNearestOverflowParent(event.target, event.deltaY);
+    };
+
+    document.addEventListener("pointerdown", closeOnPointerDown, true);
+    document.addEventListener("keydown", closeOnKeyDown);
+    document.addEventListener("scroll", closeOnScroll, true);
+    document.addEventListener("wheel", closeOnWheel, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown, true);
+      document.removeEventListener("keydown", closeOnKeyDown);
+      document.removeEventListener("scroll", closeOnScroll, true);
+      document.removeEventListener("wheel", closeOnWheel, true);
+    };
+  }, [aspectMenuOpen]);
+
   const resizeTextarea = useCallback(() => {
     requestAnimationFrame(() => {
       const el = textareaRef.current;
@@ -227,7 +301,15 @@ export function ThreadComposer({
             preview: { url: img.dataUrl, name: img.file.name },
           }))
         : undefined;
-    onSend(trimmed, payload);
+    const options: SendOptions | undefined = imageMode
+      ? {
+          imageGeneration: {
+            enabled: true,
+            aspect_ratio: imageAspectRatio === "auto" ? null : imageAspectRatio,
+          },
+        }
+      : undefined;
+    onSend(trimmed, payload, options);
     setValue("");
     setInlineError(null);
     // Bubble owns the data URL copy; safe to revoke every staged blob
@@ -235,7 +317,7 @@ export function ThreadComposer({
     clear();
     setSlashMenuDismissed(false);
     resizeTextarea();
-  }, [canSend, clear, onSend, readyImages, resizeTextarea, value]);
+  }, [canSend, clear, imageAspectRatio, imageMode, onSend, readyImages, resizeTextarea, value]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (showSlashMenu) {
@@ -312,6 +394,7 @@ export function ThreadComposer({
   );
 
   const attachButtonDisabled = disabled || full;
+  const showStopButton = isStreaming && !!onStop;
 
   return (
     <form
@@ -336,7 +419,7 @@ export function ThreadComposer({
       ) : null}
       <div
         className={cn(
-          "relative mx-auto flex w-full flex-col overflow-hidden transition-all duration-200",
+          "relative mx-auto flex w-full flex-col overflow-visible transition-all duration-200",
           isHero
             ? "max-w-[58rem] rounded-[28px] border border-black/[0.035] bg-card shadow-[0_20px_55px_rgba(15,23,42,0.08)] dark:border-white/[0.06] dark:shadow-[0_24px_55px_rgba(0,0,0,0.34)]"
             : "max-w-[49.5rem] rounded-[22px] border border-black/[0.035] bg-card shadow-[0_12px_30px_rgba(15,23,42,0.07)] dark:border-white/[0.06] dark:shadow-[0_16px_34px_rgba(0,0,0,0.28)]",
@@ -439,6 +522,59 @@ export function ThreadComposer({
             >
               <Plus className={cn(isHero ? "h-5 w-5" : "h-4 w-4")} />
             </Button>
+            <div ref={aspectControlRef} className="relative flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={disabled}
+                aria-pressed={imageMode}
+                aria-label={t("thread.composer.imageMode.toggle")}
+                onClick={() => {
+                  setImageMode(!imageMode);
+                  setAspectMenuOpen(false);
+                  textareaRef.current?.focus();
+                }}
+                className={cn(
+                  "rounded-full border border-border/55 px-2.5 font-medium shadow-[0_2px_8px_rgba(15,23,42,0.04)]",
+                  isHero ? "h-9 text-[12px]" : "h-7.5 text-[10.5px]",
+                  imageMode
+                    ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/12"
+                    : "bg-card text-muted-foreground hover:bg-card hover:text-foreground",
+                )}
+              >
+                <ImageIcon className={cn("mr-1.5", isHero ? "h-4 w-4" : "h-3.5 w-3.5")} />
+                {t("thread.composer.imageMode.label")}
+              </Button>
+              {imageMode ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={disabled}
+                  aria-haspopup="listbox"
+                  aria-expanded={aspectMenuOpen}
+                  aria-label={t("thread.composer.imageMode.aspectAria")}
+                  onClick={() => setAspectMenuOpen((open) => !open)}
+                  className={cn(
+                    "rounded-full border border-border/55 bg-card px-2.5 font-medium text-foreground/80 shadow-[0_2px_8px_rgba(15,23,42,0.04)] hover:bg-card",
+                    isHero ? "h-9 text-[12px]" : "h-7.5 text-[10.5px]",
+                  )}
+                >
+                  <span>{t(`thread.composer.imageMode.aspect.${imageAspectRatio.replace(":", "_")}`)}</span>
+                  <ChevronDown className={cn("ml-1.5", isHero ? "h-3.5 w-3.5" : "h-3 w-3")} />
+                </Button>
+              ) : null}
+              {imageMode && aspectMenuOpen ? (
+                <ImageAspectMenu
+                  selected={imageAspectRatio}
+                  isHero={isHero}
+                  onSelect={(ratio) => {
+                    setImageAspectRatio(ratio);
+                    setAspectMenuOpen(false);
+                    textareaRef.current?.focus();
+                  }}
+                />
+              ) : null}
+            </div>
             {modelLabel ? (
               <span
                 title={modelLabel}
@@ -465,19 +601,25 @@ export function ThreadComposer({
           </div>
           <span className={cn(isHero ? "hidden" : "sm:hidden")} aria-hidden />
           <Button
-            type="submit"
+            type={showStopButton ? "button" : "submit"}
             size="icon"
-            disabled={!canSend}
-            aria-label={t("thread.composer.send")}
+            disabled={showStopButton ? disabled : !canSend}
+            aria-label={showStopButton ? t("thread.composer.stop") : t("thread.composer.send")}
+            onClick={showStopButton ? onStop : undefined}
             className={cn(
-              isHero
-                ? "h-9 w-9 rounded-full border border-foreground bg-foreground text-background shadow-[0_4px_12px_rgba(15,23,42,0.20)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80"
-                : "rounded-full border border-foreground bg-foreground text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] transition-transform hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80",
+              "rounded-full transition-transform",
+              showStopButton
+                ? "border border-border/70 bg-card text-foreground/85 shadow-[0_3px_10px_rgba(15,23,42,0.08)] hover:bg-muted/65 hover:text-foreground disabled:text-muted-foreground/50"
+                : isHero
+                  ? "border border-foreground bg-foreground text-background shadow-[0_4px_12px_rgba(15,23,42,0.20)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80"
+                  : "border border-foreground bg-foreground text-background shadow-[0_3px_10px_rgba(15,23,42,0.18)] hover:bg-foreground/90 disabled:border-foreground/35 disabled:bg-foreground/35 disabled:text-background/80",
               isHero ? "" : "h-7.5 w-7.5",
-              canSend && "hover:scale-[1.03] active:scale-95",
+              (canSend || showStopButton) && "hover:scale-[1.03] active:scale-95",
             )}
           >
-            {isStreaming ? (
+            {showStopButton ? (
+              <Square className={cn("fill-current stroke-current", isHero ? "h-3 w-3" : "h-2.5 w-2.5")} />
+            ) : isStreaming ? (
               <Loader2 className={cn(isHero ? "h-4.5 w-4.5" : "h-4 w-4", "animate-spin")} />
             ) : (
               <ArrowUp className={cn(isHero ? "h-4.5 w-4.5" : "h-4 w-4")} />
@@ -497,6 +639,59 @@ interface SlashCommandPaletteProps {
   onChoose: (command: SlashCommand) => void;
 }
 
+function ImageAspectMenu({
+  selected,
+  isHero,
+  onSelect,
+}: {
+  selected: ImageAspectRatio;
+  isHero: boolean;
+  onSelect: (ratio: ImageAspectRatio) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="listbox"
+      aria-label={t("thread.composer.imageMode.aspectAria")}
+      className={cn(
+        "absolute left-0 z-30 w-44 overflow-hidden rounded-[16px] border",
+        isHero ? "top-full mt-2" : "bottom-full mb-2",
+        "border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_16px_45px_rgba(15,23,42,0.16)]",
+        "dark:border-white/10 dark:shadow-[0_18px_45px_rgba(0,0,0,0.42)]",
+        isHero ? "text-[12px]" : "text-[11.5px]",
+      )}
+    >
+      <div className="px-2 pb-1 pt-1 font-medium text-muted-foreground/70">
+        {t("thread.composer.imageMode.aspectLabel")}
+      </div>
+      {IMAGE_ASPECT_RATIOS.map((ratio) => {
+        const label = t(`thread.composer.imageMode.aspect.${ratio.replace(":", "_")}`);
+        return (
+          <button
+            key={ratio}
+            type="button"
+            role="option"
+            aria-selected={selected === ratio}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onSelect(ratio);
+            }}
+            className={cn(
+              "flex w-full items-center justify-between rounded-[11px] px-2.5 py-2 text-left transition-colors",
+              selected === ratio
+                ? "bg-primary/10 text-foreground"
+                : "text-foreground/86 hover:bg-accent/55",
+            )}
+          >
+            <span>{label}</span>
+            {selected === ratio ? <Check className="h-3.5 w-3.5 text-primary" /> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function SlashCommandPalette({
   commands,
   selectedIndex,
@@ -511,7 +706,7 @@ function SlashCommandPalette({
       aria-label={t("thread.composer.slash.ariaLabel")}
       className={cn(
         "absolute bottom-full left-1/2 z-30 mb-2 max-h-[22rem] w-[calc(100%-0.5rem)] -translate-x-1/2 overflow-hidden rounded-[18px] border",
-        "border-border/65 bg-popover/98 p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)] backdrop-blur",
+        "border-border/65 bg-popover p-1.5 text-popover-foreground shadow-[0_18px_55px_rgba(15,23,42,0.18)]",
         "dark:border-white/10 dark:shadow-[0_22px_55px_rgba(0,0,0,0.45)]",
         isHero ? "max-w-[58rem]" : "max-w-[49.5rem]",
       )}

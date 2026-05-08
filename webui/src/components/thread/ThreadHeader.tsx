@@ -1,4 +1,4 @@
-import { Menu, Moon, PanelLeftOpen, Settings, Sun } from "lucide-react";
+import { Menu, Moon, Settings, Sun } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -80,7 +80,7 @@ export function ThreadHeader({
             hideSidebarToggleOnDesktop && "lg:pointer-events-none lg:opacity-0",
           )}
         >
-          <PanelLeftOpen className="h-3.5 w-3.5" />
+          <Menu className="h-3.5 w-3.5" />
         </Button>
         <div className="flex min-w-0 items-center rounded-md px-1.5 py-1 text-[12px] font-medium text-muted-foreground">
           <span className="max-w-[min(60vw,32rem)] truncate">{title}</span>
