@@ -331,6 +331,17 @@ function Shell({ onModelNameChange, onLogout }: { onModelNameChange: (modelName:
     setMobileSidebarOpen(false);
   }, []);
 
+  const onBackToChat = useCallback(() => {
+    setView("chat");
+    setMobileSidebarOpen(false);
+    setActiveKey((current) => {
+      if (current && sessions.some((session) => session.key === current)) {
+        return current;
+      }
+      return sessions[0]?.key ?? null;
+    });
+  }, [sessions]);
+
   const onRestart = useCallback(() => {
     const chatId = activeSession?.chatId ?? client.defaultChatId;
     if (!chatId) return;
@@ -467,7 +478,7 @@ function Shell({ onModelNameChange, onLogout }: { onModelNameChange: (modelName:
           <SettingsView
             theme={theme}
             onToggleTheme={toggle}
-            onBackToChat={() => setView("chat")}
+            onBackToChat={onBackToChat}
             onModelNameChange={onModelNameChange}
             onLogout={onLogout}
             onRestart={onRestart}

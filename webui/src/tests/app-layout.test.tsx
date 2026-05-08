@@ -223,6 +223,68 @@ describe("App layout", () => {
     expect(screen.getAllByText("Not configured").length).toBeGreaterThan(0);
   });
 
+  it("returns from settings to an available chat instead of the blank start page", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "First chat",
+      },
+      {
+        key: "websocket:chat-b",
+        channel: "websocket",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        preview: "Second chat",
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("/api/settings")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              agent: {
+                model: "openai/gpt-4o",
+                provider: "openai",
+                resolved_provider: "openai",
+                has_api_key: true,
+              },
+              providers: [{ name: "openai", label: "OpenAI", configured: true }],
+              runtime: {
+                config_path: "/tmp/config.json",
+              },
+              requires_restart: false,
+            }),
+          };
+        }
+        return { ok: false, status: 404, json: async () => ({}) };
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(sidebar).getByRole("button", { name: "New chat" }));
+    await waitFor(() => expect(document.title).toBe("nanobot"));
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
+
+    await waitFor(() => expect(document.title).toBe("First chat · nanobot"));
+    const restoredSidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    fireEvent.click(within(restoredSidebar).getByRole("button", { name: /^Second chat$/ }));
+    await waitFor(() => expect(document.title).toBe("Second chat · nanobot"));
+  });
+
   it("filters sidebar sessions through the lightweight search row", async () => {
     mockSessions = [
       {
