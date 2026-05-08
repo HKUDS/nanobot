@@ -371,11 +371,6 @@ class AgentLoop:
         # When a session has an active task, new messages for that session
         # are routed here instead of creating a new task.
         self._pending_queues: dict[str, asyncio.Queue] = {}
-        # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
-        _max = int(os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3"))
-        self._concurrency_gate: asyncio.Semaphore | None = (
-            asyncio.Semaphore(_max) if _max > 0 else None
-        )
         self.consolidator = Consolidator(
             store=self.context.memory,
             provider=provider,
@@ -992,7 +987,6 @@ class AgentLoop:
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
         lock = self._session_locks.setdefault(session_key, asyncio.Lock())
-        gate = self._concurrency_gate or nullcontext()
 
         # Register a pending queue so follow-up messages for this session are
         # routed here (mid-turn injection) instead of spawning a new task.
@@ -1000,7 +994,7 @@ class AgentLoop:
         self._pending_queues[session_key] = pending
 
         try:
-            async with lock, gate:
+            async with lock:
                 try:
                     on_stream = on_stream_end = None
                     if msg.metadata.get("_wants_stream"):

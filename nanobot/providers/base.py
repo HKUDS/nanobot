@@ -2,9 +2,10 @@
 
 import asyncio
 import json
+import os
 import re
 from abc import ABC, abstractmethod
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -167,6 +168,18 @@ class LLMProvider(ABC):
         self.api_key = api_key
         self.api_base = api_base
         self.generation: GenerationSettings = GenerationSettings()
+
+        # Shared concurrency gate for all LLM calls from this provider instance.
+        # NANOBOT_MAX_CONCURRENT_REQUESTS: <=0 means unlimited; default 3.
+        # Local models (Ollama, vLLM) often require serialization (MAX=1).
+        try:
+            raw_max = os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3")
+            _max = int(raw_max)
+        except (ValueError, TypeError):
+            _max = 3
+        self._concurrency_gate: asyncio.Semaphore | None = (
+            asyncio.Semaphore(_max) if _max > 0 else None
+        )
 
     @staticmethod
     def _sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -713,7 +726,8 @@ class LLMProvider(ABC):
         identical_error_count = 0
         while True:
             attempt += 1
-            response = await call(**kw)
+            async with (self._concurrency_gate or nullcontext()):
+                response = await call(**kw)
             if response.finish_reason != "error":
                 return response
             last_response = response
