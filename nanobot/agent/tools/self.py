@@ -87,6 +87,7 @@ class MyTool(Tool):
         self._modify_allowed = modify_allowed
         self._channel = ""
         self._chat_id = ""
+        self._session_key: str | None = None
 
     def __deepcopy__(self, memo: dict[int, Any]) -> MyTool:
         cls = self.__class__
@@ -96,11 +97,13 @@ class MyTool(Tool):
         result._modify_allowed = self._modify_allowed
         result._channel = self._channel
         result._chat_id = self._chat_id
+        result._session_key = self._session_key
         return result
 
-    def set_context(self, channel: str, chat_id: str) -> None:
+    def set_context(self, channel: str, chat_id: str, session_key: str | None = None) -> None:
         self._channel = channel
         self._chat_id = chat_id
+        self._session_key = session_key
 
     @property
     def name(self) -> str:
@@ -116,6 +119,9 @@ class MyTool(Tool):
             "(e.g. '_last_usage.prompt_tokens', 'web_config.enable').\n"
             "- set (key, value): change config or store notes in your scratchpad. "
             "Scratchpad keys persist across turns but not restarts.\n"
+            "- set (key='focus', value=<str>): pin the current primary task. "
+            "The focus is auto-injected into every turn so it survives compaction "
+            "and restarts. Overwrite to switch tasks; set to empty to clear.\n"
             "Key values: _current_iteration (current progress), "
             "max_iterations - _current_iteration = remaining iterations.\n"
             "Note: web_config and exec_config are readable but read-only.\n"
@@ -348,6 +354,8 @@ class MyTool(Tool):
     def _modify(self, key: str | None, value: Any) -> str:
         if err := self._validate_key(key):
             return err
+        if key == "focus":
+            return self._modify_focus(value)
         top = key.split(".")[0]
         if top in self.BLOCKED or top in self._DENIED_ATTRS or top.startswith("__") or top.lower() in self._SENSITIVE_NAMES:
             self._audit("modify", f"BLOCKED {key}")
@@ -375,6 +383,34 @@ class MyTool(Tool):
         if key in self.RESTRICTED:
             return self._modify_restricted(key, value)
         return self._modify_free(key, value)
+
+    def _modify_focus(self, value: Any) -> str:
+        # Special key: persist to session.metadata so the active focus survives
+        # compaction and restarts, and is auto-injected into every LLM call by
+        # ContextBuilder. Setting an empty/None value clears the focus.
+        if value is not None and not isinstance(value, str):
+            self._audit("modify", f"REJECTED focus: must be str, got {type(value).__name__}")
+            return f"Error: 'focus' must be str, got {type(value).__name__}"
+        sessions = getattr(self._loop, "sessions", None)
+        if sessions is None or not self._session_key:
+            self._audit("modify", "REJECTED focus: no session context")
+            return "Error: 'focus' requires an active session"
+        text = (value or "").strip()
+        try:
+            session = sessions.get_or_create(self._session_key)
+        except Exception as e:
+            self._audit("modify", f"REJECTED focus: session lookup failed ({e})")
+            return f"Error: could not load session: {e}"
+        old = session.metadata.get("_focus")
+        if not text:
+            session.metadata.pop("_focus", None)
+            sessions.save(session)
+            self._audit("modify", f"focus cleared (was {old!r})")
+            return "Cleared focus" if old else "focus is already empty"
+        session.metadata["_focus"] = text
+        sessions.save(session)
+        self._audit("modify", f"focus: {old!r} -> {text!r}")
+        return f"Set focus = {text!r}"
 
     def _modify_restricted(self, key: str, value: Any) -> str:
         spec = self.RESTRICTED[key]

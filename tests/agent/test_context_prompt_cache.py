@@ -367,3 +367,33 @@ def test_customized_memory_md_is_injected(tmp_path) -> None:
 
     assert "# Memory\n\n## Long-term Memory" in prompt
     assert "User prefers dark mode" in prompt
+
+
+def test_runtime_context_includes_focus_when_provided(tmp_path) -> None:
+    """An active focus should be auto-injected into every LLM call."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="hello",
+        channel="cli",
+        chat_id="direct",
+        focus="fixing auth timeout bug",
+    )
+
+    user_content = messages[-1]["content"]
+    assert "Current Focus: fixing auth timeout bug" in user_content
+
+
+def test_runtime_context_omits_focus_when_absent(tmp_path) -> None:
+    """No focus line should appear when focus is None or empty."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    for value in (None, ""):
+        messages = builder.build_messages(
+            history=[], current_message="hello",
+            channel="cli", chat_id="direct", focus=value,
+        )
+        assert "Current Focus:" not in messages[-1]["content"]

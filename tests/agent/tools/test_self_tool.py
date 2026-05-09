@@ -1123,3 +1123,73 @@ class TestSetContext:
         tool.set_context("feishu", "oc_abc123")
         assert tool._channel == "feishu"
         assert tool._chat_id == "oc_abc123"
+
+    def test_set_context_stores_session_key(self):
+        tool = _make_tool()
+        tool.set_context("slack", "C123", session_key="slack:C123")
+        assert tool._session_key == "slack:C123"
+
+
+# ---------------------------------------------------------------------------
+# focus key — persists to session.metadata, survives compaction/restart
+# ---------------------------------------------------------------------------
+
+def _make_loop_with_sessions():
+    loop = _make_mock_loop()
+    session = MagicMock()
+    session.metadata = {}
+    sessions = MagicMock()
+    sessions.get_or_create.return_value = session
+    sessions.save = MagicMock()
+    loop.sessions = sessions
+    return loop, session, sessions
+
+
+class TestFocusKey:
+
+    @pytest.mark.asyncio
+    async def test_set_focus_writes_to_session_metadata(self):
+        loop, session, sessions = _make_loop_with_sessions()
+        tool = _make_tool(loop)
+        tool.set_context("slack", "C1", session_key="slack:C1")
+        result = await tool.execute(action="set", key="focus", value="fix auth bug")
+        assert "fix auth bug" in result
+        assert session.metadata["_focus"] == "fix auth bug"
+        sessions.save.assert_called_once_with(session)
+        # Must NOT spill into the in-memory scratchpad.
+        assert "focus" not in loop._runtime_vars
+
+    @pytest.mark.asyncio
+    async def test_set_focus_overwrites_previous(self):
+        loop, session, sessions = _make_loop_with_sessions()
+        session.metadata["_focus"] = "old task"
+        tool = _make_tool(loop)
+        tool.set_context("slack", "C1", session_key="slack:C1")
+        await tool.execute(action="set", key="focus", value="new task")
+        assert session.metadata["_focus"] == "new task"
+
+    @pytest.mark.asyncio
+    async def test_set_focus_empty_clears(self):
+        loop, session, sessions = _make_loop_with_sessions()
+        session.metadata["_focus"] = "old task"
+        tool = _make_tool(loop)
+        tool.set_context("slack", "C1", session_key="slack:C1")
+        result = await tool.execute(action="set", key="focus", value="")
+        assert "_focus" not in session.metadata
+        assert "Cleared" in result
+
+    @pytest.mark.asyncio
+    async def test_set_focus_rejects_non_string(self):
+        loop, _, _ = _make_loop_with_sessions()
+        tool = _make_tool(loop)
+        tool.set_context("slack", "C1", session_key="slack:C1")
+        result = await tool.execute(action="set", key="focus", value=123)
+        assert "Error" in result and "must be str" in result
+
+    @pytest.mark.asyncio
+    async def test_set_focus_without_session_key_fails(self):
+        loop, _, _ = _make_loop_with_sessions()
+        tool = _make_tool(loop)
+        # No set_context call → no session_key.
+        result = await tool.execute(action="set", key="focus", value="anything")
+        assert "Error" in result and "session" in result.lower()
