@@ -655,6 +655,8 @@ def _run_gateway(
     agent = AgentLoop.from_config(
         config, bus,
         provider=provider_snapshot.provider,
+        model=provider_snapshot.model,
+        context_window_tokens=provider_snapshot.context_window_tokens,
         cron_service=cron,
         session_manager=session_manager,
         image_generation_provider_configs={

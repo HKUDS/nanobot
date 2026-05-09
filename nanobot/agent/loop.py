@@ -360,13 +360,15 @@ class AgentLoop:
             bus = MessageBus()
         defaults = config.agents.defaults
         provider = extra.pop("provider", None) or make_provider(config)
+        model = extra.pop("model", None) or defaults.model
+        context_window_tokens = extra.pop("context_window_tokens", None) or defaults.context_window_tokens
         return cls(
             bus=bus,
             provider=provider,
             workspace=config.workspace_path,
-            model=defaults.model,
+            model=model,
             max_iterations=defaults.max_tool_iterations,
-            context_window_tokens=defaults.context_window_tokens,
+            context_window_tokens=context_window_tokens,
             context_block_limit=defaults.context_block_limit,
             max_tool_result_chars=defaults.max_tool_result_chars,
             provider_retry_mode=defaults.provider_retry_mode,
