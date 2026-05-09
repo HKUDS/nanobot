@@ -555,6 +555,27 @@ class AgentLoop:
 
         return _on_retry_wait
 
+    def _persist_user_message_early(
+        self,
+        msg: InboundMessage,
+        session: Session,
+        pending_ask_id: str | None,
+    ) -> bool:
+        """Persist the triggering user message before the turn starts.
+
+        Returns True if the message was persisted.
+        """
+        media_paths = [p for p in (msg.media or []) if isinstance(p, str) and p]
+        has_text = isinstance(msg.content, str) and msg.content.strip()
+        if not pending_ask_id and (has_text or media_paths):
+            extra: dict[str, Any] = {"media": list(media_paths)} if media_paths else {}
+            text = msg.content if isinstance(msg.content, str) else ""
+            session.add_message("user", text, **extra)
+            self._mark_pending_user_turn(session)
+            self.sessions.save(session)
+            return True
+        return False
+
     async def _dispatch_command_inline(
         self,
         msg: InboundMessage,
@@ -1162,16 +1183,7 @@ class AgentLoop:
         # doesn't silently lose the prompt on recovery. ``media`` rides along
         # as raw on-disk paths — sanitized image blocks are stripped from
         # JSONL, and webui replay needs the paths to mint signed URLs.
-        user_persisted_early = False
-        media_paths = [p for p in (msg.media or []) if isinstance(p, str) and p]
-        has_text = isinstance(msg.content, str) and msg.content.strip()
-        if not pending_ask_id and (has_text or media_paths):
-            extra: dict[str, Any] = {"media": list(media_paths)} if media_paths else {}
-            text = msg.content if isinstance(msg.content, str) else ""
-            session.add_message("user", text, **extra)
-            self._mark_pending_user_turn(session)
-            self.sessions.save(session)
-            user_persisted_early = True
+        user_persisted_early = self._persist_user_message_early(msg, session, pending_ask_id)
 
         final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
             initial_messages,
