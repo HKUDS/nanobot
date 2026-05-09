@@ -8,6 +8,8 @@ import json
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext, suppress
+from dataclasses import dataclass, field
+from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -180,6 +182,48 @@ class _LoopHook(AgentHook):
 
     def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
         return self._loop._strip_think(content)
+
+
+class TurnState(Enum):
+    RESTORE = auto()
+    COMPACT = auto()
+    COMMAND = auto()
+    BUILD = auto()
+    RUN = auto()
+    SAVE = auto()
+    RESPOND = auto()
+    DONE = auto()
+
+
+@dataclass
+class TurnContext:
+    msg: InboundMessage
+    session: Session
+    session_key: str
+    state: TurnState
+
+    history: list[dict[str, Any]] = field(default_factory=list)
+    initial_messages: list[dict[str, Any]] = field(default_factory=list)
+
+    final_content: str | None = None
+    tools_used: list[str] = field(default_factory=list)
+    all_messages: list[dict[str, Any]] = field(default_factory=list)
+    stop_reason: str = ""
+    had_injections: bool = False
+
+    user_persisted_early: bool = False
+    save_skip: int = 0
+
+    outbound: OutboundMessage | None = None
+    generated_media: list[str] = field(default_factory=list)
+
+    on_progress: Callable[..., Awaitable[None]] | None = None
+    on_stream: Callable[[str], Awaitable[None]] | None = None
+    on_stream_end: Callable[..., Awaitable[None]] | None = None
+    on_retry_wait: Callable[[str], Awaitable[None]] | None = None
+
+    pending_queue: asyncio.Queue | None = None
+    pending_summary: Any = None
 
 
 class AgentLoop:
