@@ -84,16 +84,6 @@ class Session:
         token budget from the tail (``max_tokens``) when provided.
         """
         unconsolidated = self.messages[self.last_consolidated:]
-        if not unconsolidated and self.last_consolidated > 0 and self.messages:
-            logger.warning(
-                "Session {} has last_consolidated {} >= len(messages) {}, resetting to 0. "
-                "This may indicate file corruption or migration issues.",
-                self.key,
-                self.last_consolidated,
-                len(self.messages),
-            )
-            self.last_consolidated = 0
-            unconsolidated = self.messages
         max_messages = max_messages if max_messages > 0 else 120
         sliced = unconsolidated[-max_messages:]
 
