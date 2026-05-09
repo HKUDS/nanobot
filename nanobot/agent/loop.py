@@ -34,7 +34,7 @@ from nanobot.agent.tools.self import MyTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
-from nanobot.config.schema import AgentDefaults
+from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.manager import Session, SessionManager
@@ -291,6 +291,8 @@ class AgentLoop:
         image_generation_provider_configs: dict[str, ProviderConfig] | None = None,
         provider_snapshot_loader: Callable[[], ProviderSnapshot] | None = None,
         provider_signature: tuple[object, ...] | None = None,
+        model_presets: dict[str, ModelPresetConfig] | None = None,
+        model_preset: str | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -395,6 +397,8 @@ class AgentLoop:
             provider=provider,
             model=self.model,
         )
+        self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
+        self._active_preset: str | None = model_preset if model_presets and model_preset in model_presets else None
         self._register_default_tools()
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
@@ -420,8 +424,12 @@ class AgentLoop:
             bus = MessageBus()
         defaults = config.agents.defaults
         provider = extra.pop("provider", None) or make_provider(config)
-        model = extra.pop("model", None) or defaults.model
-        context_window_tokens = extra.pop("context_window_tokens", None) or defaults.context_window_tokens
+        resolved = config.resolve_preset()
+        model = extra.pop("model", None) or resolved.model
+        context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
+        model_presets = dict(config.model_presets)
+        if "default" not in model_presets:
+            model_presets["default"] = resolved
         return cls(
             bus=bus,
             provider=provider,
@@ -443,6 +451,8 @@ class AgentLoop:
             consolidation_ratio=defaults.consolidation_ratio,
             max_messages=defaults.max_messages,
             tools_config=config.tools,
+            model_presets=model_presets,
+            model_preset=defaults.model_preset,
             **extra,
         )
 
@@ -479,6 +489,25 @@ class AgentLoop:
         if snapshot.signature == self._provider_signature:
             return
         self._apply_provider_snapshot(snapshot)
+
+    # -- model_preset property --
+
+    @property
+    def model_preset(self) -> str | None:
+        return self._active_preset
+
+    @model_preset.setter
+    def model_preset(self, name: str | None) -> None:
+        """Resolve a preset by name and apply all fields atomically."""
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("model_preset must be a non-empty string")
+        if name not in self.model_presets:
+            raise KeyError(f"model_preset {name!r} not found. Available: {', '.join(self.model_presets) or '(none)'}")
+        p = self.model_presets[name]
+        self.model = p.model
+        self.context_window_tokens = p.context_window_tokens
+        self.provider.generation = p.to_generation_settings()
+        self._active_preset = name
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools via plugin loader."""

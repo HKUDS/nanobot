@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nanobot.config.schema import Config
-from nanobot.providers.base import GenerationSettings, LLMProvider
+from nanobot.providers.base import LLMProvider
 from nanobot.providers.registry import find_by_name
 
 
@@ -20,7 +20,8 @@ class ProviderSnapshot:
 
 def make_provider(config: Config) -> LLMProvider:
     """Create the LLM provider implied by config."""
-    model = config.agents.defaults.model
+    resolved = config.resolve_preset()
+    model = resolved.model
     provider_name = config.get_provider_name(model)
     p = config.get_provider(model)
     spec = find_by_name(provider_name) if provider_name else None
@@ -83,42 +84,37 @@ def make_provider(config: Config) -> LLMProvider:
             extra_body=p.extra_body if p else None,
         )
 
-    defaults = config.agents.defaults
-    provider.generation = GenerationSettings(
-        temperature=defaults.temperature,
-        max_tokens=defaults.max_tokens,
-        reasoning_effort=defaults.reasoning_effort,
-    )
+    provider.generation = resolved.to_generation_settings()
     return provider
 
 
 def provider_signature(config: Config) -> tuple[object, ...]:
     """Return the config fields that affect the primary LLM provider."""
-    model = config.agents.defaults.model
-    defaults = config.agents.defaults
-    p = config.get_provider(model)
+    resolved = config.resolve_preset()
+    p = config.get_provider(resolved.model)
     return (
-        model,
-        defaults.provider,
-        config.get_provider_name(model),
-        config.get_api_key(model),
-        config.get_api_base(model),
+        resolved.model,
+        resolved.provider,
+        config.get_provider_name(resolved.model),
+        config.get_api_key(resolved.model),
+        config.get_api_base(resolved.model),
         p.extra_headers if p else None,
         p.extra_body if p else None,
         getattr(p, "region", None) if p else None,
         getattr(p, "profile", None) if p else None,
-        defaults.max_tokens,
-        defaults.temperature,
-        defaults.reasoning_effort,
-        defaults.context_window_tokens,
+        resolved.max_tokens,
+        resolved.temperature,
+        resolved.reasoning_effort,
+        resolved.context_window_tokens,
     )
 
 
 def build_provider_snapshot(config: Config) -> ProviderSnapshot:
+    resolved = config.resolve_preset()
     return ProviderSnapshot(
         provider=make_provider(config),
-        model=config.agents.defaults.model,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
+        model=resolved.model,
+        context_window_tokens=resolved.context_window_tokens,
         signature=provider_signature(config),
     )
 

@@ -448,6 +448,14 @@ def _onboard_plugins(config_path: Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
+def _model_display(config: Config) -> tuple[str, str]:
+    """Return (resolved_model_name, preset_tag) for display strings."""
+    resolved = config.resolve_preset()
+    name = config.agents.defaults.model_preset
+    tag = f" (preset: {name})" if name else ""
+    return resolved.model, tag
+
+
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
     from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
@@ -556,10 +564,10 @@ def serve(
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
 
-    model_name = runtime_config.agents.defaults.model
+    model_name, preset_tag = _model_display(runtime_config)
     console.print(f"{__logo__} Starting OpenAI-compatible API server")
     console.print(f"  [cyan]Endpoint[/cyan] : http://{host}:{port}/v1/chat/completions")
-    console.print(f"  [cyan]Model[/cyan]    : {model_name}")
+    console.print(f"  [cyan]Model[/cyan]    : {model_name}{preset_tag}")
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
     if host in {"0.0.0.0", "::"}:
@@ -1086,7 +1094,8 @@ def agent(
         # Interactive mode — route through bus like other channels
         from nanobot.bus.events import InboundMessage
         _init_prompt_session()
-        console.print(f"{__logo__} Interactive mode [bold blue]({config.agents.defaults.model})[/bold blue] — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
+        _model, _preset_tag = _model_display(config)
+        console.print(f"{__logo__} Interactive mode [bold blue]({_model})[/bold blue]{_preset_tag} — type [bold]exit[/bold] or [bold]Ctrl+C[/bold] to quit\n")
 
         if ":" in session_id:
             cli_channel, cli_chat_id = session_id.split(":", 1)
@@ -1448,7 +1457,8 @@ def status():
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
 
-        console.print(f"Model: {config.agents.defaults.model}")
+        _model, _preset_tag = _model_display(config)
+        console.print(f"Model: {_model}{_preset_tag}")
 
         # Check API keys from registry
         for spec in PROVIDERS:

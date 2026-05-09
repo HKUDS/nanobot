@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -73,10 +73,30 @@ class DreamConfig(Base):
         return f"every {hours}h"
 
 
+class ModelPresetConfig(Base):
+    """A named set of model + generation parameters for quick switching."""
+
+    model: str
+    provider: str = "auto"
+    max_tokens: int = 8192
+    context_window_tokens: int = 65_536
+    temperature: float = 0.1
+    reasoning_effort: str | None = None
+
+    def to_generation_settings(self) -> Any:
+        from nanobot.providers.base import GenerationSettings
+        return GenerationSettings(
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+            reasoning_effort=self.reasoning_effort,
+        )
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.nanobot/workspace"
+    model_preset: str | None = None  # Active preset name — takes precedence over fields below
     model: str = "anthropic/claude-opus-4-5"
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
@@ -254,6 +274,26 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    model_presets: dict[str, ModelPresetConfig] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_model_preset(self) -> "Config":
+        name = self.agents.defaults.model_preset
+        if name and name not in self.model_presets:
+            raise ValueError(f"model_preset {name!r} not found in model_presets")
+        return self
+
+    def resolve_preset(self) -> ModelPresetConfig:
+        """Return effective model params: from active preset, or individual defaults."""
+        name = self.agents.defaults.model_preset
+        if name:
+            return self.model_presets[name]
+        d = self.agents.defaults
+        return ModelPresetConfig(
+            model=d.model, provider=d.provider, max_tokens=d.max_tokens,
+            context_window_tokens=d.context_window_tokens,
+            temperature=d.temperature, reasoning_effort=d.reasoning_effort,
+        )
 
     @property
     def workspace_path(self) -> Path:
@@ -266,7 +306,8 @@ class Config(BaseSettings):
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS, find_by_name
 
-        forced = self.agents.defaults.provider
+        resolved = self.resolve_preset()
+        forced = resolved.provider
         if forced != "auto":
             spec = find_by_name(forced)
             if spec:
@@ -274,7 +315,7 @@ class Config(BaseSettings):
                 return (p, spec.name) if p else (None, None)
             return None, None
 
-        model_lower = (model or self.agents.defaults.model).lower()
+        model_lower = (model or resolved.model).lower()
         model_normalized = model_lower.replace("-", "_")
         model_prefix = model_lower.split("/", 1)[0] if "/" in model_lower else ""
         normalized_prefix = model_prefix.replace("-", "_")

@@ -347,6 +347,7 @@ class MyTool(Tool, ContextAware):
         # RESTRICTED keys
         for k in self.RESTRICTED:
             parts.append(self._format_value(getattr(state, k, None), k))
+        parts.append(self._format_value(state.model_preset, "model_preset"))
         # Other useful top-level keys shown in description
         for k in ("workspace", "provider_retry_mode", "max_tool_result_chars", "_current_iteration", "web_config", "exec_config", "subagents"):
             if _has_real_attr(state, k):
@@ -411,6 +412,8 @@ class MyTool(Tool, ContextAware):
         if "min_len" in spec and len(str(value)) < spec["min_len"]:
             return f"Error: '{key}' must be at least {spec['min_len']} characters"
         setattr(self._runtime_state, key, value)
+        if key == "model":
+            self._runtime_state._active_preset = None
         if key == "max_iterations" and hasattr(self._runtime_state, "_sync_subagent_runtime_limits"):
             self._runtime_state._sync_subagent_runtime_limits()
         self._audit("modify", f"{key}: {old!r} -> {value!r}")
@@ -429,7 +432,11 @@ class MyTool(Tool, ContextAware):
                         f"REJECTED type mismatch {key}: expects {old_t.__name__}, got {new_t.__name__}",
                     )
                     return f"Error: '{key}' expects {old_t.__name__}, got {new_t.__name__}"
-            setattr(self._runtime_state, key, value)
+            try:
+                setattr(self._runtime_state, key, value)
+            except (ValueError, KeyError) as e:
+                self._audit("modify", f"REJECTED {key}: {e}")
+                return f"Error: {e}"
             self._audit("modify", f"{key}: {old!r} -> {value!r}")
             return f"Set {key} = {value!r} (was {old!r})"
         if callable(value):
