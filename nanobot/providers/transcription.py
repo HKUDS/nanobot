@@ -229,13 +229,14 @@ class FasterWhisperTranscriptionProvider:
     def _schedule_unload(cls):
         if cls._unload_handle is not None:
             cls._unload_handle.cancel()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         cls._unload_handle = loop.call_later(_MODEL_TTL, cls._do_unload)
 
     @classmethod
     def _do_unload(cls):
         logger.info("Unloading faster-whisper model (idle TTL)")
         cls._model = None
+        cls._unload_handle = None
 
     def __init__(
         self,
@@ -281,7 +282,7 @@ class FasterWhisperTranscriptionProvider:
                 )
                 return ""
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             # Load model only if not already cached
             if FasterWhisperTranscriptionProvider._model is None:

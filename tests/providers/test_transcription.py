@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -250,14 +250,19 @@ async def test_returns_empty_on_malformed_json_body(audio_file: Path) -> None:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_faster_whisper_missing_file_short_circuits() -> None:
+async def test_faster_whisper_missing_file_short_circuits(
+    _reset_faster_whisper_cache,
+) -> None:
     provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="cpu")
     result = await provider.transcribe("/nonexistent/path/voice.ogg")
     assert result == ""
 
 
 @pytest.mark.asyncio
-async def test_faster_whisper_import_error_returns_empty(audio_file: Path) -> None:
+async def test_faster_whisper_import_error_returns_empty(
+    audio_file: Path,
+    _reset_faster_whisper_cache,
+) -> None:
     """If faster-whisper is not installed, return empty string gracefully."""
     provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="cpu")
     import sys
@@ -284,23 +289,70 @@ async def test_faster_whisper_import_error_returns_empty(audio_file: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_faster_whisper_auto_device_no_cuda(audio_file: Path) -> None:
-    """When torch is not available or has no CUDA, device falls back to cpu."""
-    provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="auto")
-    with patch("torch.cuda.is_available", return_value=False):
+async def test_faster_whisper_auto_device_no_cuda(
+    audio_file: Path,
+    _reset_faster_whisper_cache,
+) -> None:
+    """When torch is installed but has no CUDA, device falls back to cpu."""
+    import sys
+    saved = sys.modules.pop("torch", None)
+    try:
+        import types
+        mock_cuda = types.SimpleNamespace(is_available=Mock(return_value=False))
+        mock_torch = types.SimpleNamespace(cuda=mock_cuda)
+        sys.modules["torch"] = mock_torch
+        provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="auto")
         assert provider._effective_device == "cpu"
+    finally:
+        if saved is not None:
+            sys.modules["torch"] = saved
+        else:
+            sys.modules.pop("torch", None)
 
 
 @pytest.mark.asyncio
-async def test_faster_whisper_auto_device_with_cuda(audio_file: Path) -> None:
+async def test_faster_whisper_auto_device_with_cuda(
+    audio_file: Path,
+    _reset_faster_whisper_cache,
+) -> None:
     """When torch detects CUDA, device is cuda."""
-    provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="auto")
-    with patch("torch.cuda.is_available", return_value=True):
+    import sys
+    saved = sys.modules.pop("torch", None)
+    try:
+        import types
+        mock_cuda = types.SimpleNamespace(is_available=Mock(return_value=True))
+        mock_torch = types.SimpleNamespace(cuda=mock_cuda)
+        sys.modules["torch"] = mock_torch
+        provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="auto")
         assert provider._effective_device == "cuda"
+    finally:
+        if saved is not None:
+            sys.modules["torch"] = saved
+        else:
+            sys.modules.pop("torch", None)
 
 
 @pytest.mark.asyncio
-async def test_faster_whisper_explicit_device_overrides_auto(audio_file: Path) -> None:
+async def test_faster_whisper_auto_device_torch_not_installed(
+    audio_file: Path,
+    _reset_faster_whisper_cache,
+) -> None:
+    """When torch is not installed at all, device falls back to cpu."""
+    import sys
+    saved = sys.modules.pop("torch", None)
+    try:
+        provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="auto")
+        assert provider._effective_device == "cpu"
+    finally:
+        if saved is not None:
+            sys.modules["torch"] = saved
+    
+
+@pytest.mark.asyncio
+async def test_faster_whisper_explicit_device_overrides_auto(
+    audio_file: Path,
+    _reset_faster_whisper_cache,
+) -> None:
     """Explicit device setting takes precedence over auto-detection."""
     provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="cuda")
     assert provider._effective_device == "cuda"
@@ -362,7 +414,7 @@ async def test_retries_on_every_advertised_transient_exception(
 # faster-whisper — model caching and concurrency
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(autouse=True)
+@pytest.fixture()
 def _reset_faster_whisper_cache():
     """Reset class-level state so each test starts fresh."""
     FasterWhisperTranscriptionProvider._model = None
@@ -412,6 +464,7 @@ def _install_mock_whisper_model(init_counter: list[int]):
 @pytest.mark.asyncio
 async def test_faster_whisper_model_cached_between_calls(
     audio_file: Path,
+    _reset_faster_whisper_cache,
 ) -> None:
     """WhisperModel should be instantiated only once across multiple sequential calls."""
     provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="cpu")
@@ -429,6 +482,7 @@ async def test_faster_whisper_model_cached_between_calls(
 @pytest.mark.asyncio
 async def test_faster_whisper_concurrent_calls_reuse_model(
     audio_file: Path,
+    _reset_faster_whisper_cache,
 ) -> None:
     """Concurrent transcribe calls should not create multiple WhisperModel instances."""
     provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="cpu")
