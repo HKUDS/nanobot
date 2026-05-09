@@ -348,13 +348,18 @@ class AgentLoop:
         bus: MessageBus | None = None,
         **extra: Any,
     ) -> AgentLoop:
-        """Create an AgentLoop from config with the common parameter set."""
+        """Create an AgentLoop from config with the common parameter set.
+
+        Extra keyword arguments are forwarded to ``AgentLoop.__init__``,
+        allowing callers to override or extend the standard config-derived
+        parameters (e.g. ``cron_service``, ``session_manager``).
+        """
         from nanobot.providers.factory import make_provider
 
         if bus is None:
             bus = MessageBus()
         defaults = config.agents.defaults
-        provider = make_provider(config)
+        provider = extra.pop("provider", None) or make_provider(config)
         return cls(
             bus=bus,
             provider=provider,

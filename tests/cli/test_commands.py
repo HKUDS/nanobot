@@ -1144,7 +1144,7 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
             return cls(**extra)
         def __init__(self, *args, **kwargs) -> None:
             self.model = "test-model"
-            self.provider = object()
+            self.provider = kwargs.get("provider", object())
             self.tools = {}
 
         async def process_direct(self, *_args, **_kwargs):
@@ -1209,7 +1209,7 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
 
     assert response == "Time to stretch."
     assert seen["response"] == "Time to stretch."
-    assert seen["provider"] is not None
+    assert seen["provider"] is provider
     assert seen["model"] == "test-model"
     assert seen["task_context"] == (
         "The scheduled time has arrived. Deliver this reminder to the user now, "

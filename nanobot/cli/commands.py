@@ -543,14 +543,18 @@ def serve(
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     session_manager = SessionManager(runtime_config.workspace_path)
-    agent_loop = AgentLoop.from_config(
-        runtime_config, bus,
-        session_manager=session_manager,
-        image_generation_provider_configs={
-            "openrouter": runtime_config.providers.openrouter,
-            "aihubmix": runtime_config.providers.aihubmix,
-        },
-    )
+    try:
+        agent_loop = AgentLoop.from_config(
+            runtime_config, bus,
+            session_manager=session_manager,
+            image_generation_provider_configs={
+                "openrouter": runtime_config.providers.openrouter,
+                "aihubmix": runtime_config.providers.aihubmix,
+            },
+        )
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
 
     model_name = runtime_config.agents.defaults.model
     console.print(f"{__logo__} Starting OpenAI-compatible API server")
@@ -650,6 +654,7 @@ def _run_gateway(
     # Create agent with cron service
     agent = AgentLoop.from_config(
         config, bus,
+        provider=provider_snapshot.provider,
         cron_service=cron,
         session_manager=session_manager,
         image_generation_provider_configs={
@@ -1025,10 +1030,14 @@ def agent(
     else:
         logger.disable("nanobot")
 
-    agent_loop = AgentLoop.from_config(
-        config, bus,
-        cron_service=cron,
-    )
+    try:
+        agent_loop = AgentLoop.from_config(
+            config, bus,
+            cron_service=cron,
+        )
+    except ValueError as exc:
+        console.print(f"[red]Error: {exc}[/red]")
+        raise typer.Exit(1) from exc
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
         _print_agent_response(
