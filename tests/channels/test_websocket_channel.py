@@ -524,6 +524,8 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
     config = Config()
     config.agents.defaults.model = "openai/gpt-4o"
     config.providers.openai.api_key = "secret-key"
+    config.tools.web.search.provider = "brave"
+    config.tools.web.search.api_key = "brave-secret"
     save_config(config, config_path)
     monkeypatch.setattr("nanobot.config.loader._current_config_path", config_path)
 
@@ -547,7 +549,13 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert providers["openai"]["api_key_hint"] == "secr••••-key"
         assert providers["openrouter"]["configured"] is False
         assert body["agent"]["has_api_key"] is True
+        assert body["web_search"]["provider"] == "brave"
+        assert body["web_search"]["api_key_hint"] == "brav••••cret"
+        search_providers = {provider["name"]: provider for provider in body["web_search"]["providers"]}
+        assert search_providers["duckduckgo"]["credential"] == "none"
+        assert search_providers["searxng"]["credential"] == "base_url"
         assert "secret-key" not in settings.text
+        assert "brave-secret" not in settings.text
 
         provider_updated = await _http_get(
             "http://127.0.0.1:"
@@ -571,11 +579,27 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert updated.status_code == 200
         assert updated.json()["requires_restart"] is False
 
+        search_updated = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/web-search/update?provider=searxng"
+            "&base_url=https%3A%2F%2Fsearch.example.com",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert search_updated.status_code == 200
+        search_body = search_updated.json()
+        assert search_body["requires_restart"] is False
+        assert search_body["web_search"]["provider"] == "searxng"
+        assert search_body["web_search"]["api_key_hint"] is None
+        assert search_body["web_search"]["base_url"] == "https://search.example.com"
+
         saved = load_config(config_path)
         assert saved.agents.defaults.model == "openrouter/test"
         assert saved.agents.defaults.provider == "openrouter"
         assert saved.providers.openrouter.api_key == "sk-or-test"
         assert saved.providers.openrouter.api_base == "https://openrouter.ai/api/v1"
+        assert saved.tools.web.search.provider == "searxng"
+        assert saved.tools.web.search.api_key == ""
+        assert saved.tools.web.search.base_url == "https://search.example.com"
     finally:
         await channel.stop()
         await server_task

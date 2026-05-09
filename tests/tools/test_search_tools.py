@@ -13,7 +13,24 @@ import pytest
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.subagent import SubagentManager, SubagentStatus
 from nanobot.agent.tools.search import GlobTool, GrepTool
+from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
+from nanobot.config.schema import WebSearchConfig
+
+
+@pytest.mark.asyncio
+async def test_web_search_tool_refreshes_dynamic_config_loader(monkeypatch) -> None:
+    tool = WebSearchTool(
+        config=WebSearchConfig(provider="brave"),
+        config_loader=lambda: WebSearchConfig(provider="duckduckgo", max_results=3),
+    )
+
+    async def fake_duckduckgo(self, query: str, n: int) -> str:
+        return f"{self.config.provider}:{query}:{n}"
+
+    monkeypatch.setattr(WebSearchTool, "_search_duckduckgo", fake_duckduckgo)
+
+    assert await tool.execute("nanobot") == "duckduckgo:nanobot:3"
 
 
 @pytest.mark.asyncio
@@ -185,7 +202,7 @@ async def test_grep_files_with_matches_supports_head_limit_and_offset(tmp_path: 
     # 2. The pagination info is correct
     assert "pagination: limit=1, offset=1" in result
     # Count non-empty lines that start with src/ (file paths)
-    file_lines = [l for l in result.splitlines() if l.startswith("src/")]
+    file_lines = [line for line in result.splitlines() if line.startswith("src/")]
     assert len(file_lines) == 1
 
 

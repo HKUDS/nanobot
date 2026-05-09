@@ -7,6 +7,7 @@ import {
   listSlashCommands,
   updateProviderSettings,
   updateSettings,
+  updateWebSearchSettings,
 } from "@/lib/api";
 
 describe("webui API helpers", () => {
@@ -65,6 +66,20 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/provider/update?provider=openrouter&api_key=sk-or-test&api_base=https%3A%2F%2Fopenrouter.ai%2Fapi%2Fv1",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("serializes web search settings updates", async () => {
+    await updateWebSearchSettings("tok", {
+      provider: "searxng",
+      baseUrl: "https://search.example.com",
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/web-search/update?provider=searxng&base_url=https%3A%2F%2Fsearch.example.com",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

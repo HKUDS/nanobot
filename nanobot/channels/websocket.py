@@ -197,6 +197,20 @@ def _mask_secret_hint(secret: str | None) -> str | None:
     return f"{secret[:4]}••••{secret[-4:]}"
 
 
+_WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
+    {"name": "duckduckgo", "label": "DuckDuckGo", "credential": "none"},
+    {"name": "brave", "label": "Brave Search", "credential": "api_key"},
+    {"name": "tavily", "label": "Tavily", "credential": "api_key"},
+    {"name": "searxng", "label": "SearXNG", "credential": "base_url"},
+    {"name": "jina", "label": "Jina", "credential": "api_key"},
+    {"name": "kagi", "label": "Kagi", "credential": "api_key"},
+    {"name": "olostep", "label": "Olostep", "credential": "api_key"},
+)
+_WEB_SEARCH_PROVIDER_BY_NAME = {
+    provider["name"]: provider for provider in _WEB_SEARCH_PROVIDER_OPTIONS
+}
+
+
 def _parse_inbound_payload(raw: str) -> str | None:
     """Parse a client frame into text; return None for empty or unrecognized content."""
     text = raw.strip()
@@ -571,6 +585,9 @@ class WebSocketChannel(BaseChannel):
         if got == "/api/settings/provider/update":
             return self._handle_settings_provider_update(request)
 
+        if got == "/api/settings/web-search/update":
+            return self._handle_settings_web_search_update(request)
+
         m = re.match(r"^/api/sessions/([^/]+)/messages$", got)
         if m:
             return self._handle_session_messages(request, m.group(1))
@@ -714,6 +731,12 @@ class WebSocketChannel(BaseChannel):
                     "default_api_base": spec.default_api_base or None,
                 }
             )
+        search_config = config.tools.web.search
+        search_provider = (
+            search_config.provider
+            if search_config.provider in _WEB_SEARCH_PROVIDER_BY_NAME
+            else "duckduckgo"
+        )
         return {
             "agent": {
                 "model": defaults.model,
@@ -722,6 +745,12 @@ class WebSocketChannel(BaseChannel):
                 "has_api_key": bool(provider and provider.api_key),
             },
             "providers": providers,
+            "web_search": {
+                "provider": search_provider,
+                "api_key_hint": _mask_secret_hint(search_config.api_key),
+                "base_url": search_config.base_url or None,
+                "providers": list(_WEB_SEARCH_PROVIDER_OPTIONS),
+            },
             "runtime": {
                 "config_path": str(get_config_path().expanduser()),
             },
@@ -819,6 +848,63 @@ class WebSocketChannel(BaseChannel):
         if changed:
             save_config(config)
         # API key/base changes are picked up by the next provider snapshot refresh.
+        return _http_json_response(self._settings_payload(requires_restart=False))
+
+    def _handle_settings_web_search_update(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        from nanobot.config.loader import load_config, save_config
+
+        query = _parse_query(request.path)
+        provider_name = (_query_first(query, "provider") or "").strip().lower()
+        provider_option = _WEB_SEARCH_PROVIDER_BY_NAME.get(provider_name)
+        if provider_option is None:
+            return _http_error(400, "unknown web search provider")
+
+        config = load_config()
+        search_config = config.tools.web.search
+        previous_provider = search_config.provider
+        changed = False
+
+        def set_value(attr: str, value: str | None) -> None:
+            nonlocal changed
+            if getattr(search_config, attr) != value:
+                setattr(search_config, attr, value)
+                changed = True
+
+        if search_config.provider != provider_name:
+            search_config.provider = provider_name
+            changed = True
+
+        credential = provider_option["credential"]
+        if credential == "none":
+            set_value("api_key", "")
+            set_value("base_url", "")
+        elif credential == "base_url":
+            base_url = _query_first(query, "base_url")
+            if base_url is None:
+                base_url = _query_first(query, "baseUrl")
+            base_url = base_url.strip() if base_url is not None else None
+            if not base_url and previous_provider == provider_name and search_config.base_url:
+                base_url = search_config.base_url
+            if not base_url:
+                return _http_error(400, "base_url is required")
+            set_value("base_url", base_url)
+            set_value("api_key", "")
+        else:
+            api_key = _query_first(query, "api_key")
+            if api_key is None:
+                api_key = _query_first(query, "apiKey")
+            api_key = api_key.strip() if api_key is not None else None
+            if not api_key and previous_provider == provider_name and search_config.api_key:
+                api_key = search_config.api_key
+            if not api_key:
+                return _http_error(400, "api_key is required")
+            set_value("api_key", api_key)
+            set_value("base_url", "")
+
+        if changed:
+            save_config(config)
         return _http_json_response(self._settings_payload(requires_restart=False))
 
     @staticmethod

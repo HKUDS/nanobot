@@ -7,7 +7,7 @@ import html
 import json
 import os
 import re
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import quote, urlparse
 
 import httpx
@@ -91,16 +91,30 @@ class WebSearchTool(Tool):
     )
 
     def __init__(
-        self, config: WebSearchConfig | None = None, proxy: str | None = None, user_agent: str | None = None
+        self,
+        config: WebSearchConfig | None = None,
+        proxy: str | None = None,
+        user_agent: str | None = None,
+        config_loader: Callable[[], WebSearchConfig] | None = None,
     ):
         from nanobot.config.schema import WebSearchConfig
 
         self.config = config if config is not None else WebSearchConfig()
         self.proxy = proxy
         self.user_agent = user_agent if user_agent is not None else _DEFAULT_USER_AGENT
+        self._config_loader = config_loader
+
+    def _refresh_config(self) -> None:
+        if self._config_loader is None:
+            return
+        try:
+            self.config = self._config_loader()
+        except Exception:
+            logger.exception("Failed to refresh web search config")
 
     def _effective_provider(self) -> str:
         """Resolve the backend that execute() will actually use."""
+        self._refresh_config()
         provider = self.config.provider.strip().lower() or "brave"
         if provider == "duckduckgo":
             return "duckduckgo"
@@ -134,6 +148,7 @@ class WebSearchTool(Tool):
         return self._effective_provider() == "duckduckgo"
 
     async def execute(self, query: str, count: int | None = None, **kwargs: Any) -> str:
+        self._refresh_config()
         provider = self.config.provider.strip().lower() or "brave"
         n = min(max(count or self.config.max_results, 1), 10)
 

@@ -82,6 +82,16 @@ export interface SettingsPayload {
     api_base?: string | null;
     default_api_base?: string | null;
   }>;
+  web_search: {
+    provider: string;
+    api_key_hint?: string | null;
+    base_url?: string | null;
+    providers: Array<{
+      name: string;
+      label: string;
+      credential: "none" | "api_key" | "base_url";
+    }>;
+  };
   runtime: {
     config_path: string;
   };
@@ -97,6 +107,12 @@ export interface ProviderSettingsUpdate {
   provider: string;
   apiKey?: string;
   apiBase?: string;
+}
+
+export interface WebSearchSettingsUpdate {
+  provider: string;
+  apiKey?: string;
+  baseUrl?: string;
 }
 
 export interface SlashCommand {

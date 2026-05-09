@@ -104,7 +104,28 @@
       "hideApiKey": "Ẩn API key",
       "noConfiguredProviders": "Chưa có provider đã cấu hình",
       "configureFirst": "Hãy cấu hình provider trong BYOK trước.",
-      "openByok": "Mở BYOK"
+      "openByok": "Mở BYOK",
+      "tabs": {
+        "ariaLabel": "Loại thông tin xác thực BYOK",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "Search provider",
+        "providerHelp": "Chọn backend mà công cụ web search sẽ dùng.",
+        "selectProvider": "Chọn provider",
+        "credentials": "Thông tin xác thực",
+        "noCredentialRequired": "Không cần key",
+        "noCredentialHelp": "DuckDuckGo hoạt động mà không cần lưu API key.",
+        "apiKeyHelp": "Được lưu trong config và chỉ hiện dạng che sau khi lưu.",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG cần URL instance của bạn.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "Provider tìm kiếm này cần API key.",
+        "baseUrlRequired": "SearXNG cần Base URL.",
+        "missingCredential": "Thêm thông tin bắt buộc trước khi lưu.",
+        "saveHint": "Thay đổi áp dụng cho các yêu cầu web search mới."
+      }
     }
   },
   "chat": {

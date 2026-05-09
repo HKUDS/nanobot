@@ -104,7 +104,28 @@
       "hideApiKey": "API key 숨기기",
       "noConfiguredProviders": "설정된 provider가 없습니다",
       "configureFirst": "먼저 BYOK에서 provider를 설정하세요.",
-      "openByok": "BYOK 열기"
+      "openByok": "BYOK 열기",
+      "tabs": {
+        "ariaLabel": "BYOK 자격 증명 유형",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "검색 provider",
+        "providerHelp": "web search 도구가 사용할 백엔드를 선택합니다.",
+        "selectProvider": "provider 선택",
+        "credentials": "자격 증명",
+        "noCredentialRequired": "key 필요 없음",
+        "noCredentialHelp": "DuckDuckGo는 API key를 저장하지 않고 사용할 수 있습니다.",
+        "apiKeyHelp": "config에 저장되며 저장 후에는 마스킹되어 표시됩니다.",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG에는 자체 인스턴스 URL이 필요합니다.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "이 검색 provider에는 API key가 필요합니다.",
+        "baseUrlRequired": "SearXNG에는 Base URL이 필요합니다.",
+        "missingCredential": "저장하기 전에 필요한 자격 증명을 입력하세요.",
+        "saveHint": "변경 사항은 새 web search 요청에 적용됩니다."
+      }
     }
   },
   "chat": {

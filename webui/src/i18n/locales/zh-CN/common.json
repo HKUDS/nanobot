@@ -111,7 +111,28 @@
       "hideApiKey": "隐藏 API key",
       "noConfiguredProviders": "没有已配置的 provider",
       "configureFirst": "请先在 BYOK 里配置 provider。",
-      "openByok": "打开 BYOK"
+      "openByok": "打开 BYOK",
+      "tabs": {
+        "ariaLabel": "BYOK 凭证类型",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "搜索 provider",
+        "providerHelp": "选择 web search 工具使用的后端。",
+        "selectProvider": "选择 provider",
+        "credentials": "凭证",
+        "noCredentialRequired": "无需 key",
+        "noCredentialHelp": "DuckDuckGo 不需要保存 API key。",
+        "apiKeyHelp": "保存到 config 后只显示掩码提示。",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG 需要你自己的实例地址。",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "这个搜索 provider 需要 API key。",
+        "baseUrlRequired": "SearXNG 需要 Base URL。",
+        "missingCredential": "填写所需凭证后才能保存。",
+        "saveHint": "改动会应用到新的 web search 请求。"
+      }
     }
   },
   "chat": {

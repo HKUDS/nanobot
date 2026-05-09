@@ -408,11 +408,19 @@ class AgentLoop:
                 )
             )
         if self.web_config.enable:
+            web_search_config_loader = None
+            if self._provider_snapshot_loader is not None:
+                def web_search_config_loader():
+                    from nanobot.config.loader import load_config, resolve_config_env_vars
+
+                    return resolve_config_env_vars(load_config()).tools.web.search
+
             self.tools.register(
                 WebSearchTool(
                     config=self.web_config.search,
                     proxy=self.web_config.proxy,
                     user_agent=self.web_config.user_agent,
+                    config_loader=web_search_config_loader,
                 )
             )
             self.tools.register(

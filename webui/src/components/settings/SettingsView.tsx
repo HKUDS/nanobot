@@ -39,12 +39,18 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import { fetchSettings, updateProviderSettings, updateSettings } from "@/lib/api";
+import {
+  fetchSettings,
+  updateProviderSettings,
+  updateSettings,
+  updateWebSearchSettings,
+} from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
-import type { SettingsPayload } from "@/lib/types";
+import type { SettingsPayload, WebSearchSettingsUpdate } from "@/lib/types";
 
 type SettingsSectionKey = "general" | "byok";
+type ByokPaneKey = "llm" | "web-search";
 
 interface SettingsViewProps {
   theme: "light" | "dark";
@@ -71,12 +77,20 @@ export function SettingsView({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
+  const [webSearchSaving, setWebSearchSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>("general");
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [providerForms, setProviderForms] = useState<Record<string, { apiKey: string; apiBase: string }>>({});
   const [visibleProviderKeys, setVisibleProviderKeys] = useState<Record<string, boolean>>({});
   const [editingProviderKeys, setEditingProviderKeys] = useState<Record<string, boolean>>({});
+  const [webSearchForm, setWebSearchForm] = useState<WebSearchSettingsUpdate>({
+    provider: "duckduckgo",
+    apiKey: "",
+    baseUrl: "",
+  });
+  const [webSearchKeyVisible, setWebSearchKeyVisible] = useState(false);
+  const [webSearchKeyEditing, setWebSearchKeyEditing] = useState(false);
   const [form, setForm] = useState({
     model: "",
     provider: "",
@@ -88,6 +102,11 @@ export function SettingsView({
       model: payload.agent.model,
       provider: payload.agent.provider,
     });
+    setWebSearchForm((prev) => ({
+      provider: payload.web_search.provider,
+      apiKey: prev.provider === payload.web_search.provider ? prev.apiKey ?? "" : "",
+      baseUrl: payload.web_search.base_url ?? "",
+    }));
   }, []);
 
   useEffect(() => {
@@ -186,6 +205,89 @@ export function SettingsView({
     }
   };
 
+  const saveWebSearch = async () => {
+    if (!settings || webSearchSaving) return;
+    const provider = settings.web_search.providers.find((item) => item.name === webSearchForm.provider);
+    if (!provider) return;
+    const apiKey = webSearchForm.apiKey?.trim() ?? "";
+    const baseUrl = webSearchForm.baseUrl?.trim() ?? "";
+    const hasExistingSecret =
+      provider.credential === "api_key" &&
+      webSearchForm.provider === settings.web_search.provider &&
+      !!settings.web_search.api_key_hint;
+
+    if (provider.credential === "api_key" && !apiKey && !hasExistingSecret) {
+      setError(t("settings.byok.webSearch.apiKeyRequired"));
+      return;
+    }
+    if (provider.credential === "base_url" && !baseUrl) {
+      setError(t("settings.byok.webSearch.baseUrlRequired"));
+      return;
+    }
+
+    setWebSearchSaving(true);
+    try {
+      const update: WebSearchSettingsUpdate = { provider: webSearchForm.provider };
+      if (provider.credential === "api_key" && apiKey) update.apiKey = apiKey;
+      if (provider.credential === "base_url") update.baseUrl = baseUrl;
+      const payload = await updateWebSearchSettings(token, update);
+      applyPayload(payload);
+      setWebSearchForm((prev) => ({
+        provider: payload.web_search.provider,
+        apiKey: "",
+        baseUrl: payload.web_search.base_url ?? prev.baseUrl ?? "",
+      }));
+      setWebSearchKeyVisible(false);
+      setWebSearchKeyEditing(false);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setWebSearchSaving(false);
+    }
+  };
+
+  const resetProviderDraft = useCallback((providerName: string) => {
+    const provider = settings?.providers.find((item) => item.name === providerName);
+    if (!provider) return;
+    setProviderForms((prev) => ({
+      ...prev,
+      [providerName]: {
+        apiKey: "",
+        apiBase: provider.api_base ?? provider.default_api_base ?? "",
+      },
+    }));
+    setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: false }));
+    setEditingProviderKeys((prev) => ({ ...prev, [providerName]: false }));
+  }, [settings]);
+
+  const handleToggleProvider = useCallback((providerName: string) => {
+    if (expandedProvider) resetProviderDraft(expandedProvider);
+    setExpandedProvider(expandedProvider === providerName ? null : providerName);
+  }, [expandedProvider, resetProviderDraft]);
+
+  const resetWebSearchDraft = useCallback(() => {
+    if (!settings) return;
+    setWebSearchForm({
+      provider: settings.web_search.provider,
+      apiKey: "",
+      baseUrl: settings.web_search.base_url ?? "",
+    });
+    setWebSearchKeyVisible(false);
+    setWebSearchKeyEditing(false);
+  }, [settings]);
+
+  const handleWebSearchProviderChange = useCallback((provider: string) => {
+    if (!settings) return;
+    setWebSearchForm({
+      provider,
+      apiKey: "",
+      baseUrl: provider === settings.web_search.provider ? settings.web_search.base_url ?? "" : "",
+    });
+    setWebSearchKeyVisible(false);
+    setWebSearchKeyEditing(false);
+  }, [settings]);
+
   const toggleProviderKeyVisibility = (providerName: string) => {
     const isVisible = visibleProviderKeys[providerName];
     setVisibleProviderKeys((prev) => ({ ...prev, [providerName]: !isVisible }));
@@ -217,7 +319,7 @@ export function SettingsView({
         onLogout={onLogout}
       />
 
-      <main className="min-w-0 flex-1 overflow-y-auto">
+      <main className="min-w-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
         <div className="mx-auto w-full max-w-[840px] px-6 py-10 sm:px-10 lg:py-14">
           <div className="mb-8">
             <p className="mb-2 text-[13px] font-medium text-muted-foreground">
@@ -257,7 +359,7 @@ export function SettingsView({
                   saving={saving}
                   onSave={save}
                   onRestart={onRestart}
-                isRestarting={isRestarting}
+                  isRestarting={isRestarting}
                   onOpenByok={() => setActiveSection("byok")}
                 />
               ) : (
@@ -268,9 +370,11 @@ export function SettingsView({
                   visibleProviderKeys={visibleProviderKeys}
                   editingProviderKeys={editingProviderKeys}
                   providerSaving={providerSaving}
-                  onToggleProvider={(provider) =>
-                    setExpandedProvider((current) => (current === provider ? null : provider))
-                  }
+                  webSearchForm={webSearchForm}
+                  webSearchKeyVisible={webSearchKeyVisible}
+                  webSearchKeyEditing={webSearchKeyEditing}
+                  webSearchSaving={webSearchSaving}
+                  onToggleProvider={handleToggleProvider}
                   onToggleProviderKey={toggleProviderKeyVisibility}
                   onToggleProviderKeyEditing={toggleProviderKeyEditing}
                   onChangeProviderForm={(provider, value) =>
@@ -284,6 +388,17 @@ export function SettingsView({
                     }))
                   }
                   onSaveProvider={saveProvider}
+                  onChangeWebSearchForm={setWebSearchForm}
+                  onChangeWebSearchProvider={handleWebSearchProviderChange}
+                  onToggleWebSearchKey={() => setWebSearchKeyVisible((visible) => !visible)}
+                  onToggleWebSearchKeyEditing={() => {
+                    setWebSearchKeyEditing((editing) => !editing);
+                    setWebSearchKeyVisible(false);
+                    setWebSearchForm((prev) => ({ ...prev, apiKey: "" }));
+                  }}
+                  onResetProviderDraft={resetProviderDraft}
+                  onResetWebSearchDraft={resetWebSearchDraft}
+                  onSaveWebSearch={saveWebSearch}
                 />
               )}
             </div>
@@ -533,7 +648,7 @@ function ProviderPicker({
   emptyLabel,
   onChange,
 }: {
-  providers: SettingsPayload["providers"];
+  providers: Array<{ name: string; label: string }>;
   value: string;
   emptyLabel: string;
   onChange: (provider: string) => void;
@@ -584,6 +699,173 @@ function ProviderPicker({
   );
 }
 
+function WebSearchByokSettings({
+  settings,
+  form,
+  keyVisible,
+  keyEditing,
+  saving,
+  onChangeForm,
+  onChangeProvider,
+  onToggleKey,
+  onToggleKeyEditing,
+  onSave,
+}: {
+  settings: SettingsPayload;
+  form: WebSearchSettingsUpdate;
+  keyVisible: boolean;
+  keyEditing: boolean;
+  saving: boolean;
+  onChangeForm: Dispatch<SetStateAction<WebSearchSettingsUpdate>>;
+  onChangeProvider: (provider: string) => void;
+  onToggleKey: () => void;
+  onToggleKeyEditing: () => void;
+  onSave: () => void;
+}) {
+  const { t } = useTranslation();
+  const selectedProvider =
+    settings.web_search.providers.find((provider) => provider.name === form.provider) ??
+    settings.web_search.providers[0];
+  const hasExistingSecret =
+    selectedProvider?.credential === "api_key" &&
+    form.provider === settings.web_search.provider &&
+    !!settings.web_search.api_key_hint;
+  const showKeyInput = selectedProvider?.credential === "api_key" && (!hasExistingSecret || keyEditing);
+  const apiKey = form.apiKey?.trim() ?? "";
+  const baseUrl = form.baseUrl?.trim() ?? "";
+  const dirty =
+    form.provider !== settings.web_search.provider ||
+    apiKey.length > 0 ||
+    baseUrl !== (settings.web_search.base_url ?? "");
+  const missingCredential =
+    selectedProvider?.credential === "api_key"
+      ? !apiKey && !hasExistingSecret
+      : selectedProvider?.credential === "base_url"
+        ? !baseUrl
+        : false;
+
+  return (
+    <section className="space-y-4">
+      <SettingsGroup>
+        <SettingsRow
+          title={t("settings.byok.webSearch.provider")}
+          description={t("settings.byok.webSearch.providerHelp")}
+        >
+          <ProviderPicker
+            providers={settings.web_search.providers}
+            value={form.provider}
+            emptyLabel={t("settings.byok.webSearch.selectProvider")}
+            onChange={onChangeProvider}
+          />
+        </SettingsRow>
+
+        {selectedProvider?.credential === "none" ? (
+          <SettingsRow
+            title={t("settings.byok.webSearch.credentials")}
+            description={t("settings.byok.webSearch.noCredentialHelp")}
+          >
+            <span className="rounded-full bg-emerald-500/10 px-2.5 py-1 text-[12px] font-medium text-emerald-700 dark:text-emerald-300">
+              {t("settings.byok.webSearch.noCredentialRequired")}
+            </span>
+          </SettingsRow>
+        ) : null}
+
+        {selectedProvider?.credential === "api_key" ? (
+          <SettingsRow
+            title={t("settings.byok.apiKey")}
+            description={t("settings.byok.webSearch.apiKeyHelp")}
+          >
+            <div className="relative w-[280px] max-w-full">
+              {showKeyInput ? (
+                <>
+                  <Input
+                    type={keyVisible ? "text" : "password"}
+                    value={form.apiKey ?? ""}
+                    onChange={(event) =>
+                      onChangeForm((prev) => ({ ...prev, apiKey: event.target.value }))
+                    }
+                    placeholder={
+                      hasExistingSecret
+                        ? t("settings.byok.apiKeyConfiguredPlaceholder")
+                        : t("settings.byok.apiKeyPlaceholder")
+                    }
+                    className="h-9 rounded-full pr-11 text-[13px]"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={onToggleKey}
+                    aria-label={
+                      keyVisible ? t("settings.byok.hideApiKey") : t("settings.byok.showApiKey")
+                    }
+                    className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    {keyVisible ? (
+                      <EyeOff className="h-3.5 w-3.5" aria-hidden />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5" aria-hidden />
+                    )}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <div className="flex h-9 items-center rounded-full border border-input bg-background px-3 pr-11 text-[13px] text-muted-foreground">
+                    {settings.web_search.api_key_hint ?? t("settings.byok.configuredKeyHint")}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={onToggleKeyEditing}
+                    aria-label={t("settings.actions.edit")}
+                    className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <Pencil className="h-3.5 w-3.5" aria-hidden />
+                  </Button>
+                </>
+              )}
+            </div>
+          </SettingsRow>
+        ) : null}
+
+        {selectedProvider?.credential === "base_url" ? (
+          <SettingsRow
+            title={t("settings.byok.webSearch.baseUrl")}
+            description={t("settings.byok.webSearch.baseUrlHelp")}
+          >
+            <Input
+              value={form.baseUrl ?? ""}
+              onChange={(event) =>
+                onChangeForm((prev) => ({ ...prev, baseUrl: event.target.value }))
+              }
+              placeholder={t("settings.byok.webSearch.baseUrlPlaceholder")}
+              className="h-9 w-[280px] rounded-full text-[13px]"
+            />
+          </SettingsRow>
+        ) : null}
+
+        <div className="flex min-h-[58px] items-center justify-between gap-4 px-4 py-3 sm:px-5">
+          <div className="text-[13px] text-muted-foreground">
+            {missingCredential
+              ? t("settings.byok.webSearch.missingCredential")
+              : t("settings.byok.webSearch.saveHint")}
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onSave}
+            disabled={!dirty || missingCredential || saving}
+            className="rounded-full"
+          >
+            {saving ? t("settings.actions.saving") : t("settings.actions.save")}
+          </Button>
+        </div>
+      </SettingsGroup>
+    </section>
+  );
+}
+
 function ByokSettings({
   settings,
   expandedProvider,
@@ -591,11 +873,22 @@ function ByokSettings({
   visibleProviderKeys,
   editingProviderKeys,
   providerSaving,
+  webSearchForm,
+  webSearchKeyVisible,
+  webSearchKeyEditing,
+  webSearchSaving,
   onToggleProvider,
   onToggleProviderKey,
   onToggleProviderKeyEditing,
   onChangeProviderForm,
   onSaveProvider,
+  onChangeWebSearchForm,
+  onChangeWebSearchProvider,
+  onToggleWebSearchKey,
+  onToggleWebSearchKeyEditing,
+  onResetProviderDraft,
+  onResetWebSearchDraft,
+  onSaveWebSearch,
 }: {
   settings: SettingsPayload;
   expandedProvider: string | null;
@@ -603,13 +896,25 @@ function ByokSettings({
   visibleProviderKeys: Record<string, boolean>;
   editingProviderKeys: Record<string, boolean>;
   providerSaving: string | null;
+  webSearchForm: WebSearchSettingsUpdate;
+  webSearchKeyVisible: boolean;
+  webSearchKeyEditing: boolean;
+  webSearchSaving: boolean;
   onToggleProvider: (provider: string) => void;
   onToggleProviderKey: (provider: string) => void;
   onToggleProviderKeyEditing: (provider: string) => void;
   onChangeProviderForm: (provider: string, value: Partial<{ apiKey: string; apiBase: string }>) => void;
   onSaveProvider: (provider: string) => void;
+  onChangeWebSearchForm: Dispatch<SetStateAction<WebSearchSettingsUpdate>>;
+  onChangeWebSearchProvider: (provider: string) => void;
+  onToggleWebSearchKey: () => void;
+  onToggleWebSearchKeyEditing: () => void;
+  onResetProviderDraft: (provider: string) => void;
+  onResetWebSearchDraft: () => void;
+  onSaveWebSearch: () => void;
 }) {
   const { t } = useTranslation();
+  const [activePane, setActivePane] = useState<ByokPaneKey>("llm");
   const [showAllUnconfigured, setShowAllUnconfigured] = useState(false);
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
   const unconfiguredProviders = settings.providers.filter((provider) => !provider.configured);
@@ -751,59 +1056,113 @@ function ByokSettings({
       </div>
     );
   };
+  const panes: Array<{ key: ByokPaneKey; label: string }> = [
+    { key: "llm", label: t("settings.byok.tabs.llm") },
+    { key: "web-search", label: t("settings.byok.tabs.webSearch") },
+  ];
   return (
     <div className="space-y-6">
       <p className="max-w-[42rem] text-[13px] leading-6 text-muted-foreground">
         {t("settings.byok.description")}
       </p>
-      <div className="space-y-8">
-        <section className="space-y-3">
-          <ByokSectionHeader
-            title={t("settings.byok.configuredSection")}
-            count={configuredProviders.length}
-          />
-          <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.07)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.22)]">
-            {configuredProviders.length > 0 ? (
-              <div className="divide-y divide-border/45">
-                {configuredProviders.map(renderProviderRow)}
-              </div>
-            ) : (
-              <ByokEmptyState>{t("settings.byok.noConfiguredProviders")}</ByokEmptyState>
-            )}
-          </div>
-        </section>
-
-        <section className="space-y-3">
-          <ByokSectionHeader
-            title={t("settings.byok.notConfiguredSection")}
-            count={unconfiguredProviders.length}
-          />
-          <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.07)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.22)]">
-            <div className="divide-y divide-border/45">
-              {visibleUnconfiguredProviders.map(renderProviderRow)}
-            </div>
-          </div>
-          {hiddenUnconfiguredCount > 0 ? (
-            <Button
+      <div
+        role="tablist"
+        aria-label={t("settings.byok.tabs.ariaLabel")}
+        className="grid rounded-[22px] border border-border/35 bg-muted/35 p-1 shadow-[inset_0_1px_2px_rgba(15,23,42,0.04)] backdrop-blur-xl sm:grid-cols-2"
+      >
+        {panes.map((pane) => {
+          const selected = activePane === pane.key;
+          return (
+            <button
+              key={pane.key}
               type="button"
-              variant="ghost"
-              onClick={() => setShowAllUnconfigured(true)}
-              className="h-9 rounded-full px-3 text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => {
+                if (pane.key === activePane) return;
+                if (activePane === "llm" && expandedProvider) {
+                  onResetProviderDraft(expandedProvider);
+                }
+                if (activePane === "web-search") {
+                  onResetWebSearchDraft();
+                }
+                setActivePane(pane.key);
+              }}
+              className={cn(
+                "h-10 rounded-[18px] text-[13px] font-semibold transition-all",
+                selected
+                  ? "bg-background text-foreground shadow-[0_8px_28px_rgba(15,23,42,0.10)]"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
             >
-              {t("settings.byok.showMore", { count: hiddenUnconfiguredCount })}
-            </Button>
-          ) : showAllUnconfigured && unconfiguredProviders.length > initialUnconfiguredCount ? (
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setShowAllUnconfigured(false)}
-              className="h-9 rounded-full px-3 text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-            >
-              {t("settings.byok.showLess")}
-            </Button>
-          ) : null}
-        </section>
+              {pane.label}
+            </button>
+          );
+        })}
       </div>
+      {activePane === "llm" ? (
+        <div className="space-y-8">
+          <section className="space-y-3">
+            <ByokSectionHeader
+              title={t("settings.byok.configuredSection")}
+              count={configuredProviders.length}
+            />
+            <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.07)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.22)]">
+              {configuredProviders.length > 0 ? (
+                <div className="divide-y divide-border/45">
+                  {configuredProviders.map(renderProviderRow)}
+                </div>
+              ) : (
+                <ByokEmptyState>{t("settings.byok.noConfiguredProviders")}</ByokEmptyState>
+              )}
+            </div>
+          </section>
+
+          <section className="space-y-3">
+            <ByokSectionHeader
+              title={t("settings.byok.notConfiguredSection")}
+              count={unconfiguredProviders.length}
+            />
+            <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.07)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.22)]">
+              <div className="divide-y divide-border/45">
+                {visibleUnconfiguredProviders.map(renderProviderRow)}
+              </div>
+            </div>
+            {hiddenUnconfiguredCount > 0 ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setShowAllUnconfigured(true)}
+                className="h-9 rounded-full px-3 text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+              >
+                {t("settings.byok.showMore", { count: hiddenUnconfiguredCount })}
+              </Button>
+            ) : showAllUnconfigured && unconfiguredProviders.length > initialUnconfiguredCount ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setShowAllUnconfigured(false)}
+                className="h-9 rounded-full px-3 text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+              >
+                {t("settings.byok.showLess")}
+              </Button>
+            ) : null}
+          </section>
+        </div>
+      ) : (
+        <WebSearchByokSettings
+          settings={settings}
+          form={webSearchForm}
+          keyVisible={webSearchKeyVisible}
+          keyEditing={webSearchKeyEditing}
+          saving={webSearchSaving}
+          onChangeForm={onChangeWebSearchForm}
+          onChangeProvider={onChangeWebSearchProvider}
+          onToggleKey={onToggleWebSearchKey}
+          onToggleKeyEditing={onToggleWebSearchKeyEditing}
+          onSave={onSaveWebSearch}
+        />
+      )}
     </div>
   );
 }

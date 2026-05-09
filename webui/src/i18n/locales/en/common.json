@@ -123,7 +123,28 @@
       "hideApiKey": "Hide API key",
       "noConfiguredProviders": "No configured providers",
       "configureFirst": "Configure a provider in BYOK first.",
-      "openByok": "Open BYOK"
+      "openByok": "Open BYOK",
+      "tabs": {
+        "ariaLabel": "BYOK credential type",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "Search provider",
+        "providerHelp": "Choose the backend used by the web search tool.",
+        "selectProvider": "Select provider",
+        "credentials": "Credentials",
+        "noCredentialRequired": "No key required",
+        "noCredentialHelp": "DuckDuckGo works without a saved API key.",
+        "apiKeyHelp": "Stored in config and masked after saving.",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG needs the URL of your own instance.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "API key is required for this search provider.",
+        "baseUrlRequired": "Base URL is required for SearXNG.",
+        "missingCredential": "Add the required credential before saving.",
+        "saveHint": "Changes apply to new web search requests."
+      }
     }
   },
   "chat": {

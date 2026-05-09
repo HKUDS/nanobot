@@ -4,6 +4,7 @@ import type {
   SettingsPayload,
   SettingsUpdate,
   SlashCommand,
+  WebSearchSettingsUpdate,
 } from "./types";
 
 export class ApiError extends Error {
@@ -165,6 +166,21 @@ export async function updateProviderSettings(
   if (update.apiBase !== undefined) query.set("api_base", update.apiBase);
   return request<SettingsPayload>(
     `${base}/api/settings/provider/update?${query}`,
+    token,
+  );
+}
+
+export async function updateWebSearchSettings(
+  token: string,
+  update: WebSearchSettingsUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  query.set("provider", update.provider);
+  if (update.apiKey !== undefined) query.set("api_key", update.apiKey);
+  if (update.baseUrl !== undefined) query.set("base_url", update.baseUrl);
+  return request<SettingsPayload>(
+    `${base}/api/settings/web-search/update?${query}`,
     token,
   );
 }

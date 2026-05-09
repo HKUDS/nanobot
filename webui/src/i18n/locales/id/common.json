@@ -104,7 +104,28 @@
       "hideApiKey": "Sembunyikan API key",
       "noConfiguredProviders": "Belum ada provider terkonfigurasi",
       "configureFirst": "Konfigurasikan provider di BYOK terlebih dahulu.",
-      "openByok": "Buka BYOK"
+      "openByok": "Buka BYOK",
+      "tabs": {
+        "ariaLabel": "Jenis kredensial BYOK",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "Search provider",
+        "providerHelp": "Pilih backend yang digunakan alat web search.",
+        "selectProvider": "Pilih provider",
+        "credentials": "Kredensial",
+        "noCredentialRequired": "Tidak perlu key",
+        "noCredentialHelp": "DuckDuckGo berfungsi tanpa menyimpan API key.",
+        "apiKeyHelp": "Disimpan di config dan ditampilkan tersamarkan setelah disimpan.",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG memerlukan URL instance Anda sendiri.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "Provider pencarian ini memerlukan API key.",
+        "baseUrlRequired": "SearXNG memerlukan Base URL.",
+        "missingCredential": "Tambahkan kredensial yang diperlukan sebelum menyimpan.",
+        "saveHint": "Perubahan berlaku untuk permintaan web search baru."
+      }
     }
   },
   "chat": {

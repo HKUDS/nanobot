@@ -104,7 +104,28 @@
       "hideApiKey": "API key を隠す",
       "noConfiguredProviders": "設定済み provider がありません",
       "configureFirst": "先に BYOK で provider を設定してください。",
-      "openByok": "BYOK を開く"
+      "openByok": "BYOK を開く",
+      "tabs": {
+        "ariaLabel": "BYOK 認証情報タイプ",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "検索 provider",
+        "providerHelp": "web search ツールで使うバックエンドを選択します。",
+        "selectProvider": "provider を選択",
+        "credentials": "認証情報",
+        "noCredentialRequired": "key は不要",
+        "noCredentialHelp": "DuckDuckGo は API key を保存せずに使えます。",
+        "apiKeyHelp": "config に保存され、保存後はマスク表示されます。",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG には自分のインスタンス URL が必要です。",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "この検索 provider には API key が必要です。",
+        "baseUrlRequired": "SearXNG には Base URL が必要です。",
+        "missingCredential": "保存する前に必要な認証情報を入力してください。",
+        "saveHint": "変更は新しい web search リクエストに適用されます。"
+      }
     }
   },
   "chat": {
