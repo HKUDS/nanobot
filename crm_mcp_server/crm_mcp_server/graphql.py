@@ -22,6 +22,14 @@ class ReadOperation:
     variables: Mapping[str, Any]
 
 
+@dataclass(frozen=True)
+class GraphQLOperation:
+    operation_name: str
+    operation_type: str
+    query: str
+    variables: Mapping[str, Any]
+
+
 WRITE_LIKE_NAME_FRAGMENTS: tuple[str, ...] = (
     "create",
     "update",
@@ -104,6 +112,31 @@ _FIXED_SELECTION_SETS: Mapping[str, str] = MappingProxyType(
             limit
             data { id username name enabled }
         """,
+        "list_leads": """
+            total
+            skip
+            limit
+            data { id name title created_at updated_at }
+        """,
+        "list_leads_pool": """
+            total
+            skip
+            limit
+            data { id name title created_at updated_at }
+        """,
+        "list_opportunity_scenario": """
+            total
+            skip
+            limit
+            data { id name title created_at updated_at }
+        """,
+        "listImmediatelySignProject": """
+            id
+            name
+            project_name
+            created_at
+            updated_at
+        """,
         "list_business_chance": """
             total
             skip
@@ -123,6 +156,51 @@ _FIXED_SELECTION_SETS: Mapping[str, str] = MappingProxyType(
     }
 )
 
+_FIXED_ARGUMENTS: Mapping[str, Mapping[str, str]] = MappingProxyType(
+    {
+        "listReport": MappingProxyType(
+            {"search": "[ReportSearchParam!]", "pagination": "PaginationParam"}
+        ),
+        "reportInfo": MappingProxyType({"id": "ID!"}),
+        "reportRelatedInfo": MappingProxyType(
+            {"target": "Time!", "creator": "ID!", "type": "ReportType!"}
+        ),
+        "listProject": MappingProxyType(
+            {
+                "search": "ProjectSearchParam!",
+                "pagination": "PaginationParam",
+                "sort_by": "SortBy!",
+            }
+        ),
+        "projectInfo": MappingProxyType({"id": "ID!"}),
+        "listActivity": MappingProxyType(
+            {"search": "[ActivitySearchParam!]", "pagination": "PaginationParam"}
+        ),
+        "listCompany": MappingProxyType(
+            {"search": "[CompanySearchParam!]", "pagination": "PaginationParam"}
+        ),
+        "companyInfo": MappingProxyType({"id": "ID!"}),
+        "listUser": MappingProxyType({"search": "UserSearchParam!", "pagination": "PaginationParam"}),
+        "list_leads": MappingProxyType(
+            {"search": "LeadsSearchParam", "pagination": "PaginationParam", "sort_by": "SortBy"}
+        ),
+        "list_leads_pool": MappingProxyType(
+            {"search": "LeadsSearchParam", "pagination": "PaginationParam"}
+        ),
+        "list_opportunity_scenario": MappingProxyType(
+            {
+                "search": "OpportunityScenarioSearchParam!",
+                "pagination": "PaginationParam",
+                "sort_by": "SortBy!",
+            }
+        ),
+        "list_business_chance": MappingProxyType(
+            {"search": "BusinessChanceSearchParam", "pagination": "PaginationParam"}
+        ),
+        "business_chance": MappingProxyType({"id": "ID!"}),
+    }
+)
+
 
 def build_read_operation(
     operation_name: str,
@@ -133,13 +211,73 @@ def build_read_operation(
     """Build an allow-listed read operation; do not execute transport."""
 
     _validate_read_contract(operation_name, operation_type)
-    query = _build_fixed_query(operation_name)
+    prepared_variables = _prepare_read_variables(operation_name, variables or {})
+    query = _build_fixed_query(operation_name, prepared_variables)
     validate_read_query_text(query)
     return ReadOperation(
         operation_name=operation_name,
         operation_type="query",
         query=query,
-        variables=dict(variables or {}),
+        variables=prepared_variables,
+    )
+
+
+def build_create_report_mutation(
+    *,
+    content: str,
+    report_type: str,
+    target: str,
+    to: list[str],
+    attachments: list[str],
+    project_infos: list[Mapping[str, Any]],
+    immediately_sign_projects: list[Mapping[str, Any]],
+) -> GraphQLOperation:
+    """Build the only v1 write operation, gated by report_write confirmation."""
+
+    if not content.strip():
+        raise GraphQLContractError("Report content is required")
+    if report_type not in {"daily", "weekly"}:
+        raise GraphQLContractError("Report type must be daily or weekly")
+    if not target:
+        raise GraphQLContractError("Report target is required")
+    query = """
+mutation createReport(
+  $content: String!,
+  $type: ReportType!,
+  $target: Time!,
+  $to: [ID!],
+  $attachments: [ID!],
+  $project_infos: [InputProjectInfo!],
+  $immediately_sign_projects: [InputCreateImmediatelySignProject!]
+) {
+  createReport(
+    content: $content,
+    type: $type,
+    target: $target,
+    to: $to,
+    attachments: $attachments,
+    project_infos: $project_infos,
+    immediately_sign_projects: $immediately_sign_projects
+  ) {
+    id
+    type
+    target
+  }
+}
+""".strip()
+    return GraphQLOperation(
+        operation_name="createReport",
+        operation_type="mutation",
+        query=query,
+        variables={
+            "content": content,
+            "type": report_type,
+            "target": target,
+            "to": list(to),
+            "attachments": list(attachments),
+            "project_infos": [dict(item) for item in project_infos],
+            "immediately_sign_projects": [dict(item) for item in immediately_sign_projects],
+        },
     )
 
 
@@ -165,17 +303,44 @@ def _is_write_like_name(operation_name: str) -> bool:
     return any(fragment in lower_name for fragment in WRITE_LIKE_NAME_FRAGMENTS)
 
 
-def _build_fixed_query(operation_name: str) -> str:
+def _build_fixed_query(operation_name: str, variables: Mapping[str, Any]) -> str:
+    if operation_name == "listProjectID":
+        return f"query {operation_name} {{\n  {operation_name}\n}}"
     selection = _FIXED_SELECTION_SETS[operation_name].strip()
-    if operation_name == "listProject":
-        return (
-            f"query {operation_name}($search: ProjectSearchParam!, $pagination: PaginationParam, $sort_by: SortBy!) {{\n"
-            f"  {operation_name}(search: $search, pagination: $pagination, sort_by: $sort_by) {{\n"
-            f"{_indent(selection)}\n"
-            "  }\n"
-            "}"
-        )
-    return f"query {operation_name}($search: SearchParam, $id: ID) {{\n  {operation_name} {{\n{_indent(selection)}\n  }}\n}}"
+    allowed_arguments = _FIXED_ARGUMENTS.get(operation_name, {})
+    used_arguments = tuple(name for name in allowed_arguments if name in variables)
+    operation_signature = _operation_signature(operation_name, used_arguments, allowed_arguments)
+    field_arguments = _field_arguments(used_arguments)
+    return (
+        f"{operation_signature} {{\n"
+        f"  {operation_name}{field_arguments} {{\n"
+        f"{_indent(selection)}\n"
+        "  }\n"
+        "}"
+    )
+
+
+def _prepare_read_variables(operation_name: str, variables: Mapping[str, Any]) -> dict[str, Any]:
+    allowed_arguments = _FIXED_ARGUMENTS.get(operation_name, {})
+    return {name: variables[name] for name in allowed_arguments if name in variables}
+
+
+def _operation_signature(
+    operation_name: str,
+    used_arguments: tuple[str, ...],
+    allowed_arguments: Mapping[str, str],
+) -> str:
+    if not used_arguments:
+        return f"query {operation_name}"
+    declarations = ", ".join(f"${name}: {allowed_arguments[name]}" for name in used_arguments)
+    return f"query {operation_name}({declarations})"
+
+
+def _field_arguments(used_arguments: tuple[str, ...]) -> str:
+    if not used_arguments:
+        return ""
+    bindings = ", ".join(f"{name}: ${name}" for name in used_arguments)
+    return f"({bindings})"
 
 
 def _indent(selection: str) -> str:

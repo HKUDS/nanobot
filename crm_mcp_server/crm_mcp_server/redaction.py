@@ -16,6 +16,10 @@ SAFE_ERROR_MESSAGES: dict[str, str] = {
     "invalid_response": "The CRM response shape is invalid.",
     "operation_data_missing": "The CRM response is missing the requested operation data.",
     "records_field_missing": "The CRM response is missing the records field.",
+    "confirmation_required": "Explicit confirmation is required before writing to CRM.",
+    "confirmation_mismatch": "The confirmation did not match the pending CRM write.",
+    "write_permission_denied": "CRM write permission was denied.",
+    "write_failed": "The CRM write failed.",
     "internal_error": "An internal error occurred.",
 }
 

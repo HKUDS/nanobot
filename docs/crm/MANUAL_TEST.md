@@ -112,6 +112,16 @@ uv run --project crm_mcp_server python -m crm_mcp_server.real_smoke --auth-mode 
 
 Record only sanitized status, reason, count fields, operation name, and error categories. If the result is `INCONCLUSIVE/config_missing`, stop and fix runtime configuration outside chat; do not broaden scope or print environment values.
 
+## Confirmation-Gated Report Write Mock Check
+
+Purpose: verify that report writeback is two-phase.
+
+1. Generate a draft and confirmation package.
+2. Verify no mutation is attempted before confirmation.
+3. Confirm with `确认提交这份日报` or `确认提交这份周报`.
+4. Verify only `createReport` is attempted.
+5. Record only sanitized status, report id, report type, target, and mutation name.
+
 17A `crm_list_projects` real-runtime library check, after explicit approval and runtime configuration outside chat:
 
 - Default/mock mode must not access real CRM.
@@ -141,26 +151,31 @@ uv run --extra dev ruff check crm_mcp_server
 
 Purpose: verify the CRM MCP Server mock-mode Nanobot configuration example without enabling real CRM access.
 
-15H verifies the checked-in mock config example through Nanobot's real config schema. It does not apply user runtime config, implement a server entrypoint, start an HTTP MCP server, or run real CRM smoke.
+The checked-in mock config example is verified through Nanobot's real config schema. It starts the mock-mode stdio MCP server, but it does not apply user runtime config, start an HTTP MCP server, configure real CRM endpoint/token/headers, perform real CRM writeback, or run real CRM smoke.
 
-Allowed current tools for future mock-mode examples:
+Allowed current tools for mock-mode stdio examples:
 
-- `crm_smoke_check`
-- `crm_list_projects`
+- `crm_collect_sales_daily_context`
+- `crm_collect_sales_weekly_context`
+- `crm_collect_presales_weekly_context`
+- `crm_generate_sales_daily_draft`
+- `crm_generate_sales_weekly_draft`
+- `crm_generate_presales_weekly_table`
+- `crm_create_report_after_confirmation`
 
 Forbidden tools and behaviors:
 
 - Raw GraphQL passthrough.
-- Mutation.
-- Create, update, delete, assign, contact, message, export, or writeback tools.
+- Raw mutation passthrough.
+- Update, delete, assign, contact, message, export, or unrestricted writeback tools.
 - DingTalk write or send integration.
 
-The checked-in stdio mock example is `docs/crm/examples/nanobot-crm-mcp.mock.yaml`. Treat its `python -m crm_mcp_server` command as a config shape and future run command example until the actual MCP process entrypoint is verified.
+The checked-in stdio mock example is `docs/crm/examples/nanobot-crm-mcp.mock.yaml`. It runs `python -m crm_mcp_server` as a mock-mode stdio MCP server. Use `python -m crm_mcp_server --metadata` when you only need safe metadata inspection.
 
 Token handling:
 
 - 15G does not need a token.
-- 15H mock mode does not need a token.
+- Mock-mode stdio does not need a token.
 - 15I optional real smoke is the first task that may need a token, and only after explicit user approval.
 - Tokens must be configured by the user outside chat and outside docs.
 - Do not run `env`, `printenv`, or plain Compose config output commands in this workflow.

@@ -1,12 +1,12 @@
 # CRM Migration Notes
 
-This document explains the migration from Nanobot in-process real CRM access to a separate read-only CRM MCP Server.
+This document explains the migration from Nanobot in-process real CRM access to a separate read-first CRM MCP Server with exactly one confirmation-gated report write path.
 
 ## Decision
 
 Real CRM access should move from an in-process Nanobot `RealCRMAdapter` that talks directly to GraphQL to a separate CRM MCP Server.
 
-The CRM MCP Server becomes the production real CRM read-only access layer. Nanobot keeps mock/report/metrics/evidence behavior and connects to the MCP server through existing MCP configuration.
+The CRM MCP Server becomes the production real CRM read-first access layer, plus the explicit confirmation-gated `createReport` path. Nanobot keeps mock/report/metrics/evidence behavior and connects to the MCP server through existing MCP configuration.
 
 The direct in-process Nanobot GraphQL route is superseded for production. Future implementation must not expand `RealCRMAdapter` unless the user explicitly reopens that route.
 
@@ -93,7 +93,7 @@ Do not delete old code in the current phase.
 Old internal real CRM code can be considered for deletion only after all of these are true:
 
 - The CRM MCP Server exists and is approved as the only production real CRM access path.
-- Nanobot MCP configuration can call the approved read-only MCP tools.
+- Nanobot MCP configuration can call approved CRM MCP tools: read tools plus the explicit confirmation-gated `createReport` path.
 - Mock CLI and Docker smoke paths still pass without the old internal real adapter code.
 - The GraphQL contract and MCP tool contract cover all facts needed from the old internal adapter tests.
 - The user explicitly approves deleting or archiving the old code.
@@ -101,7 +101,7 @@ Old internal real CRM code can be considered for deletion only after all of thes
 ## Deferred Areas
 
 - DingTalk CRM delivery remains deferred until the CRM MCP Server and Nanobot MCP configuration are settled.
-- CRM writeback remains out of scope and requires a separate change proposal.
+- Arbitrary CRM writeback remains out of scope; only the explicit confirmation-gated `createReport` path is in v1, and any other write path requires a separate change proposal.
 - System/internal CRM UI or BI dashboard work remains out of scope.
 - Real CRM smoke remains opt-in and must not run without explicit user approval.
 

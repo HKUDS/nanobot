@@ -149,17 +149,11 @@ def expected_error(category: str, message: str) -> dict[str, object]:
     return {"category": category, "message": message, "retryable": False}
 
 
-def test_crm_generate_daily_report_facts_tool_name_is_exposed_as_read_only():
-    from crm_mcp_server.contract import list_v1_tools
-    from crm_mcp_server.server import get_server_metadata
+def test_crm_generate_daily_report_facts_is_helper_not_live_stdio_tool():
+    from crm_mcp_server.contract import list_v1_read_only_tools, list_v1_tools
 
-    assert "crm_generate_daily_report_facts" in list_v1_tools()
-    tool = next(
-        tool
-        for tool in get_server_metadata()["tools"]
-        if tool["name"] == "crm_generate_daily_report_facts"
-    )
-    assert tool["read_only"] is True
+    assert "crm_generate_daily_report_facts" not in list_v1_tools()
+    assert "crm_generate_daily_report_facts" not in list_v1_read_only_tools()
 
 
 @pytest.mark.parametrize(
@@ -436,12 +430,12 @@ def test_dependency_error_creates_unavailable_metrics_without_inferred_values():
 
 
 def test_mutation_used_is_false_and_write_like_tools_remain_hidden():
-    from crm_mcp_server.contract import list_v1_tools
+    from crm_mcp_server.contract import list_v1_read_only_tools
 
     result = generate_happy_report()
 
     assert result["diagnostics"]["mutation_used"] is False
-    for tool_name in list_v1_tools():
+    for tool_name in list_v1_read_only_tools():
         assert "create" not in tool_name
         assert "update" not in tool_name
         assert "delete" not in tool_name

@@ -4,7 +4,7 @@ This directory is the canonical entry point for CRM opportunity intelligence doc
 
 ## Current Direction
 
-The selected production direction is a separate read-only CRM MCP Server. The CRM MCP Server is the current real CRM access direction.
+The selected production direction is a separate read-first CRM MCP Server with one confirmation-gated report write path. The CRM MCP Server is the current real CRM access direction.
 
 Nanobot keeps the local mock/reporting layer:
 
@@ -23,14 +23,14 @@ Real CRM GraphQL access moves out of Nanobot and into the CRM MCP Server:
 
 DingTalk remains deferred. Existing DingTalk channel documentation remains useful later, but this phase does not add CRM-specific DingTalk behavior.
 
-Writeback remains out of scope. V1 must not create, update, delete, assign, contact, message, task, export, or otherwise mutate CRM state.
+Arbitrary writeback remains out of scope. V1 must not update, delete, assign, contact, message, task, export, or otherwise mutate CRM state, and the only allowed create path is confirmation-gated `createReport` through the approved MCP tool.
 
 ## Canonical Docs
 
 | Document | Purpose |
 | --- | --- |
-| `GRAPHQL_CONTRACT.md` | Read-only GraphQL source contract used by the future CRM MCP Server. |
-| `MCP_SERVER_DESIGN.md` | Design for the separate read-only CRM MCP Server. No implementation details. |
+| `GRAPHQL_CONTRACT.md` | Read-first GraphQL source contract plus confirmation-gated `createReport` path used by the future CRM MCP Server. |
+| `MCP_SERVER_DESIGN.md` | Design for the separate read-first CRM MCP Server with one confirmation-gated report write path. No implementation details. |
 | `MCP_TOOL_CONTRACT.md` | V1 MCP tool names, inputs, outputs, and safety boundaries. |
 | `MCP_CONFIGURATION.md` | Future Docker, stdio MCP, HTTP MCP, token-handling, and safe verification guidance. |
 | `examples/nanobot-crm-mcp.mock.yaml` | 15H mock-mode Nanobot MCP config example parsed by the real Nanobot config schema. |
@@ -41,11 +41,12 @@ Writeback remains out of scope. V1 must not create, update, delete, assign, cont
 
 ## Current MCP Server Status
 
-- The CRM MCP Server is currently mock/read-only/sanitized.
-- 15H adds a mock-mode Nanobot MCP config example and schema parse test; it does not enable real CRM access.
-- `crm_smoke_check` is the diagnostics tool.
-- `crm_list_projects` is the mocked read tool.
-- The mock-mode example enables only `crm_smoke_check` and `crm_list_projects` and does not require CRM credentials.
+- The CRM MCP Server package is evolving toward the CRM Report Assistant MCP package.
+- The current config example starts the mock-mode stdio MCP server with `python -m crm_mcp_server`; `python -m crm_mcp_server --metadata` remains available for safe metadata inspection.
+- Current report-assistant metadata tools are `crm_collect_sales_daily_context`, `crm_collect_sales_weekly_context`, `crm_collect_presales_weekly_context`, `crm_generate_sales_daily_draft`, `crm_generate_sales_weekly_draft`, `crm_generate_presales_weekly_table`, and `crm_create_report_after_confirmation`.
+- The package includes injected-transport read helpers and a confirmation-gated `createReport` helper for tests/library use, not a production MCP stdio write server.
+- V1 report writes accept exactly two confirmation phrases: `确认提交这份日报` for daily reports and `确认提交这份周报` for weekly reports.
+- The mock-mode stdio example does not require CRM credentials and does not configure a real CRM endpoint, token, headers, or real CRM writeback.
 - Optional real smoke is deferred to 15I and requires explicit user approval with runtime configuration outside chat.
 
 ## Superseded Docs

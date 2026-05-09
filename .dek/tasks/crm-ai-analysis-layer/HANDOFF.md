@@ -2,47 +2,41 @@
 
 ## Current State
 
-17B is complete on branch `17a-real-crm-list-projects` from the current local `main` state. `crm_list_projects` and `crm_list_business_chances` now each have two paths: default/mock mode stays network-free, and explicit real mode requires `runtime_enabled=true` plus complete runtime config. Real mode reuses the sanitized bearer `RealGraphQLSmokeTransport` proven by 15I.
+Final review findings are fixed on the dirty local worktree. No commit was made. The CRM MCP stdio path now disables SDK input validation and relies on runtime normalization/sanitization. Confirmation package preparation now sanitizes caller-provided string `target` and string-list `to` values before signing/serialization.
 
 ## Done
 
-- Kept default `crm_list_projects` behavior from accessing real CRM.
-- Added optional `runtime_enabled=false` and `transport=None` API support.
-- Added explicit real-mode config loading only when `runtime_enabled=true` and no transport is injected.
-- Added sanitized `config_missing`, HTTP/auth/unavailable/rate-limit, and GraphQL error handling for the project tool.
-- Expanded project diagnostics with safe runtime/auth/transport categories only.
-- Kept default `crm_list_business_chances` behavior from accessing real CRM.
-- Added optional `runtime_enabled=false` and `transport=None` API support to `crm_list_business_chances`.
-- Added explicit real-mode config loading only when `runtime_enabled=true` and no business-chance transport is injected.
-- Added sanitized `config_missing`, HTTP/auth/unavailable/rate-limit, and GraphQL error handling for the business-chance tool.
-- Expanded business-chance diagnostics with safe runtime/auth/transport categories only.
-- Updated CRM tool contract, manual test guidance, and `.dek` evidence/progress.
+- Added red test coverage for malicious string `target` and `to` values passed to `crm_create_report_after_confirmation`.
+- Added red test coverage that `run_stdio_server_async` registers `call_tool` with `validate_input=False` using a monkeypatched fake MCP `Server`.
+- Imported `sanitize_transport_detail` in `tool_runtime.py` and added `_safe_text` normalization.
+- Changed `_target_argument` to sanitize unsafe string targets.
+- Changed `_string_list` to sanitize string entries and filter empty/non-string entries.
+- Changed `stdio_server.py` to use `@server.call_tool(validate_input=False)`.
+- Preserved normal write-prep and confirmed mock-write behavior via focused report-write regression tests.
 
 ## Next
 
-- 17C candidate: add a dedicated approved sanitized real business-chance smoke/helper if `list_business_chance` shape needs validation, or proceed to real-mode daily report facts only after that read path is explicitly verified.
+- User decision whether to commit, push, or open a PR.
+- If continuing implementation, keep 17C as the next candidate only after confirming the intended real business-chance/read-report path.
 
 ## Key Files
 
-- `crm_mcp_server/crm_mcp_server/projects.py` - 17A implementation.
-- `crm_mcp_server/crm_mcp_server/business_chances.py` - 17B implementation.
-- `crm_mcp_server/tests/test_list_projects.py` - 17A TDD coverage.
-- `crm_mcp_server/tests/test_list_business_chances.py` - 17B TDD coverage.
-- `crm_mcp_server/tests/test_redaction.py` - diagnostics allow-list update.
-- `docs/crm/MCP_TOOL_CONTRACT.md` - explicit real-mode contract.
-- `docs/crm/MANUAL_TEST.md` - safe manual guidance.
-- `.dek/tasks/crm-ai-analysis-layer/EVIDENCE.md` - detailed sanitized evidence.
+- `crm_mcp_server/crm_mcp_server/tool_runtime.py` - runtime argument normalization for report assistant tools.
+- `crm_mcp_server/crm_mcp_server/stdio_server.py` - live MCP stdio adapter registration.
+- `crm_mcp_server/tests/test_tool_runtime.py` - confirmation package redaction regression coverage.
+- `crm_mcp_server/tests/test_stdio_server.py` - MCP SDK registration regression coverage.
+- `.dek/tasks/crm-ai-analysis-layer/EVIDENCE.md` - red/green and requested verification evidence.
 
 ## Verification
 
-- `uv run --extra dev pytest crm_mcp_server/tests/test_list_business_chances.py` - pass, `22 passed in 0.03s`.
-- `uv run --extra dev pytest crm_mcp_server/tests` - pass, `130 passed in 0.08s`.
-- `uv run --extra dev ruff check crm_mcp_server` - pass, `All checks passed!`.
+- `uv run --project crm_mcp_server --with pytest pytest crm_mcp_server/tests/test_tool_runtime.py crm_mcp_server/tests/test_stdio_server.py` - red run failed as expected with 2 failures before implementation.
+- `uv run --project crm_mcp_server --with pytest pytest crm_mcp_server/tests/test_tool_runtime.py crm_mcp_server/tests/test_stdio_server.py crm_mcp_server/tests/test_report_write.py` - pass, `42 passed, 1 warning` after fixes.
+- `uv run --project crm_mcp_server --with pytest pytest crm_mcp_server/tests` - pass, `199 passed, 1 warning` after fixes.
+- `uv run --project crm_mcp_server --with ruff ruff check crm_mcp_server tests/config/test_crm_mcp_config.py` - initially failed on import order, then pass after reordering imports.
+- `uv run --with pytest --with pyyaml pytest tests/config/test_crm_mcp_config.py` - pass, `3 passed`.
 
 ## Risks / Blockers
 
-- Current worktree had pre-existing dirty changes from prior CRM MCP work; user chose to proceed from current local `main` with those changes carried forward.
-- Do not run a real `crm_list_projects` manual check unless the user explicitly approves and confirms runtime config.
-- Do not run a real `crm_list_business_chances` check unless the user explicitly approves, confirms runtime config, and a dedicated sanitized helper/path exists.
-- The existing optional `real_smoke` command confirms bearer `listProject` only, not real `list_business_chance`.
+- Worktree had many pre-existing dirty changes; only files relevant to the review findings and tracked task evidence/handoff were edited in this session.
+- Package-local pytest commands still emit `PytestConfigWarning: Unknown config option: asyncio_mode`; tests pass.
 - Do not record endpoint, token, auth header values, raw GraphQL request/response/error, variables, or real CRM record fields.

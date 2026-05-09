@@ -1,29 +1,35 @@
 # CRM MCP Configuration
 
-This document records safe configuration patterns for the CRM MCP Server. The checked-in 15H example verifies Nanobot config parsing only; it does not start a real CRM connection.
+This document records safe configuration patterns for the CRM MCP Server. The checked-in example starts the mock-mode stdio MCP server for Nanobot config parsing and local mock tool wiring; it does not start a real CRM connection.
 
 ## Current Status
 
-- The CRM MCP Server is currently a mock, read-only, sanitized implementation.
-- Task 15H adds a Nanobot mock-mode config example and schema parse test only.
-- `crm_smoke_check` is a diagnostics tool.
-- `crm_list_projects` is a mocked read tool backed by synthetic mocked GraphQL responses.
+- The CRM MCP Server currently exposes mock-mode stdio report-assistant tools.
+- The checked-in Nanobot mock-mode config example runs `uv run --project crm_mcp_server python -m crm_mcp_server` as a mock stdio MCP server.
+- `python -m crm_mcp_server --metadata` remains available for safe metadata inspection without starting stdio serving.
+- Injected-transport helpers include confirmation-gated `createReport` support for tests and library use.
+- V1 report writes accept exactly two confirmation phrases: `确认提交这份日报` for daily reports and `确认提交这份周报` for weekly reports.
 - Future real smoke can only happen in task 15I, after explicit user approval, with runtime configuration provided outside chat. Its documented/default CRM GraphQL auth mode is `bearer`; `private_token` and `cookie` remain explicit diagnostic modes only.
 
-The current implementation does not provide a production CRM HTTP transport, active Nanobot runtime wiring, DingTalk integration, or CRM writeback.
+The current implementation does not provide a production CRM HTTP transport, real CRM endpoint/token/header wiring, DingTalk integration, or unconfirmed/unrestricted CRM writeback. The stdio server is mock-mode only; the confirmation-gated `createReport` path is available only through mock/injected transports and does not perform real CRM writeback.
 
 ## Allowed Tools
 
-Current mock-mode examples should enable only these tools:
+Current mock-mode stdio examples should enable only these tools:
 
-- `crm_smoke_check`
-- `crm_list_projects`
+- `crm_collect_sales_daily_context`
+- `crm_collect_sales_weekly_context`
+- `crm_collect_presales_weekly_context`
+- `crm_generate_sales_daily_draft`
+- `crm_generate_sales_weekly_draft`
+- `crm_generate_presales_weekly_table`
+- `crm_create_report_after_confirmation`
 
 Do not expose tools for:
 
 - Raw GraphQL passthrough.
-- Mutation.
-- Create, update, delete, assign, contact, message, export, or writeback actions.
+- Raw mutation passthrough.
+- Update, delete, assign, contact, message, export, or unrestricted writeback actions.
 - DingTalk write or send integration.
 
 ## Stdio MCP Example
@@ -46,14 +52,19 @@ tools:
         - -m
         - crm_mcp_server
       enabledTools:
-        - crm_smoke_check
-        - crm_list_projects
+        - crm_collect_sales_daily_context
+        - crm_collect_sales_weekly_context
+        - crm_collect_presales_weekly_context
+        - crm_generate_sales_daily_draft
+        - crm_generate_sales_weekly_draft
+        - crm_generate_presales_weekly_table
+        - crm_create_report_after_confirmation
       toolTimeout: 30
 ```
 
-Status note: this example is a mock-mode config shape and future run command example. The 15H test verifies that Nanobot's real `Config` schema can parse it. It does not prove that `python -m crm_mcp_server` starts a working MCP process.
+Status note: this example starts the mock-mode stdio MCP server with `python -m crm_mcp_server`. The config test verifies that Nanobot's real `Config` schema can parse it. It is still mock-mode only: it does not configure a real CRM endpoint, token, headers, HTTP transport, DingTalk integration, or real CRM writeback.
 
-15H does not write user runtime config. To use this later, copy or merge the example into a local Nanobot config outside this repository after the MCP process entrypoint is verified.
+This task does not write user runtime config. Use `python -m crm_mcp_server --metadata` when you only need safe metadata inspection instead of stdio serving.
 
 ## HTTP MCP Example
 
@@ -66,8 +77,13 @@ tools:
       type: streamableHttp
       url: http://localhost:8765/mcp
       enabledTools:
-        - crm_smoke_check
-        - crm_list_projects
+        - crm_collect_sales_daily_context
+        - crm_collect_sales_weekly_context
+        - crm_collect_presales_weekly_context
+        - crm_generate_sales_daily_draft
+        - crm_generate_sales_weekly_draft
+        - crm_generate_presales_weekly_table
+        - crm_create_report_after_confirmation
       toolTimeout: 30
 ```
 

@@ -62,7 +62,7 @@ class RecordingTransport:
         self.calls: list[dict[str, object]] = []
 
     def execute(self, operation_name: str, query: str, variables: dict[str, object]):
-        self.calls.append({"operation_name": operation_name, "variables": variables})
+        self.calls.append({"operation_name": operation_name, "query": query, "variables": variables})
         if not self.responses:
             raise AssertionError("unexpected extra transport call")
         return self.responses.pop(0)
@@ -122,15 +122,11 @@ def expected_error(category: str, message: str) -> dict[str, object]:
     return {"category": category, "message": message, "retryable": False}
 
 
-def test_crm_list_business_chances_tool_name_is_exposed_as_read_only():
-    from crm_mcp_server.contract import list_v1_tools
-    from crm_mcp_server.server import get_server_metadata
+def test_crm_list_business_chances_is_legacy_helper_not_live_stdio_tool():
+    from crm_mcp_server.contract import list_v1_read_only_tools, list_v1_tools
 
-    assert "crm_list_business_chances" in list_v1_tools()
-    tool = next(
-        tool for tool in get_server_metadata()["tools"] if tool["name"] == "crm_list_business_chances"
-    )
-    assert tool["read_only"] is True
+    assert "crm_list_business_chances" not in list_v1_tools()
+    assert "crm_list_business_chances" not in list_v1_read_only_tools()
 
 
 def test_mocked_list_business_chance_response_returns_sanitized_records_and_source_refs():
@@ -391,10 +387,33 @@ def test_pagination_uses_search_skip_and_limit():
         "list_business_chance",
         "list_business_chance",
     ]
-    assert [call["variables"]["search"]["skip"] for call in transport.calls] == [0, 1]
-    assert [call["variables"]["search"]["limit"] for call in transport.calls] == [1, 1]
+    assert [call["variables"]["pagination"]["skip"] for call in transport.calls] == [0, 1]
+    assert [call["variables"]["pagination"]["limit"] for call in transport.calls] == [1, 1]
     assert result["diagnostics"]["pages_read"] == 2
     assert result["diagnostics"]["records_returned"] == 2
+
+
+def test_business_chance_transport_query_binds_search_and_pagination_variables():
+    from crm_mcp_server.business_chances import crm_list_business_chances
+
+    transport = RecordingTransport([list_business_chance_response([business_chance_record("chance-1")])])
+
+    crm_list_business_chances(valid_request(max_records=1), transport=transport, page_size=1)
+
+    call = transport.calls[0]
+    assert "$search: BusinessChanceSearchParam" in call["query"]
+    assert "$pagination: PaginationParam" in call["query"]
+    assert "list_business_chance(search: $search, pagination: $pagination)" in call["query"]
+    assert call["variables"] == {
+        "search": {
+            "start": "2026-01-01",
+            "end": "2026-01-31",
+            "scope_id": "synthetic-team",
+            "owner_ids": ["owner-1"],
+            "group_ids": ["group-1"],
+        },
+        "pagination": {"skip": 0, "limit": 1},
+    }
 
 
 def test_max_records_and_max_pages_stop_pagination_safely():
@@ -490,14 +509,14 @@ def test_empty_result_returns_empty_records_and_sanitized_diagnostics():
 
 def test_mutation_used_is_always_false_and_write_like_tool_names_remain_hidden():
     from crm_mcp_server.business_chances import crm_list_business_chances
-    from crm_mcp_server.contract import list_v1_tools
+    from crm_mcp_server.contract import list_v1_read_only_tools
 
     transport = RecordingTransport([list_business_chance_response([business_chance_record("chance-1")])])
 
     result = crm_list_business_chances(valid_request(max_records=1), transport=transport)
 
     assert result["diagnostics"]["mutation_used"] is False
-    for tool_name in list_v1_tools():
+    for tool_name in list_v1_read_only_tools():
         assert "create" not in tool_name
         assert "update" not in tool_name
         assert "delete" not in tool_name

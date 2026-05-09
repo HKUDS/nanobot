@@ -11,6 +11,11 @@ tools:
         - -m
         - crm_mcp_server
       enabledTools:
-        - crm_smoke_check
-        - crm_list_projects
+        - crm_collect_sales_daily_context
+        - crm_collect_sales_weekly_context
+        - crm_collect_presales_weekly_context
+        - crm_generate_sales_daily_draft
+        - crm_generate_sales_weekly_draft
+        - crm_generate_presales_weekly_table
+        - crm_create_report_after_confirmation
       toolTimeout: 30

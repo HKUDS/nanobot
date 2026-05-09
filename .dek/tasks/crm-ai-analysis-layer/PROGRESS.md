@@ -37,6 +37,7 @@ Task id: `crm-ai-analysis-layer`
 - Task 15I-fix closeout complete: default sanitized real smoke succeeded with `status=OK`, `reason=ok`, `auth_mode=bearer`, `runtime_enabled=true`, `status_code_category=2xx`, `data_count=1`, `normalized_count=1`, `reported_total=703`, `graphql_errors_count=0`, `mutation_used=false`, and `errors=[]`.
 - Task 17A complete: `crm_list_projects` now supports default network-free mock/injected transport mode and explicit `runtime_enabled=true` real mode using the sanitized bearer real transport behind complete runtime config. Verification passed with focused tests, full CRM MCP tests, and ruff.
 - Task 17B complete: `crm_list_business_chances` now supports default network-free mock/injected transport mode and explicit `runtime_enabled=true` real mode using the sanitized bearer real transport behind complete runtime config. Verification passed with focused tests, full CRM MCP tests, and ruff. No real business-chance check was run.
+- Final review fixes complete: confirmation package preparation now sanitizes string `target` and string-list `to` entries before signing/serialization, and stdio MCP registration uses `@server.call_tool(validate_input=False)` so runtime sanitization handles invalid inputs instead of SDK validation echo paths. Requested focused tests, full CRM MCP tests, ruff, and config tests passed.
 - No runtime behavior was changed in 15K. No MCP server production wiring was changed. No files were deleted, moved, or renamed. `.env*` was not read. No real CRM endpoint was accessed.
 
 ## Completed
@@ -94,10 +95,11 @@ Task id: `crm-ai-analysis-layer`
 - Completed 15I-fix closeout: recorded sanitized successful real smoke result and reran CRM MCP tests plus ruff.
 - Completed 17A implementation and verification.
 - Completed 17B implementation and verification.
+- Completed final review fixes for confirmation redaction and MCP SDK validation bypass.
 
 ## Pending
 
-- User decision whether to push branch / PR after 17B verification.
+- User decision whether to push branch / PR after final review fixes.
 - Recommended 17C: add a dedicated approved sanitized real business-chance smoke/helper if `list_business_chance` shape needs validation, or proceed to real-mode daily report facts only after that read path is explicitly verified.
 - Keep WebUI and DingTalk deferred; do not jump there before the real `crm_list_projects` transport path is safely integrated.
 - Future user decision only if deeper cleanup is desired after Option B/15K. Direct adapter code/tests remain superseded-reference material.
@@ -117,4 +119,4 @@ Task id: `crm-ai-analysis-layer`
 
 ## Last Updated
 
-2026-05-08
+2026-05-09

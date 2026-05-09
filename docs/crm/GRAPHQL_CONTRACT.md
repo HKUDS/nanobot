@@ -1,6 +1,6 @@
 # CRM GraphQL Contract
 
-This document is the canonical read-only CRM GraphQL source contract for the future CRM MCP Server.
+This document is the canonical CRM GraphQL contract for read-first sources plus the single confirmation-gated report write path exposed by the future CRM MCP Server.
 
 It supersedes `docs/crm-graphql-contract.md`. The old file is kept temporarily for migration review.
 
@@ -10,7 +10,7 @@ This is documentation-only. It does not implement a GraphQL client, MCP server, 
 
 The GraphQL contract belongs behind the CRM MCP Server boundary.
 
-Nanobot should not call the CRM GraphQL API directly for production real CRM reads. Nanobot should call approved read-only MCP tools exposed by the CRM MCP Server.
+Nanobot should not call the CRM GraphQL API directly for production real CRM access. Nanobot should call approved CRM MCP tools: read tools for CRM sources plus the explicit confirmation-gated `createReport` path, with no arbitrary writeback or raw GraphQL passthrough.
 
 Runtime endpoint and authentication details are deployment configuration. They must not be committed, logged, written to `.dek`, included in tests, or pasted into documentation.
 
@@ -34,26 +34,35 @@ Only these `Query` operations are allowed for v1. All other queries are denied u
 | `reportInfo` | Read one report by id | `Report` |
 | `reportRelatedInfo` | Read deterministic CRM context related to a report date/creator/type | `ReportRelatedInfo!` |
 | `listProject` | Read project/opportunity pipeline records | `ProjectConnection!` |
+| `listProjectID` | Read visible project ids for scope estimation | `[String!]!` |
 | `projectInfo` | Read one project/opportunity detail | `Project!` |
 | `listActivity` | Read activity records for timeline/context metrics | `ActivityConnection!` |
 | `listCompany` | Read customer/company records | `CompanyConnection!` |
 | `companyInfo` | Read one company detail | `Company!` |
 | `listUser` | Resolve users and sales owners | `UserConnection!` |
+| `list_leads` | Read current user's leads with `list_type=claim_by` | `LeadsConnection!` |
+| `list_leads_pool` | Read lead pool records with `list_type=leads` | `LeadsConnection!` |
+| `list_opportunity_scenario` | Read scenario-map records | `OpportunityScenarioConnection!` |
+| `listImmediatelySignProject` | Read pending-sign project records when present | `[ImmediatelySignProject!]!` |
 | `list_business_chance` | Read partner business chances | `BusinessChanceConnection!` |
 | `business_chance` | Read one partner business chance detail | `BusinessChance` |
 
+## Confirmation-Gated Write Allow-List
+
+V1 allows exactly one mutation, `createReport`, and only through `crm_create_report_after_confirmation` after explicit user confirmation. `updateReport` and all other mutations remain forbidden.
+
 ## Forbidden Mutation Policy
 
-The CRM schema exposes a `Mutation` root. V1 CRM opportunity intelligence is read-only, so mutation use is explicitly forbidden.
+The CRM schema exposes a `Mutation` root. V1 CRM opportunity intelligence is read-first, with exactly one confirmation-gated mutation: `createReport` for `crm_create_report_after_confirmation`.
 
 Rules:
 
-- Do not send GraphQL operations whose operation type is `mutation`.
-- Do not include `Mutation` fields in allow-lists, generated clients, fixtures, tests, examples, docs, or runtime configuration.
-- Do not expose MCP tools that create, update, delete, remove, assign, claim, transfer, review, audit, sync, send, contact, message, task, export, or otherwise mutate CRM state.
+- Do not send GraphQL operations whose operation type is `mutation` unless the operation name is exactly `createReport` and the MCP tool path has explicit confirmation.
+- Do not include other `Mutation` fields in allow-lists, generated clients, fixtures, tests, examples, docs, or runtime configuration.
+- Do not expose MCP tools that create, update, delete, remove, assign, claim, transfer, review, audit, sync, send, contact, message, task, export, or otherwise mutate CRM state except `crm_create_report_after_confirmation`.
 - Reject any non-allow-listed operation before transport execution.
-- Tests for MCP server GraphQL work must assert mutation operation strings are rejected without a network call.
-- Any future writeback requires a separate change proposal and cannot be added under this v1 contract.
+- Tests for MCP server GraphQL work must assert non-allow-listed mutation operation strings are rejected without a network call.
+- Any additional writeback or mutation path requires a separate change proposal and cannot be added under this v1 contract.
 
 ## Query To Normalized Model Mapping
 

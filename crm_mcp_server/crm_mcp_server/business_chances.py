@@ -205,10 +205,11 @@ def _read_page(
         "scope_id": scope["scope_id"],
         "owner_ids": list(scope.get("owner_ids", [])),
         "group_ids": list(scope.get("group_ids", [])),
-        "skip": skip,
-        "limit": limit,
     }
-    operation = build_read_operation(OPERATION_NAME, variables={"search": search})
+    operation = build_read_operation(
+        OPERATION_NAME,
+        variables={"search": search, "pagination": {"skip": skip, "limit": limit}},
+    )
     return transport.execute(operation.operation_name, operation.query, operation.variables)
 
 

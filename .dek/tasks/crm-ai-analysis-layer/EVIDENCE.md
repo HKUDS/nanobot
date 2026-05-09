@@ -1646,6 +1646,62 @@ Scope confirmations:
 - Did not expand the query scope; real smoke remains fixed to `listProject` with limit `1`.
 - Did not execute Mutation.
 
+## 2026-05-09 - Final review findings: confirmation redaction and MCP SDK validation
+
+Scope:
+
+- Fixed final review finding that `crm_create_report_after_confirmation` could echo unsafe string `target` and `to` values into a confirmation package.
+- Fixed final review finding that the live stdio MCP path used default SDK input validation before runtime sanitization.
+- Did not commit.
+- Did not read `.env*`.
+- Did not access real CRM.
+- Did not output endpoint, token/Auth/Bearer/cookie material, raw GraphQL request, raw GraphQL response, raw GraphQL error message, variables, or real CRM data.
+
+TDD red tests:
+
+- Red test command: `uv run --project crm_mcp_server --with pytest pytest crm_mcp_server/tests/test_tool_runtime.py crm_mcp_server/tests/test_stdio_server.py`.
+- Red test result: failed as expected with 2 failures. `test_create_report_tool_sanitizes_string_target_and_to_before_confirmation_package` showed raw `mutation { updateReport { id } }` was preserved in `target`. `test_run_stdio_server_registers_call_tool_without_sdk_input_validation` showed SDK registration kwargs were `{}` instead of `{"validate_input": False}`.
+
+Implementation:
+
+- Imported `sanitize_transport_detail` into `crm_mcp_server/crm_mcp_server/tool_runtime.py`.
+- Added `_safe_text` normalization for string arguments.
+- Changed `_target_argument` to sanitize unsafe string targets before preparing confirmation packages.
+- Changed `_string_list` to sanitize string list entries and filter empty/non-string values before preparing confirmation packages.
+- Changed `crm_mcp_server/crm_mcp_server/stdio_server.py` to register `@server.call_tool(validate_input=False)` so runtime sanitization handles invalid input instead of SDK schema echo paths.
+
+Focused green check:
+
+- Command: `uv run --project crm_mcp_server --with pytest pytest crm_mcp_server/tests/test_tool_runtime.py crm_mcp_server/tests/test_stdio_server.py`.
+- Result: `18 passed, 1 warning in 0.03s`.
+
+Requested verification:
+
+- Command: `uv run --project crm_mcp_server --with pytest pytest crm_mcp_server/tests/test_tool_runtime.py crm_mcp_server/tests/test_stdio_server.py crm_mcp_server/tests/test_report_write.py`.
+- Result: `42 passed, 1 warning in 0.04s` on first requested run; after lint import-order fix, `42 passed, 1 warning in 0.03s`.
+- Command: `uv run --project crm_mcp_server --with pytest pytest crm_mcp_server/tests`.
+- Result: `199 passed, 1 warning in 0.11s` on first requested run; after lint import-order fix, `199 passed, 1 warning in 0.10s`.
+- Command: `uv run --project crm_mcp_server --with ruff ruff check crm_mcp_server tests/config/test_crm_mcp_config.py`.
+- Initial result: failed with one import-order issue in `crm_mcp_server/tests/test_stdio_server.py`.
+- Fix: reordered stdlib imports in `crm_mcp_server/tests/test_stdio_server.py`.
+- Re-run result: `All checks passed!`.
+- Command: `uv run --with pytest --with pyyaml pytest tests/config/test_crm_mcp_config.py`.
+- Result: `3 passed in 0.25s`.
+
+Files changed:
+
+- `crm_mcp_server/crm_mcp_server/tool_runtime.py`
+- `crm_mcp_server/crm_mcp_server/stdio_server.py`
+- `crm_mcp_server/tests/test_tool_runtime.py`
+- `crm_mcp_server/tests/test_stdio_server.py`
+- `.dek/tasks/crm-ai-analysis-layer/EVIDENCE.md`
+- `.dek/tasks/crm-ai-analysis-layer/PROGRESS.md`
+- `.dek/tasks/crm-ai-analysis-layer/HANDOFF.md`
+
+Remaining gaps:
+
+- Pytest emitted an existing `PytestConfigWarning: Unknown config option: asyncio_mode` under the package-local `uv run --project crm_mcp_server --with pytest` commands; tests still passed.
+
 ## 2026-05-08 - Task 17A: real transport behind explicit `crm_list_projects` runtime flag
 
 Scope:

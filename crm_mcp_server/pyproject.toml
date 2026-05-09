@@ -1,10 +1,10 @@
 [project]
 name = "crm-mcp-server"
 version = "0.1.0"
-description = "Read-only CRM MCP server skeleton"
+description = "Mock-mode CRM report assistant MCP server"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["mcp>=1.26.0,<2.0.0"]
 
 [build-system]
 requires = ["hatchling"]

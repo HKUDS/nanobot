@@ -2,22 +2,14 @@
 
 from __future__ import annotations
 
-from crm_mcp_server.contract import list_v1_tools
 from crm_mcp_server.schemas import RuntimeMetadata, ServerMetadata, ServerSkeleton, ToolMetadata
+from crm_mcp_server.tool_runtime import list_tool_definitions
 
 SERVER_NAME = "crm-mcp-server"
 SERVER_VERSION = "0.1.0"
-SERVER_DESCRIPTION = "Read-only CRM MCP server skeleton"
+SERVER_DESCRIPTION = "CRM MCP server skeleton with read tools and confirmation-gated report write metadata"
 
-_TOOL_DESCRIPTIONS = {
-    "crm_generate_daily_report_facts": "Return sanitized daily report facts.",
-    "crm_generate_weekly_report_facts": "Return sanitized weekly report facts.",
-    "crm_generate_dashboard_facts": "Return sanitized dashboard facts.",
-    "crm_check_read_boundary": "Report read-only boundary status without secrets.",
-    "crm_smoke_check": "Return sanitized CRM read-boundary diagnostics using mocked transport.",
-    "crm_list_projects": "Return sanitized project records from mocked listProject responses.",
-    "crm_list_business_chances": "Return sanitized business chance records from mocked list_business_chance responses.",
-}
+_WRITE_TOOL_NAME = "crm_create_report_after_confirmation"
 
 
 def create_server_skeleton() -> ServerSkeleton:
@@ -25,11 +17,11 @@ def create_server_skeleton() -> ServerSkeleton:
 
     tools = tuple(
         ToolMetadata(
-            name=name,
-            read_only=True,
-            description=_TOOL_DESCRIPTIONS[name],
+            name=tool.name,
+            read_only=tool.name != _WRITE_TOOL_NAME,
+            description=tool.description,
         )
-        for name in list_v1_tools()
+        for tool in list_tool_definitions()
     )
     return ServerSkeleton(
         metadata=ServerMetadata(

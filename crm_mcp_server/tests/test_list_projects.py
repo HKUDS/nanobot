@@ -100,13 +100,11 @@ def expected_error(category: str, message: str) -> dict[str, object]:
     return {"category": category, "message": message, "retryable": False}
 
 
-def test_crm_list_projects_tool_name_is_exposed_as_read_only():
-    from crm_mcp_server.contract import list_v1_tools
-    from crm_mcp_server.server import get_server_metadata
+def test_crm_list_projects_is_legacy_helper_not_live_stdio_tool():
+    from crm_mcp_server.contract import list_v1_read_only_tools, list_v1_tools
 
-    assert "crm_list_projects" in list_v1_tools()
-    tool = next(tool for tool in get_server_metadata()["tools"] if tool["name"] == "crm_list_projects")
-    assert tool["read_only"] is True
+    assert "crm_list_projects" not in list_v1_tools()
+    assert "crm_list_projects" not in list_v1_read_only_tools()
 
 
 def test_mocked_list_project_response_returns_sanitized_records_and_source_refs():
@@ -447,7 +445,7 @@ def test_empty_result_returns_empty_records_and_sanitized_diagnostics():
 
 
 def test_mutation_used_is_always_false_and_write_like_tool_names_remain_hidden():
-    from crm_mcp_server.contract import list_v1_tools
+    from crm_mcp_server.contract import list_v1_read_only_tools
     from crm_mcp_server.projects import crm_list_projects
 
     transport = RecordingTransport([list_project_response([project_record("project-1")])])
@@ -455,7 +453,7 @@ def test_mutation_used_is_always_false_and_write_like_tool_names_remain_hidden()
     result = crm_list_projects(valid_request(max_records=1), transport=transport)
 
     assert result["diagnostics"]["mutation_used"] is False
-    for tool_name in list_v1_tools():
+    for tool_name in list_v1_read_only_tools():
         assert "create" not in tool_name
         assert "update" not in tool_name
         assert "delete" not in tool_name

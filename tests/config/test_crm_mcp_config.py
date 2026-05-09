@@ -8,6 +8,16 @@ from nanobot.config.schema import Config
 
 EXAMPLE_PATH = Path("docs/crm/examples/nanobot-crm-mcp.mock.yaml")
 
+EXPECTED_ENABLED_TOOLS = [
+    "crm_collect_sales_daily_context",
+    "crm_collect_sales_weekly_context",
+    "crm_collect_presales_weekly_context",
+    "crm_generate_sales_daily_draft",
+    "crm_generate_sales_weekly_draft",
+    "crm_generate_presales_weekly_table",
+    "crm_create_report_after_confirmation",
+]
+
 WRITE_LIKE_FRAGMENTS = (
     "create",
     "update",
@@ -41,12 +51,14 @@ def _read_example() -> dict[str, object]:
     return yaml.safe_load(EXAMPLE_PATH.read_text())
 
 
-def test_crm_mcp_mock_example_uses_read_only_tools_only() -> None:
+def test_crm_mcp_mock_example_uses_expected_tools_only() -> None:
     config = _read_example()
     server = config["tools"]["mcpServers"]["crm"]
 
-    assert server["enabledTools"] == ["crm_smoke_check", "crm_list_projects"]
+    assert server["enabledTools"] == EXPECTED_ENABLED_TOOLS
     for tool_name in server["enabledTools"]:
+        if tool_name == "crm_create_report_after_confirmation":
+            continue
         for fragment in WRITE_LIKE_FRAGMENTS:
             assert fragment not in tool_name
 
@@ -74,7 +86,7 @@ def test_crm_mcp_mock_example_matches_nanobot_config_schema() -> None:
         "-m",
         "crm_mcp_server",
     ]
-    assert crm_server.enabled_tools == ["crm_smoke_check", "crm_list_projects"]
+    assert crm_server.enabled_tools == EXPECTED_ENABLED_TOOLS
     assert crm_server.tool_timeout == 30
     assert crm_server.env == {}
     assert crm_server.headers == {}

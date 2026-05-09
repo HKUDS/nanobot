@@ -1,4 +1,4 @@
-"""Read-only CRM MCP server skeleton."""
+"""Mock-mode CRM report assistant MCP server."""
 
 from crm_mcp_server.contract import V1_READ_ONLY_TOOL_NAMES, list_v1_tools
 from crm_mcp_server.server import create_server_skeleton, get_server_metadata

@@ -1,6 +1,6 @@
 # CRM MCP Server Design
 
-This document describes the design for a separate read-only CRM MCP Server. It does not define implementation code.
+This document describes the design for a separate read-first CRM MCP Server with one confirmation-gated `createReport` path. It does not define implementation code or arbitrary CRM writeback.
 
 ## Purpose
 
@@ -10,17 +10,18 @@ It isolates CRM GraphQL transport, credentials, allow-listing, pagination, redac
 
 ## Goals
 
-- Expose only v1 read-only CRM operations needed for daily, weekly, and dashboard summaries.
+- Expose v1 report-assistant stdio tools for sales daily/weekly and presales weekly workflows, plus the single confirmation-gated `createReport` path.
 - Keep CRM credentials and auth headers out of Nanobot runtime, `.dek`, docs, tests, logs, fixtures, and memory.
 - Enforce the GraphQL query allow-list in `GRAPHQL_CONTRACT.md`.
-- Reject all mutations before transport execution.
+- Reject all mutations before transport execution except explicitly confirmed `createReport`.
 - Return sanitized, normalized data or report-ready facts with evidence references.
 - Support local development with mocked GraphQL transport and synthetic data.
 - Support future manual smoke checks only through explicit operator approval and runtime configuration.
 
 ## Non-Goals
 
-- No CRM writeback.
+- No unconfirmed CRM writeback.
+- No CRM mutation except confirmation-gated `createReport` in v1.
 - No CRM task creation.
 - No customer contact, assignment, messaging, approval, audit, review, sync, export, or mutation workflow.
 - No DingTalk-specific behavior in the MCP server.
@@ -35,7 +36,7 @@ Nanobot
   mock/report/metrics/evidence
   MCP client configuration
         |
-        | approved read-only MCP tools
+        | approved CRM MCP read tools + confirmed createReport path
         v
 CRM MCP Server
   tool contracts
@@ -44,7 +45,7 @@ CRM MCP Server
   pagination and normalization
   redaction and sanitized errors
         |
-        | read-only GraphQL requests
+        | read queries + confirmed createReport only
         v
 CRM GraphQL source
 ```
@@ -55,9 +56,9 @@ Nanobot remains responsible for mock CLI verification, deterministic local repor
 
 | Component | Responsibility |
 | --- | --- |
-| MCP tool layer | Defines approved tool names, input schemas, output schemas, and read-only semantics. |
+| MCP tool layer | Defines approved tool names, input schemas, output schemas, read-tool semantics, and the single confirmation-gated report write tool. |
 | Request validator | Validates report type, date/window, scope, pagination limits, and requested source types before CRM access. |
-| GraphQL allow-list | Maps each approved tool to allowed GraphQL `Query` operations only. |
+| GraphQL allow-list | Maps read tools to allowed GraphQL `Query` operations and maps only `crm_create_report_after_confirmation` to confirmation-gated `createReport`. |
 | GraphQL transport | Executes runtime-configured CRM GraphQL requests. Implementation must keep auth material out of logs and errors. |
 | Pagination controller | Applies safe page size and max-page limits. Stops on empty pages or configured caps. |
 | Normalizer | Converts allow-listed GraphQL objects into sanitized normalized records and source references. |
@@ -67,15 +68,28 @@ Nanobot remains responsible for mock CLI verification, deterministic local repor
 
 ## Data Flow
 
+MCP invocation flow:
+
+```text
+CLI/DingTalk user request
+  -> Nanobot agent
+  -> CRM MCP tool
+  -> crm_mcp_server
+  -> CRM GraphQL
+  -> normalized CRM result
+  -> Nanobot draft/table or confirmed write result
+```
+
 1. Nanobot calls an approved MCP tool with report type, date/window, scope, and optional limits.
 2. The MCP server validates the input and rejects invalid requests before CRM access.
-3. The tool maps the request to a fixed set of allow-listed GraphQL `Query` operations.
-4. The GraphQL transport executes read-only requests using runtime configuration.
-5. Pagination applies conservative page size and maximum page limits.
-6. Normalization converts GraphQL objects to sanitized records and source references.
-7. Deterministic aggregation may run in the MCP server only if the tool contract says it returns metrics or report-ready facts.
-8. The response returns sanitized records, metrics, unavailable markers, source references, and error categories as applicable.
-9. Nanobot uses the returned facts with its existing mock/report/metrics/evidence path or displays/report-builds from the MCP output.
+3. Read tools map the request to a fixed set of allow-listed GraphQL `Query` operations.
+4. `crm_create_report_after_confirmation` may map only to `createReport` after explicit confirmation; all other mutation paths are rejected.
+5. The GraphQL transport executes the allow-listed request using runtime configuration.
+6. Pagination applies conservative page size and maximum page limits for read paths.
+7. Normalization converts GraphQL objects to sanitized records and source references.
+8. Deterministic aggregation may run in the MCP server only if the tool contract says it returns metrics or report-ready facts.
+9. The response returns sanitized records, metrics, unavailable markers, source references, and error categories as applicable.
+10. Nanobot uses the returned facts with its existing mock/report/metrics/evidence path or displays/report-builds from the MCP output.
 
 ## Tool Granularity
 
@@ -115,7 +129,7 @@ Error responses must not include credentials, endpoint auth headers, raw GraphQL
 - MCP server is disabled or inert unless runtime config explicitly enables real CRM access.
 - Credentials and auth headers are runtime-only and never documented as concrete values.
 - All GraphQL operations must be allow-listed by operation name and operation type.
-- Mutations are rejected before transport execution.
+- Mutations are rejected before transport execution except confirmation-gated `createReport`.
 - Raw CRM payloads are never returned to Nanobot.
 - Logs and errors use sanitized categories and correlation ids only.
 - Tests use synthetic data and mocked transport.
@@ -133,15 +147,13 @@ The exact deployment mode is not selected by this design. The tool contract shou
 
 Detailed future stdio, HTTP, Docker, Compose, token-handling, and verification examples live in `MCP_CONFIGURATION.md`.
 
-Current 15G status:
+Current mock stdio status:
 
-- The CRM MCP Server remains mock/read-only/sanitized.
-- `crm_smoke_check` is diagnostics-only.
-- `crm_list_projects` is a mocked read tool.
-- 15G does not implement a real CRM HTTP transport.
-- 15G does not wire Nanobot runtime configuration.
-- 15G does not connect DingTalk.
-- 15G does not enable real CRM smoke.
+- The CRM MCP Server starts as a mock-mode stdio MCP process with `python -m crm_mcp_server`.
+- Live stdio metadata publishes only the seven CRM Report Assistant tools.
+- Legacy smoke/list helpers remain helper/test-only paths and are not live stdio tools.
+- Mock mode does not implement a real CRM HTTP transport or real CRM writes.
+- Mock mode does not connect DingTalk or enable real CRM smoke.
 
 Future containerization should keep the CRM MCP Server image separate from the Nanobot image. Runtime credentials must not be baked into images or written into Compose files. If Compose syntax must be checked around secret-bearing configuration, prefer `docker compose config --quiet` and do not record expanded config output.
 

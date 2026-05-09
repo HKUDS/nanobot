@@ -310,9 +310,9 @@ def test_tool_errors_have_uniform_safe_shape():
 
 
 def test_exposed_tool_names_still_exclude_write_like_fragments():
-    from crm_mcp_server.contract import list_v1_tools
+    from crm_mcp_server.contract import list_v1_read_only_tools
 
-    for tool_name in list_v1_tools():
+    for tool_name in list_v1_read_only_tools():
         for fragment in WRITE_LIKE_FRAGMENTS:
             assert fragment not in tool_name
 
