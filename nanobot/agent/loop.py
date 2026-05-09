@@ -1318,7 +1318,7 @@ class AgentLoop:
         return TurnState.RUN
 
     async def _state_run(self, ctx: TurnContext) -> TurnState:
-        final_content, tools_used, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
+        result = await self._run_agent_loop(
             ctx.initial_messages,
             on_progress=ctx.on_progress,
             on_stream=ctx.on_stream,
@@ -1332,6 +1332,7 @@ class AgentLoop:
             session_key=ctx.session_key,
             pending_queue=ctx.pending_queue,
         )
+        final_content, tools_used, all_msgs, stop_reason, had_injections = result
         ctx.final_content = final_content
         ctx.tools_used = tools_used
         ctx.all_messages = all_msgs
@@ -1344,8 +1345,10 @@ class AgentLoop:
             ctx.final_content = EMPTY_FINAL_RESPONSE_MESSAGE
 
         ctx.save_skip = 1 + len(ctx.history) + (1 if ctx.user_persisted_early else 0)
-        ctx.generated_media = generated_image_paths_from_messages(ctx.all_messages[ctx.save_skip:])
-        if ctx.generated_media and ctx.all_messages and ctx.all_messages[-1].get("role") == "assistant":
+        skip_msgs = ctx.all_messages[ctx.save_skip:]
+        ctx.generated_media = generated_image_paths_from_messages(skip_msgs)
+        last_msg = ctx.all_messages[-1] if ctx.all_messages else None
+        if ctx.generated_media and last_msg and last_msg.get("role") == "assistant":
             existing_media = ctx.all_messages[-1].get("media")
             media = existing_media if isinstance(existing_media, list) else []
             ctx.all_messages[-1]["media"] = list(dict.fromkeys([*media, *ctx.generated_media]))
