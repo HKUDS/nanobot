@@ -92,3 +92,10 @@ logs/
 tmp/
 temp/
 *.tmp
+
+# Compound-engineering pipeline artifacts
+.context/
+docs/brainstorms/
+docs/ideation/
+docs/plans/
+docs/solutions/

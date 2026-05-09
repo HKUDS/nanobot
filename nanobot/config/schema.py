@@ -297,6 +297,7 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    hooks: HooksConfig = Field(default_factory=HooksConfig)
 
     @property
     def workspace_path(self) -> Path:
