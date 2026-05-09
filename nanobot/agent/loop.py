@@ -209,6 +209,7 @@ class TurnContext:
     msg: InboundMessage
     session_key: str
     state: TurnState
+    turn_id: str
     session: Session | None = None
 
     history: list[dict[str, Any]] = field(default_factory=list)
@@ -1212,9 +1213,10 @@ class AgentLoop:
         key = session_key or msg.session_key
         ctx = TurnContext(
             msg=msg,
-            session=self.sessions.get_or_create(key),
+            session=None,
             session_key=key,
             state=TurnState.RESTORE,
+            turn_id=f"{key}:{time.time_ns()}",
             on_progress=on_progress,
             on_stream=on_stream,
             on_stream_end=on_stream_end,
@@ -1253,7 +1255,8 @@ class AgentLoop:
                 )
             )
             logger.debug(
-                "State {} took {:.1f}ms -> event {}",
+                "[turn {}] State {} took {:.1f}ms -> event {}",
+                ctx.turn_id,
                 ctx.state.name,
                 duration,
                 event,
@@ -1262,7 +1265,8 @@ class AgentLoop:
             next_state = self._TRANSITIONS.get((ctx.state, event))
             if next_state is None:
                 raise RuntimeError(
-                    f"No transition from {ctx.state} on event {event!r}"
+                    f"[turn {ctx.turn_id}] No transition from {ctx.state} "
+                    f"on event {event!r}"
                 )
             ctx.state = next_state
 
