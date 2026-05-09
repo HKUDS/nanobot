@@ -198,9 +198,9 @@ class TurnState(Enum):
 @dataclass
 class TurnContext:
     msg: InboundMessage
-    session: Session
     session_key: str
     state: TurnState
+    session: Session | None = None
 
     history: list[dict[str, Any]] = field(default_factory=list)
     initial_messages: list[dict[str, Any]] = field(default_factory=list)
@@ -223,7 +223,7 @@ class TurnContext:
     on_retry_wait: Callable[[str], Awaitable[None]] | None = None
 
     pending_queue: asyncio.Queue | None = None
-    pending_summary: Any = None
+    pending_summary: str | None = None
 
 
 class AgentLoop:
@@ -1198,7 +1198,10 @@ class AgentLoop:
         )
 
         while ctx.state is not TurnState.DONE:
-            handler = getattr(self, f"_state_{ctx.state.name.lower()}")
+            handler_name = f"_state_{ctx.state.name.lower()}"
+            handler = getattr(self, handler_name, None)
+            if handler is None:
+                raise RuntimeError(f"Missing state handler for {ctx.state}")
             ctx.state = await handler(ctx)
 
         return ctx.outbound
@@ -1211,7 +1214,7 @@ class AgentLoop:
         stop_reason: str,
         had_injections: bool,
         generated_media: list[str],
-        on_stream: Callable | None,
+        on_stream: Callable[[str], Awaitable[None]] | None,
     ) -> OutboundMessage | None:
         """Assemble the final outbound message from turn results."""
         # MessageTool suppression
@@ -1252,7 +1255,10 @@ class AgentLoop:
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
-        ctx.session = self.sessions.get_or_create(ctx.session_key)
+        # Session is already fetched by the caller (_process_message) but
+        # ensure it exists in case this handler is invoked independently.
+        if ctx.session is None:
+            ctx.session = self.sessions.get_or_create(ctx.session_key)
         mark_webui_session(ctx.session, msg.metadata)
 
         if self._restore_runtime_checkpoint(ctx.session):
@@ -1349,9 +1355,9 @@ class AgentLoop:
         ctx.generated_media = generated_image_paths_from_messages(skip_msgs)
         last_msg = ctx.all_messages[-1] if ctx.all_messages else None
         if ctx.generated_media and last_msg and last_msg.get("role") == "assistant":
-            existing_media = ctx.all_messages[-1].get("media")
+            existing_media = last_msg.get("media")
             media = existing_media if isinstance(existing_media, list) else []
-            ctx.all_messages[-1]["media"] = list(dict.fromkeys([*media, *ctx.generated_media]))
+            last_msg["media"] = list(dict.fromkeys([*media, *ctx.generated_media]))
 
         self._save_turn(ctx.session, ctx.all_messages, ctx.save_skip)
         ctx.session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
@@ -1369,7 +1375,7 @@ class AgentLoop:
     async def _state_respond(self, ctx: TurnContext) -> TurnState:
         ctx.outbound = self._assemble_outbound(
             ctx.msg,
-            ctx.final_content or "",
+            ctx.final_content,
             ctx.all_messages,
             ctx.stop_reason,
             ctx.had_injections,
