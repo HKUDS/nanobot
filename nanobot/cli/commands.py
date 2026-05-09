@@ -235,22 +235,22 @@ def _print_cli_progress_line(text: str, thinking: ThinkingSpinner | None) -> Non
         console.print(f"  [dim]↳ {text}[/dim]")
 
 
-async def _print_interactive_progress_line(text: str, thinking: ThinkingSpinner | None) -> None:
-    """Print an interactive progress line, pausing the spinner if needed."""
+async def _print_interactive_progress_line(text: str, renderer: StreamRenderer | None) -> None:
+    """Print an interactive progress line, pausing the renderer's spinner if needed."""
     if not text.strip():
         return
-    with thinking.pause() if thinking else nullcontext():
+    with renderer.pause() if renderer else nullcontext():
         await _print_interactive_line(text)
 
 
 async def _maybe_print_interactive_progress(
     msg: Any,
-    thinking: ThinkingSpinner | None,
+    renderer: StreamRenderer | None,
     channels_config: Any,
 ) -> bool:
     metadata = msg.metadata or {}
     if metadata.get("_retry_wait"):
-        await _print_interactive_progress_line(msg.content, thinking)
+        await _print_interactive_progress_line(msg.content, renderer)
         return True
 
     if not metadata.get("_progress"):
@@ -262,7 +262,7 @@ async def _maybe_print_interactive_progress(
     if channels_config and not is_tool_hint and not channels_config.send_progress:
         return True
 
-    await _print_interactive_progress_line(msg.content, thinking)
+    await _print_interactive_progress_line(msg.content, renderer)
     return True
 
 
@@ -1204,7 +1204,7 @@ def agent(
 
                         if await _maybe_print_interactive_progress(
                             msg,
-                            _thinking,
+                            renderer,
                             agent_loop.channels_config,
                         ):
                             continue

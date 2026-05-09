@@ -134,6 +134,13 @@ class StreamRenderer:
         """Stop spinner before user input to avoid prompt_toolkit conflicts."""
         self._stop_spinner()
 
+    def pause(self):
+        """Context manager: pause spinner for external output. No-op once streaming has started."""
+        from contextlib import nullcontext
+        if self._spinner:
+            return self._spinner.pause()
+        return nullcontext()
+
     async def close(self) -> None:
         """Stop spinner/live without rendering a final streamed round."""
         if self._live:
