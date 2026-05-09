@@ -276,7 +276,7 @@ class FasterWhisperTranscriptionProvider:
 
             try:
                 from faster_whisper import WhisperModel  # type: ignore[import-not-found]
-            except ImportError as exc:
+            except ImportError:
                 logger.error(
                     "faster-whisper is not installed. Install it with: pip install faster-whisper"
                 )
