@@ -536,6 +536,25 @@ class AgentLoop:
 
         return _bus_progress
 
+    async def _build_retry_wait_callback(
+        self, msg: InboundMessage
+    ) -> Callable[[str], Awaitable[None]]:
+        """Build a retry-wait callback that publishes to the message bus."""
+
+        async def _on_retry_wait(content: str) -> None:
+            meta = dict(msg.metadata or {})
+            meta["_retry_wait"] = True
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=content,
+                    metadata=meta,
+                )
+            )
+
+        return _on_retry_wait
+
     async def _dispatch_command_inline(
         self,
         msg: InboundMessage,
@@ -1137,18 +1156,7 @@ class AgentLoop:
             )
 
         _bus_progress = await self._build_bus_progress_callback(msg)
-
-        async def _on_retry_wait(content: str) -> None:
-            meta = dict(msg.metadata or {})
-            meta["_retry_wait"] = True
-            await self.bus.publish_outbound(
-                OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=content,
-                    metadata=meta,
-                )
-            )
+        _on_retry_wait = await self._build_retry_wait_callback(msg)
 
         # Persist the triggering user message up front so a mid-turn crash
         # doesn't silently lose the prompt on recovery. ``media`` rides along
