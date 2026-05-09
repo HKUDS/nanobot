@@ -1,7 +1,8 @@
-"""Voice transcription providers (Groq and OpenAI Whisper)."""
+"""Voice transcription providers (Groq, OpenAI Whisper, and local faster-whisper)."""
 
 import asyncio
 import os
+import time
 from pathlib import Path
 
 import httpx
@@ -200,3 +201,124 @@ class GroqTranscriptionProvider:
             provider_label="Groq",
             language=self.language,
         )
+
+
+_MODEL_TTL = 600  # seconds of inactivity before unloading cached faster-whisper model
+
+
+class FasterWhisperTranscriptionProvider:
+    """Voice transcription using faster-whisper locally.
+
+    Uses the C++/ONNX implementation of Whisper for fast local inference.
+    No API key or network access required — runs entirely on the host machine.
+
+    Args:
+        model_size: One of ``tiny``, ``base``, ``small``, ``medium``, ``large-v3``.
+            Defaults to ``small`` (good quality/speed/RAM trade-off).
+        device: ``cpu`` or ``cuda``.  Defaults to ``auto`` which picks
+            ``cuda`` if a CUDA-capable GPU is detected, otherwise ``cpu``.
+        language: Optional ISO-639-1/2 language hint (e.g. ``"it"``, ``"en"``).
+    """
+
+    _model = None  # cached across instances — WhisperModel init is expensive
+    _last_used = 0.0
+    _lock = None
+    _unload_handle = None
+
+    @classmethod
+    def _schedule_unload(cls):
+        if cls._unload_handle is not None:
+            cls._unload_handle.cancel()
+        loop = asyncio.get_event_loop()
+        cls._unload_handle = loop.call_later(_MODEL_TTL, cls._do_unload)
+
+    @classmethod
+    def _do_unload(cls):
+        logger.info("Unloading faster-whisper model (idle TTL)")
+        cls._model = None
+
+    def __init__(
+        self,
+        model_size: str = "small",
+        device: str = "auto",
+        language: str | None = None,
+    ):
+        self._model_size = model_size
+        self._device = device
+        self.language = language or None
+
+    @property
+    def _effective_device(self) -> str:
+        if self._device != "auto":
+            return self._device
+        # Simple autodetect: try importing torch to check for CUDA.
+        # If torch is not available, fall back to cpu (faster-whisper works on cpu too).
+        try:
+            import torch  # type: ignore[import-not-found]
+            if torch.cuda.is_available():
+                return "cuda"
+        except ImportError:
+            pass
+        return "cpu"
+
+    async def transcribe(self, file_path: str | Path) -> str:
+        if FasterWhisperTranscriptionProvider._lock is None:
+            FasterWhisperTranscriptionProvider._lock = asyncio.Lock()
+
+        path = Path(file_path)
+        if not path.exists():
+            logger.error("Audio file not found: {}", file_path)
+            return ""
+
+        async with FasterWhisperTranscriptionProvider._lock:
+            FasterWhisperTranscriptionProvider._last_used = time.monotonic()
+
+            try:
+                from faster_whisper import WhisperModel  # type: ignore[import-not-found]
+            except ImportError as exc:
+                logger.error(
+                    "faster-whisper is not installed. Install it with: pip install faster-whisper"
+                )
+                return ""
+
+            loop = asyncio.get_event_loop()
+
+            # Load model only if not already cached
+            if FasterWhisperTranscriptionProvider._model is None:
+                def _load_model():
+                    device = self._effective_device
+                    logger.info(
+                        "Loading faster-whisper model '{}' on device '{}' (first use, may download)",
+                        self._model_size,
+                        device,
+                    )
+                    return WhisperModel(self._model_size, device=device)
+
+                model = await loop.run_in_executor(None, _load_model)
+                FasterWhisperTranscriptionProvider._model = model
+            else:
+                model = FasterWhisperTranscriptionProvider._model
+
+            def _transcribe(model):
+                segments, info = model.transcribe(
+                    str(path),
+                    language=self.language,
+                    beam_size=1,
+                )
+                logger.info(
+                    "Transcribed {} (lang={}): detected language={}, duration={:.0f}s",
+                    path.name,
+                    self.language or "auto",
+                    info.language,
+                    info.duration,
+                )
+                return " ".join(seg.text for seg in segments)
+
+            try:
+                text = await loop.run_in_executor(None, _transcribe, model)
+                return text or ""
+            except Exception as exc:
+                logger.exception("faster-whisper transcription error: {}", exc)
+                return ""
+            finally:
+                FasterWhisperTranscriptionProvider._schedule_unload()

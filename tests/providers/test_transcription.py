@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
-from nanobot.providers.transcription import GroqTranscriptionProvider, OpenAITranscriptionProvider
+from nanobot.providers.transcription import (
+    FasterWhisperTranscriptionProvider,
+    GroqTranscriptionProvider,
+    OpenAITranscriptionProvider,
+)
 
 
 @pytest.fixture
@@ -240,6 +245,67 @@ async def test_returns_empty_on_malformed_json_body(audio_file: Path) -> None:
     assert post.await_count == 1
 
 
+# ---------------------------------------------------------------------------
+# faster-whisper local provider
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_faster_whisper_missing_file_short_circuits() -> None:
+    provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="cpu")
+    result = await provider.transcribe("/nonexistent/path/voice.ogg")
+    assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_faster_whisper_import_error_returns_empty(audio_file: Path) -> None:
+    """If faster-whisper is not installed, return empty string gracefully."""
+    provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="cpu")
+    import sys
+    saved = sys.modules.pop("faster_whisper", None)
+    try:
+        # Ensure the module cannot be imported
+        class _BlockImport:
+            def find_module(self, name, path=None):
+                if name == "faster_whisper":
+                    return self
+                return None
+            def load_module(self, name):
+                raise ImportError("No module named faster-whisper")
+        blocker = _BlockImport()
+        sys.meta_path.insert(0, blocker)
+        try:
+            result = await provider.transcribe(audio_file)
+        finally:
+            sys.meta_path.remove(blocker)
+    finally:
+        if saved is not None:
+            sys.modules["faster_whisper"] = saved
+    assert result == ""
+
+
+@pytest.mark.asyncio
+async def test_faster_whisper_auto_device_no_cuda(audio_file: Path) -> None:
+    """When torch is not available or has no CUDA, device falls back to cpu."""
+    provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="auto")
+    with patch("torch.cuda.is_available", return_value=False):
+        assert provider._effective_device == "cpu"
+
+
+@pytest.mark.asyncio
+async def test_faster_whisper_auto_device_with_cuda(audio_file: Path) -> None:
+    """When torch detects CUDA, device is cuda."""
+    provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="auto")
+    with patch("torch.cuda.is_available", return_value=True):
+        assert provider._effective_device == "cuda"
+
+
+@pytest.mark.asyncio
+async def test_faster_whisper_explicit_device_overrides_auto(audio_file: Path) -> None:
+    """Explicit device setting takes precedence over auto-detection."""
+    provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="cuda")
+    assert provider._effective_device == "cuda"
+
+
 @pytest.mark.asyncio
 async def test_returns_empty_on_non_dict_json_body(audio_file: Path) -> None:
     """200 with a JSON array (not dict): no AttributeError leak; return "" immediately."""
@@ -290,3 +356,90 @@ async def test_retries_on_every_advertised_transient_exception(
         result = await provider.transcribe(audio_file)
     assert result == "recovered"
     assert post.await_count == 2
+
+
+# ---------------------------------------------------------------------------
+# faster-whisper — model caching and concurrency
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _reset_faster_whisper_cache():
+    """Reset class-level state so each test starts fresh."""
+    FasterWhisperTranscriptionProvider._model = None
+    FasterWhisperTranscriptionProvider._last_used = 0.0
+    FasterWhisperTranscriptionProvider._lock = None
+    FasterWhisperTranscriptionProvider._unload_handle = None
+    yield
+    # Cleanup after test too
+    FasterWhisperTranscriptionProvider._model = None
+    FasterWhisperTranscriptionProvider._last_used = 0.0
+    FasterWhisperTranscriptionProvider._lock = None
+    FasterWhisperTranscriptionProvider._unload_handle = None
+
+
+def _mock_whisper_model(init_counter: list[int]):
+    """Factory that builds a MockModel class counting instantiations."""
+    class MockSegment:
+        text = "hello world"
+
+    class MockInfo:
+        language = "en"
+        duration = 1.0
+
+    class MockModel:
+        def __init__(self, model_size, device):
+            init_counter[0] += 1
+
+        def transcribe(self, path, language=None, beam_size=1):
+            return [MockSegment()], MockInfo()
+
+    return MockModel
+
+
+def _install_mock_whisper_model(init_counter: list[int]):
+    """Install a mock faster_whisper module into sys.modules and patch it in.
+
+    Returns a context manager (the patch) that should be used as ``with``."""
+    import types
+
+    MockModel = _mock_whisper_model(init_counter)
+    mock_module = types.ModuleType("faster_whisper")
+    mock_module.WhisperModel = MockModel
+
+    return patch.dict("sys.modules", {"faster_whisper": mock_module})
+
+
+@pytest.mark.asyncio
+async def test_faster_whisper_model_cached_between_calls(
+    audio_file: Path,
+) -> None:
+    """WhisperModel should be instantiated only once across multiple sequential calls."""
+    provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="cpu")
+
+    init_counter = [0]
+
+    with _install_mock_whisper_model(init_counter):
+        await provider.transcribe(audio_file)
+        await provider.transcribe(audio_file)
+        await provider.transcribe(audio_file)
+
+    assert init_counter[0] == 1
+
+
+@pytest.mark.asyncio
+async def test_faster_whisper_concurrent_calls_reuse_model(
+    audio_file: Path,
+) -> None:
+    """Concurrent transcribe calls should not create multiple WhisperModel instances."""
+    provider = FasterWhisperTranscriptionProvider(model_size="tiny", device="cpu")
+
+    init_counter = [0]
+
+    with _install_mock_whisper_model(init_counter):
+        results = await asyncio.gather(
+            provider.transcribe(audio_file),
+            provider.transcribe(audio_file),
+        )
+
+    assert all(r == "hello world" for r in results)
+    assert init_counter[0] == 1

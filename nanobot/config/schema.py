@@ -28,8 +28,10 @@ class ChannelsConfig(Base):
     send_progress: bool = True  # stream agent's text progress to the channel
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
     send_max_retries: int = Field(default=3, ge=0, le=10)  # Max delivery attempts (initial send included)
-    transcription_provider: str = "groq"  # Voice transcription backend: "groq" or "openai"
+    transcription_provider: str = "groq"  # Voice transcription backend: "groq", "openai", or "local"
     transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")  # Optional ISO-639-1 hint for audio transcription
+    transcription_model_size: str = "small"  # faster-whisper model size (tiny/base/small/medium/large-v3) — used when provider is "local"
+    transcription_device: str = "auto"  # Device for local transcription: "cpu", "cuda", or "auto"
 
 
 class DreamConfig(Base):
