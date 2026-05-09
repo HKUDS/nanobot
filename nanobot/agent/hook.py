@@ -16,6 +16,8 @@ class AgentHookContext:
 
     iteration: int
     messages: list[dict[str, Any]]
+    media: list[str] | None = None
+    media_text: str | None = None
     response: LLMResponse | None = None
     usage: dict[str, int] = field(default_factory=dict)
     tool_calls: list[ToolCallRequest] = field(default_factory=list)
@@ -35,6 +37,9 @@ class AgentHook:
 
     def wants_streaming(self) -> bool:
         return False
+
+    async def before_process(self, context: AgentHookContext) -> None:
+        pass
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         pass
@@ -82,6 +87,9 @@ class CompositeHook(AgentHook):
                 await getattr(h, method_name)(*args, **kwargs)
             except Exception:
                 logger.exception("AgentHook.{} error in {}", method_name, type(h).__name__)
+
+    async def before_process(self, context: AgentHookContext) -> None:
+        await self._for_each_hook_safe("before_process", context)
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_iteration", context)
