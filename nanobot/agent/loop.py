@@ -509,6 +509,33 @@ class AgentLoop:
 
         return format_tool_hints(tool_calls, max_length=self.tool_hint_max_length)
 
+    async def _build_bus_progress_callback(
+        self, msg: InboundMessage
+    ) -> Callable[..., Awaitable[None]]:
+        """Build a progress callback that publishes to the message bus."""
+
+        async def _bus_progress(
+            content: str,
+            *,
+            tool_hint: bool = False,
+            tool_events: list[dict[str, Any]] | None = None,
+        ) -> None:
+            meta = dict(msg.metadata or {})
+            meta["_progress"] = True
+            meta["_tool_hint"] = tool_hint
+            if tool_events:
+                meta["_tool_events"] = tool_events
+            await self.bus.publish_outbound(
+                OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=content,
+                    metadata=meta,
+                )
+            )
+
+        return _bus_progress
+
     async def _dispatch_command_inline(
         self,
         msg: InboundMessage,
@@ -1109,25 +1136,7 @@ class AgentLoop:
                 sender_id=msg.sender_id,
             )
 
-        async def _bus_progress(
-            content: str,
-            *,
-            tool_hint: bool = False,
-            tool_events: list[dict[str, Any]] | None = None,
-        ) -> None:
-            meta = dict(msg.metadata or {})
-            meta["_progress"] = True
-            meta["_tool_hint"] = tool_hint
-            if tool_events:
-                meta["_tool_events"] = tool_events
-            await self.bus.publish_outbound(
-                OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=content,
-                    metadata=meta,
-                )
-            )
+        _bus_progress = await self._build_bus_progress_callback(msg)
 
         async def _on_retry_wait(content: str) -> None:
             meta = dict(msg.metadata or {})
