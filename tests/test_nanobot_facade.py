@@ -39,7 +39,7 @@ def test_from_config_default_path():
     from nanobot.config.schema import Config
 
     with patch("nanobot.config.loader.load_config") as mock_load, \
-         patch("nanobot.nanobot._make_provider") as mock_prov:
+         patch("nanobot.providers.factory.make_provider") as mock_prov:
         mock_load.return_value = Config()
         mock_prov.return_value = MagicMock()
         mock_prov.return_value.get_default_model.return_value = "test"
@@ -127,7 +127,7 @@ def test_workspace_override(tmp_path):
 
 def test_sdk_make_provider_uses_github_copilot_backend():
     from nanobot.config.schema import Config
-    from nanobot.nanobot import _make_provider
+    from nanobot.providers.factory import make_provider
 
     config = Config.model_validate(
         {
@@ -141,7 +141,7 @@ def test_sdk_make_provider_uses_github_copilot_backend():
     )
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = _make_provider(config)
+        provider = make_provider(config)
 
     assert provider.__class__.__name__ == "GitHubCopilotProvider"
 

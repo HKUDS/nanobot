@@ -48,6 +48,7 @@ from rich.table import Table
 from rich.text import Text
 
 from nanobot import __logo__, __version__
+from nanobot.agent.loop import AgentLoop
 
 
 def _sanitize_surrogates(text: str) -> str:
@@ -447,20 +448,6 @@ def _onboard_plugins(config_path: Path) -> None:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def _make_provider(config: Config):
-    """Create the appropriate LLM provider from config.
-
-    Routing is driven by ``ProviderSpec.backend`` in the registry.
-    """
-    from nanobot.providers.factory import make_provider
-
-    try:
-        return make_provider(config)
-    except ValueError as exc:
-        console.print(f"[red]Error: {exc}[/red]")
-        raise typer.Exit(1) from exc
-
-
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
     from nanobot.config.loader import load_config, resolve_config_env_vars, set_config_path
@@ -539,7 +526,6 @@ def serve(
 
     from loguru import logger
 
-    from nanobot.agent.loop import AgentLoop
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
     from nanobot.session.manager import SessionManager
@@ -556,32 +542,10 @@ def serve(
     timeout = timeout if timeout is not None else api_cfg.timeout
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
-    provider = _make_provider(runtime_config)
     session_manager = SessionManager(runtime_config.workspace_path)
-    agent_loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=runtime_config.workspace_path,
-        model=runtime_config.agents.defaults.model,
-        max_iterations=runtime_config.agents.defaults.max_tool_iterations,
-        context_window_tokens=runtime_config.agents.defaults.context_window_tokens,
-        context_block_limit=runtime_config.agents.defaults.context_block_limit,
-        max_tool_result_chars=runtime_config.agents.defaults.max_tool_result_chars,
-        provider_retry_mode=runtime_config.agents.defaults.provider_retry_mode,
-        tool_hint_max_length=runtime_config.agents.defaults.tool_hint_max_length,
-        web_config=runtime_config.tools.web,
-        exec_config=runtime_config.tools.exec,
-        restrict_to_workspace=runtime_config.tools.restrict_to_workspace,
+    agent_loop = AgentLoop.from_config(
+        runtime_config, bus,
         session_manager=session_manager,
-        mcp_servers=runtime_config.tools.mcp_servers,
-        channels_config=runtime_config.channels,
-        timezone=runtime_config.agents.defaults.timezone,
-        unified_session=runtime_config.agents.defaults.unified_session,
-        disabled_skills=runtime_config.agents.defaults.disabled_skills,
-        session_ttl_minutes=runtime_config.agents.defaults.session_ttl_minutes,
-        consolidation_ratio=runtime_config.agents.defaults.consolidation_ratio,
-        max_messages=runtime_config.agents.defaults.max_messages,
-        tools_config=runtime_config.tools,
         image_generation_provider_configs={
             "openrouter": runtime_config.providers.openrouter,
             "aihubmix": runtime_config.providers.aihubmix,
@@ -653,7 +617,6 @@ def _run_gateway(
     open_browser_url: str | None = None,
 ) -> None:
     """Shared gateway runtime; ``open_browser_url`` opens a tab once channels are up."""
-    from nanobot.agent.loop import AgentLoop
     from nanobot.agent.tools.cron import CronTool
     from nanobot.agent.tools.message import MessageTool
     from nanobot.bus.queue import MessageBus
@@ -674,7 +637,6 @@ def _run_gateway(
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
         raise typer.Exit(1) from exc
-    provider = provider_snapshot.provider
     session_manager = SessionManager(config.workspace_path)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
@@ -686,31 +648,10 @@ def _run_gateway(
     cron = CronService(cron_store_path)
 
     # Create agent with cron service
-    agent = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=config.workspace_path,
-        model=provider_snapshot.model,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=provider_snapshot.context_window_tokens,
-        web_config=config.tools.web,
-        context_block_limit=config.agents.defaults.context_block_limit,
-        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
-        provider_retry_mode=config.agents.defaults.provider_retry_mode,
-        tool_hint_max_length=config.agents.defaults.tool_hint_max_length,
-        exec_config=config.tools.exec,
+    agent = AgentLoop.from_config(
+        config, bus,
         cron_service=cron,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
         session_manager=session_manager,
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
-        timezone=config.agents.defaults.timezone,
-        unified_session=config.agents.defaults.unified_session,
-        disabled_skills=config.agents.defaults.disabled_skills,
-        session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
-        consolidation_ratio=config.agents.defaults.consolidation_ratio,
-        max_messages=config.agents.defaults.max_messages,
-        tools_config=config.tools,
         image_generation_provider_configs={
             "openrouter": config.providers.openrouter,
             "aihubmix": config.providers.aihubmix,
@@ -820,7 +761,7 @@ def _run_gateway(
 
         if job.payload.deliver and job.payload.to and response:
             should_notify = await evaluate_response(
-                response, reminder_note, provider, agent.model,
+                response, reminder_note, agent.provider, agent.model,
             )
             if should_notify:
                 await _deliver_to_channel(
@@ -910,7 +851,7 @@ def _run_gateway(
     hb_cfg = config.gateway.heartbeat
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
-        provider=provider,
+        provider=agent.provider,
         model=agent.model,
         on_execute=on_heartbeat_execute,
         on_notify=on_heartbeat_notify,
@@ -1063,7 +1004,6 @@ def agent(
     """Interact with the agent directly."""
     from loguru import logger
 
-    from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
 
@@ -1071,7 +1011,6 @@ def agent(
     sync_workspace_templates(config.workspace_path)
 
     bus = MessageBus()
-    provider = _make_provider(config)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
@@ -1086,30 +1025,9 @@ def agent(
     else:
         logger.disable("nanobot")
 
-    agent_loop = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
-        web_config=config.tools.web,
-        context_block_limit=config.agents.defaults.context_block_limit,
-        max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
-        provider_retry_mode=config.agents.defaults.provider_retry_mode,
-        tool_hint_max_length=config.agents.defaults.tool_hint_max_length,
-        exec_config=config.tools.exec,
+    agent_loop = AgentLoop.from_config(
+        config, bus,
         cron_service=cron,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
-        timezone=config.agents.defaults.timezone,
-        unified_session=config.agents.defaults.unified_session,
-        disabled_skills=config.agents.defaults.disabled_skills,
-        session_ttl_minutes=config.agents.defaults.session_ttl_minutes,
-        consolidation_ratio=config.agents.defaults.consolidation_ratio,
-        max_messages=config.agents.defaults.max_messages,
-        tools_config=config.tools,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):

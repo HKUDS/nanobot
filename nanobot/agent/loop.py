@@ -341,6 +341,46 @@ class AgentLoop:
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
+    @classmethod
+    def from_config(
+        cls,
+        config: Any,
+        bus: MessageBus | None = None,
+        **extra: Any,
+    ) -> AgentLoop:
+        """Create an AgentLoop from config with the common parameter set."""
+        from nanobot.providers.factory import make_provider
+
+        if bus is None:
+            bus = MessageBus()
+        defaults = config.agents.defaults
+        provider = make_provider(config)
+        return cls(
+            bus=bus,
+            provider=provider,
+            workspace=config.workspace_path,
+            model=defaults.model,
+            max_iterations=defaults.max_tool_iterations,
+            context_window_tokens=defaults.context_window_tokens,
+            context_block_limit=defaults.context_block_limit,
+            max_tool_result_chars=defaults.max_tool_result_chars,
+            provider_retry_mode=defaults.provider_retry_mode,
+            tool_hint_max_length=defaults.tool_hint_max_length,
+            web_config=config.tools.web,
+            exec_config=config.tools.exec,
+            restrict_to_workspace=config.tools.restrict_to_workspace,
+            mcp_servers=config.tools.mcp_servers,
+            channels_config=config.channels,
+            timezone=defaults.timezone,
+            unified_session=defaults.unified_session,
+            disabled_skills=defaults.disabled_skills,
+            session_ttl_minutes=defaults.session_ttl_minutes,
+            consolidation_ratio=defaults.consolidation_ratio,
+            max_messages=defaults.max_messages,
+            tools_config=config.tools,
+            **extra,
+        )
+
     def _sync_subagent_runtime_limits(self) -> None:
         """Keep subagent runtime limits aligned with mutable loop settings."""
         self.subagents.max_iterations = self.max_iterations
