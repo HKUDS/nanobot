@@ -82,9 +82,10 @@ class MyTool(Tool):
 
     _MAX_RUNTIME_KEYS = 64
 
-    def __init__(self, loop: AgentLoop, modify_allowed: bool = True) -> None:
+    def __init__(self, loop: AgentLoop, modify_allowed: bool = True, allow_list: list[str] | None = None) -> None:
         self._loop = loop
         self._modify_allowed = modify_allowed
+        self._allow_list = frozenset(allow_list) if allow_list else frozenset()
         self._channel = ""
         self._chat_id = ""
 
@@ -94,6 +95,7 @@ class MyTool(Tool):
         memo[id(self)] = result
         result._loop = self._loop
         result._modify_allowed = self._modify_allowed
+        result._allow_list = self._allow_list
         result._channel = self._channel
         result._chat_id = self._chat_id
         return result
@@ -164,13 +166,13 @@ class MyTool(Tool):
     # Path resolution
     # ------------------------------------------------------------------
 
-    def _resolve_path(self, path: str) -> tuple[Any, str | None]:
+    def _resolve_path(self, path: str, skip_blocked: bool = False) -> tuple[Any, str | None]:
         parts = path.split(".")
         obj = self._loop
         for part in parts:
             if part in self._DENIED_ATTRS or part.startswith("__"):
                 return None, f"'{part}' is not accessible"
-            if part in self.BLOCKED:
+            if not skip_blocked and part in self.BLOCKED:
                 return None, f"'{part}' is not accessible"
             if part.lower() in self._SENSITIVE_NAMES:
                 return None, f"'{part}' is not accessible"
@@ -348,6 +350,11 @@ class MyTool(Tool):
     def _modify(self, key: str | None, value: Any) -> str:
         if err := self._validate_key(key):
             return err
+
+        # 1. Whitelist check: allow specific keys even if top-level is BLOCKED
+        if key in self._allow_list:
+            return self._modify_whitelisted(key, value)
+
         top = key.split(".")[0]
         if top in self.BLOCKED or top in self._DENIED_ATTRS or top.startswith("__") or top.lower() in self._SENSITIVE_NAMES:
             self._audit("modify", f"BLOCKED {key}")
@@ -375,6 +382,19 @@ class MyTool(Tool):
         if key in self.RESTRICTED:
             return self._modify_restricted(key, value)
         return self._modify_free(key, value)
+
+    def _modify_whitelisted(self, key: str, value: Any) -> str:
+        """Modify a whitelisted key that bypasses BLOCKED check."""
+        parent_path, leaf = key.rsplit(".", 1)
+        parent, err = self._resolve_path(parent_path, skip_blocked=True)
+        if err:
+            return f"Error: {err}"
+        if isinstance(parent, dict):
+            parent[leaf] = value
+        else:
+            setattr(parent, leaf, value)
+        self._audit("modify", f"WHITELISTED {key} = {value!r}")
+        return f"Set {key} = {value!r}"
 
     def _modify_restricted(self, key: str, value: Any) -> str:
         spec = self.RESTRICTED[key]

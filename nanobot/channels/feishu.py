@@ -297,6 +297,7 @@ class FeishuChannel(BaseChannel):
     def __init__(self, config: Any, bus: MessageBus):
         import lark_oapi as lark
 
+        self._raw_config = config  # Keep reference for dynamic config updates
         if isinstance(config, dict):
             config = FeishuConfig.model_validate(config)
         super().__init__(config, bus)
@@ -310,6 +311,16 @@ class FeishuChannel(BaseChannel):
         self._bot_open_id: str | None = None
         self._background_tasks: set[asyncio.Task] = set()
         self._reaction_ids: dict[str, str] = {}  # message_id → reaction_id
+
+    def _get_react_emoji(self) -> str:
+        """Dynamically get react_emoji from raw config (allows runtime updates via my tool)."""
+        if isinstance(self._raw_config, dict):
+            return (
+                self._raw_config.get("reactEmoji")
+                or self._raw_config.get("react_emoji")
+                or self.config.react_emoji
+            )
+        return self.config.react_emoji
 
     @staticmethod
     def _register_optional_event(builder: Any, method_name: str, handler: Any) -> Any:
@@ -1686,7 +1697,7 @@ class FeishuChannel(BaseChannel):
 
             # Add reaction (non-blocking — tracked background task)
             task = asyncio.create_task(
-                self._add_reaction(message_id, self.config.react_emoji)
+                self._add_reaction(message_id, self._get_react_emoji())
             )
             self._background_tasks.add(task)
             task.add_done_callback(self._on_background_task_done)
