@@ -87,6 +87,7 @@ class Nanobot:
             session_ttl_minutes=defaults.session_ttl_minutes,
             consolidation_ratio=defaults.consolidation_ratio,
             tools_config=config.tools,
+            hooks_config=config.hooks,
             image_generation_provider_configs={
                 "openrouter": config.providers.openrouter,
                 "aihubmix": config.providers.aihubmix,
