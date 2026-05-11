@@ -45,6 +45,7 @@ export default defineConfig(({ mode }) => {
         "/webui": { target, changeOrigin: true },
         "/api": { target, changeOrigin: true },
         "/auth": { target: authTarget, changeOrigin: true },
+        "/admin": { target: authTarget, changeOrigin: true },
         // Forward only WebSocket upgrades on ``/`` to the nanobot gateway;
         // plain HTTP GETs on ``/`` must stay with Vite so it can serve the SPA.
         // ``bypass`` returning the original URL skips the proxy for that

@@ -4,6 +4,7 @@ import {
   Menu,
   Search,
   Settings,
+  Shield,
   SquarePen,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -24,6 +25,7 @@ interface SidebarProps {
   onSelect: (key: string) => void;
   onRequestDelete: (key: string, label: string) => void;
   onOpenSettings: () => void;
+  onOpenAdmin?: () => void;
   onCollapse: () => void;
 }
 
@@ -129,6 +131,18 @@ export function Sidebar(props: SidebarProps) {
           <Settings className="h-3.5 w-3.5" aria-hidden />
           {t("sidebar.settings")}
         </Button>
+        {user?.role === "admin" && props.onOpenAdmin && (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={props.onOpenAdmin}
+            className="h-8 w-full justify-start gap-2 rounded-full px-2.5 text-[12.5px] font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+            data-testid="sidebar-admin"
+          >
+            <Shield className="h-3.5 w-3.5" aria-hidden />
+            Users
+          </Button>
+        )}
         {user && (
           <div
             className="flex items-center gap-2 rounded-full px-2.5 py-1.5"

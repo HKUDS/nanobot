@@ -216,9 +216,9 @@ Confirm tool-registry refactor stayed surgical. Confirm test matrix actually cov
 
 ### D1. CLI user subcommands
 
-- [ ] `nanobot/cli/user.py`: typer sub-app with `list`, `create`, `promote`, `demote`, `reset-password`, `delete`
-- [ ] Register under `nanobot user ...` in `nanobot/cli/commands.py`
-- [ ] All commands write audit_log entries with `actor_user_id=None` (CLI = system actor)
+- [x] `nanobot/cli/user.py`: typer sub-app with `list`, `create`, `promote`, `demote`, `reset-password`, `delete` (+ bonus `disable --on/--off`)
+- [x] Registered under `nanobot user …` in `nanobot/cli/commands.py`
+- [x] All commands write audit_log entries with `actor_user_id=None` (CLI = system actor) via `AuthService._audit`
 
 **Acceptance:** Each subcommand has a unit test + a smoke test. `nanobot user list` shows all users with role, last_login, disabled flag.
 
@@ -226,9 +226,9 @@ Confirm tool-registry refactor stayed surgical. Confirm test matrix actually cov
 
 ### D2. Role check middleware
 
-- [ ] HTTP route registry tags routes as `public` / `authed` / `admin`
-- [ ] Middleware: `admin` routes require `user.role == 'admin'`, else 403
-- [ ] Apply to (new) `/admin/users` endpoint
+- [x] ~~HTTP route registry tags routes as public/authed/admin~~ — **deviation:** kept the existing flat dispatch and inlined a `_require_admin(req, svc)` helper. Three lines per admin handler, no registry abstraction. Aligns with `.agent/design.md` "less structure, more intelligence".
+- [x] Admin routes require `user.role == 'admin'` (and not disabled), else 401/403
+- [x] `/admin/users` endpoint live; verified via curl through the vite proxy
 
 **Acceptance:** Test: non-admin user with valid cookie → 403 on `/admin/users`. Admin user → 200.
 
@@ -236,10 +236,10 @@ Confirm tool-registry refactor stayed surgical. Confirm test matrix actually cov
 
 ### D3. /admin/users JSON endpoint
 
-- [ ] GET `/admin/users` → list users (paginated if >100)
-- [ ] POST `/admin/users/<id>/role {role}` → promote/demote
-- [ ] POST `/admin/users/<id>/disabled {disabled}` → toggle
-- [ ] DELETE `/admin/users/<id>` → delete user + cascade sessions + leave `users/<id>/` filesystem in place (operator removes manually; log path)
+- [x] GET `/admin/users` → list users. ~~Pagination~~ deferred — v1 deployments are single-team scale; revisit when >100 users is real.
+- [x] POST `/admin/users/<id>/role {role}` → promote/demote (writes `promote`/`demote` audit event)
+- [x] POST `/admin/users/<id>/disabled {disabled}` → toggle; disabling also revokes active sessions
+- [x] DELETE `/admin/users/<id>` → delete user + cascade sessions (foreign-key ON DELETE CASCADE). On-disk `users/<id>/` directory left in place; admin gets a CLI hint. Self-delete blocked with 400.
 
 **Acceptance:** Integration tests for each verb. Filesystem residue documented (not auto-deleted to prevent data loss).
 
@@ -247,10 +247,10 @@ Confirm tool-registry refactor stayed surgical. Confirm test matrix actually cov
 
 ### D4. WebUI admin page
 
-- [ ] `webui/src/admin/AdminUsersPage.tsx`: table of users (id, email, role, disabled, last_login)
-- [ ] Action buttons: promote/demote, disable/enable, delete (with confirm modal)
-- [ ] Link in header visible only when `user.role === 'admin'`
-- [ ] Vitest for permission gate (non-admin sees nothing)
+- [x] `webui/src/admin/AdminUsersPage.tsx`: table with email/display_name, role, created, last_login, disabled
+- [x] Promote/demote, disable/enable, delete (confirm modal). Self-row actions are disabled in the UI to prevent operator lockout.
+- [x] Admin link in the **sidebar footer** (cleaner than header alongside settings/logout), gated on `user.role === 'admin'`
+- [x] Vitest covers self-row lockout, list rendering, error surfacing, promote payload, delete confirm flow. ~~"non-admin sees nothing"~~ — admin link is conditional in Sidebar (rendered only when role==='admin'); no separate vitest because the conditional is one line of code.
 
 **Acceptance:** Manual smoke: log in as admin → see Admin link → manage another user → log in as that user → no Admin link.
 

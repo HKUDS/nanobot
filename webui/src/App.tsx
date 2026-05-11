@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AdminUsersPage } from "@/admin/AdminUsersPage";
 import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { Sidebar } from "@/components/Sidebar";
 import { SettingsView } from "@/components/settings/SettingsView";
@@ -36,7 +37,7 @@ type BootState =
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
 const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 const SIDEBAR_WIDTH = 272;
-type ShellView = "chat" | "settings";
+type ShellView = "chat" | "settings" | "admin";
 
 function AuthForm({
   failed,
@@ -331,6 +332,11 @@ function Shell({ onModelNameChange, onLogout }: { onModelNameChange: (modelName:
     setMobileSidebarOpen(false);
   }, []);
 
+  const onOpenAdmin = useCallback(() => {
+    setView("admin");
+    setMobileSidebarOpen(false);
+  }, []);
+
   const onBackToChat = useCallback(() => {
     setView("chat");
     setMobileSidebarOpen(false);
@@ -430,8 +436,9 @@ function Shell({ onModelNameChange, onLogout }: { onModelNameChange: (modelName:
     onRequestDelete: (key: string, label: string) =>
       setPendingDelete({ key, label }),
     onOpenSettings,
+    onOpenAdmin,
   };
-  const showMainSidebar = view !== "settings";
+  const showMainSidebar = view === "chat";
 
   return (
     <div className="relative flex h-full w-full overflow-hidden">
@@ -484,6 +491,8 @@ function Shell({ onModelNameChange, onLogout }: { onModelNameChange: (modelName:
             onRestart={onRestart}
             isRestarting={isRestarting}
           />
+        ) : view === "admin" ? (
+          <AdminUsersPage onBack={onBackToChat} />
         ) : (
           <ThreadShell
             session={activeSession}

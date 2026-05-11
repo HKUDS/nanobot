@@ -88,6 +88,10 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+from nanobot.cli.user import user_app  # noqa: E402 — typer sub-app registration
+
+app.add_typer(user_app, name="user")
+
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 
@@ -947,6 +951,7 @@ def _run_gateway(
             200: "OK",
             400: "Bad Request",
             401: "Unauthorized",
+            403: "Forbidden",
             404: "Not Found",
             405: "Method Not Allowed",
             409: "Conflict",

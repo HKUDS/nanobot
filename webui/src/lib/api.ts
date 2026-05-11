@@ -247,3 +247,54 @@ export async function authSignup(
 export async function authLogout(base: string = ""): Promise<void> {
   await authFetch<{ ok: boolean }>(`${base}/auth/logout`, { method: "POST" });
 }
+
+// ---------------------------------------------------------------------------
+// Admin
+// ---------------------------------------------------------------------------
+
+export interface AdminUserRow {
+  id: string;
+  email: string;
+  role: "user" | "admin";
+  display_name: string | null;
+  created_at: number;
+  last_login_at: number | null;
+  disabled: boolean;
+}
+
+export async function adminListUsers(base: string = ""): Promise<AdminUserRow[]> {
+  const data = await authFetch<{ users: AdminUserRow[] }>(`${base}/admin/users`);
+  return data.users;
+}
+
+export async function adminSetRole(
+  userId: string,
+  role: "user" | "admin",
+  base: string = "",
+): Promise<AdminUserRow> {
+  const data = await authFetch<{ user: AdminUserRow }>(
+    `${base}/admin/users/${userId}/role`,
+    { method: "POST", body: JSON.stringify({ role }) },
+  );
+  return data.user;
+}
+
+export async function adminSetDisabled(
+  userId: string,
+  disabled: boolean,
+  base: string = "",
+): Promise<void> {
+  await authFetch<{ ok: boolean }>(`${base}/admin/users/${userId}/disabled`, {
+    method: "POST",
+    body: JSON.stringify({ disabled }),
+  });
+}
+
+export async function adminDeleteUser(
+  userId: string,
+  base: string = "",
+): Promise<void> {
+  await authFetch<{ ok: boolean }>(`${base}/admin/users/${userId}`, {
+    method: "DELETE",
+  });
+}
