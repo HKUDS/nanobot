@@ -27,7 +27,7 @@ class TestBuildEnvUnix:
     def test_expected_keys(self):
         with patch("nanobot.agent.tools.shell._IS_WINDOWS", False):
             env = ExecTool()._build_env()
-        expected = {"HOME", "LANG", "TERM"}
+        expected = {"HOME", "LANG", "TERM", "PYTHONUNBUFFERED"}
         assert expected <= set(env)
         if sys.platform != "win32":
             assert set(env) == expected
@@ -53,7 +53,7 @@ class TestBuildEnvWindows:
 
     _EXPECTED_KEYS = {
         "SYSTEMROOT", "COMSPEC", "USERPROFILE", "HOMEDRIVE",
-        "HOMEPATH", "TEMP", "TMP", "PATHEXT", "PATH",
+        "HOMEPATH", "TEMP", "TMP", "PATHEXT", "PATH", "PYTHONUNBUFFERED",
         *_WINDOWS_ENV_KEYS,
     }
 

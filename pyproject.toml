@@ -109,6 +109,11 @@ dev = [
 [project.scripts]
 nanobot = "nanobot.cli.commands:app"
 
+# Third-party tool plugins register here.  Built-in tools are discovered
+# automatically via pkgutil scanning in ToolLoader.discover().
+# [project.entry-points."nanobot.tools"]
+# my_plugin = "my_package.plugins:MyTool"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

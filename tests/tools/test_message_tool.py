@@ -83,7 +83,8 @@ async def test_message_tool_inherits_metadata_for_same_target() -> None:
 
     tool = MessageTool(send_callback=_send)
     slack_meta = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
-    tool.set_context("slack", "C123", metadata=slack_meta)
+    from nanobot.agent.tools.context import RequestContext
+    tool.set_context(RequestContext(channel="slack", chat_id="C123", metadata=slack_meta))
 
     await tool.execute(content="thread reply")
 
@@ -98,10 +99,13 @@ async def test_message_tool_does_not_inherit_metadata_for_cross_target() -> None
         sent.append(msg)
 
     tool = MessageTool(send_callback=_send)
+    from nanobot.agent.tools.context import RequestContext
     tool.set_context(
-        "slack",
-        "C123",
-        metadata={"slack": {"thread_ts": "111.222", "channel_type": "channel"}},
+        RequestContext(
+            channel="slack",
+            chat_id="C123",
+            metadata={"slack": {"thread_ts": "111.222", "channel_type": "channel"}},
+        ),
     )
 
     await tool.execute(content="channel reply", channel="slack", chat_id="C999")

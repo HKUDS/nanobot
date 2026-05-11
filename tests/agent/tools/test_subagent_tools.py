@@ -17,7 +17,8 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
     """allowed_env_keys from ExecToolConfig must be forwarded to the subagent's ExecTool."""
     from nanobot.agent.subagent import SubagentManager, SubagentStatus
     from nanobot.bus.queue import MessageBus
-    from nanobot.config.schema import ExecToolConfig
+    from nanobot.agent.tools.shell import ExecToolConfig
+    from nanobot.config.schema import ToolsConfig
 
     bus = MessageBus()
     provider = MagicMock()
@@ -27,7 +28,7 @@ async def test_subagent_exec_tool_receives_allowed_env_keys(tmp_path):
         workspace=tmp_path,
         bus=bus,
         max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
-        exec_config=ExecToolConfig(allowed_env_keys=["GOPATH", "JAVA_HOME"]),
+        tools_config=ToolsConfig(exec=ExecToolConfig(allowed_env_keys=["GOPATH", "JAVA_HOME"])),
     )
     mgr._announce_result = AsyncMock()
 
@@ -125,8 +126,10 @@ async def test_spawn_tool_rejects_when_at_concurrency_limit(tmp_path):
 
     mgr.runner.run = AsyncMock(side_effect=fake_run)
 
+    from nanobot.agent.tools.context import RequestContext
+
     tool = SpawnTool(mgr)
-    tool.set_context("test", "c1", "test:c1")
+    tool.set_context(RequestContext(channel="test", chat_id="c1", session_key="test:c1"))
 
     # First spawn succeeds
     result = await tool.execute(task="first task")

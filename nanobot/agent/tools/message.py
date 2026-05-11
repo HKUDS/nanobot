@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
@@ -39,7 +40,7 @@ from nanobot.config.paths import get_workspace_path
         required=["content"],
     )
 )
-class MessageTool(Tool):
+class MessageTool(Tool, ContextAware):
     """Tool to send messages to users on chat channels."""
 
     def __init__(
@@ -68,18 +69,18 @@ class MessageTool(Tool):
             default=False,
         )
 
-    def set_context(
-        self,
-        channel: str,
-        chat_id: str,
-        message_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> None:
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        send_callback = ctx.bus.publish_outbound if ctx.bus else None
+        return cls(send_callback=send_callback, workspace=ctx.workspace)
+
+    def set_context(self, ctx: RequestContext) -> None:
         """Set the current message context."""
-        self._default_channel.set(channel)
-        self._default_chat_id.set(chat_id)
-        self._default_message_id.set(message_id)
-        self._default_metadata.set(metadata or {})
+        self._default_channel.set(ctx.channel)
+        self._default_chat_id.set(ctx.chat_id)
+        self._default_message_id.set(ctx.message_id)
+        if ctx.metadata:
+            self._default_metadata.set(ctx.metadata)
 
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""

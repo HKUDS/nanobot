@@ -1,7 +1,8 @@
 """Configuration schema using Pydantic."""
+from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -9,11 +10,18 @@ from pydantic_settings import BaseSettings
 
 from nanobot.cron.types import CronSchedule
 
+if TYPE_CHECKING:
+    from nanobot.agent.tools.image_generation import ImageGenerationToolConfig
+    from nanobot.agent.tools.self import MyToolConfig
+    from nanobot.agent.tools.shell import ExecToolConfig
+    from nanobot.agent.tools.web import WebToolsConfig
+
 
 class Base(BaseModel):
     """Base model that accepts both camelCase and snake_case keys."""
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
 
 class ChannelsConfig(Base):
     """Configuration for chat channels.
@@ -198,45 +206,6 @@ class GatewayConfig(Base):
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
 
 
-class WebSearchConfig(Base):
-    """Web search tool configuration."""
-
-    provider: str = "duckduckgo"  # brave, tavily, duckduckgo, searxng, jina, kagi, olostep
-    api_key: str = ""
-    base_url: str = ""  # SearXNG base URL
-    max_results: int = 5
-    timeout: int = 30  # Wall-clock timeout (seconds) for search operations
-
-
-class WebFetchConfig(Base):
-    """Web fetch tool configuration."""
-
-    use_jina_reader: bool = True
-
-
-class WebToolsConfig(Base):
-    """Web tools configuration."""
-
-    enable: bool = True
-    proxy: str | None = (
-        None  # HTTP/SOCKS5 proxy URL, e.g. "http://127.0.0.1:7890" or "socks5://127.0.0.1:1080"
-    )
-    user_agent: str | None = None
-    search: WebSearchConfig = Field(default_factory=WebSearchConfig)
-    fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)
-
-
-class ExecToolConfig(Base):
-    """Shell exec tool configuration."""
-
-    enable: bool = True
-    timeout: int = 60
-    path_append: str = ""
-    sandbox: str = ""  # sandbox backend: "" (none) or "bwrap"
-    allowed_env_keys: list[str] = Field(default_factory=list)  # Env var names to pass through to subprocess (e.g. ["GOPATH", "JAVA_HOME"])
-    allow_patterns: list[str] = Field(default_factory=list)  # Regex patterns that bypass deny_patterns (e.g. [r"rm\s+-rf\s+/tmp/"])
-    deny_patterns: list[str] = Field(default_factory=list)  # Extra regex patterns to block (appended to built-in list)
-
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""
 
@@ -249,32 +218,28 @@ class MCPServerConfig(Base):
     tool_timeout: int = 30  # seconds before a tool call is cancelled
     enabled_tools: list[str] = Field(default_factory=lambda: ["*"])  # Only register these tools; accepts raw MCP names or wrapped mcp_<server>_<tool> names; ["*"] = all tools; [] = no tools
 
-class MyToolConfig(Base):
-    """Self-inspection tool configuration."""
 
-    enable: bool = True  # register the `my` tool (agent runtime state inspection)
-    allow_set: bool = False  # let `my` modify loop state (read-only if False)
-
-
-class ImageGenerationToolConfig(Base):
-    """Image generation tool configuration."""
-
-    enabled: bool = False
-    provider: str = "openrouter"
-    model: str = "openai/gpt-5.4-image-2"
-    default_aspect_ratio: str = "1:1"
-    default_image_size: str = "1K"
-    max_images_per_turn: int = Field(default=4, ge=1, le=8)
-    save_dir: str = "generated"
+def _lazy_default(module_path: str, class_name: str) -> Any:
+    """Deferred import helper for ToolsConfig default factories."""
+    import importlib
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)()
 
 
 class ToolsConfig(Base):
-    """Tools configuration."""
+    """Tools configuration.
 
-    web: WebToolsConfig = Field(default_factory=WebToolsConfig)
-    exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
-    my: MyToolConfig = Field(default_factory=MyToolConfig)
-    image_generation: ImageGenerationToolConfig = Field(default_factory=ImageGenerationToolConfig)
+    Field types for tool-specific sub-configs are resolved via model_rebuild()
+    at the bottom of this file to avoid circular imports (tool modules import
+    Base from schema.py).
+    """
+
+    web: WebToolsConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.web", "WebToolsConfig"))
+    exec: ExecToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.shell", "ExecToolConfig"))
+    my: MyToolConfig = Field(default_factory=lambda: _lazy_default("nanobot.agent.tools.self", "MyToolConfig"))
+    image_generation: ImageGenerationToolConfig = Field(
+        default_factory=lambda: _lazy_default("nanobot.agent.tools.image_generation", "ImageGenerationToolConfig"),
+    )
     restrict_to_workspace: bool = False  # restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
     ssrf_whitelist: list[str] = Field(default_factory=list)  # CIDR ranges to exempt from SSRF blocking (e.g. ["100.64.0.0/10"] for Tailscale)
@@ -389,3 +354,39 @@ class Config(BaseSettings):
         return None
 
     model_config = ConfigDict(env_prefix="NANOBOT_", env_nested_delimiter="__")
+
+
+def _resolve_tool_config_refs() -> None:
+    """Resolve forward references in ToolsConfig by importing tool config classes.
+
+    Must be called after all modules are loaded (breaks circular imports).
+    Re-exports the classes into this module's namespace so existing imports
+    like ``from nanobot.config.schema import ExecToolConfig`` continue to work.
+    """
+    import sys
+
+    from nanobot.agent.tools.image_generation import ImageGenerationToolConfig
+    from nanobot.agent.tools.self import MyToolConfig
+    from nanobot.agent.tools.shell import ExecToolConfig
+    from nanobot.agent.tools.web import WebFetchConfig, WebSearchConfig, WebToolsConfig
+
+    # Re-export into this module's namespace
+    mod = sys.modules[__name__]
+    mod.ExecToolConfig = ExecToolConfig  # type: ignore[attr-defined]
+    mod.WebToolsConfig = WebToolsConfig  # type: ignore[attr-defined]
+    mod.WebSearchConfig = WebSearchConfig  # type: ignore[attr-defined]
+    mod.WebFetchConfig = WebFetchConfig  # type: ignore[attr-defined]
+    mod.MyToolConfig = MyToolConfig  # type: ignore[attr-defined]
+    mod.ImageGenerationToolConfig = ImageGenerationToolConfig  # type: ignore[attr-defined]
+
+    ToolsConfig.model_rebuild()
+    Config.model_rebuild()
+
+
+# Eagerly resolve when the import chain allows it (no circular deps at this
+# point).  If it fails (first import triggers a cycle), the rebuild will
+# happen lazily when Config/ToolsConfig is first used at runtime.
+try:
+    _resolve_tool_config_refs()
+except ImportError:
+    pass
