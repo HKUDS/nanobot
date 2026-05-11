@@ -46,6 +46,7 @@ def make_provider(config: Config) -> LLMProvider:
             api_key=p.api_key,
             api_base=p.api_base,
             default_model=model,
+            hosted_web_search=config.tools.web.search.provider_hosted,
         )
     elif backend == "github_copilot":
         from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
@@ -111,6 +112,7 @@ def provider_signature(config: Config) -> tuple[object, ...]:
         defaults.temperature,
         defaults.reasoning_effort,
         defaults.context_window_tokens,
+        config.tools.web.search.provider_hosted,
     )
 
 
