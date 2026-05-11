@@ -460,6 +460,17 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://qianfan.baidubce.com/v2"
     ),
+    # LongCat (美团): OpenAI-compatible API at api.longcat.chat/openai
+    ProviderSpec(
+        name="longcat",
+        keywords=("longcat",),
+        env_key="LONGCAT_API_KEY",
+        display_name="LongCat",
+        backend="openai_compat",
+        is_gateway=False,
+        detect_by_base_keyword="longcat",
+        default_api_base="https://api.longcat.chat/openai",
+    ),
 )
 
 
