@@ -33,6 +33,10 @@ class AgentHook:
     def __init__(self, reraise: bool = False) -> None:
         self._reraise = reraise
 
+    @property
+    def reraise(self) -> bool:
+        return self._reraise
+
     def wants_streaming(self) -> bool:
         return False
 
@@ -67,21 +71,20 @@ class CompositeHook(AgentHook):
 
     def __init__(self, hooks: list[AgentHook]) -> None:
         super().__init__()
-        self._hooks = list(hooks)
+        self._hooks: list[AgentHook] = list(hooks)
 
     def wants_streaming(self) -> bool:
         return any(h.wants_streaming() for h in self._hooks)
 
     async def _for_each_hook_safe(self, method_name: str, *args: Any, **kwargs: Any) -> None:
         for h in self._hooks:
-            if getattr(h, "_reraise", False):
-                await getattr(h, method_name)(*args, **kwargs)
-                continue
-
+            fn = getattr(h, method_name)
             try:
-                await getattr(h, method_name)(*args, **kwargs)
-            except Exception:
-                logger.exception("AgentHook.{} error in {}", method_name, type(h).__name__)
+                await fn(*args, **kwargs)
+            except Exception as e:
+                logger.exception("AgentHook.{} error in {}, details: {}", method_name, type(h).__name__, e)
+                if h.reraise:
+                    raise e
 
     async def before_iteration(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_iteration", context)
