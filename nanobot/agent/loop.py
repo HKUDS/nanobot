@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import os
 import time
-from contextlib import AsyncExitStack, nullcontext, suppress
+from contextlib import AsyncExitStack, suppress
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from pathlib import Path
