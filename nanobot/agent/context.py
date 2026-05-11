@@ -10,7 +10,12 @@ from typing import Any
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
-from nanobot.utils.helpers import build_assistant_message, current_time_str, detect_image_mime, truncate_text
+from nanobot.utils.helpers import (
+    build_assistant_message,
+    current_time_str,
+    detect_image_mime,
+    truncate_text,
+)
 from nanobot.utils.prompt_templates import render_template
 
 
@@ -24,10 +29,50 @@ class ContextBuilder:
     _RUNTIME_CONTEXT_END = "[/Runtime Context]"
 
     def __init__(self, workspace: Path, timezone: str | None = None, disabled_skills: list[str] | None = None):
-        self.workspace = workspace
+        self._default_workspace = workspace
         self.timezone = timezone
-        self.memory = MemoryStore(workspace)
-        self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+        self._default_memory = MemoryStore(workspace)
+        self._user_memory: dict[str, MemoryStore] = {}
+        self._disabled_skills = set(disabled_skills) if disabled_skills else None
+        self._default_skills = SkillsLoader(workspace, disabled_skills=self._disabled_skills)
+        self._user_skills: dict[str, SkillsLoader] = {}
+
+    @property
+    def workspace(self) -> Path:
+        """Active workspace, honoring the per-request UserContext."""
+        from nanobot.auth.context import current_user_ctx
+
+        ctx = current_user_ctx.get()
+        return ctx.workspace_path() if ctx is not None else self._default_workspace
+
+    @property
+    def memory(self) -> MemoryStore:
+        """Per-user MemoryStore when a UserContext is active, else the default."""
+        from nanobot.auth.context import current_user_ctx
+
+        ctx = current_user_ctx.get()
+        if ctx is None:
+            return self._default_memory
+        store = self._user_memory.get(ctx.user_id)
+        if store is None:
+            store = MemoryStore(ctx.workspace_path())
+            self._user_memory[ctx.user_id] = store
+        return store
+
+    @property
+    def skills(self) -> SkillsLoader:
+        from nanobot.auth.context import current_user_ctx
+
+        ctx = current_user_ctx.get()
+        if ctx is None:
+            return self._default_skills
+        loader = self._user_skills.get(ctx.user_id)
+        if loader is None:
+            loader = SkillsLoader(
+                ctx.workspace_path(), disabled_skills=self._disabled_skills
+            )
+            self._user_skills[ctx.user_id] = loader
+        return loader
 
     def build_system_prompt(
         self,

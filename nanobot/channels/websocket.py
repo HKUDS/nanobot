@@ -1220,6 +1220,8 @@ class WebSocketChannel(BaseChannel):
     def _save_envelope_media(
         self,
         media: list[Any],
+        *,
+        user_ctx: Any = None,
     ) -> tuple[list[str], str | None]:
         """Decode and persist ``media`` items from a ``message`` envelope.
 
@@ -1245,7 +1247,9 @@ class WebSocketChannel(BaseChannel):
         if video_count > _MAX_VIDEOS_PER_MESSAGE:
             return [], "too_many_videos"
 
-        media_dir = get_media_dir("websocket")
+        media_dir = (
+            user_ctx.media_dir("websocket") if user_ctx is not None else get_media_dir("websocket")
+        )
         paths: list[str] = []
 
         def _abort(reason: str) -> tuple[list[str], str]:
@@ -1325,7 +1329,9 @@ class WebSocketChannel(BaseChannel):
                         detail="image_rejected", reason="malformed",
                     )
                     return
-                media_paths, reason = self._save_envelope_media(raw_media)
+                media_paths, reason = self._save_envelope_media(
+                    raw_media, user_ctx=self._user_context_for(connection)
+                )
                 if reason is not None:
                     await self._send_event(
                         connection, "error",

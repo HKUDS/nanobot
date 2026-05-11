@@ -60,7 +60,7 @@ class ExecTool(Tool):
         allowed_env_keys: list[str] | None = None,
     ):
         self.timeout = timeout
-        self.working_dir = working_dir
+        self._default_working_dir = working_dir
         self.sandbox = sandbox
         self.deny_patterns = (deny_patterns or []) + [
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
@@ -85,6 +85,16 @@ class ExecTool(Tool):
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
         self.allowed_env_keys = allowed_env_keys or []
+
+    @property
+    def working_dir(self) -> str | None:
+        """Active working dir — honors per-request UserContext when set."""
+        from nanobot.auth.context import current_user_ctx
+
+        ctx = current_user_ctx.get()
+        if ctx is None:
+            return self._default_working_dir
+        return str(ctx.workspace_path())
 
     @property
     def name(self) -> str:

@@ -139,7 +139,14 @@ class FileStateStore:
         self._states_by_key: dict[str, FileStates] = {}
 
     def for_session(self, session_key: str | None) -> FileStates:
-        key = session_key or "__default__"
+        # Namespace by user_id when a per-request UserContext is bound so two
+        # users with colliding session_keys can't share the read/write state
+        # (which would let one peek at the other's file_state tracking).
+        from nanobot.auth.context import current_user_ctx
+
+        ctx = current_user_ctx.get()
+        base = session_key or "__default__"
+        key = f"{ctx.user_id}::{base}" if ctx is not None else base
         states = self._states_by_key.get(key)
         if states is None:
             states = FileStates()

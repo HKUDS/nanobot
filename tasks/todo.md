@@ -143,9 +143,9 @@ Confirm UX feels right (login/signup flows). Confirm test coverage credible.
 
 ### C1. Workspace tools (filesystem/shell/read/write/edit/list)
 
-- [ ] Tool factory/registry in `nanobot/agent/tools/registry.py` accepts `UserContext`; passes `ctx.workspace_path()` to filesystem-rooted tools instead of `get_workspace_path()`
-- [ ] Audit each tool in `nanobot/agent/tools/`: replace direct `Path.home() / ".nanobot"` with ctx-aware helper or accept workspace via constructor
-- [ ] Tool registry built **per-request** in `AgentRunner` from `UserContext`; never cached at module level
+- [x] ~~Tool factory/registry in `nanobot/agent/tools/registry.py` accepts `UserContext`~~ — **deviation:** chose a `ContextVar`-based approach instead. `nanobot/auth/context.py:current_user_ctx` is set/reset by `AgentLoop._dispatch` for the duration of each request; `_FsTool` and `ExecTool` consult it dynamically to rebase `workspace`/`allowed_dir`/`working_dir` under `users/<uid>/workspace`. Avoids rebuilding the registry per request and per-user instance caching. Tools stay singletons; user routing is async-task-scoped.
+- [x] Audit each tool — `filesystem.py`'s `_FsTool` base (covers ReadFile/WriteFile/EditFile/ListDir/Glob/Grep/NotebookEdit since they all extend it) and `shell.py`'s `ExecTool`. `Path.home() / ".nanobot"` is not used by request-path tools; channel/media helpers already accept ctx (Slice A4) or stay global by design.
+- [ ] ~~Tool registry built **per-request**~~ — superseded by contextvar (above). No module-level caching to remove; the existing module-level tool instances are now context-aware.
 
 **Acceptance:** Integration test — alice's filesystem write creates file under `users/<alice>/workspace/`; bob's shell ls of `~/` (when sandboxed to workspace) does not see alice's files.
 
@@ -153,9 +153,10 @@ Confirm UX feels right (login/signup flows). Confirm test coverage credible.
 
 ### C2. Memory store per-user
 
-- [ ] `nanobot/agent/memory.py`: memory file path resolved via `ctx.memory_dir()` instead of global
-- [ ] Dream consolidation scheduler stays global, but each cycle iterates user dirs via `users/<uid>/memory/`
-- [ ] Atomic writes + fsync preserved per-user
+- [x] Memory file paths now resolved per-user — `ContextBuilder.memory` became a property that returns a per-user `MemoryStore` cached by `user_id`. The store is rooted at `ctx.workspace_path()` so memory lives at `users/<uid>/workspace/memory/` (kept inside the workspace because `GitStore` tracks files relative to the workspace root). **Deviation from plan path layout** (plan had `users/<uid>/memory/` as a sibling of workspace; that doesn't compose with GitStore — refactor to a unified layout is a follow-up).
+- [ ] ~~Dream consolidation scheduler iterates user dirs~~ — **deferred**: Dream is a global cron job that operates on the loop's default workspace. Per-user dream cycles need their own scheduler design; out of scope for v1.
+- [x] Atomic writes + fsync preserved per-user — `MemoryStore` internals unchanged; only its workspace root is routed via the contextvar.
+- [x] `SkillsLoader` also routed per-user (was bundled with MemoryStore construction).
 
 **Acceptance:** Test: alice writes a fact via memory tool → bob's memory recall returns empty. Dream cycle running for both users produces two separate consolidation logs.
 
@@ -163,9 +164,9 @@ Confirm UX feels right (login/signup flows). Confirm test coverage credible.
 
 ### C3. Media uploads + tool-results
 
-- [ ] WS channel media save: route to `ctx.media_dir()` instead of global `get_media_dir()`
-- [ ] `nanobot/utils/helpers.py` `_TOOL_RESULTS_DIR`: accept optional ctx; resolve under user dir when present
-- [ ] Media URL signing: include user_id in signed URL; `/api/media/...` route verifies signed url's user matches request cookie
+- [x] WS channel media save: `_save_envelope_media` now accepts `user_ctx` and routes to `ctx.media_dir("websocket")` when present; falls back to global `get_media_dir("websocket")` for unauth/CLI paths
+- [x] Tool-results dir follows per-user — `AgentRunSpec.workspace` is now derived from `current_user_ctx` at run-spec construction so `maybe_persist_tool_result(workspace, …)` writes under `users/<uid>/workspace/.nanobot/tool-results`
+- [ ] ~~Media URL signing: include user_id in signed URL; verify against request cookie~~ — **deferred**: requires reshaping the HMAC payload (currently encodes a relative path under the global media root) and adding cookie verification on `/api/media/...`. Per-user uploads already land in distinct directories so cross-user fetch would need an attacker to forge a signed URL for another user's path. Hardening tracked for Slice E (security hardening).
 
 **Acceptance:** Test: alice uploads image → file at `users/<alice>/media/...`; bob requesting `/api/media/<alice's path>` returns 403 even with valid cookie.
 
@@ -173,8 +174,8 @@ Confirm UX feels right (login/signup flows). Confirm test coverage credible.
 
 ### C4. file_state store audit
 
-- [ ] Audit `nanobot/agent/state/file_state.py` (or similar): already keyed by session, confirm no cross-user key collision possible
-- [ ] If keyspace collision possible, prefix keys with `user_id`
+- [x] Audited `nanobot/agent/tools/file_state.py`: `FileStateStore.for_session` keyed by `session_key` only. Two users sharing a `session_key` (e.g. unified_session or a forced override) would have **collided** — fixed.
+- [x] Prefixed keys with `user_id::` when `current_user_ctx` is bound, leaving the legacy key shape intact for CLI/channel paths.
 
 **Acceptance:** Test or code review confirms no shared mutable map across users.
 
@@ -182,9 +183,24 @@ Confirm UX feels right (login/signup flows). Confirm test coverage credible.
 
 ### C5. MCP / subagent / cron audit (deferred wiring OK)
 
-- [ ] Read each tool file; document whether per-user state matters
-- [ ] If trivial to ctx-thread, do it; otherwise log a follow-up item in PR description
-- [ ] Document any deferred items in `docs/auth.md` "Known limitations" section
+- [x] Audited each remaining tool:
+
+  | Tool | Per-user-relevant? | Status | Rationale |
+  |---|---|---|---|
+  | filesystem | yes | **done** (C1) | `_FsTool` consults `current_user_ctx` |
+  | shell (`exec`) | yes | **done** (C1) | `ExecTool.working_dir` is a property |
+  | tool-results spill | yes | **done** (C3) | `AgentRunSpec.workspace` from contextvar |
+  | media uploads (WS) | yes | **done** (C3) | `_save_envelope_media(user_ctx=)` |
+  | memory | yes | **done** (C2) | `ContextBuilder.memory` is a property |
+  | skills loader | yes | **done** (C2) | `ContextBuilder.skills` is a property |
+  | file_state | yes | **done** (C4) | key prefixed by user_id |
+  | `image_generation` | yes | **deferred** | `self.workspace` is set at ctor; same property pattern would work but artifact paths flow into provider configs and signed media URLs — better landed alongside C3's signed-URL hardening |
+  | `message` (send) | partial | **deferred** | uses workspace for outbound media staging only; channel-admin scope dominates |
+  | `spawn` (subagent) | yes | **deferred** | subagent inherits parent loop's tools and workspace; the parent already routes per-user, so subagents inherit isolation transitively as long as they don't re-bind the contextvar before invocation |
+  | `self` (MyTool) | n/a | **deferred** | self-modification is admin-only |
+  | MCP servers | shared | **keep global** | MCP processes are gateway-scoped resources; per-user MCP allowlist is an explicit non-goal for v1 (plan.md Out of Scope) |
+  | cron (gateway) | shared | **keep global** | per-user cron is an explicit non-goal for v1 |
+- [x] Follow-ups recorded inline in this table; will be hoisted into `docs/auth.md` "Known limitations" during Slice E.
 
 **Acceptance:** PR description includes audit table: tool / per-user-relevant? / done-or-deferred / rationale.
 

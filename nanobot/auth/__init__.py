@@ -1,6 +1,6 @@
 """Authentication and per-user identity for nanobot multi-tenant mode."""
 
-from nanobot.auth.context import UserContext
+from nanobot.auth.context import UserContext, current_user_ctx
 from nanobot.auth.ids import assert_ulid, is_ulid, new_ulid
 from nanobot.auth.schema import AUTH_DB_FILENAME, init_auth_db, open_auth_db
 from nanobot.auth.service import (
@@ -19,6 +19,7 @@ __all__ = [
     "SessionRecord",
     "UserContext",
     "UserRecord",
+    "current_user_ctx",
     "assert_ulid",
     "init_auth_db",
     "is_ulid",

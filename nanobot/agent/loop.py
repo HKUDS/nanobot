@@ -680,6 +680,14 @@ class AgentLoop:
         active_session_key = session.key if session else session_key
         file_state_token = bind_file_states(self._file_state_store.for_session(active_session_key))
         try:
+            # Use the per-request workspace when a UserContext is bound — keeps
+            # tool-result spill files under users/<uid>/workspace/.nanobot/tool-results.
+            from nanobot.auth.context import current_user_ctx as _cuc
+
+            _active_ws = (
+                _cuc.get().workspace_path() if _cuc.get() is not None else self.workspace
+            )
+
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=initial_messages,
                 tools=self.tools,
@@ -689,7 +697,7 @@ class AgentLoop:
                 hook=hook,
                 error_message="Sorry, I encountered an error calling the AI model.",
                 concurrent_tools=True,
-                workspace=self.workspace,
+                workspace=_active_ws,
                 session_key=session.key if session else None,
                 context_window_tokens=self.context_window_tokens,
                 context_block_limit=self.context_block_limit,
@@ -791,6 +799,8 @@ class AgentLoop:
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message: per-session serial, cross-session concurrent."""
+        from nanobot.auth.context import current_user_ctx
+
         session_key = self._effective_session_key(msg)
         if session_key != msg.session_key:
             msg = dataclasses.replace(msg, session_key_override=session_key)
@@ -801,6 +811,11 @@ class AgentLoop:
         # routed here (mid-turn injection) instead of spawning a new task.
         pending = asyncio.Queue(maxsize=20)
         self._pending_queues[session_key] = pending
+
+        # Set per-request UserContext so workspace-rooted tools (filesystem,
+        # shell, etc.) resolve paths under users/<uid>/workspace. None for
+        # channel-admin / CLI paths preserves legacy global behaviour.
+        ctx_token = current_user_ctx.set(msg.user_context)
 
         try:
             async with lock, gate:
@@ -909,6 +924,7 @@ class AgentLoop:
                         content="Sorry, I encountered an error.",
                     ))
         finally:
+            current_user_ctx.reset(ctx_token)
             # Drain any messages still in the pending queue and re-publish
             # them to the bus so they are processed as fresh inbound messages
             # rather than silently lost.

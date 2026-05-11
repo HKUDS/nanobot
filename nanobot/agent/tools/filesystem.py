@@ -8,11 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
-from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
+from nanobot.agent.tools.schema import (
+    BooleanSchema,
+    IntegerSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.config.paths import get_media_dir
-
+from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 _FS_WORKSPACE_BOUNDARY_NOTE = (
     " (this is a hard policy boundary, not a transient failure; "
@@ -34,7 +38,7 @@ def _resolve_path(
     resolved = p.resolve()
     if allowed_dir:
         media_path = get_media_dir().resolve()
-        all_dirs = [allowed_dir] + [media_path] + (extra_allowed_dirs or []) 
+        all_dirs = [allowed_dir] + [media_path] + (extra_allowed_dirs or [])
         if not any(_is_under(resolved, d) for d in all_dirs):
             raise PermissionError(
                 f"Path {path} is outside allowed directory {allowed_dir}"
@@ -52,7 +56,15 @@ def _is_under(path: Path, directory: Path) -> bool:
 
 
 class _FsTool(Tool):
-    """Shared base for filesystem tools — common init and path resolution."""
+    """Shared base for filesystem tools — common init and path resolution.
+
+    Per-user routing: when an inbound message carries a ``UserContext`` (WebUI
+    auth path), the agent loop sets ``current_user_ctx`` for the duration of
+    the request. The resolved ``_workspace`` / ``_allowed_dir`` then point
+    into ``~/.nanobot/users/<uid>/workspace`` so writes are isolated. For
+    CLI / channel-admin code paths the contextvar is unset and the ctor
+    fallbacks apply.
+    """
 
     def __init__(
         self,
@@ -61,14 +73,38 @@ class _FsTool(Tool):
         extra_allowed_dirs: list[Path] | None = None,
         file_states: FileStates | None = None,
     ):
-        self._workspace = workspace
-        self._allowed_dir = allowed_dir
+        self._default_workspace = workspace
+        self._default_allowed_dir = allowed_dir
         self._extra_allowed_dirs = extra_allowed_dirs
         # Explicit state is used by isolated runners like Dream/subagents.
         # Main AgentLoop tools leave this unset and resolve state from the
         # current async task, which keeps shared tool instances session-safe.
         self._explicit_file_states = file_states
         self._fallback_file_states = FileStates()
+
+    def _active_paths(self) -> tuple[Path | None, Path | None]:
+        """Return (workspace, allowed_dir) honoring the current UserContext."""
+        from nanobot.auth.context import current_user_ctx
+
+        ctx = current_user_ctx.get()
+        if ctx is None:
+            return self._default_workspace, self._default_allowed_dir
+        user_ws = ctx.workspace_path()
+        # When the loop opted into restricting writes to the (global) workspace,
+        # rebind the restriction to the user's own workspace; otherwise leave
+        # the allowed_dir alone (None => no restriction).
+        if self._default_allowed_dir is not None:
+            return user_ws, user_ws
+        return user_ws, None
+
+    # Backwards-compat property for code that read ``self._workspace`` directly.
+    @property
+    def _workspace(self) -> Path | None:
+        return self._active_paths()[0]
+
+    @property
+    def _allowed_dir(self) -> Path | None:
+        return self._active_paths()[1]
 
     @property
     def _file_states(self) -> FileStates:
@@ -77,7 +113,8 @@ class _FsTool(Tool):
         return current_file_states(self._fallback_file_states)
 
     def _resolve(self, path: str) -> Path:
-        return _resolve_path(path, self._workspace, self._allowed_dir, self._extra_allowed_dirs)
+        workspace, allowed = self._active_paths()
+        return _resolve_path(path, workspace, allowed, self._extra_allowed_dirs)
 
 
 # ---------------------------------------------------------------------------

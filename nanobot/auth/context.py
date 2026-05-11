@@ -20,6 +20,7 @@ left untouched in this slice and is wired per-tool in Slice C.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -63,3 +64,12 @@ class UserContext:
 
     def file_state_dir(self) -> Path:
         return ensure_dir(self.root() / "file_state")
+
+
+# Per-request UserContext, set by the agent loop before a turn is dispatched
+# and reset on exit. Tools that need to resolve a per-user workspace path can
+# consult this directly via ``current_user_ctx.get()`` — None means we're on
+# the CLI / channel-admin code path that uses global paths.
+current_user_ctx: ContextVar["UserContext | None"] = ContextVar(
+    "nanobot_current_user_ctx", default=None
+)
