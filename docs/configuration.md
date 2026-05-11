@@ -1157,3 +1157,26 @@ Set `agents.defaults.toolHintMaxLength` to control the truncation threshold:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.toolHintMaxLength` | `40` | Maximum characters for tool hint display. Range: 20–500. Higher values show more of the command or path; lower values keep hints compact. |
+
+## Multi-Tenant State Layout
+
+Nanobot serves WebUI users out of a single shared gateway process and
+isolates per-user state under `~/.nanobot/users/<user_id>/`. See
+[`docs/auth.md`](auth.md) for the full operator guide.
+
+```
+~/.nanobot/
+  config.json           # this file — global, admin-supplied
+  auth.db               # SQLite users / sessions / audit log
+  bridge/, cron/, logs/ # global gateway state
+  users/<user_id>/      # per-user state (workspace, sessions, memory, media)
+```
+
+The schema in `config.json` is **global only**. Per-user preferences are
+not configurable in v1 (no BYOK LLM keys, no per-user channel tokens).
+
+Environment knobs that affect multi-tenant startup:
+
+| Env | Effect |
+|---|---|
+| `NANOBOT_SKIP_LEGACY_MIGRATION=1` | Skip the one-shot single-tenant → multi-tenant filesystem rename. Use after manual migration or for shared-state replicas. |

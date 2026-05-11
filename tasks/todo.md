@@ -266,11 +266,11 @@ Confirm admin UX is minimal but functional. Confirm no admin actions are exposed
 
 ### E1. Legacy-state migration on startup
 
-- [ ] `nanobot/auth/migration.py`: on gateway startup, check if `~/.nanobot/users/` absent AND any of `sessions/`, `workspace/`, `memory/` present
-- [ ] If yes: rename `~/.nanobot/` to `~/.nanobot.legacy.<ISO-date>/`, recreate fresh `~/.nanobot/` with empty `users/`, copy over `config.json` if present
-- [ ] Log loud warning with copy-paste rollback instructions (`mv ~/.nanobot.legacy.<date>/ ~/.nanobot/` if you didn't want this)
-- [ ] Honor `NANOBOT_SKIP_LEGACY_MIGRATION=1` env to bypass
-- [ ] `filelock` on `~/.nanobot/.migration.lock` to dodge gateway+CLI startup races
+- [x] `nanobot/auth/migration.py` — `migrate_legacy_layout_if_needed(data_dir)`. Triggers when `users/` absent AND one of `sessions/workspace/memory` is present.
+- [x] Renames base dir to `<base>.legacy.<UTC-ISO>` (with numeric suffix on collision); recreates fresh base, scaffolds empty `users/`, copies `config.json` if present.
+- [x] Loud warning logged + console line printed in `commands.py` with the literal `mv` rollback command.
+- [x] `NANOBOT_SKIP_LEGACY_MIGRATION=1` short-circuits.
+- [x] `filelock` on `<base>/.migration.lock` (re-checks need-state under the lock).
 
 **Acceptance:** Test with temp HOME and synthetic legacy tree → migration runs, archive exists, fresh tree exists, config preserved. Second startup: no-op. With skip flag: no archive.
 
@@ -278,9 +278,12 @@ Confirm admin UX is minimal but functional. Confirm no admin actions are exposed
 
 ### E2. Cookie + CSRF hardening
 
-- [ ] Confirm `Secure` flag auto-set when gateway runs behind TLS (detect via `X-Forwarded-Proto` or explicit config)
-- [ ] Implement double-submit CSRF token for `/auth/login` + `/auth/signup` + `/admin/*` state-changing routes
-- [ ] Document SameSite=Lax limitations re: cross-origin
+- [x] `Secure` flag set when `X-Forwarded-Proto: https` (already done in Slice A; tested in `test_login_secure_flag_when_https`).
+- [x] Double-submit CSRF wired:
+  - `nanobot_csrf` cookie auto-issued on every response (Path=/, SameSite=Lax, Secure when TLS, **not** HttpOnly so JS reads it).
+  - Production dispatcher passes `require_csrf=True`; state-changing requests (`POST/PUT/PATCH/DELETE`) on `/auth/*` and `/admin/*` must echo the cookie value in `X-CSRF-Token`.
+  - `webui/src/lib/api.ts:authFetch` reads the cookie and sets the header automatically.
+- [x] SameSite=Lax limitations documented in `docs/auth.md` §CSRF: the cookie alone blocks the obvious cross-origin POSTs; double-submit is defence in depth.
 
 **Acceptance:** Test: state-changing request without CSRF token → 403. Same with → 200.
 
@@ -288,10 +291,7 @@ Confirm admin UX is minimal but functional. Confirm no admin actions are exposed
 
 ### E3. docs/auth.md (new)
 
-- [ ] Operator setup: env vars, first-run UX, creating first admin
-- [ ] CLI reference for `nanobot user ...`
-- [ ] Threat model summary (link to plan.md if kept in tree, or inline)
-- [ ] Known limitations & deferred items (no email verify, admin-only channels, etc.)
+- [x] `docs/auth.md` written. Covers TL;DR, filesystem layout, auth mechanism, CSRF, rate limiting, CLI reference, admin HTTP API, legacy migration, threat model, known limitations, operator recovery cheatsheet.
 
 **Acceptance:** Doc renders, link checker clean, covers operator's must-know surface.
 
@@ -299,10 +299,10 @@ Confirm admin UX is minimal but functional. Confirm no admin actions are exposed
 
 ### E4. Update existing docs
 
-- [ ] `docs/configuration.md`: per-user dir layout, what's global vs per-user
-- [ ] `docs/deployment.md`: note multi-tenant default; first-run migration warning
-- [ ] `.agent/security.md`: multi-tenant boundary notes
-- [ ] `README.md`: brief mention with link to `docs/auth.md`
+- [x] `docs/configuration.md` — Multi-Tenant State Layout section + `NANOBOT_SKIP_LEGACY_MIGRATION` env.
+- [x] `docs/deployment.md` — multi-tenant default warning + migration callout at top.
+- [x] `.agent/security.md` — Multi-Tenant Boundaries section: contextvar rule, admin-route rule, channel-adapter rule.
+- [x] `README.md` — Docs index entry pointing at `docs/auth.md`.
 
 **Acceptance:** All four files updated; cross-links work.
 
@@ -310,10 +310,10 @@ Confirm admin UX is minimal but functional. Confirm no admin actions are exposed
 
 ### E5. CI + release
 
-- [ ] `pyproject.toml`: `argon2-cffi` dep added
-- [ ] CI workflow updated (if needed) to run new auth tests
-- [ ] `ruff check nanobot/` clean
-- [ ] Webui `bun run test` + `bun run build` clean
+- [x] `pyproject.toml` — `argon2-cffi>=23.1.0,<24.0.0` (Slice A1).
+- [x] CI workflow — no changes needed; existing pytest collects `tests/auth/` automatically.
+- [x] `ruff check` clean on all Slice A–E touched files.
+- [x] Webui `bun run test` (94 pass) + `bun run build` clean.
 - [ ] Open PR against `nightly` with:
   - links to plan.md & this todo
   - manual smoke checklist

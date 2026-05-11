@@ -672,8 +672,14 @@ def _run_gateway(
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
-    from nanobot.auth import init_auth_db
+    from nanobot.auth import init_auth_db, migrate_legacy_layout_if_needed
 
+    archive = migrate_legacy_layout_if_needed()
+    if archive is not None:
+        console.print(
+            f"[yellow]⚠ Legacy single-tenant state moved to[/yellow] {archive}\n"
+            f"[yellow]  Rollback with[/yellow] `mv {archive} ~/.nanobot`"
+        )
     init_auth_db()
     bus = MessageBus()
     try:
@@ -1028,7 +1034,7 @@ def _run_gateway(
                     )
                 else:
                     auth_resp: _AuthResponse | None = _auth_dispatch(
-                        req, auth_svc, limiter=auth_limiter
+                        req, auth_svc, limiter=auth_limiter, require_csrf=True
                     )
                     if auth_resp is not None:
                         out = _write_response(

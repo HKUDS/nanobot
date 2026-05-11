@@ -1,5 +1,14 @@
 # Deployment
 
+> [!IMPORTANT]
+> **Multi-tenant default:** since the addition of WebUI accounts, nanobot
+> isolates per-user state under `~/.nanobot/users/<user_id>/`. On first
+> gateway start, any pre-existing single-tenant layout is auto-archived
+> to `~/.nanobot.legacy.<date>/` (a loud warning prints with the rollback
+> command). Skip with `NANOBOT_SKIP_LEGACY_MIGRATION=1`. See
+> [`docs/auth.md`](auth.md) for operator setup, CLI commands, and the
+> threat model.
+
 ## Docker
 
 > [!TIP]

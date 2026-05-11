@@ -2,6 +2,7 @@
 
 from nanobot.auth.context import UserContext, current_user_ctx
 from nanobot.auth.ids import assert_ulid, is_ulid, new_ulid
+from nanobot.auth.migration import migrate_legacy_layout_if_needed
 from nanobot.auth.schema import AUTH_DB_FILENAME, init_auth_db, open_auth_db
 from nanobot.auth.service import (
     AuthError,
@@ -23,6 +24,7 @@ __all__ = [
     "assert_ulid",
     "init_auth_db",
     "is_ulid",
+    "migrate_legacy_layout_if_needed",
     "new_ulid",
     "open_auth_db",
 ]

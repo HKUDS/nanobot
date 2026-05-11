@@ -182,16 +182,33 @@ export interface AuthUser {
   role: "user" | "admin";
 }
 
+function readCookie(name: string): string {
+  if (typeof document === "undefined") return "";
+  const prefix = `${name}=`;
+  for (const part of document.cookie.split(";")) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(prefix)) return trimmed.slice(prefix.length);
+  }
+  return "";
+}
+
 async function authFetch<T>(
   url: string,
   init?: RequestInit,
 ): Promise<T> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const stateChanging = method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...(init?.headers as Record<string, string> | undefined ?? {}),
+  };
+  if (stateChanging) {
+    const csrf = readCookie("nanobot_csrf");
+    if (csrf) headers["X-CSRF-Token"] = csrf;
+  }
   const res = await fetch(url, {
     ...(init ?? {}),
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
+    headers,
     credentials: "include",
   });
   let payload: unknown = null;

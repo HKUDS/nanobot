@@ -65,7 +65,8 @@ def test_login_bad_password_returns_401(svc: AuthService) -> None:
     svc.create_user("a@b.com", "correct horse battery staple")
     resp = dispatch(_post("/auth/login", {"email": "a@b.com", "password": "wrong password long enough"}), svc)
     assert resp.status == 401
-    assert not resp.cookies
+    # No session cookie set on failed login (CSRF cookie auto-issue is fine).
+    assert not any(c.startswith(f"{SESSION_COOKIE}=") and "Max-Age=0" not in c for c in resp.cookies)
 
 
 def test_login_unknown_email_returns_401(svc: AuthService) -> None:
@@ -199,7 +200,8 @@ def test_signup_duplicate_email_returns_409(svc: AuthService) -> None:
     assert first.status == 200
     again = dispatch(_post("/auth/signup", payload), svc)
     assert again.status == 409
-    assert not again.cookies
+    # 409 must not mint a session cookie (CSRF cookie auto-issue is fine).
+    assert not any(c.startswith(f"{SESSION_COOKIE}=") and "Max-Age=0" not in c for c in again.cookies)
 
 
 def test_signup_rejects_short_password(svc: AuthService) -> None:

@@ -20,7 +20,9 @@ Admin (require ``role='admin'`` on the cookie's user):
 
 from __future__ import annotations
 
+import hmac
 import json
+import secrets
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -29,6 +31,14 @@ from nanobot.auth.service import AuthError, AuthService, EmailTakenError, UserRe
 
 SESSION_COOKIE = "nanobot_session"
 SESSION_COOKIE_MAX_AGE_S = 30 * 24 * 60 * 60  # 30 days
+
+# Double-submit CSRF cookie. Read by JS (NOT HttpOnly) and echoed in the
+# X-CSRF-Token header on state-changing requests; the server verifies the
+# header matches the cookie. Combined with SameSite=Lax on the session
+# cookie this gives defense-in-depth against cross-origin POSTs.
+CSRF_COOKIE = "nanobot_csrf"
+CSRF_HEADER = "x-csrf-token"
+CSRF_COOKIE_MAX_AGE_S = 30 * 24 * 60 * 60
 
 # Per-endpoint policy: (max_attempts, window_seconds). Tuned for v1 single-instance.
 RATE_LIMIT_POLICY: dict[str, tuple[int, float]] = {
@@ -103,6 +113,38 @@ def _build_session_cookie(token: str, *, secure: bool) -> str:
 
 def _clear_session_cookie() -> str:
     return f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+
+
+def _build_csrf_cookie(token: str, *, secure: bool) -> str:
+    # NOT HttpOnly — JS needs to read it to echo into the X-CSRF-Token header.
+    parts = [
+        f"{CSRF_COOKIE}={token}",
+        "Path=/",
+        "SameSite=Lax",
+        f"Max-Age={CSRF_COOKIE_MAX_AGE_S}",
+    ]
+    if secure:
+        parts.append("Secure")
+    return "; ".join(parts)
+
+
+def _ensure_csrf(resp: Response, req: Request) -> Response:
+    """Issue a CSRF cookie if the request didn't carry one."""
+    cookies = _parse_cookies(req.headers.get("cookie"))
+    if cookies.get(CSRF_COOKIE):
+        return resp
+    token = secrets.token_urlsafe(32)
+    resp.cookies.append(_build_csrf_cookie(token, secure=_detect_secure(req)))
+    return resp
+
+
+def _csrf_ok(req: Request) -> bool:
+    cookies = _parse_cookies(req.headers.get("cookie"))
+    cookie_val = cookies.get(CSRF_COOKIE, "")
+    header_val = req.headers.get(CSRF_HEADER, "")
+    if not cookie_val or not header_val:
+        return False
+    return hmac.compare_digest(cookie_val, header_val)
 
 
 def _detect_secure(req: Request) -> bool:
@@ -363,45 +405,71 @@ def _dispatch_admin(req: Request, svc: AuthService) -> Response | None:
     return _error(404, "not found")
 
 
+def _is_state_changing(method: str) -> bool:
+    return method in {"POST", "PUT", "PATCH", "DELETE"}
+
+
 def dispatch(
     req: Request,
     svc: AuthService,
     *,
     limiter: RateLimiter | None = None,
+    require_csrf: bool = False,
 ) -> Response | None:
     """Return a response for known /auth/* or /admin/* routes, else None.
 
     When ``limiter`` is provided, requests to rate-limited endpoints are
     counted per (path, remote_ip) and 429 is returned when the policy
     threshold trips.
+
+    When ``require_csrf`` is True, state-changing requests must echo the
+    ``nanobot_csrf`` cookie value in the ``X-CSRF-Token`` header. The cookie
+    itself is auto-issued on every response to clients that don't have
+    one yet — the webui's GET /auth/me on mount establishes it before any
+    login POST is sent.
     """
-    if req.path.startswith("/admin/"):
-        return _dispatch_admin(req, svc)
-    if not req.path.startswith("/auth/"):
+    is_admin = req.path.startswith("/admin/")
+    is_auth = req.path.startswith("/auth/")
+    if not (is_admin or is_auth):
         return None
-    handler = _DISPATCH.get((req.method, req.path))
-    if handler is None:
-        for method, path in _DISPATCH:
-            if path == req.path:
-                return _error(405, "method not allowed")
-        return _error(404, "not found")
-    if limiter is not None and req.path in RATE_LIMIT_POLICY:
-        max_attempts, window_s = RATE_LIMIT_POLICY[req.path]
-        ip = req.remote_ip or "-"
-        ok, retry_after = limiter.try_consume(
-            (req.path, ip), max_attempts=max_attempts, window_s=window_s
-        )
-        if not ok:
-            try:
-                svc._audit(  # noqa: SLF001 — intentional cross-module audit
-                    "ratelimit.trip",
-                    target_user_id=None,
-                    ip=ip,
-                    detail=req.path,
+
+    if require_csrf and _is_state_changing(req.method) and not _csrf_ok(req):
+        resp = _error(403, "csrf token missing or invalid")
+        return _ensure_csrf(resp, req)
+
+    if is_admin:
+        resp = _dispatch_admin(req, svc)
+    else:
+        handler = _DISPATCH.get((req.method, req.path))
+        if handler is None:
+            for method, path in _DISPATCH:
+                if path == req.path:
+                    resp = _error(405, "method not allowed")
+                    break
+            else:
+                resp = _error(404, "not found")
+        else:
+            if limiter is not None and req.path in RATE_LIMIT_POLICY:
+                max_attempts, window_s = RATE_LIMIT_POLICY[req.path]
+                ip = req.remote_ip or "-"
+                ok, retry_after = limiter.try_consume(
+                    (req.path, ip), max_attempts=max_attempts, window_s=window_s
                 )
-            except Exception:
-                pass
-            resp = _error(429, "too many requests")
-            resp.headers["Retry-After"] = str(retry_after)
-            return resp
-    return handler(req, svc)
+                if not ok:
+                    try:
+                        svc._audit(  # noqa: SLF001 — intentional cross-module audit
+                            "ratelimit.trip",
+                            target_user_id=None,
+                            ip=ip,
+                            detail=req.path,
+                        )
+                    except Exception:
+                        pass
+                    resp = _error(429, "too many requests")
+                    resp.headers["Retry-After"] = str(retry_after)
+                    return _ensure_csrf(resp, req)
+            resp = handler(req, svc)
+
+    if resp is not None:
+        _ensure_csrf(resp, req)
+    return resp
