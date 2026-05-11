@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 import shutil
+import urllib.parse
 from contextlib import AsyncExitStack, suppress
 from typing import Any
 
@@ -42,6 +43,30 @@ def _sanitize_name(name: str) -> str:
 def _is_transient(exc: BaseException) -> bool:
     """Check if an exception looks like a transient connection error."""
     return type(exc).__name__ in _TRANSIENT_EXC_NAMES
+
+
+async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
+    """Quick TCP probe to check if an HTTP MCP server is reachable.
+
+    Avoids entering ``streamable_http_client`` / ``sse_client`` when the port is
+    closed — those transports use anyio task groups whose cleanup can raise
+    ``RuntimeError`` / ``ExceptionGroup`` that escape the caller's try/except
+    and crash the event loop.
+    """
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port
+    if not port:
+        port = 443 if parsed.scheme == "https" else 80
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout,
+        )
+        writer.close()
+        await writer.wait_closed()
+        return True
+    except (OSError, asyncio.TimeoutError):
+        return False
 
 
 def _windows_command_basename(command: str) -> str:
@@ -475,6 +500,10 @@ async def connect_mcp_servers(
                 )
                 read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
+                if not await _probe_http_url(cfg.url):
+                    logger.warning("MCP server '{}': {} unreachable, skipping", name, cfg.url)
+                    await server_stack.aclose()
+                    return name, None
 
                 def httpx_client_factory(
                     headers: dict[str, str] | None = None,
@@ -497,6 +526,11 @@ async def connect_mcp_servers(
                     sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
                 )
             elif transport_type == "streamableHttp":
+                if not await _probe_http_url(cfg.url):
+                    logger.warning("MCP server '{}': {} unreachable, skipping", name, cfg.url)
+                    await server_stack.aclose()
+                    return name, None
+
                 http_client = await server_stack.enter_async_context(
                     httpx.AsyncClient(
                         headers=cfg.headers or None,
