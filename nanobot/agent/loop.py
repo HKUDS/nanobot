@@ -63,9 +63,11 @@ from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 from nanobot.utils.webui_titles import mark_webui_session, maybe_generate_webui_title_after_turn
 
 if TYPE_CHECKING:
+    from nanobot.agent.mgp.sidecar import AsyncMGPSidecar
     from nanobot.config.schema import (
         ChannelsConfig,
         ExecToolConfig,
+        MGPConfig,
         ProviderConfig,
         ToolsConfig,
         WebToolsConfig,
@@ -89,6 +91,7 @@ class _LoopHook(AgentHook):
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        sender_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
     ) -> None:
@@ -100,6 +103,7 @@ class _LoopHook(AgentHook):
         self._channel = channel
         self._chat_id = chat_id
         self._message_id = message_id
+        self._sender_id = sender_id
         self._metadata = metadata or {}
         self._session_key = session_key
         self._stream_buf = ""
@@ -155,6 +159,7 @@ class _LoopHook(AgentHook):
             self._message_id,
             self._metadata,
             session_key=self._session_key,
+            sender_id=self._sender_id,
         )
 
     async def after_iteration(self, context: AgentHookContext) -> None:
@@ -293,6 +298,7 @@ class AgentLoop:
         unified_session: bool = False,
         disabled_skills: list[str] | None = None,
         tools_config: ToolsConfig | None = None,
+        mgp_config: "MGPConfig | None" = None,
         image_generation_provider_config: ProviderConfig | None = None,
         image_generation_provider_configs: dict[str, ProviderConfig] | None = None,
         provider_snapshot_loader: Callable[[], ProviderSnapshot] | None = None,
@@ -410,6 +416,67 @@ class AgentLoop:
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
 
+        # MGP sidecar (opt-in, default disabled). When enabled we register the
+        # `recall_memory` tool and install hooks on Consolidator/Dream so their
+        # LLM-extracted facts also flow to MGP. The Consolidator/Dream classes
+        # themselves stay MGP-unaware — see _wire_mgp_hooks below.
+        # When disabled we suppress the `mgp-memory` skill so the LLM is not
+        # told about a tool that does not exist in this loop.
+        self.mgp_sidecar: AsyncMGPSidecar | None = None
+        if mgp_config is not None and mgp_config.enabled:
+            from nanobot.agent.mgp import build_sidecar
+            from nanobot.agent.tools.mgp_recall import MGPRecallTool
+
+            self.mgp_sidecar = build_sidecar(
+                mgp_config,
+                workspace_id=str(workspace.expanduser().resolve()),
+            )
+            self._wire_mgp_hooks(self.mgp_sidecar)
+            self.tools.register(MGPRecallTool(
+                sidecar=self.mgp_sidecar,
+                default_scope=mgp_config.recall_default_scope,
+                default_limit=mgp_config.recall_default_limit,
+            ))
+        else:
+            self.context.skills.disabled_skills.add("mgp-memory")
+
+    def _wire_mgp_hooks(self, sidecar: "AsyncMGPSidecar") -> None:
+        """Wire Consolidator/Dream MGP commits via their post-processing hooks.
+
+        Keeps memory.py free of any MGP imports; all sidecar interaction is
+        owned here by AgentLoop.
+        """
+
+        def _runtime_for_session(session: Any) -> Any:
+            if session.key and ":" in session.key:
+                channel, chat_id = session.key.split(":", 1)
+            else:
+                channel, chat_id = "cli", session.key or "direct"
+            return sidecar.build_runtime(
+                channel=channel,
+                chat_id=chat_id,
+                session_key=session.key,
+            )
+
+        def _on_archive(session: Any, summary: str) -> None:
+            if not sidecar.config.enable_consolidator_commit:
+                return
+            runtime = _runtime_for_session(session)
+            asyncio.create_task(sidecar.commit_bullets(runtime, summary))
+
+        def _on_phase1_analysis(analysis: str) -> None:
+            if not sidecar.config.enable_dream_commit:
+                return
+            runtime = sidecar.build_runtime(
+                channel="system",
+                chat_id="dream",
+                session_key="system:dream",
+            )
+            asyncio.create_task(sidecar.commit_dream_tags(runtime, analysis))
+
+        self.consolidator.on_archive = _on_archive
+        self.dream.on_phase1_analysis = _on_phase1_analysis
+
     @classmethod
     def from_config(
         cls,
@@ -454,6 +521,7 @@ class AgentLoop:
             consolidation_ratio=defaults.consolidation_ratio,
             max_messages=defaults.max_messages,
             tools_config=config.tools,
+            mgp_config=getattr(defaults, "mgp", None),
             **extra,
         )
 
@@ -587,8 +655,16 @@ class AgentLoop:
         self, channel: str, chat_id: str,
         message_id: str | None = None, metadata: dict | None = None,
         session_key: str | None = None,
+        *,
+        sender_id: str | None = None,
     ) -> None:
-        """Update context for all tools that need routing info."""
+        """Update context for all tools that need routing info.
+
+        ``sender_id`` is plumbed only into tools that accept it (currently
+        just ``recall_memory``); other tools keep their existing signatures.
+        Without this, group-chat MGP recalls would mis-attribute every
+        member to the same ``chat_id`` instead of their real sender id.
+        """
         # When the caller threads a thread-scoped session_key (e.g. slack with
         # reply_in_thread: true), honor it so spawn announces route back to
         # the originating thread session. Falls back to unified mode or
@@ -599,10 +675,17 @@ class AgentLoop:
             effective_key = UNIFIED_SESSION_KEY
         else:
             effective_key = f"{channel}:{chat_id}"
-        for name in ("message", "spawn", "cron", "my"):
+        # `recall_memory` joins the spawn branch because its `set_context`
+        # signature is `(channel, chat_id, effective_key=None, sender_id=None)`
+        # — a strict superset of SpawnTool's, so the existing dispatch works.
+        for name in ("message", "spawn", "cron", "my", "recall_memory"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    if name == "spawn":
+                    if name == "recall_memory":
+                        tool.set_context(
+                            channel, chat_id, effective_key=effective_key, sender_id=sender_id,
+                        )
+                    elif name == "spawn":
                         tool.set_context(channel, chat_id, effective_key=effective_key)
                         if hasattr(tool, "set_origin_message_id"):
                             tool.set_origin_message_id(message_id)
@@ -788,6 +871,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        sender_id: str | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
         pending_queue: asyncio.Queue | None = None,
@@ -811,6 +895,7 @@ class AgentLoop:
             channel=channel,
             chat_id=chat_id,
             message_id=message_id,
+            sender_id=sender_id,
             metadata=metadata,
             session_key=session_key,
         )
@@ -1191,7 +1276,7 @@ class AgentLoop:
             self.sessions.save(session)
         self._set_tool_context(
             channel, chat_id, msg.metadata.get("message_id"),
-            msg.metadata, session_key=key,
+            msg.metadata, session_key=key, sender_id=msg.sender_id,
         )
         _hist_kwargs: dict[str, Any] = {
             "max_messages": self._max_messages,
@@ -1213,6 +1298,7 @@ class AgentLoop:
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
             messages, session=session, channel=channel, chat_id=chat_id,
             message_id=msg.metadata.get("message_id"),
+            sender_id=msg.sender_id,
             metadata=msg.metadata,
             session_key=key,
             pending_queue=pending_queue,
@@ -1424,6 +1510,7 @@ class AgentLoop:
             ctx.msg.metadata.get("message_id"),
             ctx.msg.metadata,
             session_key=ctx.session_key,
+            sender_id=ctx.msg.sender_id,
         )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
@@ -1462,6 +1549,7 @@ class AgentLoop:
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
             message_id=ctx.msg.metadata.get("message_id"),
+            sender_id=ctx.msg.sender_id,
             metadata=ctx.msg.metadata,
             session_key=ctx.session_key,
             pending_queue=ctx.pending_queue,
