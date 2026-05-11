@@ -462,6 +462,15 @@ class Config(BaseSettings):
                 continue
             p = getattr(self.providers, spec.name, None)
             if p and any(_kw_matches(kw) for kw in spec.keywords):
+                # Local providers (Ollama, vLLM, …) keep model-family keywords
+                # like "nemotron" or "llama" to enable bare-model auto-routing,
+                # but those keywords collide with cloud-hosted variants of the
+                # same family (e.g. `nvidia/nemotron-...` via OpenRouter). Only
+                # honor a local keyword match when the user has actually
+                # configured that local endpoint via `api_base` — mirrors the
+                # gate already used by the local-fallback loop below.
+                if spec.is_local and not p.api_base:
+                    continue
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
                     return p, spec.name
 
