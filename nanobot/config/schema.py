@@ -203,6 +203,9 @@ class WebSearchConfig(Base):
     base_url: str = ""  # SearXNG base URL
     max_results: int = 5
     timeout: int = 30  # Wall-clock timeout (seconds) for search operations
+    # Delegate web search to the LLM provider's hosted tool instead of the local implementation.
+    # Currently only Azure OpenAI (Responses API) is supported; other providers ignore this flag.
+    provider_hosted: bool = False
 
 
 class WebFetchConfig(Base):

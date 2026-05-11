@@ -19,6 +19,16 @@ FINISH_REASON_MAP = {
     "cancelled": "error",
 }
 
+# Provider-hosted tool item types absorbed server-side (no local handling needed).
+_HOSTED_TOOL_ITEM_TYPES = frozenset({"web_search_call"})
+
+# Lifecycle events emitted while a hosted tool is running; ignored by the parser.
+_HOSTED_TOOL_LIFECYCLE_EVENTS = frozenset({
+    "response.web_search_call.in_progress",
+    "response.web_search_call.searching",
+    "response.web_search_call.completed",
+})
+
 
 def map_finish_reason(status: str | None) -> str:
     """Map a Responses API status string to a Chat-Completions-style finish_reason."""
@@ -71,8 +81,12 @@ async def consume_sse(
 
     async for event in iter_sse(response):
         event_type = event.get("type")
+        if event_type in _HOSTED_TOOL_LIFECYCLE_EVENTS:
+            continue
         if event_type == "response.output_item.added":
             item = event.get("item") or {}
+            if item.get("type") in _HOSTED_TOOL_ITEM_TYPES:
+                continue
             if item.get("type") == "function_call":
                 call_id = item.get("call_id")
                 if not call_id:
@@ -97,6 +111,8 @@ async def consume_sse(
                 tool_call_buffers[call_id]["arguments"] = event.get("arguments") or ""
         elif event_type == "response.output_item.done":
             item = event.get("item") or {}
+            if item.get("type") in _HOSTED_TOOL_ITEM_TYPES:
+                continue
             if item.get("type") == "function_call":
                 call_id = item.get("call_id")
                 if not call_id:
@@ -148,6 +164,8 @@ def parse_response_output(response: Any) -> LLMResponse:
             item = dump() if callable(dump) else vars(item)
 
         item_type = item.get("type")
+        if item_type in _HOSTED_TOOL_ITEM_TYPES:
+            continue
         if item_type == "message":
             for block in item.get("content") or []:
                 if not isinstance(block, dict):
@@ -221,8 +239,12 @@ async def consume_sdk_stream(
 
     async for event in stream:
         event_type = getattr(event, "type", None)
+        if event_type in _HOSTED_TOOL_LIFECYCLE_EVENTS:
+            continue
         if event_type == "response.output_item.added":
             item = getattr(event, "item", None)
+            if item and getattr(item, "type", None) in _HOSTED_TOOL_ITEM_TYPES:
+                continue
             if item and getattr(item, "type", None) == "function_call":
                 call_id = getattr(item, "call_id", None)
                 if not call_id:
@@ -247,6 +269,8 @@ async def consume_sdk_stream(
                 tool_call_buffers[call_id]["arguments"] = getattr(event, "arguments", "") or ""
         elif event_type == "response.output_item.done":
             item = getattr(event, "item", None)
+            if item and getattr(item, "type", None) in _HOSTED_TOOL_ITEM_TYPES:
+                continue
             if item and getattr(item, "type", None) == "function_call":
                 call_id = getattr(item, "call_id", None)
                 if not call_id:

@@ -408,13 +408,14 @@ class AgentLoop:
                 )
             )
         if self.web_config.enable:
-            self.tools.register(
-                WebSearchTool(
-                    config=self.web_config.search,
-                    proxy=self.web_config.proxy,
-                    user_agent=self.web_config.user_agent,
+            if not getattr(self.provider, "uses_provider_hosted_web_search", False):
+                self.tools.register(
+                    WebSearchTool(
+                        config=self.web_config.search,
+                        proxy=self.web_config.proxy,
+                        user_agent=self.web_config.user_agent,
+                    )
                 )
-            )
             self.tools.register(
                 WebFetchTool(
                     config=self.web_config.fetch,

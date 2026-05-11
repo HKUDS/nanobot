@@ -259,6 +259,30 @@ class TestConvertTools:
         ]
         assert len(convert_tools(tools)) == 2
 
+    def test_hosted_tool_passthrough(self):
+        """Non-function tool types (e.g. hosted web_search) must survive unchanged."""
+        tools = [{"type": "web_search"}]
+        assert convert_tools(tools) == [{"type": "web_search"}]
+
+    def test_hosted_tool_preserves_extra_fields(self):
+        tools = [{
+            "type": "web_search",
+            "search_context_size": "medium",
+            "filters": {"allowed_domains": ["example.com"]},
+        }]
+        assert convert_tools(tools) == tools
+
+    def test_hosted_and_function_tools_coexist(self):
+        tools = [
+            {"type": "function", "function": {"name": "f", "parameters": {}}},
+            {"type": "web_search"},
+        ]
+        result = convert_tools(tools)
+        assert len(result) == 2
+        assert result[0]["type"] == "function"
+        assert result[0]["name"] == "f"
+        assert result[1] == {"type": "web_search"}
+
 
 # ======================================================================
 # parsing - map_finish_reason
@@ -390,6 +414,22 @@ class TestParseResponseOutput:
         assert result.usage["completion_tokens"] == 50
         assert result.usage["total_tokens"] == 150
 
+    def test_hosted_web_search_call_item_ignored(self):
+        """web_search_call output items should be skipped without affecting the parsed answer."""
+        resp = {
+            "output": [
+                {"type": "web_search_call", "id": "ws_1", "status": "completed"},
+                {"type": "message", "role": "assistant",
+                 "content": [{"type": "output_text", "text": "Answer"}]},
+            ],
+            "status": "completed",
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        }
+        result = parse_response_output(resp)
+        assert result.content == "Answer"
+        assert result.tool_calls == []
+        assert result.finish_reason == "stop"
+
 
 # ======================================================================
 # parsing - consume_sdk_stream
@@ -520,3 +560,27 @@ class TestConsumeSdkStream:
         assert tool_calls[0].arguments == {"raw": "{bad"}
         mock_logger.warning.assert_called_once()
         assert "Failed to parse tool call arguments" in str(mock_logger.warning.call_args)
+
+    @pytest.mark.asyncio
+    async def test_hosted_web_search_call_events_ignored(self):
+        """Hosted web_search_call items and lifecycle events must not break parsing."""
+        item_added = MagicMock(type="web_search_call", id="ws_1")
+        ev_added = MagicMock(type="response.output_item.added", item=item_added)
+        ev_progress = MagicMock(type="response.web_search_call.in_progress")
+        ev_searching = MagicMock(type="response.web_search_call.searching")
+        ev_completed = MagicMock(type="response.web_search_call.completed")
+        item_done = MagicMock(type="web_search_call", id="ws_1")
+        ev_item_done = MagicMock(type="response.output_item.done", item=item_done)
+        ev_text = MagicMock(type="response.output_text.delta", delta="Result: 42")
+        resp_obj = MagicMock(status="completed", usage=None, output=[])
+        ev_final = MagicMock(type="response.completed", response=resp_obj)
+
+        async def stream():
+            for e in [ev_added, ev_progress, ev_searching, ev_completed,
+                      ev_item_done, ev_text, ev_final]:
+                yield e
+
+        content, tool_calls, finish_reason, _, _ = await consume_sdk_stream(stream())
+        assert content == "Result: 42"
+        assert tool_calls == []
+        assert finish_reason == "stop"

@@ -38,9 +38,12 @@ class AzureOpenAIProvider(LLMProvider):
         api_key: str = "",
         api_base: str = "",
         default_model: str = "gpt-5.2-chat",
+        hosted_web_search: bool = False,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
+        self.hosted_web_search = hosted_web_search
+        self.uses_provider_hosted_web_search = hosted_web_search
 
         if not api_key:
             raise ValueError("Azure OpenAI api_key is required")
@@ -109,6 +112,12 @@ class AzureOpenAIProvider(LLMProvider):
         if tools:
             body["tools"] = convert_tools(tools)
             body["tool_choice"] = tool_choice or "auto"
+
+        if self.hosted_web_search:
+            existing = body.get("tools") or []
+            if not any(t.get("type") == "web_search" for t in existing):
+                body["tools"] = existing + [{"type": "web_search"}]
+            body.setdefault("tool_choice", tool_choice or "auto")
 
         return body
 

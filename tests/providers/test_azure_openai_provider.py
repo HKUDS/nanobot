@@ -125,6 +125,56 @@ def test_build_body_with_tools():
     assert body["tool_choice"] == "auto"
 
 
+def test_build_body_hosted_web_search_injected_without_other_tools():
+    """When hosted_web_search is enabled, {type: web_search} is added even if tools=None."""
+    provider = AzureOpenAIProvider(
+        api_key="k", api_base="https://r.com", default_model="gpt-4o",
+        hosted_web_search=True,
+    )
+    body = provider._build_body(
+        [{"role": "user", "content": "latest news?"}], None, None, 4096, 0.7, None, None,
+    )
+    assert {"type": "web_search"} in body["tools"]
+    assert body["tool_choice"] == "auto"
+
+
+def test_build_body_hosted_web_search_appended_to_function_tools():
+    """Hosted web_search should coexist with function tools, not replace them."""
+    provider = AzureOpenAIProvider(
+        api_key="k", api_base="https://r.com", default_model="gpt-4o",
+        hosted_web_search=True,
+    )
+    tools = [{"type": "function", "function": {"name": "calc", "parameters": {}}}]
+    body = provider._build_body(
+        [{"role": "user", "content": "hi"}], tools, None, 4096, 0.7, None, None,
+    )
+    types = [t.get("type") for t in body["tools"]]
+    assert types.count("function") == 1
+    assert types.count("web_search") == 1
+
+
+def test_build_body_hosted_web_search_disabled_by_default():
+    """Default construction must not inject the hosted tool."""
+    provider = AzureOpenAIProvider(api_key="k", api_base="https://r.com", default_model="gpt-4o")
+    body = provider._build_body(
+        [{"role": "user", "content": "hi"}], None, None, 4096, 0.7, None, None,
+    )
+    assert "tools" not in body or all(t.get("type") != "web_search" for t in body["tools"])
+
+
+def test_build_body_hosted_web_search_not_duplicated():
+    """Calling _build_body repeatedly must not add duplicate hosted tool entries."""
+    provider = AzureOpenAIProvider(
+        api_key="k", api_base="https://r.com", default_model="gpt-4o",
+        hosted_web_search=True,
+    )
+    tools = [{"type": "web_search"}]
+    body = provider._build_body(
+        [{"role": "user", "content": "hi"}], tools, None, 4096, 0.7, None, None,
+    )
+    assert [t.get("type") for t in body["tools"]].count("web_search") == 1
+
+
 def test_build_body_with_reasoning():
     provider = AzureOpenAIProvider(api_key="k", api_base="https://r.com", default_model="gpt-5-chat")
     body = provider._build_body(
@@ -421,3 +471,41 @@ def test_get_default_model():
         api_key="k", api_base="https://r.com", default_model="my-deploy",
     )
     assert provider.get_default_model() == "my-deploy"
+
+
+# ---------------------------------------------------------------------------
+# factory wiring
+# ---------------------------------------------------------------------------
+
+
+def test_factory_propagates_hosted_web_search_flag():
+    """make_provider must plumb tools.web.search.provider_hosted into the provider."""
+    from nanobot.config.schema import Config
+    from nanobot.providers.factory import make_provider
+
+    config = Config.model_validate({
+        "agents": {"defaults": {"provider": "azure_openai", "model": "my-deploy"}},
+        "providers": {
+            "azureOpenai": {"apiKey": "k", "apiBase": "https://r.openai.azure.com"},
+        },
+        "tools": {"web": {"search": {"providerHosted": True}}},
+    })
+
+    provider = make_provider(config)
+    assert provider.__class__.__name__ == "AzureOpenAIProvider"
+    assert provider.hosted_web_search is True
+
+
+def test_factory_defaults_hosted_web_search_off():
+    from nanobot.config.schema import Config
+    from nanobot.providers.factory import make_provider
+
+    config = Config.model_validate({
+        "agents": {"defaults": {"provider": "azure_openai", "model": "my-deploy"}},
+        "providers": {
+            "azureOpenai": {"apiKey": "k", "apiBase": "https://r.openai.azure.com"},
+        },
+    })
+
+    provider = make_provider(config)
+    assert provider.hosted_web_search is False

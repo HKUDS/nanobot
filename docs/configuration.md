@@ -767,6 +767,24 @@ nanobot supports multiple web search providers. Configure in `~/.nanobot/config.
 
 By default, web search uses `duckduckgo`, and it works out of the box without an API key.
 
+Set `providerHosted` to `true` to prefer the active LLM provider's hosted web
+search tool when that provider supports one. If the active provider does not
+support provider-hosted web search, nanobot keeps using the local `web_search`
+tool and the configured search provider below. Currently this is supported by
+Azure OpenAI via the Responses API.
+
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "providerHosted": true
+      }
+    }
+  }
+}
+```
+
 | Provider | Config fields | Env var fallback | Free |
 |----------|--------------|------------------|------|
 | `brave` | `apiKey` | `BRAVE_API_KEY` | No |

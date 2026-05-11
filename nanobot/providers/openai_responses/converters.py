@@ -80,10 +80,19 @@ def convert_user_message(content: Any) -> dict[str, Any]:
 
 
 def convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Convert OpenAI function-calling tool schema to Responses API flat format."""
+    """Convert OpenAI function-calling tool schema to Responses API flat format.
+
+    Tools already declared with a non-``function`` ``type`` (e.g. Azure/OpenAI
+    hosted ``web_search``) are passed through unchanged so provider-native tools
+    can coexist with regular function tools.
+    """
     converted: list[dict[str, Any]] = []
     for tool in tools:
-        fn = (tool.get("function") or {}) if tool.get("type") == "function" else tool
+        declared_type = tool.get("type")
+        if declared_type and declared_type != "function":
+            converted.append(tool)
+            continue
+        fn = (tool.get("function") or {}) if declared_type == "function" else tool
         name = fn.get("name")
         if not name:
             continue
