@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
-import os
 import time
 from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import dataclass, field

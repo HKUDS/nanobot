@@ -5,8 +5,8 @@ import json
 import os
 import re
 from abc import ABC, abstractmethod
-from contextlib import nullcontext, suppress
 from collections.abc import Awaitable, Callable
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
