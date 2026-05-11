@@ -4,7 +4,11 @@ import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
 import { useAuth } from "@/auth/AuthContext";
 
-export function LoginPage() {
+interface LoginPageProps {
+  onSwitchToSignup?: () => void;
+}
+
+export function LoginPage({ onSwitchToSignup }: LoginPageProps = {}) {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -83,10 +87,19 @@ export function LoginPage() {
           {submitting ? "Signing in…" : "Sign in"}
         </Button>
 
-        <p className="text-center text-xs text-muted-foreground">
-          New users are created via the CLI (<code>nanobot user create</code>) until
-          self-serve signup ships in Slice&nbsp;B.
-        </p>
+        {onSwitchToSignup && (
+          <p className="text-center text-xs text-muted-foreground">
+            No account yet?{" "}
+            <button
+              type="button"
+              onClick={onSwitchToSignup}
+              className="font-medium underline-offset-2 hover:underline"
+              disabled={submitting}
+            >
+              Create one
+            </button>
+          </p>
+        )}
       </form>
     </div>
   );

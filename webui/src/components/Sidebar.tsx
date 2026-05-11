@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import {
+  LogOut,
   Menu,
   Search,
   Settings,
@@ -7,6 +8,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { useAuth } from "@/auth/AuthContext";
 import { ChatList } from "@/components/ChatList";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
 import { Button } from "@/components/ui/button";
@@ -27,7 +29,9 @@ interface SidebarProps {
 
 export function Sidebar(props: SidebarProps) {
   const { t } = useTranslation();
+  const { user, logout } = useAuth();
   const [query, setQuery] = useState("");
+  const displayLabel = user?.display_name?.trim() || user?.email || "";
   const normalizedQuery = query.trim().toLowerCase();
   const filteredSessions = useMemo(() => {
     if (!normalizedQuery) return props.sessions;
@@ -125,6 +129,30 @@ export function Sidebar(props: SidebarProps) {
           <Settings className="h-3.5 w-3.5" aria-hidden />
           {t("sidebar.settings")}
         </Button>
+        {user && (
+          <div
+            className="flex items-center gap-2 rounded-full px-2.5 py-1.5"
+            data-testid="sidebar-user"
+          >
+            <span
+              className="flex-1 truncate text-[12.5px] font-medium text-sidebar-foreground/85"
+              title={displayLabel}
+            >
+              {displayLabel}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => void logout()}
+              className="h-7 w-7 rounded-full text-sidebar-foreground/70 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              <LogOut className="h-3.5 w-3.5" aria-hidden />
+            </Button>
+          </div>
+        )}
         <ConnectionBadge />
       </div>
     </nav>

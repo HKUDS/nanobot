@@ -19,10 +19,17 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from nanobot.auth.service import AuthError, AuthService, UserRecord
+from nanobot.auth.ratelimit import RateLimiter
+from nanobot.auth.service import AuthError, AuthService, EmailTakenError, UserRecord
 
 SESSION_COOKIE = "nanobot_session"
 SESSION_COOKIE_MAX_AGE_S = 30 * 24 * 60 * 60  # 30 days
+
+# Per-endpoint policy: (max_attempts, window_seconds). Tuned for v1 single-instance.
+RATE_LIMIT_POLICY: dict[str, tuple[int, float]] = {
+    "/auth/login": (5, 60.0),
+    "/auth/signup": (3, 60.0),
+}
 
 
 @dataclass(frozen=True)
@@ -111,6 +118,43 @@ def _parse_json_body(req: Request) -> dict[str, Any]:
     return loaded
 
 
+def handle_signup(req: Request, svc: AuthService) -> Response:
+    if req.method != "POST":
+        return _error(405, "method not allowed")
+    try:
+        data = _parse_json_body(req)
+    except AuthError as exc:
+        return _error(400, str(exc))
+    email = (data.get("email") or "").strip()
+    password = data.get("password") or ""
+    display_name = data.get("display_name")
+    if isinstance(display_name, str):
+        display_name = display_name.strip() or None
+    else:
+        display_name = None
+    if not email or not password:
+        return _error(400, "email and password required")
+    try:
+        user = svc.create_user(
+            email,
+            password,
+            display_name=display_name,
+            ip=req.remote_ip,
+        )
+    except EmailTakenError:
+        return _error(409, "email already registered")
+    except AuthError as exc:
+        return _error(400, str(exc))
+    session = svc.mint_session(
+        user.id,
+        user_agent=req.headers.get("user-agent"),
+        ip=req.remote_ip,
+    )
+    resp = _json_response(200, {"user": _user_payload(user)})
+    resp.cookies.append(_build_session_cookie(session.token, secure=_detect_secure(req)))
+    return resp
+
+
 def handle_login(req: Request, svc: AuthService) -> Response:
     if req.method != "POST":
         return _error(405, "method not allowed")
@@ -160,26 +204,50 @@ def handle_me(req: Request, svc: AuthService) -> Response:
 
 
 _DISPATCH = {
+    ("POST", "/auth/signup"): handle_signup,
     ("POST", "/auth/login"): handle_login,
     ("POST", "/auth/logout"): handle_logout,
     ("GET", "/auth/me"): handle_me,
 }
 
 
-def dispatch(req: Request, svc: AuthService) -> Response | None:
+def dispatch(
+    req: Request,
+    svc: AuthService,
+    *,
+    limiter: RateLimiter | None = None,
+) -> Response | None:
     """Return a response for known /auth/* routes, else None.
 
-    The gateway server falls back to its own 404 (or other routes such as
-    ``/health``) when this returns None.
+    When ``limiter`` is provided, requests to rate-limited endpoints are
+    counted per (path, remote_ip) and 429 is returned when the policy
+    threshold trips.
     """
     if not req.path.startswith("/auth/"):
         return None
     handler = _DISPATCH.get((req.method, req.path))
     if handler is None:
-        # Known prefix but no method match — return 405 vs 404 only when the
-        # path matches a registered route under a different verb.
         for method, path in _DISPATCH:
             if path == req.path:
                 return _error(405, "method not allowed")
         return _error(404, "not found")
+    if limiter is not None and req.path in RATE_LIMIT_POLICY:
+        max_attempts, window_s = RATE_LIMIT_POLICY[req.path]
+        ip = req.remote_ip or "-"
+        ok, retry_after = limiter.try_consume(
+            (req.path, ip), max_attempts=max_attempts, window_s=window_s
+        )
+        if not ok:
+            try:
+                svc._audit(  # noqa: SLF001 — intentional cross-module audit
+                    "ratelimit.trip",
+                    target_user_id=None,
+                    ip=ip,
+                    detail=req.path,
+                )
+            except Exception:
+                pass
+            resp = _error(429, "too many requests")
+            resp.headers["Retry-After"] = str(retry_after)
+            return resp
     return handler(req, svc)

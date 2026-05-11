@@ -227,6 +227,23 @@ export async function authLogin(
   return data.user;
 }
 
+export async function authSignup(
+  email: string,
+  password: string,
+  displayName?: string,
+  base: string = "",
+): Promise<AuthUser> {
+  const body: Record<string, string> = { email, password };
+  if (displayName && displayName.trim()) {
+    body.display_name = displayName.trim();
+  }
+  const data = await authFetch<{ user: AuthUser }>(`${base}/auth/signup`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return data.user;
+}
+
 export async function authLogout(base: string = ""): Promise<void> {
   await authFetch<{ ok: boolean }>(`${base}/auth/logout`, { method: "POST" });
 }

@@ -154,3 +154,89 @@ def test_login_generic_error_does_not_distinguish_unknown_vs_wrong(svc: AuthServ
     unknown = dispatch(_post("/auth/login", {"email": "nobody@b.com", "password": "any password long enough"}), svc)
     assert bad_pwd.status == unknown.status == 401
     assert json.loads(bad_pwd.body) == json.loads(unknown.body)
+
+
+# ---------------------------------------------------------------------------
+# Slice B — /auth/signup
+# ---------------------------------------------------------------------------
+
+
+def test_signup_creates_user_and_sets_cookie(svc: AuthService) -> None:
+    resp = dispatch(
+        _post(
+            "/auth/signup",
+            {
+                "email": "new@example.com",
+                "password": "correct horse battery staple",
+                "display_name": "New User",
+            },
+        ),
+        svc,
+    )
+    assert resp.status == 200
+    payload = json.loads(resp.body)
+    assert payload["user"]["email"] == "new@example.com"
+    assert payload["user"]["display_name"] == "New User"
+    assert payload["user"]["role"] == "user"
+    cookie = _cookie_from_response(resp)
+    assert cookie.startswith(f"{SESSION_COOKIE}=")
+
+
+def test_signup_minted_session_works_for_me(svc: AuthService) -> None:
+    signup = dispatch(
+        _post("/auth/signup", {"email": "x@y.com", "password": "correct horse battery staple"}),
+        svc,
+    )
+    cookie = _cookie_from_response(signup)
+    me = dispatch(_get("/auth/me", cookie=cookie), svc)
+    assert me.status == 200
+    assert json.loads(me.body)["user"]["email"] == "x@y.com"
+
+
+def test_signup_duplicate_email_returns_409(svc: AuthService) -> None:
+    payload = {"email": "dup@example.com", "password": "correct horse battery staple"}
+    first = dispatch(_post("/auth/signup", payload), svc)
+    assert first.status == 200
+    again = dispatch(_post("/auth/signup", payload), svc)
+    assert again.status == 409
+    assert not again.cookies
+
+
+def test_signup_rejects_short_password(svc: AuthService) -> None:
+    resp = dispatch(
+        _post("/auth/signup", {"email": "short@example.com", "password": "tooshort"}),
+        svc,
+    )
+    assert resp.status == 400
+
+
+def test_signup_rejects_invalid_email(svc: AuthService) -> None:
+    resp = dispatch(
+        _post("/auth/signup", {"email": "not-an-email", "password": "correct horse battery staple"}),
+        svc,
+    )
+    assert resp.status == 400
+
+
+def test_signup_missing_fields_returns_400(svc: AuthService) -> None:
+    resp = dispatch(_post("/auth/signup", {"email": "a@b.com"}), svc)
+    assert resp.status == 400
+
+
+def test_signup_email_case_insensitive_duplicate(svc: AuthService) -> None:
+    dispatch(_post("/auth/signup", {"email": "Mix@Case.com", "password": "correct horse battery staple"}), svc)
+    again = dispatch(
+        _post("/auth/signup", {"email": "mix@case.COM", "password": "correct horse battery staple"}),
+        svc,
+    )
+    assert again.status == 409
+
+
+def test_signup_login_with_new_credentials(svc: AuthService) -> None:
+    """After signup, login with the same credentials should also succeed."""
+    dispatch(_post("/auth/signup", {"email": "round@trip.com", "password": "correct horse battery staple"}), svc)
+    login = dispatch(
+        _post("/auth/login", {"email": "round@trip.com", "password": "correct horse battery staple"}),
+        svc,
+    )
+    assert login.status == 200

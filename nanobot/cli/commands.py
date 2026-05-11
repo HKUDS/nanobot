@@ -937,6 +937,7 @@ def _run_gateway(
         """Lightweight HTTP/1.0 server: /health plus /auth/* dispatch."""
         import json as _json
 
+        from nanobot.auth.ratelimit import RateLimiter as _RateLimiter
         from nanobot.auth.routes import Request as _AuthRequest
         from nanobot.auth.routes import Response as _AuthResponse
         from nanobot.auth.routes import dispatch as _auth_dispatch
@@ -999,6 +1000,7 @@ def _run_gateway(
             )
 
         auth_svc = _AuthService.default()
+        auth_limiter = _RateLimiter()
 
         async def handle(reader, writer):
             try:
@@ -1020,7 +1022,9 @@ def _run_gateway(
                         200, body, {"Content-Type": "application/json"}, []
                     )
                 else:
-                    auth_resp: _AuthResponse | None = _auth_dispatch(req, auth_svc)
+                    auth_resp: _AuthResponse | None = _auth_dispatch(
+                        req, auth_svc, limiter=auth_limiter
+                    )
                     if auth_resp is not None:
                         out = _write_response(
                             auth_resp.status,

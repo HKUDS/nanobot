@@ -7,7 +7,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ApiError, authLogin, authLogout, authMe, type AuthUser } from "@/lib/api";
+import {
+  ApiError,
+  authLogin,
+  authLogout,
+  authMe,
+  authSignup,
+  type AuthUser,
+} from "@/lib/api";
 
 type AuthStatus = "loading" | "anon" | "authed";
 
@@ -18,11 +25,32 @@ interface AuthState {
 
 interface AuthApi extends AuthState {
   login: (email: string, password: string) => Promise<AuthUser>;
+  signup: (
+    email: string,
+    password: string,
+    displayName?: string,
+  ) => Promise<AuthUser>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthApi | null>(null);
+// Fault-tolerant default: pre-provider renders (e.g. component tests that
+// render <Sidebar /> without wrapping in <AuthProvider>) get a no-op API
+// that reports anon. Real auth flows always run inside <AuthProvider>.
+const NO_OP_AUTH: AuthApi = {
+  status: "anon",
+  user: null,
+  login: async () => {
+    throw new Error("AuthProvider missing");
+  },
+  signup: async () => {
+    throw new Error("AuthProvider missing");
+  },
+  logout: async () => {},
+  refresh: async () => {},
+};
+
+const AuthContext = createContext<AuthApi>(NO_OP_AUTH);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
@@ -60,6 +88,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const signup = useCallback(
+    async (email: string, password: string, displayName?: string) => {
+      const user = await authSignup(email, password, displayName);
+      setState({ status: "authed", user });
+      return user;
+    },
+    [],
+  );
+
   const logout = useCallback(async () => {
     try {
       await authLogout();
@@ -72,17 +109,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AuthApi>(
-    () => ({ ...state, login, logout, refresh }),
-    [state, login, logout, refresh],
+    () => ({ ...state, login, signup, logout, refresh }),
+    [state, login, signup, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthApi {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error("useAuth must be used inside <AuthProvider>");
-  }
-  return ctx;
+  return useContext(AuthContext);
 }
