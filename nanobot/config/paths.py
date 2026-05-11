@@ -60,3 +60,13 @@ def get_bridge_install_dir() -> Path:
 def get_legacy_sessions_dir() -> Path:
     """Return the legacy global session directory used for migration fallback."""
     return Path.home() / ".nanobot" / "sessions"
+
+
+def get_users_root() -> Path:
+    """Return the directory holding all per-user state subtrees."""
+    return ensure_dir(get_data_dir() / "users")
+
+
+def get_user_root(user_id: str) -> Path:
+    """Return the on-disk root for a single user. Caller validates the ULID."""
+    return ensure_dir(get_users_root() / user_id)

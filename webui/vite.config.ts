@@ -6,6 +6,9 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const target = env.NANOBOT_API_URL ?? "http://127.0.0.1:8765";
   const wsTarget = target.replace(/^http/, "ws");
+  // /auth/* lives on the gateway port (default 18790), separate from the
+  // WS channel (8765) that serves /webui, /api, and the WS upgrade.
+  const authTarget = env.NANOBOT_AUTH_URL ?? "http://127.0.0.1:18790";
 
   return {
     plugins: [react()],
@@ -41,7 +44,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         "/webui": { target, changeOrigin: true },
         "/api": { target, changeOrigin: true },
-        "/auth": { target, changeOrigin: true },
+        "/auth": { target: authTarget, changeOrigin: true },
         // Forward only WebSocket upgrades on ``/`` to the nanobot gateway;
         // plain HTTP GETs on ``/`` must stay with Vite so it can serve the SPA.
         // ``bypass`` returning the original URL skips the proxy for that

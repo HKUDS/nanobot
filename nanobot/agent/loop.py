@@ -61,6 +61,7 @@ from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 from nanobot.utils.webui_titles import mark_webui_session, maybe_generate_webui_title_after_turn
 
 if TYPE_CHECKING:
+    from nanobot.auth.context import UserContext
     from nanobot.config.schema import (
         ChannelsConfig,
         ExecToolConfig,
@@ -276,6 +277,9 @@ class AgentLoop:
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
         self.sessions = session_manager or SessionManager(workspace)
+        # Per-user SessionManager cache. Built lazily when an inbound message carries
+        # a UserContext (WebUI auth path). Channel-admin / CLI paths share self.sessions.
+        self._user_session_managers: dict[str, SessionManager] = {}
         self.tools = ToolRegistry()
         # One file-read/write tracker per logical session. The tool registry is
         # shared by this loop, so tools resolve the active state via contextvars.
@@ -537,6 +541,16 @@ class AgentLoop:
         sub_cancelled = await self.subagents.cancel_by_session(key)
         return cancelled + sub_cancelled
 
+    def _sessions_for(self, user_ctx: "UserContext | None") -> SessionManager:
+        """Return the SessionManager for the request's user; fall back to global."""
+        if user_ctx is None:
+            return self.sessions
+        cached = self._user_session_managers.get(user_ctx.user_id)
+        if cached is None:
+            cached = SessionManager(self.workspace, user_ctx=user_ctx)
+            self._user_session_managers[user_ctx.user_id] = cached
+        return cached
+
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
         if self._unified_session and not msg.session_key_override:
@@ -570,6 +584,7 @@ class AgentLoop:
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
         pending_queue: asyncio.Queue | None = None,
+        sessions: SessionManager | None = None,
     ) -> tuple[str | None, list[str], list[dict], str, bool]:
         """Run the agent iteration loop.
 
@@ -600,7 +615,7 @@ class AgentLoop:
         async def _checkpoint(payload: dict[str, Any]) -> None:
             if session is None:
                 return
-            self._set_runtime_checkpoint(session, payload)
+            self._set_runtime_checkpoint(session, payload, sessions=sessions)
 
         async def _drain_pending(*, limit: int = _MAX_INJECTIONS_PER_TURN) -> list[dict[str, Any]]:
             """Drain follow-up messages from the pending queue.
@@ -871,10 +886,11 @@ class AgentLoop:
                     # next conversation turn.
                     try:
                         key = self._effective_session_key(msg)
-                        session = self.sessions.get_or_create(key)
+                        sessions = self._sessions_for(msg.user_context)
+                        session = sessions.get_or_create(key)
                         if self._restore_runtime_checkpoint(session):
                             self._clear_pending_user_turn(session)
-                            self.sessions.save(session)
+                            sessions.save(session)
                             logger.info(
                                 "Restored partial context for cancelled session {}",
                                 key,
@@ -946,6 +962,7 @@ class AgentLoop:
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         self._refresh_provider_snapshot()
+        sessions = self._sessions_for(msg.user_context)
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (
@@ -956,11 +973,11 @@ class AgentLoop:
             # callers route to the originating thread session, not the
             # channel-level session derived from chat_id.
             key = msg.session_key_override or f"{channel}:{chat_id}"
-            session = self.sessions.get_or_create(key)
+            session = sessions.get_or_create(key)
             if self._restore_runtime_checkpoint(session):
-                self.sessions.save(session)
+                sessions.save(session)
             if self._restore_pending_user_turn(session):
-                self.sessions.save(session)
+                sessions.save(session)
 
             session, pending = self.auto_compact.prepare_session(session, key)
             if pending:
@@ -979,7 +996,7 @@ class AgentLoop:
             is_subagent = msg.sender_id == "subagent"
             if is_subagent and self._persist_subagent_followup(session, msg):
                 logger.debug("Subagent result persisted for session {}", key)
-                self.sessions.save(session)
+                sessions.save(session)
             self._set_tool_context(
                 channel, chat_id, msg.metadata.get("message_id"),
                 msg.metadata, session_key=key,
@@ -1009,11 +1026,12 @@ class AgentLoop:
                 metadata=msg.metadata,
                 session_key=key,
                 pending_queue=pending_queue,
+                sessions=sessions,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
             self._clear_runtime_checkpoint(session)
-            self.sessions.save(session)
+            sessions.save(session)
             self._schedule_background(
                 self.consolidator.maybe_consolidate_by_tokens(
                     session,
@@ -1054,12 +1072,12 @@ class AgentLoop:
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         key = session_key or msg.session_key
-        session = self.sessions.get_or_create(key)
+        session = sessions.get_or_create(key)
         mark_webui_session(session, msg.metadata)
         if self._restore_runtime_checkpoint(session):
-            self.sessions.save(session)
+            sessions.save(session)
         if self._restore_pending_user_turn(session):
-            self.sessions.save(session)
+            sessions.save(session)
 
         session, pending = self.auto_compact.prepare_session(session, key)
 
@@ -1153,7 +1171,7 @@ class AgentLoop:
             text = msg.content if isinstance(msg.content, str) else ""
             session.add_message("user", text, **extra)
             self._mark_pending_user_turn(session)
-            self.sessions.save(session)
+            sessions.save(session)
             user_persisted_early = True
 
         final_content, _, all_msgs, stop_reason, had_injections = await self._run_agent_loop(
@@ -1169,6 +1187,7 @@ class AgentLoop:
             metadata=msg.metadata,
             session_key=key,
             pending_queue=pending_queue,
+            sessions=sessions,
         )
 
         if final_content is None or not final_content.strip():
@@ -1185,7 +1204,7 @@ class AgentLoop:
         session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
         self._clear_pending_user_turn(session)
         self._clear_runtime_checkpoint(session)
-        self.sessions.save(session)
+        sessions.save(session)
         self._schedule_background(
             self.consolidator.maybe_consolidate_by_tokens(
                 session,
@@ -1332,10 +1351,16 @@ class AgentLoop:
         )
         return True
 
-    def _set_runtime_checkpoint(self, session: Session, payload: dict[str, Any]) -> None:
+    def _set_runtime_checkpoint(
+        self,
+        session: Session,
+        payload: dict[str, Any],
+        *,
+        sessions: SessionManager | None = None,
+    ) -> None:
         """Persist the latest in-flight turn state into session metadata."""
         session.metadata[self._RUNTIME_CHECKPOINT_KEY] = payload
-        self.sessions.save(session)
+        (sessions or self.sessions).save(session)
 
     def _mark_pending_user_turn(self, session: Session) -> None:
         session.metadata[self._PENDING_USER_TURN_KEY] = True

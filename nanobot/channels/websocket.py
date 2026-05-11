@@ -423,6 +423,10 @@ class WebSocketChannel(BaseChannel):
         self._conn_chats: dict[Any, set[str]] = {}
         # connection -> default chat_id for legacy frames that omit routing.
         self._conn_default: dict[Any, str] = {}
+        # connection -> authenticated WebUI user_id (None when unauthenticated).
+        self._conn_user_id: dict[Any, str] = {}
+        # Cached AuthService instance; lazily built on first cookie-auth request.
+        self._auth_svc_cache: Any = None
         # Single-use tokens consumed at WebSocket handshake.
         self._issued_tokens: dict[str, float] = {}
         # Multi-use tokens for the embedded webui's REST surface; checked but not consumed.
@@ -457,6 +461,52 @@ class WebSocketChannel(BaseChannel):
             if not subs:
                 self._subs.pop(cid, None)
         self._conn_default.pop(connection, None)
+        self._conn_user_id.pop(connection, None)
+
+    def _auth_service(self) -> Any:
+        """Lazy-build a process-shared AuthService for cookie verification."""
+        if self._auth_svc_cache is None:
+            from nanobot.auth.service import AuthService
+
+            self._auth_svc_cache = AuthService.default()
+        return self._auth_svc_cache
+
+    @staticmethod
+    def _parse_cookie_header(raw: str | None) -> dict[str, str]:
+        out: dict[str, str] = {}
+        if not raw:
+            return out
+        for chunk in raw.split(";"):
+            if "=" in chunk:
+                k, v = chunk.split("=", 1)
+                out[k.strip()] = v.strip()
+        return out
+
+    def _user_id_from_request(self, request: Any) -> str | None:
+        """Verify a webui session cookie and return the owning user_id, else None."""
+        try:
+            headers = request.headers if request is not None else None
+            raw = headers.get("Cookie") if headers is not None else None
+        except Exception:
+            return None
+        cookies = self._parse_cookie_header(raw)
+        token = cookies.get("nanobot_session", "")
+        if not token:
+            return None
+        try:
+            user = self._auth_service().verify_session(token)
+        except Exception:
+            return None
+        return user.id
+
+    def _user_context_for(self, connection: Any) -> Any:
+        """Return a UserContext for the connection's bound user, or None."""
+        user_id = self._conn_user_id.get(connection)
+        if not user_id:
+            return None
+        from nanobot.auth.context import UserContext
+
+        return UserContext(user_id=user_id)
 
     async def _send_event(self, connection: Any, event: str, **fields: Any) -> None:
         """Send a control event (attached, error, ...) to a single connection."""
@@ -1116,6 +1166,12 @@ class WebSocketChannel(BaseChannel):
             self.logger.warning("client_id too long ({} chars), truncating", len(client_id))
             client_id = client_id[:128]
 
+        # WebUI auth: if the upgrade carried a valid session cookie, bind this
+        # connection to that user_id so per-user state isolation applies.
+        bound_user_id = self._user_id_from_request(request)
+        if bound_user_id:
+            self._conn_user_id[connection] = bound_user_id
+
         default_chat_id = str(uuid.uuid4())
 
         try:
@@ -1154,6 +1210,7 @@ class WebSocketChannel(BaseChannel):
                     chat_id=default_chat_id,
                     content=content,
                     metadata={"remote": getattr(connection, "remote_address", None)},
+                    user_context=self._user_context_for(connection),
                 )
         except Exception as e:
             self.logger.debug("connection ended: {}", e)
@@ -1299,6 +1356,7 @@ class WebSocketChannel(BaseChannel):
                 content=content,
                 media=media_paths or None,
                 metadata=metadata,
+                user_context=self._user_context_for(connection),
             )
             return
         await self._send_event(connection, "error", detail=f"unknown type: {t!r}")

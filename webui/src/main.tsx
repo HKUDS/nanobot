@@ -2,6 +2,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import App from "./App";
+import { AuthGate } from "./auth/AuthGate";
+import { AuthProvider } from "./auth/AuthContext";
 import "./globals.css";
 import "./i18n";
 
@@ -10,6 +12,10 @@ if (!root) throw new Error("root element missing");
 
 ReactDOM.createRoot(root).render(
   <React.StrictMode>
-    <App />
+    <AuthProvider>
+      <AuthGate>
+        <App />
+      </AuthGate>
+    </AuthProvider>
   </React.StrictMode>,
 );

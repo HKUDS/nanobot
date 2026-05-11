@@ -8,9 +8,12 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from nanobot.auth.context import UserContext
 
 from nanobot.config.paths import get_legacy_sessions_dir
 from nanobot.utils.helpers import (
@@ -262,9 +265,13 @@ class SessionManager:
     Sessions are stored as JSONL files in the sessions directory.
     """
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, *, user_ctx: "UserContext | None" = None):
         self.workspace = workspace
-        self.sessions_dir = ensure_dir(self.workspace / "sessions")
+        self.user_ctx = user_ctx
+        if user_ctx is not None:
+            self.sessions_dir = user_ctx.sessions_dir()
+        else:
+            self.sessions_dir = ensure_dir(self.workspace / "sessions")
         self.legacy_sessions_dir = get_legacy_sessions_dir()
         self._cache: dict[str, Session] = {}
 

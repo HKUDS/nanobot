@@ -9,6 +9,8 @@ from nanobot.config.paths import (
     get_logs_dir,
     get_media_dir,
     get_runtime_subdir,
+    get_user_root,
+    get_users_root,
     get_workspace_path,
     is_default_workspace,
 )
@@ -47,3 +49,18 @@ def test_is_default_workspace_distinguishes_default_and_custom_paths() -> None:
     assert is_default_workspace(None) is True
     assert is_default_workspace(Path.home() / ".nanobot" / "workspace") is True
     assert is_default_workspace("~/custom-workspace") is False
+
+
+def test_users_root_under_data_dir(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance-c" / "config.json"
+    monkeypatch.setattr("nanobot.config.paths.get_config_path", lambda: config_file)
+    assert get_users_root() == config_file.parent / "users"
+    assert get_users_root().is_dir()
+
+
+def test_user_root_resolves_under_users_root(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance-d" / "config.json"
+    monkeypatch.setattr("nanobot.config.paths.get_config_path", lambda: config_file)
+    uid = "01KRBNKY41FNHW9V0T20SRNA9A"
+    assert get_user_root(uid) == config_file.parent / "users" / uid
+    assert get_user_root(uid).is_dir()

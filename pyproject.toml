@@ -62,6 +62,7 @@ dependencies = [
     "python-pptx>=1.0.0,<2.0.0",
     "filelock>=3.25.2",
     "boto3>=1.43.0",
+    "argon2-cffi>=23.1.0,<24.0.0",
 ]
 
 [project.optional-dependencies]

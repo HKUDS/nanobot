@@ -16,6 +16,38 @@ if (!("randomUUID" in globalThis.crypto)) {
   });
 }
 
+// Bun's test runtime injects its own ``localStorage`` stub before happy-dom
+// can install a working one, so we override both ``window.localStorage`` and
+// ``globalThis.localStorage`` with a minimal in-memory Storage implementation
+// so ``getItem``/``setItem`` are real functions in tests.
+const installStorageShim = () => {
+  const store = new Map<string, string>();
+  const shim: Storage = {
+    get length() {
+      return store.size;
+    },
+    clear: () => store.clear(),
+    getItem: (key) => (store.has(key) ? (store.get(key) as string) : null),
+    key: (index) => Array.from(store.keys())[index] ?? null,
+    removeItem: (key) => {
+      store.delete(key);
+    },
+    setItem: (key, value) => {
+      store.set(String(key), String(value));
+    },
+  };
+  Object.defineProperty(window, "localStorage", {
+    value: shim,
+    configurable: true,
+  });
+  Object.defineProperty(globalThis, "localStorage", {
+    value: shim,
+    configurable: true,
+  });
+};
+
+installStorageShim();
+
 beforeEach(async () => {
   await i18n.changeLanguage("en");
   document.documentElement.lang = "en";

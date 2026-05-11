@@ -668,6 +668,9 @@ def _run_gateway(
 
     console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
     sync_workspace_templates(config.workspace_path)
+    from nanobot.auth import init_auth_db
+
+    init_auth_db()
     bus = MessageBus()
     try:
         provider_snapshot = build_provider_snapshot(config)
@@ -931,47 +934,119 @@ def _run_gateway(
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
     async def _health_server(host: str, health_port: int):
-        """Lightweight HTTP health endpoint on the gateway port."""
+        """Lightweight HTTP/1.0 server: /health plus /auth/* dispatch."""
         import json as _json
+
+        from nanobot.auth.routes import Request as _AuthRequest
+        from nanobot.auth.routes import Response as _AuthResponse
+        from nanobot.auth.routes import dispatch as _auth_dispatch
+        from nanobot.auth.service import AuthService as _AuthService
+
+        _STATUS_TEXT = {
+            200: "OK",
+            400: "Bad Request",
+            401: "Unauthorized",
+            404: "Not Found",
+            405: "Method Not Allowed",
+            409: "Conflict",
+            429: "Too Many Requests",
+            500: "Internal Server Error",
+        }
+
+        def _write_response(status: int, body: bytes, headers: dict, cookies: list) -> bytes:
+            lines = [f"HTTP/1.0 {status} {_STATUS_TEXT.get(status, 'OK')}"]
+            merged = {"Content-Length": str(len(body)), **headers}
+            for k, v in merged.items():
+                lines.append(f"{k}: {v}")
+            for c in cookies:
+                lines.append(f"Set-Cookie: {c}")
+            return ("\r\n".join(lines) + "\r\n\r\n").encode("utf-8") + body
+
+        async def _read_request(reader, peer_ip: str | None):
+            head = b""
+            while b"\r\n\r\n" not in head:
+                chunk = await asyncio.wait_for(reader.read(4096), timeout=5)
+                if not chunk:
+                    break
+                head += chunk
+                if len(head) > 65536:
+                    raise ValueError("request headers too large")
+            if b"\r\n\r\n" not in head:
+                return None
+            header_block, _, leftover = head.partition(b"\r\n\r\n")
+            lines = header_block.decode("utf-8", errors="replace").split("\r\n")
+            if not lines:
+                return None
+            request_line = lines[0]
+            parts = request_line.split(" ")
+            method = parts[0] if len(parts) > 0 else ""
+            path = parts[1] if len(parts) > 1 else ""
+            headers: dict[str, str] = {}
+            for line in lines[1:]:
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    headers[k.strip().lower()] = v.strip()
+            content_length = int(headers.get("content-length") or 0)
+            body = leftover
+            while len(body) < content_length:
+                chunk = await asyncio.wait_for(reader.read(4096), timeout=5)
+                if not chunk:
+                    break
+                body += chunk
+            body = body[:content_length] if content_length else body
+            return _AuthRequest(
+                method=method, path=path, headers=headers, body=body, remote_ip=peer_ip
+            )
+
+        auth_svc = _AuthService.default()
 
         async def handle(reader, writer):
             try:
-                data = await asyncio.wait_for(reader.read(4096), timeout=5)
-            except (asyncio.TimeoutError, ConnectionError):
-                writer.close()
-                return
+                get_extra = getattr(writer, "get_extra_info", None)
+                peer = get_extra("peername") if get_extra else None
+                peer_ip = peer[0] if peer else None
+                try:
+                    req = await _read_request(reader, peer_ip)
+                except (asyncio.TimeoutError, ConnectionError, ValueError):
+                    writer.close()
+                    return
+                if req is None:
+                    writer.close()
+                    return
 
-            request_line = data.split(b"\r\n", 1)[0].decode("utf-8", errors="replace")
-            method, path = "", ""
-            parts = request_line.split(" ")
-            if len(parts) >= 2:
-                method, path = parts[0], parts[1]
+                if req.method == "GET" and req.path == "/health":
+                    body = _json.dumps({"status": "ok"}).encode("utf-8")
+                    out = _write_response(
+                        200, body, {"Content-Type": "application/json"}, []
+                    )
+                else:
+                    auth_resp: _AuthResponse | None = _auth_dispatch(req, auth_svc)
+                    if auth_resp is not None:
+                        out = _write_response(
+                            auth_resp.status,
+                            auth_resp.body,
+                            auth_resp.headers,
+                            auth_resp.cookies,
+                        )
+                    else:
+                        body = b"Not Found"
+                        out = _write_response(
+                            404, body, {"Content-Type": "text/plain"}, []
+                        )
 
-            if method == "GET" and path == "/health":
-                body = _json.dumps({"status": "ok"})
-                resp = (
-                    f"HTTP/1.0 200 OK\r\n"
-                    f"Content-Type: application/json\r\n"
-                    f"Content-Length: {len(body)}\r\n"
-                    f"\r\n{body}"
-                )
-            else:
-                body = "Not Found"
-                resp = (
-                    f"HTTP/1.0 404 Not Found\r\n"
-                    f"Content-Type: text/plain\r\n"
-                    f"Content-Length: {len(body)}\r\n"
-                    f"\r\n{body}"
-                )
-
-            writer.write(resp.encode())
-            await writer.drain()
-            writer.close()
+                writer.write(out)
+                await writer.drain()
+            finally:
+                with suppress(Exception):
+                    writer.close()
 
         server = await asyncio.start_server(handle, host, health_port)
         console.print(f"[green]✓[/green] Health endpoint: http://{host}:{health_port}/health")
-        async with server:
-            await server.serve_forever()
+        try:
+            async with server:
+                await server.serve_forever()
+        finally:
+            auth_svc.close()
     # Register Dream system job (always-on, idempotent on restart)
     dream_cfg = config.agents.defaults.dream
     if dream_cfg.model_override:

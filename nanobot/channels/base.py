@@ -151,6 +151,7 @@ class BaseChannel(ABC):
         media: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
+        user_context: Any = None,
     ) -> None:
         """
         Handle an incoming message from the chat platform.
@@ -164,6 +165,7 @@ class BaseChannel(ABC):
             media: Optional list of media URLs.
             metadata: Optional channel-specific metadata.
             session_key: Optional session key override (e.g. thread-scoped sessions).
+            user_context: Optional per-user runtime context (WebUI auth path).
         """
         if not self.is_allowed(sender_id):
             self.logger.warning(
@@ -185,6 +187,7 @@ class BaseChannel(ABC):
             media=media or [],
             metadata=meta,
             session_key_override=session_key,
+            user_context=user_context,
         )
 
         await self.bus.publish_inbound(msg)

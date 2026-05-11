@@ -168,3 +168,65 @@ export async function updateProviderSettings(
     token,
   );
 }
+
+// ---------------------------------------------------------------------------
+// WebUI auth: cookie-based login/logout/me. These endpoints live on the
+// gateway port (default 18790) — the vite dev proxy rewrites ``/auth/*`` to
+// that target, so the same relative paths work in dev and prod.
+// ---------------------------------------------------------------------------
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  display_name: string | null;
+  role: "user" | "admin";
+}
+
+async function authFetch<T>(
+  url: string,
+  init?: RequestInit,
+): Promise<T> {
+  const res = await fetch(url, {
+    ...(init ?? {}),
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+    credentials: "include",
+  });
+  let payload: unknown = null;
+  try {
+    payload = await res.json();
+  } catch {
+    payload = null;
+  }
+  if (!res.ok) {
+    const message =
+      typeof payload === "object" && payload && "error" in payload
+        ? String((payload as { error: unknown }).error)
+        : `HTTP ${res.status}`;
+    throw new ApiError(res.status, message);
+  }
+  return payload as T;
+}
+
+export async function authMe(base: string = ""): Promise<AuthUser> {
+  const data = await authFetch<{ user: AuthUser }>(`${base}/auth/me`);
+  return data.user;
+}
+
+export async function authLogin(
+  email: string,
+  password: string,
+  base: string = "",
+): Promise<AuthUser> {
+  const data = await authFetch<{ user: AuthUser }>(`${base}/auth/login`, {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+  return data.user;
+}
+
+export async function authLogout(base: string = ""): Promise<void> {
+  await authFetch<{ ok: boolean }>(`${base}/auth/logout`, { method: "POST" });
+}
