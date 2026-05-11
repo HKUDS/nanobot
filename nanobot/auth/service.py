@@ -33,6 +33,15 @@ MIN_PASSWORD_LEN = 12
 
 _HASHER = PasswordHasher(time_cost=3, memory_cost=64 * 1024, parallelism=2)
 
+# Real argon2id hash used to mask the unknown-email branch in verify_password.
+# A static literal hash was previously used but argon2-cffi rejected its
+# salt segment cheaply (~0.03 ms vs. ~63 ms for a real verify) — that gap
+# was a measurable timing oracle for email enumeration. Hashing a constant
+# at module import gives us a wire-format hash that argon2-cffi will
+# actually process all the way through, so the unknown-email and
+# wrong-password paths take the same time.
+_DUMMY_HASH = _HASHER.hash("__nanobot_dummy_for_timing__")
+
 
 class AuthError(Exception):
     """Generic auth failure; safe to surface to clients."""
@@ -150,10 +159,12 @@ class AuthService:
         """
         user = self.get_user_by_email(email)
         if user is None:
-            # Run hash to keep timing roughly constant against enumeration.
+            # Constant-time mask against email enumeration. ``_DUMMY_HASH`` is
+            # a real argon2id hash so the verify takes the same wall-clock
+            # time as the legitimate wrong-password branch.
             try:
-                _HASHER.verify("$argon2id$v=19$m=65536,t=3,p=2$xxxxxxxxxxxxxxxx$" + "x" * 43, password)
-            except Exception:
+                _HASHER.verify(_DUMMY_HASH, password)
+            except VerifyMismatchError:
                 pass
             self._audit("login.fail", target_user_id=None, ip=ip, detail=email.strip().lower())
             raise AuthError("invalid credentials")

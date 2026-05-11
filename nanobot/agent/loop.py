@@ -872,11 +872,12 @@ class AgentLoop:
                             content="", metadata={**msg.metadata, "_turn_end": True},
                         ))
                         if msg.metadata.get("webui") is True:
+                            title_sessions = self._sessions_for(msg.user_context)
                             async def _generate_title_and_notify() -> None:
                                 generated = await maybe_generate_webui_title_after_turn(
                                     channel=msg.channel,
                                     metadata=msg.metadata,
-                                    sessions=self.sessions,
+                                    sessions=title_sessions,
                                     session_key=session_key,
                                     provider=self.provider,
                                     model=self.model,
@@ -995,7 +996,7 @@ class AgentLoop:
             if self._restore_pending_user_turn(session):
                 sessions.save(session)
 
-            session, pending = self.auto_compact.prepare_session(session, key)
+            session, pending = self.auto_compact.prepare_session(session, key, sessions=sessions)
             if pending:
                 logger.info("Memory compact triggered for session {}", key)
 
@@ -1003,6 +1004,7 @@ class AgentLoop:
                 session,
                 session_summary=pending,
                 replay_max_messages=self._max_messages,
+                sessions=sessions,
             )
             # Persist subagent follow-ups into durable history BEFORE prompt
             # assembly. ContextBuilder merges adjacent same-role messages for
@@ -1052,6 +1054,7 @@ class AgentLoop:
                 self.consolidator.maybe_consolidate_by_tokens(
                     session,
                     replay_max_messages=self._max_messages,
+                    sessions=sessions,
                 )
             )
             options = ask_user_options_from_messages(all_msgs) if stop_reason == "ask_user" else []
@@ -1095,7 +1098,7 @@ class AgentLoop:
         if self._restore_pending_user_turn(session):
             sessions.save(session)
 
-        session, pending = self.auto_compact.prepare_session(session, key)
+        session, pending = self.auto_compact.prepare_session(session, key, sessions=sessions)
 
         # Slash commands
         raw = msg.content.strip()
@@ -1107,6 +1110,7 @@ class AgentLoop:
             session,
             session_summary=pending,
             replay_max_messages=self._max_messages,
+            sessions=sessions,
         )
 
         self._set_tool_context(
@@ -1225,6 +1229,7 @@ class AgentLoop:
             self.consolidator.maybe_consolidate_by_tokens(
                 session,
                 replay_max_messages=self._max_messages,
+                sessions=sessions,
             )
         )
 

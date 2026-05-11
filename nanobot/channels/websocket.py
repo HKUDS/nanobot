@@ -483,7 +483,15 @@ class WebSocketChannel(BaseChannel):
         return out
 
     def _user_id_from_request(self, request: Any) -> str | None:
-        """Verify a webui session cookie and return the owning user_id, else None."""
+        """Verify a webui session cookie and return the owning user_id, else None.
+
+        Includes a cross-origin guard: SameSite=Lax on the cookie does NOT
+        block WebSocket upgrades the way it blocks fetch POSTs (browsers
+        historically send cookies on WS handshakes regardless). To prevent
+        a cross-origin page from opening a WS bound to the victim's cookie,
+        we require the ``Origin`` header to match the gateway's ``Host``
+        when a session cookie is being honored.
+        """
         try:
             headers = request.headers if request is not None else None
             raw = headers.get("Cookie") if headers is not None else None
@@ -493,9 +501,33 @@ class WebSocketChannel(BaseChannel):
         token = cookies.get("nanobot_session", "")
         if not token:
             return None
+
+        # Cross-origin guard on cookie-auth handshakes.
+        try:
+            origin_header = headers.get("Origin") if headers is not None else None
+            host_header = headers.get("Host") if headers is not None else None
+        except Exception:
+            return None
+        if origin_header:
+            from urllib.parse import urlparse
+
+            origin_host = urlparse(origin_header).netloc.lower()
+            request_host = (host_header or "").lower()
+            if origin_host and request_host and origin_host != request_host:
+                self.logger.warning(
+                    "rejecting cookie-auth WS upgrade — Origin {} != Host {}",
+                    origin_host,
+                    request_host,
+                )
+                return None
+        # No Origin header at all (non-browser client / curl). Cookies don't
+        # ride curl unless explicitly attached, so treat as legitimate.
+
+        from nanobot.auth import AuthError
+
         try:
             user = self._auth_service().verify_session(token)
-        except Exception:
+        except AuthError:
             return None
         return user.id
 

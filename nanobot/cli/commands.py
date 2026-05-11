@@ -1012,6 +1012,12 @@ def _run_gateway(
 
         auth_svc = _AuthService.default()
         auth_limiter = _RateLimiter()
+        # Honor X-Forwarded-For only when the operator opts in. Without this,
+        # a reverse-proxied gateway sees every peer as 127.0.0.1 and the
+        # rate-limit / audit-log IPs are useless. The env knob is explicit
+        # so the trusted-proxy posture is a deployment choice, never a
+        # client-controllable spoof vector.
+        trust_proxy_headers = os.environ.get("NANOBOT_TRUST_PROXY_HEADERS") == "1"
 
         async def handle(reader, writer):
             try:
@@ -1026,6 +1032,19 @@ def _run_gateway(
                 if req is None:
                     writer.close()
                     return
+
+                if trust_proxy_headers:
+                    xff = req.headers.get("x-forwarded-for", "")
+                    if xff:
+                        forwarded_ip = xff.split(",", 1)[0].strip()
+                        if forwarded_ip:
+                            req = _AuthRequest(
+                                method=req.method,
+                                path=req.path,
+                                headers=req.headers,
+                                body=req.body,
+                                remote_ip=forwarded_ip,
+                            )
 
                 if req.method == "GET" and req.path == "/health":
                     body = _json.dumps({"status": "ok"}).encode("utf-8")

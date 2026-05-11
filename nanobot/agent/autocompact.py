@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
+
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -106,18 +107,24 @@ class AutoCompact:
         finally:
             self._archiving.discard(key)
 
-    def prepare_session(self, session: Session, key: str) -> tuple[Session, str | None]:
+    def prepare_session(
+        self,
+        session: Session,
+        key: str,
+        sessions: SessionManager | None = None,
+    ) -> tuple[Session, str | None]:
+        # Use the per-request SessionManager when provided so per-user sessions
+        # don't get clobbered with whatever the global manager has cached.
+        sm = sessions if sessions is not None else self.sessions
         if key in self._archiving or self._is_expired(session.updated_at):
             logger.info("Auto-compact: reloading session {} (archiving={})", key, key in self._archiving)
-            session = self.sessions.get_or_create(key)
-        # Hot path: summary from in-memory dict (process hasn't restarted).
-        # Also clean metadata copy so stale _last_summary never leaks to disk.
+            session = sm.get_or_create(key)
         entry = self._summaries.pop(key, None)
         if entry:
             session.metadata.pop("_last_summary", None)
             return session, self._format_summary(entry[0], entry[1])
         if "_last_summary" in session.metadata:
             meta = session.metadata.pop("_last_summary")
-            self.sessions.save(session)
+            sm.save(session)
             return session, self._format_summary(meta["text"], datetime.fromisoformat(meta["last_active"]))
         return session, None

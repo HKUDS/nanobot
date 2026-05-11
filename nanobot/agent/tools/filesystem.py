@@ -83,19 +83,22 @@ class _FsTool(Tool):
         self._fallback_file_states = FileStates()
 
     def _active_paths(self) -> tuple[Path | None, Path | None]:
-        """Return (workspace, allowed_dir) honoring the current UserContext."""
+        """Return (workspace, allowed_dir) honoring the current UserContext.
+
+        When a UserContext is bound we ALWAYS confine the tool to that user's
+        workspace, even when the loop was started with
+        ``restrict_to_workspace=False``. The multi-tenant gate is independent
+        of the legacy single-tenant gate: without this confinement an
+        authenticated WebUI user could `read_file('/etc/passwd')` through the
+        agent on a permissive loop.
+        """
         from nanobot.auth.context import current_user_ctx
 
         ctx = current_user_ctx.get()
         if ctx is None:
             return self._default_workspace, self._default_allowed_dir
         user_ws = ctx.workspace_path()
-        # When the loop opted into restricting writes to the (global) workspace,
-        # rebind the restriction to the user's own workspace; otherwise leave
-        # the allowed_dir alone (None => no restriction).
-        if self._default_allowed_dir is not None:
-            return user_ws, user_ws
-        return user_ws, None
+        return user_ws, user_ws
 
     # Backwards-compat property for code that read ``self._workspace`` directly.
     @property

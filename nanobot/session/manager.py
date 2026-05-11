@@ -311,7 +311,10 @@ class SessionManager:
     def _load(self, key: str) -> Session | None:
         """Load a session from disk."""
         path = self._get_session_path(key)
-        if not path.exists():
+        # Per-user managers must never adopt the legacy global ~/.nanobot/sessions/
+        # tree — that would let the first authenticated user with a matching
+        # session_key silently steal a leftover global session.
+        if not path.exists() and self.user_ctx is None:
             legacy_path = self._get_legacy_session_path(key)
             if legacy_path.exists():
                 try:

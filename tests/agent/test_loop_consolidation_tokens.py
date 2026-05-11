@@ -205,11 +205,16 @@ async def test_preflight_consolidation_receives_pending_summary(tmp_path) -> Non
 
     await loop.process_direct("hello", session_key="cli:test")
 
-    loop.consolidator.maybe_consolidate_by_tokens.assert_any_await(
-        session,
-        session_summary="Previous conversation summary: earlier context",
-        replay_max_messages=loop._max_messages,
-    )
+    # The per-user routing pass added a ``sessions=<SessionManager>`` kwarg;
+    # accept it without binding to a specific instance.
+    calls = loop.consolidator.maybe_consolidate_by_tokens.await_args_list
+    matched = [
+        c for c in calls
+        if c.args == (session,)
+        and c.kwargs.get("session_summary") == "Previous conversation summary: earlier context"
+        and c.kwargs.get("replay_max_messages") == loop._max_messages
+    ]
+    assert matched, f"expected preflight call not found in {calls}"
 
 
 @pytest.mark.asyncio

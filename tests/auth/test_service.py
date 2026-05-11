@@ -130,6 +130,28 @@ def test_expire_sessions_purges_old_rows(svc: AuthService) -> None:
     assert svc.expire_sessions() >= 1
 
 
+def test_unknown_email_dummy_hash_is_parseable(svc: AuthService) -> None:
+    """Regression: ``_DUMMY_HASH`` must round-trip through argon2 so the
+    unknown-email branch and the wrong-password branch take the same time.
+    A wire-format failure on _DUMMY_HASH would reintroduce a sub-millisecond
+    timing oracle for email enumeration."""
+    from argon2.exceptions import InvalidHash, VerificationError, VerifyMismatchError
+
+    from nanobot.auth.service import _DUMMY_HASH, _HASHER
+
+    raised: Exception | None = None
+    try:
+        _HASHER.verify(_DUMMY_HASH, "not-the-real-password")
+    except VerifyMismatchError as exc:
+        raised = exc
+    except (InvalidHash, VerificationError) as exc:  # pragma: no cover
+        raised = exc
+    assert isinstance(raised, VerifyMismatchError), (
+        "Dummy hash must fail with VerifyMismatchError (i.e. argon2 processed it "
+        "to completion), not InvalidHash/VerificationError (which would short-circuit)."
+    )
+
+
 def test_audit_log_records_events(svc: AuthService, tmp_path: Path) -> None:
     svc.create_user("a@b.com", "correct horse battery staple")
     try:

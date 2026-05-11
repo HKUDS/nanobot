@@ -218,12 +218,23 @@ export default function App() {
     );
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (state.status === "ready") {
       state.client.close();
     }
     clearSavedSecret();
+    // Also drop the cookie-auth session so the next visit goes to the
+    // LoginPage instead of silently resuming as the previous user.
+    try {
+      const { authLogout } = await import("@/lib/api");
+      await authLogout();
+    } catch {
+      /* network failures are fine — the cookie still expires server-side */
+    }
     setState({ status: "auth" });
+    // Hard reload to fully reset both AuthProvider and the bootstrap state
+    // machine; otherwise React caches the in-memory auth context.
+    window.location.reload();
   };
 
   return (

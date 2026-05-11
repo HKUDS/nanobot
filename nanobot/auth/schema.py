@@ -7,7 +7,10 @@ init so concurrent gateway + CLI startups cannot race.
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import stat
+import sys
 from pathlib import Path
 
 from filelock import FileLock
@@ -76,6 +79,15 @@ def open_auth_db(data_dir: Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+def _chmod_quiet(path: Path, mode: int) -> None:
+    if sys.platform == "win32":
+        return
+    try:
+        os.chmod(path, mode)
+    except OSError as exc:
+        logger.warning("could not chmod {} to {:o}: {}", path, mode, exc)
+
+
 def init_auth_db(data_dir: Path | None = None) -> Path:
     """Create the auth DB and schema if absent. Idempotent and lock-guarded."""
     base = data_dir if data_dir is not None else get_data_dir()
@@ -86,6 +98,9 @@ def init_auth_db(data_dir: Path | None = None) -> Path:
         first = not db_path.exists()
         with open_auth_db(base) as conn:
             conn.executescript(_SCHEMA)
+        # auth.db holds argon2 password hashes — lock to owner-read/write only
+        # so a shared-host setup can't expose hashes to other local users.
+        _chmod_quiet(db_path, stat.S_IRUSR | stat.S_IWUSR)
         if first:
             logger.info(f"Auth: initialized {db_path}")
         else:

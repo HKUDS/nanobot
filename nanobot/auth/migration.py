@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -70,7 +72,11 @@ def migrate_legacy_layout_if_needed(data_dir: Path | None = None) -> Path | None
     if not _needs_migration(base_dir):
         return None
 
-    lock = FileLock(str(base_dir / _MIGRATION_LOCK_FILENAME))
+    # Lock OUTSIDE the directory we're about to rename — keeping the lockfile
+    # inside base_dir would leave its descriptor pointing at the archived path
+    # on POSIX and crash the cleanup on Windows.
+    lock_path = base_dir.parent / f"{base_dir.name}{_MIGRATION_LOCK_FILENAME}"
+    lock = FileLock(str(lock_path))
     with lock:
         if not _needs_migration(base_dir):
             return None  # Another process raced and migrated first.
@@ -79,15 +85,29 @@ def migrate_legacy_layout_if_needed(data_dir: Path | None = None) -> Path | None
         config_bytes: bytes | None = None
         if config_src.is_file():
             config_bytes = config_src.read_bytes()
+        # Print the rollback hint BEFORE the destructive move so a partial
+        # failure between move() and the recreate steps below doesn't leave
+        # the operator without the archive path.
+        logger.warning(
+            "Legacy single-tenant state detected at {} — archiving to {}. "
+            "Rollback: `mv {} {}` (or set {}=1 to skip on next start).",
+            base_dir, archive, archive, base_dir, _SKIP_ENV_VAR,
+        )
         shutil.move(str(base_dir), str(archive))
+        # Lock down the archive — it carries the old auth.db hashes and any
+        # session JSONLs that were sitting in the legacy layout.
+        if sys.platform != "win32":
+            try:
+                os.chmod(archive, stat.S_IRWXU)  # 0o700
+            except OSError as exc:
+                logger.warning("could not chmod archive {}: {}", archive, exc)
         base_dir.mkdir(parents=True, exist_ok=True)
+        if sys.platform != "win32":
+            try:
+                os.chmod(base_dir, stat.S_IRWXU)  # 0o700
+            except OSError as exc:
+                logger.warning("could not chmod fresh base {}: {}", base_dir, exc)
         (base_dir / "users").mkdir(exist_ok=True)
         if config_bytes is not None:
             (base_dir / "config.json").write_bytes(config_bytes)
-        logger.warning(
-            "Legacy single-tenant state detected at {} — archived to {}. "
-            "Fresh multi-tenant tree initialised. Rollback: `mv {} {}` "
-            "(or set {}=1 to skip on next start).",
-            base_dir, archive, archive, base_dir, _SKIP_ENV_VAR,
-        )
         return archive
