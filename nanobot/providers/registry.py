@@ -368,6 +368,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         reasoning_as_content=True,
     ),
     # Xiaomi MIMO (小米): OpenAI-compatible API
+    # Hosted API (api.xiaomimimo.com) accepts {"thinking": {"type": "enabled"|"disabled"}}
+    # to toggle reasoning, matching the existing thinking_type style.
     ProviderSpec(
         name="xiaomi_mimo",
         keywords=("xiaomi_mimo", "mimo"),
@@ -375,6 +377,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Xiaomi MIMO",
         backend="openai_compat",
         default_api_base="https://api.xiaomimimo.com/v1",
+        thinking_style="thinking_type",
     ),
     # LongCat: OpenAI-compatible API
     ProviderSpec(
