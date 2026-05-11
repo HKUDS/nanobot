@@ -25,7 +25,11 @@ from nanobot.channels.feishu import FeishuChannel, FeishuConfig
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_feishu_channel(reply_to_message: bool = False, group_policy: str = "mention") -> FeishuChannel:
+def _make_feishu_channel(
+    reply_to_message: bool = False,
+    group_policy: str = "mention",
+    topic_isolation: bool = True,
+) -> FeishuChannel:
     config = FeishuConfig(
         enabled=True,
         app_id="cli_test",
@@ -33,6 +37,7 @@ def _make_feishu_channel(reply_to_message: bool = False, group_policy: str = "me
         allow_from=["*"],
         reply_to_message=reply_to_message,
         group_policy=group_policy,
+        topic_isolation=topic_isolation,
     )
     channel = FeishuChannel(config, MessageBus())
     channel._client = MagicMock()
@@ -93,6 +98,15 @@ def test_feishu_config_reply_to_message_defaults_false() -> None:
 def test_feishu_config_reply_to_message_can_be_enabled() -> None:
     config = FeishuConfig(reply_to_message=True)
     assert config.reply_to_message is True
+
+
+def test_feishu_config_topic_isolation_defaults_true() -> None:
+    assert FeishuConfig().topic_isolation is True
+
+
+def test_feishu_config_topic_isolation_can_be_disabled() -> None:
+    config = FeishuConfig(topic_isolation=False)
+    assert config.topic_isolation is False
 
 
 # ---------------------------------------------------------------------------
@@ -917,8 +931,7 @@ async def test_on_message_ignores_unauthorized_sender_before_side_effects() -> N
 @pytest.mark.asyncio
 async def test_session_key_with_topic_isolation_true_uses_thread_scoped() -> None:
     """When topic_isolation is True (default), group messages use thread-scoped session keys."""
-    channel = _make_feishu_channel(group_policy="open")
-    channel.config.topic_isolation = True
+    channel = _make_feishu_channel(group_policy="open", topic_isolation=True)
     bus_spy = []
     original_publish = channel.bus.publish_inbound
 
@@ -957,8 +970,7 @@ async def test_session_key_with_topic_isolation_true_uses_thread_scoped() -> Non
 @pytest.mark.asyncio
 async def test_session_key_with_topic_isolation_false_uses_group_scoped() -> None:
     """When topic_isolation is False, all group messages share the same session key (no isolation)."""
-    channel = _make_feishu_channel(group_policy="open")
-    channel.config.topic_isolation = False
+    channel = _make_feishu_channel(group_policy="open", topic_isolation=False)
     bus_spy = []
     original_publish = channel.bus.publish_inbound
 
