@@ -427,6 +427,11 @@ class WebSocketChannel(BaseChannel):
         self._conn_user_id: dict[Any, str] = {}
         # Cached AuthService instance; lazily built on first cookie-auth request.
         self._auth_svc_cache: Any = None
+        # Per-user SessionManager cache for the read-side REST routes
+        # (/api/sessions list, messages, delete). Mirrors the cache the
+        # AgentLoop keeps so the sidebar sees per-user data instead of the
+        # global workspace.
+        self._user_session_managers: dict[str, Any] = {}
         # Single-use tokens consumed at WebSocket handshake.
         self._issued_tokens: dict[str, float] = {}
         # Multi-use tokens for the embedded webui's REST surface; checked but not consumed.
@@ -539,6 +544,31 @@ class WebSocketChannel(BaseChannel):
         from nanobot.auth.context import UserContext
 
         return UserContext(user_id=user_id)
+
+    def _session_manager_for_request(self, request: Any) -> Any:
+        """Return the per-user SessionManager when the request carries a
+        valid auth cookie; fall back to the global manager otherwise.
+
+        The REST surface (`/api/sessions*`) is request-scoped, not
+        connection-scoped, so we re-derive user_id from the cookie on each
+        call instead of consulting ``_conn_user_id``.
+        """
+        if self._session_manager is None:
+            return None
+        user_id = self._user_id_from_request(request)
+        if user_id is None:
+            return self._session_manager
+        cached = self._user_session_managers.get(user_id)
+        if cached is None:
+            from nanobot.auth.context import UserContext
+            from nanobot.session.manager import SessionManager
+
+            cached = SessionManager(
+                self._session_manager.workspace,
+                user_ctx=UserContext(user_id=user_id),
+            )
+            self._user_session_managers[user_id] = cached
+        return cached
 
     async def _send_event(self, connection: Any, event: str, **fields: Any) -> None:
         """Send a control event (attached, error, ...) to a single connection."""
@@ -755,9 +785,10 @@ class WebSocketChannel(BaseChannel):
     def _handle_sessions_list(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
-        if self._session_manager is None:
+        sm = self._session_manager_for_request(request)
+        if sm is None:
             return _http_error(503, "session manager unavailable")
-        sessions = self._session_manager.list_sessions()
+        sessions = sm.list_sessions()
         # The webui is only meaningful for websocket-channel chats — CLI /
         # Slack / Lark / Discord sessions can't be resumed from the browser,
         # so leaking them into the sidebar is just noise. Filter to the
@@ -911,7 +942,8 @@ class WebSocketChannel(BaseChannel):
     def _handle_session_messages(self, request: WsRequest, key: str) -> Response:
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
-        if self._session_manager is None:
+        sm = self._session_manager_for_request(request)
+        if sm is None:
             return _http_error(503, "session manager unavailable")
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
@@ -921,7 +953,7 @@ class WebSocketChannel(BaseChannel):
         # caller probe arbitrary CLI / Slack / Lark history by handcrafted URL.
         if not self._is_webui_session_key(decoded_key):
             return _http_error(404, "session not found")
-        data = self._session_manager.read_session_file(decoded_key)
+        data = sm.read_session_file(decoded_key)
         if data is None:
             return _http_error(404, "session not found")
         # Decorate persisted user messages with signed media URLs so the
@@ -1060,7 +1092,8 @@ class WebSocketChannel(BaseChannel):
     def _handle_session_delete(self, request: WsRequest, key: str) -> Response:
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
-        if self._session_manager is None:
+        sm = self._session_manager_for_request(request)
+        if sm is None:
             return _http_error(503, "session manager unavailable")
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
@@ -1070,7 +1103,7 @@ class WebSocketChannel(BaseChannel):
         # JSONL, so keep the blast radius narrow and explicit.
         if not self._is_webui_session_key(decoded_key):
             return _http_error(404, "session not found")
-        deleted = self._session_manager.delete_session(decoded_key)
+        deleted = sm.delete_session(decoded_key)
         return _http_json_response({"deleted": bool(deleted)})
 
     def _serve_static(self, request_path: str) -> Response | None:
