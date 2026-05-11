@@ -258,6 +258,7 @@ class FeishuConfig(Base):
     reply_to_message: bool = False  # If True, bot replies quote the user's original message
     streaming: bool = True
     domain: Literal["feishu", "lark"] = "feishu"  # Set to "lark" for international Lark
+    topic_isolation: bool = True  # If True, each topic in group chat gets its own session (isolation)
 
 
 _STREAM_ELEMENT_ID = "streaming_md"
@@ -1770,12 +1771,15 @@ class FeishuChannel(BaseChannel):
             if not content and not media_paths:
                 return
 
-            # Build topic-scoped session key for conversation isolation.
-            # Group chat: each topic gets its own session via root_id (replies
-            # inside a topic) or message_id (top-level messages start a new topic).
+            # Build session key for conversation isolation.
+            # If topic_isolation is True: each topic gets its own session via root_id/message_id.
+            # If topic_isolation is False: all messages in group share the same session.
             # Private chat: no override — same behavior as Telegram/Slack.
             if chat_type == "group":
-                session_key = f"feishu:{chat_id}:{root_id or message_id}"
+                if self.config.topic_isolation:
+                    session_key = f"feishu:{chat_id}:{root_id or message_id}"
+                else:
+                    session_key = f"feishu:{chat_id}"
             else:
                 session_key = None
 
