@@ -13,7 +13,6 @@ from typing import Any
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.agent.tools.ask import AskUserInterrupt
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.helpers import (
@@ -283,22 +282,18 @@ class AgentRunner:
             self._accumulate_usage(usage, raw_usage)
 
             if response.should_execute_tools:
-                tool_calls = list(response.tool_calls)
-                ask_index = next((i for i, tc in enumerate(tool_calls) if tc.name == "ask_user"), None)
-                if ask_index is not None:
-                    tool_calls = tool_calls[: ask_index + 1]
-                context.tool_calls = list(tool_calls)
+                context.tool_calls = list(response.tool_calls)
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
 
                 assistant_message = build_assistant_message(
                     response.content or "",
-                    tool_calls=[tc.to_openai_tool_call() for tc in tool_calls],
+                    tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
                     reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
                 messages.append(assistant_message)
-                tools_used.extend(tc.name for tc in tool_calls)
+                tools_used.extend(tc.name for tc in response.tool_calls)
                 await self._emit_checkpoint(
                     spec,
                     {
@@ -307,7 +302,7 @@ class AgentRunner:
                         "model": spec.model,
                         "assistant_message": assistant_message,
                         "completed_tool_results": [],
-                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in tool_calls],
+                        "pending_tool_calls": [tc.to_openai_tool_call() for tc in response.tool_calls],
                     },
                 )
 
@@ -315,7 +310,7 @@ class AgentRunner:
 
                 results, new_events, fatal_error = await self._execute_tools(
                     spec,
-                    tool_calls,
+                    response.tool_calls,
                     external_lookup_counts,
                     workspace_violation_counts,
                 )
@@ -323,9 +318,7 @@ class AgentRunner:
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
                 completed_tool_results: list[dict[str, Any]] = []
-                for tool_call, result in zip(tool_calls, results):
-                    if isinstance(fatal_error, AskUserInterrupt) and tool_call.name == "ask_user":
-                        continue
+                for tool_call, result in zip(response.tool_calls, results):
                     tool_message = {
                         "role": "tool",
                         "tool_call_id": tool_call.id,
@@ -340,15 +333,6 @@ class AgentRunner:
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
                 if fatal_error is not None:
-                    if isinstance(fatal_error, AskUserInterrupt):
-                        final_content = fatal_error.question
-                        stop_reason = "ask_user"
-                        context.final_content = final_content
-                        context.stop_reason = stop_reason
-                        if hook.wants_streaming():
-                            await hook.on_stream_end(context, resuming=False)
-                        await hook.after_iteration(context)
-                        break
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     final_content = error
                     stop_reason = "tool_error"
@@ -724,10 +708,6 @@ class AgentRunner:
                     )
                     tool_results.append(result)
                     batch_results.append(result)
-                    if isinstance(result[2], AskUserInterrupt):
-                        break
-            if any(isinstance(error, AskUserInterrupt) for _, _, error in batch_results):
-                break
 
         results: list[Any] = []
         events: list[dict[str, str]] = []
@@ -799,9 +779,6 @@ class AgentRunner:
                 "status": "error",
                 "detail": str(exc),
             }
-            if isinstance(exc, AskUserInterrupt):
-                event["status"] = "waiting"
-                return "", event, exc
             payload = f"Error: {type(exc).__name__}: {exc}"
             handled = self._classify_violation(
                 raw_text=str(exc),

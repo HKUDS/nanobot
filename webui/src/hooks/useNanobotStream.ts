@@ -230,7 +230,7 @@ export function useNanobotStream(
         // the full turn (all tool calls + final text) is complete.
         setMessages((prev) => {
           const filtered = activeId ? prev.filter((m) => m.id !== activeId) : prev;
-          const content = ev.buttons?.length ? (ev.button_prompt ?? ev.text) : ev.text;
+          const content = ev.text;
           return [
             ...filtered,
             {
@@ -238,7 +238,6 @@ export function useNanobotStream(
               role: "assistant",
               content,
               createdAt: Date.now(),
-              ...(ev.buttons && ev.buttons.length > 0 ? { buttons: ev.buttons } : {}),
               ...(hasMedia ? { media } : {}),
             },
           ];

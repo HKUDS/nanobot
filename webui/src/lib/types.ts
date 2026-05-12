@@ -44,8 +44,6 @@ export interface UIMessage {
   images?: UIImage[];
   /** Signed or local UI-renderable media attachments. */
   media?: UIMediaAttachment[];
-  /** Optional answer choices for a pending ask_user question. */
-  buttons?: string[][];
 }
 
 export interface ChatSummary {
@@ -141,9 +139,6 @@ export type InboundEvent =
       reply_to?: string;
       media?: string[];
       media_urls?: Array<{ url: string; name?: string }>;
-      buttons?: string[][];
-      /** Original prompt before the websocket text fallback appends buttons. */
-      button_prompt?: string;
       /** Present when the frame is an agent breadcrumb (e.g. tool hint,
        * generic progress line) rather than a conversational reply. */
       kind?: "tool_hint" | "progress";

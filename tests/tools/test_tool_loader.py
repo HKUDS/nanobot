@@ -405,7 +405,7 @@ def test_loader_registers_same_tools_as_old_hardcoded():
     registered = loader.load(ctx, registry)
 
     expected = {
-        "ask_user", "read_file", "write_file", "edit_file", "list_dir",
+        "read_file", "write_file", "edit_file", "list_dir",
         "glob", "grep", "notebook_edit", "exec", "web_search", "web_fetch",
         "message", "spawn", "cron",
     }

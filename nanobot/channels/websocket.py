@@ -55,14 +55,6 @@ def _normalize_config_path(path: str) -> str:
     return _strip_trailing_slash(path)
 
 
-def _append_buttons_as_text(text: str, buttons: list[list[str]]) -> str:
-    labels = [label for row in buttons for label in row if label]
-    if not labels:
-        return text
-    fallback = "\n".join(f"{index}. {label}" for index, label in enumerate(labels, 1))
-    return f"{text}\n\n{fallback}" if text else fallback
-
-
 class WebSocketConfig(Base):
     """WebSocket server channel configuration.
 
@@ -1443,16 +1435,11 @@ class WebSocketChannel(BaseChannel):
             await self.send_session_updated(msg.chat_id)
             return
         text = msg.content
-        if msg.buttons:
-            text = _append_buttons_as_text(text, msg.buttons)
         payload: dict[str, Any] = {
             "event": "message",
             "chat_id": msg.chat_id,
             "text": text,
         }
-        if msg.buttons:
-            payload["buttons"] = msg.buttons
-            payload["button_prompt"] = msg.content
         if msg.media:
             payload["media"] = msg.media
             urls: list[dict[str, str]] = []

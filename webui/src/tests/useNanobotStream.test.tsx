@@ -217,29 +217,6 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[0].content).toBe("long task");
   });
 
-  it("keeps assistant buttons on complete messages", () => {
-    const fake = fakeClient();
-    const { result } = renderHook(() => useNanobotStream("chat-q", EMPTY_MESSAGES), {
-      wrapper: wrap(fake.client),
-    });
-
-    act(() => {
-      fake.emit("chat-q", {
-        event: "message",
-        chat_id: "chat-q",
-        text: "How should I continue?\n\n1. Short answer\n2. Detailed answer",
-        button_prompt: "How should I continue?",
-        buttons: [["Short answer", "Detailed answer"]],
-      });
-    });
-
-    expect(result.current.messages).toHaveLength(1);
-    expect(result.current.messages[0].content).toBe("How should I continue?");
-    expect(result.current.messages[0].buttons).toEqual([
-      ["Short answer", "Detailed answer"],
-    ]);
-  });
-
   it("keeps streaming alive across stream_end and completes on turn_end", () => {
     const fake = fakeClient();
     const onTurnEnd = vi.fn();
