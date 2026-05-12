@@ -17,7 +17,7 @@ from nanobot.agent.tools.ask import AskUserInterrupt
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.helpers import (
-    build_assistant_message,
+    build_assistant_message, #Compatible for tool calls
     estimate_message_tokens,
     estimate_prompt_tokens_chain,
     find_legal_message_start,
@@ -35,7 +35,7 @@ from nanobot.utils.runtime import (
     repeated_external_lookup_error,
     repeated_workspace_violation_error,
 )
-
+# global variables, designed for defence
 _DEFAULT_ERROR_MESSAGE = "Sorry, I encountered an error calling the AI model."
 _PERSISTED_MODEL_ERROR_PLACEHOLDER = "[Assistant reply unavailable due to model error.]"
 _MAX_EMPTY_RETRIES = 2
@@ -45,6 +45,7 @@ _MAX_INJECTION_CYCLES = 5
 _SNIP_SAFETY_BUFFER = 1024
 _MICROCOMPACT_KEEP_RECENT = 10
 _MICROCOMPACT_MIN_CHARS = 500
+#To avoid occupying too much context -- compact tools
 _COMPACTABLE_TOOLS = frozenset({
     "read_file", "exec", "grep", "glob",
     "web_search", "web_fetch", "list_dir",
@@ -65,11 +66,11 @@ class AgentRunSpec:
     temperature: float | None = None
     max_tokens: int | None = None
     reasoning_effort: str | None = None
-    hook: AgentHook | None = None
+    hook: AgentHook | None = None #hook for User Interface, streaming output, or logging
     error_message: str | None = _DEFAULT_ERROR_MESSAGE
     max_iterations_message: str | None = None
     concurrent_tools: bool = False
-    fail_on_tool_error: bool = False
+    fail_on_tool_error: bool = False # if tool error: stop immediately
     workspace: Path | None = None
     session_key: str | None = None
     context_window_tokens: int | None = None
@@ -88,7 +89,7 @@ class AgentRunResult:
     """Outcome of a shared agent execution."""
 
     final_content: str | None
-    messages: list[dict[str, Any]]
+    messages: list[dict[str, Any]] # includes complete conversations
     tools_used: list[str] = field(default_factory=list)
     usage: dict[str, int] = field(default_factory=dict)
     stop_reason: str = "completed"
@@ -101,7 +102,7 @@ class AgentRunner:
     """Run a tool-capable LLM loop without product-layer concerns."""
 
     def __init__(self, provider: LLMProvider):
-        self.provider = provider
+        self.provider = provider #get LLM interface
 
     @staticmethod
     def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
@@ -232,8 +233,16 @@ class AgentRunner:
         return injected_messages
 
     async def run(self, spec: AgentRunSpec) -> AgentRunResult:
+        '''
+        heart of Agent running
+        1. cutting and parsing context
+        2. calling LLM
+        3. if tool_calls  ->  execute tools
+        4. give tool results back to LLM
+        5. wait for final answer and parsing.
+        '''
         hook = spec.hook or AgentHook()
-        messages = list(spec.initial_messages)
+        messages = list(spec.initial_messages) # current conversation history
         final_content: str | None = None
         tools_used: list[str] = []
         usage: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0}
@@ -273,30 +282,44 @@ class AgentRunner:
                     messages_for_model = self._backfill_missing_tool_results(messages_for_model)
                 except Exception:
                     messages_for_model = messages
+            # get hook for User interface and streaming output
             context = AgentHookContext(iteration=iteration, messages=messages)
             await hook.before_iteration(context)
+
+            # get initial response from LLM
             response = await self._request_model(spec, messages_for_model, hook, context)
+            
+            # calculate total usage of tokens
             raw_usage = self._usage_dict(response.usage)
             context.response = response
             context.usage = dict(raw_usage)
+            
+            
             context.tool_calls = list(response.tool_calls)
             self._accumulate_usage(usage, raw_usage)
 
+            # 1. LLM decided to execute tools:
             if response.should_execute_tools:
                 tool_calls = list(response.tool_calls)
+                # special conditions: tool_call name is ask user
                 ask_index = next((i for i, tc in enumerate(tool_calls) if tc.name == "ask_user"), None)
                 if ask_index is not None:
                     tool_calls = tool_calls[: ask_index + 1]
+                
+                #get tool_calls
                 context.tool_calls = list(tool_calls)
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
 
+                # construcr assistant message (including tool_calls )
                 assistant_message = build_assistant_message(
                     response.content or "",
                     tool_calls=[tc.to_openai_tool_call() for tc in tool_calls],
                     reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
                 )
+
+                #put into current conversation history
                 messages.append(assistant_message)
                 tools_used.extend(tc.name for tc in tool_calls)
                 await self._emit_checkpoint(
@@ -311,8 +334,10 @@ class AgentRunner:
                     },
                 )
 
+                # get hook for tool calls
                 await hook.before_execute_tools(context)
 
+                #Ececute tools
                 results, new_events, fatal_error = await self._execute_tools(
                     spec,
                     tool_calls,
@@ -323,6 +348,8 @@ class AgentRunner:
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
                 completed_tool_results: list[dict[str, Any]] = []
+                
+                # write tool results into message
                 for tool_call, result in zip(tool_calls, results):
                     if isinstance(fatal_error, AskUserInterrupt) and tool_call.name == "ask_user":
                         continue
@@ -339,7 +366,10 @@ class AgentRunner:
                     }
                     messages.append(tool_message)
                     completed_tool_results.append(tool_message)
+                
+                # if error
                 if fatal_error is not None:
+                    # ask user
                     if isinstance(fatal_error, AskUserInterrupt):
                         final_content = fatal_error.question
                         stop_reason = "ask_user"
@@ -349,6 +379,8 @@ class AgentRunner:
                             await hook.on_stream_end(context, resuming=False)
                         await hook.after_iteration(context)
                         break
+                    
+                    # other errors
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     final_content = error
                     stop_reason = "tool_error"
@@ -361,6 +393,7 @@ class AgentRunner:
                         spec, messages, None, injection_cycles,
                         phase="after tool error",
                     )
+                    # step into next LLM loop.
                     if should_continue:
                         had_injections = True
                         continue
@@ -395,7 +428,11 @@ class AgentRunner:
                     spec.session_key or "default",
                 )
 
+
+            # 2. LLM decided not to use tools
             clean = hook.finalize_content(context, response.content)
+
+            # empty answer 
             if response.finish_reason != "error" and is_blank_text(clean):
                 empty_content_retries += 1
                 if empty_content_retries < _MAX_EMPTY_RETRIES:
@@ -418,6 +455,8 @@ class AgentRunner:
                 )
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=False)
+                
+                # ask another time 
                 response = await self._request_finalization_retry(spec, messages_for_model)
                 retry_usage = self._usage_dict(response.usage)
                 self._accumulate_usage(usage, retry_usage)
@@ -427,6 +466,8 @@ class AgentRunner:
                 context.tool_calls = list(response.tool_calls)
                 clean = hook.finalize_content(context, response.content)
 
+            
+            # if stopped by length overflow, cut 
             if response.finish_reason == "length" and not is_blank_text(clean):
                 length_recovery_count += 1
                 if length_recovery_count <= _MAX_LENGTH_RECOVERIES:
@@ -448,6 +489,8 @@ class AgentRunner:
                     await hook.after_iteration(context)
                     continue
 
+            
+            # build assistant message for answers
             assistant_message: dict[str, Any] | None = None
             if response.finish_reason != "error" and not is_blank_text(clean):
                 assistant_message = build_assistant_message(
@@ -509,6 +552,7 @@ class AgentRunner:
                     continue
                 break
 
+            # put answer into message
             messages.append(assistant_message or build_assistant_message(
                 clean,
                 reasoning_content=response.reasoning_content,
@@ -531,6 +575,8 @@ class AgentRunner:
             await hook.after_iteration(context)
             break
         else:
+            
+            # iteration overflow
             stop_reason = "max_iterations"
             if spec.max_iterations_message:
                 final_content = spec.max_iterations_message.format(
@@ -555,6 +601,8 @@ class AgentRunner:
             if drained_after_max_iterations:
                 had_injections = True
 
+        
+        # get Answer back
         return AgentRunResult(
             final_content=final_content,
             messages=messages,
@@ -566,6 +614,8 @@ class AgentRunner:
             had_injections=had_injections,
         )
 
+
+    # build kwargs for LLM
     def _build_request_kwargs(
         self,
         spec: AgentRunSpec,
@@ -573,6 +623,8 @@ class AgentRunner:
         *,
         tools: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
+        
+        
         kwargs: dict[str, Any] = {
             "messages": messages,
             "tools": tools,
@@ -580,6 +632,8 @@ class AgentRunner:
             "retry_mode": spec.provider_retry_mode,
             "on_retry_wait": spec.retry_wait_callback,
         }
+        
+        # Optional kwargs
         if spec.temperature is not None:
             kwargs["temperature"] = spec.temperature
         if spec.max_tokens is not None:
@@ -588,6 +642,7 @@ class AgentRunner:
             kwargs["reasoning_effort"] = spec.reasoning_effort
         return kwargs
 
+    # Asking LLM, supporting streaming, timeout
     async def _request_model(
         self,
         spec: AgentRunSpec,
@@ -595,6 +650,7 @@ class AgentRunner:
         hook: AgentHook,
         context: AgentHookContext,
     ):
+        # time control
         timeout_s: float | None = spec.llm_timeout_s
         if timeout_s is None:
             # Default to a finite timeout to avoid per-session lock starvation when an LLM
@@ -605,6 +661,8 @@ class AgentRunner:
                 timeout_s = float(raw)
             except (TypeError, ValueError):
                 timeout_s = 300.0
+        
+        # timeout <= 0  --> close timeout 
         if timeout_s is not None and timeout_s <= 0:
             timeout_s = None
 
@@ -613,6 +671,8 @@ class AgentRunner:
             messages,
             tools=spec.tools.get_definitions(),
         )
+
+        # streaming output
         wants_streaming = hook.wants_streaming()
         wants_progress_streaming = (
             not wants_streaming
@@ -621,7 +681,10 @@ class AgentRunner:
             and getattr(self.provider, "supports_progress_deltas", False) is True
         )
 
+        # 1. standard streaming
         if wants_streaming:
+            
+            # output each token
             async def _stream(delta: str) -> None:
                 if delta:
                     context.streamed_content = True
@@ -631,6 +694,8 @@ class AgentRunner:
                 **kwargs,
                 on_content_delta=_stream,
             )
+        
+        # 2. progress streaming
         elif wants_progress_streaming:
             stream_buf = ""
 
@@ -638,9 +703,13 @@ class AgentRunner:
                 nonlocal stream_buf
                 if not delta:
                     return
+                
+                # delete thinking content
                 prev_clean = strip_think(stream_buf)
                 stream_buf += delta
                 new_clean = strip_think(stream_buf)
+
+                # only get new parts
                 incremental = new_clean[len(prev_clean):]
                 if incremental:
                     context.streamed_content = True
@@ -650,6 +719,8 @@ class AgentRunner:
                 **kwargs,
                 on_content_delta=_stream_progress,
             )
+
+        # 3. normal output    
         else:
             coro = self.provider.chat_with_retry(**kwargs)
 
@@ -657,6 +728,7 @@ class AgentRunner:
             return await coro
         try:
             return await asyncio.wait_for(coro, timeout=timeout_s)
+        # if time exceed limit, create an error message.
         except asyncio.TimeoutError:
             return LLMResponse(
                 content=f"Error calling LLM: timed out after {timeout_s:g}s",
@@ -664,6 +736,7 @@ class AgentRunner:
                 error_kind="timeout",
             )
 
+    
     async def _request_finalization_retry(
         self,
         spec: AgentRunSpec,
@@ -672,6 +745,7 @@ class AgentRunner:
         retry_messages = list(messages)
         retry_messages.append(build_finalization_retry_message())
         kwargs = self._build_request_kwargs(spec, retry_messages, tools=None)
+        # tools forbiddened. Only answers
         return await self.provider.chat_with_retry(**kwargs)
 
     @staticmethod
@@ -698,6 +772,7 @@ class AgentRunner:
             merged[key] = merged.get(key, 0) + value
         return merged
 
+    # heart of tool execution
     async def _execute_tools(
         self,
         spec: AgentRunSpec,
@@ -705,9 +780,13 @@ class AgentRunner:
         external_lookup_counts: dict[str, int],
         workspace_violation_counts: dict[str, int],
     ) -> tuple[list[Any], list[dict[str, str]], BaseException | None]:
+        # separate tool_calls
         batches = self._partition_tool_batches(spec, tool_calls)
+        
         tool_results: list[tuple[Any, dict[str, str], BaseException | None]] = []
+        
         for batch in batches:
+            # Concurrent execution 
             if spec.concurrent_tools and len(batch) > 1:
                 batch_results = await asyncio.gather(*(
                     self._run_tool(
@@ -716,6 +795,7 @@ class AgentRunner:
                     for tool_call in batch
                 ))
                 tool_results.extend(batch_results)
+            # Sequential execution
             else:
                 batch_results = []
                 for tool_call in batch:
@@ -724,8 +804,10 @@ class AgentRunner:
                     )
                     tool_results.append(result)
                     batch_results.append(result)
+                    # Stop early if ask_user interrupt occurs
                     if isinstance(result[2], AskUserInterrupt):
                         break
+            # Stop entire loop if ask_user interrupt is detected
             if any(isinstance(error, AskUserInterrupt) for _, _, error in batch_results):
                 break
 
@@ -739,6 +821,7 @@ class AgentRunner:
                 fatal_error = error
         return results, events, fatal_error
 
+    # execute single tool
     async def _run_tool(
         self,
         spec: AgentRunSpec,
@@ -746,7 +829,9 @@ class AgentRunner:
         external_lookup_counts: dict[str, int],
         workspace_violation_counts: dict[str, int],
     ) -> tuple[Any, dict[str, str], BaseException | None]:
+        
         hint = "\n\n[Analyze the error above and try a different approach.]"
+        #Prevent repeated external lookups
         lookup_error = repeated_external_lookup_error(
             tool_call.name,
             tool_call.arguments,
@@ -761,6 +846,7 @@ class AgentRunner:
             if spec.fail_on_tool_error:
                 return lookup_error + hint, event, RuntimeError(lookup_error)
             return lookup_error + hint, event, None
+        # pre-prepare of tools
         prepare_call = getattr(spec.tools, "prepare_call", None)
         tool, params, prep_error = None, tool_call.arguments, None
         if callable(prepare_call):
@@ -768,12 +854,28 @@ class AgentRunner:
                 prepared = prepare_call(tool_call.name, tool_call.arguments)
                 if isinstance(prepared, tuple) and len(prepared) == 3:
                     tool, params, prep_error = prepared
+            except Exception:
+                pass
+        # error detection
         if prep_error:
             event = {
                 "name": tool_call.name,
                 "status": "error",
                 "detail": prep_error.split(": ", 1)[-1][:120],
             }
+            
+            if self._is_workspace_violation(prep_error):
+                logger.warning(
+                    "Tool {} blocked by workspace/safety guard during preparation; aborting turn: {}",
+                    tool_call.name,
+                    prep_error.replace("\n", " ").strip()[:200],
+                )
+                event["detail"] = ("workspace_violation: "
+                                   + prep_error.replace("\n", " ").strip())[:160]
+                return prep_error, event, RuntimeError(prep_error)
+            return prep_error + hint, event, RuntimeError(prep_error) if spec.fail_on_tool_error else None
+        
+        # execute tools
             handled = self._classify_violation(
                 raw_text=prep_error,
                 soft_payload=prep_error + hint,
@@ -787,6 +889,7 @@ class AgentRunner:
                 RuntimeError(prep_error) if spec.fail_on_tool_error else None
             )
         try:
+        
             if tool is not None:
                 result = await tool.execute(**params)
             else:
@@ -799,9 +902,20 @@ class AgentRunner:
                 "status": "error",
                 "detail": str(exc),
             }
+            
             if isinstance(exc, AskUserInterrupt):
                 event["status"] = "waiting"
                 return "", event, exc
+            
+            if self._is_workspace_violation(str(exc)):
+                logger.warning(
+                    "Tool {} blocked by workspace/safety guard; aborting turn: {}",
+                    tool_call.name,
+                    str(exc).replace("\n", " ").strip()[:200],
+                )
+                event["detail"] = ("workspace_violation: "
+                                   + str(exc).replace("\n", " ").strip())[:160]
+                return f"Error: {type(exc).__name__}: {exc}", event, exc
             payload = f"Error: {type(exc).__name__}: {exc}"
             handled = self._classify_violation(
                 raw_text=str(exc),
@@ -817,6 +931,7 @@ class AgentRunner:
                 return payload, event, exc
             return payload, event, None
 
+        # return tool_result
         if isinstance(result, str) and result.startswith("Error"):
             event = {
                 "name": tool_call.name,
@@ -836,6 +951,7 @@ class AgentRunner:
                 return result + hint, event, RuntimeError(result)
             return result + hint, event, None
 
+        # normal return.
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()
         if not detail:
