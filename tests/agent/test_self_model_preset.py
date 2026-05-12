@@ -104,11 +104,11 @@ def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
         model="base-model",
         context_window_tokens=1000,
         model_presets={"deep": preset},
-        model_preset_snapshot_builder=lambda _name: ProviderSnapshot(
+        provider_snapshot_loader=lambda preset_name=None: ProviderSnapshot(
             provider=new_provider,
             model=preset.model,
             context_window_tokens=preset.context_window_tokens,
-            signature=("deep", preset.model),
+            signature=(preset_name, preset.model),
         ),
     )
 
@@ -135,7 +135,7 @@ def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
         model="base-model",
         context_window_tokens=1000,
         model_presets={"fast": preset},
-        model_preset_snapshot_builder=lambda _name: (_ for _ in ()).throw(
+        provider_snapshot_loader=lambda preset_name=None: (_ for _ in ()).throw(
             RuntimeError("provider unavailable")
         ),
     )
@@ -173,10 +173,11 @@ def test_active_model_preset_survives_unchanged_config_refresh(tmp_path) -> None
         workspace=tmp_path,
         model="base-model",
         context_window_tokens=1000,
-        provider_snapshot_loader=lambda: default_snapshot,
         provider_signature=default_snapshot.signature,
         model_presets={"fast": ModelPresetConfig(model="openai/gpt-4.1")},
-        model_preset_snapshot_builder=lambda _name: fast_snapshot,
+        provider_snapshot_loader=lambda preset_name=None: (
+            fast_snapshot if preset_name == "fast" else default_snapshot
+        ),
     )
 
     loop.set_model_preset("fast")
@@ -209,10 +210,11 @@ def test_config_model_refresh_clears_active_model_preset(tmp_path) -> None:
         workspace=tmp_path,
         model="base-model",
         context_window_tokens=1000,
-        provider_snapshot_loader=lambda: webui_snapshot,
+        provider_snapshot_loader=lambda preset_name=None: (
+            fast_snapshot if preset_name == "fast" else webui_snapshot
+        ),
         provider_signature=("base-model", "auto", "openai", "sk-old"),
         model_presets={"fast": ModelPresetConfig(model="openai/gpt-4.1")},
-        model_preset_snapshot_builder=lambda _name: fast_snapshot,
     )
 
     loop.set_model_preset("fast")

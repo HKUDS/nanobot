@@ -672,7 +672,6 @@ def _run_gateway(
             "aihubmix": config.providers.aihubmix,
         },
         provider_snapshot_loader=load_provider_snapshot,
-        model_preset_snapshot_builder=lambda name: load_provider_snapshot(preset_name=name),
         provider_signature=provider_snapshot.signature,
     )
 
