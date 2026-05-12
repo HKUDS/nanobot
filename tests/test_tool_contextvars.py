@@ -4,6 +4,7 @@ import asyncio
 
 import pytest
 
+from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.spawn import SpawnTool
@@ -23,14 +24,14 @@ async def test_message_tool_keeps_task_local_context() -> None:
     tool = MessageTool(send_callback=send_callback)
 
     async def task_one() -> str:
-        tool.set_context("feishu", "chat-a")
+        tool.set_context(RequestContext(channel="feishu", chat_id="chat-a"))
         entered.set()
         await release.wait()
         return await tool.execute(content="one")
 
     async def task_two() -> str:
         await entered.wait()
-        tool.set_context("email", "chat-b")
+        tool.set_context(RequestContext(channel="email", chat_id="chat-b"))
         release.set()
         return await tool.execute(content="two")
 
@@ -70,14 +71,14 @@ async def test_spawn_tool_keeps_task_local_context() -> None:
     tool = SpawnTool(_Manager())
 
     async def task_one() -> str:
-        tool.set_context("whatsapp", "chat-a")
+        tool.set_context(RequestContext(channel="whatsapp", chat_id="chat-a"))
         entered.set()
         await release.wait()
         return await tool.execute(task="one")
 
     async def task_two() -> str:
         await entered.wait()
-        tool.set_context("telegram", "chat-b")
+        tool.set_context(RequestContext(channel="telegram", chat_id="chat-b"))
         release.set()
         return await tool.execute(task="two")
 
@@ -96,14 +97,14 @@ async def test_cron_tool_keeps_task_local_context(tmp_path) -> None:
     release = asyncio.Event()
 
     async def task_one() -> str:
-        tool.set_context("feishu", "chat-a")
+        tool.set_context(RequestContext(channel="feishu", chat_id="chat-a"))
         entered.set()
         await release.wait()
         return await tool.execute(action="add", message="first", every_seconds=60)
 
     async def task_two() -> str:
         await entered.wait()
-        tool.set_context("email", "chat-b")
+        tool.set_context(RequestContext(channel="email", chat_id="chat-b"))
         release.set()
         return await tool.execute(action="add", message="second", every_seconds=60)
 
@@ -129,7 +130,7 @@ async def test_message_tool_basic_set_context_and_execute() -> None:
         seen.append((msg.channel, msg.chat_id, msg.content))
 
     tool = MessageTool(send_callback=send_callback)
-    tool.set_context("telegram", "chat-123", "msg-456")
+    tool.set_context(RequestContext(channel="telegram", chat_id="chat-123", message_id="msg-456"))
 
     result = await tool.execute(content="hello")
     assert result == "Message sent to telegram:chat-123"
@@ -180,7 +181,7 @@ async def test_spawn_tool_basic_set_context_and_execute() -> None:
             return f"ok: {task}"
 
     tool = SpawnTool(_Manager())
-    tool.set_context("feishu", "chat-abc")
+    tool.set_context(RequestContext(channel="feishu", chat_id="chat-abc"))
 
     result = await tool.execute(task="do something")
     assert result == "ok: do something"
@@ -221,7 +222,7 @@ async def test_spawn_tool_default_values_without_set_context() -> None:
 async def test_cron_tool_basic_set_context_and_execute(tmp_path) -> None:
     """Single task: set_context then add job should use correct target."""
     tool = CronTool(CronService(tmp_path / "jobs.json"))
-    tool.set_context("wechat", "user-789")
+    tool.set_context(RequestContext(channel="wechat", chat_id="user-789"))
 
     result = await tool.execute(action="add", message="standup", every_seconds=300)
     assert result.startswith("Created job")

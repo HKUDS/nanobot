@@ -1142,6 +1142,10 @@ class WebSocketChannel(BaseChannel):
         return None
 
     async def start(self) -> None:
+        from nanobot.utils.logging_bridge import redirect_lib_logging
+
+        redirect_lib_logging("websockets", level="WARNING")
+
         self._running = True
         self._stop_event = asyncio.Event()
 

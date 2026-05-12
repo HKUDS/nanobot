@@ -192,6 +192,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="volces",
         default_api_base="https://ark.cn-beijing.volces.com/api/v3",
         thinking_style="thinking_type",
+        supports_max_completion_tokens=True,
     ),
 
     # VolcEngine Coding Plan (火山引擎 Coding Plan): same key as volcengine
@@ -205,6 +206,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://ark.cn-beijing.volces.com/api/coding/v3",
         strip_model_prefix=True,
         thinking_style="thinking_type",
+        supports_max_completion_tokens=True,
     ),
 
     # BytePlus: VolcEngine international, pay-per-use models
