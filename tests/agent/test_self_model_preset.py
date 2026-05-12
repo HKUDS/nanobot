@@ -284,7 +284,7 @@ def test_from_config_injects_default_preset(tmp_path) -> None:
     assert loop.model_presets["default"].model == "openai/gpt-4.1"
 
 
-def test_from_config_preserves_existing_default_preset(tmp_path) -> None:
+def test_from_config_reserves_default_for_agent_defaults(tmp_path) -> None:
     from unittest.mock import patch
 
     from nanobot.config.schema import Config
@@ -297,4 +297,4 @@ def test_from_config_preserves_existing_default_preset(tmp_path) -> None:
     fake_provider = _provider("openai/gpt-4.1")
     with patch("nanobot.providers.factory.make_provider", return_value=fake_provider):
         loop = AgentLoop.from_config(config)
-    assert loop.model_presets["default"].model == "custom-model"
+    assert loop.model_presets["default"].model == "openai/gpt-4.1"

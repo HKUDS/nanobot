@@ -39,6 +39,24 @@ def test_resolve_preset_returns_active_preset() -> None:
     assert resolved.reasoning_effort == "low"
 
 
+def test_default_preset_is_agents_defaults_even_when_named_preset_is_active() -> None:
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "model": "openai/gpt-4.1",
+                "provider": "openai",
+                "modelPreset": "fast",
+            }
+        },
+        "modelPresets": {
+            "fast": {"model": "openai/gpt-4.1-mini", "provider": "openai"},
+        },
+    })
+
+    assert config.resolve_preset().model == "openai/gpt-4.1-mini"
+    assert config.resolve_preset("default").model == "openai/gpt-4.1"
+
+
 def test_model_presets_accepts_camel_case_root_key() -> None:
     config = Config.model_validate({
         "modelPresets": {
@@ -77,6 +95,19 @@ def test_validator_rejects_unknown_preset() -> None:
                 }
             }
         })
+
+
+def test_model_preset_accepts_explicit_default_name() -> None:
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "model": "openai/gpt-4.1",
+                "modelPreset": "default",
+            }
+        }
+    })
+
+    assert config.resolve_preset().model == "openai/gpt-4.1"
 
 
 def test_resolve_preset_rejects_unknown_named_preset() -> None:

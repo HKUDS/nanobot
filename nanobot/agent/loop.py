@@ -437,8 +437,7 @@ class AgentLoop:
         context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
         model_preset_snapshot_builder = extra.pop("model_preset_snapshot_builder", None)
         model_presets = dict(config.model_presets)
-        if "default" not in model_presets:
-            model_presets["default"] = resolved
+        model_presets["default"] = config.resolve_default_preset()
         return cls(
             bus=bus,
             provider=provider,

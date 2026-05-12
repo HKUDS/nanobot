@@ -282,23 +282,27 @@ class Config(BaseSettings):
     @model_validator(mode="after")
     def _validate_model_preset(self) -> "Config":
         name = self.agents.defaults.model_preset
-        if name and name not in self.model_presets:
+        if name and name != "default" and name not in self.model_presets:
             raise ValueError(f"model_preset {name!r} not found in model_presets")
         return self
 
-    def resolve_preset(self, name: str | None = None) -> ModelPresetConfig:
-        """Return effective model params: from active preset, or individual defaults."""
-        name = self.agents.defaults.model_preset if name is None else name
-        if name:
-            if name not in self.model_presets:
-                raise KeyError(f"model_preset {name!r} not found in model_presets")
-            return self.model_presets[name]
+    def resolve_default_preset(self) -> ModelPresetConfig:
+        """Return the implicit `default` preset from agents.defaults fields."""
         d = self.agents.defaults
         return ModelPresetConfig(
             model=d.model, provider=d.provider, max_tokens=d.max_tokens,
             context_window_tokens=d.context_window_tokens,
             temperature=d.temperature, reasoning_effort=d.reasoning_effort,
         )
+
+    def resolve_preset(self, name: str | None = None) -> ModelPresetConfig:
+        """Return effective model params from a named preset or the implicit default."""
+        name = self.agents.defaults.model_preset if name is None else name
+        if not name or name == "default":
+            return self.resolve_default_preset()
+        if name not in self.model_presets:
+            raise KeyError(f"model_preset {name!r} not found in model_presets")
+        return self.model_presets[name]
 
     @property
     def workspace_path(self) -> Path:
