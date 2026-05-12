@@ -99,7 +99,6 @@ class SubagentManager:
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
-        self._tools_cache: ToolRegistry | None = None
 
     def _subagent_tools_config(self) -> ToolsConfig:
         """Build a ToolsConfig scoped for subagent use."""
@@ -110,9 +109,7 @@ class SubagentManager:
         )
 
     def _build_tools(self) -> ToolRegistry:
-        """Build the subagent tool registry via ToolLoader (cached)."""
-        if self._tools_cache is not None:
-            return self._tools_cache
+        """Build an isolated subagent tool registry via ToolLoader."""
         registry = ToolRegistry()
         ctx = ToolContext(
             config=self._subagent_tools_config(),
@@ -120,7 +117,6 @@ class SubagentManager:
             file_state_store=FileStates(),
         )
         ToolLoader().load(ctx, registry, scope="subagent")
-        self._tools_cache = registry
         return registry
 
     def set_provider(self, provider: LLMProvider, model: str) -> None:

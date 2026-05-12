@@ -79,8 +79,7 @@ class MessageTool(Tool, ContextAware):
         self._default_channel.set(ctx.channel)
         self._default_chat_id.set(ctx.chat_id)
         self._default_message_id.set(ctx.message_id)
-        if ctx.metadata:
-            self._default_metadata.set(ctx.metadata)
+        self._default_metadata.set(dict(ctx.metadata or {}))
 
     def set_send_callback(self, callback: Callable[[OutboundMessage], Awaitable[None]]) -> None:
         """Set the callback for sending messages."""
