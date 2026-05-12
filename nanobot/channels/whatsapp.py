@@ -265,6 +265,7 @@ class WhatsAppChannel(BaseChannel):
                     transcription = await self.transcribe_audio(media_paths[0])
                     if transcription:
                         content = transcription
+                        media_paths = []
                         self.logger.info("Transcribed voice from {}: {}...", sender_id, transcription[:50])
                     else:
                         content = "[Voice Message: Transcription failed]"
