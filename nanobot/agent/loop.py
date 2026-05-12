@@ -293,7 +293,7 @@ class AgentLoop:
         provider_signature: tuple[object, ...] | None = None,
         model_presets: dict[str, ModelPresetConfig] | None = None,
         model_preset: str | None = None,
-        model_preset_snapshot_builder: Callable[[ModelPresetConfig], ProviderSnapshot] | None = None,
+        model_preset_snapshot_builder: Callable[[str], ProviderSnapshot] | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -304,6 +304,10 @@ class AgentLoop:
         self.provider = provider
         self._provider_snapshot_loader = provider_snapshot_loader
         self._provider_signature = provider_signature
+        self._config_provider_signature = provider_signature
+        self._config_default_selection_signature = (
+            provider_signature[:2] if provider_signature is not None else None
+        )
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self.max_iterations = (
@@ -431,6 +435,7 @@ class AgentLoop:
         resolved = config.resolve_preset()
         model = extra.pop("model", None) or resolved.model
         context_window_tokens = extra.pop("context_window_tokens", None) or resolved.context_window_tokens
+        model_preset_snapshot_builder = extra.pop("model_preset_snapshot_builder", None)
         model_presets = dict(config.model_presets)
         if "default" not in model_presets:
             model_presets["default"] = resolved
@@ -457,7 +462,10 @@ class AgentLoop:
             tools_config=config.tools,
             model_presets=model_presets,
             model_preset=defaults.model_preset,
-            model_preset_snapshot_builder=lambda preset: build_provider_snapshot(config, preset=preset),
+            model_preset_snapshot_builder=(
+                model_preset_snapshot_builder
+                or (lambda name: build_provider_snapshot(config, preset_name=name))
+            ),
             **extra,
         )
 
@@ -489,8 +497,32 @@ class AgentLoop:
         except Exception:
             logger.exception("Failed to refresh provider config")
             return
+        if self._active_preset:
+            default_selection = snapshot.signature[:2]
+            if (
+                self._config_default_selection_signature is not None
+                and default_selection != self._config_default_selection_signature
+            ):
+                self._active_preset = None
+                self._config_provider_signature = snapshot.signature
+                self._config_default_selection_signature = default_selection
+                self._apply_provider_snapshot(snapshot)
+                return
+            self._config_provider_signature = snapshot.signature
+            self._config_default_selection_signature = default_selection
+            try:
+                snapshot = self._build_model_preset_snapshot(self._active_preset)
+            except Exception:
+                logger.exception("Failed to refresh active model preset")
+                return
+            if snapshot.signature == self._provider_signature:
+                return
+            self._apply_provider_snapshot(snapshot)
+            return
         if snapshot.signature == self._provider_signature:
             return
+        self._config_provider_signature = snapshot.signature
+        self._config_default_selection_signature = snapshot.signature[:2]
         self._apply_provider_snapshot(snapshot)
 
     # -- model_preset property --
@@ -506,7 +538,7 @@ class AgentLoop:
     def _build_model_preset_snapshot(self, name: str) -> ProviderSnapshot:
         preset = self.model_presets[name]
         if self._model_preset_snapshot_builder is not None:
-            return self._model_preset_snapshot_builder(preset)
+            return self._model_preset_snapshot_builder(name)
         self.provider.generation = preset.to_generation_settings()
         return ProviderSnapshot(
             provider=self.provider,

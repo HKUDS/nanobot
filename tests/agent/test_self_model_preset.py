@@ -80,11 +80,11 @@ def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
         model="base-model",
         context_window_tokens=1000,
         model_presets={"deep": preset},
-        model_preset_snapshot_builder=lambda _preset: ProviderSnapshot(
+        model_preset_snapshot_builder=lambda _name: ProviderSnapshot(
             provider=new_provider,
-            model=_preset.model,
-            context_window_tokens=_preset.context_window_tokens,
-            signature=("deep", _preset.model),
+            model=preset.model,
+            context_window_tokens=preset.context_window_tokens,
+            signature=("deep", preset.model),
         ),
     )
 
@@ -111,7 +111,7 @@ def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
         model="base-model",
         context_window_tokens=1000,
         model_presets={"fast": preset},
-        model_preset_snapshot_builder=lambda _preset: (_ for _ in ()).throw(
+        model_preset_snapshot_builder=lambda _name: (_ for _ in ()).throw(
             RuntimeError("provider unavailable")
         ),
     )
@@ -126,6 +126,78 @@ def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
     assert loop.dream.model == "base-model"
     assert loop.context_window_tokens == 1000
     assert loop.consolidator.max_completion_tokens == 123
+
+
+def test_active_model_preset_survives_unchanged_config_refresh(tmp_path) -> None:
+    base_provider = _provider("base-model", max_tokens=123)
+    fast_provider = _provider("openai/gpt-4.1", max_tokens=4096)
+    default_snapshot = ProviderSnapshot(
+        provider=base_provider,
+        model="base-model",
+        context_window_tokens=1000,
+        signature=("base-model", "auto", "openai", "sk-old"),
+    )
+    fast_snapshot = ProviderSnapshot(
+        provider=fast_provider,
+        model="openai/gpt-4.1",
+        context_window_tokens=32_768,
+        signature=("openai/gpt-4.1", "auto", "openai", "sk-old"),
+    )
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=base_provider,
+        workspace=tmp_path,
+        model="base-model",
+        context_window_tokens=1000,
+        provider_snapshot_loader=lambda: default_snapshot,
+        provider_signature=default_snapshot.signature,
+        model_presets={"fast": ModelPresetConfig(model="openai/gpt-4.1")},
+        model_preset_snapshot_builder=lambda _name: fast_snapshot,
+    )
+
+    loop.set_model_preset("fast")
+    loop._refresh_provider_snapshot()
+
+    assert loop.model_preset == "fast"
+    assert loop.provider is fast_provider
+    assert loop.model == "openai/gpt-4.1"
+
+
+def test_config_model_refresh_clears_active_model_preset(tmp_path) -> None:
+    base_provider = _provider("base-model", max_tokens=123)
+    fast_provider = _provider("openai/gpt-4.1", max_tokens=4096)
+    webui_provider = _provider("anthropic/claude-opus-4-5", max_tokens=2048)
+    webui_snapshot = ProviderSnapshot(
+        provider=webui_provider,
+        model="anthropic/claude-opus-4-5",
+        context_window_tokens=200_000,
+        signature=("anthropic/claude-opus-4-5", "anthropic", "anthropic", "sk-old"),
+    )
+    fast_snapshot = ProviderSnapshot(
+        provider=fast_provider,
+        model="openai/gpt-4.1",
+        context_window_tokens=32_768,
+        signature=("openai/gpt-4.1", "auto", "openai", "sk-old"),
+    )
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=base_provider,
+        workspace=tmp_path,
+        model="base-model",
+        context_window_tokens=1000,
+        provider_snapshot_loader=lambda: webui_snapshot,
+        provider_signature=("base-model", "auto", "openai", "sk-old"),
+        model_presets={"fast": ModelPresetConfig(model="openai/gpt-4.1")},
+        model_preset_snapshot_builder=lambda _name: fast_snapshot,
+    )
+
+    loop.set_model_preset("fast")
+    loop._refresh_provider_snapshot()
+
+    assert loop.model_preset is None
+    assert loop.provider is webui_provider
+    assert loop.model == "anthropic/claude-opus-4-5"
+    assert loop.context_window_tokens == 200_000
 
 
 def test_model_preset_setter_raises_on_unknown(tmp_path) -> None:
