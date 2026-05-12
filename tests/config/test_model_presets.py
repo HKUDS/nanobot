@@ -12,6 +12,31 @@ def test_resolve_preset_returns_defaults_when_no_preset() -> None:
     assert resolved.reasoning_effort == config.agents.defaults.reasoning_effort
 
 
+def test_legacy_defaults_config_without_presets_still_resolves() -> None:
+    config = Config.model_validate({
+        "agents": {
+            "defaults": {
+                "model": "openai/gpt-4.1",
+                "provider": "openai",
+                "maxTokens": 4096,
+                "contextWindowTokens": 128_000,
+                "temperature": 0.2,
+                "reasoningEffort": "low",
+            }
+        }
+    })
+
+    resolved = config.resolve_preset()
+    assert config.agents.defaults.model_preset is None
+    assert config.model_presets == {}
+    assert resolved.model == "openai/gpt-4.1"
+    assert resolved.provider == "openai"
+    assert resolved.max_tokens == 4096
+    assert resolved.context_window_tokens == 128_000
+    assert resolved.temperature == 0.2
+    assert resolved.reasoning_effort == "low"
+
+
 def test_resolve_preset_returns_active_preset() -> None:
     config = Config.model_validate({
         "model_presets": {
