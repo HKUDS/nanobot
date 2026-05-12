@@ -110,6 +110,17 @@ def test_model_preset_accepts_explicit_default_name() -> None:
     assert config.resolve_preset().model == "openai/gpt-4.1"
 
 
+def test_model_presets_rejects_reserved_default_name() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="model_preset name 'default' is reserved"):
+        Config.model_validate({
+            "modelPresets": {
+                "default": {"model": "custom-model"},
+            },
+        })
+
+
 def test_resolve_preset_rejects_unknown_named_preset() -> None:
     import pytest
     with pytest.raises(KeyError, match="model_preset 'missing' not found"):

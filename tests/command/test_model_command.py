@@ -102,6 +102,7 @@ async def test_model_command_unknown_preset_keeps_old_state(tmp_path) -> None:
     out = await cmd_model(_ctx(loop, "/model missing", args="missing"))
 
     assert "Could not switch model preset" in out.content
+    assert "\"model_preset" not in out.content
     assert "Available presets: `default`, `fast`" in out.content
     assert loop.model_preset is None
     assert loop.model == "base-model"

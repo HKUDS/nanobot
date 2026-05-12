@@ -104,11 +104,11 @@ def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
         model="base-model",
         context_window_tokens=1000,
         model_presets={"deep": preset},
-        provider_snapshot_loader=lambda preset_name=None: ProviderSnapshot(
+        preset_snapshot_loader=lambda name: ProviderSnapshot(
             provider=new_provider,
             model=preset.model,
             context_window_tokens=preset.context_window_tokens,
-            signature=(preset_name, preset.model),
+            signature=(name, preset.model),
         ),
     )
 
@@ -135,7 +135,7 @@ def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
         model="base-model",
         context_window_tokens=1000,
         model_presets={"fast": preset},
-        provider_snapshot_loader=lambda preset_name=None: (_ for _ in ()).throw(
+        preset_snapshot_loader=lambda _name: (_ for _ in ()).throw(
             RuntimeError("provider unavailable")
         ),
     )
@@ -175,9 +175,8 @@ def test_active_model_preset_survives_unchanged_config_refresh(tmp_path) -> None
         context_window_tokens=1000,
         provider_signature=default_snapshot.signature,
         model_presets={"fast": ModelPresetConfig(model="openai/gpt-4.1")},
-        provider_snapshot_loader=lambda preset_name=None: (
-            fast_snapshot if preset_name == "fast" else default_snapshot
-        ),
+        provider_snapshot_loader=lambda: default_snapshot,
+        preset_snapshot_loader=lambda _name: fast_snapshot,
     )
 
     loop.set_model_preset("fast")
@@ -210,11 +209,10 @@ def test_config_model_refresh_clears_active_model_preset(tmp_path) -> None:
         workspace=tmp_path,
         model="base-model",
         context_window_tokens=1000,
-        provider_snapshot_loader=lambda preset_name=None: (
-            fast_snapshot if preset_name == "fast" else webui_snapshot
-        ),
+        provider_snapshot_loader=lambda: webui_snapshot,
         provider_signature=("base-model", "auto", "openai", "sk-old"),
         model_presets={"fast": ModelPresetConfig(model="openai/gpt-4.1")},
+        preset_snapshot_loader=lambda _name: fast_snapshot,
     )
 
     loop.set_model_preset("fast")
@@ -286,17 +284,16 @@ def test_from_config_injects_default_preset(tmp_path) -> None:
     assert loop.model_presets["default"].model == "openai/gpt-4.1"
 
 
-def test_from_config_reserves_default_for_agent_defaults(tmp_path) -> None:
+def test_from_config_static_preset_loader_does_not_enable_hot_reload(tmp_path) -> None:
     from unittest.mock import patch
 
     from nanobot.config.schema import Config
     config = Config.model_validate({
         "agents": {"defaults": {"model": "openai/gpt-4.1", "workspace": str(tmp_path)}},
-        "model_presets": {
-            "default": {"model": "custom-model"}
-        },
+        "model_presets": {"fast": {"model": "openai/gpt-4.1-mini"}},
     })
     fake_provider = _provider("openai/gpt-4.1")
     with patch("nanobot.providers.factory.make_provider", return_value=fake_provider):
         loop = AgentLoop.from_config(config)
-    assert loop.model_presets["default"].model == "openai/gpt-4.1"
+    assert loop._provider_snapshot_loader is None
+    assert loop._preset_snapshot_loader is not None

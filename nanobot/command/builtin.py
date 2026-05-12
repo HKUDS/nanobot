@@ -213,6 +213,10 @@ def _active_model_preset_name(loop) -> str:
     return loop.model_preset or "default"
 
 
+def _command_error_message(exc: Exception) -> str:
+    return str(exc.args[0]) if isinstance(exc, KeyError) and exc.args else str(exc)
+
+
 def _model_command_status(loop) -> str:
     names = _model_preset_names(loop)
     active = _active_model_preset_name(loop)
@@ -256,7 +260,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
             content=(
-                f"Could not switch model preset: {exc}\n\n"
+                f"Could not switch model preset: {_command_error_message(exc)}\n\n"
                 f"Available presets: {_format_preset_names(names)}"
             ),
             metadata=metadata,
