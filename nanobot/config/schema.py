@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -233,9 +233,19 @@ class ExecToolConfig(Base):
     timeout: int = 60
     path_append: str = ""
     sandbox: str = ""  # sandbox backend: "" (none) or "bwrap"
+    sandbox_binds_ro: list[str] = Field(default_factory=list)  # Extra read-only bind mounts for the sandbox; absolute host paths bound to the same path inside (e.g. ["/opt/toolchain"])
+    sandbox_binds_rw: list[str] = Field(default_factory=list)  # Extra read-write bind mounts for the sandbox; absolute host paths bound to the same path inside (e.g. ["/var/cache/builds"])
     allowed_env_keys: list[str] = Field(default_factory=list)  # Env var names to pass through to subprocess (e.g. ["GOPATH", "JAVA_HOME"])
     allow_patterns: list[str] = Field(default_factory=list)  # Regex patterns that bypass deny_patterns (e.g. [r"rm\s+-rf\s+/tmp/"])
     deny_patterns: list[str] = Field(default_factory=list)  # Extra regex patterns to block (appended to built-in list)
+
+    @field_validator("sandbox_binds_ro", "sandbox_binds_rw")
+    @classmethod
+    def _validate_absolute_paths(cls, v: list[str]) -> list[str]:
+        for p in v:
+            if not p or not Path(p).is_absolute():
+                raise ValueError(f"sandbox bind path must be absolute, got {p!r}")
+        return v
 
 class MCPServerConfig(Base):
     """MCP server connection configuration (stdio or HTTP)."""

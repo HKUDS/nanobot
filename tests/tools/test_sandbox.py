@@ -1,10 +1,16 @@
 """Tests for nanobot.agent.tools.sandbox."""
 
 import shlex
+import sys
 
 import pytest
 
 from nanobot.agent.tools.sandbox import wrap_command
+
+_SKIP_WINDOWS = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="tests use POSIX-style absolute paths; runs on Linux and macOS",
+)
 
 
 def _parse(cmd: str) -> list[str]:
@@ -109,6 +115,64 @@ class TestBwrapBackend:
         assert (str(fake_media), str(fake_media)) in try_pairs
 
 
+@_SKIP_WINDOWS
+class TestUserBinds:
+    def test_default_no_extra_binds(self, tmp_path):
+        ws = str(tmp_path / "project")
+        result = wrap_command("bwrap", "ls", ws, ws)
+        tokens = _parse(result)
+
+        # Without extras, /opt/foo should not appear anywhere.
+        assert "/opt/foo" not in tokens
+
+    def test_ro_binds_appended_strict(self, tmp_path):
+        ws = str(tmp_path / "project")
+        result = wrap_command(
+            "bwrap", "ls", ws, ws,
+            binds_ro=["/opt/toolchain", "/etc/pip.conf"],
+        )
+        tokens = _parse(result)
+
+        ro_pairs = {(tokens[i + 1], tokens[i + 2])
+                    for i, t in enumerate(tokens) if t == "--ro-bind"}
+        assert ("/opt/toolchain", "/opt/toolchain") in ro_pairs
+        assert ("/etc/pip.conf",  "/etc/pip.conf")  in ro_pairs
+
+        # Strict: user paths use --ro-bind, never --ro-bind-try.
+        try_pairs = {(tokens[i + 1], tokens[i + 2])
+                     for i, t in enumerate(tokens) if t == "--ro-bind-try"}
+        assert ("/opt/toolchain", "/opt/toolchain") not in try_pairs
+
+    def test_rw_binds_appended_strict(self, tmp_path):
+        ws = str(tmp_path / "project")
+        result = wrap_command(
+            "bwrap", "ls", ws, ws,
+            binds_rw=["/var/cache/builds"],
+        )
+        tokens = _parse(result)
+
+        bind_pairs = {(tokens[i + 1], tokens[i + 2])
+                      for i, t in enumerate(tokens) if t == "--bind"}
+        assert ("/var/cache/builds", "/var/cache/builds") in bind_pairs
+
+    def test_user_binds_before_chdir(self, tmp_path):
+        """User binds must be emitted before --chdir so bwrap mounts before cd."""
+        ws = str(tmp_path / "project")
+        result = wrap_command(
+            "bwrap", "ls", ws, ws,
+            binds_ro=["/opt/x"], binds_rw=["/opt/y"],
+        )
+        tokens = _parse(result)
+        chdir_idx = tokens.index("--chdir")
+        # The bind targets appear at i+1; check they precede --chdir.
+        ro_idx = next(i for i, t in enumerate(tokens)
+                      if t == "--ro-bind" and tokens[i + 1] == "/opt/x")
+        rw_idx = next(i for i, t in enumerate(tokens)
+                      if t == "--bind" and tokens[i + 1] == "/opt/y")
+        assert ro_idx < chdir_idx
+        assert rw_idx < chdir_idx
+
+
 class TestUnknownBackend:
     def test_raises_value_error(self, tmp_path):
         ws = str(tmp_path / "project")
@@ -119,3 +183,42 @@ class TestUnknownBackend:
         ws = str(tmp_path / "project")
         with pytest.raises(ValueError):
             wrap_command("", "ls", ws, ws)
+
+
+@_SKIP_WINDOWS
+class TestSandboxBindsConfig:
+    """ExecToolConfig must reject relative or empty bind paths up front."""
+
+    def test_relative_ro_path_rejected(self):
+        from nanobot.config.schema import ExecToolConfig
+        with pytest.raises(ValueError, match="must be absolute"):
+            ExecToolConfig(sandbox_binds_ro=["relative/path"])
+
+    def test_relative_rw_path_rejected(self):
+        from nanobot.config.schema import ExecToolConfig
+        with pytest.raises(ValueError, match="must be absolute"):
+            ExecToolConfig(sandbox_binds_rw=["./cache"])
+
+    def test_empty_string_rejected(self):
+        from nanobot.config.schema import ExecToolConfig
+        with pytest.raises(ValueError):
+            ExecToolConfig(sandbox_binds_ro=[""])
+
+    def test_absolute_paths_accepted(self):
+        from nanobot.config.schema import ExecToolConfig
+        cfg = ExecToolConfig(
+            sandbox_binds_ro=["/opt/toolchain"],
+            sandbox_binds_rw=["/var/cache/builds"],
+        )
+        assert cfg.sandbox_binds_ro == ["/opt/toolchain"]
+        assert cfg.sandbox_binds_rw == ["/var/cache/builds"]
+
+    def test_camel_case_alias(self):
+        """Config files use camelCase keys via the Base alias generator."""
+        from nanobot.config.schema import ExecToolConfig
+        cfg = ExecToolConfig.model_validate({
+            "sandboxBindsRo": ["/opt/x"],
+            "sandboxBindsRw": ["/var/y"],
+        })
+        assert cfg.sandbox_binds_ro == ["/opt/x"]
+        assert cfg.sandbox_binds_rw == ["/var/y"]

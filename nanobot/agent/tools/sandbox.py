@@ -11,12 +11,21 @@ from pathlib import Path
 from nanobot.config.paths import get_media_dir
 
 
-def _bwrap(command: str, workspace: str, cwd: str) -> str:
+def _bwrap(
+    command: str,
+    workspace: str,
+    cwd: str,
+    binds_ro: list[str] | None = None,
+    binds_rw: list[str] | None = None,
+) -> str:
     """Wrap command in a bubblewrap sandbox (requires bwrap in container).
 
     Only the workspace is bind-mounted read-write; its parent dir (which holds
     config.json) is hidden behind a fresh tmpfs.  The media directory is
     bind-mounted read-only so exec commands can read uploaded attachments.
+
+    *binds_ro* / *binds_rw* are extra absolute host paths bind-mounted at the
+    same path inside the sandbox.  Strict: missing host paths fail loudly.
     """
     ws = Path(workspace).resolve()
     media = get_media_dir().resolve()
@@ -39,17 +48,25 @@ def _bwrap(command: str, workspace: str, cwd: str) -> str:
         "--dir", str(ws),                 # recreate workspace mount point
         "--bind", str(ws), str(ws),
         "--ro-bind-try", str(media), str(media),  # read-only access to media
-        "--chdir", sandbox_cwd,
-        "--", "sh", "-c", command,
     ]
+    for p in binds_ro or []: args += ["--ro-bind", p, p]
+    for p in binds_rw or []: args += ["--bind",    p, p]
+    args += ["--chdir", sandbox_cwd, "--", "sh", "-c", command]
     return shlex.join(args)
 
 
 _BACKENDS = {"bwrap": _bwrap}
 
 
-def wrap_command(sandbox: str, command: str, workspace: str, cwd: str) -> str:
+def wrap_command(
+    sandbox: str,
+    command: str,
+    workspace: str,
+    cwd: str,
+    binds_ro: list[str] | None = None,
+    binds_rw: list[str] | None = None,
+) -> str:
     """Wrap *command* using the named sandbox backend."""
     if backend := _BACKENDS.get(sandbox):
-        return backend(command, workspace, cwd)
+        return backend(command, workspace, cwd, binds_ro=binds_ro, binds_rw=binds_rw)
     raise ValueError(f"Unknown sandbox backend {sandbox!r}. Available: {list(_BACKENDS)}")

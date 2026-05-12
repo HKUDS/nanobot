@@ -188,6 +188,8 @@ class SubagentManager:
                     timeout=self.exec_config.timeout,
                     restrict_to_workspace=self.restrict_to_workspace,
                     sandbox=self.exec_config.sandbox,
+                    sandbox_binds_ro=self.exec_config.sandbox_binds_ro,
+                    sandbox_binds_rw=self.exec_config.sandbox_binds_rw,
                     path_append=self.exec_config.path_append,
                     allowed_env_keys=self.exec_config.allowed_env_keys,
                     allow_patterns=self.exec_config.allow_patterns,
