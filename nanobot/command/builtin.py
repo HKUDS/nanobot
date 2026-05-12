@@ -203,13 +203,23 @@ def _format_preset_names(names: list[str]) -> str:
     return ", ".join(f"`{name}`" for name in names) if names else "(none configured)"
 
 
+def _model_preset_names(loop) -> list[str]:
+    names = set(loop.model_presets)
+    names.add("default")
+    return ["default", *sorted(name for name in names if name != "default")]
+
+
+def _active_model_preset_name(loop) -> str:
+    return loop.model_preset or "default"
+
+
 def _model_command_status(loop) -> str:
-    names = sorted(loop.model_presets)
-    active = loop.model_preset or "(none)"
+    names = _model_preset_names(loop)
+    active = _active_model_preset_name(loop)
     return "\n".join([
         "## Model",
         f"- Current model: `{loop.model}`",
-        f"- Active preset: `{active}`",
+        f"- Current preset: `{active}`",
         f"- Available presets: {_format_preset_names(names)}",
     ])
 
@@ -241,7 +251,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
     try:
         loop.set_model_preset(name)
     except (KeyError, ValueError) as exc:
-        names = sorted(loop.model_presets)
+        names = _model_preset_names(loop)
         return OutboundMessage(
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,

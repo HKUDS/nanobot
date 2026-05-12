@@ -61,8 +61,8 @@ async def test_model_command_lists_current_and_available_presets(tmp_path) -> No
     out = await cmd_model(_ctx(loop, "/model"))
 
     assert "Current model: `base-model`" in out.content
-    assert "Active preset: `(none)`" in out.content
-    assert "`default`" in out.content
+    assert "Current preset: `default`" in out.content
+    assert "Available presets: `default`, `fast`" in out.content
     assert "`fast`" in out.content
     assert out.metadata == {"render_as": "text"}
 
