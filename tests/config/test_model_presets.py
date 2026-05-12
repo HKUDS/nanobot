@@ -39,6 +39,20 @@ def test_resolve_preset_returns_active_preset() -> None:
     assert resolved.reasoning_effort == "low"
 
 
+def test_model_presets_accepts_camel_case_root_key() -> None:
+    config = Config.model_validate({
+        "modelPresets": {
+            "fast": {
+                "model": "openai/gpt-4.1",
+                "provider": "openai",
+            }
+        },
+    })
+
+    assert config.model_presets["fast"].model == "openai/gpt-4.1"
+    assert config.model_presets["fast"].provider == "openai"
+
+
 def test_resolve_preset_can_target_named_preset_without_activating() -> None:
     config = Config.model_validate({
         "model_presets": {

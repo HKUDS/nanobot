@@ -274,7 +274,10 @@ class Config(BaseSettings):
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
-    model_presets: dict[str, ModelPresetConfig] = Field(default_factory=dict)
+    model_presets: dict[str, ModelPresetConfig] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("modelPresets", "model_presets"),
+    )
 
     @model_validator(mode="after")
     def _validate_model_preset(self) -> "Config":
