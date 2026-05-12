@@ -657,6 +657,71 @@ That's it! Environment variables, model routing, config matching, and `nanobot s
 
 </details>
 
+## Model Presets
+
+Model presets let you name a complete model configuration and switch it at runtime with `/model <preset>`.
+
+Existing configs do not need to change. If you do not set `modelPresets` or `agents.defaults.modelPreset`, nanobot keeps using `agents.defaults.*` exactly as before.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "openai/gpt-4.1",
+      "provider": "openai",
+      "maxTokens": 8192,
+      "contextWindowTokens": 128000,
+      "temperature": 0.1,
+      "modelPreset": null
+    }
+  },
+  "modelPresets": {
+    "fast": {
+      "model": "openai/gpt-4.1-mini",
+      "provider": "openai",
+      "maxTokens": 4096,
+      "contextWindowTokens": 128000,
+      "temperature": 0.2,
+      "reasoningEffort": "low"
+    },
+    "deep": {
+      "model": "anthropic/claude-opus-4-5",
+      "provider": "anthropic",
+      "maxTokens": 8192,
+      "contextWindowTokens": 200000,
+      "reasoningEffort": "high"
+    }
+  }
+}
+```
+
+`modelPresets` is a top-level object. The keys under it (`fast`, `deep`, `coding`, etc.) are user-defined preset names. Each preset supports:
+
+| Field | Description |
+|-------|-------------|
+| `model` | Model name to use for this preset. |
+| `provider` | Provider name, or `"auto"` to use provider auto-detection. |
+| `maxTokens` | Maximum completion/output tokens. |
+| `contextWindowTokens` | Context window size used by prompt building and consolidation decisions. |
+| `temperature` | Sampling temperature. |
+| `reasoningEffort` | Optional reasoning/thinking setting. Provider support varies. |
+
+`default` is reserved and always means the implicit preset built from `agents.defaults.*`; do not define `modelPresets.default`. Use `/model default` to switch back to `agents.defaults.*`.
+
+Set `agents.defaults.modelPreset` to start with a named preset:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "modelPreset": "fast"
+    }
+  }
+}
+```
+
+When `modelPreset` is `null` or omitted, startup uses the implicit `default` preset from `agents.defaults.*`. Runtime changes made with `/model <preset>` are not written back to `config.json`; they affect future turns until the process restarts or another model/config change replaces them.
+
 ## Channel Settings
 
 Global settings that apply to all channels. Configure under the `channels` section in `~/.nanobot/config.json`:

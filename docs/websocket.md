@@ -128,6 +128,18 @@ All frames are JSON text. Each message has an `event` field.
 }
 ```
 
+**`runtime_model_updated`** — broadcast when the gateway runtime model changes, for example after `/model <preset>`:
+
+```json
+{
+  "event": "runtime_model_updated",
+  "model_name": "openai/gpt-4.1-mini",
+  "model_preset": "fast"
+}
+```
+
+`model_preset` is omitted when no named preset is active. WebUI clients use this event to keep the displayed model badge in sync across slash commands, config reloads, and settings changes.
+
 **`attached`** — confirmation for `new_chat` / `attach` inbound envelopes (see [Multi-chat multiplexing](#multi-chat-multiplexing)):
 
 ```json
