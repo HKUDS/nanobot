@@ -109,6 +109,11 @@ def test_feishu_config_topic_isolation_can_be_disabled() -> None:
     assert config.topic_isolation is False
 
 
+def test_feishu_config_topic_isolation_accepts_camel_case() -> None:
+    config = FeishuConfig.model_validate({"topicIsolation": False})
+    assert config.topic_isolation is False
+
+
 # ---------------------------------------------------------------------------
 # _get_message_content_sync tests
 # ---------------------------------------------------------------------------
