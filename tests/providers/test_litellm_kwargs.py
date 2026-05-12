@@ -847,6 +847,18 @@ def test_volcengine_thinking_enabled() -> None:
     assert kw["extra_body"] == {"thinking": {"type": "enabled"}}
 
 
+def test_volcengine_uses_max_completion_tokens() -> None:
+    kw = _build_kwargs_for("volcengine", "doubao-seed-2-0-pro")
+    assert kw["max_completion_tokens"] == 1024
+    assert "max_tokens" not in kw
+
+
+def test_volcengine_coding_plan_uses_max_completion_tokens() -> None:
+    kw = _build_kwargs_for("volcengine_coding_plan", "doubao-seed-2-0-pro")
+    assert kw["max_completion_tokens"] == 1024
+    assert "max_tokens" not in kw
+
+
 def test_byteplus_thinking_disabled_for_minimal() -> None:
     kw = _build_kwargs_for("byteplus", "doubao-seed-2-0-pro", reasoning_effort="minimal")
     assert kw["extra_body"] == {"thinking": {"type": "disabled"}}

@@ -25,7 +25,11 @@ from nanobot.channels.feishu import FeishuChannel, FeishuConfig
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_feishu_channel(reply_to_message: bool = False, group_policy: str = "mention") -> FeishuChannel:
+def _make_feishu_channel(
+    reply_to_message: bool = False,
+    group_policy: str = "mention",
+    topic_isolation: bool = True,
+) -> FeishuChannel:
     config = FeishuConfig(
         enabled=True,
         app_id="cli_test",
@@ -33,6 +37,7 @@ def _make_feishu_channel(reply_to_message: bool = False, group_policy: str = "me
         allow_from=["*"],
         reply_to_message=reply_to_message,
         group_policy=group_policy,
+        topic_isolation=topic_isolation,
     )
     channel = FeishuChannel(config, MessageBus())
     channel._client = MagicMock()
@@ -93,6 +98,20 @@ def test_feishu_config_reply_to_message_defaults_false() -> None:
 def test_feishu_config_reply_to_message_can_be_enabled() -> None:
     config = FeishuConfig(reply_to_message=True)
     assert config.reply_to_message is True
+
+
+def test_feishu_config_topic_isolation_defaults_true() -> None:
+    assert FeishuConfig().topic_isolation is True
+
+
+def test_feishu_config_topic_isolation_can_be_disabled() -> None:
+    config = FeishuConfig(topic_isolation=False)
+    assert config.topic_isolation is False
+
+
+def test_feishu_config_topic_isolation_accepts_camel_case() -> None:
+    config = FeishuConfig.model_validate({"topicIsolation": False})
+    assert config.topic_isolation is False
 
 
 # ---------------------------------------------------------------------------
@@ -912,3 +931,93 @@ async def test_on_message_ignores_unauthorized_sender_before_side_effects() -> N
     channel._download_and_save_media.assert_not_awaited()
     channel.transcribe_audio.assert_not_awaited()
     channel._handle_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_session_key_with_topic_isolation_true_uses_thread_scoped() -> None:
+    """When topic_isolation is True (default), group messages use thread-scoped session keys."""
+    channel = _make_feishu_channel(group_policy="open", topic_isolation=True)
+    bus_spy = []
+    original_publish = channel.bus.publish_inbound
+
+    async def capture(msg):
+        bus_spy.append(msg)
+        await original_publish(msg)
+
+    channel.bus.publish_inbound = capture
+    channel._download_and_save_media = AsyncMock(return_value=(None, ""))
+    channel.transcribe_audio = AsyncMock(return_value="")
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    # Test with root_id
+    event1 = _make_feishu_event(
+        chat_type="group",
+        content='{"text": "hello"}',
+        root_id="om_root123",
+        message_id="om_child456",
+    )
+    await channel._on_message(event1)
+
+    # Test without root_id
+    event2 = _make_feishu_event(
+        chat_type="group",
+        content='{"text": "another"}',
+        root_id=None,
+        message_id="om_001",
+    )
+    await channel._on_message(event2)
+
+    assert len(bus_spy) == 2
+    assert bus_spy[0].session_key_override == "feishu:oc_abc:om_root123"
+    assert bus_spy[1].session_key_override == "feishu:oc_abc:om_001"
+
+
+@pytest.mark.asyncio
+async def test_session_key_with_topic_isolation_false_uses_group_scoped() -> None:
+    """When topic_isolation is False, all group messages share the same session key (no isolation)."""
+    channel = _make_feishu_channel(group_policy="open", topic_isolation=False)
+    bus_spy = []
+    original_publish = channel.bus.publish_inbound
+
+    async def capture(msg):
+        bus_spy.append(msg)
+        await original_publish(msg)
+
+    channel.bus.publish_inbound = capture
+    channel._download_and_save_media = AsyncMock(return_value=(None, ""))
+    channel.transcribe_audio = AsyncMock(return_value="")
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    # Test with root_id
+    event1 = _make_feishu_event(
+        chat_type="group",
+        content='{"text": "hello"}',
+        root_id="om_root123",
+        message_id="om_child456",
+    )
+    await channel._on_message(event1)
+
+    # Test without root_id
+    event2 = _make_feishu_event(
+        chat_type="group",
+        content='{"text": "another"}',
+        root_id=None,
+        message_id="om_001",
+    )
+    await channel._on_message(event2)
+
+    # Private chat still works
+    event3 = _make_feishu_event(
+        chat_type="p2p",
+        content='{"text": "private"}',
+        root_id=None,
+        message_id="om_private",
+    )
+    await channel._on_message(event3)
+
+    assert len(bus_spy) == 3
+    # Group messages all share the same key
+    assert bus_spy[0].session_key_override == "feishu:oc_abc"
+    assert bus_spy[1].session_key_override == "feishu:oc_abc"
+    # Private chat has no session key override
+    assert bus_spy[2].session_key_override is None
