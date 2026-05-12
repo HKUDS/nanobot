@@ -1,5 +1,7 @@
 """Shell execution tool."""
 
+from __future__ import annotations
+
 import asyncio
 import os
 import re
@@ -10,11 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
+from pydantic import Field
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.sandbox import wrap_command
 from nanobot.agent.tools.schema import IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.config.paths import get_media_dir
+from nanobot.config.schema import Base
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -27,6 +31,17 @@ _WORKSPACE_BOUNDARY_NOTE = (
     "resource, tell them you cannot reach it under the current "
     "restrict_to_workspace policy and ask how to proceed."
 )
+
+
+class ExecToolConfig(Base):
+    """Shell exec tool configuration."""
+    enable: bool = True
+    timeout: int = 60
+    path_append: str = ""
+    sandbox: str = ""
+    allowed_env_keys: list[str] = Field(default_factory=list)
+    allow_patterns: list[str] = Field(default_factory=list)
+    deny_patterns: list[str] = Field(default_factory=list)
 
 
 @tool_parameters(
@@ -47,6 +62,31 @@ _WORKSPACE_BOUNDARY_NOTE = (
 )
 class ExecTool(Tool):
     """Tool to execute shell commands."""
+    _scopes = {"core", "subagent"}
+
+    config_key = "exec"
+
+    @classmethod
+    def config_cls(cls):
+        return ExecToolConfig
+
+    @classmethod
+    def enabled(cls, ctx: Any) -> bool:
+        return ctx.config.exec.enable
+
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        cfg = ctx.config.exec
+        return cls(
+            working_dir=ctx.workspace,
+            timeout=cfg.timeout,
+            restrict_to_workspace=ctx.config.restrict_to_workspace,
+            sandbox=cfg.sandbox,
+            path_append=cfg.path_append,
+            allowed_env_keys=cfg.allowed_env_keys,
+            allow_patterns=cfg.allow_patterns,
+            deny_patterns=cfg.deny_patterns,
+        )
 
     def __init__(
         self,
@@ -276,6 +316,7 @@ class ExecTool(Tool):
                 "TMP": os.environ.get("TMP", f"{sr}\\Temp"),
                 "PATHEXT": os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD"),
                 "PATH": os.environ.get("PATH", f"{sr}\\system32;{sr}"),
+                "PYTHONUNBUFFERED": "1",
                 "APPDATA": os.environ.get("APPDATA", ""),
                 "LOCALAPPDATA": os.environ.get("LOCALAPPDATA", ""),
                 "ProgramData": os.environ.get("ProgramData", ""),
@@ -293,6 +334,7 @@ class ExecTool(Tool):
             "HOME": home,
             "LANG": os.environ.get("LANG", "C.UTF-8"),
             "TERM": os.environ.get("TERM", "dumb"),
+            "PYTHONUNBUFFERED": "1",
         }
         for key in self.allowed_env_keys:
             val = os.environ.get(key)

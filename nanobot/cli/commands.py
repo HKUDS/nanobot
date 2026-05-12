@@ -1061,7 +1061,11 @@ def agent(
     if message:
         # Single message mode — direct call, no bus needed
         async def run_once():
-            renderer = StreamRenderer(render_markdown=markdown)
+            renderer = StreamRenderer(
+                render_markdown=markdown,
+                bot_name=config.agents.defaults.bot_name,
+                bot_icon=config.agents.defaults.bot_icon,
+            )
             response = await agent_loop.process_direct(
                 message, session_id,
                 on_progress=_cli_progress,
@@ -1175,7 +1179,11 @@ def agent(
 
                         turn_done.clear()
                         turn_response.clear()
-                        renderer = StreamRenderer(render_markdown=markdown)
+                        renderer = StreamRenderer(
+                            render_markdown=markdown,
+                            bot_name=config.agents.defaults.bot_name,
+                            bot_icon=config.agents.defaults.bot_icon,
+                        )
 
                         await bus.publish_inbound(InboundMessage(
                             channel=cli_channel,

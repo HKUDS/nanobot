@@ -8,11 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
-from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
+from nanobot.agent.tools.schema import (
+    BooleanSchema,
+    IntegerSchema,
+    StringSchema,
+    tool_parameters_schema,
+)
 from nanobot.config.paths import get_media_dir
-
+from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 _FS_WORKSPACE_BOUNDARY_NOTE = (
     " (this is a hard policy boundary, not a transient failure; "
@@ -34,7 +38,7 @@ def _resolve_path(
     resolved = p.resolve()
     if allowed_dir:
         media_path = get_media_dir().resolve()
-        all_dirs = [allowed_dir] + [media_path] + (extra_allowed_dirs or []) 
+        all_dirs = [allowed_dir] + [media_path] + (extra_allowed_dirs or [])
         if not any(_is_under(resolved, d) for d in all_dirs):
             raise PermissionError(
                 f"Path {path} is outside allowed directory {allowed_dir}"
@@ -69,6 +73,23 @@ class _FsTool(Tool):
         # current async task, which keeps shared tool instances session-safe.
         self._explicit_file_states = file_states
         self._fallback_file_states = FileStates()
+
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+
+        restrict = (
+            ctx.config.restrict_to_workspace
+            or ctx.config.exec.sandbox
+        )
+        allowed_dir = Path(ctx.workspace) if restrict else None
+        extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
+        return cls(
+            workspace=Path(ctx.workspace),
+            allowed_dir=allowed_dir,
+            extra_allowed_dirs=extra_read,
+            file_states=ctx.file_state_store,
+        )
 
     @property
     def _file_states(self) -> FileStates:
@@ -147,6 +168,7 @@ def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
 )
 class ReadFileTool(_FsTool):
     """Read file contents with optional line-based pagination."""
+    _scopes = {"core", "subagent", "memory"}
 
     _MAX_CHARS = 128_000
     _DEFAULT_LIMIT = 2000
@@ -365,6 +387,7 @@ class ReadFileTool(_FsTool):
 )
 class WriteFileTool(_FsTool):
     """Write content to a file."""
+    _scopes = {"core", "subagent", "memory"}
 
     @property
     def name(self) -> str:
@@ -675,6 +698,7 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
 )
 class EditFileTool(_FsTool):
     """Edit a file by replacing text with fallback matching."""
+    _scopes = {"core", "subagent", "memory"}
 
     _MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024  # 1 GiB
     _MARKDOWN_EXTS = frozenset({".md", ".mdx", ".markdown"})
@@ -858,6 +882,7 @@ class EditFileTool(_FsTool):
 )
 class ListDirTool(_FsTool):
     """List directory contents with optional recursion."""
+    _scopes = {"core", "subagent"}
 
     _DEFAULT_MAX = 200
     _IGNORE_DIRS = {

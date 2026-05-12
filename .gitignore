@@ -1,10 +1,15 @@
 # Project-specific
 .worktrees/
+.worktree/
 .assets
 .docs
 .env
 .web
 .orion
+
+# Claude / AI assistant artifacts
+docs/superpowers/
+docs/plans/
 
 # webui (monorepo frontend)
 webui/node_modules/

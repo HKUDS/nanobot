@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.registry import ToolRegistry
 
@@ -40,7 +41,7 @@ class _SvcStub:
 @pytest.fixture
 def registry() -> ToolRegistry:
     tool = CronTool(_SvcStub(), default_timezone="UTC")
-    tool.set_context("channel", "chat-id")
+    tool.set_context(RequestContext(channel="channel", chat_id="chat-id"))
     reg = ToolRegistry()
     reg.register(tool)
     return reg
