@@ -156,11 +156,11 @@ def _http_json_response(data: dict[str, Any], *, status: int = 200) -> Response:
 
 
 def _read_webui_model_name() -> str | None:
-    """Return the configured default model for readonly webui display."""
+    """Return the resolved startup model for readonly WebUI display."""
     try:
         from nanobot.config.loader import load_config
 
-        model = load_config().agents.defaults.model.strip()
+        model = load_config().resolve_preset().model.strip()
         return model or None
     except Exception as e:
         logger.debug("webui bootstrap could not load model name: {}", e)
@@ -1423,6 +1423,13 @@ class WebSocketChannel(BaseChannel):
             raise
 
     async def send(self, msg: OutboundMessage) -> None:
+        if msg.metadata.get("_runtime_model_updated"):
+            await self.send_runtime_model_updated(
+                model_name=msg.metadata.get("model"),
+                model_preset=msg.metadata.get("model_preset"),
+            )
+            return
+
         # Snapshot the subscriber set so ConnectionClosed cleanups mid-iteration are safe.
         conns = list(self._subs.get(msg.chat_id, ()))
         if not conns:
@@ -1471,9 +1478,6 @@ class WebSocketChannel(BaseChannel):
             payload["kind"] = "tool_hint"
         elif msg.metadata.get("_progress"):
             payload["kind"] = "progress"
-        webui_model_name = msg.metadata.get("_webui_model_name")
-        if isinstance(webui_model_name, str) and webui_model_name.strip():
-            payload["model_name"] = webui_model_name.strip()
         raw = json.dumps(payload, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" ")
@@ -1521,3 +1525,23 @@ class WebSocketChannel(BaseChannel):
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" session_updated ")
+
+    async def send_runtime_model_updated(
+        self,
+        *,
+        model_name: Any,
+        model_preset: Any = None,
+    ) -> None:
+        """Broadcast runtime model changes to all active WebUI clients."""
+        conns = list(self._conn_chats)
+        if not conns or not isinstance(model_name, str) or not model_name.strip():
+            return
+        body: dict[str, Any] = {
+            "event": "runtime_model_updated",
+            "model_name": model_name.strip(),
+        }
+        if isinstance(model_preset, str) and model_preset.strip():
+            body["model_preset"] = model_preset.strip()
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" runtime_model_updated ")

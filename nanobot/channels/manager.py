@@ -292,6 +292,13 @@ class ChannelManager:
                 if msg.metadata.get("_retry_wait"):
                     continue
 
+                if (
+                    msg.metadata.get("_runtime_model_updated")
+                    and msg.channel == "websocket"
+                    and "websocket" not in self.channels
+                ):
+                    continue
+
                 # Coalesce consecutive _stream_delta messages for the same (channel, chat_id)
                 # to reduce API calls and improve streaming latency
                 if msg.metadata.get("_stream_delta") and not msg.metadata.get("_stream_end"):

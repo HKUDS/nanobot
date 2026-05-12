@@ -225,7 +225,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
             channel=ctx.msg.channel,
             chat_id=ctx.msg.chat_id,
             content=_model_command_status(loop),
-            metadata={**metadata, "_webui_model_name": loop.model},
+            metadata=metadata,
         )
 
     parts = args.split()
@@ -264,7 +264,7 @@ async def cmd_model(ctx: CommandContext) -> OutboundMessage:
         channel=ctx.msg.channel,
         chat_id=ctx.msg.chat_id,
         content="\n".join(lines),
-        metadata={**metadata, "_webui_model_name": loop.model},
+        metadata=metadata,
     )
 
 

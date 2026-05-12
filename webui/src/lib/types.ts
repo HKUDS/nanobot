@@ -147,8 +147,6 @@ export type InboundEvent =
       /** Present when the frame is an agent breadcrumb (e.g. tool hint,
        * generic progress line) rather than a conversational reply. */
       kind?: "tool_hint" | "progress";
-      /** Runtime model name after commands like `/model fast` update it. */
-      model_name?: string | null;
     }
   | {
       event: "delta";
@@ -160,6 +158,11 @@ export type InboundEvent =
       event: "stream_end";
       chat_id: string;
       stream_id?: string;
+    }
+  | {
+      event: "runtime_model_updated";
+      model_name: string;
+      model_preset?: string | null;
     }
   | { event: "turn_end"; chat_id: string }
   | { event: "session_updated"; chat_id: string }

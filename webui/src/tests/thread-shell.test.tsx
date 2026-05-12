@@ -12,6 +12,7 @@ function makeClient() {
     status: "open" as const,
     defaultChatId: null as string | null,
     onStatus: () => () => {},
+    onRuntimeModelUpdate: () => () => {},
     onChat: (chatId: string, handler: (ev: import("@/lib/types").InboundEvent) => void) => {
       let handlers = chatHandlers.get(chatId);
       if (!handlers) {

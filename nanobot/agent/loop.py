@@ -406,7 +406,7 @@ class AgentLoop:
         self._model_preset_snapshot_builder = model_preset_snapshot_builder
         self._active_preset: str | None = None
         if model_preset:
-            self.set_model_preset(model_preset)
+            self.set_model_preset(model_preset, notify=False)
         self._register_default_tools()
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
@@ -473,7 +473,26 @@ class AgentLoop:
         """Keep subagent runtime limits aligned with mutable loop settings."""
         self.subagents.max_iterations = self.max_iterations
 
-    def _apply_provider_snapshot(self, snapshot: ProviderSnapshot) -> None:
+    def _publish_runtime_model_updated(self, model_preset: str | None = None) -> None:
+        """Notify WebUI clients that the effective runtime model changed."""
+        self.bus.outbound.put_nowait(OutboundMessage(
+            channel="websocket",
+            chat_id="*",
+            content="",
+            metadata={
+                "_runtime_model_updated": True,
+                "model": self.model,
+                "model_preset": model_preset if model_preset is not None else self.model_preset,
+            },
+        ))
+
+    def _apply_provider_snapshot(
+        self,
+        snapshot: ProviderSnapshot,
+        *,
+        notify: bool = True,
+        model_preset: str | None = None,
+    ) -> None:
         """Swap model/provider for future turns without disturbing an active one."""
         provider = snapshot.provider
         model = snapshot.model
@@ -487,6 +506,8 @@ class AgentLoop:
         self.consolidator.set_provider(provider, model, context_window_tokens)
         self.dream.set_provider(provider, model)
         self._provider_signature = snapshot.signature
+        if notify:
+            self._publish_runtime_model_updated(model_preset)
         logger.info("Runtime model switched for next turn: {} -> {}", old_model, model)
 
     def _refresh_provider_snapshot(self) -> None:
@@ -556,7 +577,7 @@ class AgentLoop:
             ),
         )
 
-    def set_model_preset(self, name: str | None) -> None:
+    def set_model_preset(self, name: str | None, *, notify: bool = True) -> None:
         """Resolve a preset by name and apply all runtime model dependents."""
         if not isinstance(name, str) or not name.strip():
             raise ValueError("model_preset must be a non-empty string")
@@ -564,7 +585,7 @@ class AgentLoop:
         if name not in self.model_presets:
             raise KeyError(f"model_preset {name!r} not found. Available: {', '.join(self.model_presets) or '(none)'}")
         snapshot = self._build_model_preset_snapshot(name)
-        self._apply_provider_snapshot(snapshot)
+        self._apply_provider_snapshot(snapshot, notify=notify, model_preset=name)
         self._active_preset = name
 
     def _register_default_tools(self) -> None:

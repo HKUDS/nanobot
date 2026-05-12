@@ -64,6 +64,30 @@ def test_model_preset_setter_updates_state(tmp_path) -> None:
     assert loop.dream.model == "openai/gpt-4.1"
 
 
+def test_model_preset_setter_publishes_runtime_model_event(tmp_path) -> None:
+    bus = MessageBus()
+    loop = AgentLoop(
+        bus=bus,
+        provider=_provider("base-model", max_tokens=123),
+        workspace=tmp_path,
+        model="base-model",
+        context_window_tokens=1000,
+        model_presets={"fast": ModelPresetConfig(model="openai/gpt-4.1")},
+    )
+
+    loop.set_model_preset("fast")
+
+    event = bus.outbound.get_nowait()
+    assert event.channel == "websocket"
+    assert event.chat_id == "*"
+    assert event.content == ""
+    assert event.metadata == {
+        "_runtime_model_updated": True,
+        "model": "openai/gpt-4.1",
+        "model_preset": "fast",
+    }
+
+
 def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
     old_provider = _provider("base-model", max_tokens=123)
     new_provider = _provider("anthropic/claude-opus-4-5", max_tokens=2048)

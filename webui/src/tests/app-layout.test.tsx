@@ -57,6 +57,7 @@ vi.mock("@/lib/nanobot-client", () => {
     defaultChatId: string | null = null;
     connect = connectSpy;
     onStatus = () => () => {};
+    onRuntimeModelUpdate = () => () => {};
     onError = () => () => {};
     onChat = () => () => {};
     sendMessage = vi.fn();
