@@ -18,6 +18,7 @@ _IMAGE_DATA_URL = re.compile(r"^data:image/([a-zA-Z0-9.+-]+);base64,(.*)$", re.D
 _TEXT_BLOCK_TYPES = {"text", "input_text", "output_text"}
 _TEMPERATURE_UNSUPPORTED_MODEL_TOKENS = ("claude-opus-4-7",)
 _ADAPTIVE_THINKING_ONLY_MODEL_TOKENS = ("claude-opus-4-7",)
+_NOOP_TOOL_NAME = "nanobot_noop"
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -326,6 +327,27 @@ class BedrockProvider(LLMProvider):
         return result or None
 
     @staticmethod
+    def _contains_tool_blocks(messages: list[dict[str, Any]]) -> bool:
+        for msg in messages:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if isinstance(block, dict) and ("toolUse" in block or "toolResult" in block):
+                    return True
+        return False
+
+    @staticmethod
+    def _noop_tool() -> dict[str, Any]:
+        return {
+            "toolSpec": {
+                "name": _NOOP_TOOL_NAME,
+                "description": "Internal placeholder for Bedrock tool history validation.",
+                "inputSchema": {"json": {"type": "object", "properties": {}}},
+            }
+        }
+
+    @staticmethod
     def _convert_tool_choice(
         tool_choice: str | dict[str, Any] | None,
     ) -> dict[str, Any] | None:
@@ -389,11 +411,16 @@ class BedrockProvider(LLMProvider):
             kwargs["additionalModelRequestFields"] = additional
 
         bedrock_tools = self._convert_tools(tools)
+        tool_config: dict[str, Any] | None = None
         if bedrock_tools:
-            tool_config: dict[str, Any] = {"tools": bedrock_tools}
+            tool_config = {"tools": bedrock_tools}
             choice = self._convert_tool_choice(tool_choice)
             if choice:
                 tool_config["toolChoice"] = choice
+        elif self._contains_tool_blocks(bedrock_messages):
+            tool_config = {"tools": [self._noop_tool()]}
+
+        if tool_config:
             kwargs["toolConfig"] = tool_config
 
         return kwargs
