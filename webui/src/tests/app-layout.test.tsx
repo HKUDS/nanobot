@@ -265,7 +265,7 @@ describe("App layout", () => {
     expect(screen.queryByDisplayValue("unsaved-brave-key")).not.toBeInTheDocument();
   });
 
-  it("returns from settings to an available chat instead of the blank start page", async () => {
+  it("returns from settings to the blank start page when no session was active", async () => {
     mockSessions = [
       {
         key: "websocket:chat-a",
@@ -330,10 +330,8 @@ describe("App layout", () => {
     expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
 
-    await waitFor(() => expect(document.title).toBe("First chat · nanobot"));
-    const restoredSidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
-    fireEvent.click(within(restoredSidebar).getByRole("button", { name: /^Second chat$/ }));
-    await waitFor(() => expect(document.title).toBe("Second chat · nanobot"));
+    await waitFor(() => expect(document.title).toBe("nanobot"));
+    expect(screen.getByText("What can I do for you?")).toBeInTheDocument();
   });
 
   it("filters sidebar sessions through the lightweight search row", async () => {
