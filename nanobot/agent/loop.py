@@ -295,6 +295,7 @@ class AgentLoop:
         model_presets: dict[str, ModelPresetConfig] | None = None,
         model_preset: str | None = None,
         preset_snapshot_loader: preset_helpers.PresetSnapshotLoader | None = None,
+        runtime_model_publisher: Callable[[str, str | None], None] | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -305,6 +306,7 @@ class AgentLoop:
         self.provider = provider
         self._provider_snapshot_loader = provider_snapshot_loader
         self._preset_snapshot_loader = preset_snapshot_loader
+        self._runtime_model_publisher = runtime_model_publisher
         self._provider_signature = provider_signature
         self._default_selection_signature = preset_helpers.default_selection_signature(provider_signature)
         self.workspace = workspace
@@ -404,7 +406,7 @@ class AgentLoop:
         self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
         self._active_preset: str | None = None
         if model_preset:
-            self.set_model_preset(model_preset, notify=False)
+            self.set_model_preset(model_preset, publish_update=False)
         self._register_default_tools()
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
@@ -474,7 +476,7 @@ class AgentLoop:
         self,
         snapshot: ProviderSnapshot,
         *,
-        notify: bool = True,
+        publish_update: bool = True,
         model_preset: str | None = None,
     ) -> None:
         """Swap model/provider for future turns without disturbing an active one."""
@@ -490,12 +492,10 @@ class AgentLoop:
         self.consolidator.set_provider(provider, model, context_window_tokens)
         self.dream.set_provider(provider, model)
         self._provider_signature = snapshot.signature
-        if notify:
-            self.bus.outbound.put_nowait(
-                preset_helpers.runtime_model_updated_message(
-                    self.model,
-                    model_preset if model_preset is not None else self.model_preset,
-                )
+        if publish_update and self._runtime_model_publisher is not None:
+            self._runtime_model_publisher(
+                self.model,
+                model_preset if model_preset is not None else self.model_preset,
             )
         logger.info("Runtime model switched for next turn: {} -> {}", old_model, model)
 
@@ -539,11 +539,11 @@ class AgentLoop:
             loader=self._preset_snapshot_loader,
         )
 
-    def set_model_preset(self, name: str | None, *, notify: bool = True) -> None:
+    def set_model_preset(self, name: str | None, *, publish_update: bool = True) -> None:
         """Resolve a preset by name and apply all runtime model dependents."""
         name = preset_helpers.normalize_preset_name(name, self.model_presets)
         snapshot = self._build_model_preset_snapshot(name)
-        self._apply_provider_snapshot(snapshot, notify=notify, model_preset=name)
+        self._apply_provider_snapshot(snapshot, publish_update=publish_update, model_preset=name)
         self._active_preset = name
 
     def _register_default_tools(self) -> None:

@@ -633,6 +633,7 @@ def _run_gateway(
     from nanobot.agent.tools.message import MessageTool
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
+    from nanobot.channels.websocket import publish_runtime_model_update
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
@@ -672,6 +673,11 @@ def _run_gateway(
             "aihubmix": config.providers.aihubmix,
         },
         provider_snapshot_loader=load_provider_snapshot,
+        runtime_model_publisher=lambda model, preset: publish_runtime_model_update(
+            bus,
+            model,
+            preset,
+        ),
         provider_signature=provider_snapshot.signature,
     )
 

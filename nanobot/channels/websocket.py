@@ -155,6 +155,24 @@ def _http_json_response(data: dict[str, Any], *, status: int = 200) -> Response:
     return Response(status, reason, headers, body)
 
 
+def publish_runtime_model_update(
+    bus: MessageBus,
+    model: str,
+    model_preset: str | None,
+) -> None:
+    """Publish a WebUI runtime-model update onto the outbound bus."""
+    bus.outbound.put_nowait(OutboundMessage(
+        channel="websocket",
+        chat_id="*",
+        content="",
+        metadata={
+            "_runtime_model_updated": True,
+            "model": model,
+            "model_preset": model_preset,
+        },
+    ))
+
+
 def _read_webui_model_name() -> str | None:
     """Return the resolved startup model for readonly WebUI display."""
     try:

@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from nanobot.bus.events import OutboundMessage
 from nanobot.config.schema import ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot, build_provider_snapshot
@@ -64,15 +63,3 @@ def normalize_preset_name(name: str | None, presets: dict[str, ModelPresetConfig
         raise KeyError(f"model_preset {name!r} not found. Available: {', '.join(presets) or '(none)'}")
     return name
 
-
-def runtime_model_updated_message(model: str, model_preset: str | None) -> OutboundMessage:
-    return OutboundMessage(
-        channel="websocket",
-        chat_id="*",
-        content="",
-        metadata={
-            "_runtime_model_updated": True,
-            "model": model,
-            "model_preset": model_preset,
-        },
-    )

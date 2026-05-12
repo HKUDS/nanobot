@@ -64,28 +64,21 @@ def test_model_preset_setter_updates_state(tmp_path) -> None:
     assert loop.dream.model == "openai/gpt-4.1"
 
 
-def test_model_preset_setter_publishes_runtime_model_event(tmp_path) -> None:
-    bus = MessageBus()
+def test_model_preset_setter_calls_runtime_model_publisher(tmp_path) -> None:
+    published: list[tuple[str, str | None]] = []
     loop = AgentLoop(
-        bus=bus,
+        bus=MessageBus(),
         provider=_provider("base-model", max_tokens=123),
         workspace=tmp_path,
         model="base-model",
         context_window_tokens=1000,
         model_presets={"fast": ModelPresetConfig(model="openai/gpt-4.1")},
+        runtime_model_publisher=lambda model, preset: published.append((model, preset)),
     )
 
     loop.set_model_preset("fast")
 
-    event = bus.outbound.get_nowait()
-    assert event.channel == "websocket"
-    assert event.chat_id == "*"
-    assert event.content == ""
-    assert event.metadata == {
-        "_runtime_model_updated": True,
-        "model": "openai/gpt-4.1",
-        "model_preset": "fast",
-    }
+    assert published == [("openai/gpt-4.1", "fast")]
 
 
 def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
