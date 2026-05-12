@@ -1,5 +1,6 @@
 """Tests for WhatsApp channel outbound media support."""
 
+import asyncio
 import json
 import os
 import sys
@@ -333,6 +334,288 @@ async def test_login_exports_effective_bridge_token(monkeypatch, tmp_path):
     assert kwargs["cwd"] == bridge_dir
     assert kwargs["env"]["AUTH_DIR"] == str(token_path.parent)
     assert kwargs["env"]["BRIDGE_TOKEN"] == token_path.read_text(encoding="utf-8")
+
+
+# ── typing indicator ──────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_inbound_message_starts_typing():
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
+    ch._ws = AsyncMock()
+    ch._connected = True
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "t1",
+            "sender": "111@s.whatsapp.net",
+            "pn": "",
+            "content": "hello",
+            "timestamp": 1,
+        })
+    )
+
+    # A typing task must have been created for the chat
+    assert "111@s.whatsapp.net" in ch._typing_tasks
+
+
+@pytest.mark.asyncio
+async def test_send_stops_typing():
+    ch = _make_channel()
+    ch._typing_tasks["123@s.whatsapp.net"] = asyncio.create_task(asyncio.sleep(60))
+
+    msg = OutboundMessage(channel="whatsapp", chat_id="123@s.whatsapp.net", content="reply")
+    await ch.send(msg)
+
+    assert "123@s.whatsapp.net" not in ch._typing_tasks
+
+
+@pytest.mark.asyncio
+async def test_send_progress_message_does_not_stop_typing():
+    ch = _make_channel()
+    task = asyncio.create_task(asyncio.sleep(60))
+    ch._typing_tasks["123@s.whatsapp.net"] = task
+
+    msg = OutboundMessage(
+        channel="whatsapp",
+        chat_id="123@s.whatsapp.net",
+        content="...",
+        metadata={"_progress": True},
+    )
+    await ch.send(msg)
+
+    assert "123@s.whatsapp.net" in ch._typing_tasks
+    task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_typing_loop_sends_composing_presence():
+    ch = WhatsAppChannel({"enabled": True}, MagicMock())
+    ch._ws = AsyncMock()
+    ch._connected = True
+
+    task = asyncio.create_task(ch._typing_loop("abc@s.whatsapp.net"))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    await asyncio.sleep(0)  # let the loop settle; _typing_loop suppresses CancelledError internally
+
+    assert ch._ws.send.call_count >= 1
+    payload = json.loads(ch._ws.send.call_args_list[0][0][0])
+    assert payload == {"type": "presence", "to": "abc@s.whatsapp.net", "presence": "composing"}
+
+
+@pytest.mark.asyncio
+async def test_stop_cancels_typing_tasks():
+    ch = WhatsAppChannel({"enabled": True}, MagicMock())
+    task = asyncio.create_task(asyncio.sleep(60))
+    ch._typing_tasks["x@s.whatsapp.net"] = task
+    ch._ws = AsyncMock()
+
+    await ch.stop()
+    await asyncio.sleep(0)  # let the event loop process the cancellation
+
+    assert task.cancelled()
+    assert not ch._typing_tasks
+
+
+# ── emoji reaction ─────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_inbound_message_sends_reaction():
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
+    ch._ws = AsyncMock()
+    ch._connected = True
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "msg99",
+            "sender": "222@s.whatsapp.net",
+            "pn": "",
+            "content": "hi",
+            "timestamp": 1,
+        })
+    )
+
+    sent_payloads = [json.loads(c[0][0]) for c in ch._ws.send.call_args_list]
+    react_calls = [p for p in sent_payloads if p.get("type") == "react"]
+    assert len(react_calls) == 1
+    assert react_calls[0]["to"] == "222@s.whatsapp.net"
+    assert react_calls[0]["messageId"] == "msg99"
+    assert react_calls[0]["emoji"] == "👀"
+
+
+@pytest.mark.asyncio
+async def test_react_emoji_uses_config_value():
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"], "reactEmoji": "🔥"}, MagicMock())
+    ch._ws = AsyncMock()
+    ch._connected = True
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "rx1",
+            "sender": "333@s.whatsapp.net",
+            "pn": "",
+            "content": "fire",
+            "timestamp": 1,
+        })
+    )
+
+    sent_payloads = [json.loads(c[0][0]) for c in ch._ws.send.call_args_list]
+    react_calls = [p for p in sent_payloads if p.get("type") == "react"]
+    assert react_calls[0]["emoji"] == "🔥"
+
+
+@pytest.mark.asyncio
+async def test_group_message_reaction_includes_participant():
+    """In groups, the reaction key needs the original sender's JID to bind correctly."""
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"], "groupPolicy": "open"}, MagicMock())
+    ch._ws = AsyncMock()
+    ch._connected = True
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "gm1",
+            "sender": "555@g.us",
+            "pn": "user@s.whatsapp.net",
+            "participant": "user@s.whatsapp.net",
+            "content": "hi group",
+            "timestamp": 1,
+            "isGroup": True,
+        })
+    )
+
+    sent_payloads = [json.loads(c[0][0]) for c in ch._ws.send.call_args_list]
+    react = next(p for p in sent_payloads if p.get("type") == "react")
+    assert react["to"] == "555@g.us"
+    assert react["participant"] == "user@s.whatsapp.net"
+    assert ch._handle_message.await_args.kwargs["metadata"]["participant"] == "user@s.whatsapp.net"
+
+
+@pytest.mark.asyncio
+async def test_dm_reaction_omits_participant():
+    """For 1:1 chats there is no participant — the field must not be sent."""
+    ch = WhatsAppChannel({"enabled": True, "allowFrom": ["*"]}, MagicMock())
+    ch._ws = AsyncMock()
+    ch._connected = True
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "dm1",
+            "sender": "777@s.whatsapp.net",
+            "pn": "",
+            "content": "hi",
+            "timestamp": 1,
+        })
+    )
+
+    sent_payloads = [json.loads(c[0][0]) for c in ch._ws.send.call_args_list]
+    react = next(p for p in sent_payloads if p.get("type") == "react")
+    assert "participant" not in react
+
+
+@pytest.mark.asyncio
+async def test_send_removes_reaction():
+    """When the agent's final reply lands, the original 👀 reaction is cleared."""
+    ch = _make_channel()
+    msg = OutboundMessage(
+        channel="whatsapp",
+        chat_id="123@s.whatsapp.net",
+        content="reply",
+        metadata={"message_id": "msg42"},
+    )
+
+    await ch.send(msg)
+
+    sent_payloads = [json.loads(c[0][0]) for c in ch._ws.send.call_args_list]
+    react = next(p for p in sent_payloads if p.get("type") == "react")
+    assert react["messageId"] == "msg42"
+    assert react["emoji"] == ""  # empty text removes the bot's reaction
+
+
+@pytest.mark.asyncio
+async def test_send_removes_reaction_with_participant_in_groups():
+    """In groups the removal must include participant so it targets the right message."""
+    ch = _make_channel()
+    msg = OutboundMessage(
+        channel="whatsapp",
+        chat_id="555@g.us",
+        content="reply",
+        metadata={"message_id": "gm1", "participant": "user@s.whatsapp.net"},
+    )
+
+    await ch.send(msg)
+
+    sent_payloads = [json.loads(c[0][0]) for c in ch._ws.send.call_args_list]
+    react = next(p for p in sent_payloads if p.get("type") == "react")
+    assert react["participant"] == "user@s.whatsapp.net"
+    assert react["emoji"] == ""
+
+
+@pytest.mark.asyncio
+async def test_send_progress_does_not_remove_reaction():
+    """Streaming/progress messages should not clear the reaction prematurely."""
+    ch = _make_channel()
+    msg = OutboundMessage(
+        channel="whatsapp",
+        chat_id="123@s.whatsapp.net",
+        content="...",
+        metadata={"_progress": True, "message_id": "msg42"},
+    )
+
+    await ch.send(msg)
+
+    sent_payloads = [json.loads(c[0][0]) for c in ch._ws.send.call_args_list]
+    assert not any(p.get("type") == "react" for p in sent_payloads)
+
+
+@pytest.mark.asyncio
+async def test_send_without_message_id_skips_reaction_removal():
+    """Outbound messages without an origin message_id (e.g. proactive sends) must not crash."""
+    ch = _make_channel()
+    msg = OutboundMessage(channel="whatsapp", chat_id="123@s.whatsapp.net", content="hi")
+
+    await ch.send(msg)
+
+    sent_payloads = [json.loads(c[0][0]) for c in ch._ws.send.call_args_list]
+    assert not any(p.get("type") == "react" for p in sent_payloads)
+
+
+@pytest.mark.asyncio
+async def test_add_reaction_skipped_when_no_message_id():
+    ch = _make_channel()
+    await ch._add_reaction("abc@s.whatsapp.net", "", "👀")
+    ch._ws.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_add_reaction_skipped_when_no_emoji():
+    ch = WhatsAppChannel({"enabled": True, "reactEmoji": ""}, MagicMock())
+    ch._ws = AsyncMock()
+    ch._connected = True
+    ch._handle_message = AsyncMock()
+
+    await ch._handle_bridge_message(
+        json.dumps({
+            "type": "message",
+            "id": "nr1",
+            "sender": "444@s.whatsapp.net",
+            "pn": "",
+            "content": "no react",
+            "timestamp": 1,
+        })
+    )
+
+    sent_payloads = [json.loads(c[0][0]) for c in ch._ws.send.call_args_list]
+    assert not any(p.get("type") == "react" for p in sent_payloads)
 
 
 @pytest.mark.asyncio
