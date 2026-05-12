@@ -293,6 +293,7 @@ class AgentLoop:
         provider_signature: tuple[object, ...] | None = None,
         model_presets: dict[str, ModelPresetConfig] | None = None,
         model_preset: str | None = None,
+        model_preset_snapshot_builder: Callable[[ModelPresetConfig], ProviderSnapshot] | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -398,7 +399,10 @@ class AgentLoop:
             model=self.model,
         )
         self.model_presets: dict[str, ModelPresetConfig] = model_presets or {}
-        self._active_preset: str | None = model_preset if model_presets and model_preset in model_presets else None
+        self._model_preset_snapshot_builder = model_preset_snapshot_builder
+        self._active_preset: str | None = None
+        if model_preset:
+            self.set_model_preset(model_preset)
         self._register_default_tools()
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
@@ -418,7 +422,7 @@ class AgentLoop:
         allowing callers to override or extend the standard config-derived
         parameters (e.g. ``cron_service``, ``session_manager``).
         """
-        from nanobot.providers.factory import make_provider
+        from nanobot.providers.factory import build_provider_snapshot, make_provider
 
         if bus is None:
             bus = MessageBus()
@@ -453,6 +457,7 @@ class AgentLoop:
             tools_config=config.tools,
             model_presets=model_presets,
             model_preset=defaults.model_preset,
+            model_preset_snapshot_builder=lambda preset: build_provider_snapshot(config, preset=preset),
             **extra,
         )
 
@@ -465,8 +470,6 @@ class AgentLoop:
         provider = snapshot.provider
         model = snapshot.model
         context_window_tokens = snapshot.context_window_tokens
-        if self.provider is provider and self.model == model:
-            return
         old_model = self.model
         self.provider = provider
         self.model = model
@@ -498,15 +501,38 @@ class AgentLoop:
 
     @model_preset.setter
     def model_preset(self, name: str | None) -> None:
-        """Resolve a preset by name and apply all fields atomically."""
+        self.set_model_preset(name)
+
+    def _build_model_preset_snapshot(self, name: str) -> ProviderSnapshot:
+        preset = self.model_presets[name]
+        if self._model_preset_snapshot_builder is not None:
+            return self._model_preset_snapshot_builder(preset)
+        self.provider.generation = preset.to_generation_settings()
+        return ProviderSnapshot(
+            provider=self.provider,
+            model=preset.model,
+            context_window_tokens=preset.context_window_tokens,
+            signature=(
+                "model_preset",
+                name,
+                preset.model,
+                preset.provider,
+                preset.max_tokens,
+                preset.context_window_tokens,
+                preset.temperature,
+                preset.reasoning_effort,
+            ),
+        )
+
+    def set_model_preset(self, name: str | None) -> None:
+        """Resolve a preset by name and apply all runtime model dependents."""
         if not isinstance(name, str) or not name.strip():
             raise ValueError("model_preset must be a non-empty string")
+        name = name.strip()
         if name not in self.model_presets:
             raise KeyError(f"model_preset {name!r} not found. Available: {', '.join(self.model_presets) or '(none)'}")
-        p = self.model_presets[name]
-        self.model = p.model
-        self.context_window_tokens = p.context_window_tokens
-        self.provider.generation = p.to_generation_settings()
+        snapshot = self._build_model_preset_snapshot(name)
+        self._apply_provider_snapshot(snapshot)
         self._active_preset = name
 
     def _register_default_tools(self) -> None:

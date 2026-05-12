@@ -7,6 +7,7 @@ from nanobot.agent.loop import AgentLoop
 from nanobot.agent.tools.self import MyTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import ModelPresetConfig
+from nanobot.providers.factory import ProviderSnapshot
 
 
 def _provider(default_model: str, max_tokens: int = 123) -> MagicMock:
@@ -56,6 +57,75 @@ def test_model_preset_setter_updates_state(tmp_path) -> None:
     assert loop.provider.generation.temperature == 0.5
     assert loop.provider.generation.max_tokens == 4096
     assert loop.provider.generation.reasoning_effort == "low"
+    assert loop.subagents.model == "openai/gpt-4.1"
+    assert loop.consolidator.model == "openai/gpt-4.1"
+    assert loop.consolidator.context_window_tokens == 32_768
+    assert loop.consolidator.max_completion_tokens == 4096
+    assert loop.dream.model == "openai/gpt-4.1"
+
+
+def test_model_preset_setter_replaces_provider_from_snapshot(tmp_path) -> None:
+    old_provider = _provider("base-model", max_tokens=123)
+    new_provider = _provider("anthropic/claude-opus-4-5", max_tokens=2048)
+    preset = ModelPresetConfig(
+        model="anthropic/claude-opus-4-5",
+        provider="anthropic",
+        max_tokens=2048,
+        context_window_tokens=200_000,
+    )
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=old_provider,
+        workspace=tmp_path,
+        model="base-model",
+        context_window_tokens=1000,
+        model_presets={"deep": preset},
+        model_preset_snapshot_builder=lambda _preset: ProviderSnapshot(
+            provider=new_provider,
+            model=_preset.model,
+            context_window_tokens=_preset.context_window_tokens,
+            signature=("deep", _preset.model),
+        ),
+    )
+
+    loop.set_model_preset("deep")
+
+    assert loop.provider is new_provider
+    assert loop.runner.provider is new_provider
+    assert loop.subagents.provider is new_provider
+    assert loop.subagents.runner.provider is new_provider
+    assert loop.consolidator.provider is new_provider
+    assert loop.dream.provider is new_provider
+    assert loop.dream._runner.provider is new_provider
+    assert loop.model == "anthropic/claude-opus-4-5"
+    assert loop.context_window_tokens == 200_000
+    assert loop.consolidator.max_completion_tokens == 2048
+
+
+def test_model_preset_setter_failure_leaves_old_state(tmp_path) -> None:
+    preset = ModelPresetConfig(model="openai/gpt-4.1", max_tokens=4096)
+    loop = AgentLoop(
+        bus=MessageBus(),
+        provider=_provider("base-model", max_tokens=123),
+        workspace=tmp_path,
+        model="base-model",
+        context_window_tokens=1000,
+        model_presets={"fast": preset},
+        model_preset_snapshot_builder=lambda _preset: (_ for _ in ()).throw(
+            RuntimeError("provider unavailable")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        loop.set_model_preset("fast")
+
+    assert loop.model_preset is None
+    assert loop.model == "base-model"
+    assert loop.subagents.model == "base-model"
+    assert loop.consolidator.model == "base-model"
+    assert loop.dream.model == "base-model"
+    assert loop.context_window_tokens == 1000
+    assert loop.consolidator.max_completion_tokens == 123
 
 
 def test_model_preset_setter_raises_on_unknown(tmp_path) -> None:

@@ -59,6 +59,13 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "activity",
     ),
     BuiltinCommandSpec(
+        "/model",
+        "Switch model preset",
+        "Show or switch the active model preset.",
+        "brain",
+        "[preset]",
+    ),
+    BuiltinCommandSpec(
         "/history",
         "Show conversation history",
         "Print the last N persisted conversation messages.",
@@ -189,6 +196,75 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
         channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
         content="New session started.",
         metadata=dict(ctx.msg.metadata or {})
+    )
+
+
+def _format_preset_names(names: list[str]) -> str:
+    return ", ".join(f"`{name}`" for name in names) if names else "(none configured)"
+
+
+def _model_command_status(loop) -> str:
+    names = sorted(loop.model_presets)
+    active = loop.model_preset or "(none)"
+    return "\n".join([
+        "## Model",
+        f"- Current model: `{loop.model}`",
+        f"- Active preset: `{active}`",
+        f"- Available presets: {_format_preset_names(names)}",
+    ])
+
+
+async def cmd_model(ctx: CommandContext) -> OutboundMessage:
+    """Show or switch model presets."""
+    loop = ctx.loop
+    args = ctx.args.strip()
+    metadata = {**dict(ctx.msg.metadata or {}), "render_as": "text"}
+
+    if not args:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=_model_command_status(loop),
+            metadata=metadata,
+        )
+
+    parts = args.split()
+    if len(parts) != 1:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Usage: `/model [preset]`",
+            metadata=metadata,
+        )
+
+    name = parts[0]
+    try:
+        loop.set_model_preset(name)
+    except (KeyError, ValueError) as exc:
+        names = sorted(loop.model_presets)
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=(
+                f"Could not switch model preset: {exc}\n\n"
+                f"Available presets: {_format_preset_names(names)}"
+            ),
+            metadata=metadata,
+        )
+
+    max_tokens = getattr(getattr(loop.provider, "generation", None), "max_tokens", None)
+    lines = [
+        f"Switched model preset to `{loop.model_preset}`.",
+        f"- Model: `{loop.model}`",
+        f"- Context window: {loop.context_window_tokens}",
+    ]
+    if max_tokens is not None:
+        lines.append(f"- Max output tokens: {max_tokens}")
+    return OutboundMessage(
+        channel=ctx.msg.channel,
+        chat_id=ctx.msg.chat_id,
+        content="\n".join(lines),
+        metadata=metadata,
     )
 
 
@@ -477,6 +553,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.priority("/status", cmd_status)
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
+    router.exact("/model", cmd_model)
+    router.prefix("/model ", cmd_model)
     router.exact("/history", cmd_history)
     router.prefix("/history ", cmd_history)
     router.exact("/dream", cmd_dream)

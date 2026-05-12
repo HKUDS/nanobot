@@ -1,4 +1,4 @@
-from nanobot.config.schema import Config, ModelPresetConfig
+from nanobot.config.schema import Config
 
 
 def test_resolve_preset_returns_defaults_when_no_preset() -> None:
@@ -39,6 +39,20 @@ def test_resolve_preset_returns_active_preset() -> None:
     assert resolved.reasoning_effort == "low"
 
 
+def test_resolve_preset_can_target_named_preset_without_activating() -> None:
+    config = Config.model_validate({
+        "model_presets": {
+            "fast": {"model": "openai/gpt-4.1", "provider": "openai"},
+            "deep": {"model": "anthropic/claude-opus-4-5", "provider": "anthropic"},
+        },
+        "agents": {"defaults": {"modelPreset": "fast"}},
+    })
+
+    resolved = config.resolve_preset("deep")
+    assert resolved.model == "anthropic/claude-opus-4-5"
+    assert resolved.provider == "anthropic"
+
+
 def test_validator_rejects_unknown_preset() -> None:
     import pytest
     with pytest.raises(ValueError, match="model_preset 'unknown' not found in model_presets"):
@@ -49,6 +63,12 @@ def test_validator_rejects_unknown_preset() -> None:
                 }
             }
         })
+
+
+def test_resolve_preset_rejects_unknown_named_preset() -> None:
+    import pytest
+    with pytest.raises(KeyError, match="model_preset 'missing' not found"):
+        Config().resolve_preset("missing")
 
 
 def test_match_provider_uses_preset_model() -> None:

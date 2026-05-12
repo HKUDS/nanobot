@@ -283,10 +283,12 @@ class Config(BaseSettings):
             raise ValueError(f"model_preset {name!r} not found in model_presets")
         return self
 
-    def resolve_preset(self) -> ModelPresetConfig:
+    def resolve_preset(self, name: str | None = None) -> ModelPresetConfig:
         """Return effective model params: from active preset, or individual defaults."""
-        name = self.agents.defaults.model_preset
+        name = self.agents.defaults.model_preset if name is None else name
         if name:
+            if name not in self.model_presets:
+                raise KeyError(f"model_preset {name!r} not found in model_presets")
             return self.model_presets[name]
         d = self.agents.defaults
         return ModelPresetConfig(
@@ -301,12 +303,14 @@ class Config(BaseSettings):
         return Path(self.agents.defaults.workspace).expanduser()
 
     def _match_provider(
-        self, model: str | None = None
+        self, model: str | None = None,
+        *,
+        preset: ModelPresetConfig | None = None,
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
         from nanobot.providers.registry import PROVIDERS, find_by_name
 
-        resolved = self.resolve_preset()
+        resolved = preset or self.resolve_preset()
         forced = resolved.provider
         if forced != "auto":
             spec = find_by_name(forced)
@@ -366,26 +370,46 @@ class Config(BaseSettings):
                 return p, spec.name
         return None, None
 
-    def get_provider(self, model: str | None = None) -> ProviderConfig | None:
+    def get_provider(
+        self,
+        model: str | None = None,
+        *,
+        preset: ModelPresetConfig | None = None,
+    ) -> ProviderConfig | None:
         """Get matched provider config (api_key, api_base, extra_headers). Falls back to first available."""
-        p, _ = self._match_provider(model)
+        p, _ = self._match_provider(model, preset=preset)
         return p
 
-    def get_provider_name(self, model: str | None = None) -> str | None:
+    def get_provider_name(
+        self,
+        model: str | None = None,
+        *,
+        preset: ModelPresetConfig | None = None,
+    ) -> str | None:
         """Get the registry name of the matched provider (e.g. "deepseek", "openrouter")."""
-        _, name = self._match_provider(model)
+        _, name = self._match_provider(model, preset=preset)
         return name
 
-    def get_api_key(self, model: str | None = None) -> str | None:
+    def get_api_key(
+        self,
+        model: str | None = None,
+        *,
+        preset: ModelPresetConfig | None = None,
+    ) -> str | None:
         """Get API key for the given model. Falls back to first available key."""
-        p = self.get_provider(model)
+        p = self.get_provider(model, preset=preset)
         return p.api_key if p else None
 
-    def get_api_base(self, model: str | None = None) -> str | None:
+    def get_api_base(
+        self,
+        model: str | None = None,
+        *,
+        preset: ModelPresetConfig | None = None,
+    ) -> str | None:
         """Get API base URL for the given model, falling back to the provider default when present."""
         from nanobot.providers.registry import find_by_name
 
-        p, name = self._match_provider(model)
+        p, name = self._match_provider(model, preset=preset)
         if p and p.api_base:
             return p.api_base
         if name:
