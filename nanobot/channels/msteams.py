@@ -52,7 +52,6 @@ if MSTEAMS_AVAILABLE:
     import jwt
 
 MSTEAMS_REF_TTL_DAYS = 30
-MSTEAMS_REF_TTL_S = MSTEAMS_REF_TTL_DAYS * 24 * 60 * 60
 MSTEAMS_WEBCHAT_HOST = "webchat.botframework.com"
 MSTEAMS_REF_META_FILENAME = "msteams_conversations_meta.json"
 MSTEAMS_REF_LOCK_FILENAME = "msteams_conversations.lock"

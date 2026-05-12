@@ -47,7 +47,6 @@ ITEM_FILE = 4
 ITEM_VIDEO = 5
 
 # MessageType  (1 = inbound from user, 2 = outbound from bot)
-MESSAGE_TYPE_USER = 1
 MESSAGE_TYPE_BOT = 2
 
 # MessageState

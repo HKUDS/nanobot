@@ -285,7 +285,6 @@ def tool_parameters(schema: dict[str, Any]) -> Callable[[type[_ToolT]], type[_To
         def parameters(self: Any) -> dict[str, Any]:
             return deepcopy(frozen)
 
-        cls._tool_parameters_schema = deepcopy(frozen)
         cls.parameters = parameters  # type: ignore[assignment]
 
         abstract = getattr(cls, "__abstractmethods__", None)

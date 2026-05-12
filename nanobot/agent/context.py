@@ -11,7 +11,6 @@ from typing import Any
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
 from nanobot.utils.helpers import (
-    build_assistant_message,
     current_time_str,
     detect_image_mime,
     truncate_text,
@@ -204,18 +203,3 @@ class ContextBuilder:
         messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
         return messages
 
-    def add_assistant_message(
-        self, messages: list[dict[str, Any]],
-        content: str | None,
-        tool_calls: list[dict[str, Any]] | None = None,
-        reasoning_content: str | None = None,
-        thinking_blocks: list[dict] | None = None,
-    ) -> list[dict[str, Any]]:
-        """Add an assistant message to the message list."""
-        messages.append(build_assistant_message(
-            content,
-            tool_calls=tool_calls,
-            reasoning_content=reasoning_content,
-            thinking_blocks=thinking_blocks,
-        ))
-        return messages
