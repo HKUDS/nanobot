@@ -44,6 +44,7 @@ export function useNanobotStream(
   initialMessages: UIMessage[] = [],
   hasPendingToolCalls = false,
   onTurnEnd?: () => void,
+  onModelNameChange?: (modelName: string | null) => void,
 ): {
   messages: UIMessage[];
   isStreaming: boolean;
@@ -181,6 +182,9 @@ export function useNanobotStream(
       }
 
       if (ev.event === "message") {
+        if (ev.model_name !== undefined) {
+          onModelNameChange?.(ev.model_name || null);
+        }
         if (
           suppressStreamUntilTurnEndRef.current &&
           (ev.kind === "tool_hint" || ev.kind === "progress")

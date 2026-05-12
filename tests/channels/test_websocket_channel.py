@@ -230,6 +230,26 @@ async def test_send_delivers_json_message_with_media_and_reply() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_includes_webui_model_name_metadata() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(
+        OutboundMessage(
+            channel="websocket",
+            chat_id="chat-1",
+            content="switched",
+            metadata={"_webui_model_name": "openai/gpt-4.1"},
+        )
+    )
+
+    payload = json.loads(mock_ws.send.call_args[0][0])
+    assert payload["model_name"] == "openai/gpt-4.1"
+
+
+@pytest.mark.asyncio
 async def test_send_stages_external_media_as_signed_url(monkeypatch, tmp_path) -> None:
     bus = MagicMock()
     media_root = tmp_path / "media"

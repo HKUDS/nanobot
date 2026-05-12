@@ -64,7 +64,8 @@ async def test_model_command_lists_current_and_available_presets(tmp_path) -> No
     assert "Active preset: `(none)`" in out.content
     assert "`default`" in out.content
     assert "`fast`" in out.content
-    assert out.metadata == {"render_as": "text"}
+    assert out.metadata["render_as"] == "text"
+    assert out.metadata["_webui_model_name"] == "base-model"
 
 
 @pytest.mark.asyncio
@@ -75,6 +76,7 @@ async def test_model_command_switches_preset(tmp_path) -> None:
 
     assert "Switched model preset to `fast`." in out.content
     assert "Model: `openai/gpt-4.1`" in out.content
+    assert out.metadata["_webui_model_name"] == "openai/gpt-4.1"
     assert loop.model_preset == "fast"
     assert loop.model == "openai/gpt-4.1"
     assert loop.subagents.model == "openai/gpt-4.1"
@@ -90,6 +92,7 @@ async def test_model_command_switches_back_to_default(tmp_path) -> None:
     out = await cmd_model(_ctx(loop, "/model default", args="default"))
 
     assert "Switched model preset to `default`." in out.content
+    assert out.metadata["_webui_model_name"] == "base-model"
     assert loop.model_preset == "default"
     assert loop.model == "base-model"
     assert loop.context_window_tokens == 1000

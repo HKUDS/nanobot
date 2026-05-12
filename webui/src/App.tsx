@@ -492,6 +492,7 @@ function Shell({ onModelNameChange, onLogout }: { onModelNameChange: (modelName:
             onNewChat={onNewChat}
             onCreateChat={onCreateChat}
             onTurnEnd={onTurnEnd}
+            onModelNameChange={onModelNameChange}
             theme={theme}
             onToggleTheme={toggle}
             hideSidebarToggleOnDesktop={desktopSidebarOpen}

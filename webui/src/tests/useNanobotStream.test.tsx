@@ -134,6 +134,28 @@ describe("useNanobotStream", () => {
     ]);
   });
 
+  it("reports runtime model name updates from message frames", () => {
+    const fake = fakeClient();
+    const onModelNameChange = vi.fn();
+    renderHook(
+      () => useNanobotStream("chat-model", EMPTY_MESSAGES, false, undefined, onModelNameChange),
+      {
+        wrapper: wrap(fake.client),
+      },
+    );
+
+    act(() => {
+      fake.emit("chat-model", {
+        event: "message",
+        chat_id: "chat-model",
+        text: "Switched model preset to `fast`.",
+        model_name: "openai/gpt-4.1",
+      });
+    });
+
+    expect(onModelNameChange).toHaveBeenCalledWith("openai/gpt-4.1");
+  });
+
   it("suppresses redundant stream confirmation after assistant media", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-img-result", EMPTY_MESSAGES), {

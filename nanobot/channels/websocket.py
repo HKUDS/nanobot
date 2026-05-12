@@ -1471,6 +1471,9 @@ class WebSocketChannel(BaseChannel):
             payload["kind"] = "tool_hint"
         elif msg.metadata.get("_progress"):
             payload["kind"] = "progress"
+        webui_model_name = msg.metadata.get("_webui_model_name")
+        if isinstance(webui_model_name, str) and webui_model_name.strip():
+            payload["model_name"] = webui_model_name.strip()
         raw = json.dumps(payload, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" ")

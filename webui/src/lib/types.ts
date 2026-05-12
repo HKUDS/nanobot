@@ -147,6 +147,8 @@ export type InboundEvent =
       /** Present when the frame is an agent breadcrumb (e.g. tool hint,
        * generic progress line) rather than a conversational reply. */
       kind?: "tool_hint" | "progress";
+      /** Runtime model name after commands like `/model fast` update it. */
+      model_name?: string | null;
     }
   | {
       event: "delta";
