@@ -138,7 +138,11 @@ class CompleteTool(Tool):
     def description(self) -> str:
         return (
             "The ENTIRE goal is achieved. Call this only when nothing remains. "
-            "Your claim will be validated — if unproven, the task continues."
+            "Your claim will be validated — if unproven, the task continues.\n\n"
+            "IMPORTANT: The summary you provide here will be returned to the parent "
+            "agent as the FINAL ANSWER to the user. Include all key findings, data, "
+            "and conclusions directly in the summary. Do NOT rely on the parent agent "
+            "reading files afterwards — it sees ONLY this summary."
         )
 
     async def execute(self, summary: str, **kwargs: Any) -> str:
@@ -368,7 +372,12 @@ class LongTaskTool(Tool):
             "original goal and progress from the previous step. Use this for batch "
             "processing (auditing many files, processing many items), large-scale "
             "refactoring, or any multi-step task where you might lose track of the "
-            "goal. For simple independent tasks, use spawn instead."
+            "goal. For simple independent tasks, use spawn instead.\n\n"
+            "When constructing the goal, be explicit: list concrete deliverables, "
+            "required output format (e.g. Markdown table), and any file paths. "
+            "The tool returns a text summary when finished. "
+            "If the summary contains the full answer, present it to the user directly. "
+            "Only read files afterwards if the user explicitly asks for verification."
         )
 
     @classmethod
@@ -440,7 +449,6 @@ class LongTaskTool(Tool):
     def _emit(self, event_type: str, **payload: Any) -> None:
         """Emit an event to registered hooks."""
         event = LongTaskEvent(type=event_type, payload=payload)
-        logger.debug("LongTask event: {} | {}", event_type, payload)
 
         # Call catch-all hook
         catch_all = self._hooks.get("on_event")
@@ -494,6 +502,10 @@ class LongTaskTool(Tool):
             if result is None:
                 # Fatal error after retry
                 self._state["status"] = "error"
+                logger.error(
+                    "long_task step {}/{} failed after retry: {}",
+                    step + 1, max_steps, self._state["error"],
+                )
                 self._emit("task_error", step=step, error=self._state["error"])
                 if handoff.message:
                     return (
@@ -566,9 +578,22 @@ class LongTaskTool(Tool):
                 )
                 if validated:
                     self._state["status"] = "completed"
+                    logger.info(
+                        "long_task complete at step {}/{} after validation",
+                        step + 1, max_steps,
+                    )
                     self._emit("task_complete", step=step, summary=sig_payload)
-                    return sig_payload
+                    return (
+                        "The task is complete. This is the final answer — "
+                        "present it to the user directly without calling additional "
+                        "tools or reading files.\n\n"
+                        f"{sig_payload}"
+                    )
                 else:
+                    logger.warning(
+                        "long_task validation failed at step {}/{}",
+                        step + 1, max_steps,
+                    )
                     self._emit(
                         "validation_failed",
                         step=step,
@@ -600,6 +625,7 @@ class LongTaskTool(Tool):
                 self._state["last_handoff"] = handoff
 
         self._state["status"] = "error"
+        logger.error("long_task reached max steps ({})", max_steps)
         self._emit("task_error", step=max_steps, error="Max steps reached")
         return (
             f"Long task reached max steps ({max_steps}). "
