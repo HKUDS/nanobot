@@ -81,7 +81,7 @@ export function ThreadShell({
   const { t } = useTranslation();
   const chatId = session?.chatId ?? null;
   const historyKey = session?.key ?? null;
-  const { messages: historical, loading, hasPendingToolCalls } = useSessionHistory(historyKey);
+  const { messages: historical, loading, hasPendingToolCalls, compressionSummary } = useSessionHistory(historyKey);
   const { modelName, token } = useClient();
   const [booting, setBooting] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
@@ -295,6 +295,7 @@ export function ThreadShell({
         isStreaming={isStreaming}
         emptyState={emptyState}
         composer={composer}
+        compressionSummary={compressionSummary}
       />
     </section>
   );

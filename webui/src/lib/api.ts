@@ -84,6 +84,7 @@ export async function fetchSessionMessages(
   key: string;
   created_at: string | null;
   updated_at: string | null;
+  metadata: Record<string, unknown>;
   messages: Array<{
     role: string;
     content: string;

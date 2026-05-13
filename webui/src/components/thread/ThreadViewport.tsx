@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { ArrowDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { CompressionIndicator } from "@/components/thread/CompressionIndicator";
 import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -12,6 +13,7 @@ interface ThreadViewportProps {
   isStreaming: boolean;
   composer: ReactNode;
   emptyState?: ReactNode;
+  compressionSummary: { text: string; last_active: string } | null;
 }
 
 const NEAR_BOTTOM_PX = 48;
@@ -21,6 +23,7 @@ export function ThreadViewport({
   isStreaming,
   composer,
   emptyState,
+  compressionSummary,
 }: ThreadViewportProps) {
   const { t } = useTranslation();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -71,6 +74,12 @@ export function ThreadViewport({
           <div className="mx-auto flex min-h-full w-full max-w-[64rem] flex-col">
             <div className="flex-1 px-4 pb-20 pt-4">
               <div className="mx-auto w-full max-w-[49.5rem]">
+                {compressionSummary && (
+                  <CompressionIndicator
+                    summaryText={compressionSummary.text}
+                    lastActive={compressionSummary.last_active}
+                  />
+                )}
                 <ThreadMessages messages={messages} />
               </div>
             </div>

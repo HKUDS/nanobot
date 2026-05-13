@@ -86,8 +86,10 @@ export function useSessionHistory(key: string | null): {
   loading: boolean;
   error: string | null;
   /** ``true`` when the last persisted assistant turn has ``tool_calls`` but no
-   *  final text yet — the model was still processing when the page loaded. */
+    final text yet — the model was still processing when the page loaded. */
   hasPendingToolCalls: boolean;
+  /** Optional compression summary from ``_last_summary`` metadata. */
+  compressionSummary: { text: string; last_active: string } | null;
 } {
   const { token } = useClient();
   const [state, setState] = useState<{
@@ -96,12 +98,14 @@ export function useSessionHistory(key: string | null): {
     loading: boolean;
     error: string | null;
     hasPendingToolCalls: boolean;
+    compressionSummary: { text: string; last_active: string } | null;
   }>({
     key: null,
     messages: [],
     loading: false,
     error: null,
     hasPendingToolCalls: false,
+    compressionSummary: null,
   });
 
   useEffect(() => {
@@ -112,18 +116,18 @@ export function useSessionHistory(key: string | null): {
         loading: false,
         error: null,
         hasPendingToolCalls: false,
+        compressionSummary: null,
       });
       return;
     }
     let cancelled = false;
-    // Mark the new key as loading immediately so callers never see stale
-    // messages from the previous session during the render right after a switch.
     setState({
       key,
       messages: [],
       loading: true,
       error: null,
       hasPendingToolCalls: false,
+      compressionSummary: null,
     });
     (async () => {
       try {
@@ -163,12 +167,18 @@ export function useSessionHistory(key: string | null): {
           lastRaw?.role === "assistant" &&
           Array.isArray(lastRaw.tool_calls) &&
           lastRaw.tool_calls.length > 0;
+        const rawLastSummary = (body.metadata as Record<string, unknown> | undefined)?._last_summary as
+          { text: string; last_active: string; } | null | undefined;
+        const compressionSummary = rawLastSummary
+          ? { text: rawLastSummary.text, last_active: rawLastSummary.last_active }
+          : null;
         setState({
           key,
           messages: ui,
           loading: false,
           error: null,
           hasPendingToolCalls: hasPending,
+          compressionSummary,
         });
       } catch (e) {
         if (cancelled) return;
@@ -181,6 +191,7 @@ export function useSessionHistory(key: string | null): {
             loading: false,
             error: null,
             hasPendingToolCalls: false,
+            compressionSummary: null,
           });
         } else {
           setState({
@@ -189,6 +200,7 @@ export function useSessionHistory(key: string | null): {
             loading: false,
             error: (e as Error).message,
             hasPendingToolCalls: false,
+            compressionSummary: null,
           });
         }
       }
@@ -199,13 +211,13 @@ export function useSessionHistory(key: string | null): {
   }, [key, token]);
 
   if (!key) {
-    return { messages: EMPTY_MESSAGES, loading: false, error: null, hasPendingToolCalls: false };
+    return { messages: EMPTY_MESSAGES, loading: false, error: null, hasPendingToolCalls: false, compressionSummary: null };
   }
 
   // Even before the effect above commits its loading state, never surface the
   // previous session's payload for a brand-new key.
   if (state.key !== key) {
-    return { messages: EMPTY_MESSAGES, loading: true, error: null, hasPendingToolCalls: false };
+    return { messages: EMPTY_MESSAGES, loading: true, error: null, hasPendingToolCalls: false, compressionSummary: null };
   }
 
   return {
@@ -213,6 +225,7 @@ export function useSessionHistory(key: string | null): {
     loading: state.loading,
     error: state.error,
     hasPendingToolCalls: state.hasPendingToolCalls,
+    compressionSummary: state.compressionSummary,
   };
 }
 
