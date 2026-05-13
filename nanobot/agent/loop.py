@@ -104,6 +104,9 @@ class TurnContext:
     pending_queue: asyncio.Queue | None = None
     pending_summary: str | None = None
 
+    turn_wall_started_at: float = field(default_factory=time.time)
+    turn_latency_ms: int | None = None
+
     trace: list[StateTraceEntry] = field(default_factory=list)
 
 
@@ -223,6 +226,7 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
+        self._pending_turn_latency_ms: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
 
         self.context = ContextBuilder(workspace, timezone=timezone, disabled_skills=disabled_skills)
@@ -626,6 +630,24 @@ class AgentLoop:
         sub_cancelled = await self.subagents.cancel_by_session(key)
         return cancelled + sub_cancelled
 
+    async def _publish_turn_run_status(self, msg: InboundMessage, status: str) -> None:
+        """Notify WebSocket clients while a user turn is executing (timing strip)."""
+        if msg.channel != "websocket":
+            return
+        meta: dict[str, Any] = {
+            **dict(msg.metadata or {}),
+            "_goal_status": True,
+            "goal_status": status,
+        }
+        if status == "running":
+            meta["started_at"] = time.time()
+        await self.bus.publish_outbound(OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content="",
+            metadata=meta,
+        ))
+
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
         if self._unified_session and not msg.session_key_override:
@@ -928,9 +950,13 @@ class AgentLoop:
                         # Signal that the turn is fully complete (all tools executed,
                         # final text streamed).  This lets WS clients know when to
                         # definitively stop the loading indicator.
+                        turn_lat = self._pending_turn_latency_ms.pop(session_key, None)
+                        turn_metadata: dict[str, Any] = {**msg.metadata, "_turn_end": True}
+                        if turn_lat is not None:
+                            turn_metadata["latency_ms"] = int(turn_lat)
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
-                            content="", metadata={**msg.metadata, "_turn_end": True},
+                            content="", metadata=turn_metadata,
                         ))
                         if msg.metadata.get("webui") is True:
                             async def _generate_title_and_notify() -> None:
@@ -1002,6 +1028,8 @@ class AgentLoop:
                         "Re-published {} leftover message(s) to bus for session {}",
                         leftover, session_key,
                     )
+            await self._publish_turn_run_status(msg, "idle")
+            self._pending_turn_latency_ms.pop(session_key, None)
 
     async def close_mcp(self) -> None:
         """Drain pending background archives, then close MCP connections."""
@@ -1080,6 +1108,7 @@ class AgentLoop:
             sender_id=msg.sender_id,
             session_summary=pending,
         )
+        t_wall = time.time()
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
             messages, session=session, channel=channel, chat_id=chat_id,
             message_id=msg.metadata.get("message_id"),
@@ -1087,7 +1116,11 @@ class AgentLoop:
             session_key=key,
             pending_queue=pending_queue,
         )
-        self._save_turn(session, all_msgs, 1 + len(history))
+        wall_done = time.time()
+        latency_ms = max(0, int((wall_done - t_wall) * 1000))
+        self._save_turn(session, all_msgs, 1 + len(history), turn_latency_ms=latency_ms)
+        if channel == "websocket":
+            self._pending_turn_latency_ms[key] = latency_ms
         session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
         self._clear_runtime_checkpoint(session)
         self.sessions.save(session)
@@ -1208,6 +1241,8 @@ class AgentLoop:
         had_injections: bool,
         generated_media: list[str],
         on_stream: Callable[[str], Awaitable[None]] | None,
+        *,
+        turn_latency_ms: int | None = None,
     ) -> OutboundMessage | None:
         """Assemble the final outbound message from turn results."""
         # MessageTool suppression
@@ -1221,6 +1256,8 @@ class AgentLoop:
         meta = dict(msg.metadata or {})
         if on_stream is not None and stop_reason not in {"error", "tool_error"}:
             meta["_streamed"] = True
+        if turn_latency_ms is not None:
+            meta["latency_ms"] = int(turn_latency_ms)
 
         return OutboundMessage(
             channel=msg.channel,
@@ -1309,6 +1346,7 @@ class AgentLoop:
         return "ok"
 
     async def _state_run(self, ctx: TurnContext) -> str:
+        await self._publish_turn_run_status(ctx.msg, "running")
         result = await self._run_agent_loop(
             ctx.initial_messages,
             on_progress=ctx.on_progress,
@@ -1344,7 +1382,13 @@ class AgentLoop:
             media = existing_media if isinstance(existing_media, list) else []
             last_msg["media"] = list(dict.fromkeys([*media, *ctx.generated_media]))
 
-        self._save_turn(ctx.session, ctx.all_messages, ctx.save_skip)
+        ctx.turn_latency_ms = max(0, int((time.time() - ctx.turn_wall_started_at) * 1000))
+        self._save_turn(
+            ctx.session, ctx.all_messages, ctx.save_skip,
+            turn_latency_ms=ctx.turn_latency_ms,
+        )
+        if ctx.msg.channel == "websocket":
+            self._pending_turn_latency_ms[ctx.session_key] = ctx.turn_latency_ms
         ctx.session.enforce_file_cap(on_archive=self.context.memory.raw_archive)
         self._clear_pending_user_turn(ctx.session)
         self._clear_runtime_checkpoint(ctx.session)
@@ -1366,6 +1410,7 @@ class AgentLoop:
             ctx.had_injections,
             ctx.generated_media,
             ctx.on_stream,
+            turn_latency_ms=ctx.turn_latency_ms,
         )
         return "ok"
 
@@ -1409,10 +1454,18 @@ class AgentLoop:
 
         return filtered
 
-    def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
+    def _save_turn(
+        self,
+        session: Session,
+        messages: list[dict],
+        skip: int,
+        *,
+        turn_latency_ms: int | None = None,
+    ) -> None:
         """Save new-turn messages into session, truncating large tool results."""
         from datetime import datetime
 
+        last_assistant_idx: int | None = None
         for m in messages[skip:]:
             entry = dict(m)
             role, content = entry.get("role"), entry.get("content")
@@ -1452,6 +1505,10 @@ class AgentLoop:
                     entry["content"] = filtered
             entry.setdefault("timestamp", datetime.now().isoformat())
             session.messages.append(entry)
+            if role == "assistant":
+                last_assistant_idx = len(session.messages) - 1
+        if turn_latency_ms is not None and last_assistant_idx is not None:
+            session.messages[last_assistant_idx]["latency_ms"] = int(turn_latency_ms)
         session.updated_at = datetime.now()
 
     def _persist_subagent_followup(self, session: Session, msg: InboundMessage) -> bool:

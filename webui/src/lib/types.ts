@@ -51,6 +51,8 @@ export interface UIMessage {
   /** True while ``reasoning_delta`` frames are still arriving for this turn.
    * Drives the shimmer header on ``ReasoningBubble``. */
   reasoningStreaming?: boolean;
+  /** End-to-end wall time for this assistant turn (persisted ``latency_ms`` / ``turn_end``). */
+  latencyMs?: number;
 }
 
 export interface ToolProgressEvent {
@@ -162,6 +164,8 @@ export type InboundEvent =
       /** Present when the frame is an agent breadcrumb (e.g. tool hint,
        * generic progress line) rather than a conversational reply. */
       kind?: "tool_hint" | "progress" | "reasoning";
+      /** Server-measured turn wall time when this frame finishes an assistant reply. */
+      latency_ms?: number;
     }
   | {
       event: "delta";
@@ -190,7 +194,15 @@ export type InboundEvent =
       model_name: string;
       model_preset?: string | null;
     }
-  | { event: "turn_end"; chat_id: string }
+  | { event: "turn_end"; chat_id: string; latency_ms?: number }
+  | {
+      event: "goal_status";
+      chat_id: string;
+      /** Turn executing (user message through agent loop). */
+      status: "running" | "idle";
+      /** Server ``time.time()`` when ``status`` is ``running``. */
+      started_at?: number;
+    }
   | { event: "session_updated"; chat_id: string }
   | { event: "error"; chat_id?: string; detail?: string };
 

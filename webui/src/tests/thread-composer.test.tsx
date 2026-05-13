@@ -88,6 +88,25 @@ describe("ThreadComposer", () => {
     expect(screen.getByRole("button", { name: "Send message" }).className).toContain("bg-foreground");
   });
 
+  it("shows turn run timer when runStartedAt is set", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date((1_000 + 125) * 1000));
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        runStartedAt={1000}
+      />,
+    );
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(/Running/);
+    expect(status).toHaveTextContent(/2:05/);
+
+    vi.useRealTimers();
+  });
+
   it("opens a slash command palette and inserts the selected command", () => {
     const onSend = vi.fn();
     render(

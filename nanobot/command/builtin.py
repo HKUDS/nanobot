@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
 from contextlib import suppress
 from dataclasses import dataclass
 
@@ -71,6 +72,13 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "Print the last N persisted conversation messages.",
         "history",
         "[n]",
+    ),
+    BuiltinCommandSpec(
+        "/goal",
+        "Start long-running goal",
+        "Tell the agent to treat the request as a long-running goal.",
+        "activity",
+        "<goal>",
     ),
     BuiltinCommandSpec(
         "/dream",
@@ -539,6 +547,46 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+_GOAL_PROMPT_TEMPLATE = """The user declared this as a long-running goal.
+
+First inspect, search, or ask for clarification if needed. When you are ready to begin sustained multi-step execution, use the `long_task` tool with the clarified goal. Do not use `long_task` for trivial one-step answers.
+
+Goal:
+{goal}
+"""
+
+
+async def cmd_goal(ctx: CommandContext) -> OutboundMessage | None:
+    """Rewrite /goal into a normal agent turn that nudges long_task use."""
+    goal = ctx.args.strip()
+    if not goal:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content="Usage: /goal <long-running task description>",
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
+    if ctx.session is None:
+        return OutboundMessage(
+            channel=ctx.msg.channel,
+            chat_id=ctx.msg.chat_id,
+            content=(
+                "A task is already running for this chat. "
+                "Use `/stop` first, then send `/goal <long-running task description>` again."
+            ),
+            metadata={**dict(ctx.msg.metadata or {}), "render_as": "text"},
+        )
+
+    ctx.msg.metadata = {
+        **dict(ctx.msg.metadata or {}),
+        "original_command": "/goal",
+        "original_content": ctx.raw,
+        "goal_started_at": time.time(),
+    }
+    ctx.msg.content = _GOAL_PROMPT_TEMPLATE.format(goal=goal)
+    return None
+
+
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
     return OutboundMessage(
@@ -571,6 +619,8 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/model ", cmd_model)
     router.exact("/history", cmd_history)
     router.prefix("/history ", cmd_history)
+    router.exact("/goal", cmd_goal)
+    router.prefix("/goal ", cmd_goal)
     router.exact("/dream", cmd_dream)
     router.exact("/dream-log", cmd_dream_log)
     router.prefix("/dream-log ", cmd_dream_log)

@@ -89,6 +89,29 @@ describe("NanobotClient", () => {
     });
   });
 
+  it("records goal_status run strip without an onChat subscriber", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-strip",
+      status: "running",
+      started_at: 12_345,
+    });
+    expect(client.getRunStartedAt("chat-strip")).toBe(12_345);
+    lastSocket().fakeMessage({
+      event: "goal_status",
+      chat_id: "chat-strip",
+      status: "idle",
+    });
+    expect(client.getRunStartedAt("chat-strip")).toBeNull();
+  });
+
   it("dispatches runtime model updates globally", () => {
     const client = new NanobotClient({
       url: "ws://test",

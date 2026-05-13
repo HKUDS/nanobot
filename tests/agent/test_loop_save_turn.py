@@ -143,6 +143,25 @@ def test_save_turn_keeps_tool_results_under_16k() -> None:
     assert session.messages[0]["content"] == content
 
 
+def test_save_turn_stamps_latency_on_last_assistant() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:latency")
+
+    loop._save_turn(
+        session,
+        [
+            {"role": "assistant", "content": "hello", "tool_calls": [{"id": "c1"}]},
+            {"role": "assistant", "content": "final answer"},
+        ],
+        skip=0,
+        turn_latency_ms=12345,
+    )
+
+    assert session.messages[-1]["role"] == "assistant"
+    assert session.messages[-1]["content"] == "final answer"
+    assert session.messages[-1]["latency_ms"] == 12345
+
+
 def test_restore_runtime_checkpoint_rehydrates_completed_and_pending_tools() -> None:
     loop = _mk_loop()
     session = Session(

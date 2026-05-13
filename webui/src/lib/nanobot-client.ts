@@ -67,6 +67,8 @@ export class NanobotClient {
   private chatHandlers = new Map<string, Set<EventHandler>>();
   // chat_ids we've attached to since connect; re-attached after reconnects
   private knownChats = new Set<string>();
+  /** Wall-clock run strip: updated from ``goal_status`` even with no ``onChat`` subscriber. */
+  private runStartedAtByChatId = new Map<string, number>();
   private pendingNewChat: PendingNewChat | null = null;
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
@@ -131,6 +133,21 @@ export class NanobotClient {
     return () => {
       this.errorHandlers.delete(handler);
     };
+  }
+
+  /** Last ``goal_status`` ``started_at`` (unix sec) for *chatId*, if the turn is running. */
+  getRunStartedAt(chatId: string): number | null {
+    const v = this.runStartedAtByChatId.get(chatId);
+    return v === undefined ? null : v;
+  }
+
+  private recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent): void {
+    if (ev.event !== "goal_status") return;
+    if (ev.status === "running" && typeof ev.started_at === "number") {
+      this.runStartedAtByChatId.set(chatId, ev.started_at);
+    } else {
+      this.runStartedAtByChatId.delete(chatId);
+    }
   }
 
   /** Subscribe to events for a given chat_id. Auto-attaches on the next open. */
@@ -274,7 +291,10 @@ export class NanobotClient {
     }
 
     const chatId = (parsed as { chat_id?: string }).chat_id;
-    if (chatId) this.dispatch(chatId, parsed);
+    if (chatId) {
+      this.recordGoalStatusForRunStrip(chatId, parsed);
+      this.dispatch(chatId, parsed);
+    }
   }
 
   private emitRuntimeModelUpdate(modelName: string | null, modelPreset?: string | null): void {

@@ -134,6 +134,17 @@ function pruneReasoningOnlyPlaceholders(prev: UIMessage[]): UIMessage[] {
   });
 }
 
+function stampLastAssistantLatency(prev: UIMessage[], latencyMs: number): UIMessage[] {
+  for (let i = prev.length - 1; i >= 0; i -= 1) {
+    const m = prev[i];
+    if (m.role === "assistant" && m.kind !== "trace") {
+      const merged: UIMessage = { ...m, latencyMs, isStreaming: false };
+      return [...prev.slice(0, i), merged, ...prev.slice(i + 1)];
+    }
+  }
+  return prev;
+}
+
 function absorbCompleteAssistantMessage(
   prev: UIMessage[],
   message: Omit<UIMessage, "id" | "role" | "createdAt">,
@@ -190,6 +201,8 @@ export function useNanobotStream(
 ): {
   messages: UIMessage[];
   isStreaming: boolean;
+  /** Unix epoch seconds when the current user turn started (WebSocket ``goal_status``). */
+  runStartedAt: number | null;
   send: (content: string, images?: SendImage[], options?: SendOptions) => void;
   stop: () => void;
   setMessages: React.Dispatch<React.SetStateAction<UIMessage[]>>;
@@ -209,6 +222,8 @@ export function useNanobotStream(
     ? initialMessages[initialMessages.length - 1].kind === "trace"
     : false;
   const [isStreaming, setIsStreaming] = useState(initialStreaming || hasPendingToolCalls);
+  /** Unix epoch seconds when the current user turn started; cleared on ``idle``. */
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
   const buffer = useRef<StreamBuffer | null>(null);
   const suppressStreamUntilTurnEndRef = useRef(false);
@@ -238,6 +253,7 @@ export function useNanobotStream(
         : false) || hasPendingToolCalls,
     );
     setStreamError(null);
+    setRunStartedAt(chatId ? client.getRunStartedAt(chatId) : null);
     buffer.current = null;
     suppressStreamUntilTurnEndRef.current = false;
     if (streamEndTimerRef.current !== null) {
@@ -245,7 +261,7 @@ export function useNanobotStream(
       streamEndTimerRef.current = null;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatId]);
+  }, [chatId, client]);
 
   useEffect(() => {
     if (hasPendingToolCalls) setIsStreaming(true);
@@ -332,6 +348,15 @@ export function useNanobotStream(
         return;
       }
 
+      if (ev.event === "goal_status") {
+        if (ev.status === "running" && typeof ev.started_at === "number") {
+          setRunStartedAt(ev.started_at);
+        } else {
+          setRunStartedAt(null);
+        }
+        return;
+      }
+
       if (ev.event === "turn_end") {
         // Definitive signal that the turn is fully complete.  Cancel any
         // pending debounce timer and stop the loading indicator immediately.
@@ -341,8 +366,12 @@ export function useNanobotStream(
         }
         setIsStreaming(false);
         setMessages((prev) => {
-          const finalized = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
-          return pruneReasoningOnlyPlaceholders(finalized);
+          let finalized = prev.map((m) => (m.isStreaming ? { ...m, isStreaming: false } : m));
+          finalized = pruneReasoningOnlyPlaceholders(finalized);
+          if (typeof ev.latency_ms === "number" && ev.latency_ms >= 0) {
+            finalized = stampLastAssistantLatency(finalized, Math.round(ev.latency_ms));
+          }
+          return finalized;
         });
         suppressStreamUntilTurnEndRef.current = false;
         onTurnEnd?.();
@@ -415,9 +444,14 @@ export function useNanobotStream(
         setMessages((prev) => {
           const filtered = activeId ? prev.filter((m) => m.id !== activeId) : prev;
           const content = ev.text;
+          const lat =
+            typeof ev.latency_ms === "number" && ev.latency_ms >= 0
+              ? Math.round(ev.latency_ms)
+              : undefined;
           return absorbCompleteAssistantMessage(filtered, {
             content,
             ...(hasMedia ? { media } : {}),
+            ...(lat !== undefined ? { latencyMs: lat } : {}),
           });
         });
         if (hasMedia) {
@@ -485,6 +519,7 @@ export function useNanobotStream(
   return {
     messages,
     isStreaming,
+    runStartedAt,
     send,
     stop,
     setMessages,

@@ -244,6 +244,7 @@
       "placeholderStreaming": "Model is responding…",
       "inputAria": "Message input",
       "sendHint": "Enter to send · Shift+Enter for newline",
+      "runRuntimeTitle": "Running · {{elapsed}}",
       "send": "Send message",
       "stop": "Stop response",
       "attachImage": "Attach image",
@@ -307,6 +308,10 @@
             "title": "Restore memory",
             "description": "Revert memory to a previous Dream snapshot."
           },
+          "goal": {
+            "title": "Long-running goal",
+            "description": "Tell the agent to treat this as a sustained multi-step goal."
+          },
           "help": {
             "title": "Show help",
             "description": "List available slash commands."
@@ -336,7 +341,8 @@
     "reasoningStreaming": "Thinking…",
     "imageAttachment": "Image attachment",
     "copyReply": "Copy reply",
-    "copiedReply": "Copied reply"
+    "copiedReply": "Copied reply",
+    "turnLatencyTitle": "Response time (end-to-end)"
   },
   "lightbox": {
     "title": "Image preview",

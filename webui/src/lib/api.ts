@@ -93,6 +93,8 @@ export async function fetchSessionMessages(
     thinking_blocks?: unknown;
     tool_call_id?: string;
     name?: string;
+    /** Wall-clock milliseconds for the assistant turn (end-to-end). */
+    latency_ms?: number;
     /** Present on ``user`` turns that attached images. Paths have already
      * been stripped server-side; only the signed fetch URLs survive. */
     media_urls?: SessionMediaUrl[];

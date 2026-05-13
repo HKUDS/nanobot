@@ -218,6 +218,7 @@
       "placeholderStreaming": "モデルが応答しています…",
       "inputAria": "メッセージ入力欄",
       "sendHint": "Enter で送信 · Shift+Enter で改行",
+      "runRuntimeTitle": "実行中 · {{elapsed}}",
       "send": "メッセージを送信",
       "stop": "応答を停止",
       "attachImage": "画像を添付",
@@ -286,6 +287,10 @@
             "title": "メモリを復元",
             "description": "以前の Dream スナップショットへメモリを戻します。"
           },
+          "goal": {
+            "title": "長期目標",
+            "description": "持続的な複数ステップの目標として扱うようエージェントに伝えます。"
+          },
           "help": {
             "title": "ヘルプを表示",
             "description": "利用可能なスラッシュコマンドを一覧表示します。"
@@ -300,7 +305,8 @@
     "assistantTyping": "アシスタントが入力中",
     "toolSingle": "ツールを使用中",
     "toolMany": "{{count}} 個のツールを使用",
-    "imageAttachment": "画像の添付"
+    "imageAttachment": "画像の添付",
+    "turnLatencyTitle": "応答時間（全行程）"
   },
   "lightbox": {
     "title": "画像プレビュー",

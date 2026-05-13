@@ -1447,14 +1447,27 @@ class WebSocketChannel(BaseChannel):
                 msg.metadata.get("_progress")
                 or msg.metadata.get("_turn_end")
                 or msg.metadata.get("_session_updated")
+                or msg.metadata.get("_goal_status")
             ):
                 self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
             else:
                 self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
             return
+        if msg.metadata.get("_goal_status"):
+            status = msg.metadata.get("goal_status")
+            if status in ("running", "idle"):
+                started_raw = msg.metadata.get("started_at", msg.metadata.get("goal_started_at"))
+                await self.send_goal_status(
+                    msg.chat_id,
+                    status,
+                    started_at=float(started_raw) if isinstance(started_raw, int | float) else None,
+                )
+            return
         # Signal that the agent has fully finished processing the current turn.
         if msg.metadata.get("_turn_end"):
-            await self.send_turn_end(msg.chat_id)
+            lat = msg.metadata.get("latency_ms")
+            lat_i = int(lat) if isinstance(lat, (int, float)) else None
+            await self.send_turn_end(msg.chat_id, latency_ms=lat_i)
             return
         if msg.metadata.get("_session_updated"):
             await self.send_session_updated(msg.chat_id)
@@ -1476,6 +1489,9 @@ class WebSocketChannel(BaseChannel):
                 payload["media_urls"] = urls
         if msg.reply_to:
             payload["reply_to"] = msg.reply_to
+        lat = msg.metadata.get("latency_ms")
+        if isinstance(lat, (int, float)):
+            payload["latency_ms"] = int(lat)
         if msg.metadata.get("_tool_events"):
             payload["tool_events"] = msg.metadata["_tool_events"]
         # Mark intermediate agent breadcrumbs (tool-call hints, generic
@@ -1561,15 +1577,39 @@ class WebSocketChannel(BaseChannel):
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" stream ")
 
-    async def send_turn_end(self, chat_id: str) -> None:
+    async def send_turn_end(self, chat_id: str, latency_ms: int | None = None) -> None:
         """Signal that the agent has fully finished processing the current turn."""
         conns = list(self._subs.get(chat_id, ()))
         if not conns:
             return
         body: dict[str, Any] = {"event": "turn_end", "chat_id": chat_id}
+        if latency_ms is not None:
+            body["latency_ms"] = int(latency_ms)
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_end ")
+
+    async def send_goal_status(
+        self,
+        chat_id: str,
+        status: str,
+        *,
+        started_at: float | None = None,
+    ) -> None:
+        """Notify clients that a turn started or finished (WebUI run timer)."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body: dict[str, Any] = {
+            "event": "goal_status",
+            "chat_id": chat_id,
+            "status": status,
+        }
+        if status == "running" and started_at is not None:
+            body["started_at"] = started_at
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" goal_status ")
 
     async def send_session_updated(self, chat_id: str) -> None:
         """Notify clients that session metadata changed outside the main turn."""

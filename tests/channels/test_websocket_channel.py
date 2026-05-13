@@ -507,6 +507,76 @@ async def test_send_turn_end_emits_turn_end_event() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_turn_end_includes_latency_ms_when_present() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={"_turn_end": True, "latency_ms": 1500},
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {"event": "turn_end", "chat_id": "chat-1", "latency_ms": 1500}
+
+
+@pytest.mark.asyncio
+async def test_send_goal_status_running_emits_event_with_started_at() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={
+            "_goal_status": True,
+            "goal_status": "running",
+            "started_at": 1_700_000_000.5,
+        },
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {
+        "event": "goal_status",
+        "chat_id": "chat-1",
+        "status": "running",
+        "started_at": 1_700_000_000.5,
+    }
+
+
+@pytest.mark.asyncio
+async def test_send_goal_status_idle_omits_started_at() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={
+            "_goal_status": True,
+            "goal_status": "idle",
+            "goal_started_at": 99.0,
+        },
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {"event": "goal_status", "chat_id": "chat-1", "status": "idle"}
+
+
+@pytest.mark.asyncio
 async def test_send_session_updated_emits_session_updated_event() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)

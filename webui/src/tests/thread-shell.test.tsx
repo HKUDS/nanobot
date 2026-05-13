@@ -14,6 +14,7 @@ function makeClient() {
     defaultChatId: null as string | null,
     onStatus: () => () => {},
     onRuntimeModelUpdate: () => () => {},
+    getRunStartedAt: () => null,
     onChat: (chatId: string, handler: (ev: import("@/lib/types").InboundEvent) => void) => {
       let handlers = chatHandlers.get(chatId);
       if (!handlers) {

@@ -173,7 +173,8 @@ export function ThreadViewport({
           size="icon"
           onClick={() => scrollToBottom(true)}
           className={cn(
-            "absolute bottom-28 left-1/2 h-8 w-8 -translate-x-1/2 rounded-full shadow-md",
+            /* Keep clear of sticky composer (textarea + toolbar + optional goal strip). */
+            "absolute bottom-48 left-1/2 z-20 h-8 w-8 -translate-x-1/2 rounded-full shadow-md",
             "bg-background/90 backdrop-blur",
             "animate-in fade-in-0 zoom-in-95",
           )}

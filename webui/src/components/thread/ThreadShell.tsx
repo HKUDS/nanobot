@@ -111,6 +111,7 @@ export function ThreadShell({
   const {
     messages,
     isStreaming,
+    runStartedAt,
     send,
     stop,
     setMessages,
@@ -296,6 +297,7 @@ export function ThreadShell({
           imageMode={showHeroComposer ? heroImageMode : undefined}
           onImageModeChange={showHeroComposer ? setHeroImageMode : undefined}
           onStop={stop}
+          runStartedAt={runStartedAt}
         />
       ) : (
         <ThreadComposer
@@ -312,6 +314,7 @@ export function ThreadShell({
           slashCommands={slashCommands}
           imageMode={heroImageMode}
           onImageModeChange={setHeroImageMode}
+          runStartedAt={runStartedAt}
         />
       )}
       {showHeroComposer ? quickActions : null}

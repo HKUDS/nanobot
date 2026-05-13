@@ -61,6 +61,8 @@ interface ThreadComposerProps {
   imageMode?: boolean;
   onImageModeChange?: (enabled: boolean) => void;
   onStop?: () => void;
+  /** Unix seconds from server; turn elapsed timer above input while set. */
+  runStartedAt?: number | null;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -126,6 +128,32 @@ function getVisibleBounds(el: HTMLElement): { top: number; bottom: number } {
   return { top, bottom };
 }
 
+function RunElapsedStrip({ startedAt }: { startedAt: number }) {
+  const { t } = useTranslation();
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [startedAt]);
+  const elapsed = Math.max(0, Math.floor(Date.now() / 1000 - startedAt));
+  const m = Math.floor(elapsed / 60);
+  const s = elapsed % 60;
+  const label = m > 0 ? `${m}:${s.toString().padStart(2, "0")}` : `${s}s`;
+
+  return (
+    <div
+      className="flex items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
+      role="status"
+      aria-label={t("thread.composer.runRuntimeTitle", { elapsed: label })}
+    >
+      <Activity className="h-4 w-4 shrink-0 text-primary/80" aria-hidden />
+      <span className="text-[12px] font-medium text-foreground/75">
+        {t("thread.composer.runRuntimeTitle", { elapsed: label })}
+      </span>
+    </div>
+  );
+}
+
 export function ThreadComposer({
   onSend,
   disabled,
@@ -137,6 +165,7 @@ export function ThreadComposer({
   imageMode: controlledImageMode,
   onImageModeChange,
   onStop,
+  runStartedAt = null,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -542,6 +571,9 @@ export function ThreadComposer({
               />
             ))}
           </div>
+        ) : null}
+        {runStartedAt != null ? (
+          <RunElapsedStrip startedAt={runStartedAt} />
         ) : null}
         <textarea
           ref={textareaRef}

@@ -193,6 +193,9 @@ export function useSessionHistory(key: string | null): {
             createdAt: m.timestamp ? Date.parse(m.timestamp) : Date.now(),
             ...(images ? { images } : {}),
             ...(media ? { media } : {}),
+            ...(typeof m.latency_ms === "number" && m.latency_ms >= 0
+              ? { latencyMs: Math.round(m.latency_ms) }
+              : {}),
             ...(m.role === "assistant" && reasoningFromHistory(m)
               ? { reasoning: reasoningFromHistory(m), reasoningStreaming: false }
               : {}),

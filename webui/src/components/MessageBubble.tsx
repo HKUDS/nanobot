@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText } from "@/components/MarkdownText";
 import { cn } from "@/lib/utils";
+import { formatTurnLatency } from "@/lib/format";
 import type { UIImage, UIMediaAttachment, UIMessage } from "@/lib/types";
 
 interface MessageBubbleProps {
@@ -89,6 +90,13 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const reasoningStreaming = !!(message.role === "assistant" && message.reasoningStreaming);
   const hasReasoning = reasoning.length > 0 || reasoningStreaming;
   const showAssistantActions = message.role === "assistant" && !message.isStreaming && !empty;
+  const latencyMs = message.latencyMs;
+  const showLatencyFooter =
+    message.role === "assistant"
+    && latencyMs != null
+    && !message.isStreaming
+    && (!empty || hasReasoning || media.length > 0);
+  const showAssistantFooterRow = showAssistantActions || showLatencyFooter;
   return (
     <div className={cn("w-full text-[15px]", baseAnim)} style={{ lineHeight: "var(--cjk-line-height)" }}>
       {hasReasoning ? (
@@ -99,27 +107,36 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       ) : empty && message.isStreaming ? null : (
         <>
           <MarkdownText>{message.content}</MarkdownText>
-          {message.isStreaming && <StreamCursor />}
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
-          {showAssistantActions ? (
-            <div className="mt-2 flex items-center gap-1 text-muted-foreground">
-              <button
-                type="button"
-                onClick={onCopyAssistantReply}
-                aria-label={copied ? t("message.copiedReply") : t("message.copyReply")}
-                title={copied ? t("message.copiedReply") : t("message.copyReply")}
-                className={cn(
-                  "inline-flex h-8 w-8 items-center justify-center rounded-full",
-                  "transition-colors hover:bg-muted/55 hover:text-foreground",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                )}
-              >
-                {copied ? (
-                  <Check className="h-4 w-4" aria-hidden />
-                ) : (
-                  <Copy className="h-4 w-4" aria-hidden />
-                )}
-              </button>
+          {showAssistantFooterRow ? (
+            <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
+              {showAssistantActions ? (
+                <button
+                  type="button"
+                  onClick={onCopyAssistantReply}
+                  aria-label={copied ? t("message.copiedReply") : t("message.copyReply")}
+                  title={copied ? t("message.copiedReply") : t("message.copyReply")}
+                  className={cn(
+                    "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                    "transition-colors hover:bg-muted/55 hover:text-foreground",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  )}
+                >
+                  {copied ? (
+                    <Check className="h-4 w-4" aria-hidden />
+                  ) : (
+                    <Copy className="h-4 w-4" aria-hidden />
+                  )}
+                </button>
+              ) : null}
+              {showLatencyFooter ? (
+                <span
+                  className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
+                  title={t("message.turnLatencyTitle")}
+                >
+                  {formatTurnLatency(latencyMs)}
+                </span>
+              ) : null}
             </div>
           ) : null}
         </>
@@ -335,20 +352,6 @@ function UserImageCell({
         </span>
       </div>
     </div>
-  );
-}
-
-/** Blinking cursor appended at the end of streaming text. */
-function StreamCursor() {
-  const { t } = useTranslation();
-  return (
-    <span
-      aria-label={t("message.streaming")}
-      className={cn(
-        "ml-0.5 inline-block h-[1em] w-[3px] translate-y-[2px] align-middle",
-        "rounded-sm bg-foreground/70 animate-pulse",
-      )}
-    />
   );
 }
 
