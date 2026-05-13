@@ -89,8 +89,7 @@ class AutoCompact:
             if summary and summary != "(nothing)":
                 self._summaries[key] = (summary, last_active)
                 session.metadata["_last_summary"] = {"text": summary, "last_active": last_active.isoformat()}
-            session.messages = kept_msgs
-            session.last_consolidated = 0
+            session.last_consolidated = len(session.messages) - len(kept_msgs)
             session.updated_at = datetime.now()
             self.sessions.save(session)
             if archive_msgs:

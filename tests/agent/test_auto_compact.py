@@ -233,8 +233,9 @@ class TestAutoCompact:
 
         assert len(archived_messages) == 4
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
-        assert session_after.messages[0]["content"] == "msg user 2"
+        assert len(session_after.messages) == 12
+        assert session_after.last_consolidated == 4
+        assert session_after.messages[session_after.last_consolidated]["content"] == "msg user 2"
         assert session_after.messages[-1]["content"] == "msg assistant 5"
         await loop.close_mcp()
 
@@ -257,7 +258,8 @@ class TestAutoCompact:
         assert entry is not None
         assert entry[0] == "User said hello."
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert len(session_after.messages) == 12
+        assert session_after.last_consolidated == 4
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -349,8 +351,9 @@ class TestAutoCompactIdleDetection:
 
         session_after = loop.sessions.get_or_create("cli:test")
         assert len(archived_messages) == 4
-        assert not any(m["content"] == "old user 0" for m in session_after.messages)
+        assert any(m["content"] == "old user 0" for m in session_after.messages)
         assert any(m["content"] == "new msg" for m in session_after.messages)
+        assert session_after.last_consolidated > 0
         await loop.close_mcp()
 
     @pytest.mark.asyncio
@@ -446,10 +449,11 @@ class TestAutoCompactSystemMessages:
         await loop._process_message(msg)
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert not any(
+        assert any(
             m["content"] == "old user 0"
             for m in session_after.messages
         )
+        assert session_after.last_consolidated > 0
         await loop.close_mcp()
 
 
@@ -472,7 +476,8 @@ class TestAutoCompactEdgeCases:
         await loop.auto_compact._archive("cli:test")
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert len(session_after.messages) == 12
+        assert session_after.last_consolidated == 4
         # "(nothing)" summary should not be stored
         assert "cli:test" not in loop.auto_compact._summaries
 
@@ -493,7 +498,8 @@ class TestAutoCompactEdgeCases:
         await loop.auto_compact._archive("cli:test")
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert len(session_after.messages) == 12
+        assert session_after.last_consolidated == 4
 
         await loop.close_mcp()
 
@@ -578,10 +584,9 @@ class TestAutoCompactIntegration:
         # Phase 4: Verify
         session_after = loop.sessions.get_or_create("cli:test")
 
-        # The oldest messages should be trimmed from live session history
-        assert not any(
-            "past tense is used" in str(m.get("content", "")) for m in session_after.messages
-        )
+        # Oldest messages are preserved (no archive happened in this test)
+        assert session_after.last_consolidated == 0
+        assert len(session_after.messages) == 12
 
         # Summary should NOT be persisted in session (ephemeral, one-shot)
         assert not any(
@@ -679,7 +684,8 @@ class TestProactiveAutoCompact:
         await self._run_check_expired(loop)
 
         session_after = loop.sessions.get_or_create("cli:test")
-        assert len(session_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert len(session_after.messages) == 10
+        assert session_after.last_consolidated == 2
         assert len(archived_messages) == 2
         entry = loop.auto_compact._summaries.get("cli:test")
         assert entry is not None
@@ -866,7 +872,8 @@ class TestProactiveAutoCompact:
 
         assert archive_count == 1
         s1_after = loop.sessions.get_or_create("cli:expired_idle")
-        assert len(s1_after.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert len(s1_after.messages) == 12
+        assert s1_after.last_consolidated == 4
         s2_after = loop.sessions.get_or_create("cli:expired_active")
         assert len(s2_after.messages) == 12  # Preserved
         s3_after = loop.sessions.get_or_create("cli:recent")
@@ -1015,7 +1022,8 @@ class TestSummaryPersistence:
 
         # prepare_session should recover summary from metadata
         reloaded = loop.sessions.get_or_create("cli:test")
-        assert len(reloaded.messages) == loop.auto_compact._RECENT_SUFFIX_MESSAGES
+        assert len(reloaded.messages) == 12
+        assert reloaded.last_consolidated == 4
         _, summary = loop.auto_compact.prepare_session(reloaded, "cli:test")
 
         assert summary is not None
@@ -1156,4 +1164,99 @@ class TestSummaryPersistence:
         # After /new, metadata should no longer contain _last_summary
         fresh = loop.sessions.get_or_create("cli:test")
         assert "_last_summary" not in fresh.metadata
+        await loop.close_mcp()
+
+
+class TestAutoCompactMessagePreservation:
+    """Prove that _archive() destructively replaces session.messages.
+
+    These tests are the RED phase of a TDD cycle. They are expected to FAIL
+    against the current implementation until _archive() is fixed to preserve
+    the full message history instead of replacing it with only the suffix.
+    """
+
+    @pytest.mark.asyncio
+    async def test_archive_preserves_all_messages_on_session_file(self, tmp_path):
+        """After _archive(), all original messages should still be on disk."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        _add_turns(session, 10)  # 10 turns = 20 messages
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        async def _fake_archive(messages):
+            return "Summary."
+
+        loop.consolidator.archive = _fake_archive
+        await loop.auto_compact._archive("cli:test")
+
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert len(session_after.messages) == 20, (
+            f"Expected 20 messages preserved, got {len(session_after.messages)}. "
+            "_archive() destructively replaced messages with only the suffix."
+        )
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_archive_advances_last_consolidated(self, tmp_path):
+        """After _archive(), last_consolidated should advance past archived messages."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        _add_turns(session, 10)  # 10 turns = 20 messages
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        async def _fake_archive(messages):
+            return "Summary."
+
+        loop.consolidator.archive = _fake_archive
+        await loop.auto_compact._archive("cli:test")
+
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert session_after.last_consolidated > 0, (
+            f"Expected last_consolidated > 0, got {session_after.last_consolidated}. "
+            "_archive() resets last_consolidated to 0 instead of advancing the cursor."
+        )
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_second_archive_cycle_advances_cursor_not_reset(self, tmp_path):
+        """Two consecutive _archive() calls should monotonically advance the cursor."""
+        loop = _make_loop(tmp_path, session_ttl_minutes=15)
+        session = loop.sessions.get_or_create("cli:test")
+        _add_turns(session, 10)  # 10 turns = 20 messages
+        session.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(session)
+
+        async def _fake_archive(messages):
+            return "Summary."
+
+        loop.consolidator.archive = _fake_archive
+
+        # First archive cycle
+        await loop.auto_compact._archive("cli:test")
+        first = loop.sessions.get_or_create("cli:test")
+        first_consolidated = first.last_consolidated
+
+        # Add 5 new turns (10 new messages = 30 total ideally), invalidate, expire
+        first.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(first)
+        _add_turns(first, 5)
+        first.updated_at = datetime.now() - timedelta(minutes=20)
+        loop.sessions.save(first)
+        loop.sessions.invalidate(first.key)
+
+        # Second archive cycle
+        await loop.auto_compact._archive("cli:test")
+        second = loop.sessions.get_or_create("cli:test")
+
+        assert second.last_consolidated >= first_consolidated, (
+            f"Expected monotonically increasing cursor: "
+            f"second ({second.last_consolidated}) >= first ({first_consolidated}). "
+            "_archive() resets last_consolidated to 0 on each call."
+        )
+        assert len(second.messages) == 30, (
+            f"Expected 30 total messages (20 original + 10 new), got {len(second.messages)}. "
+            "_archive() replaced messages instead of preserving them."
+        )
         await loop.close_mcp()
