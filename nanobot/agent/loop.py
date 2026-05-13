@@ -7,6 +7,8 @@ import dataclasses
 import json
 import time
 from contextlib import AsyncExitStack, suppress
+from dataclasses import dataclass, field
+from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
