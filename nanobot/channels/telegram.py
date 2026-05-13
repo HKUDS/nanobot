@@ -315,7 +315,7 @@ class TelegramChannel(BaseChannel):
         """Preserve Telegram's legacy id|username allowlist matching."""
         allow_list = getattr(self.config, "allow_from", [])
         if not allow_list:
-            logger.warning("{}: allow_from is empty — all access denied", self.name)
+            self.logger.warning("allow_from is empty — all access denied")
         return self._sender_matches_allow_list(sender_id, allow_list)
 
     def _chat_access_rule(self, chat_id: str | int) -> str | list[str] | None:
@@ -342,7 +342,7 @@ class TelegramChannel(BaseChannel):
     ) -> None:
         """Handle Telegram ACLs, including per-chat access rules."""
         if not self._is_chat_sender_allowed(chat_id, sender_id):
-            logger.warning(
+            self.logger.warning(
                 "Access denied for sender {} in Telegram chat {}. "
                 "Add them to allowFrom or channels.telegram.chatAccess to grant access.",
                 sender_id, chat_id,
@@ -1055,7 +1055,7 @@ class TelegramChannel(BaseChannel):
         message = update.message
         user = update.effective_user
         sender_id = self._sender_id(user)
-        if not self.is_allowed(sender_id):
+        if not self._is_chat_sender_allowed(message.chat_id, sender_id):
             return
         self._remember_thread_context(message)
 
@@ -1085,7 +1085,7 @@ class TelegramChannel(BaseChannel):
         user = update.effective_user
         chat_id = message.chat_id
         sender_id = self._sender_id(user)
-        if not self.is_allowed(sender_id):
+        if not self._is_chat_sender_allowed(chat_id, sender_id):
             return
         self._remember_thread_context(message)
 

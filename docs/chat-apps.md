@@ -34,7 +34,11 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
     "telegram": {
       "enabled": true,
       "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["YOUR_USER_ID"]
+      "allowFrom": ["YOUR_USER_ID"],
+      "chatAccess": {
+        "-1005556656": "*",
+        "-1007778889": ["YOUR_USER_ID", "trusted_username"]
+      }
     }
   }
 }
@@ -42,6 +46,10 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 
 > You can find your **User ID** in Telegram settings. It is shown as `@yourUserId`.
 > Copy this value **without the `@` symbol** and paste it into the config file.
+> `chatAccess` is optional. Use it when a group chat needs its own access rule:
+> `"*"` allows every sender in that chat, while a list allows only those user IDs
+> or usernames in that chat. Chats not listed in `chatAccess` fall back to
+> `allowFrom`.
 
 
 **3. Run**
