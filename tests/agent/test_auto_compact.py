@@ -1168,11 +1168,12 @@ class TestSummaryPersistence:
 
 
 class TestAutoCompactMessagePreservation:
-    """Prove that _archive() destructively replaces session.messages.
+    """Verify that _archive() preserves session messages by advancing
+    last_consolidated instead of destructively replacing messages.
 
-    These tests are the RED phase of a TDD cycle. They are expected to FAIL
-    against the current implementation until _archive() is fixed to preserve
-    the full message history instead of replacing it with only the suffix.
+    These tests (now GREEN) confirm that _archive() keeps the full message
+    history on disk and uses last_consolidated as a cursor to track which
+    messages have been archived for summarization.
     """
 
     @pytest.mark.asyncio

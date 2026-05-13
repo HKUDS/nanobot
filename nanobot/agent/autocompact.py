@@ -89,6 +89,10 @@ class AutoCompact:
             if summary and summary != "(nothing)":
                 self._summaries[key] = (summary, last_active)
                 session.metadata["_last_summary"] = {"text": summary, "last_active": last_active.isoformat()}
+            # NOTE: we advance last_consolidated instead of replacing session.messages.
+            # Messages are NOT truncated here - session growth is bounded by
+            # enforce_file_cap (FILE_MAX_MESSAGES=2000). This preserves message
+            # history for the WebUI at the cost of larger session files.
             session.last_consolidated = len(session.messages) - len(kept_msgs)
             session.updated_at = datetime.now()
             self.sessions.save(session)
