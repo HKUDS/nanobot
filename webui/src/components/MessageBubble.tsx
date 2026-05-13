@@ -204,14 +204,34 @@ function MediaCell({ media }: { media: UIMediaAttachment }) {
       : t("message.fileAttachment", { defaultValue: "File attachment" });
   const Icon = media.kind === "video" ? PlaySquare : FileIcon;
 
+  const inner = (
+    <>
+      <Icon className="h-4 w-4 flex-none" aria-hidden />
+      <span className="truncate">{media.name ?? label}</span>
+    </>
+  );
+
+  if (hasUrl) {
+    return (
+      <a
+        href={media.url}
+        download={media.name ?? label}
+        title={media.name ?? undefined}
+        aria-label={label}
+        className="flex max-w-[18rem] items-center gap-2 rounded-[14px] border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground hover:underline"
+      >
+        {inner}
+      </a>
+    );
+  }
+
   return (
     <div
       className="flex max-w-[18rem] items-center gap-2 rounded-[14px] border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
       title={media.name ?? undefined}
       aria-label={label}
     >
-      <Icon className="h-4 w-4 flex-none" aria-hidden />
-      <span className="truncate">{media.name ?? label}</span>
+      {inner}
     </div>
   );
 }

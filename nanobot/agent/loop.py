@@ -39,6 +39,7 @@ from nanobot.utils.helpers import image_placeholder_text
 from nanobot.utils.helpers import truncate_text as truncate_text_fn
 from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
+from nanobot.utils.session_attachments import merge_turn_media_into_last_assistant
 from nanobot.utils.webui_titles import mark_webui_session, maybe_generate_webui_title_after_turn
 
 if TYPE_CHECKING:
@@ -1376,11 +1377,9 @@ class AgentLoop:
         ctx.save_skip = 1 + len(ctx.history) + (1 if ctx.user_persisted_early else 0)
         skip_msgs = ctx.all_messages[ctx.save_skip:]
         ctx.generated_media = generated_image_paths_from_messages(skip_msgs)
-        last_msg = ctx.all_messages[-1] if ctx.all_messages else None
-        if ctx.generated_media and last_msg and last_msg.get("role") == "assistant":
-            existing_media = last_msg.get("media")
-            media = existing_media if isinstance(existing_media, list) else []
-            last_msg["media"] = list(dict.fromkeys([*media, *ctx.generated_media]))
+        mt = self.tools.get("message")
+        extra = getattr(mt, "turn_delivered_media_paths", lambda: [])() if mt else []
+        merge_turn_media_into_last_assistant(ctx.all_messages, ctx.generated_media, extra)
 
         ctx.turn_latency_ms = max(0, int((time.time() - ctx.turn_wall_started_at) * 1000))
         self._save_turn(
