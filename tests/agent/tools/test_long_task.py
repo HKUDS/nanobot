@@ -16,6 +16,18 @@ from nanobot.agent.tools.long_task import (
     _extract_handoff_from_messages,
 )
 
+_COMPLETION_PREFIX = (
+    "The task is complete. This is the final answer — "
+    "present it to the user directly without calling additional "
+    "tools or reading files.\n\n"
+)
+
+
+def _wrapped_completion(summary: str) -> str:
+    """Matches LongTaskTool return shape after successful validation."""
+    return f"{_COMPLETION_PREFIX}{summary}"
+
+
 # ---------------------------------------------------------------------------
 # Signal tool tests
 # ---------------------------------------------------------------------------
@@ -137,7 +149,7 @@ async def test_long_task_completes_in_one_step():
     mgr.run_step.side_effect = fake_run_step
     tool = LongTaskTool(manager=mgr)
     result = await tool.execute(goal="Audit all issues.")
-    assert result == "All done. Report in summary.md"
+    assert result == _wrapped_completion("All done. Report in summary.md")
     assert call_count == 2  # main step + validation
 
 
@@ -189,7 +201,7 @@ async def test_long_task_completes_after_multiple_handoffs():
     mgr.run_step.side_effect = fake_run_step
     tool = LongTaskTool(manager=mgr)
     result = await tool.execute(goal="Audit 16 issues.")
-    assert result == "All 16 items audited."
+    assert result == _wrapped_completion("All 16 items audited.")
     assert call_count == 4  # 3 main steps + validation
 
 
@@ -227,7 +239,7 @@ async def test_long_task_uses_last_signal_when_multiple_signals_called():
     mgr.run_step.side_effect = fake_run_step
     tool = LongTaskTool(manager=mgr)
     result = await tool.execute(goal="Do something.", max_steps=1)
-    assert result == "Actually complete."
+    assert result == _wrapped_completion("Actually complete.")
     assert call_count == 2  # main step + validation
 
 
@@ -280,7 +292,7 @@ async def test_long_task_validation_falls_back_to_handoff():
     mgr.run_step.side_effect = fake_run_step
     tool = LongTaskTool(manager=mgr)
     result = await tool.execute(goal="Do something.", max_steps=5)
-    assert "Really done." == result
+    assert result == _wrapped_completion("Really done.")
     assert call_count == 4
 
 
@@ -346,7 +358,7 @@ async def test_long_task_auto_extracts_on_natural_end():
     mgr.run_step.side_effect = fake_run_step
     tool = LongTaskTool(manager=mgr)
     result = await tool.execute(goal="Process items.", max_steps=5)
-    assert "All done." == result
+    assert result == _wrapped_completion("All done.")
     assert call_count == 3
 
 
@@ -372,7 +384,7 @@ async def test_long_task_retries_on_crash():
     mgr.run_step.side_effect = fake_run_step
     tool = LongTaskTool(manager=mgr)
     result = await tool.execute(goal="Test retry.")
-    assert "Recovered." == result
+    assert result == _wrapped_completion("Recovered.")
     assert call_count == 3  # main step + retry + validation
 
 
@@ -671,7 +683,7 @@ async def test_validation_step_crash_continues_task():
     mgr.run_step.side_effect = fake_run_step
     tool = LongTaskTool(manager=mgr)
     result = await tool.execute(goal="Test validation crash.", max_steps=5)
-    assert "Actually done." == result
+    assert result == _wrapped_completion("Actually done.")
     assert call_count == 4  # main step + validation crash + continue + re-validation
 
 
@@ -696,7 +708,7 @@ async def test_hook_exception_does_not_stop_execution():
         "on_event": lambda ev: (_ for _ in ()).throw(RuntimeError("bad catch-all")),
     })
     result = await tool.execute(goal="Test hook resilience.")
-    assert result == "Done."
+    assert result == _wrapped_completion("Done.")
 
 
 @pytest.mark.asyncio
@@ -737,7 +749,7 @@ async def test_inject_correction_during_execution():
     tool.inject_correction("Change direction.")
     result = await task
 
-    assert result == "Step 2 done."
+    assert result == _wrapped_completion("Step 2 done.")
     assert any("Change direction." in msg for msg in captured_messages)
 
 
