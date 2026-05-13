@@ -24,7 +24,7 @@ from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
@@ -231,6 +231,7 @@ class TelegramConfig(Base):
     enabled: bool = False
     token: str = ""
     allow_from: list[str] = Field(default_factory=list)
+    chat_access: dict[str, str | list[str]] = Field(default_factory=dict)
     proxy: str | None = None
     reply_to_message: bool = False
     react_emoji: str = "👀"
@@ -295,24 +296,74 @@ class TelegramChannel(BaseChannel):
         self._bot_username: str | None = None
         self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
 
-    def is_allowed(self, sender_id: str) -> bool:
-        """Preserve Telegram's legacy id|username allowlist matching."""
-        if super().is_allowed(sender_id):
-            return True
-
-        allow_list = getattr(self.config, "allow_from", [])
-        if not allow_list or "*" in allow_list:
+    @staticmethod
+    def _sender_matches_allow_list(sender_id: str, allow_list: list[str]) -> bool:
+        """Match Telegram sender ids by exact value, numeric id, or username."""
+        if not allow_list:
             return False
-
+        if "*" in allow_list or str(sender_id) in allow_list:
+            return True
         sender_str = str(sender_id)
         if sender_str.count("|") != 1:
             return False
-
         sid, username = sender_str.split("|", 1)
         if not sid.isdigit() or not username:
             return False
-
         return sid in allow_list or username in allow_list
+
+    def is_allowed(self, sender_id: str) -> bool:
+        """Preserve Telegram's legacy id|username allowlist matching."""
+        allow_list = getattr(self.config, "allow_from", [])
+        if not allow_list:
+            logger.warning("{}: allow_from is empty — all access denied", self.name)
+        return self._sender_matches_allow_list(sender_id, allow_list)
+
+    def _chat_access_rule(self, chat_id: str | int) -> str | list[str] | None:
+        return getattr(self.config, "chat_access", {}).get(str(chat_id))
+
+    def _is_chat_sender_allowed(self, chat_id: str | int, sender_id: str) -> bool:
+        rule = self._chat_access_rule(chat_id)
+        if rule is None:
+            return self.is_allowed(sender_id)
+        if rule == "*":
+            return True
+        if isinstance(rule, list):
+            return self._sender_matches_allow_list(sender_id, rule)
+        return False
+
+    async def _handle_message(
+        self,
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        media: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        """Handle Telegram ACLs, including per-chat access rules."""
+        if not self._is_chat_sender_allowed(chat_id, sender_id):
+            logger.warning(
+                "Access denied for sender {} in Telegram chat {}. "
+                "Add them to allowFrom or channels.telegram.chatAccess to grant access.",
+                sender_id, chat_id,
+            )
+            return
+
+        meta = metadata or {}
+        if self.supports_streaming:
+            meta = {**meta, "_wants_stream": True}
+
+        msg = InboundMessage(
+            channel=self.name,
+            sender_id=str(sender_id),
+            chat_id=str(chat_id),
+            content=content,
+            media=media or [],
+            metadata=meta,
+            session_key_override=session_key,
+        )
+
+        await self.bus.publish_inbound(msg)
 
     @staticmethod
     def _normalize_telegram_command(content: str) -> str:
@@ -961,6 +1012,8 @@ class TelegramChannel(BaseChannel):
     async def _is_group_message_for_bot(self, message) -> bool:
         """Allow group messages when policy is open, @mentioned, or replying to the bot."""
         if message.chat.type == "private" or self.config.group_policy == "open":
+            return True
+        if self._chat_access_rule(message.chat_id) is not None:
             return True
 
         bot_id, bot_username = await self._ensure_bot_identity()

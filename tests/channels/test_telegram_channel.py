@@ -695,6 +695,51 @@ def test_is_allowed_rejects_invalid_legacy_telegram_sender_shapes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_chat_access_wildcard_accepts_any_sender_in_configured_chat() -> None:
+    bus = MessageBus()
+    channel = TelegramChannel(
+        TelegramConfig(allow_from=["84131737"], chat_access={"5556656": "*"}),
+        bus,
+    )
+
+    await channel._handle_message(
+        sender_id="999999|stranger",
+        chat_id="5556656",
+        content="hello from group",
+    )
+
+    msg = await bus.consume_inbound()
+    assert msg.sender_id == "999999|stranger"
+    assert msg.chat_id == "5556656"
+    assert msg.content == "hello from group"
+
+
+@pytest.mark.asyncio
+async def test_chat_access_list_uses_telegram_sender_matching() -> None:
+    bus = MessageBus()
+    channel = TelegramChannel(
+        TelegramConfig(allow_from=["84131737"], chat_access={"5556656": ["alice"]}),
+        bus,
+    )
+
+    await channel._handle_message(
+        sender_id="999999|alice",
+        chat_id="5556656",
+        content="allowed by chat username",
+    )
+    await channel._handle_message(
+        sender_id="999999|bob",
+        chat_id="5556656",
+        content="denied by chat username",
+    )
+
+    msg = await bus.consume_inbound()
+    assert msg.sender_id == "999999|alice"
+    assert msg.content == "allowed by chat username"
+    assert bus.inbound_size == 0
+
+
+@pytest.mark.asyncio
 async def test_send_progress_keeps_message_in_topic() -> None:
     config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
     channel = TelegramChannel(config, MessageBus())
@@ -841,6 +886,36 @@ async def test_group_policy_mention_ignores_unmentioned_group_message() -> None:
 
     assert handled == []
     assert channel._app.bot.get_me_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_access_bypasses_group_mention_policy() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["84131737"],
+            chat_access={"-100123": "*"},
+            group_policy="mention",
+        ),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    channel._start_typing = lambda _chat_id: None
+
+    await channel._on_message(_make_telegram_update(text="hello everyone"), None)
+
+    assert len(handled) == 1
+    assert handled[0]["sender_id"] == "12345|alice"
+    assert handled[0]["chat_id"] == "-100123"
+    assert channel._app.bot.get_me_calls == 0
 
 
 @pytest.mark.asyncio
