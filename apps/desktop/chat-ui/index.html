@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>nanobot</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --surface2: #0f3460;
+    --accent: #4a9eff;
+    --text: #e0e0e0;
+    --text-dim: #8892a4;
+    --user-bg: #2563eb;
+    --bot-bg: #2a2a40;
+    --input-bg: #1e1e36;
+    --border: #2a2a44;
+    --radius: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  #status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: #666;
+    transition: background 0.3s;
+  }
+  #status-dot.connected { background: #4ade80; }
+  #status-dot.connecting { background: #facc15; }
+  #status-dot.disconnected { background: #ef4444; }
+
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  #messages::-webkit-scrollbar { width: 6px; }
+  #messages::-webkit-scrollbar-track { background: transparent; }
+  #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .msg {
+    max-width: 80%;
+    padding: 10px 14px;
+    border-radius: var(--radius);
+    line-height: 1.5;
+    word-wrap: break-word;
+    white-space: pre-wrap;
+    font-size: 14px;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--user-bg);
+    border-bottom-right-radius: 4px;
+  }
+  .msg.bot {
+    align-self: flex-start;
+    background: var(--bot-bg);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.bot pre {
+    background: #111;
+    padding: 8px 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 6px 0;
+    font-size: 13px;
+  }
+  .msg.bot code {
+    background: #111;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 13px;
+  }
+  .msg.bot pre code {
+    background: none;
+    padding: 0;
+  }
+  .msg.progress {
+    align-self: flex-start;
+    color: var(--text-dim);
+    font-size: 13px;
+    font-style: italic;
+    padding: 4px 14px;
+    background: none;
+  }
+
+  .welcome {
+    text-align: center;
+    color: var(--text-dim);
+    margin: auto;
+    padding: 40px;
+  }
+  .welcome h2 { font-size: 20px; margin-bottom: 8px; color: var(--text); }
+  .welcome p { font-size: 14px; }
+
+  #input-area {
+    padding: 12px 20px 16px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+  #input-form {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+  }
+  #message-input {
+    flex: 1;
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    min-height: 42px;
+    max-height: 160px;
+    line-height: 1.4;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  #message-input:focus { border-color: var(--accent); }
+  #message-input::placeholder { color: var(--text-dim); }
+
+  #send-btn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    padding: 10px 18px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity 0.2s;
+  }
+  #send-btn:hover { opacity: 0.9; }
+  #send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>nanobot</h1>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span id="status-text" style="font-size:12px;color:var(--text-dim)"></span>
+      <div id="status-dot"></div>
+    </div>
+  </header>
+
+  <div id="messages">
+    <div class="welcome">
+      <h2>nanobot</h2>
+      <p>Your AI assistant is ready. Type a message to start.</p>
+    </div>
+  </div>
+
+  <div id="input-area">
+    <form id="input-form" autocomplete="off">
+      <textarea id="message-input" rows="1" placeholder="Type a message... (Shift+Enter for newline)"></textarea>
+      <button type="submit" id="send-btn">Send</button>
+    </form>
+  </div>
+
+<script>
+(function() {
+  const WS_URL = (() => {
+    try {
+      return sessionStorage.getItem('nanobot.desktop.ws_url') || 'ws://127.0.0.1:18791';
+    } catch { return 'ws://127.0.0.1:18791'; }
+  })();
+
+  const messagesEl = document.getElementById('messages');
+  const inputEl = document.getElementById('message-input');
+  const formEl = document.getElementById('input-form');
+  const sendBtn = document.getElementById('send-btn');
+  const statusDot = document.getElementById('status-dot');
+  const statusText = document.getElementById('status-text');
+
+  let ws = null;
+  let connected = false;
+  let reconnectDelay = 1000;
+  let welcomeRemoved = false;
+  let lastProgressEl = null;
+
+  function setStatus(state) {
+    statusDot.className = state;
+    const labels = { connected: 'Connected', connecting: 'Connecting...', disconnected: 'Disconnected' };
+    statusText.textContent = labels[state] || '';
+    connected = state === 'connected';
+    sendBtn.disabled = !connected;
+  }
+
+  function scrollToBottom() {
+    requestAnimationFrame(() => {
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    });
+  }
+
+  function removeWelcome() {
+    if (welcomeRemoved) return;
+    const w = messagesEl.querySelector('.welcome');
+    if (w) w.remove();
+    welcomeRemoved = true;
+  }
+
+  function renderMarkdown(text) {
+    // Simple markdown: code blocks, inline code, bold, italic, links
+    let html = text
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      // Code blocks
+      .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
+        '<pre><code>' + code.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>') + '</code></pre>')
+      // Inline code
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      // Bold
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      // Italic
+      .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+      // Links
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:var(--accent)">$1</a>');
+    return html;
+  }
+
+  function addMessage(content, type) {
+    removeWelcome();
+    lastProgressEl = null;
+
+    const div = document.createElement('div');
+    div.className = 'msg ' + type;
+
+    if (type === 'user') {
+      div.textContent = content;
+    } else {
+      div.innerHTML = renderMarkdown(content);
+    }
+
+    messagesEl.appendChild(div);
+    scrollToBottom();
+    return div;
+  }
+
+  function showProgress(content) {
+    removeWelcome();
+    if (lastProgressEl) {
+      lastProgressEl.textContent = content;
+    } else {
+      lastProgressEl = document.createElement('div');
+      lastProgressEl.className = 'msg progress';
+      lastProgressEl.textContent = content;
+      messagesEl.appendChild(lastProgressEl);
+    }
+    scrollToBottom();
+  }
+
+  function clearProgress() {
+    if (lastProgressEl) {
+      lastProgressEl.remove();
+      lastProgressEl = null;
+    }
+  }
+
+  function connect() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+
+    setStatus('connecting');
+
+    try {
+      ws = new WebSocket(WS_URL);
+    } catch (e) {
+      setStatus('disconnected');
+      scheduleReconnect();
+      return;
+    }
+
+    ws.onopen = () => {
+      setStatus('connected');
+      reconnectDelay = 1000;
+    };
+
+    ws.onmessage = (event) => {
+      let data;
+      try { data = JSON.parse(event.data); } catch { return; }
+
+      switch (data.type) {
+        case 'response':
+          clearProgress();
+          addMessage(data.content, 'bot');
+          break;
+        case 'progress':
+          showProgress(data.content);
+          break;
+        case 'status':
+          if (data.status === 'ready') setStatus('connected');
+          break;
+        case 'pong':
+          break;
+      }
+    };
+
+    ws.onclose = () => {
+      setStatus('disconnected');
+      ws = null;
+      scheduleReconnect();
+    };
+
+    ws.onerror = () => {
+      // onclose will fire after this
+    };
+  }
+
+  function scheduleReconnect() {
+    setTimeout(() => {
+      if (!connected) connect();
+    }, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 10000);
+  }
+
+  function sendMessage(text) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'message', content: text }));
+    addMessage(text, 'user');
+  }
+
+  // Auto-resize textarea
+  inputEl.addEventListener('input', () => {
+    inputEl.style.height = 'auto';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
+  });
+
+  // Enter to send, Shift+Enter for newline
+  inputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      formEl.dispatchEvent(new Event('submit'));
+    }
+  });
+
+  formEl.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = inputEl.value.trim();
+    if (!text || !connected) return;
+    sendMessage(text);
+    inputEl.value = '';
+    inputEl.style.height = 'auto';
+    inputEl.focus();
+  });
+
+  // Start connection
+  connect();
+  inputEl.focus();
+})();
+</script>
+</body>
+</html>
