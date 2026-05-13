@@ -253,6 +253,90 @@ async def test_decide_retries_transient_error_then_succeeds(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_has_active_tasks_returns_false_for_empty_content(tmp_path) -> None:
+    """Test that _has_active_tasks returns False for empty or comment-only content."""
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+    )
+
+    # Empty content
+    assert not service._has_active_tasks("")
+    assert not service._has_active_tasks("   \n\n   ")
+
+    # Only comments
+    assert not service._has_active_tasks("# Active Tasks")
+    assert not service._has_active_tasks("# Active Tasks\n## Section")
+    assert not service._has_active_tasks("<!-- comment -->")
+    assert not service._has_active_tasks("# Header\n\n<!-- comment -->\n## Another header")
+
+
+@pytest.mark.asyncio
+async def test_has_active_tasks_returns_true_for_content_with_tasks(tmp_path) -> None:
+    """Test that _has_active_tasks returns True when there's actual content."""
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+    )
+
+    # Task list
+    assert service._has_active_tasks("- [ ] do something")
+    assert service._has_active_tasks("# Active Tasks\n- [ ] check server")
+    assert service._has_active_tasks("## Tasks\n\nSome text here")
+    assert service._has_active_tasks("# Header\n\n- task item")
+
+
+@pytest.mark.asyncio
+async def test_tick_skips_llm_call_when_no_active_tasks(tmp_path) -> None:
+    """Test that _tick skips LLM call when HEARTBEAT.md has no active tasks."""
+    (tmp_path / "HEARTBEAT.md").write_text("# Active Tasks\n\n<!-- No tasks -->", encoding="utf-8")
+
+    provider = DummyProvider([])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+    )
+
+    await service._tick()
+    # Provider should not be called
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_tick_calls_llm_when_active_tasks_present(tmp_path) -> None:
+    """Test that _tick calls LLM when HEARTBEAT.md has active tasks."""
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] check servers", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "skip"},
+                )
+            ],
+        )
+    ])
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+    )
+
+    await service._tick()
+    # Provider should be called
+    assert provider.calls == 1
+
+
+@pytest.mark.asyncio
 async def test_decide_prompt_includes_current_time(tmp_path) -> None:
     """Phase 1 user prompt must contain current time so the LLM can judge task urgency."""
 
