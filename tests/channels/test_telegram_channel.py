@@ -889,7 +889,7 @@ async def test_group_policy_mention_ignores_unmentioned_group_message() -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_access_bypasses_group_mention_policy() -> None:
+async def test_chat_access_keeps_group_mention_policy_for_plain_messages() -> None:
     channel = TelegramChannel(
         TelegramConfig(
             enabled=True,
@@ -912,10 +912,8 @@ async def test_chat_access_bypasses_group_mention_policy() -> None:
 
     await channel._on_message(_make_telegram_update(text="hello everyone"), None)
 
-    assert len(handled) == 1
-    assert handled[0]["sender_id"] == "12345|alice"
-    assert handled[0]["chat_id"] == "-100123"
-    assert channel._app.bot.get_me_calls == 0
+    assert handled == []
+    assert channel._app.bot.get_me_calls == 1
 
 
 @pytest.mark.asyncio

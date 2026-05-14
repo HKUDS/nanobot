@@ -1013,8 +1013,6 @@ class TelegramChannel(BaseChannel):
         """Allow group messages when policy is open, @mentioned, or replying to the bot."""
         if message.chat.type == "private" or self.config.group_policy == "open":
             return True
-        if self._chat_access_rule(message.chat_id) is not None:
-            return True
 
         bot_id, bot_username = await self._ensure_bot_identity()
         if bot_username:

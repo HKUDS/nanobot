@@ -49,7 +49,8 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 > `chatAccess` is optional. Use it when a group chat needs its own access rule:
 > `"*"` allows every sender in that chat, while a list allows only those user IDs
 > or usernames in that chat. Chats not listed in `chatAccess` fall back to
-> `allowFrom`.
+> `allowFrom`. This setting controls access only; with `groupPolicy: "mention"`,
+> group messages still need to mention the bot or reply to it.
 
 
 **3. Run**
