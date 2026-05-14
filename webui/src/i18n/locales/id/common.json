@@ -219,6 +219,8 @@
       "inputAria": "Input pesan",
       "sendHint": "Enter untuk kirim · Shift+Enter untuk baris baru",
       "runRuntimeTitle": "Berjalan · {{elapsed}}",
+      "threadGoalStrip": "Tujuan · {{label}}",
+      "threadGoalFallback": "Tujuan",
       "send": "Kirim pesan",
       "stop": "Hentikan respons",
       "attachImage": "Lampirkan gambar",

@@ -233,6 +233,8 @@
       "inputAria": "消息输入框",
       "sendHint": "Enter 发送 · Shift+Enter 换行",
       "runRuntimeTitle": "运行中 · {{elapsed}}",
+      "threadGoalStrip": "目标 · {{label}}",
+      "threadGoalFallback": "目标",
       "send": "发送消息",
       "stop": "停止响应",
       "attachImage": "添加图片",

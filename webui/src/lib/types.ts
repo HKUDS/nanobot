@@ -61,6 +61,13 @@ export interface AgentUIBlob {
   data?: unknown;
 }
 
+/** WebSocket snapshot for ``long_task`` / ``complete_goal`` (always keyed by ``chat_id``). */
+export interface ThreadGoalWsPayload {
+  active: boolean;
+  ui_summary?: string;
+  objective?: string;
+}
+
 export interface ToolProgressEvent {
   version?: number;
   phase?: "start" | "end" | "error" | string;
@@ -202,7 +209,13 @@ export type InboundEvent =
       model_name: string;
       model_preset?: string | null;
     }
-  | { event: "turn_end"; chat_id: string; latency_ms?: number }
+  | {
+      event: "turn_end";
+      chat_id: string;
+      latency_ms?: number;
+      /** Authoritative sustained-goal snapshot for this chat (same shape as ``thread_goal`` events). */
+      thread_goal?: ThreadGoalWsPayload;
+    }
   | {
       event: "goal_status";
       chat_id: string;
@@ -210,6 +223,11 @@ export type InboundEvent =
       status: "running" | "idle";
       /** Server ``time.time()`` when ``status`` is ``running``. */
       started_at?: number;
+    }
+  | {
+      event: "thread_goal";
+      chat_id: string;
+      thread_goal: ThreadGoalWsPayload;
     }
   | { event: "session_updated"; chat_id: string }
   | { event: "error"; chat_id?: string; detail?: string };

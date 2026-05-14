@@ -219,6 +219,8 @@
       "inputAria": "Champ de message",
       "sendHint": "Entrée pour envoyer · Maj+Entrée pour un retour à la ligne",
       "runRuntimeTitle": "Exécution · {{elapsed}}",
+      "threadGoalStrip": "Objectif · {{label}}",
+      "threadGoalFallback": "Objectif",
       "send": "Envoyer le message",
       "stop": "Arrêter la réponse",
       "attachImage": "Joindre une image",

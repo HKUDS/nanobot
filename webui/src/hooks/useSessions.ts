@@ -11,6 +11,7 @@ import {
 import { deriveTitle } from "@/lib/format";
 import { toMediaAttachment } from "@/lib/media";
 import { dedupeToolCallsForUi, formatToolCallTrace } from "@/lib/tool-traces";
+import { scrubSubagentAnnounceBody } from "@/lib/subagent-channel-display";
 import type { ChatSummary, UIMessage } from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
@@ -176,6 +177,12 @@ export function useSessionHistory(key: string | null): {
         const ui: UIMessage[] = body.messages.flatMap((m, idx) => {
           if (m.role !== "user" && m.role !== "assistant") return [];
           if (typeof m.content !== "string") return [];
+          const rawContent = m.content;
+          const displayContent =
+            m.role === "assistant" &&
+            (m.injected_event === "subagent_result" || rawContent.includes("[Subagent"))
+              ? scrubSubagentAnnounceBody(rawContent)
+              : rawContent;
           // Hydrate signed media URLs into generic UI attachments. Image-only
           // user turns still populate the legacy ``images`` slot so the
           // existing optimistic-send and lightbox paths remain unchanged.
@@ -190,7 +197,7 @@ export function useSessionHistory(key: string | null): {
           const row: UIMessage = {
             id: `hist-${idx}`,
             role: m.role,
-            content: m.content,
+            content: displayContent,
             createdAt: m.timestamp ? Date.parse(m.timestamp) : Date.now(),
             ...(images ? { images } : {}),
             ...(media ? { media } : {}),

@@ -219,6 +219,8 @@
       "inputAria": "メッセージ入力欄",
       "sendHint": "Enter で送信 · Shift+Enter で改行",
       "runRuntimeTitle": "実行中 · {{elapsed}}",
+      "threadGoalStrip": "目標 · {{label}}",
+      "threadGoalFallback": "目標",
       "send": "メッセージを送信",
       "stop": "応答を停止",
       "attachImage": "画像を添付",

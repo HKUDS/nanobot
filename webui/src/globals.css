@@ -167,6 +167,45 @@
     }
   }
 
+  /** Goal halo: pale sky blue (not ``--primary``, which often reads as neutral gray). */
+  @keyframes thread-goal-glow-breathe {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 10px hsl(204 72% 52% / 0.22))
+        drop-shadow(0 0 24px hsl(199 80% 58% / 0.14));
+    }
+    50% {
+      filter: drop-shadow(0 0 17px hsl(204 78% 48% / 0.32))
+        drop-shadow(0 0 38px hsl(199 85% 55% / 0.2));
+    }
+  }
+  .thread-goal-shell-glow {
+    animation: thread-goal-glow-breathe 4.8s ease-in-out infinite;
+  }
+  @keyframes thread-goal-glow-breathe-dark {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 12px hsl(198 90% 72% / 0.28))
+        drop-shadow(0 0 28px hsl(195 95% 65% / 0.16));
+    }
+    50% {
+      filter: drop-shadow(0 0 20px hsl(198 95% 78% / 0.42))
+        drop-shadow(0 0 42px hsl(195 100% 70% / 0.24));
+    }
+  }
+  .dark .thread-goal-shell-glow {
+    animation-name: thread-goal-glow-breathe-dark;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .thread-goal-shell-glow {
+      animation: none;
+      filter: drop-shadow(0 0 14px hsl(204 70% 50% / 0.24));
+    }
+    .dark .thread-goal-shell-glow {
+      filter: drop-shadow(0 0 14px hsl(198 88% 70% / 0.32));
+    }
+  }
+
   /* Subtle scrollbar that doesn't fight the dark background. */
   .scrollbar-thin {
     scrollbar-width: thin;

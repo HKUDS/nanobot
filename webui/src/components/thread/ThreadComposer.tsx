@@ -22,6 +22,7 @@ import {
   Sparkles,
   Square,
   SquarePen,
+  Target,
   Undo2,
   X,
   type LucideIcon,
@@ -37,7 +38,7 @@ import {
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
 import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
-import type { SlashCommand } from "@/lib/types";
+import type { SlashCommand, ThreadGoalWsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** ``<input accept>``: aligned with the server's MIME whitelist. SVG is
@@ -63,6 +64,8 @@ interface ThreadComposerProps {
   onStop?: () => void;
   /** Unix seconds from server; turn elapsed timer above input while set. */
   runStartedAt?: number | null;
+  /** Sustained objective for this chat (WebSocket ``thread_goal``). */
+  threadGoal?: ThreadGoalWsPayload;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -128,27 +131,59 @@ function getVisibleBounds(el: HTMLElement): { top: number; bottom: number } {
   return { top, bottom };
 }
 
-function RunElapsedStrip({ startedAt }: { startedAt: number }) {
+function RunElapsedStrip({
+  startedAt,
+  threadGoalLabel,
+}: {
+  startedAt: number | null;
+  threadGoalLabel?: string | null;
+}) {
   const { t } = useTranslation();
   const [, setTick] = useState(0);
   useEffect(() => {
+    if (startedAt == null) return;
     const id = window.setInterval(() => setTick((n) => n + 1), 1000);
     return () => window.clearInterval(id);
   }, [startedAt]);
-  const elapsed = Math.max(0, Math.floor(Date.now() / 1000 - startedAt));
+  const showTimer = startedAt != null;
+  const showGoal = !!threadGoalLabel?.trim();
+  if (!showTimer && !showGoal) return null;
+
+  const elapsed =
+    startedAt != null ? Math.max(0, Math.floor(Date.now() / 1000 - startedAt)) : 0;
   const m = Math.floor(elapsed / 60);
   const s = elapsed % 60;
-  const label = m > 0 ? `${m}:${s.toString().padStart(2, "0")}` : `${s}s`;
+  const shortElapsed = m > 0 ? `${m}:${s.toString().padStart(2, "0")}` : `${s}s`;
+  const timerTitle = showTimer
+    ? t("thread.composer.runRuntimeTitle", { elapsed: shortElapsed })
+    : null;
+
+  const ariaParts = [timerTitle, showGoal ? threadGoalLabel : null].filter(Boolean);
+  const ariaLabel = ariaParts.join(" · ");
 
   return (
     <div
-      className="flex items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
+      className="flex min-h-[36px] items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
       role="status"
-      aria-label={t("thread.composer.runRuntimeTitle", { elapsed: label })}
+      aria-label={ariaLabel}
     >
-      <Activity className="h-4 w-4 shrink-0 text-primary/80" aria-hidden />
-      <span className="text-[12px] font-medium text-foreground/75">
-        {t("thread.composer.runRuntimeTitle", { elapsed: label })}
+      {showTimer ? (
+        <Activity className="h-4 w-4 shrink-0 text-primary/80" aria-hidden />
+      ) : (
+        <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
+      )}
+      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
+        {timerTitle ? <span className="shrink-0">{timerTitle}</span> : null}
+        {timerTitle && showGoal ? (
+          <span className="shrink-0 text-muted-foreground/45" aria-hidden>
+            ·
+          </span>
+        ) : null}
+        {showGoal ? (
+          <span className="truncate">
+            {t("thread.composer.threadGoalStrip", { label: threadGoalLabel })}
+          </span>
+        ) : null}
       </span>
     </div>
   );
@@ -166,6 +201,7 @@ export function ThreadComposer({
   onImageModeChange,
   onStop,
   runStartedAt = null,
+  threadGoal,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -510,6 +546,15 @@ export function ThreadComposer({
   const attachButtonDisabled = disabled || full;
   const showStopButton = isStreaming && !!onStop;
 
+  const threadGoalStripLabel = useMemo(() => {
+    if (!threadGoal?.active) return null;
+    const summary = threadGoal.ui_summary?.trim();
+    if (summary) return summary;
+    const obj = threadGoal.objective?.trim();
+    if (obj) return obj.length > 72 ? `${obj.slice(0, 72)}…` : obj;
+    return t("thread.composer.threadGoalFallback");
+  }, [threadGoal, t]);
+
   return (
     <form
       ref={formRef}
@@ -542,6 +587,8 @@ export function ThreadComposer({
           "focus-within:ring-1 focus-within:ring-foreground/8",
           disabled && "opacity-60",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
+          threadGoal?.active &&
+            "thread-goal-shell-glow ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
         )}
       >
         {images.length > 0 ? (
@@ -572,8 +619,8 @@ export function ThreadComposer({
             ))}
           </div>
         ) : null}
-        {runStartedAt != null ? (
-          <RunElapsedStrip startedAt={runStartedAt} />
+        {runStartedAt != null || threadGoalStripLabel ? (
+          <RunElapsedStrip startedAt={runStartedAt} threadGoalLabel={threadGoalStripLabel} />
         ) : null}
         <textarea
           ref={textareaRef}

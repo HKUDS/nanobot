@@ -25,7 +25,12 @@ import { WEBUI_THREAD_SCHEMA_VERSION } from "@/lib/types";
 import { mergeCanonicalHistoryPreservingLongTasks } from "@/lib/thread-history-merge";
 import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
 import { mergeWebuiDiskSnapshotWithHistorical } from "@/lib/thread-webui-merge";
+import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
 import { useClient } from "@/providers/ClientProvider";
+
+function projectWebuiThreadMessages(messages: UIMessage[]): UIMessage[] {
+  return scrubSubagentUiMessages(normalizeLegacyLongTaskMessages(messages));
+}
 
 interface ThreadShellProps {
   session: ChatSummary | null;
@@ -122,6 +127,7 @@ export function ThreadShell({
     messages,
     isStreaming,
     runStartedAt,
+    threadGoal,
     send,
     stop,
     setMessages,
@@ -148,7 +154,7 @@ export function ThreadShell({
       const dm = disk?.messages;
       if (!dm?.length) return;
       setMessages((prev) =>
-        normalizeLegacyLongTaskMessages(
+        projectWebuiThreadMessages(
           mergeWebuiDiskSnapshotWithHistorical(dm, prev.length ? prev : historical),
         ),
       );
@@ -167,7 +173,7 @@ export function ThreadShell({
         schemaVersion: WEBUI_THREAD_SCHEMA_VERSION,
         savedAt: new Date().toISOString(),
         sessionKey: historyKey,
-        messages: normalizeLegacyLongTaskMessages(messages),
+        messages: projectWebuiThreadMessages(messages),
       });
     }, 450);
     return () => {
@@ -178,10 +184,7 @@ export function ThreadShell({
     };
   }, [messages, historyKey, chatId, client]);
 
-  const displayMessages = useMemo(
-    () => normalizeLegacyLongTaskMessages(messages),
-    [messages],
-  );
+  const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
 
   const showHeroComposer = messages.length === 0 && !loading;
 
@@ -201,15 +204,15 @@ export function ThreadShell({
         pendingCanonicalHydrateRef.current.delete(chatId);
         appliedHistoryVersionRef.current.set(chatId, historyVersion);
         const merged = mergeCanonicalHistoryPreservingLongTasks(prev, historical);
-        const normalized = normalizeLegacyLongTaskMessages(merged);
+        const normalized = projectWebuiThreadMessages(merged);
         messageCacheRef.current.set(chatId, normalized);
         return normalized;
       }
-      if (cached && cached.length > 0) return normalizeLegacyLongTaskMessages(cached);
-      if (historical.length === 0 && prev.length > 0) return normalizeLegacyLongTaskMessages(prev);
+      if (cached && cached.length > 0) return projectWebuiThreadMessages(cached);
+      if (historical.length === 0 && prev.length > 0) return projectWebuiThreadMessages(prev);
       appliedHistoryVersionRef.current.set(chatId, historyVersion);
       const merged = mergeCanonicalHistoryPreservingLongTasks(prev, historical);
-      return normalizeLegacyLongTaskMessages(merged);
+      return projectWebuiThreadMessages(merged);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, chatId, historical, historyVersion]);
@@ -230,7 +233,7 @@ export function ThreadShell({
 
   useEffect(() => {
     if (chatId) return;
-    setMessages(historical);
+    setMessages(projectWebuiThreadMessages(historical));
   }, [chatId, historical, setMessages]);
 
   useLayoutEffect(() => {
@@ -244,10 +247,10 @@ export function ThreadShell({
             schemaVersion: WEBUI_THREAD_SCHEMA_VERSION,
             savedAt: new Date().toISOString(),
             sessionKey: oldKey,
-            messages: normalizeLegacyLongTaskMessages(cached),
+            messages: projectWebuiThreadMessages(cached),
           });
         }
-        messageCacheRef.current.set(prev, normalizeLegacyLongTaskMessages(messages));
+        messageCacheRef.current.set(prev, projectWebuiThreadMessages(messages));
         skipLayoutCacheRef.current = true;
       }
       prevChatIdForCacheRef.current = chatId;
@@ -255,7 +258,7 @@ export function ThreadShell({
       if (prevChatIdForCacheRef.current) {
         messageCacheRef.current.set(
           prevChatIdForCacheRef.current,
-          normalizeLegacyLongTaskMessages(messages),
+          projectWebuiThreadMessages(messages),
         );
         skipLayoutCacheRef.current = true;
       }
@@ -277,7 +280,7 @@ export function ThreadShell({
     if (loading) {
       return;
     }
-    messageCacheRef.current.set(chatId, normalizeLegacyLongTaskMessages(messages));
+    messageCacheRef.current.set(chatId, projectWebuiThreadMessages(messages));
   }, [chatId, loading, messages]);
 
   useEffect(() => {
@@ -394,6 +397,7 @@ export function ThreadShell({
           onImageModeChange={showHeroComposer ? setHeroImageMode : undefined}
           onStop={stop}
           runStartedAt={runStartedAt}
+          threadGoal={threadGoal}
         />
       ) : (
         <ThreadComposer
@@ -411,6 +415,7 @@ export function ThreadShell({
           imageMode={heroImageMode}
           onImageModeChange={setHeroImageMode}
           runStartedAt={runStartedAt}
+          threadGoal={threadGoal}
         />
       )}
       {showHeroComposer ? quickActions : null}

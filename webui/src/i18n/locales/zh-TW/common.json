@@ -219,6 +219,8 @@
       "inputAria": "訊息輸入框",
       "sendHint": "Enter 送出 · Shift+Enter 換行",
       "runRuntimeTitle": "執行中 · {{elapsed}}",
+      "threadGoalStrip": "目標 · {{label}}",
+      "threadGoalFallback": "目標",
       "send": "送出訊息",
       "stop": "停止回覆",
       "attachImage": "附加圖片",

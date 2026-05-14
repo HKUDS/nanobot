@@ -245,6 +245,8 @@
       "inputAria": "Message input",
       "sendHint": "Enter to send · Shift+Enter for newline",
       "runRuntimeTitle": "Running · {{elapsed}}",
+      "threadGoalStrip": "Goal · {{label}}",
+      "threadGoalFallback": "Goal",
       "send": "Send message",
       "stop": "Stop response",
       "attachImage": "Attach image",

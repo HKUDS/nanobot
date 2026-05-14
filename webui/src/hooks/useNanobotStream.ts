@@ -8,6 +8,7 @@ import type {
   InboundEvent,
   OutboundImageGeneration,
   OutboundMedia,
+  ThreadGoalWsPayload,
   UIImage,
   UIMessage,
 } from "@/lib/types";
@@ -203,6 +204,8 @@ export function useNanobotStream(
   isStreaming: boolean;
   /** Unix epoch seconds when the current user turn started (WebSocket ``goal_status``). */
   runStartedAt: number | null;
+  /** Latest sustained thread goal for this ``chatId`` (``thread_goal`` WS events). */
+  threadGoal: ThreadGoalWsPayload | undefined;
   send: (content: string, images?: SendImage[], options?: SendOptions) => void;
   stop: () => void;
   setMessages: React.Dispatch<React.SetStateAction<UIMessage[]>>;
@@ -224,6 +227,7 @@ export function useNanobotStream(
   const [isStreaming, setIsStreaming] = useState(initialStreaming || hasPendingToolCalls);
   /** Unix epoch seconds when the current user turn started; cleared on ``idle``. */
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
+  const [threadGoal, setThreadGoal] = useState<ThreadGoalWsPayload | undefined>(undefined);
   const [streamError, setStreamError] = useState<StreamError | null>(null);
   const buffer = useRef<StreamBuffer | null>(null);
   const suppressStreamUntilTurnEndRef = useRef(false);
@@ -254,6 +258,7 @@ export function useNanobotStream(
     );
     setStreamError(null);
     setRunStartedAt(chatId ? client.getRunStartedAt(chatId) : null);
+    setThreadGoal(chatId ? client.getThreadGoal(chatId) : undefined);
     buffer.current = null;
     suppressStreamUntilTurnEndRef.current = false;
     if (streamEndTimerRef.current !== null) {
@@ -348,6 +353,11 @@ export function useNanobotStream(
         return;
       }
 
+      if (ev.event === "thread_goal") {
+        setThreadGoal(ev.thread_goal);
+        return;
+      }
+
       if (ev.event === "goal_status") {
         if (ev.status === "running" && typeof ev.started_at === "number") {
           setRunStartedAt(ev.started_at);
@@ -358,6 +368,9 @@ export function useNanobotStream(
       }
 
       if (ev.event === "turn_end") {
+        if ("thread_goal" in ev && ev.thread_goal != null && typeof ev.thread_goal === "object") {
+          setThreadGoal(ev.thread_goal);
+        }
         // Definitive signal that the turn is fully complete.  Cancel any
         // pending debounce timer and stop the loading indicator immediately.
         if (streamEndTimerRef.current !== null) {
@@ -520,6 +533,7 @@ export function useNanobotStream(
     messages,
     isStreaming,
     runStartedAt,
+    threadGoal,
     send,
     stop,
     setMessages,

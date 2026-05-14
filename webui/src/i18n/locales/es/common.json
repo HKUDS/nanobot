@@ -219,6 +219,8 @@
       "inputAria": "Entrada de mensaje",
       "sendHint": "Enter para enviar · Shift+Enter para nueva línea",
       "runRuntimeTitle": "En ejecución · {{elapsed}}",
+      "threadGoalStrip": "Objetivo · {{label}}",
+      "threadGoalFallback": "Objetivo",
       "send": "Enviar mensaje",
       "stop": "Detener respuesta",
       "attachImage": "Adjuntar imagen",

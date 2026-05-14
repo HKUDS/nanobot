@@ -99,6 +99,8 @@ export async function fetchSessionMessages(
     /** Present on ``user`` turns that attached images. Paths have already
      * been stripped server-side; only the signed fetch URLs survive. */
     media_urls?: SessionMediaUrl[];
+    /** Present when this assistant row is a subagent result inject (session JSONL). */
+    injected_event?: string;
   }>;
 }> {
   return request(

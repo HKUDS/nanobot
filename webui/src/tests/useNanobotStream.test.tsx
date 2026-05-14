@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
-import type { InboundEvent } from "@/lib/types";
+import type { InboundEvent, ThreadGoalWsPayload } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 
 const EMPTY_MESSAGES: import("@/lib/types").UIMessage[] = [];
@@ -11,6 +11,7 @@ const EMPTY_MESSAGES: import("@/lib/types").UIMessage[] = [];
 function fakeClient() {
   const handlers = new Map<string, Set<(ev: InboundEvent) => void>>();
   const runStartedAtByChatId = new Map<string, number>();
+  const threadGoalByChatId = new Map<string, ThreadGoalWsPayload>();
 
   function recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent) {
     if (ev.event !== "goal_status") return;
@@ -19,6 +20,11 @@ function fakeClient() {
     } else {
       runStartedAtByChatId.delete(chatId);
     }
+  }
+
+  function recordThreadGoalSnapshot(chatId: string, ev: InboundEvent) {
+    if (ev.event !== "thread_goal") return;
+    threadGoalByChatId.set(chatId, ev.thread_goal);
   }
 
   return {
@@ -30,6 +36,9 @@ function fakeClient() {
       getRunStartedAt(chatId: string) {
         const v = runStartedAtByChatId.get(chatId);
         return v === undefined ? null : v;
+      },
+      getThreadGoal(chatId: string) {
+        return threadGoalByChatId.get(chatId);
       },
       onChat(chatId: string, h: (ev: InboundEvent) => void) {
         let set = handlers.get(chatId);
@@ -49,6 +58,7 @@ function fakeClient() {
     },
     emit(chatId: string, ev: InboundEvent) {
       recordGoalStatusForRunStrip(chatId, ev);
+      recordThreadGoalSnapshot(chatId, ev);
       const set = handlers.get(chatId);
       set?.forEach((h) => h(ev));
     },
@@ -782,6 +792,49 @@ describe("useNanobotStream", () => {
 
     rerender({ chatId: "chat-a" });
     expect(result.current.runStartedAt).toBe(9001);
+  });
+
+  it("tracks thread_goal per chat and restores after switching sessions", () => {
+    const fake = fakeClient();
+    const { result, rerender } = renderHook(
+      ({ chatId }: { chatId: string }) => useNanobotStream(chatId, EMPTY_MESSAGES),
+      {
+        wrapper: wrap(fake.client),
+        initialProps: { chatId: "chat-a" },
+      },
+    );
+
+    act(() => {
+      fake.emit("chat-a", {
+        event: "thread_goal",
+        chat_id: "chat-a",
+        thread_goal: { active: true, ui_summary: "Alpha" },
+      });
+    });
+    expect(result.current.threadGoal).toEqual({ active: true, ui_summary: "Alpha" });
+
+    act(() => {
+      fake.emit("chat-b", {
+        event: "thread_goal",
+        chat_id: "chat-b",
+        thread_goal: { active: true, objective: "Beta task" },
+      });
+    });
+
+    rerender({ chatId: "chat-b" });
+    expect(result.current.threadGoal).toEqual({ active: true, objective: "Beta task" });
+
+    rerender({ chatId: "chat-a" });
+    expect(result.current.threadGoal).toEqual({ active: true, ui_summary: "Alpha" });
+
+    act(() => {
+      fake.emit("chat-a", {
+        event: "thread_goal",
+        chat_id: "chat-a",
+        thread_goal: { active: false },
+      });
+    });
+    expect(result.current.threadGoal).toEqual({ active: false });
   });
 
 });
