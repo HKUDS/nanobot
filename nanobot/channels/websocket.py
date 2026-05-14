@@ -40,6 +40,7 @@ from nanobot.utils.media_decode import (
     FileSizeExceeded,
     save_base64_data_url,
 )
+from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.utils.webui_thread_disk import (
     WEBUI_THREAD_SCHEMA_VERSION,
     delete_webui_thread,
@@ -948,6 +949,9 @@ class WebSocketChannel(BaseChannel):
         data = self._session_manager.read_session_file(decoded_key)
         if data is None:
             return _http_error(404, "session not found")
+        messages = data.get("messages")
+        if isinstance(messages, list):
+            scrub_subagent_messages_for_channel(messages)
         # Decorate persisted user messages with signed media URLs so the
         # client can render previews. The raw on-disk ``media`` paths are
         # stripped on the way out — they leak server filesystem layout and
@@ -1526,10 +1530,15 @@ class WebSocketChannel(BaseChannel):
                 or msg.metadata.get("_turn_end")
                 or msg.metadata.get("_session_updated")
                 or msg.metadata.get("_goal_status")
+                or msg.metadata.get("_thread_goal_sync")
             ):
                 self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
             else:
                 self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
+            return
+        if msg.metadata.get("_thread_goal_sync"):
+            blob = msg.metadata.get("thread_goal")
+            await self.send_thread_goal(msg.chat_id, blob if isinstance(blob, dict) else {"active": False})
             return
         if msg.metadata.get("_goal_status"):
             status = msg.metadata.get("goal_status")
@@ -1545,7 +1554,9 @@ class WebSocketChannel(BaseChannel):
         if msg.metadata.get("_turn_end"):
             lat = msg.metadata.get("latency_ms")
             lat_i = int(lat) if isinstance(lat, (int, float)) else None
-            await self.send_turn_end(msg.chat_id, latency_ms=lat_i)
+            tg = msg.metadata.get("thread_goal")
+            tg_blob = tg if isinstance(tg, dict) else None
+            await self.send_turn_end(msg.chat_id, latency_ms=lat_i, thread_goal=tg_blob)
             return
         if msg.metadata.get("_session_updated"):
             await self.send_session_updated(msg.chat_id)
@@ -1658,7 +1669,13 @@ class WebSocketChannel(BaseChannel):
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" stream ")
 
-    async def send_turn_end(self, chat_id: str, latency_ms: int | None = None) -> None:
+    async def send_turn_end(
+        self,
+        chat_id: str,
+        latency_ms: int | None = None,
+        *,
+        thread_goal: dict[str, Any] | None = None,
+    ) -> None:
         """Signal that the agent has fully finished processing the current turn."""
         conns = list(self._subs.get(chat_id, ()))
         if not conns:
@@ -1666,9 +1683,21 @@ class WebSocketChannel(BaseChannel):
         body: dict[str, Any] = {"event": "turn_end", "chat_id": chat_id}
         if latency_ms is not None:
             body["latency_ms"] = int(latency_ms)
+        if thread_goal is not None:
+            body["thread_goal"] = thread_goal
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_end ")
+
+    async def send_thread_goal(self, chat_id: str, blob: dict[str, Any]) -> None:
+        """Push persisted thread-goal snapshot for *chat_id* (multi-chat isolation)."""
+        conns = list(self._subs.get(chat_id, ()))
+        if not conns:
+            return
+        body = {"event": "thread_goal", "chat_id": chat_id, "thread_goal": blob}
+        raw = json.dumps(body, ensure_ascii=False)
+        for connection in conns:
+            await self._safe_send_to(connection, raw, label=" thread_goal ")
 
     async def send_goal_status(
         self,

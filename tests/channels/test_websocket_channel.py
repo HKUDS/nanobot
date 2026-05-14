@@ -550,6 +550,26 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
 
 
 @pytest.mark.asyncio
+async def test_send_turn_end_includes_thread_goal_when_present() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    blob = {"active": True, "ui_summary": "Explore codebase"}
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="",
+        metadata={"_turn_end": True, "thread_goal": blob},
+    ))
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {"event": "turn_end", "chat_id": "chat-1", "thread_goal": blob}
+
+
+@pytest.mark.asyncio
 async def test_send_goal_status_running_emits_event_with_started_at() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
@@ -598,6 +618,35 @@ async def test_send_goal_status_idle_omits_started_at() -> None:
     mock_ws.send.assert_awaited_once()
     body = json.loads(mock_ws.send.await_args.args[0])
     assert body == {"event": "goal_status", "chat_id": "chat-1", "status": "idle"}
+
+
+@pytest.mark.asyncio
+async def test_send_thread_goal_emits_blob_per_chat() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_a = AsyncMock()
+    mock_b = AsyncMock()
+    channel._attach(mock_a, "chat-a")
+    channel._attach(mock_b, "chat-b")
+
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-a",
+        content="",
+        metadata={
+            "_thread_goal_sync": True,
+            "thread_goal": {"active": True, "ui_summary": "A"},
+        },
+    ))
+
+    mock_a.send.assert_awaited_once()
+    mock_b.send.assert_not_called()
+    body = json.loads(mock_a.send.await_args.args[0])
+    assert body == {
+        "event": "thread_goal",
+        "chat_id": "chat-a",
+        "thread_goal": {"active": True, "ui_summary": "A"},
+    }
 
 
 @pytest.mark.asyncio
