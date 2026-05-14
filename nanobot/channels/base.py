@@ -11,14 +11,9 @@ from loguru import logger
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.pairing import (
-    approve_code,
-    deny_code,
-    format_expiry,
     format_pairing_reply,
     generate_code,
     is_approved,
-    list_pending,
-    revoke,
 )
 
 
@@ -247,12 +242,6 @@ class BaseChannel(ABC):
                 )
             return
 
-        # Intercept /pairing slash commands before they reach the agent loop
-        parts = content.strip().split(None, 1)
-        if parts and parts[0] == "/pairing":
-            await self._handle_pairing_command(sender_id, chat_id, parts[1] if len(parts) > 1 else "")
-            return
-
         meta = metadata or {}
         if self.supports_streaming:
             meta = {**meta, "_wants_stream": True}
@@ -268,83 +257,6 @@ class BaseChannel(ABC):
         )
 
         await self.bus.publish_inbound(msg)
-
-    async def _handle_pairing_command(
-        self, sender_id: str, chat_id: str, subcommand_text: str
-    ) -> None:
-        """Execute a ``/pairing`` slash command and reply directly to the user."""
-        parts = subcommand_text.split()
-        sub = parts[0] if parts else "list"
-        arg = parts[1] if len(parts) > 1 else None
-
-        if sub in ("list",):
-            pending = list_pending()
-            if not pending:
-                reply = "No pending pairing requests."
-            else:
-                lines = ["Pending pairing requests:"]
-                for item in pending:
-                    expiry = format_expiry(item.get("expires_at", 0))
-                    lines.append(
-                        f"- `{item['code']}` | {item['channel']} | {item['sender_id']} | {expiry}"
-                    )
-                reply = "\n".join(lines)
-
-        elif sub == "approve":
-            if arg is None:
-                reply = "Usage: `/pairing approve <code>`"
-            else:
-                result = approve_code(arg)
-                if result is None:
-                    reply = f"Invalid or expired pairing code: `{arg}`"
-                else:
-                    channel, sid = result
-                    reply = (
-                        f"Approved pairing code `{arg}` — "
-                        f"{sid} can now access {channel}"
-                    )
-
-        elif sub == "deny":
-            if arg is None:
-                reply = "Usage: `/pairing deny <code>`"
-            else:
-                if deny_code(arg):
-                    reply = f"Denied pairing code `{arg}`"
-                else:
-                    reply = f"Pairing code `{arg}` not found or already expired"
-
-        elif sub == "revoke":
-            if arg is None:
-                reply = "Usage: `/pairing revoke <user_id>` or `/pairing revoke <channel> <user_id>`"
-            elif len(parts) == 2:
-                reply = (
-                    f"Revoked {arg} from {self.name}"
-                    if revoke(self.name, arg)
-                    else f"{arg} was not in the approved list for {self.name}"
-                )
-            elif len(parts) == 3:
-                reply = (
-                    f"Revoked {parts[2]} from {arg}"
-                    if revoke(arg, parts[2])
-                    else f"{parts[2]} was not in the approved list for {arg}"
-                )
-            else:
-                reply = "Usage: `/pairing revoke <user_id>` or `/pairing revoke <channel> <user_id>`"
-
-        else:
-            reply = (
-                "Unknown pairing command.\n"
-                "Usage: `/pairing [list|approve <code>|deny <code>|revoke <user_id>]`"
-            )
-
-        await self.send(
-            OutboundMessage(
-                channel=self.name,
-                chat_id=str(chat_id),
-                content=reply,
-                metadata={"_pairing_command": True},
-            )
-        )
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:

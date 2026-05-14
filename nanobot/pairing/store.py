@@ -189,3 +189,65 @@ def format_expiry(expires_at: float) -> str:
     """Return a human-readable expiry string (e.g. ``"120s"`` or ``"expired"``)."""
     remaining = int(expires_at - time.time())
     return f"{remaining}s" if remaining > 0 else "expired"
+
+
+def handle_pairing_command(channel: str, subcommand_text: str) -> str:
+    """Execute a pairing subcommand and return the reply text.
+
+    This is a pure function (no side effects other than store mutations)
+    so it can be used from both the CLI and the agent CommandRouter.
+    """
+    parts = subcommand_text.split()
+    sub = parts[0] if parts else "list"
+    arg = parts[1] if len(parts) > 1 else None
+
+    if sub in ("list",):
+        pending = list_pending()
+        if not pending:
+            return "No pending pairing requests."
+        lines = ["Pending pairing requests:"]
+        for item in pending:
+            expiry = format_expiry(item.get("expires_at", 0))
+            lines.append(
+                f"- `{item['code']}` | {item['channel']} | {item['sender_id']} | {expiry}"
+            )
+        return "\n".join(lines)
+
+    elif sub == "approve":
+        if arg is None:
+            return "Usage: `/pairing approve <code>`"
+        result = approve_code(arg)
+        if result is None:
+            return f"Invalid or expired pairing code: `{arg}`"
+        ch, sid = result
+        return f"Approved pairing code `{arg}` — {sid} can now access {ch}"
+
+    elif sub == "deny":
+        if arg is None:
+            return "Usage: `/pairing deny <code>`"
+        if deny_code(arg):
+            return f"Denied pairing code `{arg}`"
+        return f"Pairing code `{arg}` not found or already expired"
+
+    elif sub == "revoke":
+        if arg is None:
+            return "Usage: `/pairing revoke <user_id>` or `/pairing revoke <channel> <user_id>`"
+        elif len(parts) == 2:
+            return (
+                f"Revoked {arg} from {channel}"
+                if revoke(channel, arg)
+                else f"{arg} was not in the approved list for {channel}"
+            )
+        elif len(parts) == 3:
+            return (
+                f"Revoked {parts[2]} from {arg}"
+                if revoke(arg, parts[2])
+                else f"{parts[2]} was not in the approved list for {arg}"
+            )
+        else:
+            return "Usage: `/pairing revoke <user_id>` or `/pairing revoke <channel> <user_id>`"
+
+    return (
+        "Unknown pairing command.\n"
+        "Usage: `/pairing [list|approve <code>|deny <code>|revoke <user_id>]`"
+    )

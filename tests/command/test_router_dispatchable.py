@@ -26,11 +26,14 @@ class TestIsDispatchableCommand:
         assert router.is_dispatchable_command("/dream")
         assert router.is_dispatchable_command("/dream-log")
         assert router.is_dispatchable_command("/dream-restore")
+        assert router.is_dispatchable_command("/pairing")
 
     def test_prefix_commands_match(self, router: CommandRouter) -> None:
         assert router.is_dispatchable_command("/dream-log abc123")
         assert router.is_dispatchable_command("/dream-restore def456")
         assert router.is_dispatchable_command("/model fast")
+        assert router.is_dispatchable_command("/pairing list")
+        assert router.is_dispatchable_command("/pairing approve CODE")
 
     def test_priority_commands_not_matched(self, router: CommandRouter) -> None:
         # Priority commands are NOT in the dispatchable tiers — they are
@@ -46,9 +49,11 @@ class TestIsDispatchableCommand:
     def test_case_insensitive(self, router: CommandRouter) -> None:
         assert router.is_dispatchable_command("/NEW")
         assert router.is_dispatchable_command("/Help")
+        assert router.is_dispatchable_command("/PAIRING")
 
     def test_strips_whitespace(self, router: CommandRouter) -> None:
         assert router.is_dispatchable_command("  /new  ")
+        assert router.is_dispatchable_command("  /pairing list  ")
 
     def test_unknown_slash_command_not_matched(self, router: CommandRouter) -> None:
         assert not router.is_dispatchable_command("/unknown")
@@ -143,3 +148,82 @@ class TestMidTurnCommandDispatchedDirectly:
         )
         result = await router.dispatch(ctx)
         assert result is None
+
+
+class TestPairingCommandDispatch:
+    """Verify /pairing works via CommandRouter."""
+
+    @pytest.fixture()
+    def router(self) -> CommandRouter:
+        r = CommandRouter()
+        register_builtin_commands(r)
+        return r
+
+    @pytest.fixture()
+    def fake_msg(self) -> MagicMock:
+        msg = MagicMock()
+        msg.channel = "telegram"
+        msg.chat_id = "chat1"
+        msg.content = "/pairing list"
+        msg.metadata = {}
+        return msg
+
+    @pytest.mark.asyncio
+    async def test_pairing_list_dispatched(
+        self, router: CommandRouter, fake_msg: MagicMock, monkeypatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "nanobot.pairing.store.list_pending",
+            lambda: [
+                {
+                    "code": "ABCD-EFGH",
+                    "channel": "telegram",
+                    "sender_id": "123",
+                    "expires_at": 9999999999,
+                }
+            ],
+        )
+        ctx = CommandContext(
+            msg=fake_msg, session=None,
+            key="telegram:chat1", raw="/pairing list", args="list", loop=MagicMock(),
+        )
+        result = await router.dispatch(ctx)
+        assert result is not None
+        assert "ABCD-EFGH" in result.content
+        assert result.metadata.get("_pairing_command") is True
+
+    @pytest.mark.asyncio
+    async def test_pairing_approve_dispatched(
+        self, router: CommandRouter, fake_msg: MagicMock, monkeypatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "nanobot.pairing.store.approve_code",
+            lambda code: ("telegram", "123") if code == "ABCD-EFGH" else None,
+        )
+        fake_msg.content = "/pairing approve ABCD-EFGH"
+        ctx = CommandContext(
+            msg=fake_msg, session=None,
+            key="telegram:chat1", raw="/pairing approve ABCD-EFGH",
+            args="approve ABCD-EFGH", loop=MagicMock(),
+        )
+        result = await router.dispatch(ctx)
+        assert result is not None
+        assert "Approved" in result.content
+
+    @pytest.mark.asyncio
+    async def test_pairing_revoke_dispatched(
+        self, router: CommandRouter, fake_msg: MagicMock, monkeypatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "nanobot.pairing.store.revoke",
+            lambda ch, sid: sid == "123",
+        )
+        fake_msg.content = "/pairing revoke 123"
+        ctx = CommandContext(
+            msg=fake_msg, session=None,
+            key="telegram:chat1", raw="/pairing revoke 123",
+            args="revoke 123", loop=MagicMock(),
+        )
+        result = await router.dispatch(ctx)
+        assert result is not None
+        assert "Revoked" in result.content
