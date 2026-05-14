@@ -179,9 +179,11 @@ def get_approved(channel: str) -> list[str]:
 def format_pairing_reply(code: str) -> str:
     """Return the pairing-code message sent to unrecognised DM senders."""
     return (
-        "This assistant requires approval before it can respond.\n"
-        f"Your pairing code is: `{code}`\n"
-        f"Ask the owner to run: `nanobot pairing approve {code}`"
+        "Hi there! This assistant only responds to approved users.\n\n"
+        f"Your pairing code is: `{code}`\n\n"
+        "To get access, ask the owner to approve this code:\n"
+        f"- In this chat: send `/pairing approve {code}`\n"
+        f"- Via CLI: run `nanobot pairing approve {code}`"
     )
 
 
