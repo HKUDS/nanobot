@@ -42,6 +42,7 @@ from nanobot.utils.image_generation_intent import image_generation_prompt
 from nanobot.utils.runtime import EMPTY_FINAL_RESPONSE_MESSAGE
 from nanobot.utils.session_attachments import merge_turn_media_into_last_assistant
 from nanobot.utils.webui_titles import mark_webui_session, maybe_generate_webui_title_after_turn
+from nanobot.utils.webui_turn_helpers import publish_turn_run_status
 
 if TYPE_CHECKING:
     from nanobot.config.schema import (
@@ -634,24 +635,6 @@ class AgentLoop:
         sub_cancelled = await self.subagents.cancel_by_session(key)
         return cancelled + sub_cancelled
 
-    async def _publish_turn_run_status(self, msg: InboundMessage, status: str) -> None:
-        """Notify WebSocket clients while a user turn is executing (timing strip)."""
-        if msg.channel != "websocket":
-            return
-        meta: dict[str, Any] = {
-            **dict(msg.metadata or {}),
-            "_goal_status": True,
-            "goal_status": status,
-        }
-        if status == "running":
-            meta["started_at"] = time.time()
-        await self.bus.publish_outbound(OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content="",
-            metadata=meta,
-        ))
-
     def _effective_session_key(self, msg: InboundMessage) -> str:
         """Return the session key used for task routing and mid-turn injections."""
         if self._unified_session and not msg.session_key_override:
@@ -1037,7 +1020,7 @@ class AgentLoop:
                         "Re-published {} leftover message(s) to bus for session {}",
                         leftover, session_key,
                     )
-            await self._publish_turn_run_status(msg, "idle")
+            await publish_turn_run_status(self.bus, msg, "idle")
             self._pending_turn_latency_ms.pop(session_key, None)
 
     async def close_mcp(self) -> None:
@@ -1356,7 +1339,7 @@ class AgentLoop:
         return "ok"
 
     async def _state_run(self, ctx: TurnContext) -> str:
-        await self._publish_turn_run_status(ctx.msg, "running")
+        await publish_turn_run_status(self.bus, ctx.msg, "running")
         result = await self._run_agent_loop(
             ctx.initial_messages,
             on_progress=ctx.on_progress,
