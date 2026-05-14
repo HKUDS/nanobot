@@ -34,10 +34,12 @@ class AnthropicProvider(LLMProvider):
         api_base: str | None = None,
         default_model: str = "claude-sonnet-4-20250514",
         extra_headers: dict[str, str] | None = None,
+        spec=None,  # ProviderSpec | None — for strip_model_prefix, etc.
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self._spec = spec
 
         from anthropic import AsyncAnthropic
 
@@ -108,8 +110,9 @@ class AnthropicProvider(LLMProvider):
             error_should_retry=should_retry,
         )
 
-    @staticmethod
-    def _strip_prefix(model: str) -> str:
+    def _strip_prefix(self, model: str) -> str:
+        if self._spec and self._spec.strip_model_prefix:
+            return model.split("/")[-1]
         if model.startswith("anthropic/"):
             return model[len("anthropic/"):]
         return model
