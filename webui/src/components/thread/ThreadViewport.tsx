@@ -33,7 +33,8 @@ export function ThreadViewport({
   const lastConversationKeyRef = useRef<string | null>(conversationKey);
   const pendingConversationScrollRef = useRef(true);
   const scrollFrameIdsRef = useRef<number[]>([]);
-  const forceBottomUntilRef = useRef(0);
+  /** User scrolled away from the bottom; do not auto-yank until they return or we reset (new chat / send). */
+  const userReadingHistoryRef = useRef(false);
   const [atBottom, setAtBottom] = useState(true);
   const hasMessages = messages.length > 0;
 
@@ -56,14 +57,25 @@ export function ThreadViewport({
     setAtBottom(true);
   }, []);
 
-  const scrollToBottom = useCallback((smooth = false, frames = 1) => {
-    cancelScheduledBottomScroll();
-    scrollToBottomNow(smooth);
-    for (let i = 1; i < frames; i += 1) {
-      const id = window.requestAnimationFrame(() => scrollToBottomNow(smooth));
-      scrollFrameIdsRef.current.push(id);
-    }
-  }, [cancelScheduledBottomScroll, scrollToBottomNow]);
+  const scrollToBottom = useCallback(
+    (smooth = false, frames = 1, options?: { force?: boolean }) => {
+      const force = options?.force ?? false;
+      cancelScheduledBottomScroll();
+      const run = () => {
+        if (!force && userReadingHistoryRef.current) return;
+        scrollToBottomNow(smooth);
+      };
+      run();
+      for (let i = 1; i < frames; i += 1) {
+        const id = window.requestAnimationFrame(() => {
+          if (!force && userReadingHistoryRef.current) return;
+          scrollToBottomNow(smooth);
+        });
+        scrollFrameIdsRef.current.push(id);
+      }
+    },
+    [cancelScheduledBottomScroll, scrollToBottomNow],
+  );
 
   useEffect(() => {
     if (!atBottom) return;
@@ -74,7 +86,7 @@ export function ThreadViewport({
 
   useEffect(() => {
     if (scrollToBottomSignal <= 0) return;
-    forceBottomUntilRef.current = Date.now() + 2_000;
+    userReadingHistoryRef.current = false;
     scrollToBottom(false, 8);
   }, [scrollToBottomSignal, scrollToBottom]);
 
@@ -82,7 +94,7 @@ export function ThreadViewport({
     if (lastConversationKeyRef.current === conversationKey) return;
     lastConversationKeyRef.current = conversationKey;
     pendingConversationScrollRef.current = true;
-    forceBottomUntilRef.current = Date.now() + 2_000;
+    userReadingHistoryRef.current = false;
     setAtBottom(true);
   }, [conversationKey]);
 
@@ -104,12 +116,12 @@ export function ThreadViewport({
     const target = contentRef.current;
     if (!target || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (!atBottom && Date.now() > forceBottomUntilRef.current) return;
+      if (userReadingHistoryRef.current) return;
       scrollToBottom(false, 4);
     });
     observer.observe(target);
     return () => observer.disconnect();
-  }, [atBottom, hasMessages, scrollToBottom]);
+  }, [hasMessages, scrollToBottom]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -117,7 +129,9 @@ export function ThreadViewport({
 
     const onScroll = () => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setAtBottom(distance < NEAR_BOTTOM_PX);
+      const near = distance < NEAR_BOTTOM_PX;
+      setAtBottom(near);
+      userReadingHistoryRef.current = !near;
     };
 
     onScroll();
@@ -173,7 +187,7 @@ export function ThreadViewport({
         <Button
           variant="outline"
           size="icon"
-          onClick={() => scrollToBottom(true)}
+          onClick={() => scrollToBottom(true, 1, { force: true })}
           className={cn(
             /* Keep clear of sticky composer (textarea + toolbar + optional goal strip). */
             "absolute bottom-48 left-1/2 z-20 h-8 w-8 -translate-x-1/2 rounded-full shadow-md",
