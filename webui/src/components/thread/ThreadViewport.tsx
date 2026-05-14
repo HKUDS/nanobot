@@ -67,13 +67,15 @@ export function ThreadViewport({
 
   useEffect(() => {
     if (!atBottom) return;
-    scrollToBottom(!isStreaming);
-  }, [messages, isStreaming, atBottom, scrollToBottom]);
+    // Instant jump: CSS scroll-smooth + behavior "auto" still animates in some
+    // browsers; session switches and history hydration should never slide from top.
+    scrollToBottom(false);
+  }, [messages, atBottom, scrollToBottom]);
 
   useEffect(() => {
     if (scrollToBottomSignal <= 0) return;
     forceBottomUntilRef.current = Date.now() + 2_000;
-    scrollToBottom(true, 8);
+    scrollToBottom(false, 8);
   }, [scrollToBottomSignal, scrollToBottom]);
 
   useLayoutEffect(() => {
@@ -128,7 +130,7 @@ export function ThreadViewport({
       <div
         ref={scrollRef}
         className={cn(
-          "absolute inset-0 overflow-y-auto scroll-smooth scrollbar-thin",
+          "absolute inset-0 overflow-y-auto scroll-auto scrollbar-thin",
           "[&::-webkit-scrollbar]:w-1.5",
           "[&::-webkit-scrollbar-thumb]:rounded-full",
           "[&::-webkit-scrollbar-thumb]:bg-muted-foreground/30",
