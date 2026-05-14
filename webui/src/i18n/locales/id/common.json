@@ -9,6 +9,15 @@
       "title": "Tidak dapat menjangkau nanobot",
       "gatewayHint": "Pastikan gateway sedang berjalan (`nanobot gateway`) dan halaman ini dibuka pada mesin yang sama."
     },
+    "system": {
+      "section": "Sistem",
+      "restartHint": "Mulai ulang nanobot untuk menerapkan perubahan runtime.",
+      "restart": "Mulai ulang nanobot",
+      "restarting": "Memulai ulang..."
+    },
+    "restart": {
+      "completed": "Mulai ulang selesai dalam {{seconds}} dtk."
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -23,9 +32,100 @@
     "newChat": "Obrolan baru",
     "recent": "Terbaru",
     "refreshSessions": "Segarkan sesi",
+    "settings": "Pengaturan",
     "language": {
       "label": "Bahasa",
       "ariaLabel": "Ganti bahasa"
+    }
+  },
+  "settings": {
+    "backToChat": "Kembali ke obrolan",
+    "sidebar": {
+      "title": "Pengaturan",
+      "ariaLabel": "Bagian pengaturan"
+    },
+    "nav": {
+      "general": "Umum",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "Antarmuka",
+      "ai": "AI",
+      "system": "Sistem"
+    },
+    "rows": {
+      "theme": "Tema",
+      "language": "Bahasa",
+      "provider": "Penyedia",
+      "model": "Model",
+      "restart": "Mulai ulang nanobot",
+      "configPath": "Path konfigurasi"
+    },
+    "help": {
+      "theme": "Beralih antara tampilan terang dan gelap.",
+      "language": "Pilih bahasa yang digunakan WebUI.",
+      "provider": "Pilih penyedia untuk permintaan model baru.",
+      "model": "Atur nama model default yang digunakan nanobot.",
+      "configPath": "File konfigurasi gateway yang sedang digunakan."
+    },
+    "values": {
+      "light": "Terang",
+      "dark": "Gelap",
+      "notAvailable": "Tidak tersedia"
+    },
+    "status": {
+      "loading": "Memuat pengaturan...",
+      "loadError": "Tidak dapat memuat pengaturan",
+      "unsaved": "Ada perubahan yang belum disimpan.",
+      "savedRestart": "Tersimpan. Mulai ulang nanobot untuk menerapkan."
+    },
+    "actions": {
+      "save": "Simpan",
+      "saving": "Menyimpan",
+      "edit": "Edit",
+      "cancel": "Batal"
+    },
+    "byok": {
+      "description": "Gunakan kunci provider Anda sendiri. Nanobot membaca nilai ini dari config saat ini, dan hanya provider yang sudah dikonfigurasi yang bisa dipilih di Umum.",
+      "configured": "Terkonfigurasi",
+      "notConfigured": "Belum dikonfigurasi",
+      "configuredSection": "Terkonfigurasi",
+      "notConfiguredSection": "Belum dikonfigurasi",
+      "showMore": "Tampilkan {{count}} lagi",
+      "showLess": "Tampilkan lebih sedikit",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "Masukkan API key",
+      "apiKeyConfiguredPlaceholder": "Kosongkan untuk mempertahankan key saat ini",
+      "configuredKeyHint": "Key terkonfigurasi",
+      "apiBasePlaceholder": "Gunakan default provider",
+      "apiKeyRequired": "API key diperlukan untuk mengonfigurasi provider ini.",
+      "showApiKey": "Tampilkan API key",
+      "hideApiKey": "Sembunyikan API key",
+      "noConfiguredProviders": "Belum ada provider terkonfigurasi",
+      "configureFirst": "Konfigurasikan provider di BYOK terlebih dahulu.",
+      "openByok": "Buka BYOK",
+      "tabs": {
+        "ariaLabel": "Jenis kredensial BYOK",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "Search provider",
+        "providerHelp": "Pilih backend yang digunakan alat web search.",
+        "selectProvider": "Pilih provider",
+        "credentials": "Kredensial",
+        "noCredentialRequired": "Tidak perlu key",
+        "noCredentialHelp": "DuckDuckGo berfungsi tanpa menyimpan API key.",
+        "apiKeyHelp": "Disimpan di config dan ditampilkan tersamarkan setelah disimpan.",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG memerlukan URL instance Anda sendiri.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "Provider pencarian ini memerlukan API key.",
+        "baseUrlRequired": "SearXNG memerlukan Base URL.",
+        "missingCredential": "Tambahkan kredensial yang diperlukan sebelum menyimpan.",
+        "saveHint": "Perubahan berlaku untuk permintaan web search baru."
+      }
     }
   },
   "chat": {
@@ -37,8 +137,8 @@
     "newChat": "Obrolan baru"
   },
   "deleteConfirm": {
-    "title": "Hapus “{{title}}”?",
-    "description": "File sesi akan dihapus dari disk. Tindakan ini tidak dapat dibatalkan.",
+    "title": "Hapus obrolan ini?",
+    "description": "Tindakan ini tidak dapat dibatalkan.",
     "cancel": "Batal",
     "confirm": "Hapus"
   },
@@ -53,7 +153,60 @@
   "thread": {
     "loadingConversation": "Memuat percakapan…",
     "empty": {
-      "description": "Ajukan pertanyaan, lanjutkan pekerjaan lokal, atau mulai thread baru."
+      "description": "Ajukan pertanyaan, lanjutkan pekerjaan lokal, atau mulai thread baru.",
+      "greeting": "Apa yang bisa saya bantu?",
+      "quickActions": {
+        "plan": {
+          "title": "Buat rencana proyek",
+          "prompt": "Buat rencana proyek ringkas untuk apa yang sebaiknya saya bangun berikutnya."
+        },
+        "analyze": {
+          "title": "Analisis data ini",
+          "prompt": "Bantu saya menganalisis data ini dan soroti pola yang paling penting."
+        },
+        "brainstorm": {
+          "title": "Brainstorm ide",
+          "prompt": "Brainstorm beberapa ide praktis dan tradeoff untuk masalah ini."
+        },
+        "code": {
+          "title": "Tulis kode",
+          "prompt": "Bantu saya menulis kode untuk tugas ini, mulai dari perubahan berguna yang paling kecil."
+        },
+        "summarize": {
+          "title": "Ringkas dokumen ini",
+          "prompt": "Ringkas dokumen ini dan daftar poin-poin utamanya."
+        },
+        "more": {
+          "title": "Lainnya",
+          "prompt": "Tunjukkan beberapa cara berguna Anda dapat membantu di workspace ini."
+        }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "Desain ikon aplikasi",
+          "prompt": "Buat ikon aplikasi 1:1 yang bersih untuk nanobot: robot ramah, gaya vektor sederhana, palet biru dan putih lembut, tanpa teks."
+        },
+        "sticker": {
+          "title": "Buat stiker",
+          "prompt": "Buat gambar gaya stiker yang lucu dari asisten robot kecil, latar terlihat transparan, ekspresif dan menyenangkan."
+        },
+        "poster": {
+          "title": "Buat poster",
+          "prompt": "Buat konsep poster yang rapi untuk asisten AI pribadi, komposisi modern, hierarki visual kuat, cocok untuk landing page."
+        },
+        "product": {
+          "title": "Mockup produk",
+          "prompt": "Buat gambar mockup produk yang bersih untuk aplikasi web AI percakapan, antarmuka minimal, pencahayaan premium, bingkai perangkat realistis."
+        },
+        "portrait": {
+          "title": "Potret bergaya",
+          "prompt": "Buat potret bergaya dari pendamping AI yang ramah, pencahayaan lembut, detail tetapi tetap mudah didekati, gaya ilustrasi modern."
+        },
+        "edit": {
+          "title": "Edit gambar",
+          "prompt": "Bantu saya mengedit gambar. Minta saya mengunggah atau menyebutkan gambar terlebih dahulu, lalu buat hasil editnya."
+        }
+      }
     },
     "header": {
       "toggleSidebar": "Tampilkan atau sembunyikan sidebar"
@@ -62,10 +215,27 @@
       "placeholderThread": "Ketik pesan Anda…",
       "placeholderHero": "Apa yang sedang Anda pikirkan?",
       "placeholderOpening": "Membuka obrolan baru…",
+      "placeholderStreaming": "Model sedang merespons…",
       "inputAria": "Input pesan",
       "sendHint": "Enter untuk kirim · Shift+Enter untuk baris baru",
       "send": "Kirim pesan",
+      "stop": "Hentikan respons",
       "attachImage": "Lampirkan gambar",
+      "imageMode": {
+        "label": "Buat gambar",
+        "toggle": "Alihkan mode pembuatan gambar",
+        "placeholder": "Deskripsikan atau edit gambar…",
+        "aspectAria": "Rasio aspek gambar",
+        "aspectLabel": "Rasio gambar",
+        "aspect": {
+          "auto": "Otomatis",
+          "1_1": "Persegi 1:1",
+          "3_4": "Potret 3:4",
+          "9_16": "Story 9:16",
+          "4_3": "Lanskap 4:3",
+          "16_9": "Lebar 16:9"
+        }
+      },
       "encoding": "Memproses…",
       "remove": "Hapus lampiran",
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
@@ -76,6 +246,51 @@
         "decode_failed": "Tidak dapat mendekode gambar ini",
         "too_large": "Gambar terlalu besar — coba yang lebih kecil",
         "io": "Tidak dapat membaca file ini"
+      },
+      "slash": {
+        "ariaLabel": "Perintah slash",
+        "label": "perintah",
+        "navigateHint": "↑↓ Pilih",
+        "selectHint": "Enter/Tab Sisipkan",
+        "closeHint": "Esc Tutup",
+        "commands": {
+          "new": {
+            "title": "Obrolan baru",
+            "description": "Hentikan tugas saat ini dan mulai percakapan baru."
+          },
+          "stop": {
+            "title": "Hentikan tugas saat ini",
+            "description": "Batalkan giliran agent yang sedang aktif di chat ini."
+          },
+          "restart": {
+            "title": "Mulai ulang nanobot",
+            "description": "Mulai ulang proses bot di tempat."
+          },
+          "status": {
+            "title": "Tampilkan status",
+            "description": "Tampilkan status runtime, provider, dan channel."
+          },
+          "history": {
+            "title": "Tampilkan riwayat",
+            "description": "Cetak N pesan percakapan tersimpan terbaru."
+          },
+          "dream": {
+            "title": "Jalankan Dream",
+            "description": "Picu konsolidasi memori secara manual."
+          },
+          "dream_log": {
+            "title": "Tampilkan log Dream",
+            "description": "Tampilkan perubahan dari konsolidasi Dream terakhir."
+          },
+          "dream_restore": {
+            "title": "Pulihkan memori",
+            "description": "Kembalikan memori ke snapshot Dream sebelumnya."
+          },
+          "help": {
+            "title": "Tampilkan bantuan",
+            "description": "Daftar perintah slash yang tersedia."
+          }
+        }
       }
     },
     "scrollToBottom": "Gulir ke bawah"

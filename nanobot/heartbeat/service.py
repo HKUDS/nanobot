@@ -144,8 +144,8 @@ class HeartbeatService:
                     await self._tick()
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                logger.error("Heartbeat error: {}", e)
+            except Exception:
+                logger.exception("Heartbeat error")
 
     @staticmethod
     def _is_deliverable(response: str) -> bool:

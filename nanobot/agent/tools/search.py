@@ -5,6 +5,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, TypeVar
 
@@ -92,10 +93,8 @@ class _SearchTool(_FsTool):
 
     def _display_path(self, target: Path, root: Path) -> str:
         if self._workspace:
-            try:
+            with suppress(ValueError):
                 return target.relative_to(self._workspace).as_posix()
-            except ValueError:
-                pass
         return target.relative_to(root).as_posix()
 
     def _iter_files(self, root: Path) -> Iterable[Path]:
@@ -134,6 +133,7 @@ class _SearchTool(_FsTool):
 
 class GlobTool(_SearchTool):
     """Find files matching a glob pattern."""
+    _scopes = {"core", "subagent"}
 
     @property
     def name(self) -> str:
@@ -252,6 +252,8 @@ class GlobTool(_SearchTool):
 
 class GrepTool(_SearchTool):
     """Search file contents using a regex-like pattern."""
+    _scopes = {"core", "subagent"}
+
     _MAX_RESULT_CHARS = 128_000
     _MAX_FILE_BYTES = 2_000_000
 

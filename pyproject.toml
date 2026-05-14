@@ -61,6 +61,7 @@ dependencies = [
     "openpyxl>=3.1.0,<4.0.0",
     "python-pptx>=1.0.0,<2.0.0",
     "filelock>=3.25.2",
+    "boto3>=1.43.0",
 ]
 
 [project.optional-dependencies]
@@ -107,6 +108,11 @@ dev = [
 
 [project.scripts]
 nanobot = "nanobot.cli.commands:app"
+
+# Third-party tool plugins register here.  Built-in tools are discovered
+# automatically via pkgutil scanning in ToolLoader.discover().
+# [project.entry-points."nanobot.tools"]
+# my_plugin = "my_package.plugins:MyTool"
 
 [build-system]
 requires = ["hatchling"]

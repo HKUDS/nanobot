@@ -53,6 +53,7 @@ IMAP_PASSWORD=your-password-here
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, set `"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"` in your dashscope provider config.
 > - **Step Fun (Mainland China)**: If your API key is from Step Fun's mainland China platform (stepfun.com), set `"apiBase": "https://api.stepfun.com/v1"` in your stepfun provider config.
+> - **Xiaomi MiMo thinking mode**: MiMo models (e.g. `mimo-v2.5-pro`) default to enabled thinking. Use `agents.defaults.reasoningEffort: "none"` to disable it, or `"low"` / `"medium"` / `"high"` to keep it on. Omitting the field preserves the provider's per-model default.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -63,6 +64,7 @@ IMAP_PASSWORD=your-password-here
 | `byteplus` | LLM (VolcEngine international, pay-per-use) | [Coding Plan](https://www.byteplus.com/en/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [byteplus.com](https://www.byteplus.com) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
 | `azure_openai` | LLM (Azure OpenAI) | [portal.azure.com](https://portal.azure.com) |
+| `bedrock` | LLM (AWS Bedrock Converse, Claude/Nova/Llama/etc.) | [aws.amazon.com/bedrock](https://aws.amazon.com/bedrock/) |
 | `openai` | LLM + Voice transcription (Whisper) | [platform.openai.com](https://platform.openai.com) |
 | `deepseek` | LLM (DeepSeek direct) | [platform.deepseek.com](https://platform.deepseek.com) |
 | `groq` | LLM + Voice transcription (Whisper, default) | [console.groq.com](https://console.groq.com) |
@@ -75,6 +77,7 @@ IMAP_PASSWORD=your-password-here
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `mimo` | LLM (MiMo) | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
+| `longcat` | LLM (LongCat) | [longcat.chat](https://longcat.chat/platform/docs/zh/) |
 | `ollama` | LLM (local, Ollama) | — |
 | `lm_studio` | LLM (local, LM Studio) | — |
 | `mistral` | LLM | [docs.mistral.ai](https://docs.mistral.ai/) |
@@ -84,6 +87,183 @@ IMAP_PASSWORD=your-password-here
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
 | `qianfan` | LLM (Baidu Qianfan) | [cloud.baidu.com](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |
+
+<details>
+<summary><b>AWS Bedrock (Converse API)</b></summary>
+
+Bedrock uses the native `bedrock-runtime` Converse API, so it can call Bedrock model IDs such as Claude Opus 4.7, Claude Sonnet, Amazon Nova, Meta Llama, Mistral, Qwen, and other models that support Converse. It supports normal chat, streaming, tool calling, tool results, token usage, and Bedrock error metadata.
+
+This provider is for Bedrock's native Converse API, not Bedrock's OpenAI-compatible `/openai/v1` endpoint. For OpenAI-compatible Bedrock models, you can still use `custom` if you specifically want that API surface.
+
+**1. Configure credentials**
+
+Use the normal AWS credential chain (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, an AWS profile, or an IAM role). The IAM identity needs:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": [
+    "bedrock:InvokeModel",
+    "bedrock:InvokeModelWithResponseStream"
+  ],
+  "Resource": "*"
+}
+```
+
+You can also set `providers.bedrock.apiKey` to a Bedrock API key; nanobot exports it as `AWS_BEARER_TOKEN_BEDROCK` for the AWS SDK.
+
+Credential options:
+
+- **AWS CLI/default profile**: leave `apiKey` and `profile` empty, then run `aws configure` or provide `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.
+- **Named AWS profile**: set `profile` to a profile from `~/.aws/config` or `~/.aws/credentials`.
+- **IAM role**: on EC2/ECS/Lambda, leave `apiKey` and `profile` empty and attach a role with Bedrock permissions.
+- **Bedrock API key**: set `apiKey` or `AWS_BEARER_TOKEN_BEDROCK`; `profile` can stay `null`.
+
+**2. Minimal config**
+
+For a non-Anthropic model such as Amazon Nova:
+
+```json
+{
+  "providers": {
+    "bedrock": {
+      "region": "us-east-1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "bedrock",
+      "model": "bedrock/amazon.nova-lite-v1:0",
+      "reasoningEffort": null
+    }
+  }
+}
+```
+
+With a Bedrock API key:
+
+```json
+{
+  "providers": {
+    "bedrock": {
+      "region": "us-east-1",
+      "apiKey": "${AWS_BEARER_TOKEN_BEDROCK}"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "bedrock",
+      "model": "bedrock/amazon.nova-lite-v1:0",
+      "reasoningEffort": null
+    }
+  }
+}
+```
+
+With a named AWS profile:
+
+```json
+{
+  "providers": {
+    "bedrock": {
+      "region": "us-east-1",
+      "profile": "my-bedrock-profile"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "bedrock",
+      "model": "bedrock/amazon.nova-lite-v1:0"
+    }
+  }
+}
+```
+
+**3. Claude Opus 4.7 example**
+
+```json
+{
+  "providers": {
+    "bedrock": {
+      "region": "us-east-1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "bedrock",
+      "model": "bedrock/global.anthropic.claude-opus-4-7",
+      "reasoningEffort": "medium",
+      "maxTokens": 8192
+    }
+  }
+}
+```
+
+For regional routing, use one of Bedrock's inference IDs, for example `bedrock/us.anthropic.claude-opus-4-7`, `bedrock/eu.anthropic.claude-opus-4-7`, or `bedrock/jp.anthropic.claude-opus-4-7`.
+
+Claude Opus 4.7 does not accept `temperature`, `top_p`, or `top_k`; nanobot omits `temperature` automatically for this model. If `reasoningEffort` is set to `low`, `medium`, `high`, `max`, or `adaptive`, nanobot sends Bedrock's adaptive thinking parameter.
+
+Anthropic models on Bedrock can also require Anthropic use-case registration and are subject to Anthropic-supported country/region restrictions. If Claude fails with a `ValidationException` about unsupported countries or regions, try a non-Anthropic Bedrock model such as Amazon Nova to verify the provider setup.
+
+**4. Model IDs**
+
+Use Bedrock model IDs or inference profile IDs with a `bedrock/` prefix in nanobot config. nanobot removes the prefix before calling AWS.
+
+Examples:
+
+- `bedrock/amazon.nova-micro-v1:0`
+- `bedrock/amazon.nova-lite-v1:0`
+- `bedrock/global.anthropic.claude-opus-4-7`
+- `bedrock/us.anthropic.claude-opus-4-7`
+- `bedrock/openai.gpt-oss-20b-1:0`
+- `bedrock/meta.llama...`
+- `bedrock/mistral...`
+
+Check the Bedrock console for the exact model ID and region availability. Some models require cross-region inference profile IDs such as `us.*`, `eu.*`, or `global.*`.
+
+**5. Advanced model fields**
+
+Model-specific fields can be supplied with `extraBody`; nanobot merges it into Converse `additionalModelRequestFields`:
+
+```json
+{
+  "providers": {
+    "bedrock": {
+      "region": "us-east-1",
+      "extraBody": {
+        "thinking": {
+          "type": "adaptive",
+          "effort": "medium",
+          "display": "summarized"
+        }
+      }
+    }
+  }
+}
+```
+
+Use `apiBase` only for a custom Bedrock Runtime endpoint URL, such as a VPC endpoint or proxy. It is not needed for normal AWS regions.
+
+Current scope: nanobot passes `messages`, `system`, `inferenceConfig`, `toolConfig`, and `additionalModelRequestFields`. Bedrock Prompt Management, Guardrails, `serviceTier`, and other top-level Converse options are not first-class config fields yet.
+
+**6. Quick checks**
+
+```bash
+# For AWS credential-chain usage:
+aws sts get-caller-identity
+
+# For API-key usage:
+export AWS_BEARER_TOKEN_BEDROCK="your-bedrock-api-key"
+export AWS_REGION="us-east-1"
+```
+
+Then run:
+
+```bash
+nanobot agent -m "Reply with one short sentence."
+```
+
+</details>
 
 
 <details>
@@ -158,6 +338,34 @@ nanobot agent -c ~/.nanobot-telegram/config.json -w /tmp/nanobot-telegram-test -
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
+
+<details>
+<summary><b>LongCat (OpenAI-compatible)</b></summary>
+
+LongCat is available through nanobot's built-in OpenAI-compatible provider flow.
+The default API base already points to `https://api.longcat.chat/openai/v1`, so you
+usually only need to set `apiKey`.
+
+```json
+{
+  "providers": {
+    "longcat": {
+      "apiKey": "${LONGCAT_API_KEY}"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "longcat",
+      "model": "LongCat-Flash-Chat"
+    }
+  }
+}
+```
+
+Official model names include `LongCat-Flash-Chat`, `LongCat-Flash-Thinking`,
+`LongCat-Flash-Thinking-2601`, and `LongCat-Flash-Lite`.
 
 </details>
 
@@ -449,6 +657,106 @@ That's it! Environment variables, model routing, config matching, and `nanobot s
 
 </details>
 
+## Model Presets
+
+Model presets let you name a complete model configuration and switch it at runtime with `/model <preset>`.
+
+Existing configs do not need to change. If you do not set `modelPresets` or `agents.defaults.modelPreset`, nanobot keeps using `agents.defaults.*` exactly as before.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "openai/gpt-4.1",
+      "provider": "openai",
+      "maxTokens": 8192,
+      "contextWindowTokens": 128000,
+      "temperature": 0.1,
+      "modelPreset": "fast",
+      "fallbackModels": ["deep"]
+    }
+  },
+  "modelPresets": {
+    "fast": {
+      "model": "openai/gpt-4.1-mini",
+      "provider": "openai",
+      "maxTokens": 4096,
+      "contextWindowTokens": 128000,
+      "temperature": 0.2,
+      "reasoningEffort": "low"
+    },
+    "deep": {
+      "model": "anthropic/claude-opus-4-5",
+      "provider": "anthropic",
+      "maxTokens": 8192,
+      "contextWindowTokens": 200000,
+      "reasoningEffort": "high"
+    }
+  }
+}
+```
+
+`modelPresets` is a top-level object. The keys under it (`fast`, `deep`, `coding`, etc.) are user-defined preset names. Each preset supports:
+
+| Field | Description |
+|-------|-------------|
+| `model` | Model name to use for this preset. |
+| `provider` | Provider name, or `"auto"` to use provider auto-detection. |
+| `maxTokens` | Maximum completion/output tokens. |
+| `contextWindowTokens` | Context window size used by prompt building and consolidation decisions. |
+| `temperature` | Sampling temperature. |
+| `reasoningEffort` | Optional reasoning/thinking setting. Provider support varies. |
+
+`default` is reserved and always means the implicit preset built from `agents.defaults.*`; do not define `modelPresets.default`. Use `/model default` to switch back to `agents.defaults.*`.
+
+### Model Fallbacks
+
+`agents.defaults.fallbackModels` defines an ordered failover chain for the active model configuration. The primary model is still selected by `agents.defaults.modelPreset` (or the implicit default config when no preset is active).
+
+Each fallback candidate can be either:
+
+- A preset name from `modelPresets`, such as `"deep"`. The preset's full model, provider, generation, and context-window config is used.
+- An inline fallback object with at least `provider` and `model`. Optional `maxTokens`, `contextWindowTokens`, and `temperature` fields inherit from the active primary config when omitted. `reasoningEffort` does not inherit; omit it to leave reasoning off for that fallback, or set it explicitly for models that support reasoning.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "modelPreset": "fast",
+      "fallbackModels": [
+        "deep",
+        {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "maxTokens": 4096,
+          "contextWindowTokens": 262144
+        }
+      ]
+    }
+  }
+}
+```
+
+String entries are preset names, not raw model names. If you want to use a model that is not already a preset, use the inline object form.
+
+Failover only runs when the primary provider returns a retryable model/provider error before any answer text has been streamed. Typical fallback cases include timeouts, connection errors, 5xx server errors, 429 rate limits, overloads, and quota/balance exhaustion. It does not run for malformed requests, authentication/permission errors, content filtering/refusals, or context-length/message-format errors.
+
+If fallback candidates use smaller `contextWindowTokens` values, nanobot builds context using the smallest window in the active chain so every candidate can receive the same prompt.
+
+Set `agents.defaults.modelPreset` to start with a named preset:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "modelPreset": "fast"
+    }
+  }
+}
+```
+
+When `modelPreset` is `null` or omitted, startup uses the implicit `default` preset from `agents.defaults.*`. Runtime changes made with `/model <preset>` are not written back to `config.json`; they affect future turns until the process restarts or another model/config change replaces them.
+
 ## Channel Settings
 
 Global settings that apply to all channels. Configure under the `channels` section in `~/.nanobot/config.json`:
@@ -470,6 +778,7 @@ Global settings that apply to all channels. Configure under the `channels` secti
 |---------|---------|-------------|
 | `sendProgress` | `true` | Stream agent's text progress to the channel |
 | `sendToolHints` | `false` | Stream tool-call hints (e.g. `read_file("…")`) |
+| `showReasoning` | `true` | Allow channels to surface model reasoning/thinking content (DeepSeek-R1 `reasoning_content`, Anthropic `thinking_blocks`, inline `<think>` tags). Reasoning flows as a dedicated stream with `_reasoning_delta` / `_reasoning_end` markers — channels override `send_reasoning_delta` / `send_reasoning_end` to render in-place updates. Even with `true`, channels without those overrides stay no-op silently. Currently surfaced on CLI and WebSocket/WebUI (italic shimmer header, auto-collapses after the stream ends); Telegram / Slack / Discord / Feishu / WeChat / Matrix keep the base no-op until their bubble UI is adapted. Independent of `sendProgress`. |
 | `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
 | `transcriptionProvider` | `"groq"` | Voice transcription backend: `"groq"` (free tier, default) or `"openai"`. API key is auto-resolved from the matching provider config. |
 | `transcriptionLanguage` | `null` | Optional ISO-639-1 language hint for audio transcription, e.g. `"en"`, `"ko"`, `"ja"`. |
@@ -708,6 +1017,12 @@ If you want to always use the local conversion, you can force it using:
 |--------|------|---------|-------------|
 | `useJinaReader` | boolean | `true` | If true, Jina Reader will be preferred over the local conversion |
 
+## Image Generation
+
+Image generation is configured under `tools.imageGeneration` and uses provider credentials from `providers.openrouter` or `providers.aihubmix`.
+
+See [Image Generation](./image-generation.md) for WebUI usage, provider examples, artifact storage, and troubleshooting.
+
 ## MCP (Model Context Protocol)
 
 > [!TIP]
@@ -800,6 +1115,28 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
 
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
+
+
+## Subagent Concurrency
+
+By default, nanobot only allows one spawned subagent at a time. When the limit is
+reached, the `spawn` tool returns an error so the agent can decide to wait or
+rearrange its work. This protects local LLM servers from loading multiple KV caches
+at once. If your provider can handle more parallel work, raise the limit:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "maxConcurrentSubagents": 2
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.maxConcurrentSubagents` | `1` | Maximum number of spawned subagents that may run at the same time. Attempts to spawn beyond this limit return an error. |
 
 
 ## Auto Compact
@@ -902,3 +1239,23 @@ Disabled skills are excluded from the main agent's skill summary, from always-on
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.disabledSkills` | `[]` | List of skill directory names to exclude from loading. Applies to both built-in skills and workspace skills. |
+
+## Tool Hint Max Length
+
+Tool hints are the short progress messages shown when the agent calls tools (e.g. `$ cd …/project && npm test`). By default, these are truncated at 40 characters, which can make long commands hard to read.
+
+Set `agents.defaults.toolHintMaxLength` to control the truncation threshold:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "toolHintMaxLength": 120
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.toolHintMaxLength` | `40` | Maximum characters for tool hint display. Range: 20–500. Higher values show more of the command or path; lower values keep hints compact. |

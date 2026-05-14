@@ -113,7 +113,7 @@ class GitStore:
             logger.info("Git store initialized at {}", self._workspace)
             return True
         except Exception:
-            logger.warning("Git store init failed for {}", self._workspace)
+            logger.exception("Git store init failed for {}", self._workspace)
             return False
 
     # -- daily operations ------------------------------------------------------
@@ -149,7 +149,7 @@ class GitStore:
             logger.debug("Git auto-commit: {} ({})", sha, message)
             return sha
         except Exception:
-            logger.warning("Git auto-commit failed: {}", message)
+            logger.exception("Git auto-commit failed: {}", message)
             return None
 
     # -- internal helpers ------------------------------------------------------
@@ -243,7 +243,7 @@ class GitStore:
 
             return entries
         except Exception:
-            logger.warning("Git log failed")
+            logger.exception("Git log failed")
             return []
 
     def line_ages(self, file_path: str) -> list[LineAge]:
@@ -266,7 +266,7 @@ class GitStore:
 
             annotated = porcelain.annotate(str(self._workspace), file_path)
         except Exception:
-            logger.warning("Git line_ages annotate failed for {}", file_path)
+            logger.exception("Git line_ages annotate failed for {}", file_path)
             return []
 
         if not annotated:
@@ -296,7 +296,7 @@ class GitStore:
             )
             return out.getvalue().decode("utf-8", errors="replace")
         except Exception:
-            logger.warning("Git diff_commits failed")
+            logger.exception("Git diff_commits failed")
             return ""
 
     def find_commit(self, short_sha: str, max_entries: int = 20) -> CommitInfo | None:
@@ -367,7 +367,7 @@ class GitStore:
             msg = f"revert: undo {commit}"
             return self.auto_commit(msg)
         except Exception:
-            logger.warning("Git revert failed for {}", commit)
+            logger.exception("Git revert failed for {}", commit)
             return None
 
     @staticmethod

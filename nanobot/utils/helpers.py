@@ -6,6 +6,7 @@ import re
 import shutil
 import time
 import uuid
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,8 @@ def strip_think(text: str) -> str:
          explanatory prose that mentions these tokens.
       5. Orphan closing tags `</think>` / `</thought>` **at the very start
          or end of the text** only, for the same reason.
+      6. Trailing partial control tags split across stream chunks, such as
+         `<thi`, `<thin`, or `<tho`.
 
     Since this is also applied before persisting to history (memory.py),
     the edge-only stripping of (4) and (5) is deliberate: stripping those
@@ -57,7 +60,102 @@ def strip_think(text: str) -> str:
     text = re.sub(r"\s*</thought>\s*$", "", text)
     # Edge-only channel markers (harmony / Gemma 4 variant leaks).
     text = re.sub(r"^\s*<\|?channel\|?>\s*", "", text)
+    # Stream chunks may end in the middle of a control tag. Strip only known
+    # control-token prefixes at the very end.
+    partial_control_tag = (
+        r"</?(?:t|th|thi|thin|think|tho|thou|thoug|though|thought)>?"
+        r"|<\|?(?:c|ch|cha|chan|chann|channe|channel)(?:\|?>?)?"
+    )
+    text = re.sub(rf"(?:{partial_control_tag})$", "", text)
+    text = re.sub(r"^\s*<\|?$", "", text)
     return text.strip()
+
+
+def extract_think(text: str) -> tuple[str | None, str]:
+    """Extract thinking content from inline ``<think>`` / ``<thought>`` blocks.
+
+    Returns ``(thinking_text, cleaned_text)``. Only closed blocks are
+    extracted; unclosed streaming prefixes are stripped from the cleaned
+    text but not surfaced — :func:`strip_think` handles that case.
+    """
+    parts: list[str] = []
+    for m in re.finditer(r"<think>([\s\S]*?)</think>", text):
+        parts.append(m.group(1).strip())
+    for m in re.finditer(r"<thought>([\s\S]*?)</thought>", text):
+        parts.append(m.group(1).strip())
+    thinking = "\n\n".join(parts) if parts else None
+    return thinking, strip_think(text)
+
+
+class IncrementalThinkExtractor:
+    """Stateful inline ``<think>`` extractor for streaming buffers.
+
+    Streaming providers expose only a single content delta channel. When a
+    model embeds reasoning in ``<think>...</think>`` blocks inside that
+    channel, callers need to surface the reasoning incrementally as it
+    arrives without re-emitting earlier text. This holds the "already
+    emitted" cursor so the runner and the loop hook share one shape.
+    """
+
+    __slots__ = ("_emitted",)
+
+    def __init__(self) -> None:
+        self._emitted = ""
+
+    def reset(self) -> None:
+        self._emitted = ""
+
+    async def feed(self, buf: str, emit: Any) -> bool:
+        """Emit any new thinking text found in ``buf``.
+
+        Returns True if anything was emitted this call. ``emit`` is an
+        async callable taking a single string (typically
+        ``hook.emit_reasoning``).
+        """
+        thinking, _ = extract_think(buf)
+        if not thinking or thinking == self._emitted:
+            return False
+        new = thinking[len(self._emitted):].strip()
+        self._emitted = thinking
+        if not new:
+            return False
+        await emit(new)
+        return True
+
+
+def extract_reasoning(
+    reasoning_content: str | None,
+    thinking_blocks: list[dict[str, Any]] | None,
+    content: str | None,
+) -> tuple[str | None, str | None]:
+    """Return ``(reasoning_text, cleaned_content)`` from one model response.
+
+    Single source of truth for "what reasoning did this response carry, and
+    what answer text remains after we peel it out". Fallback order:
+
+    1. Dedicated ``reasoning_content`` (DeepSeek-R1, Kimi, MiMo, OpenAI
+       reasoning models, Bedrock).
+    2. Anthropic ``thinking_blocks``.
+    3. Inline ``<think>`` / ``<thought>`` blocks in ``content``.
+
+    Only one source contributes per response; lower-priority sources are
+    ignored if a higher-priority one is present, but inline ``<think>``
+    tags are still stripped from ``content`` so they never leak into the
+    final answer.
+    """
+    if reasoning_content:
+        return reasoning_content, strip_think(content) if content else content
+    if thinking_blocks:
+        parts = [
+            tb.get("thinking", "")
+            for tb in thinking_blocks
+            if isinstance(tb, dict) and tb.get("type") == "thinking"
+        ]
+        joined = "\n\n".join(p for p in parts if p)
+        return (joined or None), strip_think(content) if content else content
+    if content:
+        return extract_think(content)
+    return None, content
 
 
 def detect_image_mime(data: bytes) -> str | None:
@@ -154,11 +252,6 @@ def find_legal_message_start(messages: list[dict[str, Any]]) -> int:
             if tid and str(tid) not in declared:
                 start = i + 1
                 declared.clear()
-                for prev in messages[start : i + 1]:
-                    if prev.get("role") == "assistant":
-                        for tc in prev.get("tool_calls") or []:
-                            if isinstance(tc, dict) and tc.get("id"):
-                                declared.add(str(tc["id"]))
     return start
 
 
@@ -257,8 +350,8 @@ def maybe_persist_tool_result(
     bucket = ensure_dir(root / safe_filename(session_key or "default"))
     try:
         _cleanup_tool_result_buckets(root, bucket)
-    except Exception as exc:
-        logger.warning("Failed to clean stale tool result buckets in {}: {}", root, exc)
+    except Exception:
+        logger.exception("Failed to clean stale tool result buckets in {}", root)
     path = bucket / f"{safe_filename(tool_call_id)}.{suffix}"
     if not path.exists():
         if suffix == "json" and isinstance(content, list):
@@ -416,13 +509,10 @@ def estimate_prompt_tokens_chain(
     """Estimate prompt tokens via provider counter first, then tiktoken fallback."""
     provider_counter = getattr(provider, "estimate_prompt_tokens", None)
     if callable(provider_counter):
-        try:
+        with suppress(Exception):
             tokens, source = provider_counter(messages, tools, model)
             if isinstance(tokens, (int, float)) and tokens > 0:
                 return int(tokens), str(source or "provider_counter")
-        except Exception:
-            pass
-
     estimated = estimate_prompt_tokens(messages, tools)
     if estimated > 0:
         return int(estimated), "tiktoken"
@@ -532,6 +622,6 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         )
         gs.init()
     except Exception:
-        logger.warning("Failed to initialize git store for {}", workspace)
+        logger.exception("Failed to initialize git store for {}", workspace)
 
     return added

@@ -44,8 +44,25 @@ export interface UIMessage {
   images?: UIImage[];
   /** Signed or local UI-renderable media attachments. */
   media?: UIMediaAttachment[];
-  /** Optional answer choices for a pending ask_user question. */
-  buttons?: string[][];
+  /** Assistant turn: accumulated model reasoning / thinking text. Built up
+   * incrementally from ``reasoning_delta`` frames; finalized when
+   * ``reasoning_end`` arrives. */
+  reasoning?: string;
+  /** True while ``reasoning_delta`` frames are still arriving for this turn.
+   * Drives the shimmer header on ``ReasoningBubble``. */
+  reasoningStreaming?: boolean;
+}
+
+export interface ToolProgressEvent {
+  version?: number;
+  phase?: "start" | "end" | "error" | string;
+  call_id?: string;
+  name?: string;
+  arguments?: unknown;
+  result?: unknown;
+  error?: unknown;
+  files?: unknown[];
+  embeds?: unknown[];
 }
 
 export interface ChatSummary {
@@ -56,6 +73,7 @@ export interface ChatSummary {
   chatId: string;
   createdAt: string | null;
   updatedAt: string | null;
+  title?: string;
   preview: string;
 }
 
@@ -76,7 +94,21 @@ export interface SettingsPayload {
   providers: Array<{
     name: string;
     label: string;
+    configured: boolean;
+    api_key_hint?: string | null;
+    api_base?: string | null;
+    default_api_base?: string | null;
   }>;
+  web_search: {
+    provider: string;
+    api_key_hint?: string | null;
+    base_url?: string | null;
+    providers: Array<{
+      name: string;
+      label: string;
+      credential: "none" | "api_key" | "base_url";
+    }>;
+  };
   runtime: {
     config_path: string;
   };
@@ -86,6 +118,26 @@ export interface SettingsPayload {
 export interface SettingsUpdate {
   model?: string;
   provider?: string;
+}
+
+export interface ProviderSettingsUpdate {
+  provider: string;
+  apiKey?: string;
+  apiBase?: string;
+}
+
+export interface WebSearchSettingsUpdate {
+  provider: string;
+  apiKey?: string;
+  baseUrl?: string;
+}
+
+export interface SlashCommand {
+  command: string;
+  title: string;
+  description: string;
+  icon: string;
+  argHint?: string;
 }
 
 export type ConnectionStatus =
@@ -106,12 +158,10 @@ export type InboundEvent =
       reply_to?: string;
       media?: string[];
       media_urls?: Array<{ url: string; name?: string }>;
-      buttons?: string[][];
-      /** Original prompt before the websocket text fallback appends buttons. */
-      button_prompt?: string;
+      tool_events?: ToolProgressEvent[];
       /** Present when the frame is an agent breadcrumb (e.g. tool hint,
        * generic progress line) rather than a conversational reply. */
-      kind?: "tool_hint" | "progress";
+      kind?: "tool_hint" | "progress" | "reasoning";
     }
   | {
       event: "delta";
@@ -124,6 +174,24 @@ export type InboundEvent =
       chat_id: string;
       stream_id?: string;
     }
+  | {
+      event: "reasoning_delta";
+      chat_id: string;
+      text: string;
+      stream_id?: string;
+    }
+  | {
+      event: "reasoning_end";
+      chat_id: string;
+      stream_id?: string;
+    }
+  | {
+      event: "runtime_model_updated";
+      model_name: string;
+      model_preset?: string | null;
+    }
+  | { event: "turn_end"; chat_id: string }
+  | { event: "session_updated"; chat_id: string }
   | { event: "error"; chat_id?: string; detail?: string };
 
 /** Base64-encoded image attached to an outbound ``message`` envelope.
@@ -139,6 +207,11 @@ export interface OutboundMedia {
   name?: string;
 }
 
+export interface OutboundImageGeneration {
+  enabled: true;
+  aspect_ratio?: string | null;
+}
+
 export type Outbound =
   | { type: "new_chat" }
   | { type: "attach"; chat_id: string }
@@ -147,4 +220,8 @@ export type Outbound =
       chat_id: string;
       content: string;
       media?: OutboundMedia[];
+      image_generation?: OutboundImageGeneration;
+      /** Marks messages sent by the embedded WebUI, without changing the
+       * generic websocket protocol for other clients. */
+      webui?: true;
     };

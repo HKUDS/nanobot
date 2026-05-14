@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import webbrowser
 from collections.abc import Callable
+from contextlib import suppress
 
 import httpx
 from oauth_cli_kit.models import OAuthToken
@@ -28,7 +29,7 @@ _EXPIRY_SKEW_SECONDS = 60
 _LONG_LIVED_TOKEN_SECONDS = 315360000
 
 
-def _storage() -> FileTokenStorage:
+def get_storage() -> FileTokenStorage:
     return FileTokenStorage(
         token_filename=TOKEN_FILENAME,
         app_name=TOKEN_APP_NAME,
@@ -47,7 +48,7 @@ def _copilot_headers(token: str) -> dict[str, str]:
 
 
 def _load_github_token() -> OAuthToken | None:
-    token = _storage().load()
+    token = get_storage().load()
     if not token or not token.access:
         return None
     return token
@@ -86,10 +87,8 @@ def login_github_copilot(
         printer(f"Open: {verify_url}")
         printer(f"Code: {user_code}")
         if verify_complete:
-            try:
+            with suppress(Exception):
                 webbrowser.open(verify_complete)
-            except Exception:
-                pass
 
         deadline = time.time() + expires_in
         current_interval = interval
@@ -151,7 +150,7 @@ def login_github_copilot(
         expires=expires_ms,
         account_id=str(account_id) if account_id else None,
     )
-    _storage().save(token)
+    get_storage().save(token)
     return token
 
 

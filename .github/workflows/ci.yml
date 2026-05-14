@@ -2,38 +2,47 @@ name: Test Suite
 
 on:
   push:
-    branches: [ main, nightly ]
+    branches: [main, nightly]
   pull_request:
-    branches: [ main, nightly ]
+    branches: [main, nightly]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["ubuntu-latest","windows-latest"]') }}
+        python-version: ${{ github.event_name == 'pull_request' && fromJSON('["3.11","3.14"]') || fromJSON('["3.11","3.12","3.13","3.14"]') }}
 
     steps:
-    - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ matrix.python-version }}
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
 
-    - name: Install uv
-      uses: astral-sh/setup-uv@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
 
-    - name: Install system dependencies (Linux)
-      if: runner.os == 'Linux'
-      run: sudo apt-get update && sudo apt-get install -y libolm-dev build-essential
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libolm-dev build-essential
 
-    - name: Install dependencies
-      run: uv sync --all-extras
+      - name: Install dependencies
+        run: uv sync --all-extras
 
-    - name: Lint with ruff
-      run: uv run ruff check nanobot --select F401,F841
+      - name: Lint with ruff
+        run: uv run ruff check nanobot --select F
 
-    - name: Run tests
-      run: uv run pytest tests/
+      - name: Run tests
+        run: uv run pytest tests/

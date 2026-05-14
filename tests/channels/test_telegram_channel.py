@@ -306,17 +306,19 @@ async def test_on_error_logs_network_issues_as_warning(monkeypatch) -> None:
     recorded: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.warning",
+        channel.logger,
+        "warning",
         lambda message, error: recorded.append(("warning", message.format(error))),
     )
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.error",
+        channel.logger,
+        "error",
         lambda message, error: recorded.append(("error", message.format(error))),
     )
 
     await channel._on_error(object(), SimpleNamespace(error=NetworkError("proxy disconnected")))
 
-    assert recorded == [("warning", "Telegram network issue: proxy disconnected")]
+    assert recorded == [("warning", "network issue: proxy disconnected")]
 
 
 @pytest.mark.asyncio
@@ -330,13 +332,14 @@ async def test_on_error_summarizes_empty_network_error(monkeypatch) -> None:
     recorded: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.warning",
+        channel.logger,
+        "warning",
         lambda message, error: recorded.append(("warning", message.format(error))),
     )
 
     await channel._on_error(object(), SimpleNamespace(error=NetworkError("")))
 
-    assert recorded == [("warning", "Telegram network issue: NetworkError")]
+    assert recorded == [("warning", "network issue: NetworkError")]
 
 
 @pytest.mark.asyncio
@@ -348,17 +351,19 @@ async def test_on_error_keeps_non_network_exceptions_as_error(monkeypatch) -> No
     recorded: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.warning",
+        channel.logger,
+        "warning",
         lambda message, error: recorded.append(("warning", message.format(error))),
     )
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.error",
+        channel.logger,
+        "error",
         lambda message, error: recorded.append(("error", message.format(error))),
     )
 
     await channel._on_error(object(), SimpleNamespace(error=RuntimeError("boom")))
 
-    assert recorded == [("error", "Telegram error: boom")]
+    assert recorded == [("error", "error: boom")]
 
 
 @pytest.mark.asyncio
@@ -1310,6 +1315,58 @@ async def test_on_help_includes_restart_command() -> None:
 
 
 @pytest.mark.asyncio
+async def test_on_start_ignores_unauthorized_user_silently() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], group_policy="open"),
+        MessageBus(),
+    )
+    update = _make_telegram_update(text="/start", chat_type="private")
+    update.message.reply_text = AsyncMock()
+
+    await channel._on_start(update, None)
+
+    update.message.reply_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_on_help_ignores_unauthorized_user_silently() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], group_policy="open"),
+        MessageBus(),
+    )
+    update = _make_telegram_update(text="/help", chat_type="private")
+    update.message.reply_text = AsyncMock()
+
+    await channel._on_help(update, None)
+
+    update.message.reply_text.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_on_message_ignores_unauthorized_user_before_side_effects() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    started_typing: list[str] = []
+    handled: list[dict] = []
+    channel._start_typing = lambda chat_id: started_typing.append(chat_id)
+    channel._add_reaction = AsyncMock(return_value=None)
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+
+    await channel._on_message(_make_telegram_update(text="hello", chat_type="private"), None)
+
+    assert started_typing == []
+    channel._add_reaction.assert_not_awaited()
+    assert handled == []
+
+
+@pytest.mark.asyncio
 async def test_on_message_location_content() -> None:
     """Location messages are forwarded as [location: lat, lon] content."""
     channel = TelegramChannel(
@@ -1750,3 +1807,32 @@ async def test_send_uses_native_keyboard_when_flag_on() -> None:
     sent = channel._app.bot.sent_messages[0]
     assert isinstance(sent.get("reply_markup"), InlineKeyboardMarkup)
     assert "[Yes]" not in sent["text"]  # native keyboard owns the rendering
+
+
+@pytest.mark.asyncio
+async def test_callback_query_ignores_unauthorized_user_before_side_effects() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["999"], inline_keyboards=True),
+        MessageBus(),
+    )
+    channel._handle_message = AsyncMock()
+
+    query = SimpleNamespace(
+        id="cb_1",
+        data="Yes",
+        answer=AsyncMock(),
+        message=SimpleNamespace(
+            chat_id=123,
+            edit_reply_markup=AsyncMock(),
+        ),
+    )
+    update = SimpleNamespace(
+        callback_query=query,
+        effective_user=SimpleNamespace(id=12345, username="alice", first_name="Alice"),
+    )
+
+    await channel._on_callback_query(update, None)
+
+    query.answer.assert_not_awaited()
+    query.message.edit_reply_markup.assert_not_awaited()
+    channel._handle_message.assert_not_awaited()

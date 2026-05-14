@@ -9,6 +9,15 @@
       "title": "無法連線到 nanobot",
       "gatewayHint": "請確認 gateway 已啟動（`nanobot gateway`），並且目前頁面與 gateway 在同一台機器上開啟。"
     },
+    "system": {
+      "section": "系統",
+      "restartHint": "重新啟動 nanobot 以套用執行階段變更。",
+      "restart": "重新啟動 nanobot",
+      "restarting": "正在重新啟動..."
+    },
+    "restart": {
+      "completed": "重新啟動已完成，耗時 {{seconds}} 秒。"
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -23,9 +32,100 @@
     "newChat": "新增對話",
     "recent": "最近對話",
     "refreshSessions": "重新整理會話",
+    "settings": "設定",
     "language": {
       "label": "語言",
       "ariaLabel": "切換語言"
+    }
+  },
+  "settings": {
+    "backToChat": "返回對話",
+    "sidebar": {
+      "title": "設定",
+      "ariaLabel": "設定分區"
+    },
+    "nav": {
+      "general": "一般",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "介面",
+      "ai": "AI",
+      "system": "系統"
+    },
+    "rows": {
+      "theme": "主題",
+      "language": "語言",
+      "provider": "提供者",
+      "model": "模型",
+      "restart": "重新啟動 nanobot",
+      "configPath": "設定檔路徑"
+    },
+    "help": {
+      "theme": "在淺色與深色外觀之間切換。",
+      "language": "選擇 WebUI 使用的語言。",
+      "provider": "選擇新模型請求使用的服務提供者。",
+      "model": "設定 nanobot 預設使用的模型名稱。",
+      "configPath": "目前閘道正在使用的設定檔。"
+    },
+    "values": {
+      "light": "淺色",
+      "dark": "深色",
+      "notAvailable": "不可用"
+    },
+    "status": {
+      "loading": "正在載入設定...",
+      "loadError": "無法載入設定",
+      "unsaved": "有未儲存的變更。",
+      "savedRestart": "已儲存。重新啟動 nanobot 後生效。"
+    },
+    "actions": {
+      "save": "儲存",
+      "saving": "儲存中",
+      "edit": "編輯",
+      "cancel": "取消"
+    },
+    "byok": {
+      "description": "自帶 provider key。Nanobot 會從目前 config 讀取這些值，只有已設定的 provider 才能在一般設定中選擇。",
+      "configured": "已設定",
+      "notConfigured": "未設定",
+      "configuredSection": "已設定",
+      "notConfiguredSection": "未設定",
+      "showMore": "再顯示 {{count}} 個",
+      "showLess": "收合",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "輸入 API key",
+      "apiKeyConfiguredPlaceholder": "留空則保留目前 key",
+      "configuredKeyHint": "已設定的 key",
+      "apiBasePlaceholder": "使用 provider 預設地址",
+      "apiKeyRequired": "需要 API key 才能設定此 provider。",
+      "showApiKey": "顯示 API key",
+      "hideApiKey": "隱藏 API key",
+      "noConfiguredProviders": "沒有已設定的 provider",
+      "configureFirst": "請先在 BYOK 設定 provider。",
+      "openByok": "開啟 BYOK",
+      "tabs": {
+        "ariaLabel": "BYOK 憑證類型",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "搜尋 provider",
+        "providerHelp": "選擇 web search 工具使用的後端。",
+        "selectProvider": "選擇 provider",
+        "credentials": "憑證",
+        "noCredentialRequired": "不需要 key",
+        "noCredentialHelp": "DuckDuckGo 不需要儲存 API key。",
+        "apiKeyHelp": "儲存到 config 後只顯示遮罩提示。",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG 需要你自己的實例網址。",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "此搜尋 provider 需要 API key。",
+        "baseUrlRequired": "SearXNG 需要 Base URL。",
+        "missingCredential": "填寫必要憑證後才能儲存。",
+        "saveHint": "變更會套用到新的 web search 請求。"
+      }
     }
   },
   "chat": {
@@ -37,8 +137,8 @@
     "newChat": "新增對話"
   },
   "deleteConfirm": {
-    "title": "刪除「{{title}}」？",
-    "description": "這個會話檔案會從磁碟中移除，而且無法復原。",
+    "title": "刪除這個對話？",
+    "description": "此操作無法復原。",
     "cancel": "取消",
     "confirm": "刪除"
   },
@@ -53,7 +153,60 @@
   "thread": {
     "loadingConversation": "正在載入對話…",
     "empty": {
-      "description": "你可以提問、延續本地工作，或是開始新的執行緒。"
+      "description": "你可以提問、延續本地工作，或是開始新的執行緒。",
+      "greeting": "我可以幫你做什麼？",
+      "quickActions": {
+        "plan": {
+          "title": "建立專案計畫",
+          "prompt": "幫我為接下來要做的事情寫一份簡潔的專案計畫。"
+        },
+        "analyze": {
+          "title": "分析這些資料",
+          "prompt": "幫我分析這些資料，並指出最重要的模式。"
+        },
+        "brainstorm": {
+          "title": "腦力激盪想法",
+          "prompt": "圍繞這個問題腦力激盪幾個實用方案，並說明取捨。"
+        },
+        "code": {
+          "title": "撰寫程式碼",
+          "prompt": "幫我為這個任務撰寫程式碼，先從最小可用改動開始。"
+        },
+        "summarize": {
+          "title": "總結這份文件",
+          "prompt": "幫我總結這份文件，並列出關鍵重點。"
+        },
+        "more": {
+          "title": "更多",
+          "prompt": "展示幾個你在這個工作區裡可以幫我的實用方式。"
+        }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "設計應用程式圖示",
+          "prompt": "生成一個乾淨的 1:1 nanobot 應用程式圖示：友善的機器人、簡潔向量風格、柔和藍白配色，不要文字。"
+        },
+        "sticker": {
+          "title": "製作貼圖",
+          "prompt": "生成一張可愛貼圖風格的小型機器人助理圖片，背景像透明貼紙，表情活潑有趣。"
+        },
+        "poster": {
+          "title": "建立海報",
+          "prompt": "生成一張個人 AI 助理的精緻海報概念圖，現代構圖、清楚的視覺層級，適合登陸頁展示。"
+        },
+        "product": {
+          "title": "產品樣機",
+          "prompt": "生成一張對話式 AI Web 應用的乾淨產品樣機圖，極簡介面、高級光影、真實裝置邊框。"
+        },
+        "portrait": {
+          "title": "風格化頭像",
+          "prompt": "生成一個友善 AI 夥伴的風格化頭像，柔和光線、細節豐富但親切，現代插畫風格。"
+        },
+        "edit": {
+          "title": "編輯圖片",
+          "prompt": "幫我編輯一張圖片。先請我上傳或指定要編輯的圖片，然後生成編輯後的結果。"
+        }
+      }
     },
     "header": {
       "toggleSidebar": "切換側邊欄"
@@ -62,10 +215,27 @@
       "placeholderThread": "輸入訊息…",
       "placeholderHero": "你在想什麼？",
       "placeholderOpening": "正在開啟新對話…",
+      "placeholderStreaming": "模型正在回覆…",
       "inputAria": "訊息輸入框",
       "sendHint": "Enter 送出 · Shift+Enter 換行",
       "send": "送出訊息",
+      "stop": "停止回覆",
       "attachImage": "附加圖片",
+      "imageMode": {
+        "label": "圖片生成",
+        "toggle": "切換圖片生成模式",
+        "placeholder": "描述或編輯圖片…",
+        "aspectAria": "圖片畫幅",
+        "aspectLabel": "圖片畫幅",
+        "aspect": {
+          "auto": "自動",
+          "1_1": "方形 1:1",
+          "3_4": "直式 3:4",
+          "9_16": "故事版 9:16",
+          "4_3": "橫式 4:3",
+          "16_9": "寬螢幕 16:9"
+        }
+      },
       "encoding": "處理中…",
       "remove": "移除附件",
       "normalizedSizeHint": "{{orig}} → {{current}}（已自動壓縮）",
@@ -76,6 +246,51 @@
         "decode_failed": "無法解碼這張圖片",
         "too_large": "圖片太大，請換一張小一點的",
         "io": "無法讀取這個檔案"
+      },
+      "slash": {
+        "ariaLabel": "斜線命令",
+        "label": "命令",
+        "navigateHint": "↑↓ 選擇",
+        "selectHint": "Enter/Tab 填入",
+        "closeHint": "Esc 關閉",
+        "commands": {
+          "new": {
+            "title": "新增對話",
+            "description": "停止目前任務，並開始新的對話。"
+          },
+          "stop": {
+            "title": "停止目前任務",
+            "description": "取消這個對話中正在執行的 agent 回合。"
+          },
+          "restart": {
+            "title": "重新啟動 nanobot",
+            "description": "原地重新啟動 bot 進程。"
+          },
+          "status": {
+            "title": "查看狀態",
+            "description": "顯示執行環境、provider 和 channel 狀態。"
+          },
+          "history": {
+            "title": "查看對話歷史",
+            "description": "列印最近 N 則已持久化的對話訊息。"
+          },
+          "dream": {
+            "title": "執行 Dream",
+            "description": "手動觸發記憶整理。"
+          },
+          "dream_log": {
+            "title": "查看 Dream 日誌",
+            "description": "查看上一次 Dream 整理變更了什麼。"
+          },
+          "dream_restore": {
+            "title": "恢復記憶",
+            "description": "將記憶恢復到之前的 Dream 快照。"
+          },
+          "help": {
+            "title": "查看說明",
+            "description": "列出可用的斜線命令。"
+          }
+        }
       }
     },
     "scrollToBottom": "捲動到底部"

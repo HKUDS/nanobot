@@ -7,23 +7,31 @@ import json
 import os
 import re
 import weakref
-import tiktoken
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator
 
+import tiktoken
 from loguru import logger
 
-from nanobot.utils.prompt_templates import render_template
-from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain, strip_think, truncate_text
-
-from nanobot.agent.runner import AgentRunSpec, AgentRunner
+from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.session.manager import Session
 from nanobot.utils.gitstore import GitStore
+from nanobot.utils.helpers import (
+    ensure_dir,
+    estimate_message_tokens,
+    estimate_prompt_tokens_chain,
+    find_legal_message_start,
+    strip_think,
+    truncate_text,
+)
+from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
-    from nanobot.session.manager import Session, SessionManager
+    from nanobot.session.manager import SessionManager
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +62,7 @@ class MemoryStore:
         self._corruption_logged = False  # rate-limit non-int cursor warning
         self._oversize_logged = False  # rate-limit oversized-entry warning
         self._git = GitStore(workspace, tracked_files=[
-            "SOUL.md", "USER.md", "memory/MEMORY.md",
+            "SOUL.md", "USER.md", "memory/MEMORY.md", "memory/.dream_cursor",
         ])
         self._maybe_migrate_legacy_history()
 
@@ -296,10 +304,8 @@ class MemoryStore:
     def _next_cursor(self) -> int:
         """Read the current cursor counter and return the next value."""
         if self._cursor_file.exists():
-            try:
+            with suppress(ValueError, OSError):
                 return int(self._cursor_file.read_text(encoding="utf-8").strip()) + 1
-            except (ValueError, OSError):
-                pass
         # Fast path: trust the tail when intact.  Otherwise scan the whole
         # file and take ``max`` — that stays correct even if the monotonic
         # invariant was broken by external writes.
@@ -328,7 +334,7 @@ class MemoryStore:
     def _read_entries(self) -> list[dict[str, Any]]:
         """Read all entries from history.jsonl."""
         entries: list[dict[str, Any]] = []
-        try:
+        with suppress(FileNotFoundError):
             with open(self.history_file, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
@@ -337,8 +343,7 @@ class MemoryStore:
                             entries.append(json.loads(line))
                         except json.JSONDecodeError:
                             continue
-        except FileNotFoundError:
-            pass
+
         return entries
 
     def _read_last_entry(self) -> dict[str, Any] | None:
@@ -352,7 +357,7 @@ class MemoryStore:
                 read_size = min(size, 4096)
                 f.seek(size - read_size)
                 data = f.read().decode("utf-8")
-                lines = [l for l in data.split("\n") if l.strip()]
+                lines = [line for line in data.split("\n") if line.strip()]
                 if not lines:
                     return None
                 return json.loads(lines[-1])
@@ -374,14 +379,12 @@ class MemoryStore:
             # On Windows, opening a directory with O_RDONLY raises
             # PermissionError — skip the dir sync there (NTFS
             # journals metadata synchronously).
-            try:
+            with suppress(PermissionError):
                 fd = os.open(str(self.history_file.parent), os.O_RDONLY)
                 try:
                     os.fsync(fd)
                 finally:
                     os.close(fd)
-            except PermissionError:
-                pass  # Windows — directory fsync not supported
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise
@@ -390,10 +393,8 @@ class MemoryStore:
 
     def get_last_dream_cursor(self) -> int:
         if self._dream_cursor_file.exists():
-            try:
+            with suppress(ValueError, OSError):
                 return int(self._dream_cursor_file.read_text(encoding="utf-8").strip())
-            except (ValueError, OSError):
-                pass
         return 0
 
     def set_last_dream_cursor(self, cursor: int) -> None:
@@ -509,21 +510,100 @@ class Consolidator:
 
         return last_boundary
 
+    @staticmethod
+    def _full_unconsolidated_history(
+        session: Session,
+        *,
+        include_timestamps: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return the whole unconsolidated tail for consolidation decisions."""
+        unconsolidated_count = len(session.messages) - session.last_consolidated
+        if unconsolidated_count <= 0:
+            return []
+        return session.get_history(
+            max_messages=unconsolidated_count,
+            include_timestamps=include_timestamps,
+        )
+
+    @staticmethod
+    def _replay_overflow_boundary(
+        session: Session,
+        replay_max_messages: int | None,
+    ) -> int | None:
+        if not replay_max_messages or replay_max_messages <= 0:
+            return None
+        tail = list(enumerate(session.messages[session.last_consolidated:], session.last_consolidated))
+        if len(tail) <= replay_max_messages:
+            return None
+
+        sliced = tail[-replay_max_messages:]
+        for i, (_idx, message) in enumerate(sliced):
+            if message.get("role") == "user":
+                start = i
+                if i > 0 and sliced[i - 1][1].get("_channel_delivery"):
+                    start = i - 1
+                sliced = sliced[start:]
+                break
+
+        legal_start = find_legal_message_start([message for _idx, message in sliced])
+        if legal_start:
+            sliced = sliced[legal_start:]
+        if not sliced:
+            return len(session.messages)
+
+        first_visible_idx = sliced[0][0]
+        if first_visible_idx <= session.last_consolidated:
+            return None
+        return first_visible_idx
+
+    async def _consolidate_replay_overflow(
+        self,
+        session: Session,
+        replay_max_messages: int | None,
+    ) -> str | None:
+        """Archive messages that would be hidden by the replay message window."""
+        end_idx = self._replay_overflow_boundary(session, replay_max_messages)
+        if end_idx is None:
+            return None
+        chunk = session.messages[session.last_consolidated:end_idx]
+        if not chunk:
+            return None
+        logger.info(
+            "Replay-window consolidation for {}: chunk={} msgs, replay_max={}",
+            session.key,
+            len(chunk),
+            replay_max_messages,
+        )
+        summary = await self.archive(chunk)
+        session.last_consolidated = end_idx
+        self.sessions.save(session)
+        return summary
+
+    def _persist_last_summary(self, session: Session, summary: str | None) -> None:
+        if summary and summary != "(nothing)":
+            session.metadata["_last_summary"] = {
+                "text": summary,
+                "last_active": session.updated_at.isoformat(),
+            }
+            self.sessions.save(session)
+
     def estimate_session_prompt_tokens(
         self,
         session: Session,
-        *,
-        session_summary: str | None = None,
     ) -> tuple[int, str]:
-        """Estimate current prompt size for the normal session history view."""
-        history = session.get_history(max_messages=0, include_timestamps=True)
+        """Estimate prompt size from the full unconsolidated session tail."""
+        history = self._full_unconsolidated_history(session, include_timestamps=True)
         channel, chat_id = (session.key.split(":", 1) if ":" in session.key else (None, None))
+        # Include archived summary in estimation so the budget accounts for it.
+        meta = session.metadata.get("_last_summary")
+        summary = meta.get("text") if isinstance(meta, dict) else (meta if isinstance(meta, str) else None)
         probe_messages = self._build_messages(
             history=history,
             current_message="[token-probe]",
             channel=channel,
             chat_id=chat_id,
-            session_summary=session_summary,
+            sender_id=None,
+            session_summary=summary,
         )
         return estimate_prompt_tokens_chain(
             self.provider,
@@ -590,7 +670,7 @@ class Consolidator:
         self,
         session: Session,
         *,
-        session_summary: str | None = None,
+        replay_max_messages: int | None = None,
     ) -> None:
         """Loop: archive old messages until prompt fits within safe budget.
 
@@ -604,15 +684,19 @@ class Consolidator:
         async with lock:
             budget = self._input_token_budget
             target = int(budget * self.consolidation_ratio)
+            last_summary = await self._consolidate_replay_overflow(
+                session,
+                replay_max_messages,
+            )
             try:
                 estimated, source = self.estimate_session_prompt_tokens(
                     session,
-                    session_summary=session_summary,
                 )
             except Exception:
                 logger.exception("Token estimation failed for {}", session.key)
                 estimated, source = 0, "error"
             if estimated <= 0:
+                self._persist_last_summary(session, last_summary)
                 return
             if estimated < budget:
                 unconsolidated_count = len(session.messages) - session.last_consolidated
@@ -624,9 +708,9 @@ class Consolidator:
                     source,
                     unconsolidated_count,
                 )
+                self._persist_last_summary(session, last_summary)
                 return
 
-            last_summary = None
             for round_num in range(self._MAX_CONSOLIDATION_ROUNDS):
                 if estimated <= target:
                     break
@@ -672,7 +756,6 @@ class Consolidator:
                 try:
                     estimated, source = self.estimate_session_prompt_tokens(
                         session,
-                        session_summary=session_summary,
                     )
                 except Exception:
                     logger.exception("Token estimation failed for {}", session.key)
@@ -683,12 +766,7 @@ class Consolidator:
             # Persist the last summary to session metadata so it can be injected
             # into the runtime context on the next prepare_session() call, aligning
             # the summary injection strategy with AutoCompact._archive().
-            if last_summary and last_summary != "(nothing)":
-                session.metadata["_last_summary"] = {
-                    "text": last_summary,
-                    "last_active": session.updated_at.isoformat(),
-                }
-                self.sessions.save(session)
+            self._persist_last_summary(session, last_summary)
 
 
 # ---------------------------------------------------------------------------
@@ -753,23 +831,28 @@ class Dream:
     def _build_tools(self) -> ToolRegistry:
         """Build a minimal tool registry for the Dream agent."""
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+        from nanobot.agent.tools.file_state import FileStates
         from nanobot.agent.tools.filesystem import EditFileTool, ReadFileTool, WriteFileTool
 
         tools = ToolRegistry()
         workspace = self.store.workspace
         # Allow reading builtin skills for reference during skill creation
         extra_read = [BUILTIN_SKILLS_DIR] if BUILTIN_SKILLS_DIR.exists() else None
+        # Dream gets its own FileStates so its caches stay isolated from the
+        # main loop's sessions (issue #3571).
+        file_states = FileStates()
         tools.register(ReadFileTool(
             workspace=workspace,
             allowed_dir=workspace,
             extra_allowed_dirs=extra_read,
+            file_states=file_states,
         ))
-        tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace))
+        tools.register(EditFileTool(workspace=workspace, allowed_dir=workspace, file_states=file_states))
         # write_file resolves relative paths from workspace root, but can only
         # write under skills/ so the prompt can safely use skills/<name>/SKILL.md.
         skills_dir = workspace / "skills"
         skills_dir.mkdir(parents=True, exist_ok=True)
-        tools.register(WriteFileTool(workspace=workspace, allowed_dir=skills_dir))
+        tools.register(WriteFileTool(workspace=workspace, allowed_dir=skills_dir, file_states=file_states))
         return tools
 
     # -- skill listing --------------------------------------------------------
@@ -780,7 +863,7 @@ class Dream:
 
         from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 
-        _DESC_RE = _re.compile(r"^description:\s*(.+)$", _re.MULTILINE | _re.IGNORECASE)
+        desc_re = _re.compile(r"^description:\s*(.+)$", _re.MULTILINE | _re.IGNORECASE)
         entries: dict[str, str] = {}
         for base in (self.store.workspace / "skills", BUILTIN_SKILLS_DIR):
             if not base.exists():
@@ -795,7 +878,7 @@ class Dream:
                 if d.name in entries and base == BUILTIN_SKILLS_DIR:
                     continue
                 content = skill_md.read_text(encoding="utf-8")[:500]
-                m = _DESC_RE.search(content)
+                m = desc_re.search(content)
                 desc = m.group(1).strip() if m else "(no description)"
                 entries[d.name] = desc
         return [f"{name} — {desc}" for name, desc in sorted(entries.items())]
@@ -974,12 +1057,10 @@ class Dream:
                 if event["status"] == "ok":
                     changelog.append(f"{event['name']}: {event['detail']}")
 
-        # Advance cursor — always, to avoid re-processing Phase 1
-        new_cursor = batch[-1]["cursor"]
-        self.store.set_last_dream_cursor(new_cursor)
-        self.store.compact_history()
-
+        # Only advance cursor on successful completion to prevent silent loss
         if result and result.stop_reason == "completed":
+            new_cursor = batch[-1]["cursor"]
+            self.store.set_last_dream_cursor(new_cursor)
             logger.info(
                 "Dream done: {} change(s), cursor advanced to {}",
                 len(changelog), new_cursor,
@@ -987,9 +1068,11 @@ class Dream:
         else:
             reason = result.stop_reason if result else "exception"
             logger.warning(
-                "Dream incomplete ({}): cursor advanced to {}",
-                reason, new_cursor,
+                "Dream incomplete ({}): cursor NOT advanced, will retry next cron cycle",
+                reason,
             )
+
+        self.store.compact_history()
 
         # Git auto-commit (only when there are actual changes)
         if changelog and self.store.git.is_initialized():

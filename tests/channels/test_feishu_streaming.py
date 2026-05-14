@@ -10,13 +10,14 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.feishu import FeishuChannel, FeishuConfig, _FeishuStreamBuf
 
 
-def _make_channel(streaming: bool = True) -> FeishuChannel:
+def _make_channel(streaming: bool = True, reply_to_message: bool = False) -> FeishuChannel:
     config = FeishuConfig(
         enabled=True,
         app_id="cli_test",
         app_secret="secret",
         allow_from=["*"],
         streaming=streaming,
+        reply_to_message=reply_to_message,
     )
     ch = FeishuChannel(config, MessageBus())
     ch._client = MagicMock()
@@ -149,6 +150,62 @@ class TestSendDelta:
         ch._client.cardkit.v1.card_element.content.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_group_delta_uses_create_when_reply_disabled(self):
+        ch = _make_channel(reply_to_message=False)
+        ch._client.cardkit.v1.card.create.return_value = _mock_create_card_response("card_new")
+        ch._client.im.v1.message.create.return_value = _mock_send_response("om_new")
+        ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
+
+        await ch.send_delta(
+            "oc_chat1",
+            "Hello ",
+            metadata={"message_id": "om_001", "chat_type": "group"},
+        )
+
+        ch._client.im.v1.message.create.assert_called_once()
+        ch._client.im.v1.message.reply.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_group_delta_keeps_existing_topic_when_reply_disabled(self):
+        ch = _make_channel(reply_to_message=False)
+        ch._client.cardkit.v1.card.create.return_value = _mock_create_card_response("card_new")
+        reply_resp = MagicMock()
+        reply_resp.success.return_value = True
+        ch._client.im.v1.message.reply.return_value = reply_resp
+        ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
+
+        await ch.send_delta(
+            "oc_chat1",
+            "Hello ",
+            metadata={"message_id": "om_001", "chat_type": "group", "thread_id": "ot_001"},
+        )
+
+        ch._client.im.v1.message.reply.assert_called_once()
+        ch._client.im.v1.message.create.assert_not_called()
+        request = ch._client.im.v1.message.reply.call_args[0][0]
+        assert request.request_body.reply_in_thread is not True
+
+    @pytest.mark.asyncio
+    async def test_group_delta_replies_in_thread_when_reply_enabled(self):
+        ch = _make_channel(reply_to_message=True)
+        ch._client.cardkit.v1.card.create.return_value = _mock_create_card_response("card_new")
+        reply_resp = MagicMock()
+        reply_resp.success.return_value = True
+        ch._client.im.v1.message.reply.return_value = reply_resp
+        ch._client.cardkit.v1.card_element.content.return_value = _mock_content_response()
+
+        await ch.send_delta(
+            "oc_chat1",
+            "Hello ",
+            metadata={"message_id": "om_001", "chat_type": "group"},
+        )
+
+        ch._client.im.v1.message.reply.assert_called_once()
+        ch._client.im.v1.message.create.assert_not_called()
+        request = ch._client.im.v1.message.reply.call_args[0][0]
+        assert request.request_body.reply_in_thread is True
+
+    @pytest.mark.asyncio
     async def test_second_delta_within_interval_skips_update(self):
         ch = _make_channel()
         buf = _FeishuStreamBuf(text="Hello ", card_id="card_1", sequence=1, last_edit=time.monotonic())
@@ -203,6 +260,70 @@ class TestSendDelta:
         assert "oc_chat1" not in ch._stream_bufs
         ch._client.cardkit.v1.card_element.content.assert_not_called()
         ch._client.im.v1.message.create.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stream_end_fallback_group_uses_create_when_reply_disabled(self):
+        ch = _make_channel(reply_to_message=False)
+        ch._stream_bufs["om_001"] = _FeishuStreamBuf(
+            text="Fallback content", card_id=None, sequence=0, last_edit=0.0,
+        )
+        ch._client.im.v1.message.create.return_value = _mock_send_response("om_fb")
+
+        await ch.send_delta(
+            "oc_chat1",
+            "",
+            metadata={"_stream_end": True, "message_id": "om_001", "chat_type": "group"},
+        )
+
+        ch._client.im.v1.message.create.assert_called_once()
+        ch._client.im.v1.message.reply.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_stream_end_fallback_keeps_existing_topic_when_reply_disabled(self):
+        ch = _make_channel(reply_to_message=False)
+        ch._stream_bufs["om_001"] = _FeishuStreamBuf(
+            text="Fallback content", card_id=None, sequence=0, last_edit=0.0,
+        )
+        reply_resp = MagicMock()
+        reply_resp.success.return_value = True
+        ch._client.im.v1.message.reply.return_value = reply_resp
+
+        await ch.send_delta(
+            "oc_chat1",
+            "",
+            metadata={
+                "_stream_end": True,
+                "message_id": "om_001",
+                "chat_type": "group",
+                "thread_id": "ot_001",
+            },
+        )
+
+        ch._client.im.v1.message.reply.assert_called_once()
+        ch._client.im.v1.message.create.assert_not_called()
+        request = ch._client.im.v1.message.reply.call_args[0][0]
+        assert request.request_body.reply_in_thread is not True
+
+    @pytest.mark.asyncio
+    async def test_stream_end_fallback_group_replies_when_reply_enabled(self):
+        ch = _make_channel(reply_to_message=True)
+        ch._stream_bufs["om_001"] = _FeishuStreamBuf(
+            text="Fallback content", card_id=None, sequence=0, last_edit=0.0,
+        )
+        reply_resp = MagicMock()
+        reply_resp.success.return_value = True
+        ch._client.im.v1.message.reply.return_value = reply_resp
+
+        await ch.send_delta(
+            "oc_chat1",
+            "",
+            metadata={"_stream_end": True, "message_id": "om_001", "chat_type": "group"},
+        )
+
+        ch._client.im.v1.message.reply.assert_called_once()
+        ch._client.im.v1.message.create.assert_not_called()
+        request = ch._client.im.v1.message.reply.call_args[0][0]
+        assert request.request_body.reply_in_thread is True
 
     @pytest.mark.asyncio
     async def test_stream_end_fallback_when_final_update_fails(self):
@@ -315,6 +436,64 @@ class TestToolHintInlineStreaming:
 
         assert "oc_chat1" not in ch._stream_bufs
         ch._client.im.v1.message.create.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_tool_hint_group_uses_create_when_reply_disabled(self):
+        ch = _make_channel(reply_to_message=False)
+        ch._client.im.v1.message.create.return_value = _mock_send_response("om_hint")
+
+        msg = OutboundMessage(
+            channel="feishu", chat_id="oc_chat1",
+            content='read_file("path")',
+            metadata={"_tool_hint": True, "message_id": "om_001", "chat_type": "group"},
+        )
+        await ch.send(msg)
+
+        ch._client.im.v1.message.create.assert_called_once()
+        ch._client.im.v1.message.reply.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tool_hint_keeps_existing_topic_when_reply_disabled(self):
+        ch = _make_channel(reply_to_message=False)
+        reply_resp = MagicMock()
+        reply_resp.success.return_value = True
+        ch._client.im.v1.message.reply.return_value = reply_resp
+
+        msg = OutboundMessage(
+            channel="feishu", chat_id="oc_chat1",
+            content='read_file("path")',
+            metadata={
+                "_tool_hint": True,
+                "message_id": "om_001",
+                "chat_type": "group",
+                "thread_id": "ot_001",
+            },
+        )
+        await ch.send(msg)
+
+        ch._client.im.v1.message.reply.assert_called_once()
+        ch._client.im.v1.message.create.assert_not_called()
+        request = ch._client.im.v1.message.reply.call_args[0][0]
+        assert request.request_body.reply_in_thread is not True
+
+    @pytest.mark.asyncio
+    async def test_tool_hint_group_replies_when_reply_enabled(self):
+        ch = _make_channel(reply_to_message=True)
+        reply_resp = MagicMock()
+        reply_resp.success.return_value = True
+        ch._client.im.v1.message.reply.return_value = reply_resp
+
+        msg = OutboundMessage(
+            channel="feishu", chat_id="oc_chat1",
+            content='read_file("path")',
+            metadata={"_tool_hint": True, "message_id": "om_001", "chat_type": "group"},
+        )
+        await ch.send(msg)
+
+        ch._client.im.v1.message.reply.assert_called_once()
+        ch._client.im.v1.message.create.assert_not_called()
+        request = ch._client.im.v1.message.reply.call_args[0][0]
+        assert request.request_body.reply_in_thread is True
 
     @pytest.mark.asyncio
     async def test_consecutive_tool_hints_append(self):

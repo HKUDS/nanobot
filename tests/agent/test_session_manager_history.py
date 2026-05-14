@@ -1,4 +1,4 @@
-from nanobot.session.manager import Session
+from nanobot.session.manager import Session, SessionManager
 
 
 def _assert_no_orphans(history: list[dict]) -> None:
@@ -29,6 +29,31 @@ def _tool_turn(prefix: str, idx: int) -> list[dict]:
         {"role": "tool", "tool_call_id": f"{prefix}_{idx}_a", "name": "x", "content": "ok"},
         {"role": "tool", "tool_call_id": f"{prefix}_{idx}_b", "name": "y", "content": "ok"},
     ]
+
+
+def test_list_sessions_includes_metadata_title(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:chat-title")
+    session.metadata["title"] = "自动生成标题"
+    manager.save(session)
+
+    rows = manager.list_sessions()
+
+    assert rows[0]["key"] == "websocket:chat-title"
+    assert rows[0]["title"] == "自动生成标题"
+
+
+def test_list_sessions_includes_user_preview(tmp_path):
+    manager = SessionManager(tmp_path)
+    session = manager.get_or_create("websocket:chat-preview")
+    session.add_message("user", "帮我总结一下 OpenAI 的最新硬件计划")
+    session.add_message("assistant", "可以，我会先查最新消息。")
+    manager.save(session)
+
+    rows = manager.list_sessions()
+
+    assert rows[0]["key"] == "websocket:chat-preview"
+    assert rows[0]["preview"] == "帮我总结一下 OpenAI 的最新硬件计划"
 
 
 # --- Original regression test (from PR 2075) ---
@@ -180,6 +205,7 @@ def test_get_history_preserves_reasoning_content():
         "role": "assistant",
         "content": "done",
         "reasoning_content": "hidden chain of thought",
+        "thinking_blocks": [{"type": "thinking", "thinking": "hidden chain of thought", "signature": "sig"}],
     })
 
     history = session.get_history(max_messages=500)
@@ -190,6 +216,11 @@ def test_get_history_preserves_reasoning_content():
             "role": "assistant",
             "content": "done",
             "reasoning_content": "hidden chain of thought",
+            "thinking_blocks": [{
+                "type": "thinking",
+                "thinking": "hidden chain of thought",
+                "signature": "sig",
+            }],
         },
     ]
 
@@ -227,14 +258,8 @@ def test_get_history_annotates_user_turns_but_not_assistant_turns():
     ]
 
 
-def test_get_history_annotates_proactive_assistant_deliveries_with_timestamps():
-    """Cron / heartbeat assistant pushes still carry a timestamp prefix.
-
-    These proactive deliveries can sit hours away from the next user reply,
-    so the model needs to know when they fired. They are rare enough that
-    they don't act as in-context demonstrations encouraging the model to
-    prefix its own normal replies with ``[Message Time: ...]``.
-    """
+def test_get_history_does_not_annotate_proactive_assistant_deliveries_with_timestamps():
+    """Assistant-side timestamp examples can leak back into future replies."""
     session = Session(key="test:proactive-timestamps")
     session.messages.append({
         "role": "assistant",
@@ -253,7 +278,7 @@ def test_get_history_annotates_proactive_assistant_deliveries_with_timestamps():
     assert history == [
         {
             "role": "assistant",
-            "content": "[Message Time: 2026-04-26T15:00:00]\n记得喝水",
+            "content": "记得喝水",
         },
         {
             "role": "user",
@@ -350,6 +375,41 @@ def test_get_history_ignores_media_kwarg_on_non_user_rows():
     # List content is passed through verbatim — the synthesizer only
     # rewrites plain-string content.
     assert history[0]["content"] == [{"type": "text", "text": "structured"}]
+
+
+def test_get_history_does_not_paste_assistant_media_paths_into_replay():
+    session = Session(key="test:assistant-media")
+    session.messages.append(
+        {
+            "role": "assistant",
+            "content": "来了 🎨",
+            "media": ["/home/user/.nanobot/media/generated/img_abc.png"],
+        }
+    )
+
+    history = session.get_history(max_messages=500)
+
+    assert history == [{"role": "assistant", "content": "来了 🎨"}]
+
+
+def test_get_history_sanitizes_existing_assistant_replay_artifacts():
+    session = Session(key="test:polluted-assistant")
+    session.messages.append(
+        {
+            "role": "assistant",
+            "content": (
+                "[Message Time: 2026-05-09 00:33:48]\n"
+                "来了 🎨\n"
+                "[image: /home/user/.nanobot/media/generated/img_old.png]\n\n"
+                "generate_image(\"16:9\")\n"
+                "message(\"来了 🎨\")"
+            ),
+        }
+    )
+
+    history = session.get_history(max_messages=500, include_timestamps=True)
+
+    assert history == [{"role": "assistant", "content": "来了 🎨"}]
 
 
 def test_get_history_respects_max_tokens(monkeypatch):

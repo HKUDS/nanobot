@@ -6,9 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from nanobot.agent.hook import AgentHook
+from nanobot.agent.hook import AgentHook, SDKCaptureHook
 from nanobot.agent.loop import AgentLoop
-from nanobot.bus.queue import MessageBus
 
 
 @dataclass(slots=True)
@@ -62,30 +61,12 @@ class Nanobot:
                 Path(workspace).expanduser().resolve()
             )
 
-        provider = _make_provider(config)
-        bus = MessageBus()
-        defaults = config.agents.defaults
-
-        loop = AgentLoop(
-            bus=bus,
-            provider=provider,
-            workspace=config.workspace_path,
-            model=defaults.model,
-            max_iterations=defaults.max_tool_iterations,
-            context_window_tokens=defaults.context_window_tokens,
-            context_block_limit=defaults.context_block_limit,
-            max_tool_result_chars=defaults.max_tool_result_chars,
-            provider_retry_mode=defaults.provider_retry_mode,
-            web_config=config.tools.web,
-            exec_config=config.tools.exec,
-            restrict_to_workspace=config.tools.restrict_to_workspace,
-            mcp_servers=config.tools.mcp_servers,
-            timezone=defaults.timezone,
-            unified_session=defaults.unified_session,
-            disabled_skills=defaults.disabled_skills,
-            session_ttl_minutes=defaults.session_ttl_minutes,
-            consolidation_ratio=defaults.consolidation_ratio,
-            tools_config=config.tools,
+        loop = AgentLoop.from_config(
+            config,
+            image_generation_provider_configs={
+                "openrouter": config.providers.openrouter,
+                "aihubmix": config.providers.aihubmix,
+            },
         )
         return cls(loop)
 
@@ -104,9 +85,10 @@ class Nanobot:
                 Different keys get independent history.
             hooks: Optional lifecycle hooks for this run.
         """
+        capture = SDKCaptureHook()
         prev = self._loop._extra_hooks
-        if hooks is not None:
-            self._loop._extra_hooks = list(hooks)
+        base_hooks = list(hooks) if hooks is not None else list(prev or [])
+        self._loop._extra_hooks = [capture, *base_hooks]
         try:
             response = await self._loop.process_direct(
                 message, session_key=session_key,
@@ -115,11 +97,10 @@ class Nanobot:
             self._loop._extra_hooks = prev
 
         content = (response.content if response else None) or ""
-        return RunResult(content=content, tools_used=[], messages=[])
+        return RunResult(
+            content=content,
+            tools_used=capture.tools_used,
+            messages=capture.messages,
+        )
 
 
-def _make_provider(config: Any) -> Any:
-    """Create the LLM provider from config (extracted from CLI)."""
-    from nanobot.providers.factory import make_provider
-
-    return make_provider(config)

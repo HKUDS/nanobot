@@ -2,7 +2,9 @@
 
 import json
 import os
+import re
 import shutil
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +22,47 @@ from nanobot.utils.helpers import (
 )
 
 FILE_MAX_MESSAGES = 2000
+_MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
+_LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
+_TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
+_SESSION_PREVIEW_MAX_CHARS = 120
+
+
+def _sanitize_assistant_replay_text(content: str) -> str:
+    """Remove internal replay artifacts that the model may have copied before.
+
+    These strings are useful as runtime/session metadata, but when they appear
+    in assistant examples they become demonstrations for the model to repeat.
+    """
+    content = _MESSAGE_TIME_PREFIX_RE.sub("", content, count=1)
+    lines = [
+        line
+        for line in content.splitlines()
+        if not _LOCAL_IMAGE_BREADCRUMB_RE.match(line)
+        and not _TOOL_CALL_ECHO_RE.match(line)
+    ]
+    return "\n".join(lines).strip()
+
+
+def _text_preview(content: Any) -> str:
+    """Return compact display text for session lists."""
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                value = block.get("text")
+                if isinstance(value, str):
+                    parts.append(value)
+        text = " ".join(parts)
+    else:
+        return ""
+    text = _sanitize_assistant_replay_text(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > _SESSION_PREVIEW_MAX_CHARS:
+        text = text[: _SESSION_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
+    return text
 
 
 @dataclass
@@ -40,22 +83,15 @@ class Session:
         Annotating *every* assistant turn trains the model (via in-context
         demonstrations) to start its own replies with the same
         ``[Message Time: ...]`` prefix, which leaks metadata back to the user.
-        We therefore only annotate:
-
-        * ``user`` turns — needed so the model can pin the conversation in time.
-        * proactive deliveries (``_channel_delivery=True``) — cron / heartbeat
-          assistant pushes that may sit hours away from the next user reply,
-          and are too infrequent to act as parroting demonstrations.
+        We therefore only annotate user turns. User-side stamps are enough to
+        pin adjacent assistant replies for relative-time reasoning, including
+        proactive messages the user replies to later.
         """
         timestamp = message.get("timestamp")
         if not timestamp or not isinstance(content, str):
             return content
         role = message.get("role")
-        if role == "user":
-            pass
-        elif role == "assistant" and message.get("_channel_delivery"):
-            pass
-        else:
+        if role != "user":
             return content
         return f"[Message Time: {timestamp}]\n{content}"
 
@@ -104,21 +140,27 @@ class Session:
         out: list[dict[str, Any]] = []
         for message in sliced:
             content = message.get("content", "")
+            role = message.get("role")
+            if role == "assistant" and isinstance(content, str):
+                content = _sanitize_assistant_replay_text(content)
             # Synthesize an ``[image: path]`` breadcrumb from the persisted
             # ``media`` kwarg so LLM replay still sees *something* where the
             # image used to be. Without this, an image-only user turn
             # replays as an empty user message — the assistant's reply then
             # looks like it's responding to nothing.
             media = message.get("media")
-            if isinstance(media, list) and media and isinstance(content, str):
+            if role == "user" and isinstance(media, list) and media and isinstance(content, str):
                 breadcrumbs = "\n".join(
                     image_placeholder_text(p) for p in media if isinstance(p, str) and p
                 )
                 content = f"{content}\n{breadcrumbs}" if content else breadcrumbs
             if include_timestamps:
                 content = self._annotate_message_time(message, content)
+            if role == "assistant" and isinstance(content, str) and not content.strip():
+                if not any(key in message for key in ("tool_calls", "reasoning_content", "thinking_blocks")):
+                    continue
             entry: dict[str, Any] = {"role": message["role"], "content": content}
-            for key in ("tool_calls", "tool_call_id", "name", "reasoning_content"):
+            for key in ("tool_calls", "tool_call_id", "name", "reasoning_content", "thinking_blocks"):
                 if key in message:
                     entry[key] = message[key]
             out.append(entry)
@@ -161,6 +203,7 @@ class Session:
         self.messages = []
         self.last_consolidated = 0
         self.updated_at = datetime.now()
+        self.metadata.pop("_last_summary", None)
 
     def retain_recent_legal_suffix(self, max_messages: int) -> None:
         """Keep a legal recent suffix constrained by a hard message cap."""
@@ -362,15 +405,11 @@ class SessionManager:
                     if data.get("_type") == "metadata":
                         metadata = data.get("metadata", {})
                         if data.get("created_at"):
-                            try:
+                            with suppress(ValueError, TypeError):
                                 created_at = datetime.fromisoformat(data["created_at"])
-                            except (ValueError, TypeError):
-                                pass
                         if data.get("updated_at"):
-                            try:
+                            with suppress(ValueError, TypeError):
                                 updated_at = datetime.fromisoformat(data["updated_at"])
-                            except (ValueError, TypeError):
-                                pass
                         last_consolidated = data.get("last_consolidated", 0)
                     else:
                         messages.append(data)
@@ -440,14 +479,12 @@ class SessionManager:
                 # On Windows, opening a directory with O_RDONLY raises
                 # PermissionError — skip the dir sync there (NTFS
                 # journals metadata synchronously).
-                try:
+                with suppress(PermissionError):
                     fd = os.open(str(path.parent), os.O_RDONLY)
                     try:
                         os.fsync(fd)
                     finally:
                         os.close(fd)
-                except PermissionError:
-                    pass  # Windows — directory fsync not supported
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise
@@ -545,17 +582,38 @@ class SessionManager:
         for path in self.sessions_dir.glob("*.jsonl"):
             fallback_key = path.stem.replace("_", ":", 1)
             try:
-                # Read just the metadata line
+                # Read the metadata line and a small preview for WebUI/session lists.
                 with open(path, encoding="utf-8") as f:
                     first_line = f.readline().strip()
                     if first_line:
                         data = json.loads(first_line)
                         if data.get("_type") == "metadata":
                             key = data.get("key") or path.stem.replace("_", ":", 1)
+                            metadata = data.get("metadata", {})
+                            title = metadata.get("title") if isinstance(metadata, dict) else None
+                            preview = ""
+                            fallback_preview = ""
+                            for line in f:
+                                if not line.strip():
+                                    continue
+                                item = json.loads(line)
+                                if item.get("_type") == "metadata":
+                                    continue
+                                text = _text_preview(item.get("content"))
+                                if not text:
+                                    continue
+                                if item.get("role") == "user":
+                                    preview = text
+                                    break
+                                if not fallback_preview and item.get("role") == "assistant":
+                                    fallback_preview = text
+                            preview = preview or fallback_preview
                             sessions.append({
                                 "key": key,
                                 "created_at": data.get("created_at"),
                                 "updated_at": data.get("updated_at"),
+                                "title": title if isinstance(title, str) else "",
+                                "preview": preview,
                                 "path": str(path)
                             })
             except Exception:
@@ -565,6 +623,19 @@ class SessionManager:
                         "key": repaired.key,
                         "created_at": repaired.created_at.isoformat(),
                         "updated_at": repaired.updated_at.isoformat(),
+                        "title": (
+                            repaired.metadata.get("title")
+                            if isinstance(repaired.metadata.get("title"), str)
+                            else ""
+                        ),
+                        "preview": next(
+                            (
+                                text
+                                for msg in repaired.messages
+                                if (text := _text_preview(msg.get("content")))
+                            ),
+                            "",
+                        ),
                         "path": str(path)
                     })
                 continue

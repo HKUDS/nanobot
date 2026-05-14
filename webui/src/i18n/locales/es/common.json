@@ -9,6 +9,15 @@
       "title": "No se pudo conectar con nanobot",
       "gatewayHint": "Asegúrate de que la gateway esté en ejecución (`nanobot gateway`) y de que esta página esté abierta en la misma máquina."
     },
+    "system": {
+      "section": "Sistema",
+      "restartHint": "Reinicia nanobot para aplicar los cambios de ejecución.",
+      "restart": "Reiniciar nanobot",
+      "restarting": "Reiniciando..."
+    },
+    "restart": {
+      "completed": "Reinicio completado en {{seconds}} s."
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -23,9 +32,100 @@
     "newChat": "Nuevo chat",
     "recent": "Recientes",
     "refreshSessions": "Actualizar sesiones",
+    "settings": "Configuración",
     "language": {
       "label": "Idioma",
       "ariaLabel": "Cambiar idioma"
+    }
+  },
+  "settings": {
+    "backToChat": "Volver al chat",
+    "sidebar": {
+      "title": "Configuración",
+      "ariaLabel": "Secciones de configuración"
+    },
+    "nav": {
+      "general": "General",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "Interfaz",
+      "ai": "IA",
+      "system": "Sistema"
+    },
+    "rows": {
+      "theme": "Tema",
+      "language": "Idioma",
+      "provider": "Proveedor",
+      "model": "Modelo",
+      "restart": "Reiniciar nanobot",
+      "configPath": "Ruta de configuración"
+    },
+    "help": {
+      "theme": "Cambia entre apariencia clara y oscura.",
+      "language": "Elige el idioma usado por la WebUI.",
+      "provider": "Selecciona el proveedor para nuevas solicitudes de modelo.",
+      "model": "Define el nombre del modelo predeterminado que usa nanobot.",
+      "configPath": "El archivo de configuración que usa actualmente el gateway."
+    },
+    "values": {
+      "light": "Claro",
+      "dark": "Oscuro",
+      "notAvailable": "No disponible"
+    },
+    "status": {
+      "loading": "Cargando configuración...",
+      "loadError": "No se pudo cargar la configuración",
+      "unsaved": "Hay cambios sin guardar.",
+      "savedRestart": "Guardado. Reinicia nanobot para aplicar."
+    },
+    "actions": {
+      "save": "Guardar",
+      "saving": "Guardando",
+      "edit": "Editar",
+      "cancel": "Cancelar"
+    },
+    "byok": {
+      "description": "Usa tus propias claves de proveedor. Nanobot lee estos valores desde la configuración actual, y solo los proveedores configurados se pueden elegir en General.",
+      "configured": "Configurado",
+      "notConfigured": "Sin configurar",
+      "configuredSection": "Configurados",
+      "notConfiguredSection": "Sin configurar",
+      "showMore": "Mostrar {{count}} más",
+      "showLess": "Mostrar menos",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "Introduce la API key",
+      "apiKeyConfiguredPlaceholder": "Deja vacío para conservar la key actual",
+      "configuredKeyHint": "Key configurada",
+      "apiBasePlaceholder": "Usar el valor predeterminado del proveedor",
+      "apiKeyRequired": "Se requiere una API key para configurar este proveedor.",
+      "showApiKey": "Mostrar API key",
+      "hideApiKey": "Ocultar API key",
+      "noConfiguredProviders": "No hay proveedores configurados",
+      "configureFirst": "Configura primero un proveedor en BYOK.",
+      "openByok": "Abrir BYOK",
+      "tabs": {
+        "ariaLabel": "Tipo de credencial BYOK",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "Proveedor de búsqueda",
+        "providerHelp": "Elige el backend que usará la herramienta web search.",
+        "selectProvider": "Seleccionar proveedor",
+        "credentials": "Credenciales",
+        "noCredentialRequired": "No requiere key",
+        "noCredentialHelp": "DuckDuckGo funciona sin guardar una API key.",
+        "apiKeyHelp": "Se guarda en config y se muestra enmascarada después de guardar.",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG necesita la URL de tu propia instancia.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "Este proveedor de búsqueda requiere una API key.",
+        "baseUrlRequired": "SearXNG requiere una Base URL.",
+        "missingCredential": "Añade la credencial requerida antes de guardar.",
+        "saveHint": "Los cambios se aplican a nuevas solicitudes de web search."
+      }
     }
   },
   "chat": {
@@ -37,8 +137,8 @@
     "newChat": "Nuevo chat"
   },
   "deleteConfirm": {
-    "title": "¿Eliminar “{{title}}”?",
-    "description": "El archivo de sesión se eliminará del disco. Esta acción no se puede deshacer.",
+    "title": "¿Eliminar este chat?",
+    "description": "Esta acción no se puede deshacer.",
     "cancel": "Cancelar",
     "confirm": "Eliminar"
   },
@@ -53,7 +153,60 @@
   "thread": {
     "loadingConversation": "Cargando conversación…",
     "empty": {
-      "description": "Haz preguntas, continúa tu trabajo local o inicia un nuevo hilo."
+      "description": "Haz preguntas, continúa tu trabajo local o inicia un nuevo hilo.",
+      "greeting": "¿Qué puedo hacer por ti?",
+      "quickActions": {
+        "plan": {
+          "title": "Crear un plan de proyecto",
+          "prompt": "Crea un plan de proyecto conciso para lo que debería construir después."
+        },
+        "analyze": {
+          "title": "Analizar estos datos",
+          "prompt": "Ayúdame a analizar estos datos y destaca los patrones más importantes."
+        },
+        "brainstorm": {
+          "title": "Lluvia de ideas",
+          "prompt": "Propón algunas ideas prácticas y sus compensaciones para este problema."
+        },
+        "code": {
+          "title": "Escribir código",
+          "prompt": "Ayúdame a escribir el código para esta tarea, empezando por el cambio útil más pequeño."
+        },
+        "summarize": {
+          "title": "Resumir este documento",
+          "prompt": "Resume este documento y enumera las conclusiones clave."
+        },
+        "more": {
+          "title": "Más",
+          "prompt": "Muéstrame algunas formas útiles en las que puedes ayudar en este workspace."
+        }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "Diseñar un icono de app",
+          "prompt": "Genera un icono de app 1:1 limpio para nanobot: robot amigable, estilo vectorial simple, paleta suave azul y blanca, sin texto."
+        },
+        "sticker": {
+          "title": "Crear un sticker",
+          "prompt": "Genera una imagen estilo sticker de un pequeño asistente robot, con fondo de apariencia transparente, expresivo y divertido."
+        },
+        "poster": {
+          "title": "Crear un póster",
+          "prompt": "Genera un concepto de póster pulido para un asistente personal de IA, composición moderna, jerarquía visual fuerte, apto para una landing page."
+        },
+        "product": {
+          "title": "Mockup de producto",
+          "prompt": "Genera una imagen limpia de mockup de producto para una app web de IA conversacional, interfaz mínima, iluminación premium, marco de dispositivo realista."
+        },
+        "portrait": {
+          "title": "Retrato estilizado",
+          "prompt": "Genera un retrato estilizado de un compañero de IA amigable, luz suave, detallado pero cercano, estilo de ilustración moderna."
+        },
+        "edit": {
+          "title": "Editar una imagen",
+          "prompt": "Ayúdame a editar una imagen. Primero pídeme que suba o indique la imagen, y luego genera el resultado editado."
+        }
+      }
     },
     "header": {
       "toggleSidebar": "Mostrar u ocultar la barra lateral"
@@ -62,10 +215,27 @@
       "placeholderThread": "Escribe tu mensaje…",
       "placeholderHero": "¿Qué tienes en mente?",
       "placeholderOpening": "Abriendo un nuevo chat…",
+      "placeholderStreaming": "El modelo está respondiendo…",
       "inputAria": "Entrada de mensaje",
       "sendHint": "Enter para enviar · Shift+Enter para nueva línea",
       "send": "Enviar mensaje",
+      "stop": "Detener respuesta",
       "attachImage": "Adjuntar imagen",
+      "imageMode": {
+        "label": "Generar imagen",
+        "toggle": "Activar o desactivar modo de generación de imágenes",
+        "placeholder": "Describe o edita una imagen…",
+        "aspectAria": "Relación de aspecto de imagen",
+        "aspectLabel": "Formato de imagen",
+        "aspect": {
+          "auto": "Auto",
+          "1_1": "Cuadrado 1:1",
+          "3_4": "Vertical 3:4",
+          "9_16": "Historia 9:16",
+          "4_3": "Horizontal 4:3",
+          "16_9": "Panorámico 16:9"
+        }
+      },
       "encoding": "Procesando…",
       "remove": "Quitar adjunto",
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
@@ -76,6 +246,51 @@
         "decode_failed": "No se pudo decodificar esta imagen",
         "too_large": "Imagen demasiado grande — prueba una más pequeña",
         "io": "No se pudo leer este archivo"
+      },
+      "slash": {
+        "ariaLabel": "Comandos slash",
+        "label": "comandos",
+        "navigateHint": "↑↓ Navegar",
+        "selectHint": "Enter/Tab Insertar",
+        "closeHint": "Esc Cerrar",
+        "commands": {
+          "new": {
+            "title": "Nuevo chat",
+            "description": "Detiene la tarea actual e inicia una conversación nueva."
+          },
+          "stop": {
+            "title": "Detener tarea actual",
+            "description": "Cancela el turno activo del agent en este chat."
+          },
+          "restart": {
+            "title": "Reiniciar nanobot",
+            "description": "Reinicia el proceso del bot en el mismo lugar."
+          },
+          "status": {
+            "title": "Mostrar estado",
+            "description": "Muestra el estado del runtime, provider y channels."
+          },
+          "history": {
+            "title": "Mostrar historial",
+            "description": "Imprime los últimos N mensajes persistidos de la conversación."
+          },
+          "dream": {
+            "title": "Ejecutar Dream",
+            "description": "Activa manualmente la consolidación de memoria."
+          },
+          "dream_log": {
+            "title": "Mostrar registro de Dream",
+            "description": "Muestra qué cambió la última consolidación Dream."
+          },
+          "dream_restore": {
+            "title": "Restaurar memoria",
+            "description": "Revierte la memoria a una instantánea Dream anterior."
+          },
+          "help": {
+            "title": "Mostrar ayuda",
+            "description": "Lista los comandos slash disponibles."
+          }
+        }
       }
     },
     "scrollToBottom": "Desplazarse al final"

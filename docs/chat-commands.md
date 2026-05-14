@@ -8,12 +8,34 @@ These commands work inside chat channels and interactive agent sessions:
 | `/stop` | Stop the current task |
 | `/restart` | Restart the bot |
 | `/status` | Show bot status |
+| `/model` | Show the current model and available model presets |
+| `/model <preset>` | Switch the runtime model preset for future turns |
 | `/dream` | Run Dream memory consolidation now |
 | `/dream-log` | Show the latest Dream memory change |
 | `/dream-log <sha>` | Show a specific Dream memory change |
 | `/dream-restore` | List recent Dream memory versions |
 | `/dream-restore <sha>` | Restore memory to the state before a specific change |
 | `/help` | Show available in-chat commands |
+
+## Model Presets
+
+Use `/model` to inspect the current runtime model:
+
+```text
+/model
+```
+
+The response shows the current model, the current preset, and the available preset names. `default` is always available and represents the model settings from `agents.defaults.*`.
+
+To switch presets for future turns:
+
+```text
+/model fast
+/model deep
+/model default
+```
+
+Preset names come from the top-level `modelPresets` config. Switching is runtime-only: it does not rewrite `config.json`, and an in-progress turn keeps using the model it started with. See [Configuration: Model presets](./configuration.md#model-presets) for setup details.
 
 ## Periodic Tasks
 

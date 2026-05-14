@@ -9,6 +9,15 @@
       "title": "Không thể kết nối tới nanobot",
       "gatewayHint": "Hãy chắc chắn gateway đang chạy (`nanobot gateway`) và trang này được mở trên cùng máy."
     },
+    "system": {
+      "section": "Hệ thống",
+      "restartHint": "Khởi động lại nanobot để áp dụng thay đổi runtime.",
+      "restart": "Khởi động lại nanobot",
+      "restarting": "Đang khởi động lại..."
+    },
+    "restart": {
+      "completed": "Khởi động lại hoàn tất sau {{seconds}} giây."
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -23,9 +32,100 @@
     "newChat": "Cuộc trò chuyện mới",
     "recent": "Gần đây",
     "refreshSessions": "Làm mới phiên",
+    "settings": "Cài đặt",
     "language": {
       "label": "Ngôn ngữ",
       "ariaLabel": "Đổi ngôn ngữ"
+    }
+  },
+  "settings": {
+    "backToChat": "Quay lại trò chuyện",
+    "sidebar": {
+      "title": "Cài đặt",
+      "ariaLabel": "Các mục cài đặt"
+    },
+    "nav": {
+      "general": "Chung",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "Giao diện",
+      "ai": "AI",
+      "system": "Hệ thống"
+    },
+    "rows": {
+      "theme": "Giao diện",
+      "language": "Ngôn ngữ",
+      "provider": "Nhà cung cấp",
+      "model": "Mô hình",
+      "restart": "Khởi động lại nanobot",
+      "configPath": "Đường dẫn cấu hình"
+    },
+    "help": {
+      "theme": "Chuyển giữa giao diện sáng và tối.",
+      "language": "Chọn ngôn ngữ dùng trong WebUI.",
+      "provider": "Chọn nhà cung cấp cho các yêu cầu mô hình mới.",
+      "model": "Đặt tên mô hình mặc định mà nanobot sử dụng.",
+      "configPath": "Tệp cấu hình gateway hiện đang dùng."
+    },
+    "values": {
+      "light": "Sáng",
+      "dark": "Tối",
+      "notAvailable": "Không khả dụng"
+    },
+    "status": {
+      "loading": "Đang tải cài đặt...",
+      "loadError": "Không thể tải cài đặt",
+      "unsaved": "Có thay đổi chưa lưu.",
+      "savedRestart": "Đã lưu. Khởi động lại nanobot để áp dụng."
+    },
+    "actions": {
+      "save": "Lưu",
+      "saving": "Đang lưu",
+      "edit": "Sửa",
+      "cancel": "Hủy"
+    },
+    "byok": {
+      "description": "Dùng key provider của riêng bạn. Nanobot đọc các giá trị này từ config hiện tại, và chỉ provider đã cấu hình mới có thể chọn trong Chung.",
+      "configured": "Đã cấu hình",
+      "notConfigured": "Chưa cấu hình",
+      "configuredSection": "Đã cấu hình",
+      "notConfiguredSection": "Chưa cấu hình",
+      "showMore": "Hiển thị thêm {{count}}",
+      "showLess": "Thu gọn",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "Nhập API key",
+      "apiKeyConfiguredPlaceholder": "Để trống để giữ key hiện tại",
+      "configuredKeyHint": "Key đã cấu hình",
+      "apiBasePlaceholder": "Dùng mặc định của provider",
+      "apiKeyRequired": "Cần API key để cấu hình provider này.",
+      "showApiKey": "Hiển thị API key",
+      "hideApiKey": "Ẩn API key",
+      "noConfiguredProviders": "Chưa có provider đã cấu hình",
+      "configureFirst": "Hãy cấu hình provider trong BYOK trước.",
+      "openByok": "Mở BYOK",
+      "tabs": {
+        "ariaLabel": "Loại thông tin xác thực BYOK",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "Search provider",
+        "providerHelp": "Chọn backend mà công cụ web search sẽ dùng.",
+        "selectProvider": "Chọn provider",
+        "credentials": "Thông tin xác thực",
+        "noCredentialRequired": "Không cần key",
+        "noCredentialHelp": "DuckDuckGo hoạt động mà không cần lưu API key.",
+        "apiKeyHelp": "Được lưu trong config và chỉ hiện dạng che sau khi lưu.",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG cần URL instance của bạn.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "Provider tìm kiếm này cần API key.",
+        "baseUrlRequired": "SearXNG cần Base URL.",
+        "missingCredential": "Thêm thông tin bắt buộc trước khi lưu.",
+        "saveHint": "Thay đổi áp dụng cho các yêu cầu web search mới."
+      }
     }
   },
   "chat": {
@@ -37,8 +137,8 @@
     "newChat": "Cuộc trò chuyện mới"
   },
   "deleteConfirm": {
-    "title": "Xóa “{{title}}”?",
-    "description": "Tệp phiên sẽ bị xóa khỏi đĩa. Không thể hoàn tác thao tác này.",
+    "title": "Xóa cuộc trò chuyện này?",
+    "description": "Không thể hoàn tác thao tác này.",
     "cancel": "Hủy",
     "confirm": "Xóa"
   },
@@ -53,7 +153,60 @@
   "thread": {
     "loadingConversation": "Đang tải cuộc trò chuyện…",
     "empty": {
-      "description": "Hãy đặt câu hỏi, tiếp tục công việc cục bộ hoặc bắt đầu một luồng mới."
+      "description": "Hãy đặt câu hỏi, tiếp tục công việc cục bộ hoặc bắt đầu một luồng mới.",
+      "greeting": "Tôi có thể giúp gì cho bạn?",
+      "quickActions": {
+        "plan": {
+          "title": "Tạo kế hoạch dự án",
+          "prompt": "Tạo một kế hoạch dự án ngắn gọn cho việc tôi nên xây dựng tiếp theo."
+        },
+        "analyze": {
+          "title": "Phân tích dữ liệu này",
+          "prompt": "Giúp tôi phân tích dữ liệu này và chỉ ra các mẫu quan trọng nhất."
+        },
+        "brainstorm": {
+          "title": "Động não ý tưởng",
+          "prompt": "Động não vài ý tưởng thực tế và các đánh đổi cho vấn đề này."
+        },
+        "code": {
+          "title": "Viết mã",
+          "prompt": "Giúp tôi viết mã cho nhiệm vụ này, bắt đầu từ thay đổi hữu ích nhỏ nhất."
+        },
+        "summarize": {
+          "title": "Tóm tắt tài liệu này",
+          "prompt": "Tóm tắt tài liệu này và liệt kê các ý chính."
+        },
+        "more": {
+          "title": "Thêm",
+          "prompt": "Cho tôi xem vài cách hữu ích mà bạn có thể giúp trong workspace này."
+        }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "Thiết kế biểu tượng app",
+          "prompt": "Tạo một biểu tượng ứng dụng 1:1 gọn gàng cho nanobot: robot thân thiện, phong cách vector đơn giản, bảng màu xanh trắng dịu, không có chữ."
+        },
+        "sticker": {
+          "title": "Tạo sticker",
+          "prompt": "Tạo một hình kiểu sticker dễ thương của trợ lý robot nhỏ, nền trông như trong suốt, biểu cảm và vui nhộn."
+        },
+        "poster": {
+          "title": "Tạo poster",
+          "prompt": "Tạo một ý tưởng poster chỉn chu cho trợ lý AI cá nhân, bố cục hiện đại, phân cấp thị giác rõ, phù hợp cho landing page."
+        },
+        "product": {
+          "title": "Mockup sản phẩm",
+          "prompt": "Tạo một hình mockup sản phẩm gọn gàng cho ứng dụng web AI hội thoại, giao diện tối giản, ánh sáng cao cấp, khung thiết bị chân thực."
+        },
+        "portrait": {
+          "title": "Chân dung cách điệu",
+          "prompt": "Tạo chân dung cách điệu của một người bạn đồng hành AI thân thiện, ánh sáng mềm, chi tiết nhưng dễ gần, phong cách minh họa hiện đại."
+        },
+        "edit": {
+          "title": "Chỉnh sửa ảnh",
+          "prompt": "Giúp tôi chỉnh sửa một ảnh. Trước tiên hãy yêu cầu tôi tải lên hoặc chỉ định ảnh, rồi tạo kết quả đã chỉnh sửa."
+        }
+      }
     },
     "header": {
       "toggleSidebar": "Bật/tắt thanh bên"
@@ -62,10 +215,27 @@
       "placeholderThread": "Nhập tin nhắn…",
       "placeholderHero": "Bạn đang nghĩ gì?",
       "placeholderOpening": "Đang mở cuộc trò chuyện mới…",
+      "placeholderStreaming": "Mô hình đang trả lời…",
       "inputAria": "Ô nhập tin nhắn",
       "sendHint": "Enter để gửi · Shift+Enter để xuống dòng",
       "send": "Gửi tin nhắn",
+      "stop": "Dừng phản hồi",
       "attachImage": "Đính kèm ảnh",
+      "imageMode": {
+        "label": "Tạo ảnh",
+        "toggle": "Bật/tắt chế độ tạo ảnh",
+        "placeholder": "Mô tả hoặc chỉnh sửa ảnh…",
+        "aspectAria": "Tỷ lệ khung hình ảnh",
+        "aspectLabel": "Tỷ lệ ảnh",
+        "aspect": {
+          "auto": "Tự động",
+          "1_1": "Vuông 1:1",
+          "3_4": "Dọc 3:4",
+          "9_16": "Story 9:16",
+          "4_3": "Ngang 4:3",
+          "16_9": "Rộng 16:9"
+        }
+      },
       "encoding": "Đang xử lý…",
       "remove": "Xóa tệp đính kèm",
       "normalizedSizeHint": "{{orig}} → {{current}} (tự động)",
@@ -76,6 +246,51 @@
         "decode_failed": "Không thể giải mã ảnh này",
         "too_large": "Ảnh quá lớn — hãy thử ảnh nhỏ hơn",
         "io": "Không thể đọc tệp này"
+      },
+      "slash": {
+        "ariaLabel": "Lệnh slash",
+        "label": "lệnh",
+        "navigateHint": "↑↓ Chọn",
+        "selectHint": "Enter/Tab Chèn",
+        "closeHint": "Esc Đóng",
+        "commands": {
+          "new": {
+            "title": "Cuộc trò chuyện mới",
+            "description": "Dừng tác vụ hiện tại và bắt đầu một cuộc trò chuyện mới."
+          },
+          "stop": {
+            "title": "Dừng tác vụ hiện tại",
+            "description": "Hủy lượt agent đang chạy trong cuộc trò chuyện này."
+          },
+          "restart": {
+            "title": "Khởi động lại nanobot",
+            "description": "Khởi động lại tiến trình bot tại chỗ."
+          },
+          "status": {
+            "title": "Hiển thị trạng thái",
+            "description": "Hiển thị trạng thái runtime, provider và channel."
+          },
+          "history": {
+            "title": "Hiển thị lịch sử",
+            "description": "In N tin nhắn hội thoại đã lưu gần nhất."
+          },
+          "dream": {
+            "title": "Chạy Dream",
+            "description": "Kích hoạt thủ công quá trình hợp nhất bộ nhớ."
+          },
+          "dream_log": {
+            "title": "Hiển thị nhật ký Dream",
+            "description": "Hiển thị những gì lần hợp nhất Dream gần nhất đã thay đổi."
+          },
+          "dream_restore": {
+            "title": "Khôi phục bộ nhớ",
+            "description": "Đưa bộ nhớ về một snapshot Dream trước đó."
+          },
+          "help": {
+            "title": "Hiển thị trợ giúp",
+            "description": "Liệt kê các lệnh slash có sẵn."
+          }
+        }
       }
     },
     "scrollToBottom": "Cuộn xuống cuối"

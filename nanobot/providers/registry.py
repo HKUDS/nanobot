@@ -34,7 +34,7 @@ class ProviderSpec:
     display_name: str = ""  # shown in `nanobot status`
 
     # which provider implementation to use
-    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot"
+    # "openai_compat" | "anthropic" | "azure_openai" | "openai_codex" | "github_copilot" | "bedrock"
     backend: str = "openai_compat"
 
     # extra env vars, e.g. (("ZHIPUAI_API_KEY", "{api_key}"),)
@@ -105,6 +105,29 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="azure_openai",
         is_direct=True,
     ),
+    # === AWS Bedrock (native Converse API via bedrock-runtime) =============
+    ProviderSpec(
+        name="bedrock",
+        keywords=(
+            "bedrock",
+            "anthropic.claude",
+            "amazon.nova",
+            "meta.",
+            "mistral.",
+            "cohere.",
+            "qwen.",
+            "deepseek.",
+            "openai.gpt-oss",
+            "ai21.",
+            "moonshot.",
+            "writer.",
+            "zai.",
+        ),
+        env_key="AWS_BEARER_TOKEN_BEDROCK",
+        display_name="AWS Bedrock",
+        backend="bedrock",
+        is_direct=True,
+    ),
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
     # OpenRouter: global gateway, keys start with "sk-or-"
@@ -169,6 +192,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="volces",
         default_api_base="https://ark.cn-beijing.volces.com/api/v3",
         thinking_style="thinking_type",
+        supports_max_completion_tokens=True,
     ),
 
     # VolcEngine Coding Plan (火山引擎 Coding Plan): same key as volcengine
@@ -182,6 +206,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://ark.cn-beijing.volces.com/api/coding/v3",
         strip_model_prefix=True,
         thinking_style="thinking_type",
+        supports_max_completion_tokens=True,
     ),
 
     # BytePlus: VolcEngine international, pay-per-use models
@@ -345,6 +370,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         reasoning_as_content=True,
     ),
     # Xiaomi MIMO (小米): OpenAI-compatible API
+    # Hosted API (api.xiaomimimo.com) accepts {"thinking": {"type": "enabled"|"disabled"}}
+    # to toggle reasoning, matching the existing thinking_type style.
     ProviderSpec(
         name="xiaomi_mimo",
         keywords=("xiaomi_mimo", "mimo"),
@@ -352,6 +379,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         display_name="Xiaomi MIMO",
         backend="openai_compat",
         default_api_base="https://api.xiaomimimo.com/v1",
+        thinking_style="thinking_type",
+    ),
+    # LongCat: OpenAI-compatible API
+    ProviderSpec(
+        name="longcat",
+        keywords=("longcat",),
+        env_key="LONGCAT_API_KEY",
+        display_name="LongCat",
+        backend="openai_compat",
+        default_api_base="https://api.longcat.chat/openai/v1",
     ),
     # === Local deployment (matched by config key, NOT by api_base) =========
     # vLLM / any OpenAI-compatible local server
@@ -395,6 +432,19 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         is_direct=True,
         is_local=True,
         default_api_base="http://localhost:8000/v3",
+    ),
+    # === NVIDIA NIM (NVIDIA Inference Microservices) =======================
+    # Keys start with "nvapi-", base URL at integrate.api.nvidia.com
+    ProviderSpec(
+        name="nvidia",
+        keywords=("nvidia", "nemotron", "nvapi"),
+        env_key="NVIDIA_NIM_API_KEY",
+        display_name="NVIDIA NIM",
+        backend="openai_compat",
+        is_gateway=False,
+        detect_by_key_prefix="nvapi-",
+        detect_by_base_keyword="nvidia.com",
+        default_api_base="https://integrate.api.nvidia.com/v1",
     ),
     # === Auxiliary (not a primary LLM provider) ============================
     # Groq: mainly used for Whisper voice transcription, also usable for LLM

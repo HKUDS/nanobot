@@ -4,7 +4,8 @@ import asyncio
 import os
 import re
 import shutil
-from contextlib import AsyncExitStack
+import urllib.parse
+from contextlib import AsyncExitStack, suppress
 from typing import Any
 
 import httpx
@@ -42,6 +43,30 @@ def _sanitize_name(name: str) -> str:
 def _is_transient(exc: BaseException) -> bool:
     """Check if an exception looks like a transient connection error."""
     return type(exc).__name__ in _TRANSIENT_EXC_NAMES
+
+
+async def _probe_http_url(url: str, timeout: float = 3.0) -> bool:
+    """Quick TCP probe to check if an HTTP MCP server is reachable.
+
+    Avoids entering ``streamable_http_client`` / ``sse_client`` when the port is
+    closed — those transports use anyio task groups whose cleanup can raise
+    ``RuntimeError`` / ``ExceptionGroup`` that escape the caller's try/except
+    and crash the event loop.
+    """
+    parsed = urllib.parse.urlparse(url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port
+    if not port:
+        port = 443 if parsed.scheme == "https" else 80
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout,
+        )
+        writer.close()
+        await writer.wait_closed()
+        return True
+    except (OSError, asyncio.TimeoutError):
+        return False
 
 
 def _windows_command_basename(command: str) -> str:
@@ -144,6 +169,8 @@ def _normalize_schema_for_openai(schema: Any) -> dict[str, Any]:
 class MCPToolWrapper(Tool):
     """Wraps a single MCP server tool as a nanobot Tool."""
 
+    _plugin_discoverable = False
+
     def __init__(self, session, server_name: str, tool_def, tool_timeout: int = 30):
         self._session = session
         self._original_name = tool_def.name
@@ -198,11 +225,10 @@ class MCPToolWrapper(Tool):
                         await asyncio.sleep(1)  # Brief backoff before retry
                         continue
                     # Second transient failure — give up with retry-specific message
-                    logger.error(
-                        "MCP tool '{}' failed after retry: {}: {}",
+                    logger.exception(
+                        "MCP tool '{}' failed after retry: {}",
                         self._name,
                         type(exc).__name__,
-                        exc,
                     )
                     return f"(MCP tool call failed after retry: {type(exc).__name__})"
                 logger.exception(
@@ -227,6 +253,8 @@ class MCPToolWrapper(Tool):
 
 class MCPResourceWrapper(Tool):
     """Wraps an MCP resource URI as a read-only nanobot Tool."""
+
+    _plugin_discoverable = False
 
     def __init__(self, session, server_name: str, resource_def, resource_timeout: int = 30):
         self._session = session
@@ -287,11 +315,10 @@ class MCPResourceWrapper(Tool):
                         )
                         await asyncio.sleep(1)
                         continue
-                    logger.error(
-                        "MCP resource '{}' failed after retry: {}: {}",
+                    logger.exception(
+                        "MCP resource '{}' failed after retry: {}",
                         self._name,
                         type(exc).__name__,
-                        exc,
                     )
                     return f"(MCP resource read failed after retry: {type(exc).__name__})"
                 logger.exception(
@@ -317,6 +344,8 @@ class MCPResourceWrapper(Tool):
 
 class MCPPromptWrapper(Tool):
     """Wraps an MCP prompt as a read-only nanobot Tool."""
+
+    _plugin_discoverable = False
 
     def __init__(self, session, server_name: str, prompt_def, prompt_timeout: int = 30):
         self._session = session
@@ -383,7 +412,7 @@ class MCPPromptWrapper(Tool):
                 logger.warning("MCP prompt '{}' was cancelled by server/SDK", self._name)
                 return "(MCP prompt call was cancelled)"
             except McpError as exc:
-                logger.error(
+                logger.exception(
                     "MCP prompt '{}' failed: code={} message={}",
                     self._name,
                     exc.error.code,
@@ -400,11 +429,10 @@ class MCPPromptWrapper(Tool):
                         )
                         await asyncio.sleep(1)
                         continue
-                    logger.error(
-                        "MCP prompt '{}' failed after retry: {}: {}",
+                    logger.exception(
+                        "MCP prompt '{}' failed after retry: {}",
                         self._name,
                         type(exc).__name__,
-                        exc,
                     )
                     return f"(MCP prompt call failed after retry: {type(exc).__name__})"
                 logger.exception(
@@ -439,8 +467,8 @@ async def connect_mcp_servers(
     """Connect to configured MCP servers and register their tools, resources, prompts.
 
     Returns a dict mapping server name -> its dedicated AsyncExitStack.
-    Each server gets its own stack and runs in its own task to prevent
-    cancel scope conflicts when multiple MCP servers are configured.
+    Each server gets its own stack to prevent cancel scope conflicts
+    when multiple MCP servers are configured.
     """
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.sse import sse_client
@@ -478,6 +506,10 @@ async def connect_mcp_servers(
                 )
                 read, write = await server_stack.enter_async_context(stdio_client(params))
             elif transport_type == "sse":
+                if not await _probe_http_url(cfg.url):
+                    logger.warning("MCP server '{}': {} unreachable, skipping", name, cfg.url)
+                    await server_stack.aclose()
+                    return name, None
 
                 def httpx_client_factory(
                     headers: dict[str, str] | None = None,
@@ -500,6 +532,11 @@ async def connect_mcp_servers(
                     sse_client(cfg.url, httpx_client_factory=httpx_client_factory)
                 )
             elif transport_type == "streamableHttp":
+                if not await _probe_http_url(cfg.url):
+                    logger.warning("MCP server '{}': {} unreachable, skipping", name, cfg.url)
+                    await server_stack.aclose()
+                    return name, None
+
                 http_client = await server_stack.enter_async_context(
                     httpx.AsyncClient(
                         headers=cfg.headers or None,
@@ -608,28 +645,20 @@ async def connect_mcp_servers(
                     " Hint: this looks like stdio protocol pollution. Make sure the MCP server writes "
                     "only JSON-RPC to stdout and sends logs/debug output to stderr instead."
                 )
-            logger.error("MCP server '{}': failed to connect: {}{}", name, e, hint)
-            try:
+            logger.exception("MCP server '{}': failed to connect: {}", name, hint)
+            with suppress(Exception):
                 await server_stack.aclose()
-            except Exception:
-                pass
             return name, None
 
     server_stacks: dict[str, AsyncExitStack] = {}
 
-    tasks: list[asyncio.Task] = []
     for name, cfg in mcp_servers.items():
-        task = asyncio.create_task(connect_single_server(name, cfg))
-        tasks.append(task)
-
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-
-    for i, result in enumerate(results):
-        name = list(mcp_servers.keys())[i]
-        if isinstance(result, BaseException):
-            if not isinstance(result, asyncio.CancelledError):
-                logger.error("MCP server '{}' connection task failed: {}", name, result)
-        elif result is not None and result[1] is not None:
+        try:
+            result = await connect_single_server(name, cfg)
+        except Exception as e:
+            logger.exception("MCP server '{}' connection failed: {}", name, e)
+            continue
+        if result is not None and result[1] is not None:
             server_stacks[result[0]] = result[1]
 
     return server_stacks

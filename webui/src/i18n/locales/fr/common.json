@@ -9,6 +9,15 @@
       "title": "Impossible de joindre nanobot",
       "gatewayHint": "Assurez-vous que la gateway est en cours d’exécution (`nanobot gateway`) et que cette page est ouverte sur la même machine."
     },
+    "system": {
+      "section": "Système",
+      "restartHint": "Redémarrez nanobot pour appliquer les changements d’exécution.",
+      "restart": "Redémarrer nanobot",
+      "restarting": "Redémarrage..."
+    },
+    "restart": {
+      "completed": "Redémarrage terminé en {{seconds}} s."
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -23,9 +32,100 @@
     "newChat": "Nouvelle discussion",
     "recent": "Récentes",
     "refreshSessions": "Actualiser les sessions",
+    "settings": "Paramètres",
     "language": {
       "label": "Langue",
       "ariaLabel": "Changer de langue"
+    }
+  },
+  "settings": {
+    "backToChat": "Retour à la discussion",
+    "sidebar": {
+      "title": "Paramètres",
+      "ariaLabel": "Sections des paramètres"
+    },
+    "nav": {
+      "general": "Général",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "Interface",
+      "ai": "IA",
+      "system": "Système"
+    },
+    "rows": {
+      "theme": "Thème",
+      "language": "Langue",
+      "provider": "Fournisseur",
+      "model": "Modèle",
+      "restart": "Redémarrer nanobot",
+      "configPath": "Chemin de configuration"
+    },
+    "help": {
+      "theme": "Basculer entre les apparences claire et sombre.",
+      "language": "Choisissez la langue utilisée par le WebUI.",
+      "provider": "Sélectionnez le fournisseur des nouvelles requêtes de modèle.",
+      "model": "Définissez le nom du modèle par défaut utilisé par nanobot.",
+      "configPath": "Le fichier de configuration actuellement utilisé par la passerelle."
+    },
+    "values": {
+      "light": "Clair",
+      "dark": "Sombre",
+      "notAvailable": "Indisponible"
+    },
+    "status": {
+      "loading": "Chargement des paramètres...",
+      "loadError": "Impossible de charger les paramètres",
+      "unsaved": "Modifications non enregistrées.",
+      "savedRestart": "Enregistré. Redémarrez nanobot pour appliquer."
+    },
+    "actions": {
+      "save": "Enregistrer",
+      "saving": "Enregistrement",
+      "edit": "Modifier",
+      "cancel": "Annuler"
+    },
+    "byok": {
+      "description": "Utilisez vos propres clés de fournisseur. Nanobot lit ces valeurs depuis la configuration actuelle, et seuls les fournisseurs configurés peuvent être sélectionnés dans Général.",
+      "configured": "Configuré",
+      "notConfigured": "Non configuré",
+      "configuredSection": "Configurés",
+      "notConfiguredSection": "Non configurés",
+      "showMore": "Afficher {{count}} de plus",
+      "showLess": "Afficher moins",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "Saisir l'API key",
+      "apiKeyConfiguredPlaceholder": "Laisser vide pour conserver la key actuelle",
+      "configuredKeyHint": "Key configurée",
+      "apiBasePlaceholder": "Utiliser la valeur par défaut du fournisseur",
+      "apiKeyRequired": "Une API key est requise pour configurer ce fournisseur.",
+      "showApiKey": "Afficher l'API key",
+      "hideApiKey": "Masquer l'API key",
+      "noConfiguredProviders": "Aucun fournisseur configuré",
+      "configureFirst": "Configurez d'abord un fournisseur dans BYOK.",
+      "openByok": "Ouvrir BYOK",
+      "tabs": {
+        "ariaLabel": "Type d'identifiants BYOK",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "Fournisseur de recherche",
+        "providerHelp": "Choisissez le backend utilisé par l'outil web search.",
+        "selectProvider": "Choisir un fournisseur",
+        "credentials": "Identifiants",
+        "noCredentialRequired": "Aucune key requise",
+        "noCredentialHelp": "DuckDuckGo fonctionne sans API key enregistrée.",
+        "apiKeyHelp": "Enregistrée dans la config et masquée après l'enregistrement.",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG nécessite l'URL de votre propre instance.",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "Ce fournisseur de recherche nécessite une API key.",
+        "baseUrlRequired": "SearXNG nécessite une Base URL.",
+        "missingCredential": "Ajoutez l'identifiant requis avant d'enregistrer.",
+        "saveHint": "Les changements s'appliquent aux nouvelles requêtes web search."
+      }
     }
   },
   "chat": {
@@ -37,8 +137,8 @@
     "newChat": "Nouvelle discussion"
   },
   "deleteConfirm": {
-    "title": "Supprimer « {{title}} » ?",
-    "description": "Le fichier de session sera supprimé du disque. Cette action est irréversible.",
+    "title": "Supprimer cette discussion ?",
+    "description": "Cette action est irréversible.",
     "cancel": "Annuler",
     "confirm": "Supprimer"
   },
@@ -53,7 +153,60 @@
   "thread": {
     "loadingConversation": "Chargement de la conversation…",
     "empty": {
-      "description": "Posez des questions, poursuivez votre travail local ou démarrez un nouveau fil."
+      "description": "Posez des questions, poursuivez votre travail local ou démarrez un nouveau fil.",
+      "greeting": "Que puis-je faire pour vous ?",
+      "quickActions": {
+        "plan": {
+          "title": "Créer un plan de projet",
+          "prompt": "Créez un plan de projet concis pour ce que je devrais construire ensuite."
+        },
+        "analyze": {
+          "title": "Analyser ces données",
+          "prompt": "Aidez-moi à analyser ces données et à faire ressortir les tendances les plus importantes."
+        },
+        "brainstorm": {
+          "title": "Trouver des idées",
+          "prompt": "Proposez quelques idées pratiques et leurs compromis pour ce problème."
+        },
+        "code": {
+          "title": "Écrire du code",
+          "prompt": "Aidez-moi à écrire le code pour cette tâche, en commençant par le plus petit changement utile."
+        },
+        "summarize": {
+          "title": "Résumer ce document",
+          "prompt": "Résumez ce document et listez les points clés à retenir."
+        },
+        "more": {
+          "title": "Plus",
+          "prompt": "Montrez-moi quelques façons utiles dont vous pouvez m’aider dans cet espace de travail."
+        }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "Créer une icône d’app",
+          "prompt": "Générez une icône d’application 1:1 propre pour nanobot : robot sympathique, style vectoriel simple, palette douce bleu et blanc, sans texte."
+        },
+        "sticker": {
+          "title": "Créer un sticker",
+          "prompt": "Générez une image façon sticker d’un petit assistant robot, avec un fond d’apparence transparente, expressive et ludique."
+        },
+        "poster": {
+          "title": "Créer une affiche",
+          "prompt": "Générez un concept d’affiche soigné pour un assistant IA personnel, composition moderne, hiérarchie visuelle forte, adapté à une landing page."
+        },
+        "product": {
+          "title": "Maquette produit",
+          "prompt": "Générez une maquette produit propre pour une application web d’IA conversationnelle, interface minimale, éclairage premium, cadre d’appareil réaliste."
+        },
+        "portrait": {
+          "title": "Portrait stylisé",
+          "prompt": "Générez un portrait stylisé d’un compagnon IA sympathique, lumière douce, détaillé mais accessible, style illustration moderne."
+        },
+        "edit": {
+          "title": "Modifier une image",
+          "prompt": "Aidez-moi à modifier une image. Demandez-moi d’abord de téléverser ou d’indiquer l’image, puis générez le résultat modifié."
+        }
+      }
     },
     "header": {
       "toggleSidebar": "Afficher ou masquer la barre latérale"
@@ -62,10 +215,27 @@
       "placeholderThread": "Saisissez votre message…",
       "placeholderHero": "Qu’avez-vous en tête ?",
       "placeholderOpening": "Ouverture d’une nouvelle discussion…",
+      "placeholderStreaming": "Le modèle est en train de répondre…",
       "inputAria": "Champ de message",
       "sendHint": "Entrée pour envoyer · Maj+Entrée pour un retour à la ligne",
       "send": "Envoyer le message",
+      "stop": "Arrêter la réponse",
       "attachImage": "Joindre une image",
+      "imageMode": {
+        "label": "Génération d’image",
+        "toggle": "Activer ou désactiver le mode génération d’image",
+        "placeholder": "Décrire ou modifier une image…",
+        "aspectAria": "Format de l’image",
+        "aspectLabel": "Format de l’image",
+        "aspect": {
+          "auto": "Auto",
+          "1_1": "Carré 1:1",
+          "3_4": "Portrait 3:4",
+          "9_16": "Story 9:16",
+          "4_3": "Paysage 4:3",
+          "16_9": "Large 16:9"
+        }
+      },
       "encoding": "Traitement…",
       "remove": "Retirer la pièce jointe",
       "normalizedSizeHint": "{{orig}} → {{current}} (auto)",
@@ -76,6 +246,51 @@
         "decode_failed": "Impossible de décoder cette image",
         "too_large": "Image trop grande — essayez-en une plus petite",
         "io": "Impossible de lire ce fichier"
+      },
+      "slash": {
+        "ariaLabel": "Commandes slash",
+        "label": "commandes",
+        "navigateHint": "↑↓ Naviguer",
+        "selectHint": "Entrée/Tab Insérer",
+        "closeHint": "Échap Fermer",
+        "commands": {
+          "new": {
+            "title": "Nouvelle discussion",
+            "description": "Arrêter la tâche en cours et démarrer une nouvelle conversation."
+          },
+          "stop": {
+            "title": "Arrêter la tâche en cours",
+            "description": "Annuler le tour agent actif pour cette discussion."
+          },
+          "restart": {
+            "title": "Redémarrer nanobot",
+            "description": "Redémarrer le processus du bot sur place."
+          },
+          "status": {
+            "title": "Afficher l’état",
+            "description": "Afficher l’état du runtime, du provider et des channels."
+          },
+          "history": {
+            "title": "Afficher l’historique",
+            "description": "Afficher les N derniers messages persistés de la conversation."
+          },
+          "dream": {
+            "title": "Lancer Dream",
+            "description": "Déclencher manuellement la consolidation de la mémoire."
+          },
+          "dream_log": {
+            "title": "Afficher le journal Dream",
+            "description": "Afficher ce que la dernière consolidation Dream a changé."
+          },
+          "dream_restore": {
+            "title": "Restaurer la mémoire",
+            "description": "Revenir à un instantané Dream précédent."
+          },
+          "help": {
+            "title": "Afficher l’aide",
+            "description": "Lister les commandes slash disponibles."
+          }
+        }
       }
     },
     "scrollToBottom": "Faire défiler vers le bas"

@@ -89,6 +89,45 @@ describe("NanobotClient", () => {
     });
   });
 
+  it("dispatches runtime model updates globally", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const handler = vi.fn();
+    client.onRuntimeModelUpdate(handler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    lastSocket().fakeMessage({
+      event: "runtime_model_updated",
+      model_name: "openai/gpt-4.1",
+      model_preset: "fast",
+    });
+
+    expect(handler).toHaveBeenCalledWith("openai/gpt-4.1", "fast");
+  });
+
+  it("dispatches session updates globally", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const globalHandler = vi.fn();
+    const chatHandler = vi.fn();
+    client.onSessionUpdate(globalHandler);
+    client.onChat("chat-title", chatHandler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    lastSocket().fakeMessage({ event: "session_updated", chat_id: "chat-title" });
+
+    expect(globalHandler).toHaveBeenCalledWith("chat-title");
+    expect(chatHandler).not.toHaveBeenCalled();
+  });
+
   it("resolves newChat() via the server-assigned chat_id", async () => {
     const client = new NanobotClient({
       url: "ws://test",
@@ -116,7 +155,34 @@ describe("NanobotClient", () => {
     // Attach is sent first because sendMessage adds to knownChats, which
     // handleOpen re-attaches; then the queued message follows.
     expect(lastSocket().sent).toContain(
-      JSON.stringify({ type: "message", chat_id: "chat-x", content: "hello" }),
+      JSON.stringify({ type: "message", chat_id: "chat-x", content: "hello", webui: true }),
+    );
+  });
+
+  it("includes image generation options in outbound messages", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+
+    client.sendMessage(
+      "chat-img",
+      "draw a banner",
+      undefined,
+      { imageGeneration: { enabled: true, aspect_ratio: "16:9" } },
+    );
+
+    expect(lastSocket().sent).toContain(
+      JSON.stringify({
+        type: "message",
+        chat_id: "chat-img",
+        content: "draw a banner",
+        image_generation: { enabled: true, aspect_ratio: "16:9" },
+        webui: true,
+      }),
     );
   });
 
@@ -196,6 +262,7 @@ describe("NanobotClient", () => {
       chat_id: "chat-x",
       content: "look",
       media: [{ data_url: "data:image/png;base64,AAAA", name: "shot.png" }],
+      webui: true,
     });
   });
 
@@ -214,6 +281,7 @@ describe("NanobotClient", () => {
       type: "message",
       chat_id: "chat-x",
       content: "hello",
+      webui: true,
     });
   });
 

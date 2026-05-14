@@ -9,6 +9,15 @@
       "title": "nanobot に接続できませんでした",
       "gatewayHint": "gateway（`nanobot gateway`）が起動しており、このページが同じマシン上で開かれていることを確認してください。"
     },
+    "system": {
+      "section": "システム",
+      "restartHint": "実行時の変更を適用するには nanobot を再起動します。",
+      "restart": "nanobot を再起動",
+      "restarting": "再起動中..."
+    },
+    "restart": {
+      "completed": "{{seconds}} 秒で再起動が完了しました。"
+    },
     "documentTitle": {
       "base": "nanobot",
       "chat": "{{title}} · nanobot"
@@ -23,9 +32,100 @@
     "newChat": "新しいチャット",
     "recent": "最近のチャット",
     "refreshSessions": "セッションを更新",
+    "settings": "設定",
     "language": {
       "label": "言語",
       "ariaLabel": "言語を変更"
+    }
+  },
+  "settings": {
+    "backToChat": "チャットに戻る",
+    "sidebar": {
+      "title": "設定",
+      "ariaLabel": "設定セクション"
+    },
+    "nav": {
+      "general": "一般",
+      "byok": "BYOK"
+    },
+    "sections": {
+      "interface": "インターフェース",
+      "ai": "AI",
+      "system": "システム"
+    },
+    "rows": {
+      "theme": "テーマ",
+      "language": "言語",
+      "provider": "プロバイダー",
+      "model": "モデル",
+      "restart": "nanobot を再起動",
+      "configPath": "設定パス"
+    },
+    "help": {
+      "theme": "ライト表示とダーク表示を切り替えます。",
+      "language": "WebUI で使用する言語を選択します。",
+      "provider": "新しいモデルリクエストに使うプロバイダーを選択します。",
+      "model": "nanobot が既定で使用するモデル名を設定します。",
+      "configPath": "現在ゲートウェイが使用している設定ファイルです。"
+    },
+    "values": {
+      "light": "ライト",
+      "dark": "ダーク",
+      "notAvailable": "利用不可"
+    },
+    "status": {
+      "loading": "設定を読み込んでいます...",
+      "loadError": "設定を読み込めませんでした",
+      "unsaved": "未保存の変更があります。",
+      "savedRestart": "保存しました。反映するには nanobot を再起動してください。"
+    },
+    "actions": {
+      "save": "保存",
+      "saving": "保存中",
+      "edit": "編集",
+      "cancel": "キャンセル"
+    },
+    "byok": {
+      "description": "自分の provider キーを使います。Nanobot は現在の config から値を読み込み、設定済みの provider だけを一般設定で選択できます。",
+      "configured": "設定済み",
+      "notConfigured": "未設定",
+      "configuredSection": "設定済み",
+      "notConfiguredSection": "未設定",
+      "showMore": "さらに {{count}} 件表示",
+      "showLess": "折りたたむ",
+      "apiKey": "API key",
+      "apiBase": "API base",
+      "apiKeyPlaceholder": "API key を入力",
+      "apiKeyConfiguredPlaceholder": "空欄のままなら現在の key を保持",
+      "configuredKeyHint": "設定済み key",
+      "apiBasePlaceholder": "provider の既定値を使用",
+      "apiKeyRequired": "この provider を設定するには API key が必要です。",
+      "showApiKey": "API key を表示",
+      "hideApiKey": "API key を隠す",
+      "noConfiguredProviders": "設定済み provider がありません",
+      "configureFirst": "先に BYOK で provider を設定してください。",
+      "openByok": "BYOK を開く",
+      "tabs": {
+        "ariaLabel": "BYOK 認証情報タイプ",
+        "llm": "LLM",
+        "webSearch": "Web Search"
+      },
+      "webSearch": {
+        "provider": "検索 provider",
+        "providerHelp": "web search ツールで使うバックエンドを選択します。",
+        "selectProvider": "provider を選択",
+        "credentials": "認証情報",
+        "noCredentialRequired": "key は不要",
+        "noCredentialHelp": "DuckDuckGo は API key を保存せずに使えます。",
+        "apiKeyHelp": "config に保存され、保存後はマスク表示されます。",
+        "baseUrl": "Base URL",
+        "baseUrlHelp": "SearXNG には自分のインスタンス URL が必要です。",
+        "baseUrlPlaceholder": "https://search.example.com",
+        "apiKeyRequired": "この検索 provider には API key が必要です。",
+        "baseUrlRequired": "SearXNG には Base URL が必要です。",
+        "missingCredential": "保存する前に必要な認証情報を入力してください。",
+        "saveHint": "変更は新しい web search リクエストに適用されます。"
+      }
     }
   },
   "chat": {
@@ -37,8 +137,8 @@
     "newChat": "新しいチャット"
   },
   "deleteConfirm": {
-    "title": "「{{title}}」を削除しますか？",
-    "description": "セッションファイルはディスクから削除されます。この操作は元に戻せません。",
+    "title": "このチャットを削除しますか？",
+    "description": "この操作は元に戻せません。",
     "cancel": "キャンセル",
     "confirm": "削除"
   },
@@ -53,7 +153,60 @@
   "thread": {
     "loadingConversation": "会話を読み込み中…",
     "empty": {
-      "description": "質問したり、ローカル作業を続けたり、新しいスレッドを始めたりできます。"
+      "description": "質問したり、ローカル作業を続けたり、新しいスレッドを始めたりできます。",
+      "greeting": "何をお手伝いしましょうか？",
+      "quickActions": {
+        "plan": {
+          "title": "プロジェクト計画を作成",
+          "prompt": "次に作るものについて、簡潔なプロジェクト計画を作成してください。"
+        },
+        "analyze": {
+          "title": "このデータを分析",
+          "prompt": "このデータを分析し、最も重要なパターンを指摘してください。"
+        },
+        "brainstorm": {
+          "title": "アイデアを出す",
+          "prompt": "この問題について、実用的なアイデアとトレードオフをいくつか出してください。"
+        },
+        "code": {
+          "title": "コードを書く",
+          "prompt": "このタスクのコードを書くのを手伝ってください。まず最小限の有用な変更から始めてください。"
+        },
+        "summarize": {
+          "title": "この文書を要約",
+          "prompt": "この文書を要約し、重要なポイントを列挙してください。"
+        },
+        "more": {
+          "title": "その他",
+          "prompt": "このワークスペースであなたが手伝える便利な方法をいくつか見せてください。"
+        }
+      },
+      "imageQuickActions": {
+        "icon": {
+          "title": "アプリアイコンを作る",
+          "prompt": "nanobot のクリーンな 1:1 アプリアイコンを生成してください。親しみやすいロボット、シンプルなベクター風、柔らかい青と白の配色、文字なし。"
+        },
+        "sticker": {
+          "title": "ステッカーを作る",
+          "prompt": "小さなロボットアシスタントのかわいいステッカー風画像を生成してください。透明風の背景で、表情豊かで遊び心のある雰囲気。"
+        },
+        "poster": {
+          "title": "ポスターを作る",
+          "prompt": "個人向け AI アシスタントの洗練されたポスター案を生成してください。モダンな構図、強い視覚階層、ランディングページ向け。"
+        },
+        "product": {
+          "title": "製品モックアップ",
+          "prompt": "会話型 AI Web アプリのクリーンな製品モックアップ画像を生成してください。ミニマルな UI、上質なライティング、リアルなデバイスフレーム。"
+        },
+        "portrait": {
+          "title": "スタイル付きポートレート",
+          "prompt": "親しみやすい AI コンパニオンのスタイル付きポートレートを生成してください。柔らかい光、細部は豊かで近づきやすい、モダンなイラスト風。"
+        },
+        "edit": {
+          "title": "画像を編集",
+          "prompt": "画像編集を手伝ってください。まず編集する画像のアップロードまたは指定を求め、その後に編集後の結果を生成してください。"
+        }
+      }
     },
     "header": {
       "toggleSidebar": "サイドバーを切り替える"
@@ -62,10 +215,27 @@
       "placeholderThread": "メッセージを入力…",
       "placeholderHero": "何を考えていますか？",
       "placeholderOpening": "新しいチャットを開いています…",
+      "placeholderStreaming": "モデルが応答しています…",
       "inputAria": "メッセージ入力欄",
       "sendHint": "Enter で送信 · Shift+Enter で改行",
       "send": "メッセージを送信",
+      "stop": "応答を停止",
       "attachImage": "画像を添付",
+      "imageMode": {
+        "label": "画像生成",
+        "toggle": "画像生成モードを切り替え",
+        "placeholder": "画像を説明または編集…",
+        "aspectAria": "画像のアスペクト比",
+        "aspectLabel": "画像の比率",
+        "aspect": {
+          "auto": "自動",
+          "1_1": "正方形 1:1",
+          "3_4": "縦長 3:4",
+          "9_16": "ストーリー 9:16",
+          "4_3": "横長 4:3",
+          "16_9": "ワイド 16:9"
+        }
+      },
       "encoding": "処理中…",
       "remove": "添付を削除",
       "normalizedSizeHint": "{{orig}} → {{current}}（自動圧縮）",
@@ -76,6 +246,51 @@
         "decode_failed": "この画像をデコードできません",
         "too_large": "画像が大きすぎます。小さいものを選んでください",
         "io": "このファイルを読み込めません"
+      },
+      "slash": {
+        "ariaLabel": "スラッシュコマンド",
+        "label": "コマンド",
+        "navigateHint": "↑↓ 選択",
+        "selectHint": "Enter/Tab 入力",
+        "closeHint": "Esc 閉じる",
+        "commands": {
+          "new": {
+            "title": "新しいチャット",
+            "description": "現在のタスクを停止して、新しい会話を開始します。"
+          },
+          "stop": {
+            "title": "現在のタスクを停止",
+            "description": "このチャットで実行中の agent ターンをキャンセルします。"
+          },
+          "restart": {
+            "title": "nanobot を再起動",
+            "description": "bot プロセスをその場で再起動します。"
+          },
+          "status": {
+            "title": "ステータスを表示",
+            "description": "ランタイム、provider、channel の状態を表示します。"
+          },
+          "history": {
+            "title": "会話履歴を表示",
+            "description": "保存済みの直近 N 件の会話メッセージを表示します。"
+          },
+          "dream": {
+            "title": "Dream を実行",
+            "description": "メモリ統合を手動で開始します。"
+          },
+          "dream_log": {
+            "title": "Dream ログを表示",
+            "description": "直近の Dream 統合で変更された内容を表示します。"
+          },
+          "dream_restore": {
+            "title": "メモリを復元",
+            "description": "以前の Dream スナップショットへメモリを戻します。"
+          },
+          "help": {
+            "title": "ヘルプを表示",
+            "description": "利用可能なスラッシュコマンドを一覧表示します。"
+          }
+        }
       }
     },
     "scrollToBottom": "一番下へスクロール"

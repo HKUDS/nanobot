@@ -27,7 +27,7 @@ class TestBuildEnvUnix:
     def test_expected_keys(self):
         with patch("nanobot.agent.tools.shell._IS_WINDOWS", False):
             env = ExecTool()._build_env()
-        expected = {"HOME", "LANG", "TERM"}
+        expected = {"HOME", "LANG", "TERM", "PYTHONUNBUFFERED"}
         assert expected <= set(env)
         if sys.platform != "win32":
             assert set(env) == expected
@@ -53,7 +53,7 @@ class TestBuildEnvWindows:
 
     _EXPECTED_KEYS = {
         "SYSTEMROOT", "COMSPEC", "USERPROFILE", "HOMEDRIVE",
-        "HOMEPATH", "TEMP", "TMP", "PATHEXT", "PATH",
+        "HOMEPATH", "TEMP", "TMP", "PATHEXT", "PATH", "PYTHONUNBUFFERED",
         *_WINDOWS_ENV_KEYS,
     }
 
@@ -112,33 +112,31 @@ class TestSpawnUnix:
 class TestSpawnWindows:
 
     @pytest.mark.asyncio
-    async def test_uses_comspec_from_env(self):
+    async def test_uses_create_subprocess_shell(self):
         env = {"COMSPEC": r"C:\Windows\system32\cmd.exe", "PATH": ""}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
-            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+            patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell,
         ):
-            mock_exec.return_value = AsyncMock()
-            await ExecTool._spawn("dir", r"C:\Users", env)
+            mock_shell.return_value = AsyncMock()
+            await ExecTool._spawn("dir", r"C:\work", env)
 
-        args = mock_exec.call_args[0]
-        assert "cmd.exe" in args[0]
-        assert "/c" in args
+        args = mock_shell.call_args[0]
         assert "dir" in args
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_default_comspec(self):
-        env = {"PATH": ""}
+    async def test_passes_cwd_and_env(self):
+        env = {"PATH": "/usr/bin"}
         with (
             patch("nanobot.agent.tools.shell._IS_WINDOWS", True),
-            patch.dict("os.environ", {}, clear=True),
-            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+            patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell,
         ):
-            mock_exec.return_value = AsyncMock()
-            await ExecTool._spawn("dir", r"C:\Users", env)
+            mock_shell.return_value = AsyncMock()
+            await ExecTool._spawn("echo hi", r"C:\work", env)
 
-        args = mock_exec.call_args[0]
-        assert args[0] == "cmd.exe"
+        kwargs = mock_shell.call_args[1]
+        assert kwargs["cwd"] == r"C:\work"
+        assert kwargs["env"] == env
 
 
 # ---------------------------------------------------------------------------
