@@ -81,9 +81,15 @@ class OpenAICodexProvider(LLMProvider):
                 )
             return LLMResponse(content=content, tool_calls=tool_calls, finish_reason=finish_reason)
         except Exception as e:
-            msg = f"Error calling Codex: {e}"
+            msg = _codex_error_message(e)
             retry_after = getattr(e, "retry_after", None) or self._extract_retry_after(msg)
-            return LLMResponse(content=msg, finish_reason="error", retry_after=retry_after)
+            return LLMResponse(
+                content=msg,
+                finish_reason="error",
+                retry_after=retry_after,
+                error_kind=_codex_error_kind(e),
+                error_should_retry=_codex_error_should_retry(e, retry_after),
+            )
 
     async def chat(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
@@ -122,6 +128,33 @@ def _build_headers(account_id: str, token: str) -> dict[str, str]:
         "accept": "text/event-stream",
         "content-type": "application/json",
     }
+
+
+def _codex_error_message(exc: Exception) -> str:
+    detail = str(exc).strip()
+    if detail:
+        return f"Error calling Codex: {detail}"
+    return "Error calling Codex: request failed without details"
+
+
+def _codex_error_kind(exc: Exception) -> str | None:
+    if isinstance(exc, (asyncio.TimeoutError, httpx.TimeoutException)):
+        return "timeout"
+    if isinstance(exc, (httpx.TransportError, ConnectionError)):
+        return "connection"
+    if not str(exc).strip():
+        return "connection"
+    return None
+
+
+def _codex_error_should_retry(exc: Exception, retry_after: float | None) -> bool | None:
+    if retry_after is not None:
+        return True
+    if _codex_error_kind(exc) in {"timeout", "connection"}:
+        return True
+    if not str(exc).strip():
+        return True
+    return None
 
 
 class _CodexHTTPError(RuntimeError):
