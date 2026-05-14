@@ -486,7 +486,7 @@ def _input_model_with_autocomplete(
         def __init__(self, provider_name: str):
             self.provider = provider_name
 
-        def get_completions(self, document, complete_event):
+        def get_completions(self, document, _complete_event):
             text = document.text_before_cursor
             suggestions = get_model_suggestions(text, provider=self.provider, limit=50)
             for model in suggestions:

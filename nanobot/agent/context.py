@@ -209,11 +209,3 @@ class ContextBuilder:
             return text
         return images + [{"type": "text", "text": text}]
 
-    def add_tool_result(
-        self, messages: list[dict[str, Any]],
-        tool_call_id: str, tool_name: str, result: Any,
-    ) -> list[dict[str, Any]]:
-        """Add a tool result to the message list."""
-        messages.append({"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": result})
-        return messages
-

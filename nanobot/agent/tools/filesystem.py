@@ -625,11 +625,6 @@ def _find_matches(content: str, old_text: str) -> list[_MatchSpan]:
     return []
 
 
-def _find_match_line_numbers(content: str, old_text: str) -> list[int]:
-    """Return 1-based starting line numbers for the current matching strategies."""
-    return [match.line for match in _find_matches(content, old_text)]
-
-
 def _collapse_internal_whitespace(text: str) -> str:
     return "\n".join(" ".join(line.split()) for line in text.splitlines())
 

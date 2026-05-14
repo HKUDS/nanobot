@@ -322,26 +322,3 @@ class TestBuildMessages:
         user_msg = messages[-1]["content"]
         assert isinstance(user_msg, list)
         assert any(b.get("type") == "image_url" for b in user_msg)
-
-
-# ---------------------------------------------------------------------------
-# add_tool_result
-# ---------------------------------------------------------------------------
-
-
-class TestAddToolResult:
-    def test_appends_tool_message(self, tmp_path):
-        builder = _builder(tmp_path)
-        msgs = [{"role": "user", "content": "hello"}]
-        result = builder.add_tool_result(msgs, "call_123", "read_file", "file content")
-        assert len(result) == 2
-        assert result[1]["role"] == "tool"
-        assert result[1]["tool_call_id"] == "call_123"
-        assert result[1]["name"] == "read_file"
-        assert result[1]["content"] == "file content"
-
-    def test_returns_same_list(self, tmp_path):
-        builder = _builder(tmp_path)
-        msgs = []
-        result = builder.add_tool_result(msgs, "id", "tool", "ok")
-        assert result is msgs
