@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -73,12 +73,73 @@ async def test_complete_goal_closes_active_goal(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_long_task_publishes_thread_goal_ws_after_save(tmp_path):
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    sm = SessionManager(tmp_path)
+    lt = LongTaskTool(sessions=sm, bus=bus)
+    rc = RequestContext(
+        channel="websocket",
+        chat_id="chat-99",
+        session_key="websocket:chat-99",
+        metadata={},
+    )
+    lt.set_context(rc)
+
+    await lt.execute(goal="Objective alpha", ui_summary="alpha")
+
+    bus.publish_outbound.assert_awaited_once()
+    call = bus.publish_outbound.await_args.args[0]
+    assert call.channel == "websocket"
+    assert call.chat_id == "chat-99"
+    assert call.metadata.get("_thread_goal_sync") is True
+    assert call.metadata["thread_goal"] == {
+        "active": True,
+        "ui_summary": "alpha",
+        "objective": "Objective alpha",
+    }
+
+
+@pytest.mark.asyncio
+async def test_complete_goal_publishes_inactive_thread_goal_ws(tmp_path):
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    sm = SessionManager(tmp_path)
+    lt = LongTaskTool(sessions=sm, bus=bus)
+    cg = CompleteGoalTool(sessions=sm, bus=bus)
+    rc = RequestContext(
+        channel="websocket",
+        chat_id="chat-z",
+        session_key="websocket:chat-z",
+        metadata={},
+    )
+    lt.set_context(rc)
+    await lt.execute(goal="X")
+
+    bus.publish_outbound.reset_mock()
+    cg.set_context(rc)
+    await cg.execute(recap="Done.")
+
+    bus.publish_outbound.assert_awaited_once()
+    call = bus.publish_outbound.await_args.args[0]
+    assert call.metadata["thread_goal"] == {"active": False}
+
+
+@pytest.mark.asyncio
 async def test_complete_goal_without_active_is_noop_message(tmp_path):
     sm = SessionManager(tmp_path)
     _lt, cg = _tools(sm)
 
     out = await cg.execute(recap="n/a")
     assert "No active" in out
+
+
+@pytest.mark.asyncio
+async def test_long_task_skips_ws_publish_without_bus(tmp_path):
+    sm = SessionManager(tmp_path)
+    lt, _cg = _tools(sm)
+    out = await lt.execute(goal="Solo", ui_summary="s")
+    assert "Thread goal recorded" in out
 
 
 @pytest.mark.asyncio

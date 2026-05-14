@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 THREAD_GOAL_KEY = "thread_goal"
 _MAX_OBJECTIVE_IN_RUNTIME = 4000
+_MAX_OBJECTIVE_WS = 600
 
 
 def parse_thread_goal(blob: Any) -> dict[str, Any] | None:
@@ -44,3 +45,20 @@ def runtime_lines_for_metadata(metadata: Mapping[str, Any] | None) -> list[str]:
     if hint:
         out.append(f"Summary: {hint}")
     return out
+
+
+def thread_goal_ws_blob(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """JSON-safe snapshot for WebSocket ``thread_goal`` events (one chat_id per frame)."""
+    goal = parse_thread_goal(metadata.get(THREAD_GOAL_KEY)) if metadata else None
+    if isinstance(goal, dict) and goal.get("status") == "active":
+        objective = str(goal.get("objective") or "").strip()
+        if len(objective) > _MAX_OBJECTIVE_WS:
+            objective = objective[:_MAX_OBJECTIVE_WS].rstrip() + "…"
+        summary = str(goal.get("ui_summary") or "").strip()[:120]
+        blob: dict[str, Any] = {"active": True}
+        if summary:
+            blob["ui_summary"] = summary
+        if objective:
+            blob["objective"] = objective
+        return blob
+    return {"active": False}

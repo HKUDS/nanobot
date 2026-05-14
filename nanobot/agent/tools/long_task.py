@@ -15,10 +15,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from nanobot.agent.thread_goal_state import THREAD_GOAL_KEY, parse_thread_goal
+from nanobot.agent.thread_goal_state import THREAD_GOAL_KEY, parse_thread_goal, thread_goal_ws_blob
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
+from nanobot.bus.events import OutboundMessage
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
@@ -31,8 +32,9 @@ def _iso_now() -> str:
 class _GoalToolsMixin(ContextAware):
     """Shared routing context + Session lookup."""
 
-    def __init__(self, sessions: SessionManager) -> None:
+    def __init__(self, sessions: SessionManager, bus: Any | None = None) -> None:
         self._sessions = sessions
+        self._bus = bus
         self._request_ctx: RequestContext | None = None
 
     def set_context(self, ctx: RequestContext) -> None:
@@ -45,6 +47,27 @@ class _GoalToolsMixin(ContextAware):
         if not key:
             return None
         return self._sessions.get_or_create(key)
+
+    async def _publish_thread_goal_ws(self, metadata: dict[str, Any]) -> None:
+        """Fan-out authoritative goal snapshot for this WebSocket chat only."""
+        bus = self._bus
+        rc = self._request_ctx
+        if bus is None or rc is None or rc.channel != "websocket":
+            return
+        cid = (rc.chat_id or "").strip()
+        if not cid:
+            return
+        await bus.publish_outbound(
+            OutboundMessage(
+                channel="websocket",
+                chat_id=cid,
+                content="",
+                metadata={
+                    "_thread_goal_sync": True,
+                    "thread_goal": thread_goal_ws_blob(metadata),
+                },
+            ),
+        )
 
 
 @tool_parameters(
@@ -65,11 +88,14 @@ class _GoalToolsMixin(ContextAware):
 class LongTaskTool(Tool, _GoalToolsMixin):
     """Begin or replace focus on a long-running objective stored on the session."""
 
+    def __init__(self, sessions: Any, bus: Any | None = None) -> None:
+        _GoalToolsMixin.__init__(self, sessions, bus)
+
     @classmethod
     def create(cls, ctx: Any) -> Tool:
         sess = getattr(ctx, "sessions", None)
         assert sess is not None  # guarded by enabled()
-        return cls(sessions=sess)
+        return cls(sessions=sess, bus=getattr(ctx, "bus", None))
 
     @classmethod
     def enabled(cls, ctx: Any) -> bool:
@@ -113,6 +139,7 @@ class LongTaskTool(Tool, _GoalToolsMixin):
         }
         sess.metadata[THREAD_GOAL_KEY] = blob
         self._sessions.save(sess)
+        await self._publish_thread_goal_ws(sess.metadata)
         extra = f"\nSummary line: {summary}" if summary else ""
         return (
             "Thread goal recorded. Keep working toward the objective using ordinary tools. "
@@ -135,11 +162,14 @@ class LongTaskTool(Tool, _GoalToolsMixin):
 class CompleteGoalTool(Tool, _GoalToolsMixin):
     """Mark the active thread goal finished after all required work is verified."""
 
+    def __init__(self, sessions: Any, bus: Any | None = None) -> None:
+        _GoalToolsMixin.__init__(self, sessions, bus)
+
     @classmethod
     def create(cls, ctx: Any) -> Tool:
         sess = getattr(ctx, "sessions", None)
         assert sess is not None
-        return cls(sessions=sess)
+        return cls(sessions=sess, bus=getattr(ctx, "bus", None))
 
     @classmethod
     def enabled(cls, ctx: Any) -> bool:
@@ -175,6 +205,7 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
             "recap": (recap or "").strip(),
         }
         self._sessions.save(sess)
+        await self._publish_thread_goal_ws(sess.metadata)
         tail = (recap or "").strip()
         if tail:
             return f"Goal marked complete ({ended}). Recap:\n{tail}"

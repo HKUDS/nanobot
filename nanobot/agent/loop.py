@@ -22,7 +22,7 @@ from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
-from nanobot.agent.thread_goal_state import runtime_lines_for_metadata
+from nanobot.agent.thread_goal_state import runtime_lines_for_metadata, thread_goal_ws_blob
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -961,6 +961,8 @@ class AgentLoop:
                         turn_metadata: dict[str, Any] = {**msg.metadata, "_turn_end": True}
                         if turn_lat is not None:
                             turn_metadata["latency_ms"] = int(turn_lat)
+                        sess_turn = self.sessions.get_or_create(session_key)
+                        turn_metadata["thread_goal"] = thread_goal_ws_blob(sess_turn.metadata)
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
                             content="", metadata=turn_metadata,
