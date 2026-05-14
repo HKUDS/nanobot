@@ -1,5 +1,5 @@
 /** Drop duplicate tool_call objects (same id or identical formatted trace). */
-export function dedupeToolCallsForUi(calls: unknown[] | undefined): unknown[] {
+export function dedupeToolCallsForUi(calls: unknown): unknown[] {
   if (!Array.isArray(calls) || calls.length === 0) return [];
   const seen = new Set<string>();
   const out: unknown[] = [];
