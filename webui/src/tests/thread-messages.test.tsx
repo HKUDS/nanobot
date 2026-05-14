@@ -5,7 +5,7 @@ import { ThreadMessages } from "@/components/thread/ThreadMessages";
 import type { UIMessage } from "@/lib/types";
 
 describe("ThreadMessages", () => {
-  it("uses compact spacing between consecutive auxiliary rows", () => {
+  it("groups consecutive reasoning and tool rows into one cluster before the answer", () => {
     const messages: UIMessage[] = [
       {
         id: "r1",
@@ -41,12 +41,13 @@ describe("ThreadMessages", () => {
       },
     ];
 
-    const { container } = render(<ThreadMessages messages={messages} />);
+    const { container } = render(
+      <ThreadMessages messages={messages} isStreaming={false} />,
+    );
     const rows = Array.from(container.firstElementChild?.children ?? []);
 
-    expect(rows[0]).not.toHaveClass("mt-2", "mt-5");
-    expect(rows[1]).toHaveClass("mt-2");
-    expect(rows[2]).toHaveClass("mt-2");
-    expect(rows[3]).toHaveClass("mt-5");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).not.toHaveClass("mt-2", "mt-4", "mt-5");
+    expect(rows[1]).toHaveClass("mt-4");
   });
 });

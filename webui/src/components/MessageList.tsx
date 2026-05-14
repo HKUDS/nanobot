@@ -1,10 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, ChevronRight, Sparkles, Wrench } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { MessageBubble } from "@/components/MessageBubble";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { UIMessage } from "@/lib/types";
+
+/** A run of consecutive trace / reasoning events to be merged into one collapsible block. */
+interface TraceChunk {
+  kind: "trace_chunk";
+  /** Unique IDs of all messages in this chunk, used as React key. */
+  ids: string[];
+  /** All tool call lines across the chunk (flattened). */
+  traceLines: string[];
+  /** All reasoning texts across the chunk. */
+  reasoningTexts: string[];
+  /** True while any message in the chunk is still streaming. */
+  isStreaming: boolean;
+  animClass?: string;
+}
 
 interface MessageListProps {
   messages: UIMessage[];

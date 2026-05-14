@@ -118,7 +118,7 @@ describe("MessageBubble", () => {
 
     expect(screen.getByText("Thinking…")).toBeInTheDocument();
     expect(screen.getByText(/Step 1: parse intent\./)).toBeInTheDocument();
-    expect(container.querySelector(".reasoning-shimmer")).toBeInTheDocument();
+    expect(container.querySelector(".reasoning-sheen-stripe")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /thinking/i }).parentElement).not.toHaveClass("mb-2");
   });
 
