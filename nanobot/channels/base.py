@@ -42,6 +42,21 @@ class BaseChannel(ABC):
         self.logger = logger.bind(channel=self.name)
         self.bus = bus
         self._running = False
+        # Hydrate transcription/render attrs from the channel config when
+        # provided. Channel configs use Pydantic `extra="allow"` so callers
+        # can override these per-channel without bloating the schema; the
+        # class-level defaults above kick in only when nothing was set.
+        for attr in (
+            "transcription_provider",
+            "transcription_api_key",
+            "transcription_api_base",
+            "transcription_language",
+            "send_progress",
+            "send_tool_hints",
+        ):
+            val = getattr(config, attr, None)
+            if val is not None and val != "":
+                setattr(self, attr, val)
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
         """Transcribe an audio file via Whisper (OpenAI or Groq). Returns empty string on failure."""
