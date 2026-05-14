@@ -51,6 +51,10 @@ class SlackConfig(Base):
 
 SLACK_MAX_MESSAGE_LEN = 39_000  # Slack API allows ~40k; leave margin
 SLACK_DOWNLOAD_TIMEOUT = 30.0
+# Abort Socket Mode WSS handshake after this many seconds. REST auth_test can still
+# succeed while WSS blocks (firewall / region). slack-sdk does not apply HTTP(S)_PROXY
+# to websockets.connect — see slack_sdk.socket_mode.websockets.SocketModeClient.connect.
+SLACK_SOCKET_CONNECT_TIMEOUT_S = 45.0
 _HTML_DOWNLOAD_PREFIXES = (b"<!doctype html", b"<html")
 
 
@@ -108,7 +112,23 @@ class SlackChannel(BaseChannel):
             self.logger.warning("auth_test failed: {}", e)
 
         self.logger.info("Starting Socket Mode client...")
-        await self._socket_client.connect()
+        try:
+            await asyncio.wait_for(
+                self._socket_client.connect(),
+                timeout=SLACK_SOCKET_CONNECT_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            self.logger.error(
+                "Slack Socket Mode WebSocket handshake timed out after {:.0f}s. "
+                "auth_test uses HTTPS and may still succeed while WSS is blocked. "
+                "Check outbound access to Slack WebSockets; slack-sdk Socket Mode "
+                "does not apply HTTP(S)_PROXY to websockets.connect.",
+                SLACK_SOCKET_CONNECT_TIMEOUT_S,
+            )
+            await self.stop()
+            raise RuntimeError("Slack Socket Mode WebSocket connect timed out") from None
+
+        self.logger.info("Slack Socket Mode WebSocket connected (events enabled)")
 
         while self._running:
             await asyncio.sleep(1)
