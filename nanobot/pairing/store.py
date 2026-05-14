@@ -8,7 +8,6 @@ private-assistant scale: small JSON file, simple locking, no external DB.
 from __future__ import annotations
 
 import json
-import os
 import secrets
 import string
 import threading
@@ -19,11 +18,11 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.paths import get_data_dir
+from nanobot.utils.helpers import _write_text_atomic
 
 _LOCK = threading.Lock()
-
 _ALPHABET = string.ascii_uppercase + string.digits
-_CODE_LENGTH = 8  # e.g. XK9-42F-MP
+_CODE_LENGTH = 8  # e.g. ABCD-EFGH
 _TTL_DEFAULT_S = 600  # 10 minutes
 
 
@@ -37,30 +36,26 @@ def _load() -> dict[str, Any]:
         return {"approved": {}, "pending": {}}
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
     except (json.JSONDecodeError, OSError):
         logger.warning("Corrupted pairing store, resetting")
         return {"approved": {}, "pending": {}}
+
+    # Convert approved lists to sets for O(1) lookup
+    for channel, users in data.get("approved", {}).items():
+        data["approved"][channel] = set(users)
+    return data
 
 
 def _save(data: dict[str, Any]) -> None:
     path = _store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.flush()
-        os.fsync(f.fileno())
-    tmp.replace(path)
-    # Ensure directory entry is flushed for durability (Unix only; no-op on Windows)
-    try:
-        fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-    except (OSError, NotImplementedError):
-        pass
+    # Convert sets back to lists for JSON serialization
+    payload = {
+        "approved": {ch: sorted(list(users)) for ch, users in data.get("approved", {}).items()},
+        "pending": dict(data.get("pending", {})),
+    }
+    _write_text_atomic(path, json.dumps(payload, indent=2, ensure_ascii=False))
 
 
 def _gc_pending(data: dict[str, Any]) -> None:
@@ -79,19 +74,13 @@ def generate_code(
 ) -> str:
     """Create a new pairing code for *sender_id* on *channel*.
 
-    Returns the code (e.g. ``"XK9-42F"``).
+    Returns the code (e.g. ``"ABCD-EFGH"``).
     """
     with _LOCK:
         data = _load()
         _gc_pending(data)
-        # Ensure uniqueness
-        for _ in range(100):
-            raw = "".join(secrets.choice(_ALPHABET) for _ in range(_CODE_LENGTH))
-            code = f"{raw[:4]}-{raw[4:]}"
-            if code not in data.get("pending", {}):
-                break
-        else:  # pragma: no cover
-            raise RuntimeError("Failed to generate unique pairing code")
+        raw = "".join(secrets.choice(_ALPHABET) for _ in range(_CODE_LENGTH))
+        code = f"{raw[:4]}-{raw[4:]}"
 
         data.setdefault("pending", {})[code] = {
             "channel": channel,
@@ -119,7 +108,7 @@ def approve_code(code: str) -> tuple[str, str] | None:
             return None
         channel = info["channel"]
         sender_id = info["sender_id"]
-        data.setdefault("approved", {}).setdefault(channel, []).append(sender_id)
+        data.setdefault("approved", {}).setdefault(channel, set()).add(sender_id)
         _save(data)
         logger.info("Approved pairing code {} for {}@{}", code, sender_id, channel)
         return channel, sender_id
@@ -146,8 +135,8 @@ def is_approved(channel: str, sender_id: str) -> bool:
     """Check whether *sender_id* has been approved on *channel*."""
     with _LOCK:
         data = _load()
-        approved: dict[str, list[str]] = data.get("approved", {})
-        return str(sender_id) in approved.get(channel, [])
+        approved: dict[str, set[str]] = data.get("approved", {})
+        return str(sender_id) in approved.get(channel, set())
 
 
 def list_pending() -> list[dict[str, Any]]:
@@ -168,11 +157,11 @@ def revoke(channel: str, sender_id: str) -> bool:
     """
     with _LOCK:
         data = _load()
-        approved: dict[str, list[str]] = data.get("approved", {})
-        lst = approved.get(channel, [])
-        if sender_id in lst:
-            lst.remove(sender_id)
-            if not lst:
+        approved: dict[str, set[str]] = data.get("approved", {})
+        users = approved.get(channel, set())
+        if sender_id in users:
+            users.discard(sender_id)
+            if not users:
                 del approved[channel]
             _save(data)
             logger.info("Revoked {} from {}", sender_id, channel)
@@ -184,4 +173,19 @@ def get_approved(channel: str) -> list[str]:
     """Return all approved sender IDs for *channel*."""
     with _LOCK:
         data = _load()
-        return list(data.get("approved", {}).get(channel, []))
+        return sorted(data.get("approved", {}).get(channel, set()))
+
+
+def format_pairing_reply(code: str) -> str:
+    """Return the pairing-code message sent to unrecognised DM senders."""
+    return (
+        "This assistant requires approval before it can respond.\n"
+        f"Your pairing code is: `{code}`\n"
+        f"Ask the owner to run: `nanobot pairing approve {code}`"
+    )
+
+
+def format_expiry(expires_at: float) -> str:
+    """Return a human-readable expiry string (e.g. ``"120s"`` or ``"expired"``)."""
+    remaining = int(expires_at - time.time())
+    return f"{remaining}s" if remaining > 0 else "expired"

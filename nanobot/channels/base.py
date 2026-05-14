@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -14,6 +13,8 @@ from nanobot.bus.queue import MessageBus
 from nanobot.pairing import (
     approve_code,
     deny_code,
+    format_expiry,
+    format_pairing_reply,
     generate_code,
     is_approved,
     list_pending,
@@ -222,35 +223,15 @@ class BaseChannel(ABC):
         session_key: str | None = None,
         is_dm: bool = False,
     ) -> None:
-        """
-        Handle an incoming message from the chat platform.
-
-        This method checks permissions and forwards to the bus.
-        For DM messages from unrecognised senders, a pairing code is
-        issued instead of silently dropping the message.
-
-        Args:
-            sender_id: The sender's identifier.
-            chat_id: The chat/channel identifier.
-            content: Message text content.
-            media: Optional list of media URLs.
-            metadata: Optional channel-specific metadata.
-            session_key: Optional session key override (e.g. thread-scoped sessions).
-            is_dm: Whether the message is a direct / private message.
-        """
+        """Handle an incoming message: check permissions, issue pairing codes in DMs, or forward to bus."""
         if not self.is_allowed(sender_id):
             if is_dm:
                 code = generate_code(self.name, str(sender_id))
-                reply = (
-                    "This assistant requires approval before it can respond.\n"
-                    f"Your pairing code is: `{code}`\n"
-                    f"Ask the owner to run: `nanobot pairing approve {code}`"
-                )
                 await self.send(
                     OutboundMessage(
                         channel=self.name,
                         chat_id=str(chat_id),
-                        content=reply,
+                        content=format_pairing_reply(code),
                         metadata={"_pairing_code": code},
                     )
                 )
@@ -267,8 +248,9 @@ class BaseChannel(ABC):
             return
 
         # Intercept /pairing slash commands before they reach the agent loop
-        if content.strip().startswith("/pairing"):
-            await self._handle_pairing_command(sender_id, chat_id, content.strip())
+        parts = content.strip().split(None, 1)
+        if parts and parts[0] == "/pairing":
+            await self._handle_pairing_command(sender_id, chat_id, parts[1] if len(parts) > 1 else "")
             return
 
         meta = metadata or {}
@@ -288,12 +270,12 @@ class BaseChannel(ABC):
         await self.bus.publish_inbound(msg)
 
     async def _handle_pairing_command(
-        self, sender_id: str, chat_id: str, content: str
+        self, sender_id: str, chat_id: str, subcommand_text: str
     ) -> None:
         """Execute a ``/pairing`` slash command and reply directly to the user."""
-        parts = content.split()
-        sub = parts[1] if len(parts) > 1 else "list"
-        arg = parts[2] if len(parts) > 2 else None
+        parts = subcommand_text.split()
+        sub = parts[0] if parts else "list"
+        arg = parts[1] if len(parts) > 1 else None
 
         if sub in ("list",):
             pending = list_pending()
@@ -302,8 +284,7 @@ class BaseChannel(ABC):
             else:
                 lines = ["Pending pairing requests:"]
                 for item in pending:
-                    remaining = int(item.get("expires_at", 0) - time.time())
-                    expiry = f"{remaining}s" if remaining > 0 else "expired"
+                    expiry = format_expiry(item.get("expires_at", 0))
                     lines.append(
                         f"- `{item['code']}` | {item['channel']} | {item['sender_id']} | {expiry}"
                     )
@@ -335,13 +316,20 @@ class BaseChannel(ABC):
         elif sub == "revoke":
             if arg is None:
                 reply = "Usage: `/pairing revoke <user_id>` or `/pairing revoke <channel> <user_id>`"
+            elif len(parts) == 2:
+                reply = (
+                    f"Revoked {arg} from {self.name}"
+                    if revoke(self.name, arg)
+                    else f"{arg} was not in the approved list for {self.name}"
+                )
+            elif len(parts) == 3:
+                reply = (
+                    f"Revoked {parts[2]} from {arg}"
+                    if revoke(arg, parts[2])
+                    else f"{parts[2]} was not in the approved list for {arg}"
+                )
             else:
-                target_channel = parts[3] if len(parts) > 3 else self.name
-                target_user = arg if len(parts) <= 3 else parts[3]
-                if revoke(target_channel, target_user):
-                    reply = f"Revoked {target_user} from {target_channel}"
-                else:
-                    reply = f"{target_user} was not in the approved list for {target_channel}"
+                reply = "Usage: `/pairing revoke <user_id>` or `/pairing revoke <channel> <user_id>`"
 
         else:
             reply = (

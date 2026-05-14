@@ -18,6 +18,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.pairing import format_pairing_reply, generate_code, is_approved
 from nanobot.utils.helpers import safe_filename, split_message
 
 
@@ -343,13 +344,8 @@ class SlackChannel(BaseChannel):
 
         if not self._is_allowed(sender_id, chat_id, channel_type):
             if channel_type == "im" and self.config.dm.enabled:
-                from nanobot.pairing import generate_code
                 code = generate_code(self.name, sender_id)
-                reply = (
-                    "This assistant requires approval before it can respond.\n"
-                    f"Your pairing code is: `{code}`\n"
-                    f"Ask the owner to run: `nanobot pairing approve {code}`"
-                )
+                reply = format_pairing_reply(code)
                 await self.send(
                     OutboundMessage(
                         channel=self.name,
@@ -624,8 +620,6 @@ class SlackChannel(BaseChannel):
                 self.logger.debug("done reaction failed: {}", e)
 
     def _is_allowed(self, sender_id: str, chat_id: str, channel_type: str) -> bool:
-        from nanobot.pairing import is_approved
-
         if channel_type == "im":
             if not self.config.dm.enabled:
                 return False

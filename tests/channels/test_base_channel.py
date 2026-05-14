@@ -101,7 +101,7 @@ async def test_handle_pairing_command_list(monkeypatch) -> None:
         ],
     )
 
-    await channel._handle_pairing_command("owner", "chat1", "/pairing list")
+    await channel._handle_pairing_command("owner", "chat1", "list")
 
     assert len(channel._sent) == 1
     assert "ABCD-EFGH" in channel._sent[0].content
@@ -115,7 +115,7 @@ async def test_handle_pairing_command_approve(monkeypatch) -> None:
         lambda code: ("dummy", "123") if code == "ABCD-EFGH" else None,
     )
 
-    await channel._handle_pairing_command("owner", "chat1", "/pairing approve ABCD-EFGH")
+    await channel._handle_pairing_command("owner", "chat1", "approve ABCD-EFGH")
 
     assert len(channel._sent) == 1
     assert "Approved" in channel._sent[0].content
@@ -129,7 +129,7 @@ async def test_handle_pairing_command_revoke(monkeypatch) -> None:
         lambda ch, sid: sid == "123",
     )
 
-    await channel._handle_pairing_command("owner", "chat1", "/pairing revoke 123")
+    await channel._handle_pairing_command("owner", "chat1", "revoke 123")
 
     assert len(channel._sent) == 1
     assert "Revoked" in channel._sent[0].content

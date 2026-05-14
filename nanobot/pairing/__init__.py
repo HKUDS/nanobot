@@ -3,6 +3,8 @@
 from nanobot.pairing.store import (
     approve_code,
     deny_code,
+    format_expiry,
+    format_pairing_reply,
     generate_code,
     get_approved,
     is_approved,
@@ -13,6 +15,8 @@ from nanobot.pairing.store import (
 __all__ = [
     "approve_code",
     "deny_code",
+    "format_expiry",
+    "format_pairing_reply",
     "generate_code",
     "get_approved",
     "is_approved",
