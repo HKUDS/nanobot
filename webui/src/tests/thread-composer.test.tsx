@@ -107,6 +107,31 @@ describe("ThreadComposer", () => {
     vi.useRealTimers();
   });
 
+  it("opens a bottom sheet with full thread goal when expand is clicked", async () => {
+    const longObjective =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz0123456789GoalTail";
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Type your message..."
+        threadGoal={{
+          active: true,
+          objective: longObjective,
+          ui_summary: "Short summary for strip",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Show full goal" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveTextContent("Short summary for strip");
+    expect(dialog).toHaveTextContent(longObjective);
+    expect(dialog).toHaveTextContent("Summary");
+    expect(dialog).toHaveTextContent("Objective");
+  });
+
   it("opens a slash command palette and inserts the selected command", () => {
     const onSend = vi.fn();
     render(

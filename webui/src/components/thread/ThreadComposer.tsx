@@ -13,6 +13,7 @@ import {
   BookOpen,
   Check,
   ChevronDown,
+  ChevronUp,
   CircleHelp,
   History,
   ImageIcon,
@@ -30,6 +31,12 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   useAttachedImages,
   type AttachedImage,
@@ -131,14 +138,27 @@ function getVisibleBounds(el: HTMLElement): { top: number; bottom: number } {
   return { top, bottom };
 }
 
+function threadGoalStripPreview(
+  goal: ThreadGoalWsPayload | undefined,
+  t: (key: string) => string,
+): string | null {
+  if (!goal?.active) return null;
+  const summary = goal.ui_summary?.trim();
+  if (summary) return summary;
+  const obj = goal.objective?.trim();
+  if (obj) return obj.length > 72 ? `${obj.slice(0, 72)}…` : obj;
+  return t("thread.composer.threadGoalFallback");
+}
+
 function RunElapsedStrip({
   startedAt,
-  threadGoalLabel,
+  threadGoal,
 }: {
   startedAt: number | null;
-  threadGoalLabel?: string | null;
+  threadGoal?: ThreadGoalWsPayload;
 }) {
   const { t } = useTranslation();
+  const [goalSheetOpen, setGoalSheetOpen] = useState(false);
   const [, setTick] = useState(0);
   useEffect(() => {
     if (startedAt == null) return;
@@ -146,8 +166,13 @@ function RunElapsedStrip({
     return () => window.clearInterval(id);
   }, [startedAt]);
   const showTimer = startedAt != null;
-  const showGoal = !!threadGoalLabel?.trim();
+  const stripLabel = threadGoalStripPreview(threadGoal, t);
+  const showGoal = !!stripLabel?.trim();
   if (!showTimer && !showGoal) return null;
+
+  const objectiveFull = threadGoal?.objective?.trim() ?? "";
+  const summaryFull = threadGoal?.ui_summary?.trim() ?? "";
+  const canExpandGoal = !!(threadGoal?.active && (objectiveFull || summaryFull));
 
   const elapsed =
     startedAt != null ? Math.max(0, Math.floor(Date.now() / 1000 - startedAt)) : 0;
@@ -158,34 +183,85 @@ function RunElapsedStrip({
     ? t("thread.composer.runRuntimeTitle", { elapsed: shortElapsed })
     : null;
 
-  const ariaParts = [timerTitle, showGoal ? threadGoalLabel : null].filter(Boolean);
+  const ariaParts = [timerTitle, showGoal ? stripLabel : null].filter(Boolean);
   const ariaLabel = ariaParts.join(" · ");
 
   return (
-    <div
-      className="flex min-h-[36px] items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
-      role="status"
-      aria-label={ariaLabel}
-    >
-      {showTimer ? (
-        <Activity className="h-4 w-4 shrink-0 text-primary/80" aria-hidden />
-      ) : (
-        <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
-      )}
-      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
-        {timerTitle ? <span className="shrink-0">{timerTitle}</span> : null}
-        {timerTitle && showGoal ? (
-          <span className="shrink-0 text-muted-foreground/45" aria-hidden>
-            ·
-          </span>
+    <>
+      <div
+        className="flex min-h-[36px] items-center gap-2 border-b border-black/[0.04] px-3 py-2 dark:border-white/[0.06]"
+        role="status"
+        aria-label={ariaLabel}
+      >
+        {showTimer ? (
+          <Activity className="h-4 w-4 shrink-0 text-primary/80" aria-hidden />
+        ) : (
+          <Target className="h-4 w-4 shrink-0 text-primary/75" aria-hidden />
+        )}
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[12px] font-medium text-foreground/75">
+          {timerTitle ? <span className="shrink-0">{timerTitle}</span> : null}
+          {timerTitle && showGoal ? (
+            <span className="shrink-0 text-muted-foreground/45" aria-hidden>
+              ·
+            </span>
+          ) : null}
+          {showGoal ? (
+            <span className="truncate">
+              {t("thread.composer.threadGoalStrip", { label: stripLabel })}
+            </span>
+          ) : null}
+        </span>
+        {canExpandGoal ? (
+          <button
+            type="button"
+            className={cn(
+              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+              "text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            )}
+            aria-label={t("thread.composer.threadGoalExpandAria")}
+            title={t("thread.composer.threadGoalExpandAria")}
+            onClick={() => setGoalSheetOpen(true)}
+          >
+            <ChevronUp className="h-4 w-4" aria-hidden />
+          </button>
         ) : null}
-        {showGoal ? (
-          <span className="truncate">
-            {t("thread.composer.threadGoalStrip", { label: threadGoalLabel })}
-          </span>
-        ) : null}
-      </span>
-    </div>
+      </div>
+
+      <Sheet open={goalSheetOpen} onOpenChange={setGoalSheetOpen}>
+        <SheetContent
+          side="bottom"
+          showCloseButton
+          aria-describedby={undefined}
+          className={cn(
+            "max-h-[min(85vh,560px)] rounded-t-2xl border-t px-4 pb-6 pt-4",
+            "gap-3 sm:max-w-lg sm:rounded-t-2xl",
+          )}
+        >
+          <SheetHeader className="space-y-1 text-left">
+            <SheetTitle>{t("thread.composer.threadGoalSheetTitle")}</SheetTitle>
+          </SheetHeader>
+          <div className="flex max-h-[min(58vh,420px)] flex-col gap-4 overflow-y-auto pr-0.5 text-[14px] leading-relaxed">
+            {summaryFull ? (
+              <section>
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t("thread.composer.threadGoalSummaryHeading")}
+                </p>
+                <p className="whitespace-pre-wrap text-foreground/90">{summaryFull}</p>
+              </section>
+            ) : null}
+            {objectiveFull ? (
+              <section>
+                <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t("thread.composer.threadGoalObjectiveHeading")}
+                </p>
+                <p className="whitespace-pre-wrap text-foreground/90">{objectiveFull}</p>
+              </section>
+            ) : null}
+          </div>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }
 
@@ -546,15 +622,6 @@ export function ThreadComposer({
   const attachButtonDisabled = disabled || full;
   const showStopButton = isStreaming && !!onStop;
 
-  const threadGoalStripLabel = useMemo(() => {
-    if (!threadGoal?.active) return null;
-    const summary = threadGoal.ui_summary?.trim();
-    if (summary) return summary;
-    const obj = threadGoal.objective?.trim();
-    if (obj) return obj.length > 72 ? `${obj.slice(0, 72)}…` : obj;
-    return t("thread.composer.threadGoalFallback");
-  }, [threadGoal, t]);
-
   return (
     <form
       ref={formRef}
@@ -619,8 +686,8 @@ export function ThreadComposer({
             ))}
           </div>
         ) : null}
-        {runStartedAt != null || threadGoalStripLabel ? (
-          <RunElapsedStrip startedAt={runStartedAt} threadGoalLabel={threadGoalStripLabel} />
+        {runStartedAt != null || threadGoal?.active ? (
+          <RunElapsedStrip startedAt={runStartedAt} threadGoal={threadGoal} />
         ) : null}
         <textarea
           ref={textareaRef}
