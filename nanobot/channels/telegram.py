@@ -1011,6 +1011,7 @@ class TelegramChannel(BaseChannel):
             content=content,
             metadata=self._build_message_metadata(message, user),
             session_key=self._derive_topic_session_key(message),
+            is_dm=message.chat.type == "private",
         )
 
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

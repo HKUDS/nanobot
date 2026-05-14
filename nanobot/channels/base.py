@@ -10,6 +10,14 @@ from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.pairing import (
+    approve_code,
+    deny_code,
+    generate_code,
+    is_approved,
+    list_pending,
+    revoke,
+)
 
 
 class BaseChannel(ABC):
@@ -176,7 +184,14 @@ class BaseChannel(ABC):
         return bool(streaming) and type(self).send_delta is not BaseChannel.send_delta
 
     def is_allowed(self, sender_id: str) -> bool:
-        """Check if *sender_id* is permitted.  Empty list → deny all; ``"*"`` → allow all."""
+        """Check if *sender_id* is permitted.
+
+        Priority:
+        1. ``allowFrom: ["*"]`` → allow all.
+        2. ``allowFrom`` list → allow if sender_id is present.
+        3. Pairing store approved list → allow if previously approved.
+        4. Otherwise deny.
+        """
         if isinstance(self.config, dict):
             if "allow_from" in self.config:
                 allow_list = self.config.get("allow_from")
@@ -184,12 +199,13 @@ class BaseChannel(ABC):
                 allow_list = self.config.get("allowFrom", [])
         else:
             allow_list = getattr(self.config, "allow_from", [])
-        if not allow_list:
-            self.logger.warning("allow_from is empty — all access denied")
-            return False
         if "*" in allow_list:
             return True
-        return str(sender_id) in allow_list
+        if str(sender_id) in allow_list:
+            return True
+        if is_approved(self.name, str(sender_id)):
+            return True
+        return False
 
     async def _handle_message(
         self,
@@ -199,11 +215,14 @@ class BaseChannel(ABC):
         media: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
+        is_dm: bool = False,
     ) -> None:
         """
         Handle an incoming message from the chat platform.
 
         This method checks permissions and forwards to the bus.
+        For DM messages from unrecognised senders, a pairing code is
+        issued instead of silently dropping the message.
 
         Args:
             sender_id: The sender's identifier.
@@ -212,13 +231,39 @@ class BaseChannel(ABC):
             media: Optional list of media URLs.
             metadata: Optional channel-specific metadata.
             session_key: Optional session key override (e.g. thread-scoped sessions).
+            is_dm: Whether the message is a direct / private message.
         """
         if not self.is_allowed(sender_id):
-            self.logger.warning(
-                "Access denied for sender {}. "
-                "Add them to allowFrom list in config to grant access.",
-                sender_id,
-            )
+            if is_dm:
+                code = generate_code(self.name, str(sender_id))
+                reply = (
+                    "This assistant requires approval before it can respond.\n"
+                    f"Your pairing code is: `{code}`\n"
+                    f"Ask the owner to run: `nanobot pairing approve {code}`"
+                )
+                await self.send(
+                    OutboundMessage(
+                        channel=self.name,
+                        chat_id=str(chat_id),
+                        content=reply,
+                        metadata={"_pairing_code": code},
+                    )
+                )
+                self.logger.info(
+                    "Sent pairing code {} to sender {} in chat {}",
+                    code, sender_id, chat_id,
+                )
+            else:
+                self.logger.warning(
+                    "Access denied for sender {}. "
+                    "Add them to allowFrom list in config to grant access.",
+                    sender_id,
+                )
+            return
+
+        # Intercept /pairing slash commands before they reach the agent loop
+        if content.strip().startswith("/pairing"):
+            await self._handle_pairing_command(sender_id, chat_id, content.strip())
             return
 
         meta = metadata or {}
@@ -236,6 +281,77 @@ class BaseChannel(ABC):
         )
 
         await self.bus.publish_inbound(msg)
+
+    async def _handle_pairing_command(
+        self, sender_id: str, chat_id: str, content: str
+    ) -> None:
+        """Execute a ``/pairing`` slash command and reply directly to the user."""
+        parts = content.split()
+        sub = parts[1] if len(parts) > 1 else "list"
+        arg = parts[2] if len(parts) > 2 else None
+
+        if sub in ("list",):
+            pending = list_pending()
+            if not pending:
+                reply = "No pending pairing requests."
+            else:
+                lines = ["Pending pairing requests:"]
+                import time
+
+                for item in pending:
+                    remaining = int(item.get("expires_at", 0) - time.time())
+                    expiry = f"{remaining}s" if remaining > 0 else "expired"
+                    lines.append(
+                        f"- `{item['code']}` | {item['channel']} | {item['sender_id']} | {expiry}"
+                    )
+                reply = "\n".join(lines)
+
+        elif sub == "approve":
+            if arg is None:
+                reply = "Usage: `/pairing approve <code>`"
+            else:
+                result = approve_code(arg)
+                if result is None:
+                    reply = f"Invalid or expired pairing code: `{arg}`"
+                else:
+                    channel, sid = result
+                    reply = (
+                        f"Approved pairing code `{arg}` — "
+                        f"{sid} can now access {channel}"
+                    )
+
+        elif sub == "deny":
+            if arg is None:
+                reply = "Usage: `/pairing deny <code>`"
+            else:
+                if deny_code(arg):
+                    reply = f"Denied pairing code `{arg}`"
+                else:
+                    reply = f"Pairing code `{arg}` not found or already expired"
+
+        elif sub == "revoke":
+            if arg is None:
+                reply = "Usage: `/pairing revoke <user_id>`"
+            else:
+                if revoke(self.name, arg):
+                    reply = f"Revoked {arg} from {self.name}"
+                else:
+                    reply = f"{arg} was not in the approved list for {self.name}"
+
+        else:
+            reply = (
+                "Unknown pairing command.\n"
+                "Usage: `/pairing [list|approve <code>|deny <code>|revoke <user_id>]`"
+            )
+
+        await self.send(
+            OutboundMessage(
+                channel=self.name,
+                chat_id=str(chat_id),
+                content=reply,
+                metadata={"_pairing_command": True},
+            )
+        )
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:

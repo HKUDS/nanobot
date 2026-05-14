@@ -1620,5 +1620,94 @@ def _login_github_copilot() -> None:
         raise typer.Exit(1)
 
 
+# ============================================================================
+# Pairing Commands
+# ============================================================================
+
+pairing_app = typer.Typer(help="Manage DM pairing approvals")
+app.add_typer(pairing_app, name="pairing")
+
+
+@pairing_app.command("list")
+def pairing_list():
+    """Show pending pairing requests."""
+    from nanobot.pairing import list_pending
+
+    pending = list_pending()
+    if not pending:
+        console.print("[dim]No pending pairing requests.[/dim]")
+        return
+
+    table = Table(title="Pending Pairing Requests")
+    table.add_column("Code", style="cyan")
+    table.add_column("Channel", style="magenta")
+    table.add_column("Sender ID", style="yellow")
+    table.add_column("Expires", style="green")
+
+    import time
+
+    for item in pending:
+        remaining = int(item.get("expires_at", 0) - time.time())
+        expiry = f"{remaining}s" if remaining > 0 else "expired"
+        table.add_row(
+            item["code"],
+            item["channel"],
+            item["sender_id"],
+            expiry,
+        )
+
+    console.print(table)
+
+
+@pairing_app.command("approve")
+def pairing_approve(
+    code: str = typer.Argument(..., help="Pairing code to approve"),
+):
+    """Approve a pending pairing code."""
+    from nanobot.pairing import approve_code
+
+    result = approve_code(code)
+    if result is None:
+        console.print(f"[red]✗[/red] Invalid or expired pairing code: {code}")
+        raise typer.Exit(1)
+
+    channel, sender_id = result
+    console.print(
+        f"[green]✓[/green] Approved pairing code {code} — "
+        f"{sender_id} can now access {channel}"
+    )
+
+
+@pairing_app.command("deny")
+def pairing_deny(
+    code: str = typer.Argument(..., help="Pairing code to deny"),
+):
+    """Deny and discard a pending pairing code."""
+    from nanobot.pairing import deny_code
+
+    if deny_code(code):
+        console.print(f"[green]✓[/green] Denied pairing code {code}")
+    else:
+        console.print(f"[yellow]! Pairing code {code} not found or already expired[/yellow]")
+
+
+@pairing_app.command("revoke")
+def pairing_revoke(
+    channel: str = typer.Argument(..., help="Channel name (e.g. telegram)"),
+    user_id: str = typer.Argument(..., help="User ID to revoke"),
+):
+    """Revoke an approved sender from a channel."""
+    from nanobot.pairing import revoke
+
+    if revoke(channel, user_id):
+        console.print(
+            f"[green]✓[/green] Revoked {user_id} from {channel}"
+        )
+    else:
+        console.print(
+            f"[yellow]! {user_id} was not in the approved list for {channel}[/yellow]"
+        )
+
+
 if __name__ == "__main__":
     app()

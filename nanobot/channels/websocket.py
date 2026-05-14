@@ -1254,6 +1254,7 @@ class WebSocketChannel(BaseChannel):
                     chat_id=default_chat_id,
                     content=content,
                     metadata={"remote": getattr(connection, "remote_address", None)},
+                    is_dm=True,
                 )
         except Exception as e:
             self.logger.debug("connection ended: {}", e)
@@ -1399,6 +1400,7 @@ class WebSocketChannel(BaseChannel):
                 content=content,
                 media=media_paths or None,
                 metadata=metadata,
+                is_dm=True,
             )
             return
         await self._send_event(connection, "error", detail=f"unknown type: {t!r}")
