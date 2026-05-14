@@ -95,7 +95,10 @@ export function ThreadShell({
   const [scrollToBottomSignal, setScrollToBottomSignal] = useState(0);
   const pendingFirstRef = useRef<PendingFirstMessage | null>(null);
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
-  const lastCachedChatIdRef = useRef<string | null>(null);
+  /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
+  const prevChatIdForCacheRef = useRef<string | null>(null);
+  /** Skip one layout cache write right after chatId changes (messages may not match yet). */
+  const skipLayoutCacheRef = useRef(false);
   const appliedHistoryVersionRef = useRef<Map<string, number>>(new Map());
   const pendingCanonicalHydrateRef = useRef<Set<string>>(new Set());
 
@@ -118,6 +121,7 @@ export function ThreadShell({
     streamError,
     dismissStreamError,
   } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd);
+
   const showHeroComposer = messages.length === 0 && !loading;
 
   useEffect(() => {
@@ -166,19 +170,31 @@ export function ThreadShell({
   }, [chatId, historical, setMessages]);
 
   useLayoutEffect(() => {
+    if (chatId) {
+      const prev = prevChatIdForCacheRef.current;
+      if (prev && prev !== chatId) {
+        messageCacheRef.current.set(prev, messages);
+        skipLayoutCacheRef.current = true;
+      }
+      prevChatIdForCacheRef.current = chatId;
+    } else {
+      if (prevChatIdForCacheRef.current) {
+        messageCacheRef.current.set(prevChatIdForCacheRef.current, messages);
+        skipLayoutCacheRef.current = true;
+      }
+      prevChatIdForCacheRef.current = null;
+    }
+  }, [chatId, messages]);
+
+  useLayoutEffect(() => {
     if (!chatId) {
-      lastCachedChatIdRef.current = null;
       return;
     }
-    if (loading) return;
-    // Skip the first cache write after a chat switch. During that render,
-    // `messages` can still belong to the previous chat until the stream hook
-    // resets its local state for the new session.
-    if (lastCachedChatIdRef.current !== chatId) {
-      lastCachedChatIdRef.current = chatId;
-      if (messages.length > 0) {
-        messageCacheRef.current.set(chatId, messages);
-      }
+    if (loading) {
+      return;
+    }
+    if (skipLayoutCacheRef.current) {
+      skipLayoutCacheRef.current = false;
       return;
     }
     messageCacheRef.current.set(chatId, messages);

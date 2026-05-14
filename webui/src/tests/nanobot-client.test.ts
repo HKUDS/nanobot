@@ -89,6 +89,26 @@ describe("NanobotClient", () => {
     });
   });
 
+  it("buffers chat events while no chat handler is registered and replays on subscribe", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    client.connect();
+    lastSocket().fakeOpen();
+    // Nobody listening yet — deltas must not be dropped (user switched away).
+    lastSocket().fakeMessage({ event: "delta", chat_id: "chat-queue", text: "a" });
+    lastSocket().fakeMessage({ event: "delta", chat_id: "chat-queue", text: "b" });
+    const handler = vi.fn();
+    client.onChat("chat-queue", handler);
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(handler.mock.calls[0][0]).toMatchObject({ event: "delta", text: "a" });
+    expect(handler.mock.calls[1][0]).toMatchObject({ event: "delta", text: "b" });
+    lastSocket().fakeMessage({ event: "delta", chat_id: "chat-queue", text: "c" });
+    expect(handler).toHaveBeenCalledTimes(3);
+  });
+
   it("records goal_status run strip without an onChat subscriber", () => {
     const client = new NanobotClient({
       url: "ws://test",
@@ -110,6 +130,27 @@ describe("NanobotClient", () => {
       status: "idle",
     });
     expect(client.getRunStartedAt("chat-strip")).toBeNull();
+  });
+
+  it("buffers after unsubscribe until the chat is subscribed again", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const h1 = vi.fn();
+    const unsub = client.onChat("chat-rejoin", h1);
+    client.connect();
+    lastSocket().fakeOpen();
+    lastSocket().fakeMessage({ event: "delta", chat_id: "chat-rejoin", text: "live" });
+    expect(h1).toHaveBeenCalledTimes(1);
+    unsub();
+    lastSocket().fakeMessage({ event: "delta", chat_id: "chat-rejoin", text: "queued" });
+    expect(h1).toHaveBeenCalledTimes(1);
+    const h2 = vi.fn();
+    client.onChat("chat-rejoin", h2);
+    expect(h2).toHaveBeenCalledTimes(1);
+    expect(h2.mock.calls[0][0]).toMatchObject({ event: "delta", text: "queued" });
   });
 
   it("dispatches runtime model updates globally", () => {

@@ -65,6 +65,9 @@ export class NanobotClient {
   private errorHandlers = new Set<ErrorHandler>();
   // chat_id -> handlers listening on it
   private chatHandlers = new Map<string, Set<EventHandler>>();
+  /** Inbound frames received while no subscriber is registered (e.g. user switched away). */
+  private pendingInboundByChat = new Map<string, InboundEvent[]>();
+  private static readonly PENDING_INBOUND_MAX = 2000;
   // chat_ids we've attached to since connect; re-attached after reconnects
   private knownChats = new Set<string>();
   /** Wall-clock run strip: updated from ``goal_status`` even with no ``onChat`` subscriber. */
@@ -158,6 +161,14 @@ export class NanobotClient {
       this.chatHandlers.set(chatId, handlers);
     }
     handlers.add(handler);
+    const pending = this.pendingInboundByChat.get(chatId);
+    if (pending !== undefined && pending.length > 0) {
+      const flushed = pending.splice(0);
+      this.pendingInboundByChat.delete(chatId);
+      for (const ev of flushed) {
+        handler(ev);
+      }
+    }
     this.attach(chatId);
     return () => {
       const current = this.chatHandlers.get(chatId);
@@ -311,8 +322,22 @@ export class NanobotClient {
 
   private dispatch(chatId: string, ev: InboundEvent): void {
     const handlers = this.chatHandlers.get(chatId);
-    if (!handlers) return;
-    for (const h of handlers) h(ev);
+    if (handlers !== undefined && handlers.size > 0) {
+      for (const h of handlers) {
+        h(ev);
+      }
+      return;
+    }
+    let q = this.pendingInboundByChat.get(chatId);
+    if (!q) {
+      q = [];
+      this.pendingInboundByChat.set(chatId, q);
+    }
+    q.push(ev);
+    const over = q.length - NanobotClient.PENDING_INBOUND_MAX;
+    if (over > 0) {
+      q.splice(0, over);
+    }
   }
 
   private handleClose(event?: { code?: number }): void {
