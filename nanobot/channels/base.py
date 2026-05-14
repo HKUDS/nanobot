@@ -195,11 +195,11 @@ class BaseChannel(ABC):
         """
         if isinstance(self.config, dict):
             if "allow_from" in self.config:
-                allow_list = self.config.get("allow_from")
+                allow_list = self.config.get("allow_from") or []
             else:
-                allow_list = self.config.get("allowFrom", [])
+                allow_list = self.config.get("allowFrom", []) or []
         else:
-            allow_list = getattr(self.config, "allow_from", [])
+            allow_list = getattr(self.config, "allow_from", []) or []
         if "*" in allow_list:
             return True
         if str(sender_id) in allow_list:

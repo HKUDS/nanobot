@@ -20,6 +20,9 @@ from loguru import logger
 from nanobot.config.paths import get_data_dir
 from nanobot.utils.helpers import _write_text_atomic
 
+# threading.Lock is used so store functions remain callable from both sync CLI
+# and async channel handlers.  At private-assistant scale (small JSON file,
+# sub-millisecond operations) the brief block is acceptable.
 _LOCK = threading.Lock()
 _ALPHABET = string.ascii_uppercase + string.digits
 _CODE_LENGTH = 8  # e.g. ABCD-EFGH
@@ -251,5 +254,5 @@ def handle_pairing_command(channel: str, subcommand_text: str) -> str:
 
     return (
         "Unknown pairing command.\n"
-        "Usage: `/pairing [list|approve <code>|deny <code>|revoke <user_id>]`"
+        "Usage: `/pairing [list|approve <code>|deny <code>|revoke <user_id>|revoke <channel> <user_id>]`"
     )

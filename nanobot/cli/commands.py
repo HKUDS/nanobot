@@ -1631,7 +1631,7 @@ app.add_typer(pairing_app, name="pairing")
 @pairing_app.command("list")
 def pairing_list():
     """Show pending pairing requests."""
-    from nanobot.pairing import list_pending
+    from nanobot.pairing import format_expiry, list_pending
 
     pending = list_pending()
     if not pending:
@@ -1644,11 +1644,8 @@ def pairing_list():
     table.add_column("Sender ID", style="yellow")
     table.add_column("Expires", style="green")
 
-    import time
-
     for item in pending:
-        remaining = int(item.get("expires_at", 0) - time.time())
-        expiry = f"{remaining}s" if remaining > 0 else "expired"
+        expiry = format_expiry(item.get("expires_at", 0))
         table.add_row(
             item["code"],
             item["channel"],

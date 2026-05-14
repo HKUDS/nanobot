@@ -1283,6 +1283,7 @@ class AgentLoop:
                     "assistant", result.content, _command=True
                 )
                 self.sessions.save(ctx.session)
+                self._clear_pending_user_turn(ctx.session)
             return "shortcut"
         return "dispatch"
 
