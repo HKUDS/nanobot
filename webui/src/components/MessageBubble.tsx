@@ -17,6 +17,8 @@ import type { UIImage, UIMediaAttachment, UIMessage } from "@/lib/types";
 
 interface MessageBubbleProps {
   message: UIMessage;
+  /** When false, hide the assistant reply copy button (mid-turn text before more agent activity). Default true. */
+  showAssistantCopyAction?: boolean;
 }
 
 /**
@@ -28,7 +30,10 @@ interface MessageBubbleProps {
  * Trace rows (tool-call hints, progress breadcrumbs) render as a subdued
  * collapsible group so intermediate steps never masquerade as replies.
  */
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  showAssistantCopyAction = true,
+}: MessageBubbleProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copyResetRef = useRef<number | null>(null);
@@ -97,13 +102,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const reasoningStreaming = !!(message.role === "assistant" && message.reasoningStreaming);
   const hasReasoning = reasoning.length > 0 || reasoningStreaming;
   const showAssistantActions = message.role === "assistant" && !message.isStreaming && !empty;
+  const showCopyButton = showAssistantCopyAction && showAssistantActions;
   const latencyMs = message.latencyMs;
   const showLatencyFooter =
     message.role === "assistant"
     && latencyMs != null
     && !message.isStreaming
     && (!empty || hasReasoning || media.length > 0);
-  const showAssistantFooterRow = showAssistantActions || showLatencyFooter;
+  const showAssistantFooterRow = showCopyButton || showLatencyFooter;
   return (
     <div className={cn("w-full text-[15px]", baseAnim)} style={{ lineHeight: "var(--cjk-line-height)" }}>
       {hasReasoning ? (
@@ -117,7 +123,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
           {showAssistantFooterRow ? (
             <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
-              {showAssistantActions ? (
+              {showCopyButton ? (
                 <button
                   type="button"
                   onClick={onCopyAssistantReply}

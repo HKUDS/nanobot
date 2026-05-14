@@ -59,6 +59,19 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
   });
 
+  it("does not show copy when showAssistantCopyAction is false", () => {
+    const message: UIMessage = {
+      id: "a-mid",
+      role: "assistant",
+      content: "Mid-turn snippet.",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} showAssistantCopyAction={false} />);
+
+    expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
+  });
+
   it("renders trace messages as collapsible tool groups", () => {
     const message: UIMessage = {
       id: "t1",

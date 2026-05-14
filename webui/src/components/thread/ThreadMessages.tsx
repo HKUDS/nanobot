@@ -11,9 +11,24 @@ interface ThreadMessagesProps {
   isStreaming?: boolean;
 }
 
-type DisplayUnit =
+export type DisplayUnit =
   | { type: "cluster"; messages: UIMessage[] }
   | { type: "single"; message: UIMessage };
+
+/** True when this unit index is the last assistant text slice before the next user message (or end of thread). */
+export function isFinalAssistantSliceBeforeNextUser(
+  units: DisplayUnit[],
+  index: number,
+): boolean {
+  const u = units[index];
+  if (u.type !== "single" || u.message.role !== "assistant") return true;
+  for (let j = index + 1; j < units.length; j++) {
+    const v = units[j];
+    if (v.type === "single" && v.message.role === "user") break;
+    return false;
+  }
+  return true;
+}
 
 function buildDisplayUnits(messages: UIMessage[]): DisplayUnit[] {
   const out: DisplayUnit[] = [];
@@ -61,7 +76,14 @@ export function ThreadMessages({ messages, isStreaming = false }: ThreadMessages
                 hasBodyBelow={hasBodyBelow}
               />
             ) : (
-              <MessageBubble message={unit.message} />
+              <MessageBubble
+                message={unit.message}
+                showAssistantCopyAction={
+                  unit.message.role === "assistant"
+                    ? isFinalAssistantSliceBeforeNextUser(units, index)
+                    : true
+                }
+              />
             )}
           </div>
         );
