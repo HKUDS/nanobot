@@ -1316,6 +1316,168 @@ def channels_login(
 
 
 # ============================================================================
+# Session Commands
+# ============================================================================
+
+sessions_app = typer.Typer(help="Manage conversation sessions")
+app.add_typer(sessions_app, name="sessions")
+
+
+@sessions_app.command("list")
+def sessions_list(
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max sessions to show"),
+):
+    """List all conversation sessions."""
+    from datetime import datetime
+
+    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.session.manager import SessionManager
+
+    if config:
+        set_config_path(Path(config).expanduser().resolve())
+    cfg = load_config()
+    sm = SessionManager(cfg.workspace_path)
+    sessions = sm.list_sessions()
+
+    if not sessions:
+        console.print("[dim]No sessions found.[/dim]")
+        return
+
+    table = Table(title="Conversation Sessions")
+    table.add_column("Session Key", style="cyan")
+    table.add_column("Messages (est)", justify="right")
+    table.add_column("Title")
+    table.add_column("Last Updated")
+
+    shown = sessions[:limit]
+    for s in shown:
+        key = s.get("key", "unknown")
+        display_key = key if len(key) < 40 else key[:37] + "..."
+        msg_count = "?"
+        try:
+            p = Path(s.get("path", ""))
+            if p.exists():
+                with open(p) as f_msg:
+                    lines = sum(1 for _ in f_msg) - 1
+                msg_count = str(max(0, lines))
+        except Exception:
+            pass
+        title = s.get("title", "") or ""
+        if len(title) > 50:
+            title = title[:47] + "..."
+        updated = s.get("updated_at", "") or ""
+        if updated:
+            try:
+                dt = datetime.fromisoformat(updated)
+                updated = dt.strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                pass
+        table.add_row(display_key, msg_count, title, updated)
+
+    console.print(table)
+    if len(sessions) > limit:
+        console.print(f"[dim]... and {len(sessions) - limit} more sessions[/dim]")
+
+
+@sessions_app.command("export")
+def sessions_export(
+    session_key: str = typer.Argument(..., help="Session key to export (e.g., 'weixin:user123')"),
+    output: str | None = typer.Option(None, "--output", "-o", help="Output file path"),
+    format: str = typer.Option("markdown", "--format", "-f", help="Output format: markdown or json"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Export a conversation session to Markdown or JSON."""
+    import json as _json
+
+    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.session.manager import SessionManager
+
+    if config:
+        set_config_path(Path(config).expanduser().resolve())
+    cfg = load_config()
+    sm = SessionManager(cfg.workspace_path)
+
+    data = sm.read_session_file(session_key)
+    if data is None:
+        console.print(f"[red]Session not found: {session_key}[/red]")
+        console.print("[dim]Use `nanobot sessions list` to see available sessions.[/dim]")
+        raise typer.Exit(1)
+
+    messages = data.get("messages", [])
+    if not messages:
+        console.print("[yellow]Session has no messages to export.[/yellow]")
+        return
+
+    out_path = Path(output).expanduser().resolve() if output else None
+    if out_path is None:
+        safe_key = session_key.replace(":", "_").replace("/", "_")
+        out_path = Path.cwd() / f"session_{safe_key}.{'md' if format == 'markdown' else 'json'}"
+
+    if format == "json":
+        out_path.write_text(_json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    else:
+        lines = [
+            f"# Session: {session_key}",
+            f"Exported: {data.get('updated_at', 'unknown')}",
+            "",
+            "---",
+            "",
+        ]
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(
+                    b.get("text", "") for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+            content = str(content).strip()
+            if not content:
+                continue
+            if role == "user":
+                lines.append("### \U0001f464 You" + "\n\n" + content + "\n")
+            elif role == "assistant":
+                lines.append("### \U0001f916 Assistant" + "\n\n" + content + "\n")
+            elif role == "tool":
+                name = msg.get("name", "tool")
+                lines.append(
+                    "### \U0001f527 Tool: " + name + "\n\n```\n"
+                    + content[:500] + "\n```\n"
+                )
+        out_path.write_text("\n".join(lines), encoding="utf-8")
+
+    console.print(f"[green]✓[/green] Exported {len(messages)} messages to {out_path}")
+
+
+@sessions_app.command("delete")
+def sessions_delete(
+    session_key: str = typer.Argument(..., help="Session key to delete"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation"),
+):
+    """Delete a conversation session."""
+    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.session.manager import SessionManager
+
+    if config:
+        set_config_path(Path(config).expanduser().resolve())
+    cfg = load_config()
+    sm = SessionManager(cfg.workspace_path)
+
+    if not force:
+        if not typer.confirm(f"Delete session '{session_key}' permanently?"):
+            console.print("Cancelled.")
+            return
+
+    deleted = sm.delete_session(session_key)
+    if deleted:
+        console.print(f"[green]✓[/green] Deleted session: {session_key}")
+    else:
+        console.print(f"[yellow]Session not found: {session_key}[/yellow]")
+
+
+# ============================================================================
 # Plugin Commands
 # ============================================================================
 
