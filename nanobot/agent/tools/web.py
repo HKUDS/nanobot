@@ -44,6 +44,7 @@ class WebToolsConfig(Base):
     enable: bool = True
     proxy: str | None = None
     user_agent: str | None = None
+    ssl_verify: str | bool = True
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
     fetch: WebFetchConfig = Field(default_factory=WebFetchConfig)
 
@@ -134,6 +135,7 @@ class WebSearchTool(Tool):
             config=ctx.config.web.search,
             proxy=ctx.config.web.proxy,
             user_agent=ctx.config.web.user_agent,
+            ssl_verify=ctx.config.web.ssl_verify,
             config_loader=config_loader,
         )
 
@@ -142,11 +144,13 @@ class WebSearchTool(Tool):
         config: WebSearchConfig | None = None,
         proxy: str | None = None,
         user_agent: str | None = None,
+        ssl_verify: str | bool = True,
         config_loader: Callable[[], WebSearchConfig] | None = None,
     ):
         self.config = config if config is not None else WebSearchConfig()
         self.proxy = proxy
         self.user_agent = user_agent if user_agent is not None else _DEFAULT_USER_AGENT
+        self.ssl_verify = ssl_verify
         self._config_loader = config_loader
 
     def _refresh_config(self) -> None:
@@ -232,6 +236,7 @@ class WebSearchTool(Tool):
                         await http_client.aclose()
                         transport._client = httpx.AsyncClient(  # type: ignore[attr-defined]
                             proxy=self.proxy,
+                            verify=self.ssl_verify,
                             headers=dict(http_client.headers),
                             timeout=http_client.timeout,
                             limits=httpx.Limits(
@@ -272,7 +277,7 @@ class WebSearchTool(Tool):
             logger.warning("BRAVE_API_KEY not set, falling back to DuckDuckGo")
             return await self._search_duckduckgo(query, n)
         try:
-            async with httpx.AsyncClient(proxy=self.proxy) as client:
+            async with httpx.AsyncClient(proxy=self.proxy, verify=self.ssl_verify) as client:
                 r = await client.get(
                     "https://api.search.brave.com/res/v1/web/search",
                     params={"q": query, "count": n},
@@ -298,7 +303,7 @@ class WebSearchTool(Tool):
             logger.warning("TAVILY_API_KEY not set, falling back to DuckDuckGo")
             return await self._search_duckduckgo(query, n)
         try:
-            async with httpx.AsyncClient(proxy=self.proxy) as client:
+            async with httpx.AsyncClient(proxy=self.proxy, verify=self.ssl_verify) as client:
                 r = await client.post(
                     "https://api.tavily.com/search",
                     headers={"Authorization": f"Bearer {api_key}", "User-Agent": self.user_agent},
@@ -320,7 +325,7 @@ class WebSearchTool(Tool):
         if not is_valid:
             return f"Error: invalid SearXNG URL: {error_msg}"
         try:
-            async with httpx.AsyncClient(proxy=self.proxy) as client:
+            async with httpx.AsyncClient(proxy=self.proxy, verify=self.ssl_verify) as client:
                 r = await client.get(
                     endpoint,
                     params={"q": query, "format": "json"},
@@ -344,7 +349,7 @@ class WebSearchTool(Tool):
                 "User-Agent": self.user_agent,
             }
             encoded_query = quote(query, safe="")
-            async with httpx.AsyncClient(proxy=self.proxy) as client:
+            async with httpx.AsyncClient(proxy=self.proxy, verify=self.ssl_verify) as client:
                 r = await client.get(
                     f"https://s.jina.ai/{encoded_query}",
                     headers=headers,
@@ -367,7 +372,7 @@ class WebSearchTool(Tool):
             logger.warning("KAGI_API_KEY not set, falling back to DuckDuckGo")
             return await self._search_duckduckgo(query, n)
         try:
-            async with httpx.AsyncClient(proxy=self.proxy) as client:
+            async with httpx.AsyncClient(proxy=self.proxy, verify=self.ssl_verify) as client:
                 r = await client.get(
                     "https://kagi.com/api/v0/search",
                     params={"q": query, "limit": n},
@@ -446,12 +451,14 @@ class WebFetchTool(Tool):
             config=ctx.config.web.fetch,
             proxy=ctx.config.web.proxy,
             user_agent=ctx.config.web.user_agent,
+            ssl_verify=ctx.config.web.ssl_verify,
         )
 
-    def __init__(self, config: WebFetchConfig | None = None, proxy: str | None = None, user_agent: str | None = None, max_chars: int = 50000):
+    def __init__(self, config: WebFetchConfig | None = None, proxy: str | None = None, user_agent: str | None = None, ssl_verify: str | bool = True, max_chars: int = 50000):
         self.config = config if config is not None else WebFetchConfig()
         self.proxy = proxy
         self.user_agent = user_agent or _DEFAULT_USER_AGENT
+        self.ssl_verify = ssl_verify
         self.max_chars = max_chars
 
     @property
@@ -474,7 +481,7 @@ class WebFetchTool(Tool):
 
         # Detect and fetch images directly to avoid Jina's textual image captioning
         try:
-            async with httpx.AsyncClient(proxy=self.proxy, follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=15.0) as client:
+            async with httpx.AsyncClient(proxy=self.proxy, verify=self.ssl_verify, follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=15.0) as client:
                 async with client.stream("GET", url, headers={"User-Agent": self.user_agent}) as r:
                     from nanobot.security.network import validate_resolved_url
 
@@ -504,7 +511,7 @@ class WebFetchTool(Tool):
             jina_key = os.environ.get("JINA_API_KEY", "")
             if jina_key:
                 headers["Authorization"] = f"Bearer {jina_key}"
-            async with httpx.AsyncClient(proxy=self.proxy, timeout=20.0) as client:
+            async with httpx.AsyncClient(proxy=self.proxy, verify=self.ssl_verify, timeout=20.0) as client:
                 r = await client.get(f"https://r.jina.ai/{url}", headers=headers)
                 if r.status_code == 429:
                     logger.debug("Jina Reader rate limited, falling back to readability")
@@ -543,6 +550,7 @@ class WebFetchTool(Tool):
                 max_redirects=MAX_REDIRECTS,
                 timeout=30.0,
                 proxy=self.proxy,
+                verify=self.ssl_verify,
             ) as client:
                 r = await client.get(url, headers={"User-Agent": self.user_agent})
                 r.raise_for_status()
