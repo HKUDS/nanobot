@@ -18,6 +18,7 @@ from nanobot.agent.tools.long_task import (
     _extract_handoff_from_messages,
     _strip_redundant_tail_block,
 )
+from nanobot.bus.events import OUTBOUND_META_AGENT_UI
 
 _COMPLETION_PREFIX = (
     "The task is complete. This is the final answer — "
@@ -119,6 +120,51 @@ def _step_result(**overrides):
 # ---------------------------------------------------------------------------
 # LongTaskTool orchestrator tests
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_long_task_publishes_agent_ui_on_bus_metadata():
+    """Structured UI rides on OutboundMessage.metadata for any channel to forward."""
+    from nanobot.agent.tools.context import RequestContext
+
+    mgr = _make_manager_stub()
+    bus = MagicMock()
+    bus.publish_outbound = AsyncMock()
+    call_count = 0
+
+    async def fake_run_step(*, system_prompt, user_message, extra_tools, max_iterations=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            for t in extra_tools:
+                if t.name == "complete":
+                    await t.execute(summary="All done. Report in summary.md")
+            return _step_result(
+                final_content="All done.",
+                tools_used=["complete"],
+                tool_events=[{"name": "complete", "status": "ok", "detail": ""}],
+            )
+        for t in extra_tools:
+            if t.name == "complete":
+                await t.execute(summary="Validated")
+        return _step_result(
+            tools_used=["complete"],
+            tool_events=[{"name": "complete", "status": "ok", "detail": ""}],
+        )
+
+    mgr.run_step.side_effect = fake_run_step
+    tool = LongTaskTool(manager=mgr, bus=bus)
+    tool.set_context(RequestContext(channel="websocket", chat_id="chat-1", metadata={}))
+    await tool.execute(goal="Audit all issues.")
+    published = [call.args[0] for call in bus.publish_outbound.await_args_list]
+    with_ui = [m for m in published if m.metadata.get(OUTBOUND_META_AGENT_UI)]
+    assert with_ui, "expected at least one outbound with agent UI metadata"
+    first = with_ui[0].metadata[OUTBOUND_META_AGENT_UI]
+    assert first["kind"] == "long_task"
+    assert first["data"]["event"] == "task_start"
+    assert first["data"]["run_id"]
+    events = {m.metadata[OUTBOUND_META_AGENT_UI]["data"]["event"] for m in with_ui}
+    assert "task_complete" in events
 
 
 @pytest.mark.asyncio

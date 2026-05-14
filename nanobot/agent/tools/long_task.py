@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -15,11 +16,21 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.utils.prompt_templates import render_template
 
 if TYPE_CHECKING:
     from nanobot.agent.subagent import SubagentManager
-    from nanobot.agent.tools.context import ToolContext
+    from nanobot.agent.tools.context import RequestContext, ToolContext
+
+# JSON snapshot caps (chars / list lengths) for bus/WebSocket clients.
+_UI_GOAL_MAX_CHARS = 500
+_UI_HANDOFF_TEXT_MAX_CHARS = 800
+_UI_HINT_MAX_CHARS = 300
+_UI_SUMMARY_MAX_CHARS = 2000
+_UI_REASON_MAX_CHARS = 1000
+_UI_PATH_LIST_MAX = 300
+_UI_TOOLS_USED_MAX = 50
 
 
 # ---------------------------------------------------------------------------
@@ -459,8 +470,11 @@ class LongTaskTool(Tool):
     # NOT available in subagent scope to prevent recursive long_task nesting.
     _scopes: set[str] = {"core"}
 
-    def __init__(self, manager: SubagentManager) -> None:
+    def __init__(self, manager: SubagentManager, bus: Any | None = None) -> None:
         self._manager = manager
+        self._bus = bus
+        self._request_ctx: RequestContext | None = None
+        self._ui_run_id = ""
         self._hooks: dict[str, Any] = {}
         self._state: dict[str, Any] = {"signal_queue": []}
         self._reset_state()
@@ -521,7 +535,11 @@ class LongTaskTool(Tool):
 
     @classmethod
     def create(cls, ctx: ToolContext) -> Tool:
-        return cls(manager=ctx.subagent_manager)
+        return cls(manager=ctx.subagent_manager, bus=ctx.bus)
+
+    def set_context(self, ctx: RequestContext) -> None:
+        """Inject routing metadata for progress/UI publishes (WebSocket, etc.)."""
+        self._request_ctx = ctx
 
     # --- State exposure for WebUI observability ---
 
@@ -602,6 +620,112 @@ class LongTaskTool(Tool):
             except Exception:
                 logger.exception("LongTask {} hook failed", hook_name)
 
+    def _handoff_as_dict(self, h: HandoffState) -> dict[str, Any]:
+        return {
+            "signal_type": h.signal_type,
+            "message": (h.message or "")[:_UI_HANDOFF_TEXT_MAX_CHARS],
+            "files_created": list(h.files_created)[:_UI_PATH_LIST_MAX],
+            "files_modified": list(h.files_modified)[:_UI_PATH_LIST_MAX],
+            "next_step_hint": (h.next_step_hint or "")[:_UI_HINT_MAX_CHARS],
+            "verification": (h.verification or "")[:_UI_HINT_MAX_CHARS],
+        }
+
+    def _build_ui_snapshot(self, event_type: str, **payload: Any) -> dict[str, Any]:
+        last = self._state.get("last_handoff")
+        last_dict = self._handoff_as_dict(last) if isinstance(last, HandoffState) else {}
+        snap: dict[str, Any] = {
+            "version": 1,
+            "event": event_type,
+            "run_id": self._ui_run_id,
+            "status": self._state.get("status"),
+            "current_step": self._state.get("current_step"),
+            "total_steps": self._state.get("total_steps"),
+            "goal": (self._state.get("goal") or "")[:_UI_GOAL_MAX_CHARS],
+            "cumulative_usage": dict(self._state.get("cumulative_usage") or {}),
+            "last_handoff": last_dict,
+            "error": self._state.get("error"),
+            "files_created_union": sorted(self._all_created_paths)[:_UI_PATH_LIST_MAX],
+            "files_modified_union": sorted(self._all_modified_paths)[:_UI_PATH_LIST_MAX],
+        }
+        if "step" in payload and payload["step"] is not None:
+            snap["step"] = payload["step"]
+        if "max_steps" in payload and payload["max_steps"] is not None:
+            snap["max_steps"] = payload["max_steps"]
+        if "budget" in payload and payload["budget"] is not None:
+            snap["budget"] = payload["budget"]
+        if "summary" in payload and payload["summary"] is not None:
+            snap["summary"] = str(payload["summary"])[:_UI_SUMMARY_MAX_CHARS]
+        if "error" in payload and payload["error"] is not None:
+            snap["event_error"] = str(payload["error"])[:_UI_SUMMARY_MAX_CHARS]
+        if "reason" in payload and payload["reason"] is not None:
+            snap["reason"] = str(payload["reason"])[:_UI_REASON_MAX_CHARS]
+        handoff_payload = payload.get("handoff")
+        if isinstance(handoff_payload, HandoffState):
+            snap["step_handoff"] = self._handoff_as_dict(handoff_payload)
+        res = payload.get("result")
+        if res is not None:
+            tu = getattr(res, "tools_used", None)
+            if tu is not None:
+                snap["tools_used"] = list(tu)[:_UI_TOOLS_USED_MAX]
+            sr = getattr(res, "stop_reason", None)
+            if sr is not None:
+                snap["stop_reason"] = str(sr)
+        return snap
+
+    def _ui_one_liner(self, snap: dict[str, Any]) -> str:
+        ev = str(snap.get("event", ""))
+        tot = int(snap.get("total_steps") or 0)
+        cur = snap.get("current_step")
+        step_idx = snap.get("step")
+        if step_idx is None and isinstance(cur, int):
+            step_idx = cur
+        if not isinstance(step_idx, int):
+            step_idx = 0
+        n = step_idx + 1
+        if ev == "task_start":
+            ms = int(snap.get("max_steps") or tot or 0)
+            return f"long_task · started (max {ms} steps)"
+        if ev == "step_start":
+            return f"long_task · step {n}/{tot}"
+        if ev == "step_complete":
+            return f"long_task · step {n}/{tot} · subagent finished"
+        if ev == "handoff_received":
+            return f"long_task · step {n}/{tot} · handoff"
+        if ev == "validation_started":
+            return f"long_task · step {n}/{tot} · validating"
+        if ev == "validation_failed":
+            return f"long_task · step {n}/{tot} · validation failed"
+        if ev == "validation_passed":
+            return "long_task · validation passed"
+        if ev == "task_complete":
+            return f"long_task · completed at step {n}/{tot}"
+        if ev == "task_error":
+            pe = snap.get("event_error")
+            if pe == "Max steps reached":
+                return f"long_task · max steps ({tot}) reached"
+            return f"long_task · error at step {n}/{tot}"
+        return f"long_task · {ev}"
+
+    async def _publish_ui_snapshot(self, event_type: str, **payload: Any) -> None:
+        if not self._bus or not self._request_ctx:
+            return
+        snap = self._build_ui_snapshot(event_type, **payload)
+        meta = dict(self._request_ctx.metadata or {})
+        meta["_progress"] = True
+        meta[OUTBOUND_META_AGENT_UI] = {"kind": "long_task", "data": snap}
+        await self._bus.publish_outbound(
+            OutboundMessage(
+                channel=self._request_ctx.channel,
+                chat_id=self._request_ctx.chat_id,
+                content=self._ui_one_liner(snap),
+                metadata=meta,
+            )
+        )
+
+    async def _emit_async(self, event_type: str, **payload: Any) -> None:
+        self._emit(event_type, **payload)
+        await self._publish_ui_snapshot(event_type, **payload)
+
     def _merge_handoff_paths(self, handoff: HandoffState) -> None:
         for p in handoff.files_created:
             self._all_created_paths.add(p)
@@ -678,9 +802,10 @@ class LongTaskTool(Tool):
         self._state["goal"] = goal
         self._state["total_steps"] = max_steps
         self._state["status"] = "running"
+        self._ui_run_id = str(uuid.uuid4())
 
         logger.debug("long_task start: max_steps={}, goal={:.120}", max_steps, goal)
-        self._emit("task_start", goal=goal, max_steps=max_steps)
+        await self._emit_async("task_start", goal=goal, max_steps=max_steps)
 
         for step in range(max_steps):
             self._state["current_step"] = step
@@ -699,7 +824,7 @@ class LongTaskTool(Tool):
             )
 
             budget = _step_budget(step, max_steps)
-            self._emit("step_start", step=step, goal=goal, budget=budget)
+            await self._emit_async("step_start", step=step, goal=goal, budget=budget)
 
             # Run the step with retry on crash
             result = await self._run_step_with_retry(
@@ -717,7 +842,7 @@ class LongTaskTool(Tool):
                     "long_task step {}/{} failed after retry: {}",
                     step + 1, max_steps, self._state["error"],
                 )
-                self._emit("task_error", step=step, error=self._state["error"])
+                await self._emit_async("task_error", step=step, error=self._state["error"])
                 if handoff.message:
                     return (
                         f"Long task failed at step {step + 1}/{max_steps}. "
@@ -741,7 +866,9 @@ class LongTaskTool(Tool):
                     auto_modified,
                 )
 
-            self._emit("step_complete", step=step, result=result, handoff=signal_store)
+            await self._emit_async(
+                "step_complete", step=step, result=result, handoff=signal_store
+            )
 
             # Determine signal from tool events
             sig_type = "none"
@@ -778,7 +905,7 @@ class LongTaskTool(Tool):
             if sig_type == "complete":
                 # Validation round
                 self._state["status"] = "validating"
-                self._emit(
+                await self._emit_async(
                     "validation_started",
                     step=step,
                     completion_summary=sig_payload,
@@ -793,7 +920,7 @@ class LongTaskTool(Tool):
                         "long_task complete at step {}/{} after validation",
                         step + 1, max_steps,
                     )
-                    self._emit("task_complete", step=step, summary=sig_payload)
+                    await self._emit_async("task_complete", step=step, summary=sig_payload)
                     return (
                         "The task is complete. This is the final answer — "
                         "present it to the user directly without calling additional "
@@ -805,7 +932,7 @@ class LongTaskTool(Tool):
                         "long_task validation failed at step {}/{}",
                         step + 1, max_steps,
                     )
-                    self._emit(
+                    await self._emit_async(
                         "validation_failed",
                         step=step,
                         reason="Validation did not confirm completion",
@@ -827,7 +954,7 @@ class LongTaskTool(Tool):
                     continue
 
             elif sig_type == "handoff":
-                self._emit("handoff_received", step=step, handoff=signal_store)
+                await self._emit_async("handoff_received", step=step, handoff=signal_store)
                 # Merge auto-detected file changes if not explicitly reported
                 if auto_created and not signal_store.files_created:
                     signal_store.files_created = auto_created
@@ -855,7 +982,7 @@ class LongTaskTool(Tool):
 
         self._state["status"] = "error"
         logger.error("long_task reached max steps ({})", max_steps)
-        self._emit("task_error", step=max_steps, error="Max steps reached")
+        await self._emit_async("task_error", step=max_steps, error="Max steps reached")
         return (
             f"Long task reached max steps ({max_steps}). "
             f"Last progress:\n{handoff.message}"
@@ -925,10 +1052,12 @@ class LongTaskTool(Tool):
             tool_events = getattr(result, "tool_events", []) or []
             for event in tool_events:
                 if event.get("name") == "complete":
-                    self._emit("validation_passed", summary=completion_summary)
+                    await self._emit_async(
+                        "validation_passed", summary=completion_summary
+                    )
                     return True
 
-            self._emit(
+            await self._emit_async(
                 "validation_failed",
                 reason=validation_store.message or "Validator did not confirm",
             )

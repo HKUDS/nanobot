@@ -13,7 +13,7 @@ import websockets
 from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.websocket import (
     WebSocketChannel,
@@ -368,6 +368,30 @@ async def test_send_progress_includes_structured_tool_events() -> None:
             "embeds": [],
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_send_progress_includes_agent_ui_blob() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+
+    blob = {
+        "kind": "long_task",
+        "data": {"version": 1, "event": "task_start", "run_id": "r1"},
+    }
+    await channel.send(OutboundMessage(
+        channel="websocket",
+        chat_id="chat-1",
+        content="long_task · started (max 5 steps)",
+        metadata={"_progress": True, OUTBOUND_META_AGENT_UI: blob},
+    ))
+
+    payload = json.loads(mock_ws.send.await_args.args[0])
+    assert payload["event"] == "message"
+    assert payload["kind"] == "progress"
+    assert payload["agent_ui"] == blob
 
 
 @pytest.mark.asyncio

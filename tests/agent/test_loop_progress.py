@@ -204,13 +204,16 @@ class TestToolEventProgress:
             if not m.metadata.get("_stream_delta")
             and not m.metadata.get("_stream_end")
             and not m.metadata.get("_turn_end")
+            and not m.metadata.get("_goal_status")
         ]
 
         assert [m.content for m in deltas] == ["Hel", "lo"]
         assert len(stream_end) == 1
         assert final[-1].content == "Hello"
         assert final[-1].metadata.get("_streamed") is True
-        assert outbound[-1].metadata.get("_turn_end") is True
+        turn_end_msgs = [m for m in outbound if m.metadata.get("_turn_end")]
+        assert len(turn_end_msgs) == 1
+        assert turn_end_msgs[0].content == ""
         provider.chat_with_retry.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -286,11 +289,15 @@ class TestToolEventProgress:
         while bus.outbound_size > 0:
             outbound.append(await bus.consume_outbound())
 
-        assert outbound[-2].content == "Done"
-        assert (outbound[-2].metadata or {}).get("_turn_end") is not True
-        assert outbound[-1].content == ""
-        assert (outbound[-1].metadata or {}).get("_turn_end") is True
-        assert outbound[-1].chat_id == "chat1"
+        done_msgs = [m for m in outbound if m.content == "Done"]
+        assert len(done_msgs) == 1
+        assert not done_msgs[0].metadata.get("_turn_end")
+
+        turn_end_msgs = [m for m in outbound if m.metadata.get("_turn_end")]
+        assert len(turn_end_msgs) == 1
+        assert turn_end_msgs[0].content == ""
+        assert turn_end_msgs[0].chat_id == "chat1"
+        assert outbound.index(done_msgs[0]) < outbound.index(turn_end_msgs[0])
 
     @pytest.mark.asyncio
     async def test_webui_title_generation_runs_after_turn_end(self, tmp_path: Path) -> None:
@@ -323,13 +330,27 @@ class TestToolEventProgress:
             metadata={"webui": True},
         )), timeout=0.5)
 
-        outbound = [await bus.consume_outbound(), await bus.consume_outbound()]
-        assert outbound[0].content == "Done"
-        assert (outbound[1].metadata or {}).get("_turn_end") is True
+        outbound: list = []
+        for _ in range(12):
+            outbound.append(await asyncio.wait_for(bus.consume_outbound(), timeout=0.5))
+            if outbound[-1].metadata.get("_turn_end"):
+                break
+        else:
+            raise AssertionError("_turn_end message not found")
+
+        done_with_body = [m for m in outbound if m.content == "Done"]
+        assert len(done_with_body) == 1
+        assert outbound[-1].metadata.get("_turn_end") is True
 
         await asyncio.wait_for(title_started.wait(), timeout=0.5)
         release_title.set()
-        session_updated = await asyncio.wait_for(bus.consume_outbound(), timeout=0.5)
+        session_updated = None
+        for _ in range(10):
+            candidate = await asyncio.wait_for(bus.consume_outbound(), timeout=0.5)
+            if (candidate.metadata or {}).get("_session_updated"):
+                session_updated = candidate
+                break
+        assert session_updated is not None
 
         assert (session_updated.metadata or {}).get("_session_updated") is True
         assert provider.chat_with_retry.await_count == 2

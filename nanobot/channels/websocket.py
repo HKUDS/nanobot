@@ -29,7 +29,7 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 from websockets.http11 import Response
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import builtin_command_palette
@@ -1494,6 +1494,9 @@ class WebSocketChannel(BaseChannel):
             payload["latency_ms"] = int(lat)
         if msg.metadata.get("_tool_events"):
             payload["tool_events"] = msg.metadata["_tool_events"]
+        agent_ui = msg.metadata.get(OUTBOUND_META_AGENT_UI)
+        if agent_ui is not None:
+            payload["agent_ui"] = agent_ui
         # Mark intermediate agent breadcrumbs (tool-call hints, generic
         # progress strings) so WS clients can render them as subordinate
         # trace rows rather than conversational replies.
