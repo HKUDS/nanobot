@@ -91,6 +91,13 @@ BUILTIN_COMMAND_SPECS: tuple[BuiltinCommandSpec, ...] = (
         "undo-2",
     ),
     BuiltinCommandSpec(
+        "/export",
+        "Export conversation",
+        "Export current conversation as Markdown to the workspace.",
+        "download",
+        "[filename]",
+    ),
+    BuiltinCommandSpec(
         "/help",
         "Show help",
         "List available slash commands.",
@@ -539,6 +546,55 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_export(ctx: CommandContext) -> OutboundMessage:
+    """Export current conversation session as Markdown to the workspace directory."""
+    from datetime import datetime
+
+    session = ctx.session or ctx.loop.sessions.get_or_create(ctx.key)
+    history = session.get_history(max_messages=0) if session else []
+    if not history:
+        return OutboundMessage(
+            channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+            content="No conversation history to export.",
+            metadata=dict(ctx.msg.metadata or {}),
+        )
+
+    filename = ctx.args.strip() or f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+    if not filename.endswith(".md"):
+        filename += ".md"
+    out_path = ctx.loop.workspace / filename
+
+    lines = [
+        f"# Conversation Export: {ctx.key}",
+        f"Exported: {datetime.now().isoformat()}",
+        "",
+        "---",
+        "",
+    ]
+    for msg in history:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if isinstance(content, list):
+            content = " ".join(
+                b.get("text", "") for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+        content = str(content).strip()
+        if not content:
+            continue
+        if role == "user":
+            lines.append(f"### 👤 You\n\n{content}\n")
+        elif role == "assistant":
+            lines.append(f"### 🤖 Assistant\n\n{content}\n")
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+    return OutboundMessage(
+        channel=ctx.msg.channel, chat_id=ctx.msg.chat_id,
+        content=f"Exported {len(history)} messages to `{out_path.name}`",
+        metadata=dict(ctx.msg.metadata or {}),
+    )
+
+
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
     return OutboundMessage(
@@ -576,4 +632,6 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.prefix("/dream-log ", cmd_dream_log)
     router.exact("/dream-restore", cmd_dream_restore)
     router.prefix("/dream-restore ", cmd_dream_restore)
+    router.exact("/export", cmd_export)
+    router.prefix("/export ", cmd_export)
     router.exact("/help", cmd_help)
