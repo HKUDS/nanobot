@@ -5,6 +5,22 @@
 ## Goal
 {{ goal }}
 
+{% if cumulative_history %}
+## Run history (prior steps)
+Summaries from **earlier** completed steps. Use with **Previous Progress** below.
+
+{{ cumulative_history }}
+{% endif %}
+{% if all_files_created_so_far or all_files_modified_so_far %}
+### All files touched so far (entire run)
+{% for f in all_files_created_so_far %}
+- Created: `{{ f }}`
+{% endfor %}
+{% for f in all_files_modified_so_far %}
+- Modified: `{{ f }}`
+{% endfor %}
+{% endif %}
+
 ## Previous Progress
 {% if handoff.message %}
 {{ handoff.message }}

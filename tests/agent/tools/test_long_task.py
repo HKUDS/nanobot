@@ -6,14 +6,17 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.tools.long_task import (
+    _IMPLICIT_HANDOFF_TAG,
     CompleteTool,
     HandoffState,
     HandoffTool,
     LongTaskTool,
     _build_system_prompt,
     _build_user_message,
+    _cumulative_block_for_step,
     _extract_file_changes,
     _extract_handoff_from_messages,
+    _strip_redundant_tail_block,
 )
 
 _COMPLETION_PREFIX = (
@@ -173,6 +176,10 @@ async def test_long_task_completes_after_multiple_handoffs():
         elif call_count == 2:
             assert "Processed 1-8." in user_message
             assert "Step 2 of 20" in user_message
+            assert "Previous Progress" in user_message
+            # Last handoff is only under Previous Progress — not duplicated in run history.
+            assert "Run history" not in user_message
+            assert "#### Step 1" not in user_message
             for t in extra_tools:
                 if t.name == "handoff":
                     await t.execute(message="Processed 9-16.")
@@ -181,6 +188,11 @@ async def test_long_task_completes_after_multiple_handoffs():
                 tool_events=[{"name": "handoff", "status": "ok", "detail": ""}],
             )
         elif call_count == 3:
+            assert "Run history" in user_message
+            assert "#### Step 1" in user_message
+            assert "#### Step 2" not in user_message
+            assert "Processed 1-8." in user_message
+            assert "Processed 9-16." in user_message
             for t in extra_tools:
                 if t.name == "complete":
                     await t.execute(summary="All 16 items audited.")
@@ -571,6 +583,100 @@ def test_build_user_message_later_step():
     assert "a.py" in msg
     assert "Do Y" in msg
     assert "Step 4 of 20" in msg
+
+
+def test_build_user_message_includes_cumulative_and_file_union():
+    handoff = HandoffState(message="Last step only.")
+    msg = _build_user_message(
+        "G",
+        step=2,
+        max_steps=10,
+        handoff=handoff,
+        cumulative_history="#### Step 1\nearlier summary",
+        all_files_created_so_far=["early.py", "new.py"],
+        all_files_modified_so_far=["x.py"],
+    )
+    assert "Run history" in msg
+    assert "earlier summary" in msg
+    assert "All files touched so far" in msg
+    assert "early.py" in msg and "new.py" in msg
+    assert "x.py" in msg
+    assert "Last step only." in msg
+
+
+def test_strip_redundant_tail_block_drops_handoff_echo():
+    earlier = HandoffState(message="chunk A")
+    last = HandoffState(message="chunk B", next_step_hint="do C")
+    b0 = _cumulative_block_for_step(0, earlier, body_max_chars=2500)
+    b1 = _cumulative_block_for_step(1, last, body_max_chars=2500)
+    out = _strip_redundant_tail_block(
+        [b0, b1], step=2, handoff=last, body_max_chars=2500
+    )
+    assert out == [b0]
+
+
+def test_strip_redundant_tail_block_drops_implicit_echo():
+    h = HandoffState(message="implicit done")
+    stored = _cumulative_block_for_step(
+        0, h, tag=_IMPLICIT_HANDOFF_TAG, body_max_chars=2500
+    )
+    out = _strip_redundant_tail_block(
+        [stored], step=1, handoff=h, body_max_chars=2500
+    )
+    assert out == []
+
+
+def test_strip_redundant_tail_block_keeps_non_handoff_tail():
+    h = HandoffState(message="continue", next_step_hint="fix tests")
+    blocks = [
+        "#### Step 2 — validation failed\nCompletion claim was rejected\nClaim summary:\nfoo"
+    ]
+    out = _strip_redundant_tail_block(blocks, step=3, handoff=h, body_max_chars=2500)
+    assert out == blocks
+
+
+def test_cumulative_block_respects_body_max():
+    body = "x" * 200
+    block = _cumulative_block_for_step(
+        0, HandoffState(message=body), body_max_chars=80
+    )
+    assert "[... truncated ...]" in block
+
+
+@pytest.mark.asyncio
+async def test_long_task_accepts_cumulative_size_overrides():
+    mgr = _make_manager_stub()
+    call_count = 0
+
+    async def fake_run_step(*, system_prompt, user_message, extra_tools, max_iterations=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            for t in extra_tools:
+                if t.name == "complete":
+                    await t.execute(summary="Done")
+            return _step_result(
+                tools_used=["complete"],
+                tool_events=[{"name": "complete", "status": "ok", "detail": ""}],
+            )
+        for t in extra_tools:
+            if t.name == "complete":
+                await t.execute(summary="ok")
+        return _step_result(
+            tools_used=["complete"],
+            tool_events=[{"name": "complete", "status": "ok", "detail": ""}],
+        )
+
+    mgr.run_step.side_effect = fake_run_step
+    tool = LongTaskTool(manager=mgr)
+    await tool.execute(
+        goal="G",
+        max_steps=2,
+        cumulative_prompt_max_chars=6000,
+        cumulative_step_body_max_chars=900,
+    )
+    assert tool._cumulative_prompt_max_chars == 6000
+    assert tool._cumulative_step_body_max_chars == 900
 
 
 def test_build_user_message_final_step():

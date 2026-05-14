@@ -158,6 +158,17 @@ class CompleteTool(Tool):
 _STEP_BUDGET = 8
 _FINAL_STEP_BUDGET = 4  # Lower budget for final steps
 
+# Cap run-history injected into each step prompt (UTF-8 chars). Avoids blowing context
+# on very long chains while preserving early + recent step notes.
+_CUMULATIVE_PROMPT_MAX_CHARS = 12_000
+_CUMULATIVE_STEP_BODY_MAX_CHARS = 2_500
+_CUMULATIVE_PROMPT_MAX_CHARS_HARD_CAP = 200_000
+_CUMULATIVE_PROMPT_MIN_CHARS = 500
+_CUMULATIVE_STEP_BODY_MAX_CHARS_HARD_CAP = 50_000
+_CUMULATIVE_STEP_BODY_MIN_CHARS = 100
+
+_IMPLICIT_HANDOFF_TAG = "implicit (no handoff() call)"
+
 # Must match max_iterations_message set in SubagentManager.run_step()
 _BUDGET_EXHAUSTED_PREFIX = "Tool budget exhausted"
 
@@ -183,12 +194,56 @@ def _build_system_prompt(budget: int) -> str:
     )
 
 
+def _format_cumulative_prompt(blocks: list[str], *, max_chars: int) -> str:
+    """Join per-step run history blocks, truncating from the middle if needed.
+
+    Keeps the earliest block (often has the global plan) and as many recent blocks
+    as fit under ``max_chars``.
+    """
+    if not blocks:
+        return ""
+    sep = "\n\n---\n\n"
+    joined = sep.join(blocks)
+    if len(joined) <= max_chars:
+        return joined
+    first = blocks[0]
+    reserve = max_chars - len(first) - 120
+    if reserve < 200:
+        return joined[:max_chars] + "\n\n[... truncated ...]"
+    tail: list[str] = []
+    size = 0
+    for b in reversed(blocks[1:]):
+        add = len(b) + (len(sep) if tail else 0)
+        if size + add > reserve:
+            break
+        tail.insert(0, b)
+        size += add
+    omitted = len(blocks) - 1 - len(tail)
+    mid = (
+        f"\n\n[... {omitted} intermediate step(s) omitted for brevity ...]\n\n"
+        if omitted > 0
+        else "\n\n"
+    )
+    return first + mid + sep.join(tail)
+
+
+def _truncate_cumulative_text(text: str, max_chars: int) -> str:
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 33].rstrip() + "\n[... truncated ...]"
+
+
 def _build_user_message(
     goal: str,
     step: int,
     max_steps: int,
     handoff: HandoffState,
     correction: str | None = None,
+    *,
+    cumulative_history: str = "",
+    all_files_created_so_far: list[str] | None = None,
+    all_files_modified_so_far: list[str] | None = None,
 ) -> str:
     """Build the user message for a subagent step using templates."""
     budget = _step_budget(step, max_steps)
@@ -198,6 +253,8 @@ def _build_user_message(
         f"Reserve the last 1-2 calls for handoff() or complete(). "
         f"If you run out of calls without calling one, your progress is LOST."
     )
+    created = list(all_files_created_so_far or [])
+    modified = list(all_files_modified_so_far or [])
 
     if step == 0:
         prompt = render_template(
@@ -215,6 +272,9 @@ def _build_user_message(
             goal=goal,
             budget=budget,
             handoff=handoff,
+            cumulative_history=cumulative_history,
+            all_files_created_so_far=created,
+            all_files_modified_so_far=modified,
         )
     else:
         prompt = render_template(
@@ -224,12 +284,63 @@ def _build_user_message(
             goal=goal,
             budget=budget,
             handoff=handoff,
+            cumulative_history=cumulative_history,
+            all_files_created_so_far=created,
+            all_files_modified_so_far=modified,
         )
 
     if correction:
         prompt += f"\n\n## User Correction\n{correction}\n"
 
     return prompt + budget_note
+
+
+def _strip_redundant_tail_block(
+    blocks: list[str],
+    *,
+    step: int,
+    handoff: HandoffState,
+    body_max_chars: int,
+) -> list[str]:
+    """Omit the last run-history block if it duplicates **Previous Progress** (last handoff)."""
+    if step <= 0 or not blocks or handoff.is_empty():
+        return blocks
+    last = blocks[-1]
+    prev = step - 1
+    for tag in ("", _IMPLICIT_HANDOFF_TAG):
+        echo = _cumulative_block_for_step(
+            prev, handoff, tag=tag, body_max_chars=body_max_chars
+        )
+        if last == echo:
+            return blocks[:-1]
+    return blocks
+
+
+def _cumulative_block_for_step(
+    step_index: int,
+    handoff: HandoffState,
+    *,
+    tag: str = "",
+    body_max_chars: int = _CUMULATIVE_STEP_BODY_MAX_CHARS,
+) -> str:
+    """One markdown block describing a finished step (for run history)."""
+    label = f"Step {step_index + 1}"
+    if tag:
+        label = f"{label} — {tag}"
+    lines = [f"#### {label}"]
+    body = (handoff.message or "").strip() or "(no summary)"
+    lines.append(_truncate_cumulative_text(body, body_max_chars))
+    if handoff.next_step_hint:
+        lines.append(
+            "Next hint: "
+            + _truncate_cumulative_text(handoff.next_step_hint, 800)
+        )
+    if handoff.verification:
+        lines.append(
+            "Verification: "
+            + _truncate_cumulative_text(handoff.verification, 800)
+        )
+    return "\n".join(lines)
 
 
 def _extract_handoff_from_messages(messages: list[dict[str, Any]]) -> str:
@@ -323,6 +434,22 @@ class LongTaskEvent:
             minimum=1,
             maximum=100,
         ),
+        cumulative_prompt_max_chars=IntegerSchema(
+            description=(
+                "Max size of the run-history section in each step prompt "
+                f"(default {_CUMULATIVE_PROMPT_MAX_CHARS} UTF-8 chars, clamped)"
+            ),
+            minimum=_CUMULATIVE_PROMPT_MIN_CHARS,
+            maximum=_CUMULATIVE_PROMPT_MAX_CHARS_HARD_CAP,
+        ),
+        cumulative_step_body_max_chars=IntegerSchema(
+            description=(
+                "Max chars per step summary inside run history "
+                f"(default {_CUMULATIVE_STEP_BODY_MAX_CHARS}, clamped)"
+            ),
+            minimum=_CUMULATIVE_STEP_BODY_MIN_CHARS,
+            maximum=_CUMULATIVE_STEP_BODY_MAX_CHARS_HARD_CAP,
+        ),
         required=["goal"],
     )
 )
@@ -345,6 +472,11 @@ class LongTaskTool(Tool):
         called before execute() starts.
         """
         existing_signals = self._state.get("signal_queue", [])
+        self._cumulative_step_blocks = []
+        self._all_created_paths = set()
+        self._all_modified_paths = set()
+        self._cumulative_prompt_max_chars = _CUMULATIVE_PROMPT_MAX_CHARS
+        self._cumulative_step_body_max_chars = _CUMULATIVE_STEP_BODY_MAX_CHARS
         self._state: dict[str, Any] = {
             "current_step": 0,
             "total_steps": 0,
@@ -368,8 +500,11 @@ class LongTaskTool(Tool):
     def description(self) -> str:
         return (
             "Execute a long-running task that cannot fit in a single context window. "
-            "The work is broken into sequential steps, each starting fresh with the "
-            "original goal and progress from the previous step. Use this for batch "
+            "The work is broken into sequential steps; each step gets the goal, the "
+            "last handoff, a **cumulative run history** of earlier step summaries, "
+            "and a **union of all file paths** touched so far (not only the previous "
+            "step). Optional `cumulative_prompt_max_chars` / `cumulative_step_body_max_chars` "
+            "tune how much run history is injected per step. Use this for batch "
             "processing (auditing many files, processing many items), large-scale "
             "refactoring, or any multi-step task where you might lose track of the "
             "goal. For simple independent tasks, use spawn instead.\n\n"
@@ -467,11 +602,79 @@ class LongTaskTool(Tool):
             except Exception:
                 logger.exception("LongTask {} hook failed", hook_name)
 
+    def _merge_handoff_paths(self, handoff: HandoffState) -> None:
+        for p in handoff.files_created:
+            self._all_created_paths.add(p)
+        for p in handoff.files_modified:
+            self._all_modified_paths.add(p)
+
+    def _merge_auto_paths(self, created: list[str], modified: list[str]) -> None:
+        for p in created:
+            self._all_created_paths.add(p)
+        for p in modified:
+            self._all_modified_paths.add(p)
+
+    def _cumulative_prompt_extras(
+        self, step: int, handoff: HandoffState
+    ) -> tuple[str, list[str], list[str]]:
+        blocks = _strip_redundant_tail_block(
+            self._cumulative_step_blocks,
+            step=step,
+            handoff=handoff,
+            body_max_chars=self._cumulative_step_body_max_chars,
+        )
+        hist = _format_cumulative_prompt(
+            blocks,
+            max_chars=self._cumulative_prompt_max_chars,
+        )
+        return hist, sorted(self._all_created_paths), sorted(self._all_modified_paths)
+
+    def _record_handoff_step(self, step: int, handoff: HandoffState, *, tag: str = "") -> None:
+        self._merge_handoff_paths(handoff)
+        self._cumulative_step_blocks.append(
+            _cumulative_block_for_step(
+                step,
+                handoff,
+                tag=tag,
+                body_max_chars=self._cumulative_step_body_max_chars,
+            )
+        )
+
+    def _record_validation_failed(self, step: int, claimed_summary: str) -> None:
+        body = _truncate_cumulative_text(
+            (claimed_summary or "").strip() or "(empty claim)",
+            self._cumulative_step_body_max_chars,
+        )
+        block = (
+            f"#### Step {step + 1} — validation failed\n"
+            "Completion claim was rejected by the validation pass — continue working.\n"
+            f"Claim summary:\n{body}"
+        )
+        self._cumulative_step_blocks.append(block)
+
     # --- Core execution ---
 
-    async def execute(self, goal: str, max_steps: int = 20, **kwargs: Any) -> str:
+    async def execute(
+        self,
+        goal: str,
+        max_steps: int = 20,
+        *,
+        cumulative_prompt_max_chars: int | None = None,
+        cumulative_step_body_max_chars: int | None = None,
+        **kwargs: Any,
+    ) -> str:
         handoff = HandoffState()
         self._reset_state()
+        pm = cumulative_prompt_max_chars or _CUMULATIVE_PROMPT_MAX_CHARS
+        sm = cumulative_step_body_max_chars or _CUMULATIVE_STEP_BODY_MAX_CHARS
+        self._cumulative_prompt_max_chars = max(
+            _CUMULATIVE_PROMPT_MIN_CHARS,
+            min(pm, _CUMULATIVE_PROMPT_MAX_CHARS_HARD_CAP),
+        )
+        self._cumulative_step_body_max_chars = max(
+            _CUMULATIVE_STEP_BODY_MIN_CHARS,
+            min(sm, _CUMULATIVE_STEP_BODY_MAX_CHARS_HARD_CAP),
+        )
         self._state["goal"] = goal
         self._state["total_steps"] = max_steps
         self._state["status"] = "running"
@@ -483,8 +686,16 @@ class LongTaskTool(Tool):
             self._state["current_step"] = step
             signal_store = HandoffState()
             correction = self._pop_signal()
+            c_hist, cr_union, mo_union = self._cumulative_prompt_extras(step, handoff)
             user_msg = _build_user_message(
-                goal, step, max_steps, handoff, correction=correction
+                goal,
+                step,
+                max_steps,
+                handoff,
+                correction=correction,
+                cumulative_history=c_hist,
+                all_files_created_so_far=cr_union,
+                all_files_modified_so_far=mo_union,
             )
 
             budget = _step_budget(step, max_steps)
@@ -600,6 +811,13 @@ class LongTaskTool(Tool):
                         reason="Validation did not confirm completion",
                     )
                     # Fall through to handoff — continue working
+                    if auto_created and not signal_store.files_created:
+                        signal_store.files_created = auto_created
+                    if auto_modified and not signal_store.files_modified:
+                        signal_store.files_modified = auto_modified
+                    self._merge_handoff_paths(signal_store)
+                    self._merge_auto_paths(auto_created, auto_modified)
+                    self._record_validation_failed(step, sig_payload)
                     handoff = signal_store
                     handoff.next_step_hint = (
                         f"Validation failed. Continue working toward the goal. "
@@ -615,6 +833,7 @@ class LongTaskTool(Tool):
                     signal_store.files_created = auto_created
                 if auto_modified and not signal_store.files_modified:
                     signal_store.files_modified = auto_modified
+                self._record_handoff_step(step, signal_store)
                 handoff = signal_store
                 self._state["last_handoff"] = handoff
                 continue
@@ -622,6 +841,16 @@ class LongTaskTool(Tool):
             else:
                 # No signal — use extracted content as handoff
                 handoff = HandoffState(message=signal_store.message)
+                if auto_created and not handoff.files_created:
+                    handoff.files_created = auto_created
+                if auto_modified and not handoff.files_modified:
+                    handoff.files_modified = auto_modified
+                if handoff.message or handoff.files_created or handoff.files_modified:
+                    self._record_handoff_step(
+                        step,
+                        handoff,
+                        tag=_IMPLICIT_HANDOFF_TAG,
+                    )
                 self._state["last_handoff"] = handoff
 
         self._state["status"] = "error"
