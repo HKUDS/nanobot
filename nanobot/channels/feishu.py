@@ -363,6 +363,18 @@ class FeishuChannel(BaseChannel):
             "register_p2_im_chat_access_event_bot_p2p_chat_entered_v1",
             self._on_bot_p2p_chat_entered,
         )
+        # Silence "processor not found" errors when bots are added/removed from groups.
+        # These events carry no actionable data for the agent.
+        builder = self._register_optional_event(
+            builder,
+            "register_p2_im_chat_member_bot_added_v1",
+            lambda _: None,
+        )
+        builder = self._register_optional_event(
+            builder,
+            "register_p2_im_chat_member_bot_deleted_v1",
+            lambda _: None,
+        )
         event_handler = builder.build()
 
         # Create WebSocket client for long connection
