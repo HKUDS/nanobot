@@ -241,6 +241,12 @@ class TelegramConfig(Base):
     # Enable inline keyboard buttons in Telegram messages.
     inline_keyboards: bool = False
     stream_edit_interval: float = Field(default=_STREAM_EDIT_INTERVAL_DEFAULT, ge=0.1)
+    # Voice/audio transcription. Empty api_key disables transcription
+    # entirely; messages then reach the agent as the raw [voice: <path>] tag.
+    transcription_provider: Literal["groq", "openai"] = "groq"
+    transcription_api_key: str = ""
+    transcription_api_base: str = ""
+    transcription_language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}$")
 
 
 class TelegramChannel(BaseChannel):
