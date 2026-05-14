@@ -1,5 +1,9 @@
 """Thread goal tools: sustained objectives on the main agent (Codex-style).
 
+Follow the built-in **long-task** skill for lifecycle rules and how to phrase
+objectives (especially **idempotent**, compaction-safe goals). That skill is
+always-on in context; use it before composing ``long_task.goal`` text.
+
 ``long_task`` registers an objective on the session (JSON-serializable metadata).
 Active objectives are mirrored each turn into the Runtime Context block (see
 ``thread_goal_state.runtime_lines_for_metadata``) so compaction cannot hide them.
@@ -74,7 +78,9 @@ class _GoalToolsMixin(ContextAware):
     tool_parameters_schema(
         goal=StringSchema(
             "Full objective for sustained execution on this chat thread. "
-            "Be explicit about deliverables, formats, and constraints.",
+            "Follow the built-in long-task skill: state desired outcomes and acceptance criteria, "
+            "keep wording idempotent and self-contained (safe across compaction / resume—no duplicate destructive steps). "
+            "Be explicit about deliverables, scope boundaries, and verification.",
             max_length=12_000,
         ),
         ui_summary=StringSchema(
@@ -109,6 +115,9 @@ class LongTaskTool(Tool, _GoalToolsMixin):
     def description(self) -> str:
         return (
             "Declare a sustained objective for this conversation. "
+            "First internalize the built-in long-task skill (always in context): "
+            "write goals that are idempotent and self-contained—acceptable end state, scope, verification— "
+            "not brittle step lists that break on retry or compaction. "
             "Execution stays on the main agent across turns (use normal tools). "
             "The active objective is mirrored each turn under Runtime Context as "
             "\"Thread goal (active):\" plus the stored text. "
