@@ -1113,6 +1113,7 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
 | `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
+| `channels.telegram.chatAccess` | `{}` | Optional per-chat access rules for Telegram. Each key is a Telegram `chat_id`; each value is either `"*"` to allow every sender in that chat, or a list of user IDs/usernames allowed only in that chat. Chats not listed here fall back to `allowFrom`. This controls who may talk to the bot; `groupPolicy` still controls whether plain group messages are accepted or a mention/reply is required. |
 
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
 
