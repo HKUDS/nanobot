@@ -76,4 +76,41 @@ describe("mergeCanonicalHistoryPreservingLongTasks", () => {
     expect(traces.length).toBe(1);
     expect(traces[0]!.traces).toEqual(["tool x", "tool y"]);
   });
+
+  it("keeps each turn's traces in that turn after refresh (no tail accumulation)", () => {
+    const traceT1: UIMessage = {
+      id: "t1",
+      role: "tool",
+      kind: "trace",
+      content: "old",
+      traces: Array.from({ length: 40 }, (_, i) => `tool-${i}`),
+      createdAt: 2,
+    };
+    const traceT2: UIMessage = {
+      id: "t2",
+      role: "tool",
+      kind: "trace",
+      content: "new",
+      traces: ["only-two"],
+      createdAt: 5,
+    };
+    const prev: UIMessage[] = [
+      { id: "u1", role: "user", content: "one", createdAt: 1 },
+      traceT1,
+      { id: "a1", role: "assistant", content: "r1", createdAt: 3 },
+      { id: "u2", role: "user", content: "two", createdAt: 4 },
+      traceT2,
+      { id: "a2", role: "assistant", content: "r2", createdAt: 6 },
+    ];
+    const historical: UIMessage[] = [
+      { id: "u1", role: "user", content: "one", createdAt: 1 },
+      { id: "a1", role: "assistant", content: "r1", createdAt: 3 },
+      { id: "u2", role: "user", content: "two", createdAt: 4 },
+      { id: "a2", role: "assistant", content: "r2", createdAt: 6 },
+    ];
+    const merged = mergeCanonicalHistoryPreservingLongTasks(prev, historical);
+    expect(merged.map((m) => m.id)).toEqual(["u1", "t1", "a1", "u2", "t2", "a2"]);
+    const t2row = merged.find((m) => m.id === "t2");
+    expect(t2row?.traces?.length).toBe(1);
+  });
 });
