@@ -1,41 +1,27 @@
 """Thread goal tools: sustained objectives on the main agent (Codex-style).
 
 ``long_task`` registers an objective on the session (JSON-serializable metadata).
+Active objectives are mirrored each turn into the Runtime Context block (see
+``thread_goal_state.runtime_lines_for_metadata``) so compaction cannot hide them.
 Work proceeds in ordinary agent turns (same runner, compaction as configured).
-When everything requested is truly done, call ``complete_goal`` so bookkeeping clears.
+Call ``complete_goal`` when the sustained objective should stop being tracked:
+finished successfully, or cancelled / superseded / redirected—in every case the recap should match reality.
 
 There is **no** sub-agent orchestrator and **no** special WebSocket ``agent_ui`` stream.
 """
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from nanobot.agent.thread_goal_state import THREAD_GOAL_KEY, parse_thread_goal
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
-
-
-THREAD_GOAL_KEY = "thread_goal"
-
-
-def _parse_goal(blob: Any) -> dict[str, Any] | None:
-    if blob is None:
-        return None
-    if isinstance(blob, dict):
-        return blob
-    if isinstance(blob, str):
-        try:
-            parsed = json.loads(blob)
-        except json.JSONDecodeError:
-            return None
-        return parsed if isinstance(parsed, dict) else None
-    return None
 
 
 def _iso_now() -> str:
@@ -98,6 +84,8 @@ class LongTaskTool(Tool, _GoalToolsMixin):
         return (
             "Declare a sustained objective for this conversation. "
             "Execution stays on the main agent across turns (use normal tools). "
+            "The active objective is mirrored each turn under Runtime Context as "
+            "\"Thread goal (active):\" plus the stored text. "
             "When—and only when—the objective is fully satisfied, call complete_goal. "
             "Do not call complete_goal for partial progress or because you are tired. "
             "If an objective is already active, finish or complete_goal before starting another."
@@ -109,7 +97,7 @@ class LongTaskTool(Tool, _GoalToolsMixin):
             return (
                 "Error: long_task requires an active chat session (missing routing context)."
             )
-        prior = _parse_goal(sess.metadata.get(THREAD_GOAL_KEY))
+        prior = parse_thread_goal(sess.metadata.get(THREAD_GOAL_KEY))
         if isinstance(prior, dict) and prior.get("status") == "active":
             return (
                 "Error: a thread goal is already active. "
@@ -136,7 +124,8 @@ class LongTaskTool(Tool, _GoalToolsMixin):
 @tool_parameters(
     tool_parameters_schema(
         recap=StringSchema(
-            "Brief recap for the user confirming what was achieved (plain text).",
+            "Brief recap for the user (plain text). When the goal succeeded, confirm outcomes; "
+            "if the user cancelled, pivoted, or replaced the objective, say so honestly.",
             max_length=8000,
             nullable=True,
         ),
@@ -163,16 +152,18 @@ class CompleteGoalTool(Tool, _GoalToolsMixin):
     @property
     def description(self) -> str:
         return (
-            "Call only after the active thread goal has been fully achieved and verified. "
-            "Summarize outcomes for the user. If no goal is active, the tool reports that "
-            "and leaves metadata unchanged."
+            "End bookkeeping for the active thread goal. "
+            "Use when the objective is fully achieved and verified—recap what was delivered. "
+            "Also call when the user cancels, redirects, or replaces the goal: recap must reflect "
+            "what actually happened (not necessarily success). "
+            "If no goal is active, the tool reports that and leaves metadata unchanged."
         )
 
     async def execute(self, recap: str | None = None, **kwargs: Any) -> str:
         sess = self._session()
         if sess is None:
             return "Error: complete_goal requires an active chat session."
-        prior = _parse_goal(sess.metadata.get(THREAD_GOAL_KEY))
+        prior = parse_thread_goal(sess.metadata.get(THREAD_GOAL_KEY))
         if not isinstance(prior, dict) or prior.get("status") != "active":
             return "No active thread goal to complete."
 

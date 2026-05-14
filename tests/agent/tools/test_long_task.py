@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 
+from nanobot.agent.loop import AgentLoop
+from nanobot.agent.thread_goal_state import THREAD_GOAL_KEY
 from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.long_task import (
-    THREAD_GOAL_KEY,
     CompleteGoalTool,
     LongTaskTool,
 )
-from nanobot.agent.loop import AgentLoop
 from nanobot.bus.queue import MessageBus
 from nanobot.session.manager import SessionManager
-from unittest.mock import MagicMock
 
 
 def _tools(sm: SessionManager) -> tuple[LongTaskTool, CompleteGoalTool]:

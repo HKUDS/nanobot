@@ -604,6 +604,7 @@ class Consolidator:
             chat_id=chat_id,
             sender_id=None,
             session_summary=summary,
+            session_metadata=session.metadata,
         )
         return estimate_prompt_tokens_chain(
             self.provider,

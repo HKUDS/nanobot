@@ -1,13 +1,11 @@
 """Tests for ContextBuilder — system prompt and message assembly."""
 
-import base64
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from nanobot.agent.context import ContextBuilder
-
+from nanobot.agent.thread_goal_state import THREAD_GOAL_KEY
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -284,6 +282,22 @@ class TestBuildMessages:
         user_msg = str(messages[-1]["content"])
         assert "[Runtime Context" in user_msg
         assert "hello" in user_msg
+
+    def test_session_metadata_injects_active_thread_goal(self, tmp_path):
+        builder = _builder(tmp_path)
+        meta = {
+            THREAD_GOAL_KEY: {"status": "active", "objective": "Finish docs migration."},
+        }
+        messages = builder.build_messages(
+            [],
+            "hi",
+            channel="cli",
+            chat_id="x",
+            session_metadata=meta,
+        )
+        user_msg = str(messages[-1]["content"])
+        assert "Thread goal (active):" in user_msg
+        assert "Finish docs migration." in user_msg
 
     def test_consecutive_same_role_merged(self, tmp_path):
         builder = _builder(tmp_path)

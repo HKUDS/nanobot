@@ -5,8 +5,8 @@ from datetime import datetime
 from typing import Any
 
 # Optional ``OutboundMessage.metadata`` key for structured, channel-agnostic UI
-# state. Value is a JSON-serializable dict with at least ``kind`` (e.g.
-# ``long_task``); each channel decides whether to forward it (WebUI, WS, …).
+# payloads. Value is JSON-serializable with at least ``kind``; rich clients may
+# render it and other channels may ignore unknown keys.
 OUTBOUND_META_AGENT_UI = "_agent_ui"
 
 

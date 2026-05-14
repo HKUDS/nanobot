@@ -22,6 +22,7 @@ from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.thread_goal_state import runtime_lines_for_metadata
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -602,6 +603,7 @@ class AgentLoop:
             chat_id=self._runtime_chat_id(msg),
             sender_id=msg.sender_id,
             session_summary=pending_summary,
+            session_metadata=session.metadata,
         )
 
     async def _dispatch_command_inline(
@@ -736,10 +738,13 @@ class AgentLoop:
                     content, media = extract_documents(content, media)
                     media = media or None
                 user_content = self.context._build_user_content(content, media)
+                extra = runtime_lines_for_metadata(session.metadata) if session is not None else []
                 runtime_ctx = self.context._build_runtime_context(
                     pending_msg.channel,
                     self._runtime_chat_id(pending_msg),
                     self.context.timezone,
+                    sender_id=pending_msg.sender_id,
+                    supplemental_lines=extra or None,
                 )
                 if isinstance(user_content, str):
                     merged: str | list[dict[str, Any]] = f"{runtime_ctx}\n\n{user_content}"
@@ -1109,6 +1114,7 @@ class AgentLoop:
             current_role=current_role,
             sender_id=msg.sender_id,
             session_summary=pending,
+            session_metadata=session.metadata,
         )
         t_wall = time.time()
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
