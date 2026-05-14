@@ -440,6 +440,13 @@ class LongTaskEvent:
 @tool_parameters(
     tool_parameters_schema(
         goal=StringSchema("Description of the task to complete"),
+        ui_summary=StringSchema(
+            description=(
+                "One-line label for the chat UI (roughly ≤12 words). "
+                "Shown in the collapsed long-task card; optional but recommended."
+            ),
+            max_length=120,
+        ),
         max_steps=IntegerSchema(
             description="Maximum number of subagent steps (default 20)",
             minimum=1,
@@ -504,6 +511,7 @@ class LongTaskTool(Tool):
             },
             "signal_queue": existing_signals,
             "error": None,
+            "ui_summary": "",
         }
 
     @property
@@ -524,6 +532,8 @@ class LongTaskTool(Tool):
             "goal. For simple independent tasks, use spawn instead.\n\n"
             "When constructing the goal, be explicit: list concrete deliverables, "
             "required output format (e.g. Markdown table), and any file paths. "
+            "Pass a short ``ui_summary`` (one line) when invoking this tool so the "
+            "user sees a compact card title in the interface. "
             "The tool returns a text summary when finished. "
             "If the summary contains the full answer, present it to the user directly. "
             "Only read files afterwards if the user explicitly asks for verification."
@@ -646,6 +656,7 @@ class LongTaskTool(Tool):
             "error": self._state.get("error"),
             "files_created_union": sorted(self._all_created_paths)[:_UI_PATH_LIST_MAX],
             "files_modified_union": sorted(self._all_modified_paths)[:_UI_PATH_LIST_MAX],
+            "ui_summary": (self._state.get("ui_summary") or "")[:120],
         }
         if "step" in payload and payload["step"] is not None:
             snap["step"] = payload["step"]
@@ -783,6 +794,7 @@ class LongTaskTool(Tool):
         goal: str,
         max_steps: int = 20,
         *,
+        ui_summary: str = "",
         cumulative_prompt_max_chars: int | None = None,
         cumulative_step_body_max_chars: int | None = None,
         **kwargs: Any,
@@ -802,6 +814,7 @@ class LongTaskTool(Tool):
         self._state["goal"] = goal
         self._state["total_steps"] = max_steps
         self._state["status"] = "running"
+        self._state["ui_summary"] = (ui_summary or "").strip()[:120]
         self._ui_run_id = str(uuid.uuid4())
 
         logger.debug("long_task start: max_steps={}, goal={:.120}", max_steps, goal)

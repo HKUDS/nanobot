@@ -1,8 +1,9 @@
 export type Role = "user" | "assistant" | "tool" | "system";
 
 /** "trace" rows are intermediate agent breadcrumbs (tool-call hints,
- * progress pings) that should not be rendered as conversational replies. */
-export type MessageKind = "message" | "trace";
+ * progress pings) that should not be rendered as conversational replies.
+ * ``long_task`` is a single updating activity card (see ``longTask`` payload). */
+export type MessageKind = "message" | "trace" | "long_task";
 
 /** One image attached to a UIMessage.
  *
@@ -53,6 +54,52 @@ export interface UIMessage {
   reasoningStreaming?: boolean;
   /** End-to-end wall time for this assistant turn (persisted ``latency_ms`` / ``turn_end``). */
   latencyMs?: number;
+  /** When ``kind === "long_task"``, structured state for the activity card (merged by ``run_id``). */
+  longTask?: LongTaskAgentUIData;
+  /** Append-only snapshots for the same ``run_id`` (step timeline in the UI). */
+  longTaskTimeline?: LongTaskAgentUIData[];
+}
+
+/** Snapshot from ``long_task`` tool, nested under WS ``agent_ui.data``. */
+export interface LongTaskHandoffSlice {
+  signal_type?: string;
+  message?: string;
+  files_created?: string[];
+  files_modified?: string[];
+  next_step_hint?: string;
+  verification?: string;
+}
+
+export interface LongTaskAgentUIData {
+  version?: number;
+  event: string;
+  run_id: string;
+  status?: string;
+  current_step?: number;
+  total_steps?: number;
+  step?: number;
+  max_steps?: number;
+  budget?: number;
+  goal?: string;
+  cumulative_usage?: Record<string, number>;
+  last_handoff?: LongTaskHandoffSlice;
+  error?: string | null;
+  files_created_union?: string[];
+  files_modified_union?: string[];
+  summary?: string;
+  /** Caller-provided one-line UI label (optional). */
+  ui_summary?: string;
+  event_error?: string;
+  reason?: string;
+  step_handoff?: LongTaskHandoffSlice;
+  tools_used?: string[];
+  stop_reason?: string;
+}
+
+/** Structured UI blob on ``progress`` WS frames; channels may add more ``kind`` values later. */
+export interface AgentUIBlob {
+  kind: string;
+  data?: unknown;
 }
 
 export interface ToolProgressEvent {
@@ -166,6 +213,8 @@ export type InboundEvent =
       kind?: "tool_hint" | "progress" | "reasoning";
       /** Server-measured turn wall time when this frame finishes an assistant reply. */
       latency_ms?: number;
+      /** Structured orchestration state (e.g. long-running ``long_task``). */
+      agent_ui?: AgentUIBlob;
     }
   | {
       event: "delta";

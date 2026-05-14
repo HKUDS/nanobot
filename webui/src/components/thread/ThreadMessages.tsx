@@ -3,7 +3,6 @@ import {
   AgentActivityCluster,
   isAgentActivityMember,
 } from "@/components/thread/AgentActivityCluster";
-import { cn } from "@/lib/utils";
 import type { UIMessage } from "@/lib/types";
 
 interface ThreadMessagesProps {
@@ -86,6 +85,7 @@ function marginAfterPrevUnit(prev: DisplayUnit): string {
   const p = prev.message;
   const denseP =
     p.kind === "trace"
+    || p.kind === "long_task"
     || (
       p.role === "assistant"
       && p.content.trim().length === 0

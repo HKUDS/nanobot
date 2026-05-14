@@ -21,6 +21,7 @@ import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useN
 import { useSessionHistory } from "@/hooks/useSessions";
 import { listSlashCommands } from "@/lib/api";
 import type { ChatSummary, SlashCommand, UIMessage } from "@/lib/types";
+import { mergeCanonicalHistoryPreservingLongTasks } from "@/lib/thread-history-merge";
 import { useClient } from "@/providers/ClientProvider";
 
 interface ThreadShellProps {
@@ -139,8 +140,9 @@ export function ThreadShell({
       if (hasNewCanonicalHistory && historical.length > 0) {
         pendingCanonicalHydrateRef.current.delete(chatId);
         appliedHistoryVersionRef.current.set(chatId, historyVersion);
-        messageCacheRef.current.set(chatId, historical);
-        return historical;
+        const merged = mergeCanonicalHistoryPreservingLongTasks(prev, historical);
+        messageCacheRef.current.set(chatId, merged);
+        return merged;
       }
       if (cached && cached.length > 0) return cached;
       if (historical.length === 0 && prev.length > 0) return prev;

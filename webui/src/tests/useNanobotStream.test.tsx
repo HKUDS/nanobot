@@ -129,6 +129,110 @@ describe("useNanobotStream", () => {
     expect(result.current.messages[1].kind).toBeUndefined();
   });
 
+  it("merges long_task agent_ui snapshots by run_id into one row", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-lt", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const rid = "run-abc";
+    act(() => {
+      fake.emit("chat-lt", {
+        event: "message",
+        chat_id: "chat-lt",
+        text: "long_task · started",
+        kind: "progress",
+        agent_ui: {
+          kind: "long_task",
+          data: {
+            version: 1,
+            event: "task_start",
+            run_id: rid,
+            total_steps: 5,
+            status: "running",
+          },
+        },
+      });
+    });
+    expect(result.current.messages).toHaveLength(1);
+    const row = result.current.messages[0];
+    expect(row.kind).toBe("long_task");
+    expect(row.role).toBe("assistant");
+    expect(row.longTask?.event).toBe("task_start");
+    const firstId = row.id;
+
+    act(() => {
+      fake.emit("chat-lt", {
+        event: "message",
+        chat_id: "chat-lt",
+        text: "long_task · step 2/5",
+        kind: "progress",
+        agent_ui: {
+          kind: "long_task",
+          data: {
+            version: 1,
+            event: "step_start",
+            run_id: rid,
+            total_steps: 5,
+            current_step: 1,
+            status: "running",
+          },
+        },
+      });
+    });
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].id).toBe(firstId);
+    expect(result.current.messages[0].longTask?.event).toBe("step_start");
+    expect(result.current.messages[0].longTaskTimeline?.length).toBe(2);
+  });
+
+  it("collapses task_start then step_start when they share the same displayed step", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-lt2", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    const rid = "run-dup";
+    act(() => {
+      fake.emit("chat-lt2", {
+        event: "message",
+        chat_id: "chat-lt2",
+        text: "long_task · started",
+        kind: "progress",
+        agent_ui: {
+          kind: "long_task",
+          data: {
+            version: 1,
+            event: "task_start",
+            run_id: rid,
+            total_steps: 3,
+            status: "running",
+          },
+        },
+      });
+    });
+    act(() => {
+      fake.emit("chat-lt2", {
+        event: "message",
+        chat_id: "chat-lt2",
+        text: "long_task · step 1/3",
+        kind: "progress",
+        agent_ui: {
+          kind: "long_task",
+          data: {
+            version: 1,
+            event: "step_start",
+            run_id: rid,
+            total_steps: 3,
+            current_step: 0,
+            status: "running",
+          },
+        },
+      });
+    });
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].longTaskTimeline?.length).toBe(1);
+    expect(result.current.messages[0].longTask?.event).toBe("step_start");
+  });
+
   it("renders live tool traces from structured tool events", () => {
     const fake = fakeClient();
     const { result } = renderHook(() => useNanobotStream("chat-tool-events", EMPTY_MESSAGES), {
