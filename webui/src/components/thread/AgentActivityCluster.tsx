@@ -31,7 +31,7 @@ function countToolCalls(messages: UIMessage[]): number {
 
 interface AgentActivityClusterProps {
   messages: UIMessage[];
-  /** True while the session turn is still running (keeps outer fold open until the turn ends). */
+  /** True while the session turn is still running (drives “Working…” copy + header sheen). */
   isTurnStreaming: boolean;
   hasBodyBelow: boolean;
 }
@@ -50,8 +50,9 @@ export function AgentActivityCluster({
   const toolCalls = countToolCalls(messages);
 
   const [userToggledOuter, setUserToggledOuter] = useState(false);
-  const [outerOpenLocal, setOuterOpenLocal] = useState(true);
-  const outerExpanded = userToggledOuter ? outerOpenLocal : isTurnStreaming;
+  const [outerOpenLocal, setOuterOpenLocal] = useState(false);
+  /** Collapsed by default during “Working…” and after the turn; user expands to inspect traces. */
+  const outerExpanded = userToggledOuter ? outerOpenLocal : false;
 
   const headerBusy = isTurnStreaming;
 
