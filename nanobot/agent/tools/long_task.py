@@ -1,8 +1,8 @@
 """Thread goal tools: sustained objectives on the main agent (Codex-style).
 
-Follow the built-in **long-task** skill for lifecycle rules and how to phrase
-objectives (especially **idempotent**, compaction-safe goals). That skill is
-always-on in context; use it before composing ``long_task.goal`` text.
+Follow the built-in **long-goal** skill for lifecycle rules and how to phrase
+objectives (especially **idempotent**, compaction-safe goals). Load that skill
+from the skills listing (path shown there) before composing ``long_task.goal`` text.
 
 ``long_task`` registers an objective on the session (JSON-serializable metadata).
 Active objectives are mirrored each turn into the Runtime Context block (see
@@ -77,10 +77,13 @@ class _GoalToolsMixin(ContextAware):
 @tool_parameters(
     tool_parameters_schema(
         goal=StringSchema(
-            "Full objective for sustained execution on this chat thread. "
-            "Follow the built-in long-task skill: state desired outcomes and acceptance criteria, "
-            "keep wording idempotent and self-contained (safe across compaction / resume—no duplicate destructive steps). "
-            "Be explicit about deliverables, scope boundaries, and verification.",
+            "Full objective text for sustained execution on this chat thread. "
+            "Required: read the entire **long-goal** skill before composing this argument "
+            "(locate **long-goal** in the skills listing and open its file path, e.g. read_file)—do **not** "
+            "call `long_task` until you have read it. "
+            "Apply that skill literally: desired outcomes and acceptance criteria; "
+            "idempotent, self-contained wording (safe across compaction and resume; "
+            "no duplicate destructive steps); explicit deliverables, scope boundaries, and verification.",
             max_length=12_000,
         ),
         ui_summary=StringSchema(
@@ -115,8 +118,8 @@ class LongTaskTool(Tool, _GoalToolsMixin):
     def description(self) -> str:
         return (
             "Declare a sustained objective for this conversation. "
-            "First internalize the built-in long-task skill (always in context): "
-            "write goals that are idempotent and self-contained—acceptable end state, scope, verification— "
+            "Before calling: read the **long-goal** skill from its path in the skills listing—goals must be "
+            "idempotent and self-contained (clear end state, scope, verification), "
             "not brittle step lists that break on retry or compaction. "
             "Execution stays on the main agent across turns (use normal tools). "
             "The active objective is mirrored each turn under Runtime Context as "

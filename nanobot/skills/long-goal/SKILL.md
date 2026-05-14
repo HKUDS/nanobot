@@ -1,7 +1,6 @@
 ---
-name: long-task
+name: long-goal
 description: Sustained objectives via long_task / complete_goal, Runtime Context goal lines, and idempotent goal wording.
-always: true
 ---
 
 # Long-running objectives (`long_task` / `complete_goal`)
@@ -16,7 +15,7 @@ Optional **`Summary:`** is a short UI label only—put crisp acceptance hints in
 
 ## Tools
 
-- **`long_task`** — Register **one** sustained objective per thread. Before calling it, align the `goal` text with **Idempotent goals** below. Execution stays on the main agent across turns.
+- **`long_task`** — Register **one** sustained objective per thread. **Read this skill file first** (via the skills listing path), then align the `goal` text with **Idempotent goals** below. Execution stays on the main agent across turns.
 
 - **`complete_goal`** — Close bookkeeping for the **current** active goal. Call when work is **done**, **and also** when the user **cancels**, **changes direction**, or **replaces** the objective: use **`recap`** to state honestly what happened (e.g. cancelled, partially done, superseded). Then you may call **`long_task`** again for a **new** objective after the session shows no active goal (or after the user agrees to replace).
 
