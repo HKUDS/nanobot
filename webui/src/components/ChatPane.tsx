@@ -5,7 +5,10 @@ import { MessageList } from "@/components/MessageList";
 import { useClient } from "@/providers/ClientProvider";
 import { useNanobotStream } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
+import { fetchWebuiThreadWithRetry } from "@/lib/api";
+import { mergeWebuiDiskSnapshotWithHistorical } from "@/lib/thread-webui-merge";
 import type { ChatSummary } from "@/lib/types";
+import { WEBUI_THREAD_SCHEMA_VERSION } from "@/lib/types";
 
 interface ChatPaneProps {
   session: ChatSummary | null;
@@ -23,9 +26,10 @@ export function ChatPane({ session, onNewChat }: ChatPaneProps) {
   const chatId = session?.chatId ?? null;
   const historyKey = session?.key ?? null;
   const { messages: historical, loading, hasPendingToolCalls } = useSessionHistory(historyKey);
-  const { client } = useClient();
+  const { client, token } = useClient();
   const [booting, setBooting] = useState(false);
   const pendingFirstRef = useRef<string | null>(null);
+  const webuiSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const initial = useMemo(() => historical, [historical]);
   const { messages, isStreaming, send, setMessages } = useNanobotStream(
@@ -35,9 +39,38 @@ export function ChatPane({ session, onNewChat }: ChatPaneProps) {
   );
 
   useEffect(() => {
-    if (!loading && chatId) setMessages(historical);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, chatId, historical]);
+    if (loading || !chatId || !historyKey) return;
+    let cancelled = false;
+    void (async () => {
+      const disk = await fetchWebuiThreadWithRetry(token, historyKey);
+      if (cancelled) return;
+      const dm = disk?.messages ?? [];
+      setMessages(mergeWebuiDiskSnapshotWithHistorical(dm, historical));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, chatId, historyKey, historical, setMessages, token]);
+
+  useEffect(() => {
+    if (!historyKey || !chatId) return;
+    if (webuiSaveTimerRef.current !== null) clearTimeout(webuiSaveTimerRef.current);
+    webuiSaveTimerRef.current = setTimeout(() => {
+      webuiSaveTimerRef.current = null;
+      client.saveWebuiThreadSnapshot(historyKey, {
+        schemaVersion: WEBUI_THREAD_SCHEMA_VERSION,
+        savedAt: new Date().toISOString(),
+        sessionKey: historyKey,
+        messages,
+      });
+    }, 450);
+    return () => {
+      if (webuiSaveTimerRef.current !== null) {
+        clearTimeout(webuiSaveTimerRef.current);
+        webuiSaveTimerRef.current = null;
+      }
+    };
+  }, [messages, historyKey, chatId, client]);
 
   // Once a session becomes active, flush any first-message stashed from the
   // welcome composer so the user's keystroke "just sends".

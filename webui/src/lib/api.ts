@@ -5,6 +5,7 @@ import type {
   SettingsUpdate,
   SlashCommand,
   WebSearchSettingsUpdate,
+  WebuiThreadPersistedPayload,
 } from "./types";
 
 export class ApiError extends Error {
@@ -104,6 +105,55 @@ export async function fetchSessionMessages(
     `${base}/api/sessions/${encodeURIComponent(key)}/messages`,
     token,
   );
+}
+
+/** Disk-backed WebUI display thread snapshot (separate from agent session). */
+export async function fetchWebuiThread(
+  token: string,
+  key: string,
+  base: string = "",
+): Promise<WebuiThreadPersistedPayload | null> {
+  const url = `${base}/api/sessions/${encodeURIComponent(key)}/webui-thread`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: "same-origin",
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  return (await res.json()) as WebuiThreadPersistedPayload;
+}
+
+const WEBUI_THREAD_FETCH_ATTEMPTS = 3;
+const WEBUI_THREAD_FETCH_BACKOFF_MS = 400;
+
+/**
+ * Same as {@link fetchWebuiThread} but retries transient failures so a flaky
+ * boot GET does not permanently skip disk hydration for this mount.
+ */
+export async function fetchWebuiThreadWithRetry(
+  token: string,
+  key: string,
+  base: string = "",
+): Promise<WebuiThreadPersistedPayload | null> {
+  let lastErr: unknown;
+  for (let i = 0; i < WEBUI_THREAD_FETCH_ATTEMPTS; i++) {
+    try {
+      return await fetchWebuiThread(token, key, base);
+    } catch (e) {
+      lastErr = e;
+      if (i < WEBUI_THREAD_FETCH_ATTEMPTS - 1) {
+        await new Promise((r) => setTimeout(r, WEBUI_THREAD_FETCH_BACKOFF_MS));
+      }
+    }
+  }
+  const detail =
+    lastErr instanceof ApiError
+      ? `HTTP ${lastErr.status}`
+      : lastErr instanceof Error
+        ? lastErr.message
+        : String(lastErr);
+  console.warn(`fetchWebuiThreadWithRetry: giving up after retries (${detail})`);
+  return null;
 }
 
 export async function deleteSession(

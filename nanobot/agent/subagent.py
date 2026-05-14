@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
-from nanobot.agent.runner import AgentRunResult, AgentRunner, AgentRunSpec
+from nanobot.agent.runner import AgentRunner, AgentRunResult, AgentRunSpec
 from nanobot.agent.tools.context import ToolContext
 from nanobot.agent.tools.file_state import FileStates
 from nanobot.agent.tools.loader import ToolLoader
@@ -111,12 +111,26 @@ class SubagentManager:
             restrict_to_workspace=self.restrict_to_workspace,
         )
 
-    def _build_tools(self) -> ToolRegistry:
+    def tools_config_with_restrict(self, *, restrict_to_workspace: bool) -> ToolsConfig:
+        """Copy of subagent tool policy with a different workspace restriction flag."""
+        return ToolsConfig(
+            exec=self.tools_config.exec,
+            web=self.tools_config.web,
+            restrict_to_workspace=restrict_to_workspace,
+        )
+
+    def _build_tools(
+        self,
+        workspace: Path | None = None,
+        tools_config: ToolsConfig | None = None,
+    ) -> ToolRegistry:
         """Build an isolated subagent tool registry via ToolLoader."""
+        root = self.workspace if workspace is None else workspace
         registry = ToolRegistry()
+        cfg = tools_config if tools_config is not None else self._subagent_tools_config()
         ctx = ToolContext(
-            config=self._subagent_tools_config(),
-            workspace=str(self.workspace),
+            config=cfg,
+            workspace=str(root.resolve()),
             file_state_store=FileStates(),
         )
         ToolLoader().load(ctx, registry, scope="subagent")
@@ -133,17 +147,25 @@ class SubagentManager:
         user_message: str,
         extra_tools: list["Tool"] | None = None,
         max_iterations: int | None = None,
+        *,
+        workspace: Path | None = None,
+        tools_config: ToolsConfig | None = None,
+        hook: AgentHook | None = None,
+        progress_callback: Any | None = None,
+        stream_progress_deltas: bool = True,
     ) -> AgentRunResult:
         """Run a single subagent step and return the result directly.
 
         Unlike ``spawn``, this awaits completion and returns the
         ``AgentRunResult`` — no message-bus announcement.
+
+        ``workspace`` optionally overrides the ToolContext root for this step only
+        (callers may point steps at a sandbox directory separate from the user's workspace).
         """
-        tools = self._build_tools()
+        tools = self._build_tools(workspace, tools_config)
         for t in (extra_tools or []):
             tools.register(t)
-        # Deliberately lower than _run_subagent()'s 15: long-task steps must
-        # be short to encourage handoff() calls instead of doing everything.
+        # Deliberately lower than _run_subagent()'s 15 so delegated steps stay focused.
         return await self.runner.run(AgentRunSpec(
             initial_messages=[
                 {"role": "system", "content": system_prompt},
@@ -158,6 +180,9 @@ class SubagentManager:
             ),
             max_tool_result_chars=self.max_tool_result_chars,
             fail_on_tool_error=False,
+            hook=hook,
+            progress_callback=progress_callback,
+            stream_progress_deltas=stream_progress_deltas,
         ))
 
     async def spawn(

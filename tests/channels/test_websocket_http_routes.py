@@ -171,8 +171,17 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
 
 
 @pytest.mark.asyncio
-async def test_session_delete_removes_file(bus: MagicMock, tmp_path: Path) -> None:
+async def test_session_delete_removes_file(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:doomed")
+    from nanobot.utils.webui_thread_disk import write_webui_thread_atomic
+
+    write_webui_thread_atomic(
+        "websocket:doomed",
+        {"schemaVersion": 1, "sessionKey": "websocket:doomed", "messages": []},
+    )
     channel = _ch(bus, session_manager=sm, port=29903)
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
@@ -183,6 +192,8 @@ async def test_session_delete_removes_file(bus: MagicMock, tmp_path: Path) -> No
 
         path = sm._get_session_path("websocket:doomed")
         assert path.exists()
+        webui_path = tmp_path / "webui" / f"{SessionManager.safe_key('websocket:doomed')}.json"
+        assert webui_path.is_file()
         resp = await _http_get(
             "http://127.0.0.1:29903/api/sessions/websocket:doomed/delete",
             headers=auth,
@@ -190,6 +201,7 @@ async def test_session_delete_removes_file(bus: MagicMock, tmp_path: Path) -> No
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
         assert not path.exists()
+        assert not webui_path.exists()
     finally:
         await channel.stop()
         await server_task

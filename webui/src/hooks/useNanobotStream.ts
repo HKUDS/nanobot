@@ -6,39 +6,11 @@ import { toolTraceLinesFromEvents } from "@/lib/tool-traces";
 import type { StreamError } from "@/lib/nanobot-client";
 import type {
   InboundEvent,
-  LongTaskAgentUIData,
   OutboundImageGeneration,
   OutboundMedia,
   UIImage,
   UIMessage,
 } from "@/lib/types";
-import { displayStep1Based } from "@/components/thread/long-task-ui-helpers";
-
-function longTaskTimelineKey(d: LongTaskAgentUIData): string {
-  const step = d.step ?? d.current_step ?? -1;
-  return `${d.event}:${step}`;
-}
-
-function nextLongTaskTimeline(
-  prevTimeline: LongTaskAgentUIData[] | undefined,
-  snapshot: LongTaskAgentUIData,
-): LongTaskAgentUIData[] {
-  const timeline: LongTaskAgentUIData[] = prevTimeline?.length ? [...prevTimeline] : [];
-  const last = timeline[timeline.length - 1];
-  if (!last) return [snapshot];
-  if (longTaskTimelineKey(last) === longTaskTimelineKey(snapshot)) {
-    return [...timeline.slice(0, -1), snapshot];
-  }
-  /* Same 1-based step, different events (e.g. task_start then step_start): one UI row. */
-  if (
-    displayStep1Based(last) === displayStep1Based(snapshot)
-    && last.event === "task_start"
-    && snapshot.event === "step_start"
-  ) {
-    return [...timeline.slice(0, -1), snapshot];
-  }
-  return [...timeline, snapshot];
-}
 
 interface StreamBuffer {
   /** ID of the assistant message currently receiving deltas. */
@@ -66,7 +38,6 @@ function attachReasoningChunk(prev: UIMessage[], chunk: string): UIMessage[] {
     // tools belongs to the next assistant iteration, not the assistant turn
     // that produced those tool calls.
     if (candidate.kind === "trace") break;
-    if (candidate.kind === "long_task") break;
     if (candidate.role !== "assistant") continue;
     const hasAnswer = candidate.content.length > 0;
     if (
@@ -166,7 +137,7 @@ function pruneReasoningOnlyPlaceholders(prev: UIMessage[]): UIMessage[] {
 function stampLastAssistantLatency(prev: UIMessage[], latencyMs: number): UIMessage[] {
   for (let i = prev.length - 1; i >= 0; i -= 1) {
     const m = prev[i];
-    if (m.role === "assistant" && m.kind !== "trace" && m.kind !== "long_task") {
+    if (m.role === "assistant" && m.kind !== "trace") {
       const merged: UIMessage = { ...m, latencyMs, isStreaming: false };
       return [...prev.slice(0, i), merged, ...prev.slice(i + 1)];
     }
@@ -427,48 +398,6 @@ export function useNanobotStream(
         // Attach them to the last trace row if it was the last emitted item
         // so a sequence of calls collapses into one compact trace group.
         if (ev.kind === "tool_hint" || ev.kind === "progress") {
-          const agentUi = "agent_ui" in ev ? ev.agent_ui : undefined;
-          if (
-            ev.kind === "progress"
-            && agentUi
-            && typeof agentUi === "object"
-            && "kind" in agentUi
-            && agentUi.kind === "long_task"
-          ) {
-            const raw = "data" in agentUi ? agentUi.data : undefined;
-            if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-              const d = raw as Record<string, unknown>;
-              const runId = d.run_id;
-              const eventStr = d.event;
-              if (typeof runId === "string" && runId && typeof eventStr === "string") {
-                const snapshot = raw as LongTaskAgentUIData;
-                setMessages((prev) => {
-                  const idx = prev.findIndex(
-                    (m) => m.kind === "long_task" && m.longTask?.run_id === runId,
-                  );
-                  const prevRow = idx >= 0 ? prev[idx]! : null;
-                  const longTaskTimeline = nextLongTaskTimeline(
-                    prevRow?.longTaskTimeline,
-                    snapshot,
-                  );
-                  const row: UIMessage = {
-                    id: idx >= 0 ? prevRow!.id : crypto.randomUUID(),
-                    role: "assistant",
-                    kind: "long_task",
-                    content: ev.text ?? "",
-                    longTask: snapshot,
-                    longTaskTimeline,
-                    createdAt: idx >= 0 ? prevRow!.createdAt : Date.now(),
-                  };
-                  if (idx >= 0) {
-                    return [...prev.slice(0, idx), row, ...prev.slice(idx + 1)];
-                  }
-                  return [...prev, row];
-                });
-                return;
-              }
-            }
-          }
           const structuredLines = toolTraceLinesFromEvents(ev.tool_events);
           const lines = structuredLines.length > 0
             ? structuredLines

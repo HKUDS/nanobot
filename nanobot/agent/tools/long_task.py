@@ -1,518 +1,93 @@
-"""Long Task Tool: meta-ReAct loop for long-running tasks via subagent steps."""
+"""Thread goal tools: sustained objectives on the main agent (Codex-style).
+
+``long_task`` registers an objective on the session (JSON-serializable metadata).
+Work proceeds in ordinary agent turns (same runner, compaction as configured).
+When everything requested is truly done, call ``complete_goal`` so bookkeeping clears.
+
+There is **no** sub-agent orchestrator and **no** special WebSocket ``agent_ui`` stream.
+"""
 
 from __future__ import annotations
 
-import time
-import uuid
-from dataclasses import dataclass, field
+import json
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from loguru import logger
-
 from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import (
-    ArraySchema,
-    IntegerSchema,
-    StringSchema,
-    tool_parameters_schema,
-)
-from nanobot.bus.events import OUTBOUND_META_AGENT_UI, OutboundMessage
-from nanobot.utils.prompt_templates import render_template
+from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 
 if TYPE_CHECKING:
-    from nanobot.agent.subagent import SubagentManager
-    from nanobot.agent.tools.context import RequestContext, ToolContext
-
-# JSON snapshot caps (chars / list lengths) for bus/WebSocket clients.
-_UI_GOAL_MAX_CHARS = 500
-_UI_HANDOFF_TEXT_MAX_CHARS = 800
-_UI_HINT_MAX_CHARS = 300
-_UI_SUMMARY_MAX_CHARS = 2000
-_UI_REASON_MAX_CHARS = 1000
-_UI_PATH_LIST_MAX = 300
-_UI_TOOLS_USED_MAX = 50
+    from nanobot.session.manager import SessionManager
 
 
-# ---------------------------------------------------------------------------
-# Structured handoff state
-# ---------------------------------------------------------------------------
-
-@dataclass
-class HandoffState:
-    """Structured progress state passed between long-task steps."""
-
-    signal_type: str = ""
-    message: str = ""
-    files_created: list[str] = field(default_factory=list)
-    files_modified: list[str] = field(default_factory=list)
-    next_step_hint: str = ""
-    verification: str = ""
-
-    def is_empty(self) -> bool:
-        return not any(
-            [
-                self.signal_type,
-                self.message,
-                self.files_created,
-                self.files_modified,
-                self.next_step_hint,
-                self.verification,
-            ]
-        )
+THREAD_GOAL_KEY = "thread_goal"
 
 
-# ---------------------------------------------------------------------------
-# Signal tools -- write progress/completion into a shared state
-# ---------------------------------------------------------------------------
-
-@tool_parameters(
-    tool_parameters_schema(
-        message=StringSchema(
-            "What you completed in this step and where results are saved. "
-            "The next step will pick up from here.",
-        ),
-        files_created=ArraySchema(
-            StringSchema(""),
-            description="List of file paths you created in this step",
-        ),
-        files_modified=ArraySchema(
-            StringSchema(""),
-            description="List of file paths you modified in this step",
-        ),
-        next_step_hint=StringSchema(
-            "A clear, specific hint about what the next step should do. "
-            "Be concrete — e.g. 'Implement the test cases in test_foo.py'",
-        ),
-        verification=StringSchema(
-            "Any verification you performed (tests run, lint passed, etc.)",
-        ),
-        required=["message"],
-    )
-)
-class HandoffTool(Tool):
-    """Signal that the step is done but the overall task continues."""
-
-    _plugin_discoverable = False
-
-    def __init__(self, store: HandoffState) -> None:
-        self._store = store
-
-    @property
-    def name(self) -> str:
-        return "handoff"
-
-    @property
-    def description(self) -> str:
-        return (
-            "You are done with this step. Pass control to the next step. "
-            "You MUST call this (or complete()) before your tool budget runs out. "
-            "Provide a detailed summary, list files changed, and hint the next step."
-        )
-
-    async def execute(
-        self,
-        message: str,
-        files_created: list[str] | None = None,
-        files_modified: list[str] | None = None,
-        next_step_hint: str = "",
-        verification: str = "",
-        **kwargs: Any,
-    ) -> str:
-        self._store.signal_type = "handoff"
-        self._store.message = message
-        self._store.files_created = list(files_created or [])
-        self._store.files_modified = list(files_modified or [])
-        self._store.next_step_hint = next_step_hint
-        self._store.verification = verification
-        return "Progress recorded. The next step will continue from here."
-
-
-@tool_parameters(
-    tool_parameters_schema(
-        summary=StringSchema("Final result summary of the entire task"),
-        required=["summary"],
-    )
-)
-class CompleteTool(Tool):
-    """Signal that the entire long task is finished."""
-
-    _plugin_discoverable = False
-
-    def __init__(self, store: HandoffState) -> None:
-        self._store = store
-
-    @property
-    def name(self) -> str:
-        return "complete"
-
-    @property
-    def description(self) -> str:
-        return (
-            "The ENTIRE goal is achieved. Call this only when nothing remains. "
-            "Your claim will be validated — if unproven, the task continues.\n\n"
-            "IMPORTANT: The summary you provide here will be returned to the parent "
-            "agent as the FINAL ANSWER to the user. Include all key findings, data, "
-            "and conclusions directly in the summary. Do NOT rely on the parent agent "
-            "reading files afterwards — it sees ONLY this summary."
-        )
-
-    async def execute(self, summary: str, **kwargs: Any) -> str:
-        self._store.signal_type = "complete"
-        self._store.message = summary
-        return "Task marked as complete. Awaiting validation."
-
-
-# ---------------------------------------------------------------------------
-# Budget and prompt helpers
-# ---------------------------------------------------------------------------
-
-_STEP_BUDGET = 8
-_FINAL_STEP_BUDGET = 4  # Lower budget for final steps
-
-# Cap run-history injected into each step prompt (UTF-8 chars). Avoids blowing context
-# on very long chains while preserving early + recent step notes.
-_CUMULATIVE_PROMPT_MAX_CHARS = 12_000
-_CUMULATIVE_STEP_BODY_MAX_CHARS = 2_500
-_CUMULATIVE_PROMPT_MAX_CHARS_HARD_CAP = 200_000
-_CUMULATIVE_PROMPT_MIN_CHARS = 500
-_CUMULATIVE_STEP_BODY_MAX_CHARS_HARD_CAP = 50_000
-_CUMULATIVE_STEP_BODY_MIN_CHARS = 100
-
-_IMPLICIT_HANDOFF_TAG = "implicit (no handoff() call)"
-
-# Must match max_iterations_message set in SubagentManager.run_step()
-_BUDGET_EXHAUSTED_PREFIX = "Tool budget exhausted"
-
-
-def _step_budget(step: int, max_steps: int) -> int:
-    """Compute per-step tool budget based on progress."""
-    if step >= max_steps - 2:
-        return _FINAL_STEP_BUDGET
-    return _STEP_BUDGET
-
-
-def _build_system_prompt(budget: int) -> str:
-    """Build the system prompt for a subagent step."""
-    return (
-        "You are one step in a chain working toward a goal.\n\n"
-        "Rules:\n"
-        "1. Do ONE small chunk of work per step.\n"
-        "2. Write results to files — do NOT just collect information.\n"
-        "3. Call handoff() when done with your chunk. "
-        "Call complete() ONLY if the ENTIRE goal is achieved.\n"
-        f"4. You have {budget} tool calls. "
-        "Reserve the last 1-2 for handoff() or complete()."
-    )
-
-
-def _format_cumulative_prompt(blocks: list[str], *, max_chars: int) -> str:
-    """Join per-step run history blocks, truncating from the middle if needed.
-
-    Keeps the earliest block (often has the global plan) and as many recent blocks
-    as fit under ``max_chars``.
-    """
-    if not blocks:
-        return ""
-    sep = "\n\n---\n\n"
-    joined = sep.join(blocks)
-    if len(joined) <= max_chars:
-        return joined
-    first = blocks[0]
-    reserve = max_chars - len(first) - 120
-    if reserve < 200:
-        return joined[:max_chars] + "\n\n[... truncated ...]"
-    tail: list[str] = []
-    size = 0
-    for b in reversed(blocks[1:]):
-        add = len(b) + (len(sep) if tail else 0)
-        if size + add > reserve:
-            break
-        tail.insert(0, b)
-        size += add
-    omitted = len(blocks) - 1 - len(tail)
-    mid = (
-        f"\n\n[... {omitted} intermediate step(s) omitted for brevity ...]\n\n"
-        if omitted > 0
-        else "\n\n"
-    )
-    return first + mid + sep.join(tail)
-
-
-def _truncate_cumulative_text(text: str, max_chars: int) -> str:
-    text = text.strip()
-    if len(text) <= max_chars:
-        return text
-    return text[: max_chars - 33].rstrip() + "\n[... truncated ...]"
-
-
-def _build_user_message(
-    goal: str,
-    step: int,
-    max_steps: int,
-    handoff: HandoffState,
-    correction: str | None = None,
-    *,
-    cumulative_history: str = "",
-    all_files_created_so_far: list[str] | None = None,
-    all_files_modified_so_far: list[str] | None = None,
-) -> str:
-    """Build the user message for a subagent step using templates."""
-    budget = _step_budget(step, max_steps)
-    budget_note = (
-        f"\n\n---\n"
-        f"Step {step + 1} of {max_steps}. You have {budget} tool calls for this step. "
-        f"Reserve the last 1-2 calls for handoff() or complete(). "
-        f"If you run out of calls without calling one, your progress is LOST."
-    )
-    created = list(all_files_created_so_far or [])
-    modified = list(all_files_modified_so_far or [])
-
-    if step == 0:
-        prompt = render_template(
-            "agent/long_task/step_start.md",
-            step=step,
-            max_steps=max_steps,
-            goal=goal,
-            budget=budget,
-        )
-    elif step >= max_steps - 2:
-        prompt = render_template(
-            "agent/long_task/step_final.md",
-            step=step,
-            max_steps=max_steps,
-            goal=goal,
-            budget=budget,
-            handoff=handoff,
-            cumulative_history=cumulative_history,
-            all_files_created_so_far=created,
-            all_files_modified_so_far=modified,
-        )
-    else:
-        prompt = render_template(
-            "agent/long_task/step_middle.md",
-            step=step,
-            max_steps=max_steps,
-            goal=goal,
-            budget=budget,
-            handoff=handoff,
-            cumulative_history=cumulative_history,
-            all_files_created_so_far=created,
-            all_files_modified_so_far=modified,
-        )
-
-    if correction:
-        prompt += f"\n\n## User Correction\n{correction}\n"
-
-    return prompt + budget_note
-
-
-def _strip_redundant_tail_block(
-    blocks: list[str],
-    *,
-    step: int,
-    handoff: HandoffState,
-    body_max_chars: int,
-) -> list[str]:
-    """Omit the last run-history block if it duplicates **Previous Progress** (last handoff)."""
-    if step <= 0 or not blocks or handoff.is_empty():
-        return blocks
-    last = blocks[-1]
-    prev = step - 1
-    for tag in ("", _IMPLICIT_HANDOFF_TAG):
-        echo = _cumulative_block_for_step(
-            prev, handoff, tag=tag, body_max_chars=body_max_chars
-        )
-        if last == echo:
-            return blocks[:-1]
-    return blocks
-
-
-def _cumulative_block_for_step(
-    step_index: int,
-    handoff: HandoffState,
-    *,
-    tag: str = "",
-    body_max_chars: int = _CUMULATIVE_STEP_BODY_MAX_CHARS,
-) -> str:
-    """One markdown block describing a finished step (for run history)."""
-    label = f"Step {step_index + 1}"
-    if tag:
-        label = f"{label} — {tag}"
-    lines = [f"#### {label}"]
-    body = (handoff.message or "").strip() or "(no summary)"
-    lines.append(_truncate_cumulative_text(body, body_max_chars))
-    if handoff.next_step_hint:
-        lines.append(
-            "Next hint: "
-            + _truncate_cumulative_text(handoff.next_step_hint, 800)
-        )
-    if handoff.verification:
-        lines.append(
-            "Verification: "
-            + _truncate_cumulative_text(handoff.verification, 800)
-        )
-    return "\n".join(lines)
-
-
-def _extract_handoff_from_messages(messages: list[dict[str, Any]]) -> str:
-    """Extract useful content from messages when no signal was called.
-
-    Skips the generic max_iterations_message appended by the runner,
-    looking for actual subagent thinking/progress text instead.
-    """
-    for msg in reversed(messages):
-        if msg.get("role") != "assistant":
-            continue
-        content = (msg.get("content") or "").strip()
-        if not content:
-            continue
-        if content.startswith(_BUDGET_EXHAUSTED_PREFIX):
-            continue
-        return content
-    return ""
-
-
-def _extract_write_path(detail: str) -> str | None:
-    prefix = "Successfully wrote "
-    marker = " to "
-    if not detail.startswith(prefix) or marker not in detail:
+def _parse_goal(blob: Any) -> dict[str, Any] | None:
+    if blob is None:
         return None
-    return detail.rsplit(marker, 1)[1].strip()
-
-
-def _extract_edit_path(detail: str) -> str | None:
-    for prefix in ("Successfully created ", "Successfully edited "):
-        if detail.startswith(prefix):
-            return detail.removeprefix(prefix).strip()
+    if isinstance(blob, dict):
+        return blob
+    if isinstance(blob, str):
+        try:
+            parsed = json.loads(blob)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
     return None
 
 
-def _extract_file_changes(
-    tool_events: list[dict[str, Any]],
-) -> tuple[list[str], list[str]]:
-    """Extract file creation/modification events from tool events."""
-    created: list[str] = []
-    modified: list[str] = []
-    for event in tool_events:
-        name = event.get("name", "")
-        status = event.get("status", "")
-        detail = event.get("detail", "")
-        if status != "ok":
-            continue
-        if name == "write_file":
-            path = _extract_write_path(detail)
-            if path:
-                created.append(path)
-            else:
-                logger.debug(
-                    "long_task: skipping file event with unexpected detail: {}",
-                    detail[:80],
-                )
-        elif name == "edit_file":
-            path = _extract_edit_path(detail)
-            if path:
-                modified.append(path)
-            else:
-                logger.debug(
-                    "long_task: skipping file event with unexpected detail: {}",
-                    detail[:80],
-                )
-    return created, modified
+def _iso_now() -> str:
+    return datetime.now().isoformat()
 
 
-# ---------------------------------------------------------------------------
-# Observability: events and hooks
-# ---------------------------------------------------------------------------
+class _GoalToolsMixin(ContextAware):
+    """Shared routing context + Session lookup."""
 
-@dataclass
-class LongTaskEvent:
-    """Event emitted during long-task execution for observability."""
+    def __init__(self, sessions: SessionManager) -> None:
+        self._sessions = sessions
+        self._request_ctx: RequestContext | None = None
 
-    type: str
-    payload: dict[str, Any] = field(default_factory=dict)
-    timestamp: float = field(default_factory=time.time)
+    def set_context(self, ctx: RequestContext) -> None:
+        self._request_ctx = ctx
 
+    def _session(self):
+        if self._request_ctx is None:
+            return None
+        key = self._request_ctx.session_key
+        if not key:
+            return None
+        return self._sessions.get_or_create(key)
 
-# ---------------------------------------------------------------------------
-# Long Task Tool — the orchestrator
-# ---------------------------------------------------------------------------
 
 @tool_parameters(
     tool_parameters_schema(
-        goal=StringSchema("Description of the task to complete"),
+        goal=StringSchema(
+            "Full objective for sustained execution on this chat thread. "
+            "Be explicit about deliverables, formats, and constraints.",
+            max_length=12_000,
+        ),
         ui_summary=StringSchema(
-            description=(
-                "One-line label for the chat UI (roughly ≤12 words). "
-                "Shown in the collapsed long-task card; optional but recommended."
-            ),
+            "Optional one-line label for session lists / logs (≤120 chars).",
             max_length=120,
-        ),
-        max_steps=IntegerSchema(
-            description="Maximum number of subagent steps (default 20)",
-            minimum=1,
-            maximum=100,
-        ),
-        cumulative_prompt_max_chars=IntegerSchema(
-            description=(
-                "Max size of the run-history section in each step prompt "
-                f"(default {_CUMULATIVE_PROMPT_MAX_CHARS} UTF-8 chars, clamped)"
-            ),
-            minimum=_CUMULATIVE_PROMPT_MIN_CHARS,
-            maximum=_CUMULATIVE_PROMPT_MAX_CHARS_HARD_CAP,
-        ),
-        cumulative_step_body_max_chars=IntegerSchema(
-            description=(
-                "Max chars per step summary inside run history "
-                f"(default {_CUMULATIVE_STEP_BODY_MAX_CHARS}, clamped)"
-            ),
-            minimum=_CUMULATIVE_STEP_BODY_MIN_CHARS,
-            maximum=_CUMULATIVE_STEP_BODY_MAX_CHARS_HARD_CAP,
+            nullable=True,
         ),
         required=["goal"],
     )
 )
-class LongTaskTool(Tool):
-    """Execute a long-running task via a meta-ReAct loop of subagent steps."""
+class LongTaskTool(Tool, _GoalToolsMixin):
+    """Begin or replace focus on a long-running objective stored on the session."""
 
-    # NOT available in subagent scope to prevent recursive long_task nesting.
-    _scopes: set[str] = {"core"}
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        sess = getattr(ctx, "sessions", None)
+        assert sess is not None  # guarded by enabled()
+        return cls(sessions=sess)
 
-    def __init__(self, manager: SubagentManager, bus: Any | None = None) -> None:
-        self._manager = manager
-        self._bus = bus
-        self._request_ctx: RequestContext | None = None
-        self._ui_run_id = ""
-        self._hooks: dict[str, Any] = {}
-        self._state: dict[str, Any] = {"signal_queue": []}
-        self._reset_state()
-
-    def _reset_state(self) -> None:
-        """Reset internal state before a new execution.
-
-        Preserves any pending user corrections so inject_correction() can be
-        called before execute() starts.
-        """
-        existing_signals = self._state.get("signal_queue", [])
-        self._cumulative_step_blocks = []
-        self._all_created_paths = set()
-        self._all_modified_paths = set()
-        self._cumulative_prompt_max_chars = _CUMULATIVE_PROMPT_MAX_CHARS
-        self._cumulative_step_body_max_chars = _CUMULATIVE_STEP_BODY_MAX_CHARS
-        self._state: dict[str, Any] = {
-            "current_step": 0,
-            "total_steps": 0,
-            "goal": "",
-            "status": "idle",  # idle, running, validating, completed, error
-            "last_handoff": HandoffState(),
-            "cumulative_usage": {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
-            },
-            "signal_queue": existing_signals,
-            "error": None,
-            "ui_summary": "",
-        }
+    @classmethod
+    def enabled(cls, ctx: Any) -> bool:
+        return getattr(ctx, "sessions", None) is not None
 
     @property
     def name(self) -> str:
@@ -521,560 +96,96 @@ class LongTaskTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Execute a long-running task that cannot fit in a single context window. "
-            "The work is broken into sequential steps; each step gets the goal, the "
-            "last handoff, a **cumulative run history** of earlier step summaries, "
-            "and a **union of all file paths** touched so far (not only the previous "
-            "step). Optional `cumulative_prompt_max_chars` / `cumulative_step_body_max_chars` "
-            "tune how much run history is injected per step. Use this for batch "
-            "processing (auditing many files, processing many items), large-scale "
-            "refactoring, or any multi-step task where you might lose track of the "
-            "goal. For simple independent tasks, use spawn instead.\n\n"
-            "When constructing the goal, be explicit: list concrete deliverables, "
-            "required output format (e.g. Markdown table), and any file paths. "
-            "Pass a short ``ui_summary`` (one line) when invoking this tool so the "
-            "user sees a compact card title in the interface. "
-            "The tool returns a text summary when finished. "
-            "If the summary contains the full answer, present it to the user directly. "
-            "Only read files afterwards if the user explicitly asks for verification."
+            "Declare a sustained objective for this conversation. "
+            "Execution stays on the main agent across turns (use normal tools). "
+            "When—and only when—the objective is fully satisfied, call complete_goal. "
+            "Do not call complete_goal for partial progress or because you are tired. "
+            "If an objective is already active, finish or complete_goal before starting another."
         )
 
-    @classmethod
-    def enabled(cls, ctx: ToolContext) -> bool:
-        return ctx.subagent_manager is not None
+    async def execute(self, goal: str, ui_summary: str | None = None, **kwargs: Any) -> str:
+        sess = self._session()
+        if sess is None:
+            return (
+                "Error: long_task requires an active chat session (missing routing context)."
+            )
+        prior = _parse_goal(sess.metadata.get(THREAD_GOAL_KEY))
+        if isinstance(prior, dict) and prior.get("status") == "active":
+            return (
+                "Error: a thread goal is already active. "
+                "Use complete_goal when finished, or ask the user before replacing it."
+            )
 
-    @classmethod
-    def create(cls, ctx: ToolContext) -> Tool:
-        return cls(manager=ctx.subagent_manager, bus=ctx.bus)
-
-    def set_context(self, ctx: RequestContext) -> None:
-        """Inject routing metadata for progress/UI publishes (WebSocket, etc.)."""
-        self._request_ctx = ctx
-
-    # --- State exposure for WebUI observability ---
-
-    @property
-    def current_step(self) -> int:
-        return self._state["current_step"]
-
-    @property
-    def total_steps(self) -> int:
-        return self._state["total_steps"]
-
-    @property
-    def status(self) -> str:
-        return self._state["status"]
-
-    @property
-    def last_handoff(self) -> HandoffState:
-        return self._state["last_handoff"]
-
-    @property
-    def cumulative_usage(self) -> dict[str, int]:
-        return dict(self._state["cumulative_usage"])
-
-    @property
-    def goal(self) -> str:
-        return self._state["goal"]
-
-    # --- External signal mechanism (for user correction) ---
-
-    def inject_correction(self, message: str) -> None:
-        """Inject a user correction message to be read before the next step."""
-        self._state["signal_queue"].append(message)
-        logger.info("LongTask correction injected: {}", message[:120])
-
-    def _pop_signal(self) -> str | None:
-        """Consume and return the oldest pending correction, if any."""
-        if self._state["signal_queue"]:
-            return self._state["signal_queue"].pop(0)
-        return None
-
-    # --- Hook system for WebUI and logging ---
-
-    def set_hooks(self, hooks: dict[str, Any]) -> None:
-        """Register observability hooks.
-
-        Supported hooks (all optional):
-        - on_task_start(goal, max_steps)
-        - on_step_start(step, goal, budget)
-        - on_step_complete(step, result, handoff)
-        - on_handoff(step, handoff)
-        - on_validation_started(step, completion_summary)
-        - on_validation_passed(step, summary)
-        - on_validation_failed(step, reason)
-        - on_task_complete(step, summary)
-        - on_task_error(step, error)
-        - on_event(event: LongTaskEvent)  # catch-all
-        """
-        self._hooks = dict(hooks)
-
-    def _emit(self, event_type: str, **payload: Any) -> None:
-        """Emit an event to registered hooks."""
-        event = LongTaskEvent(type=event_type, payload=payload)
-
-        # Call catch-all hook
-        catch_all = self._hooks.get("on_event")
-        if catch_all is not None:
-            try:
-                catch_all(event)
-            except Exception:
-                logger.exception("LongTask on_event hook failed")
-
-        # Call specific hook
-        hook_name = f"on_{event_type}"
-        hook = self._hooks.get(hook_name)
-        if hook is not None:
-            try:
-                hook(**payload)
-            except Exception:
-                logger.exception("LongTask {} hook failed", hook_name)
-
-    def _handoff_as_dict(self, h: HandoffState) -> dict[str, Any]:
-        return {
-            "signal_type": h.signal_type,
-            "message": (h.message or "")[:_UI_HANDOFF_TEXT_MAX_CHARS],
-            "files_created": list(h.files_created)[:_UI_PATH_LIST_MAX],
-            "files_modified": list(h.files_modified)[:_UI_PATH_LIST_MAX],
-            "next_step_hint": (h.next_step_hint or "")[:_UI_HINT_MAX_CHARS],
-            "verification": (h.verification or "")[:_UI_HINT_MAX_CHARS],
+        summary = (ui_summary or "").strip()[:120]
+        blob = {
+            "status": "active",
+            "objective": goal.strip(),
+            "ui_summary": summary,
+            "started_at": _iso_now(),
         }
-
-    def _build_ui_snapshot(self, event_type: str, **payload: Any) -> dict[str, Any]:
-        last = self._state.get("last_handoff")
-        last_dict = self._handoff_as_dict(last) if isinstance(last, HandoffState) else {}
-        snap: dict[str, Any] = {
-            "version": 1,
-            "event": event_type,
-            "run_id": self._ui_run_id,
-            "status": self._state.get("status"),
-            "current_step": self._state.get("current_step"),
-            "total_steps": self._state.get("total_steps"),
-            "goal": (self._state.get("goal") or "")[:_UI_GOAL_MAX_CHARS],
-            "cumulative_usage": dict(self._state.get("cumulative_usage") or {}),
-            "last_handoff": last_dict,
-            "error": self._state.get("error"),
-            "files_created_union": sorted(self._all_created_paths)[:_UI_PATH_LIST_MAX],
-            "files_modified_union": sorted(self._all_modified_paths)[:_UI_PATH_LIST_MAX],
-            "ui_summary": (self._state.get("ui_summary") or "")[:120],
-        }
-        if "step" in payload and payload["step"] is not None:
-            snap["step"] = payload["step"]
-        if "max_steps" in payload and payload["max_steps"] is not None:
-            snap["max_steps"] = payload["max_steps"]
-        if "budget" in payload and payload["budget"] is not None:
-            snap["budget"] = payload["budget"]
-        if "summary" in payload and payload["summary"] is not None:
-            snap["summary"] = str(payload["summary"])[:_UI_SUMMARY_MAX_CHARS]
-        if "error" in payload and payload["error"] is not None:
-            snap["event_error"] = str(payload["error"])[:_UI_SUMMARY_MAX_CHARS]
-        if "reason" in payload and payload["reason"] is not None:
-            snap["reason"] = str(payload["reason"])[:_UI_REASON_MAX_CHARS]
-        handoff_payload = payload.get("handoff")
-        if isinstance(handoff_payload, HandoffState):
-            snap["step_handoff"] = self._handoff_as_dict(handoff_payload)
-        res = payload.get("result")
-        if res is not None:
-            tu = getattr(res, "tools_used", None)
-            if tu is not None:
-                snap["tools_used"] = list(tu)[:_UI_TOOLS_USED_MAX]
-            sr = getattr(res, "stop_reason", None)
-            if sr is not None:
-                snap["stop_reason"] = str(sr)
-        return snap
-
-    def _ui_one_liner(self, snap: dict[str, Any]) -> str:
-        ev = str(snap.get("event", ""))
-        tot = int(snap.get("total_steps") or 0)
-        cur = snap.get("current_step")
-        step_idx = snap.get("step")
-        if step_idx is None and isinstance(cur, int):
-            step_idx = cur
-        if not isinstance(step_idx, int):
-            step_idx = 0
-        n = step_idx + 1
-        if ev == "task_start":
-            ms = int(snap.get("max_steps") or tot or 0)
-            return f"long_task · started (max {ms} steps)"
-        if ev == "step_start":
-            return f"long_task · step {n}/{tot}"
-        if ev == "step_complete":
-            return f"long_task · step {n}/{tot} · subagent finished"
-        if ev == "handoff_received":
-            return f"long_task · step {n}/{tot} · handoff"
-        if ev == "validation_started":
-            return f"long_task · step {n}/{tot} · validating"
-        if ev == "validation_failed":
-            return f"long_task · step {n}/{tot} · validation failed"
-        if ev == "validation_passed":
-            return "long_task · validation passed"
-        if ev == "task_complete":
-            return f"long_task · completed at step {n}/{tot}"
-        if ev == "task_error":
-            pe = snap.get("event_error")
-            if pe == "Max steps reached":
-                return f"long_task · max steps ({tot}) reached"
-            return f"long_task · error at step {n}/{tot}"
-        return f"long_task · {ev}"
-
-    async def _publish_ui_snapshot(self, event_type: str, **payload: Any) -> None:
-        if not self._bus or not self._request_ctx:
-            return
-        snap = self._build_ui_snapshot(event_type, **payload)
-        meta = dict(self._request_ctx.metadata or {})
-        meta["_progress"] = True
-        meta[OUTBOUND_META_AGENT_UI] = {"kind": "long_task", "data": snap}
-        await self._bus.publish_outbound(
-            OutboundMessage(
-                channel=self._request_ctx.channel,
-                chat_id=self._request_ctx.chat_id,
-                content=self._ui_one_liner(snap),
-                metadata=meta,
-            )
-        )
-
-    async def _emit_async(self, event_type: str, **payload: Any) -> None:
-        self._emit(event_type, **payload)
-        await self._publish_ui_snapshot(event_type, **payload)
-
-    def _merge_handoff_paths(self, handoff: HandoffState) -> None:
-        for p in handoff.files_created:
-            self._all_created_paths.add(p)
-        for p in handoff.files_modified:
-            self._all_modified_paths.add(p)
-
-    def _merge_auto_paths(self, created: list[str], modified: list[str]) -> None:
-        for p in created:
-            self._all_created_paths.add(p)
-        for p in modified:
-            self._all_modified_paths.add(p)
-
-    def _cumulative_prompt_extras(
-        self, step: int, handoff: HandoffState
-    ) -> tuple[str, list[str], list[str]]:
-        blocks = _strip_redundant_tail_block(
-            self._cumulative_step_blocks,
-            step=step,
-            handoff=handoff,
-            body_max_chars=self._cumulative_step_body_max_chars,
-        )
-        hist = _format_cumulative_prompt(
-            blocks,
-            max_chars=self._cumulative_prompt_max_chars,
-        )
-        return hist, sorted(self._all_created_paths), sorted(self._all_modified_paths)
-
-    def _record_handoff_step(self, step: int, handoff: HandoffState, *, tag: str = "") -> None:
-        self._merge_handoff_paths(handoff)
-        self._cumulative_step_blocks.append(
-            _cumulative_block_for_step(
-                step,
-                handoff,
-                tag=tag,
-                body_max_chars=self._cumulative_step_body_max_chars,
-            )
-        )
-
-    def _record_validation_failed(self, step: int, claimed_summary: str) -> None:
-        body = _truncate_cumulative_text(
-            (claimed_summary or "").strip() or "(empty claim)",
-            self._cumulative_step_body_max_chars,
-        )
-        block = (
-            f"#### Step {step + 1} — validation failed\n"
-            "Completion claim was rejected by the validation pass — continue working.\n"
-            f"Claim summary:\n{body}"
-        )
-        self._cumulative_step_blocks.append(block)
-
-    # --- Core execution ---
-
-    async def execute(
-        self,
-        goal: str,
-        max_steps: int = 20,
-        *,
-        ui_summary: str = "",
-        cumulative_prompt_max_chars: int | None = None,
-        cumulative_step_body_max_chars: int | None = None,
-        **kwargs: Any,
-    ) -> str:
-        handoff = HandoffState()
-        self._reset_state()
-        pm = cumulative_prompt_max_chars or _CUMULATIVE_PROMPT_MAX_CHARS
-        sm = cumulative_step_body_max_chars or _CUMULATIVE_STEP_BODY_MAX_CHARS
-        self._cumulative_prompt_max_chars = max(
-            _CUMULATIVE_PROMPT_MIN_CHARS,
-            min(pm, _CUMULATIVE_PROMPT_MAX_CHARS_HARD_CAP),
-        )
-        self._cumulative_step_body_max_chars = max(
-            _CUMULATIVE_STEP_BODY_MIN_CHARS,
-            min(sm, _CUMULATIVE_STEP_BODY_MAX_CHARS_HARD_CAP),
-        )
-        self._state["goal"] = goal
-        self._state["total_steps"] = max_steps
-        self._state["status"] = "running"
-        self._state["ui_summary"] = (ui_summary or "").strip()[:120]
-        self._ui_run_id = str(uuid.uuid4())
-
-        logger.debug("long_task start: max_steps={}, goal={:.120}", max_steps, goal)
-        await self._emit_async("task_start", goal=goal, max_steps=max_steps)
-
-        for step in range(max_steps):
-            self._state["current_step"] = step
-            signal_store = HandoffState()
-            correction = self._pop_signal()
-            c_hist, cr_union, mo_union = self._cumulative_prompt_extras(step, handoff)
-            user_msg = _build_user_message(
-                goal,
-                step,
-                max_steps,
-                handoff,
-                correction=correction,
-                cumulative_history=c_hist,
-                all_files_created_so_far=cr_union,
-                all_files_modified_so_far=mo_union,
-            )
-
-            budget = _step_budget(step, max_steps)
-            await self._emit_async("step_start", step=step, goal=goal, budget=budget)
-
-            # Run the step with retry on crash
-            result = await self._run_step_with_retry(
-                system_prompt=_build_system_prompt(budget),
-                user_message=user_msg,
-                extra_tools=[HandoffTool(signal_store), CompleteTool(signal_store)],
-                step=step,
-                budget=budget,
-            )
-
-            if result is None:
-                # Fatal error after retry
-                self._state["status"] = "error"
-                logger.error(
-                    "long_task step {}/{} failed after retry: {}",
-                    step + 1, max_steps, self._state["error"],
-                )
-                await self._emit_async("task_error", step=step, error=self._state["error"])
-                if handoff.message:
-                    return (
-                        f"Long task failed at step {step + 1}/{max_steps}. "
-                        f"Last progress:\n{handoff.message}"
-                    )
-                return f"Long task failed at step {step + 1}/{max_steps}."
-
-            # Accumulate usage
-            usage = getattr(result, "usage", {}) or {}
-            for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
-                self._state["cumulative_usage"][key] += usage.get(key, 0)
-
-            # Extract file changes from tool events for automatic tracking
-            tool_events = getattr(result, "tool_events", []) or []
-            auto_created, auto_modified = _extract_file_changes(tool_events)
-            if auto_created or auto_modified:
-                logger.debug(
-                    "long_task step {}: auto-detected files created={}, modified={}",
-                    step + 1,
-                    auto_created,
-                    auto_modified,
-                )
-
-            await self._emit_async(
-                "step_complete", step=step, result=result, handoff=signal_store
-            )
-
-            # Determine signal from tool events
-            sig_type = "none"
-            for event in reversed(tool_events):
-                ev_name = event.get("name", "")
-                if ev_name == "complete":
-                    sig_type = "complete"
-                    break
-                elif ev_name == "handoff":
-                    sig_type = "handoff"
-                    break
-
-            # Fallback: if no explicit signal but CompleteTool/HandoffTool was
-            # called but the runner did not expose tool events, trust the store.
-            if sig_type == "none" and signal_store.signal_type:
-                sig_type = signal_store.signal_type
-            elif sig_type == "none":
-                signal_store.message = _extract_handoff_from_messages(
-                    getattr(result, "messages", []) or []
-                )
-                if signal_store.message:
-                    sig_type = "handoff"
-
-            sig_payload = signal_store.message
-            logger.info(
-                "long_task step {}/{}: signal={}, stop_reason={}, tools={}",
-                step + 1,
-                max_steps,
-                sig_type,
-                result.stop_reason,
-                result.tools_used,
-            )
-
-            if sig_type == "complete":
-                # Validation round
-                self._state["status"] = "validating"
-                await self._emit_async(
-                    "validation_started",
-                    step=step,
-                    completion_summary=sig_payload,
-                )
-
-                validated = await self._validate_completion(
-                    goal, sig_payload, max_steps
-                )
-                if validated:
-                    self._state["status"] = "completed"
-                    logger.info(
-                        "long_task complete at step {}/{} after validation",
-                        step + 1, max_steps,
-                    )
-                    await self._emit_async("task_complete", step=step, summary=sig_payload)
-                    return (
-                        "The task is complete. This is the final answer — "
-                        "present it to the user directly without calling additional "
-                        "tools or reading files.\n\n"
-                        f"{sig_payload}"
-                    )
-                else:
-                    logger.warning(
-                        "long_task validation failed at step {}/{}",
-                        step + 1, max_steps,
-                    )
-                    await self._emit_async(
-                        "validation_failed",
-                        step=step,
-                        reason="Validation did not confirm completion",
-                    )
-                    # Fall through to handoff — continue working
-                    if auto_created and not signal_store.files_created:
-                        signal_store.files_created = auto_created
-                    if auto_modified and not signal_store.files_modified:
-                        signal_store.files_modified = auto_modified
-                    self._merge_handoff_paths(signal_store)
-                    self._merge_auto_paths(auto_created, auto_modified)
-                    self._record_validation_failed(step, sig_payload)
-                    handoff = signal_store
-                    handoff.next_step_hint = (
-                        f"Validation failed. Continue working toward the goal. "
-                        f"Previous claim: {sig_payload}"
-                    )
-                    self._state["last_handoff"] = handoff
-                    continue
-
-            elif sig_type == "handoff":
-                await self._emit_async("handoff_received", step=step, handoff=signal_store)
-                # Merge auto-detected file changes if not explicitly reported
-                if auto_created and not signal_store.files_created:
-                    signal_store.files_created = auto_created
-                if auto_modified and not signal_store.files_modified:
-                    signal_store.files_modified = auto_modified
-                self._record_handoff_step(step, signal_store)
-                handoff = signal_store
-                self._state["last_handoff"] = handoff
-                continue
-
-            else:
-                # No signal — use extracted content as handoff
-                handoff = HandoffState(message=signal_store.message)
-                if auto_created and not handoff.files_created:
-                    handoff.files_created = auto_created
-                if auto_modified and not handoff.files_modified:
-                    handoff.files_modified = auto_modified
-                if handoff.message or handoff.files_created or handoff.files_modified:
-                    self._record_handoff_step(
-                        step,
-                        handoff,
-                        tag=_IMPLICIT_HANDOFF_TAG,
-                    )
-                self._state["last_handoff"] = handoff
-
-        self._state["status"] = "error"
-        logger.error("long_task reached max steps ({})", max_steps)
-        await self._emit_async("task_error", step=max_steps, error="Max steps reached")
+        sess.metadata[THREAD_GOAL_KEY] = blob
+        self._sessions.save(sess)
+        extra = f"\nSummary line: {summary}" if summary else ""
         return (
-            f"Long task reached max steps ({max_steps}). "
-            f"Last progress:\n{handoff.message}"
+            "Thread goal recorded. Keep working toward the objective using ordinary tools. "
+            "When fully done (verified against what was asked), call complete_goal with a "
+            f"short recap.{extra}"
         )
 
-    async def _run_step_with_retry(
-        self,
-        system_prompt: str,
-        user_message: str,
-        extra_tools: list[Any],
-        step: int,
-        budget: int,
-    ) -> Any:
-        """Run a single step with one retry on crash."""
-        try:
-            return await self._manager.run_step(
-                system_prompt=system_prompt,
-                user_message=user_message,
-                extra_tools=extra_tools,
-                max_iterations=budget,
-            )
-        except Exception as first_err:
-            logger.warning(
-                "long_task step {}/{} crashed (will retry once): {}",
-                step + 1,
-                self._state["total_steps"],
-                first_err,
-            )
-            try:
-                return await self._manager.run_step(
-                    system_prompt=system_prompt,
-                    user_message=user_message,
-                    extra_tools=extra_tools,
-                    max_iterations=budget,
-                )
-            except Exception as second_err:
-                logger.exception(
-                    "long_task step {}/{} failed after retry",
-                    step + 1,
-                    self._state["total_steps"],
-                )
-                self._state["error"] = str(second_err)
-                return None
 
-    async def _validate_completion(
-        self, goal: str, completion_summary: str, max_steps: int
-    ) -> bool:
-        """Run a validation step to verify the completion claim."""
-        try:
-            validation_store = HandoffState()
-            validation_prompt = render_template(
-                "agent/long_task/validation.md",
-                goal=goal,
-                completion_summary=completion_summary,
-            )
-            result = await self._manager.run_step(
-                system_prompt=validation_prompt,
-                user_message="Validate the claimed completion. "
-                "Call complete() if verified, handoff() if not.",
-                extra_tools=[
-                    HandoffTool(validation_store),
-                    CompleteTool(validation_store),
-                ],
-                max_iterations=4,  # Short validation step
-            )
-            # If complete() was called, validation passed
-            tool_events = getattr(result, "tool_events", []) or []
-            for event in tool_events:
-                if event.get("name") == "complete":
-                    await self._emit_async(
-                        "validation_passed", summary=completion_summary
-                    )
-                    return True
+@tool_parameters(
+    tool_parameters_schema(
+        recap=StringSchema(
+            "Brief recap for the user confirming what was achieved (plain text).",
+            max_length=8000,
+            nullable=True,
+        ),
+        required=[],
+    )
+)
+class CompleteGoalTool(Tool, _GoalToolsMixin):
+    """Mark the active thread goal finished after all required work is verified."""
 
-            await self._emit_async(
-                "validation_failed",
-                reason=validation_store.message or "Validator did not confirm",
-            )
-            return False
-        except Exception:
-            logger.exception("Validation step failed")
-            return False
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        sess = getattr(ctx, "sessions", None)
+        assert sess is not None
+        return cls(sessions=sess)
+
+    @classmethod
+    def enabled(cls, ctx: Any) -> bool:
+        return getattr(ctx, "sessions", None) is not None
+
+    @property
+    def name(self) -> str:
+        return "complete_goal"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Call only after the active thread goal has been fully achieved and verified. "
+            "Summarize outcomes for the user. If no goal is active, the tool reports that "
+            "and leaves metadata unchanged."
+        )
+
+    async def execute(self, recap: str | None = None, **kwargs: Any) -> str:
+        sess = self._session()
+        if sess is None:
+            return "Error: complete_goal requires an active chat session."
+        prior = _parse_goal(sess.metadata.get(THREAD_GOAL_KEY))
+        if not isinstance(prior, dict) or prior.get("status") != "active":
+            return "No active thread goal to complete."
+
+        ended = _iso_now()
+        sess.metadata[THREAD_GOAL_KEY] = {
+            **prior,
+            "status": "completed",
+            "completed_at": ended,
+            "recap": (recap or "").strip(),
+        }
+        self._sessions.save(sess)
+        tail = (recap or "").strip()
+        if tail:
+            return f"Goal marked complete ({ended}). Recap:\n{tail}"
+        return f"Goal marked complete ({ended})."
+

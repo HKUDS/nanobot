@@ -378,13 +378,13 @@ async def test_send_progress_includes_agent_ui_blob() -> None:
     channel._attach(mock_ws, "chat-1")
 
     blob = {
-        "kind": "long_task",
-        "data": {"version": 1, "event": "task_start", "run_id": "r1"},
+        "kind": "panel",
+        "data": {"version": 1, "event": "tick", "id": "r1"},
     }
     await channel.send(OutboundMessage(
         channel="websocket",
         chat_id="chat-1",
-        content="long_task · started (max 5 steps)",
+        content="progress · panel",
         metadata={"_progress": True, OUTBOUND_META_AGENT_UI: blob},
     ))
 
@@ -1339,3 +1339,76 @@ def test_parse_envelope_rejects_legacy_and_garbage() -> None:
 )
 def test_is_valid_chat_id(value: Any, expected: bool) -> None:
     assert _is_valid_chat_id(value) is expected
+
+
+def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:
+    from urllib.parse import quote
+
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.utils.webui_thread_disk import write_webui_thread_atomic
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:c1"
+    write_webui_thread_atomic(
+        key,
+        {"schemaVersion": 1, "sessionKey": key, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    bus = MagicMock()
+    channel = _ch(bus)
+    channel._api_tokens["tok"] = time.monotonic() + 300.0
+    enc = quote(key, safe="")
+    req = Request(f"/api/sessions/{enc}/webui-thread", Headers([("Authorization", "Bearer tok")]))
+    resp = channel._handle_webui_thread_get(req, enc)
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert body["sessionKey"] == key
+    assert len(body["messages"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_save_envelope_persists(bus: MagicMock, monkeypatch, tmp_path) -> None:
+    from nanobot.utils import webui_thread_disk
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    channel = _ch(bus)
+    mock_ws = AsyncMock()
+    env = {
+        "type": "webui_thread_save",
+        "session_key": "websocket:e1",
+        "payload": {
+            "schemaVersion": 1,
+            "messages": [{"role": "user", "content": "x", "id": "1", "createdAt": 1}],
+        },
+    }
+    await channel._handle_webui_thread_save_envelope(mock_ws, "cid", env)
+    path = webui_thread_disk.webui_thread_file_path("websocket:e1")
+    assert path.is_file()
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["messages"][0]["content"] == "x"
+    mock_ws.send.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webui_thread_save_envelope_coerces_invalid_schema_version(
+    bus: MagicMock, monkeypatch, tmp_path
+) -> None:
+    from nanobot.utils import webui_thread_disk
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    channel = _ch(bus)
+    mock_ws = AsyncMock()
+    env = {
+        "type": "webui_thread_save",
+        "session_key": "websocket:e2",
+        "payload": {
+            "schemaVersion": "not-an-int",
+            "messages": [{"role": "user", "content": "y", "id": "1", "createdAt": 1}],
+        },
+    }
+    await channel._handle_webui_thread_save_envelope(mock_ws, "cid", env)
+    path = webui_thread_disk.webui_thread_file_path("websocket:e2")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["schemaVersion"] == webui_thread_disk.WEBUI_THREAD_SCHEMA_VERSION
+    assert data["messages"][0]["content"] == "y"

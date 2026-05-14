@@ -547,9 +547,9 @@ async def cmd_history(ctx: CommandContext) -> OutboundMessage:
     )
 
 
-_GOAL_PROMPT_TEMPLATE = """The user declared this as a long-running goal.
+_GOAL_PROMPT_TEMPLATE = """The user declared a sustained objective for this thread.
 
-First inspect, search, or ask for clarification if needed. When you are ready to begin sustained multi-step execution, use the `long_task` tool with the clarified goal. Do not use `long_task` for trivial one-step answers.
+Inspect or clarify if needed, then call `long_task` with the refined objective (and optional short ui_summary). Work proceeds as normal assistant turns using your usual tools. When—and only when—the objective is fully done and verified, call `complete_goal` with a brief recap. Do not use `long_task` / `complete_goal` for trivial one-shot answers.
 
 Goal:
 {goal}

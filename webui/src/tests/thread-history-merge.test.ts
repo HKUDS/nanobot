@@ -4,34 +4,25 @@ import { mergeCanonicalHistoryPreservingLongTasks } from "@/lib/thread-history-m
 import type { UIMessage } from "@/lib/types";
 
 describe("mergeCanonicalHistoryPreservingLongTasks", () => {
-  it("re-inserts long_task before the last assistant row of the turn (final reply)", () => {
+  it("re-inserts disk trace rows before the final assistant reply when historical is longer", () => {
     const historical: UIMessage[] = [
       { id: "u1", role: "user", content: "hi", createdAt: 1 },
-      {
-        id: "a1",
-        role: "assistant",
-        content: "done",
-        createdAt: 2,
-      },
+      { id: "a1", role: "assistant", content: "done", createdAt: 3 },
     ];
-    const lt: UIMessage = {
-      id: "lt1",
+    const trace: UIMessage = {
+      id: "tr1",
       role: "assistant",
-      kind: "long_task",
-      content: "long_task ·",
-      createdAt: 1.5,
-      longTask: {
-        run_id: "r1",
-        event: "task_complete",
-        goal: "g",
-      },
+      kind: "trace",
+      content: "",
+      traces: ["tool x"],
+      createdAt: 2,
     };
-    const prev = [historical[0]!, lt];
+    const prev: UIMessage[] = [historical[0]!, trace];
     const merged = mergeCanonicalHistoryPreservingLongTasks(prev, historical);
-    expect(merged.map((m) => m.id)).toEqual(["u1", "lt1", "a1"]);
+    expect(merged.map((m) => m.id)).toEqual(["u1", "tr1", "a1"]);
   });
 
-  it("places long_task after reasoning-only assistant rows, before the final reply", () => {
+  it("places traces after reasoning-only assistant rows, before the final reply", () => {
     const historical: UIMessage[] = [
       { id: "u1", role: "user", content: "hi", createdAt: 1 },
       {
@@ -48,16 +39,41 @@ describe("mergeCanonicalHistoryPreservingLongTasks", () => {
         createdAt: 3,
       },
     ];
-    const lt: UIMessage = {
-      id: "lt1",
+    const trace: UIMessage = {
+      id: "tr1",
       role: "assistant",
-      kind: "long_task",
-      content: "long_task ·",
+      kind: "trace",
+      content: "",
+      traces: ["tool x"],
       createdAt: 2.5,
-      longTask: { run_id: "r1", event: "task_complete", goal: "g" },
     };
-    const prev: UIMessage[] = [historical[0]!, historical[1]!, lt];
+    const prev: UIMessage[] = [historical[0]!, historical[1]!, trace];
     const merged = mergeCanonicalHistoryPreservingLongTasks(prev, historical);
-    expect(merged.map((m) => m.id)).toEqual(["u1", "a_think", "lt1", "a1"]);
+    expect(merged.map((m) => m.id)).toEqual(["u1", "a_think", "tr1", "a1"]);
+  });
+
+  it("prefers disk trace payload when historical shares the same trace id", () => {
+    const traceDisk: UIMessage = {
+      id: "tr1",
+      role: "assistant",
+      kind: "trace",
+      content: "",
+      traces: ["tool x", "tool y"],
+      createdAt: 2,
+    };
+    const traceCanon: UIMessage = {
+      ...traceDisk,
+      traces: ["tool x"],
+    };
+    const historical: UIMessage[] = [
+      { id: "u1", role: "user", content: "hi", createdAt: 1 },
+      traceCanon,
+      { id: "a1", role: "assistant", content: "done", createdAt: 3 },
+    ];
+    const disk: UIMessage[] = [historical[0]!, traceDisk, historical[2]!];
+    const merged = mergeCanonicalHistoryPreservingLongTasks(disk, historical);
+    const traces = merged.filter((m) => m.kind === "trace");
+    expect(traces.length).toBe(1);
+    expect(traces[0]!.traces).toEqual(["tool x", "tool y"]);
   });
 });

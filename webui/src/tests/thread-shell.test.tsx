@@ -5,6 +5,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { ClientProvider } from "@/providers/ClientProvider";
 
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    fetchWebuiThreadWithRetry: vi.fn(() => Promise.resolve(null)),
+  };
+});
+
 function makeClient() {
   const errorHandlers = new Set<(err: { kind: string }) => void>();
   const chatHandlers = new Map<string, Set<(ev: import("@/lib/types").InboundEvent) => void>>();
@@ -53,6 +61,7 @@ function makeClient() {
     connect: vi.fn(),
     close: vi.fn(),
     updateUrl: vi.fn(),
+    saveWebuiThreadSnapshot: vi.fn(),
   };
 }
 

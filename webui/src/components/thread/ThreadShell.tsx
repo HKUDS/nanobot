@@ -19,9 +19,12 @@ import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
 import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
-import { listSlashCommands } from "@/lib/api";
+import { listSlashCommands, fetchWebuiThreadWithRetry } from "@/lib/api";
 import type { ChatSummary, SlashCommand, UIMessage } from "@/lib/types";
+import { WEBUI_THREAD_SCHEMA_VERSION } from "@/lib/types";
 import { mergeCanonicalHistoryPreservingLongTasks } from "@/lib/thread-history-merge";
+import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
+import { mergeWebuiDiskSnapshotWithHistorical } from "@/lib/thread-webui-merge";
 import { useClient } from "@/providers/ClientProvider";
 
 interface ThreadShellProps {
@@ -98,10 +101,13 @@ export function ThreadShell({
   const messageCacheRef = useRef<Map<string, UIMessage[]>>(new Map());
   /** Last chatId we associated with the in-memory thread (for cache-on-switch). */
   const prevChatIdForCacheRef = useRef<string | null>(null);
-  /** Skip one layout cache write right after chatId changes (messages may not match yet). */
+  /** Skip one message-cache write right after chatId changes (messages may not match yet). */
   const skipLayoutCacheRef = useRef(false);
   const appliedHistoryVersionRef = useRef<Map<string, number>>(new Map());
   const pendingCanonicalHydrateRef = useRef<Set<string>>(new Set());
+  const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
+  const webuiDiskHydratedKeyRef = useRef<string | null>(null);
+  const webuiSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
@@ -123,6 +129,60 @@ export function ThreadShell({
     dismissStreamError,
   } = useNanobotStream(chatId, initial, hasPendingToolCalls, handleTurnEnd);
 
+  useEffect(() => {
+    if (chatId && historyKey) sessionKeyByChatIdRef.current.set(chatId, historyKey);
+  }, [chatId, historyKey]);
+
+  useEffect(() => {
+    webuiDiskHydratedKeyRef.current = null;
+  }, [historyKey]);
+
+  useEffect(() => {
+    if (!historyKey || !chatId || loading) return;
+    if (webuiDiskHydratedKeyRef.current === historyKey) return;
+    let cancelled = false;
+    void (async () => {
+      const disk = await fetchWebuiThreadWithRetry(token, historyKey);
+      if (cancelled) return;
+      webuiDiskHydratedKeyRef.current = historyKey;
+      const dm = disk?.messages;
+      if (!dm?.length) return;
+      setMessages((prev) =>
+        normalizeLegacyLongTaskMessages(
+          mergeWebuiDiskSnapshotWithHistorical(dm, prev.length ? prev : historical),
+        ),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [historyKey, chatId, loading, historical, setMessages, token]);
+
+  useEffect(() => {
+    if (!historyKey || !chatId) return;
+    if (webuiSaveTimerRef.current !== null) clearTimeout(webuiSaveTimerRef.current);
+    webuiSaveTimerRef.current = setTimeout(() => {
+      webuiSaveTimerRef.current = null;
+      client.saveWebuiThreadSnapshot(historyKey, {
+        schemaVersion: WEBUI_THREAD_SCHEMA_VERSION,
+        savedAt: new Date().toISOString(),
+        sessionKey: historyKey,
+        messages: normalizeLegacyLongTaskMessages(messages),
+      });
+    }, 450);
+    return () => {
+      if (webuiSaveTimerRef.current !== null) {
+        clearTimeout(webuiSaveTimerRef.current);
+        webuiSaveTimerRef.current = null;
+      }
+    };
+  }, [messages, historyKey, chatId, client]);
+
+  const displayMessages = useMemo(
+    () => normalizeLegacyLongTaskMessages(messages),
+    [messages],
+  );
+
   const showHeroComposer = messages.length === 0 && !loading;
 
   useEffect(() => {
@@ -141,13 +201,15 @@ export function ThreadShell({
         pendingCanonicalHydrateRef.current.delete(chatId);
         appliedHistoryVersionRef.current.set(chatId, historyVersion);
         const merged = mergeCanonicalHistoryPreservingLongTasks(prev, historical);
-        messageCacheRef.current.set(chatId, merged);
-        return merged;
+        const normalized = normalizeLegacyLongTaskMessages(merged);
+        messageCacheRef.current.set(chatId, normalized);
+        return normalized;
       }
-      if (cached && cached.length > 0) return cached;
-      if (historical.length === 0 && prev.length > 0) return prev;
+      if (cached && cached.length > 0) return normalizeLegacyLongTaskMessages(cached);
+      if (historical.length === 0 && prev.length > 0) return normalizeLegacyLongTaskMessages(prev);
       appliedHistoryVersionRef.current.set(chatId, historyVersion);
-      return historical;
+      const merged = mergeCanonicalHistoryPreservingLongTasks(prev, historical);
+      return normalizeLegacyLongTaskMessages(merged);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, chatId, historical, historyVersion]);
@@ -175,31 +237,47 @@ export function ThreadShell({
     if (chatId) {
       const prev = prevChatIdForCacheRef.current;
       if (prev && prev !== chatId) {
-        messageCacheRef.current.set(prev, messages);
+        const oldKey = sessionKeyByChatIdRef.current.get(prev);
+        const cached = messageCacheRef.current.get(prev);
+        if (oldKey && cached && cached.length > 0) {
+          client.saveWebuiThreadSnapshot(oldKey, {
+            schemaVersion: WEBUI_THREAD_SCHEMA_VERSION,
+            savedAt: new Date().toISOString(),
+            sessionKey: oldKey,
+            messages: normalizeLegacyLongTaskMessages(cached),
+          });
+        }
+        messageCacheRef.current.set(prev, normalizeLegacyLongTaskMessages(messages));
         skipLayoutCacheRef.current = true;
       }
       prevChatIdForCacheRef.current = chatId;
     } else {
       if (prevChatIdForCacheRef.current) {
-        messageCacheRef.current.set(prevChatIdForCacheRef.current, messages);
+        messageCacheRef.current.set(
+          prevChatIdForCacheRef.current,
+          normalizeLegacyLongTaskMessages(messages),
+        );
         skipLayoutCacheRef.current = true;
       }
       prevChatIdForCacheRef.current = null;
     }
-  }, [chatId, messages]);
+  }, [chatId, messages, client]);
 
-  useLayoutEffect(() => {
+  // Persist thread to in-memory cache after paint so ``useNanobotStream``'s chat switch
+  // ``useEffect`` reset has flushed; ``skipLayoutCacheRef`` drops the first run that still
+  // sees the *previous* chat's ``messages`` (avoids stale rows leaking across sessions).
+  useEffect(() => {
     if (!chatId) {
-      return;
-    }
-    if (loading) {
       return;
     }
     if (skipLayoutCacheRef.current) {
       skipLayoutCacheRef.current = false;
       return;
     }
-    messageCacheRef.current.set(chatId, messages);
+    if (loading) {
+      return;
+    }
+    messageCacheRef.current.set(chatId, normalizeLegacyLongTaskMessages(messages));
   }, [chatId, loading, messages]);
 
   useEffect(() => {
@@ -362,7 +440,7 @@ export function ThreadShell({
         minimal={!session && !loading}
       />
       <ThreadViewport
-        messages={messages}
+        messages={displayMessages}
         isStreaming={isStreaming}
         emptyState={emptyState}
         composer={composer}

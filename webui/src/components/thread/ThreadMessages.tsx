@@ -85,7 +85,6 @@ function marginAfterPrevUnit(prev: DisplayUnit): string {
   const p = prev.message;
   const denseP =
     p.kind === "trace"
-    || p.kind === "long_task"
     || (
       p.role === "assistant"
       && p.content.trim().length === 0

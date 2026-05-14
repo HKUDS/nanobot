@@ -40,6 +40,12 @@ from nanobot.utils.media_decode import (
     FileSizeExceeded,
     save_base64_data_url,
 )
+from nanobot.utils.webui_thread_disk import (
+    WEBUI_THREAD_SCHEMA_VERSION,
+    delete_webui_thread,
+    read_webui_thread,
+    write_webui_thread_atomic,
+)
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
@@ -602,6 +608,10 @@ class WebSocketChannel(BaseChannel):
         if m:
             return self._handle_session_messages(request, m.group(1))
 
+        m = re.match(r"^/api/sessions/([^/]+)/webui-thread$", got)
+        if m:
+            return self._handle_webui_thread_get(request, m.group(1))
+
         # NOTE: websockets' HTTP parser only accepts GET, so we cannot expose a
         # true ``DELETE`` verb. The action is folded into the path instead.
         m = re.match(r"^/api/sessions/([^/]+)/delete$", got)
@@ -945,6 +955,70 @@ class WebSocketChannel(BaseChannel):
         self._augment_media_urls(data)
         return _http_json_response(data)
 
+    def _handle_webui_thread_get(self, request: WsRequest, key: str) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        decoded_key = _decode_api_key(key)
+        if decoded_key is None:
+            return _http_error(400, "invalid session key")
+        if not self._is_webui_session_key(decoded_key):
+            return _http_error(404, "session not found")
+        data = read_webui_thread(decoded_key)
+        if data is None:
+            return _http_error(404, "webui thread not found")
+        return _http_json_response(data)
+
+    @staticmethod
+    def _normalize_webui_thread_payload(session_key: str, payload: Any) -> dict[str, Any] | None:
+        if not isinstance(payload, dict):
+            return None
+        messages = payload.get("messages")
+        if not isinstance(messages, list):
+            return None
+        for item in messages:
+            if not isinstance(item, dict):
+                return None
+        raw_sv = payload.get("schemaVersion")
+        try:
+            schema_version = int(raw_sv) if raw_sv not in (None, "") else WEBUI_THREAD_SCHEMA_VERSION
+        except (TypeError, ValueError):
+            schema_version = WEBUI_THREAD_SCHEMA_VERSION
+        out = {
+            "schemaVersion": schema_version,
+            "sessionKey": session_key,
+            "messages": messages,
+        }
+        if isinstance(payload.get("savedAt"), str):
+            out["savedAt"] = payload["savedAt"]
+        return out
+
+    async def _handle_webui_thread_save_envelope(
+        self,
+        connection: Any,
+        client_id: str,
+        envelope: dict[str, Any],
+    ) -> None:
+        """Persist WebUI display thread JSON from a typed envelope."""
+        _ = client_id
+        sk = envelope.get("session_key")
+        if not isinstance(sk, str) or not self._is_webui_session_key(sk):
+            await self._send_event(connection, "error", detail="invalid session_key for webui_thread_save")
+            return
+        payload = self._normalize_webui_thread_payload(sk, envelope.get("payload"))
+        if payload is None:
+            await self._send_event(connection, "error", detail="invalid webui_thread payload")
+            return
+        try:
+            write_webui_thread_atomic(sk, payload)
+        except ValueError as e:
+            await self._send_event(connection, "error", detail=str(e))
+            return
+        except OSError as e:
+            logger.warning("webui_thread save failed: {}", e)
+            await self._send_event(connection, "error", detail="webui_thread save failed")
+            return
+        await self._send_event(connection, "webui_thread_saved", session_key=sk)
+
     def _augment_media_urls(self, payload: dict[str, Any]) -> None:
         """Mutate *payload* in place: each message's ``media`` path list is
         replaced by a parallel ``media_urls`` list of signed fetch URLs.
@@ -1085,6 +1159,7 @@ class WebSocketChannel(BaseChannel):
         if not self._is_webui_session_key(decoded_key):
             return _http_error(404, "session not found")
         deleted = self._session_manager.delete_session(decoded_key)
+        delete_webui_thread(decoded_key)
         return _http_json_response({"deleted": bool(deleted)})
 
     def _serve_static(self, request_path: str) -> Response | None:
@@ -1348,6 +1423,9 @@ class WebSocketChannel(BaseChannel):
                 return
             self._attach(connection, cid)
             await self._send_event(connection, "attached", chat_id=cid)
+            return
+        if t == "webui_thread_save":
+            await self._handle_webui_thread_save_envelope(connection, client_id, envelope)
             return
         if t == "message":
             cid = envelope.get("chat_id")

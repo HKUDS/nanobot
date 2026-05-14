@@ -10,7 +10,7 @@ import {
 } from "@/lib/api";
 import { deriveTitle } from "@/lib/format";
 import { toMediaAttachment } from "@/lib/media";
-import { formatToolCallTrace } from "@/lib/tool-traces";
+import { dedupeToolCallsForUi, formatToolCallTrace } from "@/lib/tool-traces";
 import type { ChatSummary, UIMessage } from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
@@ -33,8 +33,9 @@ function reasoningFromHistory(message: HistoryMessage): string | undefined {
 }
 
 function toolTracesFromHistory(message: HistoryMessage): string[] {
-  if (!Array.isArray(message.tool_calls)) return [];
-  return message.tool_calls
+  const calls = dedupeToolCallsForUi(message.tool_calls);
+  if (!Array.isArray(calls) || calls.length === 0) return [];
+  return calls
     .map(formatToolCallTrace)
     .filter((trace): trace is string => !!trace);
 }
@@ -221,10 +222,11 @@ export function useSessionHistory(key: string | null): {
         const lastRaw = [...body.messages]
           .reverse()
           .find((m) => m.role === "user" || m.role === "assistant");
-        const hasPending =
-          lastRaw?.role === "assistant" &&
-          Array.isArray(lastRaw.tool_calls) &&
-          lastRaw.tool_calls.length > 0;
+        const pendingCalls =
+          lastRaw?.role === "assistant"
+            ? dedupeToolCallsForUi(lastRaw.tool_calls)
+            : [];
+        const hasPending = pendingCalls.length > 0;
         setState((prev) => ({
           key,
           messages: ui,

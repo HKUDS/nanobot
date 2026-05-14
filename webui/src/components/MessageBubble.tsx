@@ -11,7 +11,6 @@ import { useTranslation } from "react-i18next";
 
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
-import { LongTaskActivityCard } from "@/components/thread/LongTaskActivityCard";
 import { cn } from "@/lib/utils";
 import { formatTurnLatency } from "@/lib/format";
 import type { UIImage, UIMediaAttachment, UIMessage } from "@/lib/types";
@@ -56,10 +55,6 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       }, 1_500);
     });
   }, [message.content]);
-
-  if (message.kind === "long_task" && message.longTask) {
-    return <LongTaskActivityCard message={message} animClass={baseAnim} />;
-  }
 
   if (message.kind === "trace") {
     return <TraceGroup message={message} animClass={baseAnim} />;
