@@ -139,6 +139,8 @@ class Session:
 
         out: list[dict[str, Any]] = []
         for message in sliced:
+            if message.get("_command"):
+                continue
             content = message.get("content", "")
             role = message.get("role")
             if role == "assistant" and isinstance(content, str):

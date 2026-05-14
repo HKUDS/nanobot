@@ -418,6 +418,40 @@ class TestAutoCompactIdleDetection:
         assert len(session_after.messages) == 0
         await loop.close_mcp()
 
+    @pytest.mark.asyncio
+    async def test_shortcut_command_persisted_with_command_flag(self, tmp_path):
+        """Shortcut commands (e.g. /help) are persisted so WebUI can show them,
+        but tagged with _command so they don't leak into LLM context."""
+        loop = _make_loop(tmp_path)
+        msg = InboundMessage(channel="cli", sender_id="user", chat_id="test", content="/help")
+        response = await loop._process_message(msg)
+
+        assert response is not None
+        session_after = loop.sessions.get_or_create("cli:test")
+        assert len(session_after.messages) == 2
+        assert session_after.messages[0]["role"] == "user"
+        assert session_after.messages[0]["content"] == "/help"
+        assert session_after.messages[0].get("_command") is True
+        assert session_after.messages[1]["role"] == "assistant"
+        assert session_after.messages[1].get("_command") is True
+        await loop.close_mcp()
+
+    @pytest.mark.asyncio
+    async def test_shortcut_command_excluded_from_get_history(self, tmp_path):
+        """Messages marked _command are invisible to get_history (LLM context)."""
+        loop = _make_loop(tmp_path)
+        session = loop.sessions.get_or_create("cli:test")
+        session.add_message("user", "real question")
+        session.add_message("assistant", "real answer")
+        session.add_message("user", "/help", _command=True)
+        session.add_message("assistant", "help text", _command=True)
+
+        history = session.get_history()
+        assert len(history) == 2
+        assert all(m["content"] != "/help" for m in history)
+        assert all(m["content"] != "help text" for m in history)
+        await loop.close_mcp()
+
 
 class TestAutoCompactSystemMessages:
     """Test that auto-new also works for system messages."""
