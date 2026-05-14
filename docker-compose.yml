@@ -18,6 +18,9 @@ services:
     <<: *common-config
     command: ["gateway"]
     restart: unless-stopped
+    environment:
+      NANOBOT_TELEGRAM_HEALTH_PATH: /tmp/nanobot-telegram-health.json
+      NANOBOT_TELEGRAM_HEALTH_MAX_AGE_S: "120"
     ports:
       - 18790:18790
     deploy:

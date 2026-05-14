@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -18,6 +19,7 @@ from nanobot.channels.telegram import (
     TelegramConfig,
     _StreamBuf,
 )
+from nanobot.telegram_polling_health import TelegramPollingHealthRequest
 
 
 class _FakeHTTPXRequest:
@@ -165,6 +167,16 @@ def _make_telegram_update(
 
 
 @pytest.mark.asyncio
+async def test_channel_initializes_health_state() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+
+    assert channel._health_state is not None
+
+
+@pytest.mark.asyncio
 async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     _FakeHTTPXRequest.clear()
     config = TelegramConfig(
@@ -186,20 +198,36 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
 
     await channel.start()
 
-    assert len(_FakeHTTPXRequest.instances) == 2
-    api_req, poll_req = _FakeHTTPXRequest.instances
+    assert len(_FakeHTTPXRequest.instances) == 1
+    api_req = _FakeHTTPXRequest.instances[0]
+    poll_req = builder.get_updates_request_value
     assert api_req.kwargs["proxy"] == config.proxy
-    assert poll_req.kwargs["proxy"] == config.proxy
+    assert poll_req._client_kwargs["proxy"] == config.proxy
     assert api_req.kwargs["connection_pool_size"] == 32
-    assert poll_req.kwargs["connection_pool_size"] == 4
+    assert poll_req._client_kwargs["limits"].max_connections == 4
     assert builder.request_value is api_req
-    assert builder.get_updates_request_value is poll_req
+    assert isinstance(poll_req, TelegramPollingHealthRequest)
     assert callable(app.updater.start_polling_kwargs["error_callback"])
     assert any(cmd.command == "status" for cmd in app.bot.commands)
     assert any(cmd.command == "history" for cmd in app.bot.commands)
     assert any(cmd.command == "dream" for cmd in app.bot.commands)
     assert any(cmd.command == "dream_log" for cmd in app.bot.commands)
     assert any(cmd.command == "dream_restore" for cmd in app.bot.commands)
+
+
+@pytest.mark.asyncio
+async def test_on_polling_error_marks_health_state(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("NANOBOT_TELEGRAM_HEALTH_PATH", str(tmp_path / "telegram-health.json"))
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+
+    channel._on_polling_error(RuntimeError("boom"))
+
+    payload = json.loads(channel._health_state.path.read_text(encoding="utf-8"))
+    assert payload["status"] == "error"
+    assert payload["last_error"] == "boom"
 
 
 @pytest.mark.asyncio
@@ -226,10 +254,10 @@ async def test_start_respects_custom_pool_config(monkeypatch) -> None:
     await channel.start()
 
     api_req = _FakeHTTPXRequest.instances[0]
-    poll_req = _FakeHTTPXRequest.instances[1]
+    poll_req = builder.get_updates_request_value
     assert api_req.kwargs["connection_pool_size"] == 32
     assert api_req.kwargs["pool_timeout"] == 10.0
-    assert poll_req.kwargs["pool_timeout"] == 10.0
+    assert poll_req._client_kwargs["timeout"].pool == 10.0
 
 
 @pytest.mark.asyncio

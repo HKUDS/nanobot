@@ -25,6 +25,7 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes, Messag
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
+from nanobot.telegram_polling_health import TelegramHealthState, TelegramPollingHealthRequest
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
@@ -285,6 +286,7 @@ class TelegramChannel(BaseChannel):
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
         self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
+        self._health_state = TelegramHealthState()
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -323,6 +325,7 @@ class TelegramChannel(BaseChannel):
             return
 
         self._running = True
+        self._health_state.mark_starting("telegram polling starting")
 
         proxy = self.config.proxy or None
 
@@ -334,12 +337,13 @@ class TelegramChannel(BaseChannel):
             read_timeout=30.0,
             proxy=proxy,
         )
-        poll_request = HTTPXRequest(
+        poll_request = TelegramPollingHealthRequest(
             connection_pool_size=4,
             pool_timeout=self.config.pool_timeout,
             connect_timeout=30.0,
             read_timeout=30.0,
             proxy=proxy,
+            health_state=self._health_state,
         )
         builder = (
             Application.builder()
@@ -409,6 +413,7 @@ class TelegramChannel(BaseChannel):
             drop_pending_updates=False,  # Process pending messages on startup
             error_callback=self._on_polling_error,
         )
+        self._health_state.mark_ok("telegram polling started")
 
         # Keep running until stopped
         while self._running:
@@ -433,6 +438,7 @@ class TelegramChannel(BaseChannel):
             await self._app.stop()
             await self._app.shutdown()
             self._app = None
+        self._health_state.mark_stopped()
 
     @staticmethod
     def _get_media_type(path: str) -> str:
@@ -1191,6 +1197,7 @@ class TelegramChannel(BaseChannel):
     def _on_polling_error(self, exc: Exception) -> None:
         """Keep long-polling network failures to a single readable line."""
         summary = self._format_telegram_error(exc)
+        self._health_state.mark_error(summary)
         if isinstance(exc, (NetworkError, TimedOut)):
             self.logger.warning("polling network issue: {}", summary)
         else:
