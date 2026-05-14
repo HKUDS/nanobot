@@ -31,8 +31,9 @@ You are one step in a chain working toward a goal.
 {% endif %}
 
 ## Instructions
-1. **Check existing work**: Use the file list above — do NOT re-explore files already handled.
-2. **Do the next chunk**: Make concrete progress. Write results to files.
-3. **Handoff**: Call `handoff()` with your progress summary, files changed, and a hint for the next step. Call `complete()` only if the ENTIRE goal is achieved.
+1. **Follow the hint**: Do exactly what the Suggested Next Step above asks for.
+2. **Check existing work**: Use the file list above — do NOT re-explore files already handled.
+3. **Do the next chunk**: Make concrete progress. Write results to files.
+4. **Handoff**: Call `handoff()` with your progress summary, files changed, and a hint for the next step. Call `complete()` only if the ENTIRE goal is achieved.
 
 You have {{ budget }} tool calls total. Reserve the last 1-2 calls for `handoff()` or `complete()`.

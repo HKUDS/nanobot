@@ -7,12 +7,10 @@ You are the FIRST step in a meta-ReAct loop. Your job is NOT to finish the entir
 
 ## Instructions
 1. **Explore**: Check the filesystem and any relevant state. Do NOT assume anything.
-2. **Plan the split**: Explicitly decide how the goal will be divided across the remaining {{ max_steps - 1 }} steps. Write this plan down.
-3. **Do ONE chunk**: Make concrete progress on ONLY the first chunk. Do NOT attempt to finish the entire goal now, even if you have enough tool calls. The meta-loop exists so later steps can review, correct, and refine your work.
-4. **Handoff**: Call `handoff()` with:
+2. **Start**: Make concrete progress on the FIRST chunk only. Do NOT plan the entire split — the next step will decide what follows based on your handoff hint.
+3. **Handoff**: Call `handoff()` with:
    - A detailed summary of what you did
    - Files changed
-   - The explicit plan for the remaining steps
    - A clear hint for the next step
 
 You have {{ budget }} tool calls. Reserve the last 1-2 for `handoff()`.
