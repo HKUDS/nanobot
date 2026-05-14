@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Check, ChevronRight, Copy, FileIcon, ImageIcon, PlaySquare, Sparkles, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ImageLightbox } from "@/components/ImageLightbox";
-import { MarkdownText } from "@/components/MarkdownText";
+import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import { cn } from "@/lib/utils";
 import { formatTurnLatency } from "@/lib/format";
 import type { UIImage, UIMediaAttachment, UIMessage } from "@/lib/types";
@@ -444,8 +451,11 @@ interface ReasoningBubbleProps {
  *
  * Lifecycle:
  *   - While ``streaming`` is true (``reasoning_delta`` frames still arriving),
- *     the bubble defaults to open and the header runs a shimmer + pulse so
+ *     the bubble defaults to open and the header shows a sheen + pulse so
  *     the user sees the model "thinking out loud" in real time.
+ *   - Expanded reasoning uses the same Markdown pipeline as assistant replies
+ *     (deferred while streaming to reduce parser thrash), so headings and
+ *     emphasis render instead of leaking raw ``###`` / ``**``.
  *   - On ``reasoning_end`` the bubble auto-collapses for prose density —
  *     the user can re-expand to inspect the chain of thought. The local
  *     toggle persists once the user interacts.
@@ -457,6 +467,8 @@ export function ReasoningBubble({
   embeddedInCluster = false,
 }: ReasoningBubbleProps) {
   const { t } = useTranslation();
+  const deferredText = useDeferredValue(text);
+  const markdownSource = streaming ? deferredText : text;
   const [userToggled, setUserToggled] = useState(false);
   const [openLocal, setOpenLocal] = useState(true);
   const open = userToggled ? openLocal : streaming;
@@ -464,6 +476,11 @@ export function ReasoningBubble({
     setUserToggled(true);
     setOpenLocal((v) => (userToggled ? !v : !open));
   };
+  useEffect(() => {
+    if (open && text.length > 0) {
+      preloadMarkdownText();
+    }
+  }, [open, text.length]);
   return (
     <div
       className={cn(
@@ -502,12 +519,23 @@ export function ReasoningBubble({
       {open && text.length > 0 && (
         <div
           className={cn(
-            "mt-1 space-y-0.5 whitespace-pre-wrap break-words border-l border-muted-foreground/20 pl-3",
-            "animate-in fade-in-0 slide-in-from-top-1 duration-200",
-            "text-[12.5px] italic leading-relaxed text-muted-foreground/85",
+            "mt-1 min-w-0 border-l border-muted-foreground/20 pl-3",
+            !embeddedInCluster && "animate-in fade-in-0 slide-in-from-top-1 duration-200",
           )}
         >
-          {text}
+          <MarkdownText
+            className={cn(
+              "text-[12.5px] italic text-muted-foreground/88",
+              "prose-p:my-1.5 prose-li:my-0.5",
+              "prose-headings:mt-2 prose-headings:mb-1 prose-headings:font-medium",
+              "prose-headings:text-muted-foreground/92 prose-strong:text-muted-foreground",
+              "prose-h1:text-[15px] prose-h2:text-[13.5px] prose-h3:text-[12.5px] prose-h4:text-[12px]",
+              "prose-a:text-muted-foreground/95 prose-a:underline hover:prose-a:opacity-90",
+              "prose-code:text-[0.92em]",
+            )}
+          >
+            {markdownSource}
+          </MarkdownText>
         </div>
       )}
     </div>

@@ -143,6 +143,27 @@ describe("MessageBubble", () => {
     expect(screen.getByText("hidden until expanded")).toBeInTheDocument();
   });
 
+  it("renders reasoning body as markdown so headings are not left as raw ###", async () => {
+    await import("@/components/MarkdownTextRenderer");
+    const message: UIMessage = {
+      id: "a-reasoning-md",
+      role: "assistant",
+      content: "",
+      createdAt: Date.now(),
+      reasoning: "### Section title\n\nBody line.",
+      reasoningStreaming: false,
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+    fireEvent.click(screen.getByRole("button", { name: /thinking/i }));
+
+    await waitFor(() => {
+      expect(container.querySelector("h3")?.textContent).toBe("Section title");
+    });
+    expect(container.textContent).not.toContain("###");
+    expect(screen.getByText("Body line.")).toBeInTheDocument();
+  });
+
   it("renders assistant image media as a larger generated result", () => {
     const message: UIMessage = {
       id: "a-image",
