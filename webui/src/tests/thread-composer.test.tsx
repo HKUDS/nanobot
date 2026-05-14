@@ -114,7 +114,7 @@ describe("ThreadComposer", () => {
       <ThreadComposer
         onSend={vi.fn()}
         placeholder="Type your message..."
-        threadGoal={{
+        goalState={{
           active: true,
           objective: longObjective,
           ui_summary: "Short summary for strip",

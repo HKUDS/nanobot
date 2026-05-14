@@ -132,7 +132,7 @@ describe("NanobotClient", () => {
     expect(client.getRunStartedAt("chat-strip")).toBeNull();
   });
 
-  it("records thread_goal per chat_id without an onChat subscriber", () => {
+  it("records goal_state per chat_id without an onChat subscriber", () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -141,29 +141,29 @@ describe("NanobotClient", () => {
     client.connect();
     lastSocket().fakeOpen();
     lastSocket().fakeMessage({
-      event: "thread_goal",
+      event: "goal_state",
       chat_id: "chat-goal-a",
-      thread_goal: { active: true, ui_summary: "Docs" },
+      goal_state: { active: true, ui_summary: "Docs" },
     });
     lastSocket().fakeMessage({
-      event: "thread_goal",
+      event: "goal_state",
       chat_id: "chat-goal-b",
-      thread_goal: { active: true, objective: "Ship API" },
+      goal_state: { active: true, objective: "Ship API" },
     });
-    expect(client.getThreadGoal("chat-goal-a")).toEqual({ active: true, ui_summary: "Docs" });
-    expect(client.getThreadGoal("chat-goal-b")).toEqual({
+    expect(client.getGoalState("chat-goal-a")).toEqual({ active: true, ui_summary: "Docs" });
+    expect(client.getGoalState("chat-goal-b")).toEqual({
       active: true,
       objective: "Ship API",
     });
     lastSocket().fakeMessage({
-      event: "thread_goal",
+      event: "goal_state",
       chat_id: "chat-goal-a",
-      thread_goal: { active: false },
+      goal_state: { active: false },
     });
-    expect(client.getThreadGoal("chat-goal-a")).toEqual({ active: false });
+    expect(client.getGoalState("chat-goal-a")).toEqual({ active: false });
   });
 
-  it("records thread_goal from turn_end payload when present", () => {
+  it("records goal_state from turn_end payload when present", () => {
     const client = new NanobotClient({
       url: "ws://test",
       reconnect: false,
@@ -174,9 +174,9 @@ describe("NanobotClient", () => {
     lastSocket().fakeMessage({
       event: "turn_end",
       chat_id: "chat-te",
-      thread_goal: { active: true, objective: "Long task" },
+      goal_state: { active: true, objective: "Long task" },
     });
-    expect(client.getThreadGoal("chat-te")).toEqual({ active: true, objective: "Long task" });
+    expect(client.getGoalState("chat-te")).toEqual({ active: true, objective: "Long task" });
   });
 
   it("buffers after unsubscribe until the chat is subscribed again", () => {

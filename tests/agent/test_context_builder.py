@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from nanobot.agent.context import ContextBuilder
-from nanobot.agent.thread_goal_state import THREAD_GOAL_KEY
+from nanobot.session.goal_state import GOAL_STATE_KEY
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -283,10 +283,10 @@ class TestBuildMessages:
         assert "[Runtime Context" in user_msg
         assert "hello" in user_msg
 
-    def test_session_metadata_injects_active_thread_goal(self, tmp_path):
+    def test_session_metadata_injects_active_goal_state(self, tmp_path):
         builder = _builder(tmp_path)
         meta = {
-            THREAD_GOAL_KEY: {"status": "active", "objective": "Finish docs migration."},
+            GOAL_STATE_KEY: {"status": "active", "objective": "Finish docs migration."},
         }
         messages = builder.build_messages(
             [],
@@ -296,7 +296,7 @@ class TestBuildMessages:
             session_metadata=meta,
         )
         user_msg = str(messages[-1]["content"])
-        assert "Thread goal (active):" in user_msg
+        assert "Goal (active):" in user_msg
         assert "Finish docs migration." in user_msg
 
     def test_consecutive_same_role_merged(self, tmp_path):

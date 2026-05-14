@@ -1530,15 +1530,18 @@ class WebSocketChannel(BaseChannel):
                 or msg.metadata.get("_turn_end")
                 or msg.metadata.get("_session_updated")
                 or msg.metadata.get("_goal_status")
+                or msg.metadata.get("_goal_state_sync")
                 or msg.metadata.get("_thread_goal_sync")
             ):
                 self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
             else:
                 self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
             return
-        if msg.metadata.get("_thread_goal_sync"):
-            blob = msg.metadata.get("thread_goal")
-            await self.send_thread_goal(msg.chat_id, blob if isinstance(blob, dict) else {"active": False})
+        if msg.metadata.get("_goal_state_sync") or msg.metadata.get("_thread_goal_sync"):
+            blob = msg.metadata.get("goal_state")
+            if blob is None:
+                blob = msg.metadata.get("thread_goal")
+            await self.send_goal_state(msg.chat_id, blob if isinstance(blob, dict) else {"active": False})
             return
         if msg.metadata.get("_goal_status"):
             status = msg.metadata.get("goal_status")
@@ -1554,9 +1557,11 @@ class WebSocketChannel(BaseChannel):
         if msg.metadata.get("_turn_end"):
             lat = msg.metadata.get("latency_ms")
             lat_i = int(lat) if isinstance(lat, (int, float)) else None
-            tg = msg.metadata.get("thread_goal")
-            tg_blob = tg if isinstance(tg, dict) else None
-            await self.send_turn_end(msg.chat_id, latency_ms=lat_i, thread_goal=tg_blob)
+            gs = msg.metadata.get("goal_state")
+            if gs is None:
+                gs = msg.metadata.get("thread_goal")
+            gs_blob = gs if isinstance(gs, dict) else None
+            await self.send_turn_end(msg.chat_id, latency_ms=lat_i, goal_state=gs_blob)
             return
         if msg.metadata.get("_session_updated"):
             await self.send_session_updated(msg.chat_id)
@@ -1674,7 +1679,7 @@ class WebSocketChannel(BaseChannel):
         chat_id: str,
         latency_ms: int | None = None,
         *,
-        thread_goal: dict[str, Any] | None = None,
+        goal_state: dict[str, Any] | None = None,
     ) -> None:
         """Signal that the agent has fully finished processing the current turn."""
         conns = list(self._subs.get(chat_id, ()))
@@ -1683,21 +1688,21 @@ class WebSocketChannel(BaseChannel):
         body: dict[str, Any] = {"event": "turn_end", "chat_id": chat_id}
         if latency_ms is not None:
             body["latency_ms"] = int(latency_ms)
-        if thread_goal is not None:
-            body["thread_goal"] = thread_goal
+        if goal_state is not None:
+            body["goal_state"] = goal_state
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_end ")
 
-    async def send_thread_goal(self, chat_id: str, blob: dict[str, Any]) -> None:
-        """Push persisted thread-goal snapshot for *chat_id* (multi-chat isolation)."""
+    async def send_goal_state(self, chat_id: str, blob: dict[str, Any]) -> None:
+        """Push persisted goal-state snapshot for *chat_id* (multi-chat isolation)."""
         conns = list(self._subs.get(chat_id, ()))
         if not conns:
             return
-        body = {"event": "thread_goal", "chat_id": chat_id, "thread_goal": blob}
+        body = {"event": "goal_state", "chat_id": chat_id, "goal_state": blob}
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
-            await self._safe_send_to(connection, raw, label=" thread_goal ")
+            await self._safe_send_to(connection, raw, label=" goal_state ")
 
     async def send_goal_status(
         self,

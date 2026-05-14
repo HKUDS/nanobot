@@ -550,7 +550,7 @@ async def test_send_turn_end_includes_latency_ms_when_present() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_turn_end_includes_thread_goal_when_present() -> None:
+async def test_send_turn_end_includes_goal_state_when_present() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
     mock_ws = AsyncMock()
@@ -561,12 +561,12 @@ async def test_send_turn_end_includes_thread_goal_when_present() -> None:
         channel="websocket",
         chat_id="chat-1",
         content="",
-        metadata={"_turn_end": True, "thread_goal": blob},
+        metadata={"_turn_end": True, "goal_state": blob},
     ))
 
     mock_ws.send.assert_awaited_once()
     body = json.loads(mock_ws.send.await_args.args[0])
-    assert body == {"event": "turn_end", "chat_id": "chat-1", "thread_goal": blob}
+    assert body == {"event": "turn_end", "chat_id": "chat-1", "goal_state": blob}
 
 
 @pytest.mark.asyncio
@@ -621,7 +621,7 @@ async def test_send_goal_status_idle_omits_started_at() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_thread_goal_emits_blob_per_chat() -> None:
+async def test_send_goal_state_emits_blob_per_chat() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
     mock_a = AsyncMock()
@@ -634,8 +634,8 @@ async def test_send_thread_goal_emits_blob_per_chat() -> None:
         chat_id="chat-a",
         content="",
         metadata={
-            "_thread_goal_sync": True,
-            "thread_goal": {"active": True, "ui_summary": "A"},
+            "_goal_state_sync": True,
+            "goal_state": {"active": True, "ui_summary": "A"},
         },
     ))
 
@@ -643,9 +643,9 @@ async def test_send_thread_goal_emits_blob_per_chat() -> None:
     mock_b.send.assert_not_called()
     body = json.loads(mock_a.send.await_args.args[0])
     assert body == {
-        "event": "thread_goal",
+        "event": "goal_state",
         "chat_id": "chat-a",
-        "thread_goal": {"active": True, "ui_summary": "A"},
+        "goal_state": {"active": True, "ui_summary": "A"},
     }
 
 

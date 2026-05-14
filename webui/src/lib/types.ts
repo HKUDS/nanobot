@@ -61,8 +61,8 @@ export interface AgentUIBlob {
   data?: unknown;
 }
 
-/** WebSocket snapshot for ``long_task`` / ``complete_goal`` (always keyed by ``chat_id``). */
-export interface ThreadGoalWsPayload {
+/** WebSocket snapshot for sustained goals (`goal_state` events; keyed by ``chat_id``). */
+export interface GoalStateWsPayload {
   active: boolean;
   ui_summary?: string;
   objective?: string;
@@ -213,8 +213,8 @@ export type InboundEvent =
       event: "turn_end";
       chat_id: string;
       latency_ms?: number;
-      /** Authoritative sustained-goal snapshot for this chat (same shape as ``thread_goal`` events). */
-      thread_goal?: ThreadGoalWsPayload;
+      /** Authoritative sustained-goal snapshot for this chat (same shape as ``goal_state`` events). */
+      goal_state?: GoalStateWsPayload;
     }
   | {
       event: "goal_status";
@@ -225,9 +225,9 @@ export type InboundEvent =
       started_at?: number;
     }
   | {
-      event: "thread_goal";
+      event: "goal_state";
       chat_id: string;
-      thread_goal: ThreadGoalWsPayload;
+      goal_state: GoalStateWsPayload;
     }
   | { event: "session_updated"; chat_id: string }
   | { event: "error"; chat_id?: string; detail?: string };

@@ -1,4 +1,4 @@
-"""Tests for thread goal tools (`long_task`, `complete_goal`)."""
+"""Tests for sustained goal tools (`long_task`, `complete_goal`)."""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from nanobot.agent.loop import AgentLoop
-from nanobot.agent.thread_goal_state import THREAD_GOAL_KEY
 from nanobot.agent.tools.context import RequestContext
 from nanobot.agent.tools.long_task import (
     CompleteGoalTool,
     LongTaskTool,
 )
 from nanobot.bus.queue import MessageBus
+from nanobot.session.goal_state import GOAL_STATE_KEY
 from nanobot.session.manager import SessionManager
 
 
@@ -37,10 +37,10 @@ async def test_long_task_records_goal_metadata(tmp_path):
     lt, _cg = _tools(sm)
 
     out = await lt.execute(goal="Do the thing", ui_summary="thing")
-    assert "Thread goal recorded" in out
+    assert "Goal recorded" in out
 
     sess = sm.get_or_create("websocket:c1")
-    blob = sess.metadata.get(THREAD_GOAL_KEY)
+    blob = sess.metadata.get(GOAL_STATE_KEY)
     assert isinstance(blob, dict)
     assert blob["status"] == "active"
     assert blob["objective"] == "Do the thing"
@@ -67,13 +67,13 @@ async def test_complete_goal_closes_active_goal(tmp_path):
     assert "marked complete" in out
 
     sess = sm.get_or_create("websocket:c1")
-    blob = sess.metadata.get(THREAD_GOAL_KEY)
+    blob = sess.metadata.get(GOAL_STATE_KEY)
     assert blob["status"] == "completed"
     assert blob["recap"] == "Done."
 
 
 @pytest.mark.asyncio
-async def test_long_task_publishes_thread_goal_ws_after_save(tmp_path):
+async def test_long_task_publishes_goal_state_ws_after_save(tmp_path):
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
     sm = SessionManager(tmp_path)
@@ -92,8 +92,8 @@ async def test_long_task_publishes_thread_goal_ws_after_save(tmp_path):
     call = bus.publish_outbound.await_args.args[0]
     assert call.channel == "websocket"
     assert call.chat_id == "chat-99"
-    assert call.metadata.get("_thread_goal_sync") is True
-    assert call.metadata["thread_goal"] == {
+    assert call.metadata.get("_goal_state_sync") is True
+    assert call.metadata["goal_state"] == {
         "active": True,
         "ui_summary": "alpha",
         "objective": "Objective alpha",
@@ -101,7 +101,7 @@ async def test_long_task_publishes_thread_goal_ws_after_save(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_complete_goal_publishes_inactive_thread_goal_ws(tmp_path):
+async def test_complete_goal_publishes_inactive_goal_state_ws(tmp_path):
     bus = MagicMock()
     bus.publish_outbound = AsyncMock()
     sm = SessionManager(tmp_path)
@@ -122,7 +122,7 @@ async def test_complete_goal_publishes_inactive_thread_goal_ws(tmp_path):
 
     bus.publish_outbound.assert_awaited_once()
     call = bus.publish_outbound.await_args.args[0]
-    assert call.metadata["thread_goal"] == {"active": False}
+    assert call.metadata["goal_state"] == {"active": False}
 
 
 @pytest.mark.asyncio
@@ -139,7 +139,7 @@ async def test_long_task_skips_ws_publish_without_bus(tmp_path):
     sm = SessionManager(tmp_path)
     lt, _cg = _tools(sm)
     out = await lt.execute(goal="Solo", ui_summary="s")
-    assert "Thread goal recorded" in out
+    assert "Goal recorded" in out
 
 
 @pytest.mark.asyncio

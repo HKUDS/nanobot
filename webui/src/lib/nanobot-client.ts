@@ -4,7 +4,7 @@ import type {
   Outbound,
   OutboundImageGeneration,
   OutboundMedia,
-  ThreadGoalWsPayload,
+  GoalStateWsPayload,
   WebuiThreadPersistedPayload,
 } from "./types";
 
@@ -74,8 +74,8 @@ export class NanobotClient {
   private knownChats = new Set<string>();
   /** Wall-clock run strip: updated from ``goal_status`` even with no ``onChat`` subscriber. */
   private runStartedAtByChatId = new Map<string, number>();
-  /** Latest ``thread_goal`` snapshot per ``chat_id`` (multi-session isolation). */
-  private threadGoalByChatId = new Map<string, ThreadGoalWsPayload>();
+  /** Latest ``goal_state`` snapshot per ``chat_id`` (multi-session isolation). */
+  private goalStateByChatId = new Map<string, GoalStateWsPayload>();
   private pendingNewChat: PendingNewChat | null = null;
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
@@ -148,9 +148,9 @@ export class NanobotClient {
     return v === undefined ? null : v;
   }
 
-  /** Last ``thread_goal`` payload for *chatId*, if any frame has arrived this connection. */
-  getThreadGoal(chatId: string): ThreadGoalWsPayload | undefined {
-    return this.threadGoalByChatId.get(chatId);
+  /** Last ``goal_state`` payload for *chatId*, if any frame has arrived this connection. */
+  getGoalState(chatId: string): GoalStateWsPayload | undefined {
+    return this.goalStateByChatId.get(chatId);
   }
 
   private recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent): void {
@@ -162,13 +162,13 @@ export class NanobotClient {
     }
   }
 
-  private recordThreadGoalSnapshot(chatId: string, ev: InboundEvent): void {
-    if (ev.event === "thread_goal") {
-      this.threadGoalByChatId.set(chatId, ev.thread_goal);
+  private recordGoalStateSnapshot(chatId: string, ev: InboundEvent): void {
+    if (ev.event === "goal_state") {
+      this.goalStateByChatId.set(chatId, ev.goal_state);
       return;
     }
-    if (ev.event === "turn_end" && ev.thread_goal != null && typeof ev.thread_goal === "object") {
-      this.threadGoalByChatId.set(chatId, ev.thread_goal);
+    if (ev.event === "turn_end" && ev.goal_state != null && typeof ev.goal_state === "object") {
+      this.goalStateByChatId.set(chatId, ev.goal_state);
     }
   }
 
@@ -332,7 +332,7 @@ export class NanobotClient {
     const chatId = (parsed as { chat_id?: string }).chat_id;
     if (chatId) {
       this.recordGoalStatusForRunStrip(chatId, parsed);
-      this.recordThreadGoalSnapshot(chatId, parsed);
+      this.recordGoalStateSnapshot(chatId, parsed);
       this.dispatch(chatId, parsed);
     }
   }

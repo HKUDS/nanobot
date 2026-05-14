@@ -22,7 +22,6 @@ from nanobot.agent.memory import Consolidator, Dream
 from nanobot.agent.progress_hook import AgentProgressHook
 from nanobot.agent.runner import _MAX_INJECTIONS_PER_TURN, AgentRunner, AgentRunSpec
 from nanobot.agent.subagent import SubagentManager
-from nanobot.agent.thread_goal_state import runtime_lines_for_metadata, thread_goal_ws_blob
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
@@ -33,6 +32,7 @@ from nanobot.command import CommandContext, CommandRouter, register_builtin_comm
 from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
+from nanobot.session.goal_state import goal_state_runtime_lines, goal_state_ws_blob
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.artifacts import generated_image_paths_from_messages
 from nanobot.utils.document import extract_documents
@@ -721,7 +721,7 @@ class AgentLoop:
                     content, media = extract_documents(content, media)
                     media = media or None
                 user_content = self.context._build_user_content(content, media)
-                extra = runtime_lines_for_metadata(session.metadata) if session is not None else []
+                extra = goal_state_runtime_lines(session.metadata) if session is not None else []
                 runtime_ctx = self.context._build_runtime_context(
                     pending_msg.channel,
                     self._runtime_chat_id(pending_msg),
@@ -945,7 +945,7 @@ class AgentLoop:
                         if turn_lat is not None:
                             turn_metadata["latency_ms"] = int(turn_lat)
                         sess_turn = self.sessions.get_or_create(session_key)
-                        turn_metadata["thread_goal"] = thread_goal_ws_blob(sess_turn.metadata)
+                        turn_metadata["goal_state"] = goal_state_ws_blob(sess_turn.metadata)
                         await self.bus.publish_outbound(OutboundMessage(
                             channel=msg.channel, chat_id=msg.chat_id,
                             content="", metadata=turn_metadata,

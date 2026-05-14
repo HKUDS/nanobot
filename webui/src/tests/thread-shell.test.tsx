@@ -17,14 +17,14 @@ function makeClient() {
   const errorHandlers = new Set<(err: { kind: string }) => void>();
   const chatHandlers = new Map<string, Set<(ev: import("@/lib/types").InboundEvent) => void>>();
   const sessionUpdateHandlers = new Set<(chatId: string) => void>();
-  const threadGoalByChatId = new Map<string, import("@/lib/types").ThreadGoalWsPayload>();
+  const goalStateByChatId = new Map<string, import("@/lib/types").GoalStateWsPayload>();
   return {
     status: "open" as const,
     defaultChatId: null as string | null,
     onStatus: () => () => {},
     onRuntimeModelUpdate: () => () => {},
     getRunStartedAt: () => null,
-    getThreadGoal: (chatId: string) => threadGoalByChatId.get(chatId),
+    getGoalState: (chatId: string) => goalStateByChatId.get(chatId),
     onChat: (chatId: string, handler: (ev: import("@/lib/types").InboundEvent) => void) => {
       let handlers = chatHandlers.get(chatId);
       if (!handlers) {
@@ -52,8 +52,8 @@ function makeClient() {
       for (const h of errorHandlers) h(err);
     },
     _emitChat(chatId: string, ev: import("@/lib/types").InboundEvent) {
-      if (ev.event === "thread_goal") {
-        threadGoalByChatId.set(chatId, ev.thread_goal);
+      if (ev.event === "goal_state") {
+        goalStateByChatId.set(chatId, ev.goal_state);
       }
       for (const h of chatHandlers.get(chatId) ?? []) h(ev);
     },

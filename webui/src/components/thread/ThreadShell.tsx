@@ -127,7 +127,7 @@ export function ThreadShell({
     messages,
     isStreaming,
     runStartedAt,
-    threadGoal,
+    goalState,
     send,
     stop,
     setMessages,
@@ -397,7 +397,7 @@ export function ThreadShell({
           onImageModeChange={showHeroComposer ? setHeroImageMode : undefined}
           onStop={stop}
           runStartedAt={runStartedAt}
-          threadGoal={threadGoal}
+          goalState={goalState}
         />
       ) : (
         <ThreadComposer
@@ -415,7 +415,7 @@ export function ThreadShell({
           imageMode={heroImageMode}
           onImageModeChange={setHeroImageMode}
           runStartedAt={runStartedAt}
-          threadGoal={threadGoal}
+          goalState={goalState}
         />
       )}
       {showHeroComposer ? quickActions : null}

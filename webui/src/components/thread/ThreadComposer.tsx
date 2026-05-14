@@ -45,7 +45,7 @@ import {
 } from "@/hooks/useAttachedImages";
 import { useClipboardAndDrop } from "@/hooks/useClipboardAndDrop";
 import type { SendImage, SendOptions } from "@/hooks/useNanobotStream";
-import type { SlashCommand, ThreadGoalWsPayload } from "@/lib/types";
+import type { SlashCommand, GoalStateWsPayload } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** ``<input accept>``: aligned with the server's MIME whitelist. SVG is
@@ -71,8 +71,8 @@ interface ThreadComposerProps {
   onStop?: () => void;
   /** Unix seconds from server; turn elapsed timer above input while set. */
   runStartedAt?: number | null;
-  /** Sustained objective for this chat (WebSocket ``thread_goal``). */
-  threadGoal?: ThreadGoalWsPayload;
+  /** Sustained objective for this chat (WebSocket ``goal_state``). */
+  goalState?: GoalStateWsPayload;
 }
 
 const COMMAND_ICONS: Record<string, LucideIcon> = {
@@ -138,8 +138,8 @@ function getVisibleBounds(el: HTMLElement): { top: number; bottom: number } {
   return { top, bottom };
 }
 
-function threadGoalStripPreview(
-  goal: ThreadGoalWsPayload | undefined,
+function goalStateStripPreview(
+  goal: GoalStateWsPayload | undefined,
   t: (key: string) => string,
 ): string | null {
   if (!goal?.active) return null;
@@ -147,15 +147,15 @@ function threadGoalStripPreview(
   if (summary) return summary;
   const obj = goal.objective?.trim();
   if (obj) return obj.length > 72 ? `${obj.slice(0, 72)}…` : obj;
-  return t("thread.composer.threadGoalFallback");
+  return t("thread.composer.goalStateFallback");
 }
 
 function RunElapsedStrip({
   startedAt,
-  threadGoal,
+  goalState,
 }: {
   startedAt: number | null;
-  threadGoal?: ThreadGoalWsPayload;
+  goalState?: GoalStateWsPayload;
 }) {
   const { t } = useTranslation();
   const [goalSheetOpen, setGoalSheetOpen] = useState(false);
@@ -166,13 +166,13 @@ function RunElapsedStrip({
     return () => window.clearInterval(id);
   }, [startedAt]);
   const showTimer = startedAt != null;
-  const stripLabel = threadGoalStripPreview(threadGoal, t);
+  const stripLabel = goalStateStripPreview(goalState, t);
   const showGoal = !!stripLabel?.trim();
   if (!showTimer && !showGoal) return null;
 
-  const objectiveFull = threadGoal?.objective?.trim() ?? "";
-  const summaryFull = threadGoal?.ui_summary?.trim() ?? "";
-  const canExpandGoal = !!(threadGoal?.active && (objectiveFull || summaryFull));
+  const objectiveFull = goalState?.objective?.trim() ?? "";
+  const summaryFull = goalState?.ui_summary?.trim() ?? "";
+  const canExpandGoal = !!(goalState?.active && (objectiveFull || summaryFull));
 
   const elapsed =
     startedAt != null ? Math.max(0, Math.floor(Date.now() / 1000 - startedAt)) : 0;
@@ -207,7 +207,7 @@ function RunElapsedStrip({
           ) : null}
           {showGoal ? (
             <span className="truncate">
-              {t("thread.composer.threadGoalStrip", { label: stripLabel })}
+              {t("thread.composer.goalStateStrip", { label: stripLabel })}
             </span>
           ) : null}
         </span>
@@ -219,8 +219,8 @@ function RunElapsedStrip({
               "text-muted-foreground transition-colors hover:bg-muted/55 hover:text-foreground",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             )}
-            aria-label={t("thread.composer.threadGoalExpandAria")}
-            title={t("thread.composer.threadGoalExpandAria")}
+            aria-label={t("thread.composer.goalStateExpandAria")}
+            title={t("thread.composer.goalStateExpandAria")}
             onClick={() => setGoalSheetOpen(true)}
           >
             <ChevronUp className="h-4 w-4" aria-hidden />
@@ -239,13 +239,13 @@ function RunElapsedStrip({
           )}
         >
           <SheetHeader className="space-y-1 text-left">
-            <SheetTitle>{t("thread.composer.threadGoalSheetTitle")}</SheetTitle>
+            <SheetTitle>{t("thread.composer.goalStateSheetTitle")}</SheetTitle>
           </SheetHeader>
           <div className="flex max-h-[min(58vh,420px)] flex-col gap-4 overflow-y-auto pr-0.5 text-[14px] leading-relaxed">
             {summaryFull ? (
               <section>
                 <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {t("thread.composer.threadGoalSummaryHeading")}
+                  {t("thread.composer.goalStateSummaryHeading")}
                 </p>
                 <p className="whitespace-pre-wrap text-foreground/90">{summaryFull}</p>
               </section>
@@ -253,7 +253,7 @@ function RunElapsedStrip({
             {objectiveFull ? (
               <section>
                 <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {t("thread.composer.threadGoalObjectiveHeading")}
+                  {t("thread.composer.goalStateObjectiveHeading")}
                 </p>
                 <p className="whitespace-pre-wrap text-foreground/90">{objectiveFull}</p>
               </section>
@@ -277,7 +277,7 @@ export function ThreadComposer({
   onImageModeChange,
   onStop,
   runStartedAt = null,
-  threadGoal,
+  goalState,
 }: ThreadComposerProps) {
   const { t } = useTranslation();
   const [value, setValue] = useState("");
@@ -654,7 +654,7 @@ export function ThreadComposer({
           "focus-within:ring-1 focus-within:ring-foreground/8",
           disabled && "opacity-60",
           isDragging && "ring-2 ring-primary/40 motion-reduce:ring-0 motion-reduce:border-primary",
-          threadGoal?.active &&
+          goalState?.active &&
             "thread-goal-shell-glow ring-1 ring-sky-400/35 motion-reduce:ring-sky-400/25 dark:ring-sky-400/45",
         )}
       >
@@ -686,8 +686,8 @@ export function ThreadComposer({
             ))}
           </div>
         ) : null}
-        {runStartedAt != null || threadGoal?.active ? (
-          <RunElapsedStrip startedAt={runStartedAt} threadGoal={threadGoal} />
+        {runStartedAt != null || goalState?.active ? (
+          <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} />
         ) : null}
         <textarea
           ref={textareaRef}

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
-import type { InboundEvent, ThreadGoalWsPayload } from "@/lib/types";
+import type { InboundEvent, GoalStateWsPayload } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 
 const EMPTY_MESSAGES: import("@/lib/types").UIMessage[] = [];
@@ -11,7 +11,7 @@ const EMPTY_MESSAGES: import("@/lib/types").UIMessage[] = [];
 function fakeClient() {
   const handlers = new Map<string, Set<(ev: InboundEvent) => void>>();
   const runStartedAtByChatId = new Map<string, number>();
-  const threadGoalByChatId = new Map<string, ThreadGoalWsPayload>();
+  const goalStateByChatId = new Map<string, GoalStateWsPayload>();
 
   function recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent) {
     if (ev.event !== "goal_status") return;
@@ -22,9 +22,14 @@ function fakeClient() {
     }
   }
 
-  function recordThreadGoalSnapshot(chatId: string, ev: InboundEvent) {
-    if (ev.event !== "thread_goal") return;
-    threadGoalByChatId.set(chatId, ev.thread_goal);
+  function recordGoalStateSnapshot(chatId: string, ev: InboundEvent) {
+    if (ev.event === "goal_state") {
+      goalStateByChatId.set(chatId, ev.goal_state);
+      return;
+    }
+    if (ev.event === "turn_end" && ev.goal_state != null && typeof ev.goal_state === "object") {
+      goalStateByChatId.set(chatId, ev.goal_state);
+    }
   }
 
   return {
@@ -37,8 +42,8 @@ function fakeClient() {
         const v = runStartedAtByChatId.get(chatId);
         return v === undefined ? null : v;
       },
-      getThreadGoal(chatId: string) {
-        return threadGoalByChatId.get(chatId);
+      getGoalState(chatId: string) {
+        return goalStateByChatId.get(chatId);
       },
       onChat(chatId: string, h: (ev: InboundEvent) => void) {
         let set = handlers.get(chatId);
@@ -58,7 +63,7 @@ function fakeClient() {
     },
     emit(chatId: string, ev: InboundEvent) {
       recordGoalStatusForRunStrip(chatId, ev);
-      recordThreadGoalSnapshot(chatId, ev);
+      recordGoalStateSnapshot(chatId, ev);
       const set = handlers.get(chatId);
       set?.forEach((h) => h(ev));
     },
@@ -794,7 +799,7 @@ describe("useNanobotStream", () => {
     expect(result.current.runStartedAt).toBe(9001);
   });
 
-  it("tracks thread_goal per chat and restores after switching sessions", () => {
+  it("tracks goal_state per chat and restores after switching sessions", () => {
     const fake = fakeClient();
     const { result, rerender } = renderHook(
       ({ chatId }: { chatId: string }) => useNanobotStream(chatId, EMPTY_MESSAGES),
@@ -806,35 +811,35 @@ describe("useNanobotStream", () => {
 
     act(() => {
       fake.emit("chat-a", {
-        event: "thread_goal",
+        event: "goal_state",
         chat_id: "chat-a",
-        thread_goal: { active: true, ui_summary: "Alpha" },
+        goal_state: { active: true, ui_summary: "Alpha" },
       });
     });
-    expect(result.current.threadGoal).toEqual({ active: true, ui_summary: "Alpha" });
+    expect(result.current.goalState).toEqual({ active: true, ui_summary: "Alpha" });
 
     act(() => {
       fake.emit("chat-b", {
-        event: "thread_goal",
+        event: "goal_state",
         chat_id: "chat-b",
-        thread_goal: { active: true, objective: "Beta task" },
+        goal_state: { active: true, objective: "Beta task" },
       });
     });
 
     rerender({ chatId: "chat-b" });
-    expect(result.current.threadGoal).toEqual({ active: true, objective: "Beta task" });
+    expect(result.current.goalState).toEqual({ active: true, objective: "Beta task" });
 
     rerender({ chatId: "chat-a" });
-    expect(result.current.threadGoal).toEqual({ active: true, ui_summary: "Alpha" });
+    expect(result.current.goalState).toEqual({ active: true, ui_summary: "Alpha" });
 
     act(() => {
       fake.emit("chat-a", {
-        event: "thread_goal",
+        event: "goal_state",
         chat_id: "chat-a",
-        thread_goal: { active: false },
+        goal_state: { active: false },
       });
     });
-    expect(result.current.threadGoal).toEqual({ active: false });
+    expect(result.current.goalState).toEqual({ active: false });
   });
 
 });

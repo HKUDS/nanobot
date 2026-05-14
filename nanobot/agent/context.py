@@ -10,7 +10,7 @@ from typing import Any, Mapping, Sequence
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
-from nanobot.agent.thread_goal_state import runtime_lines_for_metadata
+from nanobot.session.goal_state import goal_state_runtime_lines
 from nanobot.utils.helpers import (
     current_time_str,
     detect_image_mime,
@@ -156,7 +156,7 @@ class ContextBuilder:
         session_metadata: Mapping[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
-        extra = runtime_lines_for_metadata(session_metadata)
+        extra = goal_state_runtime_lines(session_metadata)
         runtime_ctx = self._build_runtime_context(
             channel,
             chat_id,
