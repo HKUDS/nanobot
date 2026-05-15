@@ -6,7 +6,7 @@ import platform
 from contextlib import suppress
 from importlib.resources import files as pkg_files
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
@@ -16,6 +16,28 @@ from nanobot.utils.helpers import (
     truncate_text,
 )
 from nanobot.utils.prompt_templates import render_template
+
+
+class _PromptCacheKey(NamedTuple):
+    """Stable cache key for system prompt.
+
+    The prompt is rebuilt only when one of its inputs changes:
+    - ``channel``: drives per-channel Format Hint in identity.md
+    - ``fs_mtime``: maximum mtime across all workspace paths that feed the
+      prompt — bootstrap files (SOUL.md, USER.md, …), MEMORY.md,
+      history.jsonl (Recent History section), and the workspace skills
+      directory (skill add / remove).
+
+    A single float captures every relevant filesystem event: file edits bump
+    their own mtime, directory creates/deletes bump the parent directory mtime,
+    and Dream cursor advances always coincide with a history.jsonl write.
+
+    Intentionally excluded: wall-clock time (current_time_str lives in the
+    runtime context block that is merged into the *user* message, not system).
+    """
+
+    channel: str | None
+    fs_mtime: float
 
 
 class ContextBuilder:
@@ -32,6 +54,41 @@ class ContextBuilder:
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+        # One cached prompt per channel value. Invalidated by _PromptCacheKey mismatch.
+        self._prompt_cache: dict[str | None, tuple[_PromptCacheKey, str]] = {}
+
+    # ------------------------------------------------------------------
+    # Cache helpers
+    # ------------------------------------------------------------------
+
+    def _prompt_cache_key(self, channel: str | None) -> _PromptCacheKey:
+        """Compute the cache key for the given channel without building the prompt."""
+        return _PromptCacheKey(
+            channel=channel,
+            fs_mtime=self._workspace_mtime(),
+        )
+
+    def _workspace_mtime(self) -> float:
+        """Return the maximum mtime of all workspace paths that affect the system prompt.
+
+        Covers bootstrap files (SOUL.md, USER.md, …), MEMORY.md,
+        history.jsonl (Recent History section advances whenever new entries
+        are appended), and the workspace skills directory itself so that
+        adding or removing a skill also invalidates the cache.
+        """
+        watched: list[Path] = [self.workspace / f for f in self.BOOTSTRAP_FILES]
+        watched.append(self.memory.memory_file)
+        watched.append(self.memory.history_file)   # mtime advances on every append_history call
+        watched.append(self.skills.workspace_skills)  # directory mtime changes on skill add/remove
+        mtime = 0.0
+        for path in watched:
+            with suppress(OSError):
+                mtime = max(mtime, path.stat().st_mtime)
+        return mtime
+
+    def invalidate_prompt_cache(self) -> None:
+        """Explicitly drop all cached prompts (e.g. after a Dream git commit)."""
+        self._prompt_cache.clear()
 
     def build_system_prompt(
         self,
@@ -39,7 +96,33 @@ class ContextBuilder:
         channel: str | None = None,
         session_summary: str | None = None,
     ) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills."""
+        """Build the system prompt from identity, bootstrap files, memory, and skills.
+
+        Results are cached per ``channel`` and invalidated automatically when
+        any contributing workspace file is modified (mtime-based).  The hot
+        path — back-to-back calls with no file changes — is a single dict
+        lookup and NamedTuple equality check.
+
+        ``skill_names`` is accepted for API compatibility but is not yet used
+        by any caller.  If a non-None value is passed the cache is bypassed to
+        avoid returning a stale result should this parameter be activated in
+        the future.
+        """
+        if skill_names is not None:
+            # skill_names is not part of the cache key; bypass to stay correct.
+            return self._build_system_prompt_uncached(channel)
+
+        key = self._prompt_cache_key(channel)
+        entry = self._prompt_cache.get(channel)
+        if entry is not None and entry[0] == key:
+            return entry[1]
+
+        prompt = self._build_system_prompt_uncached(channel)
+        self._prompt_cache[channel] = (key, prompt)
+        return prompt
+
+    def _build_system_prompt_uncached(self, channel: str | None) -> str:
+        """Unconditionally rebuild the system prompt (no cache read/write)."""
         parts = [self._get_identity(channel=channel)]
 
         bootstrap = self._load_bootstrap_files()
