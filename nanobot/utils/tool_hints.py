@@ -11,7 +11,6 @@ _TOOL_FORMATS: dict[str, tuple[list[str], str, bool, bool]] = {
     "read_file":  (["path", "file_path"],              "read {}",     True,  False),
     "write_file": (["path", "file_path"],              "write {}",    True,  False),
     "edit":       (["file_path", "path"],              "edit {}",     True,  False),
-    "glob":       (["pattern"],                        'glob "{}"',   False, False),
     "grep":       (["pattern"],                        'grep "{}"',   False, False),
     "exec":       (["command"],                        "$ {}",        False, True),
     "web_search": (["query"],                          'search "{}"', False, False),

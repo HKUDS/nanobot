@@ -149,10 +149,12 @@ class ChannelManager:
                     allow = cfg.get("allowFrom")
             else:
                 allow = getattr(cfg, "allow_from", None)
-            if allow == []:
-                raise SystemExit(
-                    f'Error: "{name}" has empty allowFrom (denies all). '
-                    f'Set ["*"] to allow everyone, or add specific user IDs.'
+            if allow is None:
+                # allowFrom omitted → pairing-only mode.  Unapproved senders
+                # receive a pairing code instead of being silently ignored.
+                logger.info(
+                    '"{}" has no allowFrom; unapproved users will receive a pairing code',
+                    name,
                 )
 
     def _should_send_progress(self, channel_name: str, *, tool_hint: bool = False) -> bool:

@@ -87,6 +87,24 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Return exactly: OK" in user_content
 
 
+def test_runtime_context_appended_after_user_content(tmp_path) -> None:
+    """User content must precede runtime context for prompt-cache prefix stability."""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="hello world",
+        channel="cli",
+        chat_id="direct",
+    )
+
+    content = messages[-1]["content"]
+    user_pos = content.find("hello world")
+    tag_pos = content.find(ContextBuilder._RUNTIME_CONTEXT_TAG)
+    assert user_pos < tag_pos, "user content must precede runtime context for prefix stability"
+
+
 def test_runtime_context_includes_sender_id_when_provided(tmp_path) -> None:
     """Sender ID should be included in runtime context when provided."""
     workspace = _make_workspace(tmp_path)

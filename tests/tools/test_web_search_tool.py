@@ -19,7 +19,10 @@ def _tool(
     )
 
 
-def _response(status: int = 200, json: dict | None = None) -> httpx.Response:
+def _response(
+    status: int = 200,
+    json: dict | None = None,
+) -> httpx.Response:
     """Build a mock httpx.Response with a dummy request attached."""
     r = httpx.Response(status, json=json)
     r._request = httpx.Request("GET", "https://mock")
@@ -60,6 +63,55 @@ async def test_brave_search(monkeypatch):
     result = await tool.execute(query="nanobot", count=1)
     assert "NanoBot" in result
     assert "https://example.com" in result
+
+
+@pytest.mark.asyncio
+async def test_brave_search_retries_rate_limit_once(monkeypatch):
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    async def mock_sleep(delay: float):
+        sleeps.append(delay)
+
+    async def mock_get(self, url, **kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _response(status=429, json={"error": "rate limit"})
+        return _response(json={
+            "web": {"results": [{"title": "Recovered", "url": "https://example.com", "description": "ok"}]}
+        })
+
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", mock_sleep)
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    tool = _tool(provider="brave", api_key="brave-key")
+    result = await tool.execute(query="nanobot", count=1)
+
+    assert calls["n"] == 2
+    assert "Recovered" in result
+    assert sleeps == [1.0]
+
+
+@pytest.mark.asyncio
+async def test_brave_search_returns_clear_rate_limit_after_retries(monkeypatch):
+    calls = {"n": 0}
+
+    async def mock_sleep(delay: float):
+        return None
+
+    async def mock_get(self, url, **kw):
+        calls["n"] += 1
+        return _response(status=429, json={"error": "rate limit"})
+
+    monkeypatch.setattr("nanobot.agent.tools.web.asyncio.sleep", mock_sleep)
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    tool = _tool(provider="brave", api_key="brave-key")
+    result = await tool.execute(query="nanobot", count=1)
+
+    assert calls["n"] == 2
+    assert "Brave search rate limited" in result
+    assert "consecutive web_search" in result
 
 
 @pytest.mark.asyncio

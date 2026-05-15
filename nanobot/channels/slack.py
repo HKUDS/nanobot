@@ -18,6 +18,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.pairing import is_approved
 from nanobot.utils.helpers import safe_filename, split_message
 
 
@@ -362,6 +363,13 @@ class SlackChannel(BaseChannel):
         channel_type = event.get("channel_type") or ""
 
         if not self._is_allowed(sender_id, chat_id, channel_type):
+            if channel_type == "im" and self.config.dm.enabled:
+                await self._handle_message(
+                    sender_id=sender_id,
+                    chat_id=chat_id,
+                    content="",
+                    is_dm=True,
+                )
             return
 
         if channel_type != "im" and not self._should_respond_in_channel(event_type, text, chat_id):
@@ -632,7 +640,7 @@ class SlackChannel(BaseChannel):
             if not self.config.dm.enabled:
                 return False
             if self.config.dm.policy == "allowlist":
-                return sender_id in self.config.dm.allow_from
+                return sender_id in self.config.dm.allow_from or is_approved(self.name, sender_id)
             return True
 
         # Group / channel messages

@@ -272,23 +272,37 @@ class WebSearchTool(Tool):
             logger.warning("BRAVE_API_KEY not set, falling back to DuckDuckGo")
             return await self._search_duckduckgo(query, n)
         try:
+            headers = {
+                "Accept": "application/json",
+                "X-Subscription-Token": api_key,
+                "User-Agent": self.user_agent,
+            }
             async with httpx.AsyncClient(proxy=self.proxy) as client:
-                r = await client.get(
-                    "https://api.search.brave.com/res/v1/web/search",
-                    params={"q": query, "count": n},
-                    headers={
-                        "Accept": "application/json",
-                        "X-Subscription-Token": api_key,
-                        "User-Agent": self.user_agent,
-                    },
-                    timeout=10.0,
-                )
+                for attempt in range(2):
+                    r = await client.get(
+                        "https://api.search.brave.com/res/v1/web/search",
+                        params={"q": query, "count": n},
+                        headers=headers,
+                        timeout=10.0,
+                    )
+                    if r.status_code != 429:
+                        break
+                    if attempt == 0:
+                        logger.warning("Brave search rate limited; retrying once in 1.0s")
+                        await asyncio.sleep(1.0)
                 r.raise_for_status()
             items = [
                 {"title": x.get("title", ""), "url": x.get("url", ""), "content": x.get("description", "")}
                 for x in r.json().get("web", {}).get("results", [])
             ]
             return _format_results(query, items, n)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                return (
+                    "Error: Brave search rate limited after retry. "
+                    "Retry later or reduce consecutive web_search calls."
+                )
+            return f"Error: {e}"
         except Exception as e:
             return f"Error: {e}"
 

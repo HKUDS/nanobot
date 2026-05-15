@@ -30,7 +30,10 @@ async def test_message_tool_rejects_malformed_buttons(bad) -> None:
     into the channel layer where Telegram would silently reject the frame."""
     tool = MessageTool()
     result = await tool.execute(
-        content="hi", channel="telegram", chat_id="1", buttons=bad,
+        content="hi",
+        channel="telegram",
+        chat_id="1",
+        buttons=bad,
     )
     assert result == "Error: buttons must be a list of list of strings"
 
@@ -84,6 +87,7 @@ async def test_message_tool_inherits_metadata_for_same_target() -> None:
     tool = MessageTool(send_callback=_send)
     slack_meta = {"slack": {"thread_ts": "111.222", "channel_type": "channel"}}
     from nanobot.agent.tools.context import RequestContext
+
     tool.set_context(RequestContext(channel="slack", chat_id="C123", metadata=slack_meta))
 
     await tool.execute(content="thread reply")
@@ -100,6 +104,7 @@ async def test_message_tool_clears_metadata_when_context_has_none() -> None:
 
     tool = MessageTool(send_callback=_send)
     from nanobot.agent.tools.context import RequestContext
+
     tool.set_context(
         RequestContext(
             channel="slack",
@@ -123,6 +128,7 @@ async def test_message_tool_does_not_inherit_metadata_for_cross_target() -> None
 
     tool = MessageTool(send_callback=_send)
     from nanobot.agent.tools.context import RequestContext
+
     tool.set_context(
         RequestContext(
             channel="slack",
@@ -174,6 +180,57 @@ async def test_message_tool_resolves_relative_media_paths_from_active_workspace(
     )
 
     assert sent[0].media == [str(workspace / "output/image.png")]
+
+
+@pytest.mark.asyncio
+async def test_message_tool_rejects_outside_workspace_absolute_media_when_restricted(
+    tmp_path,
+) -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret", encoding="utf-8")
+    tool = MessageTool(send_callback=_send, workspace=workspace, restrict_to_workspace=True)
+
+    result = await tool.execute(
+        content="see attached",
+        channel="telegram",
+        chat_id="1",
+        media=[str(outside)],
+    )
+
+    assert result.startswith("Error: media path is not allowed:")
+    assert "outside allowed directory" in result
+    assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_message_tool_allows_workspace_absolute_media_when_restricted(tmp_path) -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    image = workspace / "image.png"
+    image.write_text("image", encoding="utf-8")
+    tool = MessageTool(send_callback=_send, workspace=workspace, restrict_to_workspace=True)
+
+    result = await tool.execute(
+        content="see attached",
+        channel="telegram",
+        chat_id="1",
+        media=[str(image)],
+    )
+
+    assert result == "Message sent to telegram:1 with 1 attachments"
+    assert sent[0].media == [str(image.resolve())]
 
 
 @pytest.mark.asyncio

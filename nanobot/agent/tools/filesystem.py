@@ -9,50 +9,14 @@ from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
+from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import (
     BooleanSchema,
     IntegerSchema,
     StringSchema,
     tool_parameters_schema,
 )
-from nanobot.config.paths import get_media_dir
 from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
-
-_FS_WORKSPACE_BOUNDARY_NOTE = (
-    " (this is a hard policy boundary, not a transient failure; "
-    "do not retry with shell tricks or alternative tools, and ask "
-    "the user how to proceed if the resource is genuinely required)"
-)
-
-
-def _resolve_path(
-    path: str,
-    workspace: Path | None = None,
-    allowed_dir: Path | None = None,
-    extra_allowed_dirs: list[Path] | None = None,
-) -> Path:
-    """Resolve path against workspace (if relative) and enforce directory restriction."""
-    p = Path(path).expanduser()
-    if not p.is_absolute() and workspace:
-        p = workspace / p
-    resolved = p.resolve()
-    if allowed_dir:
-        media_path = get_media_dir().resolve()
-        all_dirs = [allowed_dir] + [media_path] + (extra_allowed_dirs or [])
-        if not any(_is_under(resolved, d) for d in all_dirs):
-            raise PermissionError(
-                f"Path {path} is outside allowed directory {allowed_dir}"
-                + _FS_WORKSPACE_BOUNDARY_NOTE
-            )
-    return resolved
-
-
-def _is_under(path: Path, directory: Path) -> bool:
-    try:
-        path.relative_to(directory.resolve())
-        return True
-    except ValueError:
-        return False
 
 
 class _FsTool(Tool):
@@ -98,7 +62,12 @@ class _FsTool(Tool):
         return current_file_states(self._fallback_file_states)
 
     def _resolve(self, path: str) -> Path:
-        return _resolve_path(path, self._workspace, self._allowed_dir, self._extra_allowed_dirs)
+        return resolve_workspace_path(
+            path,
+            self._workspace,
+            self._allowed_dir,
+            self._extra_allowed_dirs,
+        )
 
 
 # ---------------------------------------------------------------------------

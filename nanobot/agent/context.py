@@ -97,7 +97,7 @@ class ContextBuilder:
         sender_id: str | None = None,
         supplemental_lines: Sequence[str] | None = None,
     ) -> str:
-        """Build untrusted runtime metadata block for injection before the user message."""
+        """Build untrusted runtime metadata block appended after user content."""
         lines = [f"Current Time: {current_time_str(timezone)}"]
         if channel and chat_id:
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
@@ -168,10 +168,12 @@ class ContextBuilder:
 
         # Merge runtime context and user content into a single user message
         # to avoid consecutive same-role messages that some providers reject.
+        # Runtime context is appended to keep the user-content prefix stable
+        # for prompt-cache hits (the context changes every turn due to time).
         if isinstance(user_content, str):
-            merged = f"{runtime_ctx}\n\n{user_content}"
+            merged = f"{user_content}\n\n{runtime_ctx}"
         else:
-            merged = [{"type": "text", "text": runtime_ctx}] + user_content
+            merged = user_content + [{"type": "text", "text": runtime_ctx}]
         messages = [
             {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel, session_summary=session_summary)},
             *history,

@@ -101,8 +101,8 @@ def test_save_turn_keeps_image_placeholder_with_path_after_runtime_strip() -> No
         [{
             "role": "user",
             "content": [
-                {"type": "text", "text": runtime},
                 {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}, "_meta": {"path": "/media/feishu/photo.jpg"}},
+                {"type": "text", "text": runtime},
             ],
         }],
         skip=0,
@@ -120,13 +120,47 @@ def test_save_turn_keeps_image_placeholder_without_meta() -> None:
         [{
             "role": "user",
             "content": [
-                {"type": "text", "text": runtime},
                 {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                {"type": "text", "text": runtime},
             ],
         }],
         skip=0,
     )
     assert session.messages[0]["content"] == [{"type": "text", "text": "[image]"}]
+
+
+def test_save_turn_strips_runtime_context_suffix_from_string() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:suffix-strip")
+    runtime = (
+        ContextBuilder._RUNTIME_CONTEXT_TAG
+        + "\nCurrent Time: now\n"
+        + ContextBuilder._RUNTIME_CONTEXT_END
+    )
+
+    loop._save_turn(
+        session,
+        [{"role": "user", "content": f"hello world\n\n{runtime}"}],
+        skip=0,
+    )
+    assert session.messages[0]["content"] == "hello world"
+
+
+def test_save_turn_skips_string_user_when_only_runtime_context_suffix() -> None:
+    loop = _mk_loop()
+    session = Session(key="test:suffix-only")
+    runtime = (
+        ContextBuilder._RUNTIME_CONTEXT_TAG
+        + "\nCurrent Time: now\n"
+        + ContextBuilder._RUNTIME_CONTEXT_END
+    )
+
+    loop._save_turn(
+        session,
+        [{"role": "user", "content": runtime}],
+        skip=0,
+    )
+    assert session.messages == []
 
 
 def test_save_turn_keeps_tool_results_under_16k() -> None:
