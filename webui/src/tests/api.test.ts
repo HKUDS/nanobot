@@ -1,9 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   deleteSession,
-  fetchSessionMessages,
-  fetchWebuiThreadWithRetry,
+  fetchWebuiThread,
   listSessions,
   listSlashCommands,
   updateProviderSettings,
@@ -22,13 +21,14 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("percent-encodes websocket keys when fetching session history", async () => {
-    await fetchSessionMessages("tok", "websocket:chat-1");
+  it("percent-encodes websocket keys when fetching webui-thread snapshot", async () => {
+    await fetchWebuiThread("tok", "websocket:chat-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/messages",
+      "/api/sessions/websocket%3Achat-1/webui-thread",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
       }),
     );
   });
@@ -154,44 +154,5 @@ describe("webui API helpers", () => {
         headers: { Authorization: "Bearer tok" },
       }),
     );
-  });
-
-  describe("fetchWebuiThreadWithRetry", () => {
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    it("retries transient HTTP errors then succeeds", async () => {
-      vi.useFakeTimers();
-      const payload = { schemaVersion: 1, messages: [], sessionKey: "websocket:c1" };
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValueOnce({ ok: false, status: 503 })
-        .mockResolvedValueOnce({
-          ok: true,
-          status: 200,
-          json: async () => payload,
-        });
-      vi.stubGlobal("fetch", fetchMock);
-
-      const p = fetchWebuiThreadWithRetry("tok", "websocket:c1");
-      await Promise.resolve();
-      await vi.advanceTimersByTimeAsync(500);
-      await expect(p).resolves.toEqual(payload);
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-    });
-
-    it("returns null after exhausting retries", async () => {
-      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      vi.useFakeTimers();
-      const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 503 });
-      vi.stubGlobal("fetch", fetchMock);
-      const p = fetchWebuiThreadWithRetry("tok", "websocket:c1");
-      await Promise.resolve();
-      await vi.advanceTimersByTimeAsync(5000);
-      await expect(p).resolves.toBeNull();
-      expect(fetchMock).toHaveBeenCalledTimes(3);
-      warn.mockRestore();
-    });
   });
 });

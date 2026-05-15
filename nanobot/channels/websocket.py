@@ -1557,16 +1557,13 @@ class WebSocketChannel(BaseChannel):
                 or msg.metadata.get("_session_updated")
                 or msg.metadata.get("_goal_status")
                 or msg.metadata.get("_goal_state_sync")
-                or msg.metadata.get("_thread_goal_sync")
             ):
                 self.logger.debug("no active subscribers for chat_id={}", msg.chat_id)
             else:
                 self.logger.warning("no active subscribers for chat_id={}", msg.chat_id)
             return
-        if msg.metadata.get("_goal_state_sync") or msg.metadata.get("_thread_goal_sync"):
+        if msg.metadata.get("_goal_state_sync"):
             blob = msg.metadata.get("goal_state")
-            if blob is None:
-                blob = msg.metadata.get("thread_goal")
             await self.send_goal_state(msg.chat_id, blob if isinstance(blob, dict) else {"active": False})
             return
         if msg.metadata.get("_goal_status"):
@@ -1584,8 +1581,6 @@ class WebSocketChannel(BaseChannel):
             lat = msg.metadata.get("latency_ms")
             lat_i = int(lat) if isinstance(lat, (int, float)) else None
             gs = msg.metadata.get("goal_state")
-            if gs is None:
-                gs = msg.metadata.get("thread_goal")
             gs_blob = gs if isinstance(gs, dict) else None
             await self.send_turn_end(msg.chat_id, latency_ms=lat_i, goal_state=gs_blob)
             return

@@ -67,48 +67,6 @@ export async function listSessions(
   }));
 }
 
-/** Signed image URL attached to a historical user message. The server
- * emits these in place of raw on-disk paths so the client can render
- * previews without learning where media lives on disk. Each URL is a
- * self-authenticating ``/api/media/...`` route (see backend
- * ``_sign_media_path``) safe to drop into an ``<img src>`` attribute. */
-export interface SessionMediaUrl {
-  url: string;
-  name?: string;
-}
-
-export async function fetchSessionMessages(
-  token: string,
-  key: string,
-  base: string = "",
-): Promise<{
-  key: string;
-  created_at: string | null;
-  updated_at: string | null;
-  messages: Array<{
-    role: string;
-    content: string;
-    timestamp?: string;
-    tool_calls?: unknown;
-    reasoning_content?: string | null;
-    thinking_blocks?: unknown;
-    tool_call_id?: string;
-    name?: string;
-    /** Wall-clock milliseconds for the assistant turn (end-to-end). */
-    latency_ms?: number;
-    /** Present on ``user`` turns that attached images. Paths have already
-     * been stripped server-side; only the signed fetch URLs survive. */
-    media_urls?: SessionMediaUrl[];
-    /** Present when this assistant row is a subagent result inject (session JSONL). */
-    injected_event?: string;
-  }>;
-}> {
-  return request(
-    `${base}/api/sessions/${encodeURIComponent(key)}/messages`,
-    token,
-  );
-}
-
 /** Disk-backed WebUI display thread snapshot (separate from agent session). */
 export async function fetchWebuiThread(
   token: string,
@@ -123,39 +81,6 @@ export async function fetchWebuiThread(
   if (res.status === 404) return null;
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
   return (await res.json()) as WebuiThreadPersistedPayload;
-}
-
-const WEBUI_THREAD_FETCH_ATTEMPTS = 3;
-const WEBUI_THREAD_FETCH_BACKOFF_MS = 400;
-
-/**
- * Same as {@link fetchWebuiThread} but retries transient failures so a flaky
- * boot GET does not permanently skip disk hydration for this mount.
- */
-export async function fetchWebuiThreadWithRetry(
-  token: string,
-  key: string,
-  base: string = "",
-): Promise<WebuiThreadPersistedPayload | null> {
-  let lastErr: unknown;
-  for (let i = 0; i < WEBUI_THREAD_FETCH_ATTEMPTS; i++) {
-    try {
-      return await fetchWebuiThread(token, key, base);
-    } catch (e) {
-      lastErr = e;
-      if (i < WEBUI_THREAD_FETCH_ATTEMPTS - 1) {
-        await new Promise((r) => setTimeout(r, WEBUI_THREAD_FETCH_BACKOFF_MS));
-      }
-    }
-  }
-  const detail =
-    lastErr instanceof ApiError
-      ? `HTTP ${lastErr.status}`
-      : lastErr instanceof Error
-        ? lastErr.message
-        : String(lastErr);
-  console.warn(`fetchWebuiThreadWithRetry: giving up after retries (${detail})`);
-  return null;
 }
 
 export async function deleteSession(
