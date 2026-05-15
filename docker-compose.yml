@@ -92,6 +92,9 @@ services:
                 ],
                 "disabled": false
               },
+              "notion": {
+                  "url": "https://mcp.notion.com/mcp"
+              },
               "minimax": {
                 "command": "uvx",
                 "args": ["minimax-coding-plan-mcp", "-y"],
