@@ -59,6 +59,15 @@ _KIMI_THINKING_MODELS: frozenset[str] = frozenset({
     "kimi-k2.6",
     "k2.6-code-preview",
 })
+# Thinking-capable MiMo models per Xiaomi docs (see
+# tests/providers/test_xiaomi_mimo_thinking.py). mimo-v2-flash is omitted
+# because it does not support thinking.
+_MIMO_THINKING_MODELS: frozenset[str] = frozenset({
+    "mimo-v2.5-pro",
+    "mimo-v2.5",
+    "mimo-v2-pro",
+    "mimo-v2-omni",
+})
 _OPENAI_COMPAT_REQUEST_TIMEOUT_S = 120.0
 
 # Maps ProviderSpec.thinking_style → extra_body builder.
@@ -86,6 +95,22 @@ def _is_kimi_thinking_model(model_name: str) -> bool:
     if name in _KIMI_THINKING_MODELS:
         return True
     if "/" in name and name.rsplit("/", 1)[1] in _KIMI_THINKING_MODELS:
+        return True
+    return False
+
+
+def _is_mimo_thinking_model(model_name: str) -> bool:
+    """Return True if model_name refers to a MiMo thinking-capable model.
+
+    Mirrors _is_kimi_thinking_model: gateway providers (e.g. OpenRouter
+    routing ``xiaomi/mimo-v2.5-pro``) have no ``thinking_style`` on their
+    spec, so the spec-driven branch in _build_kwargs misses them. The
+    model-name path catches those cases.
+    """
+    name = model_name.lower()
+    if name in _MIMO_THINKING_MODELS:
+        return True
+    if "/" in name and name.rsplit("/", 1)[1] in _MIMO_THINKING_MODELS:
         return True
     return False
 
@@ -548,6 +573,19 @@ class OpenAICompatProvider(LLMProvider):
                 {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
             )
 
+        # Model-level thinking injection for MiMo thinking-capable models.
+        # Same shape as Kimi: gateway providers (OpenRouter, etc.) lack the
+        # xiaomi_mimo spec's thinking_style, so the spec-driven branch above
+        # misses them — match by model name to catch "xiaomi/mimo-v2.5-pro"
+        # and friends. (Direct xiaomi_mimo requests are also covered here;
+        # both branches write the same payload, so the dict update is a
+        # safe no-op for already-handled cases.)
+        if reasoning_effort is not None and _is_mimo_thinking_model(model_name):
+            thinking_enabled = semantic_effort not in ("none", "minimal")
+            kwargs.setdefault("extra_body", {}).update(
+                {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
+            )
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
@@ -559,7 +597,11 @@ class OpenAICompatProvider(LLMProvider):
         explicit_thinking = (
             reasoning_effort is not None
             and semantic_effort not in ("none", "minimal")
-            and ((spec and spec.thinking_style) or _is_kimi_thinking_model(model_name))
+            and (
+                (spec and spec.thinking_style)
+                or _is_kimi_thinking_model(model_name)
+                or _is_mimo_thinking_model(model_name)
+            )
         )
         implicit_deepseek_thinking = (
             spec is not None
