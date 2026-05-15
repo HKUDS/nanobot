@@ -1,12 +1,12 @@
 """Message tool for sending messages to users."""
 
-import os
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
+from nanobot.agent.tools.filesystem import _resolve_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
@@ -50,11 +50,19 @@ class MessageTool(Tool, ContextAware):
         default_chat_id: str = "",
         default_message_id: str | None = None,
         workspace: str | Path | None = None,
+        restrict_to_workspace: bool = False,
     ):
         self._send_callback = send_callback
-        self._workspace = Path(workspace).expanduser() if workspace is not None else get_workspace_path()
-        self._default_channel: ContextVar[str] = ContextVar("message_default_channel", default=default_channel)
-        self._default_chat_id: ContextVar[str] = ContextVar("message_default_chat_id", default=default_chat_id)
+        self._workspace = (
+            Path(workspace).expanduser() if workspace is not None else get_workspace_path()
+        )
+        self._restrict_to_workspace = restrict_to_workspace
+        self._default_channel: ContextVar[str] = ContextVar(
+            "message_default_channel", default=default_channel
+        )
+        self._default_chat_id: ContextVar[str] = ContextVar(
+            "message_default_chat_id", default=default_chat_id
+        )
         self._default_message_id: ContextVar[str | None] = ContextVar(
             "message_default_message_id",
             default=default_message_id,
@@ -72,7 +80,11 @@ class MessageTool(Tool, ContextAware):
     @classmethod
     def create(cls, ctx: Any) -> Tool:
         send_callback = ctx.bus.publish_outbound if ctx.bus else None
-        return cls(send_callback=send_callback, workspace=ctx.workspace)
+        return cls(
+            send_callback=send_callback,
+            workspace=ctx.workspace,
+            restrict_to_workspace=ctx.config.restrict_to_workspace,
+        )
 
     def set_context(self, ctx: RequestContext) -> None:
         """Set the current message context."""
@@ -123,6 +135,20 @@ class MessageTool(Tool, ContextAware):
             "Do NOT use read_file to send files — that only reads content for your own analysis."
         )
 
+    def _resolve_media(self, media: list[str]) -> list[str]:
+        """Resolve local media attachments and enforce workspace restriction when enabled."""
+        resolved: list[str] = []
+        allowed_dir = self._workspace if self._restrict_to_workspace else None
+        for p in media:
+            if p.startswith(("http://", "https://")):
+                resolved.append(p)
+            elif not self._restrict_to_workspace:
+                path = Path(p).expanduser()
+                resolved.append(p if path.is_absolute() else str(self._workspace / path))
+            else:
+                resolved.append(str(_resolve_path(p, self._workspace, allowed_dir)))
+        return resolved
+
     async def execute(
         self,
         content: str,
@@ -131,9 +157,10 @@ class MessageTool(Tool, ContextAware):
         message_id: str | None = None,
         media: list[str] | None = None,
         buttons: list[list[str]] | None = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> str:
         from nanobot.utils.helpers import strip_think
+
         content = strip_think(content)
 
         if buttons is not None:
@@ -164,13 +191,10 @@ class MessageTool(Tool, ContextAware):
             return "Error: Message sending not configured"
 
         if media:
-            resolved = []
-            for p in media:
-                if p.startswith(("http://", "https://")) or os.path.isabs(p):
-                    resolved.append(p)
-                else:
-                    resolved.append(str(self._workspace / p))
-            media = resolved
+            try:
+                media = self._resolve_media(media)
+            except (OSError, PermissionError, ValueError) as e:
+                return f"Error: media path is not allowed: {str(e)}"
 
         metadata = dict(self._default_metadata.get()) if same_target else {}
         if message_id:
