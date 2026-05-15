@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.hook import AgentHook
+from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.config.schema import AgentDefaults
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
@@ -38,7 +38,7 @@ class _RecordingHook(AgentHook):
 async def test_runner_preserves_reasoning_fields_in_assistant_history():
     """Reasoning fields ride along on the persisted assistant message so
     follow-up provider calls retain the model's prior thinking context."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -86,7 +86,7 @@ async def test_runner_preserves_reasoning_fields_in_assistant_history():
 
 @pytest.mark.asyncio
 async def test_runner_emits_anthropic_thinking_blocks():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 
@@ -126,7 +126,7 @@ async def test_runner_emits_anthropic_thinking_blocks():
 async def test_runner_emits_inline_think_content_as_reasoning():
     """Models embedding reasoning in <think>...</think> blocks should have
     that content extracted and emitted, and stripped from the answer."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 
@@ -161,7 +161,7 @@ async def test_runner_emits_inline_think_content_as_reasoning():
 async def test_runner_prefers_reasoning_content_over_inline_think():
     """Fallback priority: dedicated reasoning_content wins; inline <think>
     is still scrubbed from the answer content."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 
@@ -197,7 +197,7 @@ async def test_runner_emits_reasoning_content_even_when_answer_was_streamed():
     """`reasoning_content` arrives only on the final response; streaming the
     answer must not suppress it (the answer stream and the reasoning channel
     are independent — only the reasoning-already-emitted bit matters)."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     provider.supports_progress_deltas = True
@@ -244,7 +244,7 @@ async def test_runner_emits_reasoning_content_even_when_answer_was_streamed():
 async def test_runner_does_not_double_emit_when_inline_think_already_streamed():
     """Inline `<think>` blocks streamed incrementally during the answer
     stream must not be re-emitted from the final response."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
     provider.supports_progress_deltas = True
@@ -289,7 +289,7 @@ async def test_runner_closes_reasoning_stream_after_one_shot_response():
     """A non-streaming response carrying ``reasoning_content`` must emit
     both a reasoning delta and an end marker so channels can finalize the
     in-place bubble."""
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
 
     provider = MagicMock()
 
@@ -319,3 +319,53 @@ async def test_runner_closes_reasoning_stream_after_one_shot_response():
     assert result.final_content == "answer"
     assert hook.emitted == ["hidden thought"]
     assert hook.end_calls == 1
+
+
+class _StreamRecordingHook(_RecordingHook):
+    def wants_streaming(self) -> bool:
+        return True
+
+    async def on_stream(self, _ctx: AgentHookContext, delta: str) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_runner_streams_native_thinking_deltas_without_post_hoc_dup():
+    """Anthropic-style ``on_thinking_delta`` should fan out to ``emit_reasoning``;
+    final ``thinking_blocks`` must not emit again when already streamed."""
+    from nanobot.agent.runner import AgentRunner, AgentRunSpec
+
+    provider = MagicMock()
+
+    async def chat_stream_with_retry(
+        *, on_content_delta=None, on_thinking_delta=None, **kwargs
+    ):
+        if on_thinking_delta:
+            await on_thinking_delta("part1")
+            await on_thinking_delta("part2")
+        if on_content_delta:
+            await on_content_delta("done")
+        return LLMResponse(
+            content="done",
+            tool_calls=[],
+            thinking_blocks=[{"type": "thinking", "thinking": "part1part2"}],
+            usage={"prompt_tokens": 1, "completion_tokens": 2},
+        )
+
+    provider.chat_stream_with_retry = chat_stream_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+
+    hook = _StreamRecordingHook()
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[{"role": "user", "content": "q"}],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+        max_tool_result_chars=_MAX_TOOL_RESULT_CHARS,
+        hook=hook,
+    ))
+
+    assert result.final_content == "done"
+    assert hook.emitted == ["part1", "part2"]

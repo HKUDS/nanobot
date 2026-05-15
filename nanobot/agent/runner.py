@@ -626,9 +626,16 @@ class AgentRunner:
                     context.streamed_content = True
                 await hook.on_stream(context, delta)
 
+            async def _thinking(delta: str) -> None:
+                if not delta:
+                    return
+                context.streamed_reasoning = True
+                await hook.emit_reasoning(delta)
+
             coro = self.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream,
+                on_thinking_delta=_thinking,
             )
         elif wants_progress_streaming:
             stream_buf = ""
