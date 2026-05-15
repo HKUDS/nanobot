@@ -232,6 +232,13 @@
       "placeholderStreaming": "模型正在回复…",
       "inputAria": "消息输入框",
       "sendHint": "Enter 发送 · Shift+Enter 换行",
+      "runRuntimeTitle": "运行中 · {{elapsed}}",
+      "goalStateStrip": "目标 · {{label}}",
+      "goalStateFallback": "目标",
+      "goalStateExpandAria": "查看完整目标",
+      "goalStateSheetTitle": "会话目标",
+      "goalStateSummaryHeading": "摘要",
+      "goalStateObjectiveHeading": "目标描述",
       "send": "发送消息",
       "stop": "停止响应",
       "attachImage": "添加图片",
@@ -295,6 +302,10 @@
             "title": "恢复记忆",
             "description": "将记忆恢复到之前的 Dream 快照。"
           },
+          "goal": {
+            "title": "长期目标",
+            "description": "让助手把当前请求当作需要多步骤持续推进的目标。"
+          },
           "help": {
             "title": "查看帮助",
             "description": "列出可用的斜杠命令。"
@@ -320,11 +331,21 @@
     "assistantTyping": "助手正在输入",
     "toolSingle": "正在使用工具",
     "toolMany": "已使用 {{count}} 个工具",
+    "toolSummary": "{{count}} 个工具",
+    "toolSummaryMany": "{{count}} 个工具",
+    "reasoningTools": "推理 · {{count}} 个工具",
+    "reasoningToolsSingular": "推理 · 1 个工具",
     "reasoning": "思考过程",
     "reasoningStreaming": "正在思考…",
+    "reasoningSummary": "推理",
+    "agentActivitySummary": "{{reasoning}} 步 · {{tools}} 次工具调用",
+    "agentActivityToolsOnly": "{{tools}} 次工具调用",
+    "agentActivityLiveSummary": "进行中… · {{reasoning}} 步 · {{tools}} 次工具调用",
+    "agentActivityLiveToolsOnly": "进行中… · {{tools}} 次工具调用",
     "imageAttachment": "图片附件",
     "copyReply": "复制回复",
-    "copiedReply": "已复制回复"
+    "copiedReply": "已复制回复",
+    "turnLatencyTitle": "本轮耗时（端到端）"
   },
   "lightbox": {
     "title": "图片预览",

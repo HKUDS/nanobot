@@ -1,14 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Check, ChevronRight, Copy, FileIcon, ImageIcon, PlaySquare, Sparkles, Wrench } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { ImageLightbox } from "@/components/ImageLightbox";
-import { MarkdownText } from "@/components/MarkdownText";
+import { MarkdownText, preloadMarkdownText } from "@/components/MarkdownText";
 import { cn } from "@/lib/utils";
+import { formatTurnLatency } from "@/lib/format";
 import type { UIImage, UIMediaAttachment, UIMessage } from "@/lib/types";
 
 interface MessageBubbleProps {
   message: UIMessage;
+  /** When false, hide the assistant reply copy button (mid-turn text before more agent activity). Default true. */
+  showAssistantCopyAction?: boolean;
 }
 
 /**
@@ -20,7 +30,10 @@ interface MessageBubbleProps {
  * Trace rows (tool-call hints, progress breadcrumbs) render as a subdued
  * collapsible group so intermediate steps never masquerade as replies.
  */
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  showAssistantCopyAction = true,
+}: MessageBubbleProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copyResetRef = useRef<number | null>(null);
@@ -89,6 +102,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const reasoningStreaming = !!(message.role === "assistant" && message.reasoningStreaming);
   const hasReasoning = reasoning.length > 0 || reasoningStreaming;
   const showAssistantActions = message.role === "assistant" && !message.isStreaming && !empty;
+  const showCopyButton = showAssistantCopyAction && showAssistantActions;
+  const latencyMs = message.latencyMs;
+  const showLatencyFooter =
+    message.role === "assistant"
+    && latencyMs != null
+    && !message.isStreaming
+    && (!empty || hasReasoning || media.length > 0);
+  const showAssistantFooterRow = showCopyButton || showLatencyFooter;
   return (
     <div className={cn("w-full text-[15px]", baseAnim)} style={{ lineHeight: "var(--cjk-line-height)" }}>
       {hasReasoning ? (
@@ -99,27 +120,36 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       ) : empty && message.isStreaming ? null : (
         <>
           <MarkdownText>{message.content}</MarkdownText>
-          {message.isStreaming && <StreamCursor />}
           {media.length > 0 ? <MessageMedia media={media} align="left" /> : null}
-          {showAssistantActions ? (
-            <div className="mt-2 flex items-center gap-1 text-muted-foreground">
-              <button
-                type="button"
-                onClick={onCopyAssistantReply}
-                aria-label={copied ? t("message.copiedReply") : t("message.copyReply")}
-                title={copied ? t("message.copiedReply") : t("message.copyReply")}
-                className={cn(
-                  "inline-flex h-8 w-8 items-center justify-center rounded-full",
-                  "transition-colors hover:bg-muted/55 hover:text-foreground",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                )}
-              >
-                {copied ? (
-                  <Check className="h-4 w-4" aria-hidden />
-                ) : (
-                  <Copy className="h-4 w-4" aria-hidden />
-                )}
-              </button>
+          {showAssistantFooterRow ? (
+            <div className="mt-2 flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
+              {showCopyButton ? (
+                <button
+                  type="button"
+                  onClick={onCopyAssistantReply}
+                  aria-label={copied ? t("message.copiedReply") : t("message.copyReply")}
+                  title={copied ? t("message.copiedReply") : t("message.copyReply")}
+                  className={cn(
+                    "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                    "transition-colors hover:bg-muted/55 hover:text-foreground",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  )}
+                >
+                  {copied ? (
+                    <Check className="h-4 w-4" aria-hidden />
+                  ) : (
+                    <Copy className="h-4 w-4" aria-hidden />
+                  )}
+                </button>
+              ) : null}
+              {showLatencyFooter ? (
+                <span
+                  className="text-[11px] leading-none text-muted-foreground/70 tabular-nums"
+                  title={t("message.turnLatencyTitle")}
+                >
+                  {formatTurnLatency(latencyMs)}
+                </span>
+              ) : null}
             </div>
           ) : null}
         </>
@@ -187,14 +217,34 @@ function MediaCell({ media }: { media: UIMediaAttachment }) {
       : t("message.fileAttachment", { defaultValue: "File attachment" });
   const Icon = media.kind === "video" ? PlaySquare : FileIcon;
 
+  const inner = (
+    <>
+      <Icon className="h-4 w-4 flex-none" aria-hidden />
+      <span className="truncate">{media.name ?? label}</span>
+    </>
+  );
+
+  if (hasUrl) {
+    return (
+      <a
+        href={media.url}
+        download={media.name ?? label}
+        title={media.name ?? undefined}
+        aria-label={label}
+        className="flex max-w-[18rem] items-center gap-2 rounded-[14px] border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground hover:underline"
+      >
+        {inner}
+      </a>
+    );
+  }
+
   return (
     <div
       className="flex max-w-[18rem] items-center gap-2 rounded-[14px] border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
       title={media.name ?? undefined}
       aria-label={label}
     >
-      <Icon className="h-4 w-4 flex-none" aria-hidden />
-      <span className="truncate">{media.name ?? label}</span>
+      {inner}
     </div>
   );
 }
@@ -338,20 +388,6 @@ function UserImageCell({
   );
 }
 
-/** Blinking cursor appended at the end of streaming text. */
-function StreamCursor() {
-  const { t } = useTranslation();
-  return (
-    <span
-      aria-label={t("message.streaming")}
-      className={cn(
-        "ml-0.5 inline-block h-[1em] w-[3px] translate-y-[2px] align-middle",
-        "rounded-sm bg-foreground/70 animate-pulse",
-      )}
-    />
-  );
-}
-
 /** Pre-token-arrival placeholder: three bouncing dots. */
 function TypingDots() {
   const { t } = useTranslation();
@@ -379,6 +415,139 @@ function Dot({ delay }: { delay: string }) {
   );
 }
 
+/** L→R sheen overlay on label text; base copy stays solid ``text-muted-foreground``. */
+export function StreamingLabelSheen({
+  children,
+  active,
+  className,
+}: {
+  children: ReactNode;
+  active: boolean;
+  className?: string;
+}) {
+  return (
+    <span className={cn("relative block min-w-0 py-px", className)}>
+      <span
+        className={cn(
+          "relative z-0 block font-medium leading-normal text-muted-foreground",
+          !active && "truncate",
+        )}
+      >
+        {children}
+      </span>
+      {active ? (
+        <span className="reasoning-sheen-track" aria-hidden dir="ltr">
+          <span className="reasoning-sheen-stripe" />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+interface ReasoningBubbleProps {
+  text: string;
+  streaming: boolean;
+  hasBodyBelow: boolean;
+  /** When true, skip the slide-in wrapper (used inside ``AgentActivityCluster``). */
+  embeddedInCluster?: boolean;
+}
+
+/**
+ * Subordinate "thinking" trace shown above an assistant turn.
+ *
+ * Lifecycle:
+ *   - While ``streaming`` is true (``reasoning_delta`` frames still arriving),
+ *     the bubble defaults to open and the header shows a sheen + pulse so
+ *     the user sees the model "thinking out loud" in real time.
+ *   - Expanded reasoning uses the same Markdown pipeline as assistant replies
+ *     (deferred while streaming to reduce parser thrash), so headings and
+ *     emphasis render instead of leaking raw ``###`` / ``**``.
+ *   - On ``reasoning_end`` the bubble auto-collapses for prose density —
+ *     the user can re-expand to inspect the chain of thought. The local
+ *     toggle persists once the user interacts.
+ */
+export function ReasoningBubble({
+  text,
+  streaming,
+  hasBodyBelow,
+  embeddedInCluster = false,
+}: ReasoningBubbleProps) {
+  const { t } = useTranslation();
+  const deferredText = useDeferredValue(text);
+  const markdownSource = streaming ? deferredText : text;
+  const [userToggled, setUserToggled] = useState(false);
+  const [openLocal, setOpenLocal] = useState(true);
+  const open = userToggled ? openLocal : streaming;
+  const onToggle = () => {
+    setUserToggled(true);
+    setOpenLocal((v) => (userToggled ? !v : !open));
+  };
+  useEffect(() => {
+    if (open && text.length > 0) {
+      preloadMarkdownText();
+    }
+  }, [open, text.length]);
+  return (
+    <div
+      className={cn(
+        "w-full",
+        !embeddedInCluster && "animate-in fade-in-0 slide-in-from-top-1 duration-200",
+        hasBodyBelow && "mb-2",
+      )}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className={cn(
+          "group flex w-full items-center gap-2 rounded-md px-2 py-1.5",
+          "text-xs text-muted-foreground transition-colors hover:bg-muted/45",
+        )}
+        aria-expanded={open}
+        aria-live={streaming ? "polite" : undefined}
+      >
+        <Sparkles
+          className={cn("h-3.5 w-3.5", streaming && "animate-pulse")}
+          aria-hidden
+        />
+        <StreamingLabelSheen active={streaming} className="min-w-0 flex-1 text-left">
+          {streaming
+            ? t("message.reasoningStreaming", { defaultValue: "Thinking…" })
+            : t("message.reasoning", { defaultValue: "Thinking" })}
+        </StreamingLabelSheen>
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            "ml-auto h-3.5 w-3.5 transition-transform duration-200",
+            open && "rotate-90",
+          )}
+        />
+      </button>
+      {open && text.length > 0 && (
+        <div
+          className={cn(
+            "mt-1 min-w-0 border-l border-muted-foreground/20 pl-3",
+            !embeddedInCluster && "animate-in fade-in-0 slide-in-from-top-1 duration-200",
+          )}
+        >
+          <MarkdownText
+            className={cn(
+              "text-[12.5px] italic text-muted-foreground/88",
+              "prose-p:my-1.5 prose-li:my-0.5",
+              "prose-headings:mt-2 prose-headings:mb-1 prose-headings:font-medium",
+              "prose-headings:text-muted-foreground/92 prose-strong:text-muted-foreground",
+              "prose-h1:text-[15px] prose-h2:text-[13.5px] prose-h3:text-[12.5px] prose-h4:text-[12px]",
+              "prose-a:text-muted-foreground/95 prose-a:underline hover:prose-a:opacity-90",
+              "prose-code:text-[0.92em]",
+            )}
+          >
+            {markdownSource}
+          </MarkdownText>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface TraceGroupProps {
   message: UIMessage;
   animClass: string;
@@ -389,7 +558,7 @@ interface TraceGroupProps {
  * collapsed because tool traces are supporting evidence, not the answer.
  * A single click expands the exact calls when the user wants details.
  */
-function TraceGroup({ message, animClass }: TraceGroupProps) {
+export function TraceGroup({ message, animClass }: TraceGroupProps) {
   const { t } = useTranslation();
   const lines = message.traces ?? [message.content];
   const count = lines.length;
@@ -435,82 +604,6 @@ function TraceGroup({ message, animClass }: TraceGroupProps) {
             </li>
           ))}
         </ul>
-      )}
-    </div>
-  );
-}
-
-interface ReasoningBubbleProps {
-  text: string;
-  streaming: boolean;
-  hasBodyBelow: boolean;
-}
-
-/**
- * Subordinate "thinking" trace shown above an assistant turn.
- *
- * Lifecycle:
- *   - While ``streaming`` is true (``reasoning_delta`` frames still arriving),
- *     the bubble defaults to open and the header runs a shimmer + pulse so
- *     the user sees the model "thinking out loud" in real time.
- *   - On ``reasoning_end`` the bubble auto-collapses for prose density —
- *     the user can re-expand to inspect the chain of thought. The local
- *     toggle persists once the user interacts.
- */
-function ReasoningBubble({ text, streaming, hasBodyBelow }: ReasoningBubbleProps) {
-  const { t } = useTranslation();
-  const [userToggled, setUserToggled] = useState(false);
-  const [openLocal, setOpenLocal] = useState(true);
-  const open = userToggled ? openLocal : streaming;
-  const onToggle = () => {
-    setUserToggled(true);
-    setOpenLocal((v) => (userToggled ? !v : !open));
-  };
-  return (
-    <div
-      className={cn(
-        "w-full animate-in fade-in-0 slide-in-from-top-1 duration-200",
-        hasBodyBelow && "mb-2",
-      )}
-    >
-      <button
-        type="button"
-        onClick={onToggle}
-        className={cn(
-          "group flex w-full items-center gap-2 rounded-md px-2 py-1.5",
-          "text-xs text-muted-foreground transition-colors hover:bg-muted/45",
-          streaming && "reasoning-shimmer",
-        )}
-        aria-expanded={open}
-        aria-live={streaming ? "polite" : undefined}
-      >
-        <Sparkles
-          className={cn("h-3.5 w-3.5", streaming && "animate-pulse")}
-          aria-hidden
-        />
-        <span className="font-medium">
-          {streaming
-            ? t("message.reasoningStreaming", { defaultValue: "Thinking…" })
-            : t("message.reasoning", { defaultValue: "Thinking" })}
-        </span>
-        <ChevronRight
-          aria-hidden
-          className={cn(
-            "ml-auto h-3.5 w-3.5 transition-transform duration-200",
-            open && "rotate-90",
-          )}
-        />
-      </button>
-      {open && text.length > 0 && (
-        <div
-          className={cn(
-            "mt-1 space-y-0.5 whitespace-pre-wrap break-words border-l border-muted-foreground/20 pl-3",
-            "animate-in fade-in-0 slide-in-from-top-1 duration-200",
-            "text-[12.5px] italic leading-relaxed text-muted-foreground/85",
-          )}
-        >
-          {text}
-        </div>
       )}
     </div>
   );

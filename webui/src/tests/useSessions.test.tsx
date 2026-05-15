@@ -12,7 +12,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     ...actual,
     listSessions: vi.fn(),
     deleteSession: vi.fn(),
-    fetchSessionMessages: vi.fn(),
+    fetchWebuiThread: vi.fn(),
   };
 });
 
@@ -24,6 +24,7 @@ function fakeClient() {
     onStatus: () => () => {},
     onError: () => () => {},
     onChat: () => () => {},
+    getRunStartedAt: () => null,
     onSessionUpdate: (handler: (chatId: string) => void) => {
       sessionUpdateHandlers.add(handler);
       return () => sessionUpdateHandlers.delete(handler);
@@ -57,7 +58,7 @@ describe("useSessions", () => {
   beforeEach(() => {
     vi.mocked(api.listSessions).mockReset();
     vi.mocked(api.deleteSession).mockReset();
-    vi.mocked(api.fetchSessionMessages).mockReset();
+    vi.mocked(api.fetchWebuiThread).mockReset();
   });
 
   it("removes a session from the local list after delete succeeds", async () => {
@@ -98,14 +99,14 @@ describe("useSessions", () => {
   it("refreshes sessions when the websocket reports a session update", async () => {
     vi.mocked(api.listSessions)
       .mockResolvedValueOnce([
-        {
-          key: "websocket:chat-a",
-          channel: "websocket",
-          chatId: "chat-a",
-          createdAt: "2026-04-16T10:00:00Z",
-          updatedAt: "2026-04-16T10:00:00Z",
-          preview: "",
-        },
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "",
+      },
       ])
       .mockResolvedValueOnce([
         {
@@ -134,35 +135,26 @@ describe("useSessions", () => {
     expect(api.listSessions).toHaveBeenCalledTimes(2);
   });
 
-  it("hydrates media_urls from historical user turns into UIMessage.images", async () => {
-    // Round-trip check for the signed-media replay: the backend emits
-    // ``media_urls`` on a historical user row and the hook must surface them
-    // as ``images`` so the bubble can render the preview. Assistant turns
-    // carry no media_urls and should not sprout an ``images`` field.
-    vi.mocked(api.fetchSessionMessages).mockResolvedValue({
-      key: "websocket:chat-media",
-      created_at: "2026-04-20T10:00:00Z",
-      updated_at: "2026-04-20T10:05:00Z",
+  it("passes through WebUI transcript user media as images and media", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
       messages: [
         {
+          id: "u1",
           role: "user",
           content: "what's this?",
-          timestamp: "2026-04-20T10:00:00Z",
-          media_urls: [
+          createdAt: 1,
+          images: [
             { url: "/api/media/sig-1/payload-1", name: "snap.png" },
             { url: "/api/media/sig-2/payload-2", name: "diag.jpg" },
           ],
+          media: [
+            { kind: "image", url: "/api/media/sig-1/payload-1", name: "snap.png" },
+            { kind: "image", url: "/api/media/sig-2/payload-2", name: "diag.jpg" },
+          ],
         },
-        {
-          role: "assistant",
-          content: "it's a cat",
-          timestamp: "2026-04-20T10:00:01Z",
-        },
-        {
-          role: "user",
-          content: "follow-up without images",
-          timestamp: "2026-04-20T10:01:00Z",
-        },
+        { id: "a1", role: "assistant", content: "it's a cat", createdAt: 2 },
+        { id: "u2", role: "user", content: "follow-up without images", createdAt: 3 },
       ],
     });
 
@@ -187,19 +179,16 @@ describe("useSessions", () => {
     expect(third.images).toBeUndefined();
   });
 
-  it("hydrates historical assistant video media_urls into media attachments", async () => {
-    vi.mocked(api.fetchSessionMessages).mockResolvedValue({
-      key: "websocket:chat-video",
-      created_at: "2026-04-20T10:00:00Z",
-      updated_at: "2026-04-20T10:05:00Z",
+  it("passes through assistant video media from transcript replay", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
       messages: [
         {
+          id: "a1",
           role: "assistant",
           content: "clip ready",
-          timestamp: "2026-04-20T10:00:01Z",
-          media_urls: [
-            { url: "/api/media/sig-v/payload-v", name: "clip.mp4" },
-          ],
+          createdAt: 1,
+          media: [{ kind: "video", url: "/api/media/sig-v/payload-v", name: "clip.mp4" }],
         },
       ],
     });
@@ -210,24 +199,23 @@ describe("useSessions", () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(result.current.messages[0].role).toBe("assistant");
-    expect(result.current.messages[0].images).toBeUndefined();
-    expect(result.current.messages[0].media).toEqual([
+    expect(result.current.messages[0]!.role).toBe("assistant");
+    expect(result.current.messages[0]!.images).toBeUndefined();
+    expect(result.current.messages[0]!.media).toEqual([
       { kind: "video", url: "/api/media/sig-v/payload-v", name: "clip.mp4" },
     ]);
   });
 
-  it("hydrates persisted assistant reasoning into the replayed message", async () => {
-    vi.mocked(api.fetchSessionMessages).mockResolvedValue({
-      key: "websocket:chat-reasoning",
-      created_at: "2026-04-20T10:00:00Z",
-      updated_at: "2026-04-20T10:05:00Z",
+  it("passes through assistant reasoning from transcript replay", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
       messages: [
         {
+          id: "a1",
           role: "assistant",
           content: "final answer",
-          timestamp: "2026-04-20T10:00:01Z",
-          reasoning_content: "hidden but persisted reasoning",
+          createdAt: 1,
+          reasoning: "hidden but persisted reasoning",
         },
       ],
     });
@@ -239,75 +227,25 @@ describe("useSessions", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.messages).toHaveLength(1);
-    expect(result.current.messages[0].role).toBe("assistant");
-    expect(result.current.messages[0].content).toBe("final answer");
-    expect(result.current.messages[0].reasoning).toBe("hidden but persisted reasoning");
-    expect(result.current.messages[0].reasoningStreaming).toBe(false);
+    expect(result.current.messages[0]!.role).toBe("assistant");
+    expect(result.current.messages[0]!.content).toBe("final answer");
+    expect(result.current.messages[0]!.reasoning).toBe("hidden but persisted reasoning");
   });
 
-  it("drops replayed assistant turns that only contain reasoning", async () => {
-    vi.mocked(api.fetchSessionMessages).mockResolvedValue({
-      key: "websocket:chat-empty-reasoning",
-      created_at: "2026-04-20T10:00:00Z",
-      updated_at: "2026-04-20T10:05:00Z",
+  it("accepts transcript rows produced by the server replay reducer", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
       messages: [
+        { id: "u1", role: "user", content: "research this", createdAt: 1 },
         {
-          role: "assistant",
-          content: "",
-          timestamp: "2026-04-20T10:00:01Z",
-          reasoning_content: "orphan reasoning",
-        },
-      ],
-    });
-
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-empty-reasoning"), {
-      wrapper: wrap(fakeClient()),
-    });
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    expect(result.current.messages).toHaveLength(0);
-  });
-
-  it("hydrates historical assistant tool calls into a replay trace row", async () => {
-    vi.mocked(api.fetchSessionMessages).mockResolvedValue({
-      key: "websocket:chat-tools",
-      created_at: "2026-04-20T10:00:00Z",
-      updated_at: "2026-04-20T10:05:00Z",
-      messages: [
-        {
-          role: "user",
-          content: "research this",
-          timestamp: "2026-04-20T10:00:00Z",
-        },
-        {
-          role: "assistant",
-          content: "",
-          timestamp: "2026-04-20T10:00:01Z",
-          tool_calls: [
-            {
-              id: "call-1",
-              type: "function",
-              function: { name: "web_search", arguments: "{\"query\":\"agents\"}" },
-            },
-            {
-              id: "call-2",
-              type: "function",
-              function: { name: "web_fetch", arguments: "{\"url\":\"https://example.com\"}" },
-            },
-          ],
-        },
-        {
+          id: "t1",
           role: "tool",
-          content: "tool output that should not render directly",
-          timestamp: "2026-04-20T10:00:02Z",
-          tool_call_id: "call-1",
+          kind: "trace",
+          content: "web_fetch({})",
+          traces: ["web_search({\"query\":\"agents\"})", "web_fetch({\"url\":\"https://example.com\"})"],
+          createdAt: 2,
         },
-        {
-          role: "assistant",
-          content: "summary",
-          timestamp: "2026-04-20T10:00:03Z",
-        },
+        { id: "a1", role: "assistant", content: "summary", createdAt: 3 },
       ],
     });
 
@@ -318,26 +256,26 @@ describe("useSessions", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.messages.map((m) => m.role)).toEqual(["user", "tool", "assistant"]);
-    const trace = result.current.messages[1];
+    const trace = result.current.messages[1]!;
     expect(trace.kind).toBe("trace");
     expect(trace.traces).toEqual([
       "web_search({\"query\":\"agents\"})",
       "web_fetch({\"url\":\"https://example.com\"})",
     ]);
-    expect(result.current.messages[2].content).toBe("summary");
+    expect(result.current.messages[2]!.content).toBe("summary");
   });
 
-  it("flags history with trailing assistant tool calls as still pending", async () => {
-    vi.mocked(api.fetchSessionMessages).mockResolvedValue({
-      key: "websocket:chat-pending",
-      created_at: "2026-04-20T10:00:00Z",
-      updated_at: "2026-04-20T10:05:00Z",
+  it("flags transcript ending with a trace row as pending", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
       messages: [
         {
-          role: "assistant",
+          id: "t1",
+          role: "tool",
+          kind: "trace",
           content: "Using 2 tools",
-          timestamp: "2026-04-20T10:00:01Z",
-          tool_calls: [{ id: "call-1" }],
+          traces: ["Using 2 tools"],
+          createdAt: 1,
         },
       ],
     });
@@ -351,47 +289,11 @@ describe("useSessions", () => {
     expect(result.current.hasPendingToolCalls).toBe(true);
   });
 
-  it("keeps pending when tool result rows trail assistant tool calls", async () => {
-    vi.mocked(api.fetchSessionMessages).mockResolvedValue({
-      key: "websocket:chat-pending-tool-result",
-      created_at: "2026-04-20T10:00:00Z",
-      updated_at: "2026-04-20T10:05:00Z",
+  it("does not flag transcript as pending when last row is not a trace", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue({
+      schemaVersion: 3,
       messages: [
-        {
-          role: "assistant",
-          content: "Using 1 tool",
-          timestamp: "2026-04-20T10:00:01Z",
-          tool_calls: [{ id: "call-1" }],
-        },
-        {
-          role: "tool",
-          content: "tool output",
-          timestamp: "2026-04-20T10:00:02Z",
-          tool_call_id: "call-1",
-        },
-      ],
-    });
-
-    const { result } = renderHook(() => useSessionHistory("websocket:chat-pending-tool-result"), {
-      wrapper: wrap(fakeClient()),
-    });
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    expect(result.current.hasPendingToolCalls).toBe(true);
-  });
-
-  it("does not flag history as pending once the assistant turn has no tool calls", async () => {
-    vi.mocked(api.fetchSessionMessages).mockResolvedValue({
-      key: "websocket:chat-done",
-      created_at: "2026-04-20T10:00:00Z",
-      updated_at: "2026-04-20T10:05:00Z",
-      messages: [
-        {
-          role: "assistant",
-          content: "All done",
-          timestamp: "2026-04-20T10:00:01Z",
-        },
+        { id: "a1", role: "assistant", content: "All done", createdAt: 1 },
       ],
     });
 
@@ -401,6 +303,19 @@ describe("useSessions", () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
+    expect(result.current.hasPendingToolCalls).toBe(false);
+  });
+
+  it("treats missing transcript (404) as empty history", async () => {
+    vi.mocked(api.fetchWebuiThread).mockResolvedValue(null);
+
+    const { result } = renderHook(() => useSessionHistory("websocket:new-chat"), {
+      wrapper: wrap(fakeClient()),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.messages).toEqual([]);
     expect(result.current.hasPendingToolCalls).toBe(false);
   });
 

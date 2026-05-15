@@ -22,7 +22,7 @@ def get_model_context_limit(model: str, provider: str = "auto") -> int | None:
     return None
 
 
-def get_model_suggestions(partial: str, provider: str = "auto", limit: int = 20) -> list[str]:
+def get_model_suggestions(_partial: str, provider: str = "auto", limit: int = 20) -> list[str]:
     return []
 
 

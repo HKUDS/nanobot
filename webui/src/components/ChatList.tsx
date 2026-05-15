@@ -7,7 +7,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import type { ChatSummary } from "@/lib/types";
 
@@ -18,12 +17,6 @@ interface ChatListProps {
   onRequestDelete: (key: string, label: string) => void;
   loading?: boolean;
   emptyLabel?: string;
-}
-
-function titleFor(s: ChatSummary, fallbackTitle: string): string {
-  const p = (s.title || s.preview)?.trim();
-  if (p) return p.length > 48 ? `${p.slice(0, 45)}…` : p;
-  return fallbackTitle;
 }
 
 export function ChatList({
@@ -58,8 +51,8 @@ export function ChatList({
   });
 
   return (
-    <ScrollArea className="h-full">
-      <div className="space-y-3 px-2 py-1.5">
+    <div className="h-full min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain">
+      <div className="min-w-0 space-y-3 px-2 py-1.5">
         {groups.map((group) => (
           <section key={group.label} aria-label={group.label}>
             <div className="px-2 pb-1 text-[12px] font-medium text-muted-foreground/65">
@@ -68,15 +61,16 @@ export function ChatList({
             <ul className="space-y-0.5">
               {group.sessions.map((s) => {
                 const active = s.key === activeKey;
-                const title = titleFor(
-                  s,
-                  t("chat.fallbackTitle", { id: s.chatId.slice(0, 6) }),
-                );
+                const fallbackTitle = t("chat.fallbackTitle", {
+                  id: s.chatId.slice(0, 6),
+                });
+                const rawLabel = (s.title || s.preview)?.trim();
+                const title = rawLabel || fallbackTitle;
                 return (
-                  <li key={s.key}>
+                  <li key={s.key} className="min-w-0">
                     <div
                       className={cn(
-                        "group flex min-h-8 items-center gap-2 rounded-xl px-2 text-[13px] transition-colors",
+                        "group flex min-h-8 min-w-0 max-w-full items-center gap-2 rounded-xl px-2 text-[13px] transition-colors",
                         active
                           ? "bg-sidebar-accent/70 text-sidebar-accent-foreground shadow-[inset_0_0_0_1px_hsl(var(--sidebar-border)/0.28)]"
                           : "text-sidebar-foreground/82 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground",
@@ -85,14 +79,15 @@ export function ChatList({
                       <button
                         type="button"
                         onClick={() => onSelect(s.key)}
-                        className="min-w-0 flex-1 py-1.5 text-left"
+                        title={rawLabel || fallbackTitle}
+                        className="min-w-0 flex-1 overflow-hidden py-1.5 text-left"
                       >
                         <span className="block w-full truncate font-medium leading-5">{title}</span>
                       </button>
                       <DropdownMenu modal={false}>
                         <DropdownMenuTrigger
                           className={cn(
-                            "inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/75 opacity-0 transition-opacity",
+                            "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/75 opacity-40 transition-opacity",
                             "hover:bg-sidebar-accent hover:text-sidebar-foreground group-hover:opacity-100",
                             "focus-visible:opacity-100",
                             active && "opacity-100",
@@ -124,7 +119,7 @@ export function ChatList({
           </section>
         ))}
       </div>
-    </ScrollArea>
+    </div>
   );
 }
 

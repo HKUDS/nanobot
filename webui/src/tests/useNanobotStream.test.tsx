@@ -3,19 +3,48 @@ import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import { useNanobotStream } from "@/hooks/useNanobotStream";
-import type { InboundEvent } from "@/lib/types";
+import type { InboundEvent, GoalStateWsPayload } from "@/lib/types";
 import { ClientProvider } from "@/providers/ClientProvider";
 
 const EMPTY_MESSAGES: import("@/lib/types").UIMessage[] = [];
 
 function fakeClient() {
   const handlers = new Map<string, Set<(ev: InboundEvent) => void>>();
+  const runStartedAtByChatId = new Map<string, number>();
+  const goalStateByChatId = new Map<string, GoalStateWsPayload>();
+
+  function recordGoalStatusForRunStrip(chatId: string, ev: InboundEvent) {
+    if (ev.event !== "goal_status") return;
+    if (ev.status === "running" && typeof ev.started_at === "number") {
+      runStartedAtByChatId.set(chatId, ev.started_at);
+    } else {
+      runStartedAtByChatId.delete(chatId);
+    }
+  }
+
+  function recordGoalStateSnapshot(chatId: string, ev: InboundEvent) {
+    if (ev.event === "goal_state") {
+      goalStateByChatId.set(chatId, ev.goal_state);
+      return;
+    }
+    if (ev.event === "turn_end" && ev.goal_state != null && typeof ev.goal_state === "object") {
+      goalStateByChatId.set(chatId, ev.goal_state);
+    }
+  }
+
   return {
     client: {
       status: "open" as const,
       defaultChatId: null as string | null,
       onStatus: () => () => {},
       onError: () => () => {},
+      getRunStartedAt(chatId: string) {
+        const v = runStartedAtByChatId.get(chatId);
+        return v === undefined ? null : v;
+      },
+      getGoalState(chatId: string) {
+        return goalStateByChatId.get(chatId);
+      },
       onChat(chatId: string, h: (ev: InboundEvent) => void) {
         let set = handlers.get(chatId);
         if (!set) {
@@ -33,6 +62,8 @@ function fakeClient() {
       updateUrl: vi.fn(),
     },
     emit(chatId: string, ev: InboundEvent) {
+      recordGoalStatusForRunStrip(chatId, ev);
+      recordGoalStateSnapshot(chatId, ev);
       const set = handlers.get(chatId);
       set?.forEach((h) => h(ev));
     },
@@ -111,6 +142,28 @@ describe("useNanobotStream", () => {
     expect(result.current.messages).toHaveLength(2);
     expect(result.current.messages[1].role).toBe("assistant");
     expect(result.current.messages[1].kind).toBeUndefined();
+  });
+
+  it("treats progress with arbitrary agent_ui like ordinary trace text", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-au", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+    act(() => {
+      fake.emit("chat-au", {
+        event: "message",
+        chat_id: "chat-au",
+        text: "progress · panel tick",
+        kind: "progress",
+        agent_ui: {
+          kind: "panel",
+          data: { version: 1, event: "tick", id: "x1" },
+        },
+      });
+    });
+    expect(result.current.messages).toHaveLength(1);
+    expect(result.current.messages[0].kind).toBe("trace");
+    expect(result.current.messages[0].content).toContain("panel tick");
   });
 
   it("renders live tool traces from structured tool events", () => {
@@ -654,6 +707,139 @@ describe("useNanobotStream", () => {
     expect(result.current.isStreaming).toBe(false);
     expect(result.current.messages.every((message) => !message.isStreaming)).toBe(true);
     expect(onTurnEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("stamps latency on the last assistant bubble from turn_end", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-lat", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    act(() => {
+      fake.emit("chat-lat", {
+        event: "delta",
+        chat_id: "chat-lat",
+        text: "Hi",
+      });
+    });
+
+    act(() => {
+      fake.emit("chat-lat", {
+        event: "turn_end",
+        chat_id: "chat-lat",
+        latency_ms: 2400,
+      });
+    });
+
+    const lastAssistant = [...result.current.messages].reverse().find((m) => m.role === "assistant");
+    expect(lastAssistant?.latencyMs).toBe(2400);
+  });
+
+  it("tracks goal_status running and clears on idle", () => {
+    const fake = fakeClient();
+    const { result } = renderHook(() => useNanobotStream("chat-g", EMPTY_MESSAGES), {
+      wrapper: wrap(fake.client),
+    });
+
+    expect(result.current.runStartedAt).toBeNull();
+
+    act(() => {
+      fake.emit("chat-g", {
+        event: "goal_status",
+        chat_id: "chat-g",
+        status: "running",
+        started_at: 1700,
+      });
+    });
+    expect(result.current.runStartedAt).toBe(1700);
+
+    act(() => {
+      fake.emit("chat-g", {
+        event: "goal_status",
+        chat_id: "chat-g",
+        status: "idle",
+      });
+    });
+    expect(result.current.runStartedAt).toBeNull();
+  });
+
+  it("restores runStartedAt after switching away and back when goal_status was recorded without a subscriber", () => {
+    const fake = fakeClient();
+    const { result, rerender } = renderHook(
+      ({ chatId }: { chatId: string }) => useNanobotStream(chatId, EMPTY_MESSAGES),
+      {
+        wrapper: wrap(fake.client),
+        initialProps: { chatId: "chat-a" },
+      },
+    );
+
+    act(() => {
+      fake.emit("chat-a", {
+        event: "goal_status",
+        chat_id: "chat-a",
+        status: "running",
+        started_at: 4242,
+      });
+    });
+    expect(result.current.runStartedAt).toBe(4242);
+
+    rerender({ chatId: "chat-b" });
+    expect(result.current.runStartedAt).toBeNull();
+
+    act(() => {
+      fake.emit("chat-a", {
+        event: "goal_status",
+        chat_id: "chat-a",
+        status: "running",
+        started_at: 9001,
+      });
+    });
+
+    rerender({ chatId: "chat-a" });
+    expect(result.current.runStartedAt).toBe(9001);
+  });
+
+  it("tracks goal_state per chat and restores after switching sessions", () => {
+    const fake = fakeClient();
+    const { result, rerender } = renderHook(
+      ({ chatId }: { chatId: string }) => useNanobotStream(chatId, EMPTY_MESSAGES),
+      {
+        wrapper: wrap(fake.client),
+        initialProps: { chatId: "chat-a" },
+      },
+    );
+
+    act(() => {
+      fake.emit("chat-a", {
+        event: "goal_state",
+        chat_id: "chat-a",
+        goal_state: { active: true, ui_summary: "Alpha" },
+      });
+    });
+    expect(result.current.goalState).toEqual({ active: true, ui_summary: "Alpha" });
+
+    act(() => {
+      fake.emit("chat-b", {
+        event: "goal_state",
+        chat_id: "chat-b",
+        goal_state: { active: true, objective: "Beta task" },
+      });
+    });
+
+    rerender({ chatId: "chat-b" });
+    expect(result.current.goalState).toEqual({ active: true, objective: "Beta task" });
+
+    rerender({ chatId: "chat-a" });
+    expect(result.current.goalState).toEqual({ active: true, ui_summary: "Alpha" });
+
+    act(() => {
+      fake.emit("chat-a", {
+        event: "goal_state",
+        chat_id: "chat-a",
+        goal_state: { active: false },
+      });
+    });
+    expect(result.current.goalState).toEqual({ active: false });
   });
 
 });

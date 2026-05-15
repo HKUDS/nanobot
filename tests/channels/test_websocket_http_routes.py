@@ -22,6 +22,7 @@ def _ch(
     session_manager: SessionManager | None = None,
     static_dist_path: Path | None = None,
     port: int = _PORT,
+    runtime_model_name: Any | None = None,
     **extra: Any,
 ) -> WebSocketChannel:
     cfg: dict[str, Any] = {
@@ -33,11 +34,16 @@ def _ch(
         "websocketRequiresToken": False,
     }
     cfg.update(extra)
+    ws_kwargs: dict[str, Any] = {
+        "session_manager": session_manager,
+        "static_dist_path": static_dist_path,
+    }
+    if runtime_model_name is not None:
+        ws_kwargs["runtime_model_name"] = runtime_model_name
     return WebSocketChannel(
         cfg,
         bus,
-        session_manager=session_manager,
-        static_dist_path=static_dist_path,
+        **ws_kwargs,
     )
 
 
@@ -171,8 +177,14 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
 
 
 @pytest.mark.asyncio
-async def test_session_delete_removes_file(bus: MagicMock, tmp_path: Path) -> None:
+async def test_session_delete_removes_file(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:doomed")
+    from nanobot.utils.webui_transcript import append_transcript_object
+
+    append_transcript_object("websocket:doomed", {"event": "user", "chat_id": "doomed", "text": "x"})
     channel = _ch(bus, session_manager=sm, port=29903)
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
@@ -183,6 +195,8 @@ async def test_session_delete_removes_file(bus: MagicMock, tmp_path: Path) -> No
 
         path = sm._get_session_path("websocket:doomed")
         assert path.exists()
+        webui_path = tmp_path / "webui" / f"{SessionManager.safe_key('websocket:doomed')}.jsonl"
+        assert webui_path.is_file()
         resp = await _http_get(
             "http://127.0.0.1:29903/api/sessions/websocket:doomed/delete",
             headers=auth,
@@ -190,6 +204,7 @@ async def test_session_delete_removes_file(bus: MagicMock, tmp_path: Path) -> No
         assert resp.status_code == 200
         assert resp.json()["deleted"] is True
         assert not path.exists()
+        assert not webui_path.exists()
     finally:
         await channel.stop()
         await server_task
@@ -433,7 +448,7 @@ def test_wildcard_ipv6_without_auth_raises(bus: MagicMock) -> None:
 
 def test_wildcard_ipv6_with_secret_is_valid(bus: MagicMock) -> None:
     channel = _ch(bus, host="::", tokenIssueSecret="s3cret")
-    resp = channel._handle_webui_bootstrap(
+    resp = channel._handle_bootstrap(
         _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
     )
     assert resp.status_code == 200
@@ -442,7 +457,7 @@ def test_wildcard_ipv6_with_secret_is_valid(bus: MagicMock) -> None:
 def test_bootstrap_accepts_static_token_as_secret(bus: MagicMock) -> None:
     """When only token (not token_issue_secret) is set, bootstrap accepts it."""
     channel = _ch(bus, host="0.0.0.0", token="static-tok")
-    resp = channel._handle_webui_bootstrap(
+    resp = channel._handle_bootstrap(
         _REMOTE, _FakeReq({"Authorization": "Bearer static-tok"})
     )
     assert resp.status_code == 200
@@ -452,13 +467,53 @@ def test_bootstrap_accepts_static_token_as_secret(bus: MagicMock) -> None:
 
 def test_localhost_without_auth_is_valid(bus: MagicMock) -> None:
     channel = _ch(bus, host="127.0.0.1")
-    resp = channel._handle_webui_bootstrap(_LOCAL, _NO_HEADERS)
+    resp = channel._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 200
+
+
+def test_bootstrap_prefers_runtime_model_name(bus: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "nanobot.channels.websocket._default_model_name_from_config",
+        lambda: "from-disk",
+    )
+    channel = _ch(bus, host="127.0.0.1", runtime_model_name=lambda: "  live/model  ")
+    resp = channel._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["model_name"] == "live/model"
+
+
+def test_bootstrap_falls_back_when_runtime_returns_empty(bus: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "nanobot.channels.websocket._default_model_name_from_config",
+        lambda: "from-disk",
+    )
+    channel = _ch(bus, host="127.0.0.1", runtime_model_name=lambda: "   ")
+    resp = channel._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["model_name"] == "from-disk"
+
+
+def test_bootstrap_falls_back_when_runtime_raises(bus: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "nanobot.channels.websocket._default_model_name_from_config",
+        lambda: "from-disk",
+    )
+
+    def boom():
+        raise RuntimeError("resolver failed")
+
+    channel = _ch(bus, host="127.0.0.1", runtime_model_name=boom)
+    resp = channel._handle_bootstrap(_LOCAL, _NO_HEADERS)
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["model_name"] == "from-disk"
 
 
 def test_bootstrap_rejects_wrong_secret(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="correct")
-    resp = channel._handle_webui_bootstrap(
+    resp = channel._handle_bootstrap(
         _REMOTE, _FakeReq({"Authorization": "Bearer wrong"})
     )
     assert resp.status_code == 401
@@ -466,7 +521,7 @@ def test_bootstrap_rejects_wrong_secret(bus: MagicMock) -> None:
 
 def test_bootstrap_accepts_remote_with_valid_secret(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
-    resp = channel._handle_webui_bootstrap(
+    resp = channel._handle_bootstrap(
         _REMOTE, _FakeReq({"Authorization": "Bearer s3cret"})
     )
     assert resp.status_code == 200
@@ -476,7 +531,7 @@ def test_bootstrap_accepts_remote_with_valid_secret(bus: MagicMock) -> None:
 
 def test_bootstrap_accepts_x_nanobot_auth_header(bus: MagicMock) -> None:
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
-    resp = channel._handle_webui_bootstrap(
+    resp = channel._handle_bootstrap(
         _REMOTE, _FakeReq({"X-Nanobot-Auth": "s3cret"})
     )
     assert resp.status_code == 200
@@ -485,5 +540,5 @@ def test_bootstrap_accepts_x_nanobot_auth_header(bus: MagicMock) -> None:
 def test_bootstrap_secret_also_enforced_on_localhost(bus: MagicMock) -> None:
     """When secret is set, even localhost must provide it (reverse-proxy safety)."""
     channel = _ch(bus, host="0.0.0.0", tokenIssueSecret="s3cret")
-    resp = channel._handle_webui_bootstrap(_LOCAL, _NO_HEADERS)
+    resp = channel._handle_bootstrap(_LOCAL, _NO_HEADERS)
     assert resp.status_code == 401

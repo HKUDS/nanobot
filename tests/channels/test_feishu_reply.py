@@ -911,7 +911,8 @@ def test_on_background_task_done_removes_from_set() -> None:
 
 
 @pytest.mark.asyncio
-async def test_on_message_ignores_unauthorized_sender_before_side_effects() -> None:
+async def test_on_message_unauthorized_dm_sends_pairing_code_without_side_effects() -> None:
+    """Unauthorized DM sender gets a pairing code but no media side effects."""
     channel = _make_feishu_channel(group_policy="open")
     channel.config.allow_from = ["ou_allowed"]
     channel._add_reaction = AsyncMock()
@@ -920,6 +921,32 @@ async def test_on_message_ignores_unauthorized_sender_before_side_effects() -> N
     channel._handle_message = AsyncMock()
 
     event = _make_feishu_event(
+        msg_type="audio",
+        content='{"file_key": "file_1"}',
+        sender_open_id="ou_blocked",
+    )
+
+    await channel._on_message(event)
+
+    channel._add_reaction.assert_not_awaited()
+    channel._download_and_save_media.assert_not_awaited()
+    channel.transcribe_audio.assert_not_awaited()
+    # _handle_message is called to issue the pairing code in DMs
+    channel._handle_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_on_message_unauthorized_group_ignored_before_side_effects() -> None:
+    """Unauthorized group chat sender is silently ignored before any side effects."""
+    channel = _make_feishu_channel(group_policy="open")
+    channel.config.allow_from = ["ou_allowed"]
+    channel._add_reaction = AsyncMock()
+    channel._download_and_save_media = AsyncMock(return_value=("/tmp/audio.ogg", "[audio]"))
+    channel.transcribe_audio = AsyncMock(return_value="transcript")
+    channel._handle_message = AsyncMock()
+
+    event = _make_feishu_event(
+        chat_type="group",
         msg_type="audio",
         content='{"file_key": "file_1"}',
         sender_open_id="ou_blocked",

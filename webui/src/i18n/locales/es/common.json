@@ -218,6 +218,13 @@
       "placeholderStreaming": "El modelo está respondiendo…",
       "inputAria": "Entrada de mensaje",
       "sendHint": "Enter para enviar · Shift+Enter para nueva línea",
+      "runRuntimeTitle": "En ejecución · {{elapsed}}",
+      "goalStateStrip": "Objetivo · {{label}}",
+      "goalStateFallback": "Objetivo",
+      "goalStateExpandAria": "Ver objetivo completo",
+      "goalStateSheetTitle": "Objetivo del hilo",
+      "goalStateSummaryHeading": "Resumen",
+      "goalStateObjectiveHeading": "Objetivo",
       "send": "Enviar mensaje",
       "stop": "Detener respuesta",
       "attachImage": "Adjuntar imagen",
@@ -286,6 +293,10 @@
             "title": "Restaurar memoria",
             "description": "Revierte la memoria a una instantánea Dream anterior."
           },
+          "goal": {
+            "title": "Objetivo a largo plazo",
+            "description": "Indica al agente que trate esto como un objetivo sostenido en varios pasos."
+          },
           "help": {
             "title": "Mostrar ayuda",
             "description": "Lista los comandos slash disponibles."
@@ -300,7 +311,19 @@
     "assistantTyping": "El asistente está escribiendo",
     "toolSingle": "Usando una herramienta",
     "toolMany": "Se usaron {{count}} herramientas",
-    "imageAttachment": "Imagen adjunta"
+    "toolSummary": "{{count}} herramienta",
+    "toolSummaryMany": "{{count}} herramientas",
+    "reasoningTools": "Razonamiento · {{count}} herramientas",
+    "reasoningToolsSingular": "Razonamiento · 1 herramienta",
+    "reasoning": "Razonamiento",
+    "reasoningStreaming": "Pensando…",
+    "reasoningSummary": "Razonamiento",
+    "agentActivitySummary": "{{reasoning}} pasos · {{tools}} llamadas a herramientas",
+    "agentActivityToolsOnly": "{{tools}} llamadas a herramientas",
+    "agentActivityLiveSummary": "En curso… · {{reasoning}} pasos · {{tools}} llamadas a herramientas",
+    "agentActivityLiveToolsOnly": "En curso… · {{tools}} llamadas a herramientas",
+    "imageAttachment": "Imagen adjunta",
+    "turnLatencyTitle": "Tiempo de respuesta (extremo a extremo)"
   },
   "lightbox": {
     "title": "Vista previa de imagen",

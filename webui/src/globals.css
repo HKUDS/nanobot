@@ -117,31 +117,92 @@
     --cjk-line-height: 1.625;
   }
 
-  /* Shimmer band sweeping across the reasoning header while
-     ``reasoning_delta`` frames are arriving. Pure CSS, no JS animation,
-     respects ``prefers-reduced-motion``. */
-  @keyframes reasoning-shimmer-sweep {
+  /* L→R sheen over solid label text (overlay stripe). Avoids ``background-clip:
+     text`` loop seams that read as RTL “erase” or one-frame transparent glyphs. */
+  @keyframes reasoning-sheen-ltr {
     0% {
-      background-position: -200% 0;
+      left: -44%;
     }
     100% {
-      background-position: 200% 0;
+      left: 118%;
     }
   }
-  .reasoning-shimmer {
-    background-image: linear-gradient(
+  .reasoning-sheen-track {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    overflow: hidden;
+    border-radius: 2px;
+    pointer-events: none;
+  }
+  .reasoning-sheen-stripe {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 44%;
+    min-width: 3.25rem;
+    left: -44%;
+    border-radius: inherit;
+    background: linear-gradient(
       90deg,
       transparent 0%,
-      hsl(var(--muted-foreground) / 0.18) 50%,
+      hsl(0 0% 100% / 0.07) 34%,
+      hsl(0 0% 100% / 0.76) 50%,
+      hsl(0 0% 100% / 0.07) 66%,
       transparent 100%
     );
-    background-size: 200% 100%;
-    background-repeat: no-repeat;
-    animation: reasoning-shimmer-sweep 2.2s linear infinite;
+    mix-blend-mode: soft-light;
+    opacity: 0.95;
+    animation: reasoning-sheen-ltr 5.2s linear infinite;
+  }
+  .dark .reasoning-sheen-stripe {
+    mix-blend-mode: overlay;
+    opacity: 1;
   }
   @media (prefers-reduced-motion: reduce) {
-    .reasoning-shimmer {
+    .reasoning-sheen-stripe {
       animation: none;
+      opacity: 0;
+      visibility: hidden;
+    }
+  }
+
+  /** Goal halo: pale sky blue (not ``--primary``, which often reads as neutral gray). */
+  @keyframes thread-goal-glow-breathe {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 10px hsl(204 72% 52% / 0.22))
+        drop-shadow(0 0 24px hsl(199 80% 58% / 0.14));
+    }
+    50% {
+      filter: drop-shadow(0 0 17px hsl(204 78% 48% / 0.32))
+        drop-shadow(0 0 38px hsl(199 85% 55% / 0.2));
+    }
+  }
+  .thread-goal-shell-glow {
+    animation: thread-goal-glow-breathe 4.8s ease-in-out infinite;
+  }
+  @keyframes thread-goal-glow-breathe-dark {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 12px hsl(198 90% 72% / 0.28))
+        drop-shadow(0 0 28px hsl(195 95% 65% / 0.16));
+    }
+    50% {
+      filter: drop-shadow(0 0 20px hsl(198 95% 78% / 0.42))
+        drop-shadow(0 0 42px hsl(195 100% 70% / 0.24));
+    }
+  }
+  .dark .thread-goal-shell-glow {
+    animation-name: thread-goal-glow-breathe-dark;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .thread-goal-shell-glow {
+      animation: none;
+      filter: drop-shadow(0 0 14px hsl(204 70% 50% / 0.24));
+    }
+    .dark .thread-goal-shell-glow {
+      filter: drop-shadow(0 0 14px hsl(198 88% 70% / 0.32));
     }
   }
 
@@ -157,5 +218,11 @@
   .scrollbar-thin::-webkit-scrollbar-thumb {
     background-color: hsl(var(--muted-foreground) / 0.4);
     border-radius: 9999px;
+  }
+  .scrollbar-track-transparent {
+    scrollbar-gutter: stable;
+  }
+  .scrollbar-track-transparent::-webkit-scrollbar-track {
+    background: transparent;
   }
 }

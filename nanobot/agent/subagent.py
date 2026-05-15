@@ -108,12 +108,18 @@ class SubagentManager:
             restrict_to_workspace=self.restrict_to_workspace,
         )
 
-    def _build_tools(self) -> ToolRegistry:
+    def _build_tools(
+        self,
+        workspace: Path | None = None,
+        tools_config: ToolsConfig | None = None,
+    ) -> ToolRegistry:
         """Build an isolated subagent tool registry via ToolLoader."""
+        root = self.workspace if workspace is None else workspace
         registry = ToolRegistry()
+        cfg = tools_config if tools_config is not None else self._subagent_tools_config()
         ctx = ToolContext(
-            config=self._subagent_tools_config(),
-            workspace=str(self.workspace),
+            config=cfg,
+            workspace=str(root.resolve()),
             file_state_store=FileStates(),
         )
         ToolLoader().load(ctx, registry, scope="subagent")

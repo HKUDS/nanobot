@@ -244,6 +244,13 @@
       "placeholderStreaming": "Model is responding…",
       "inputAria": "Message input",
       "sendHint": "Enter to send · Shift+Enter for newline",
+      "runRuntimeTitle": "Running · {{elapsed}}",
+      "goalStateStrip": "Goal · {{label}}",
+      "goalStateFallback": "Goal",
+      "goalStateExpandAria": "Show full goal",
+      "goalStateSheetTitle": "Thread goal",
+      "goalStateSummaryHeading": "Summary",
+      "goalStateObjectiveHeading": "Objective",
       "send": "Send message",
       "stop": "Stop response",
       "attachImage": "Attach image",
@@ -307,6 +314,10 @@
             "title": "Restore memory",
             "description": "Revert memory to a previous Dream snapshot."
           },
+          "goal": {
+            "title": "Long-running goal",
+            "description": "Tell the agent to treat this as a sustained multi-step goal."
+          },
           "help": {
             "title": "Show help",
             "description": "List available slash commands."
@@ -332,11 +343,21 @@
     "assistantTyping": "Assistant is typing",
     "toolSingle": "Using a tool",
     "toolMany": "Used {{count}} tools",
+    "toolSummary": "{{count}} tool",
+    "toolSummaryMany": "{{count}} tools",
+    "reasoningTools": "Reasoning · {{count}} tools",
+    "reasoningToolsSingular": "Reasoning · 1 tool",
     "reasoning": "Thinking",
     "reasoningStreaming": "Thinking…",
+    "reasoningSummary": "Reasoning",
+    "agentActivitySummary": "{{reasoning}} steps · {{tools}} tool calls",
+    "agentActivityToolsOnly": "{{tools}} tool calls",
+    "agentActivityLiveSummary": "Working… · {{reasoning}} steps · {{tools}} tool calls",
+    "agentActivityLiveToolsOnly": "Working… · {{tools}} tool calls",
     "imageAttachment": "Image attachment",
     "copyReply": "Copy reply",
-    "copiedReply": "Copied reply"
+    "copiedReply": "Copied reply",
+    "turnLatencyTitle": "Response time (end-to-end)"
   },
   "lightbox": {
     "title": "Image preview",

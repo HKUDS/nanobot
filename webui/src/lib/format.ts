@@ -75,3 +75,33 @@ export function fmtDateTime(
   const date = parseDate(value);
   return date ? dateTimeFormatter(activeLocale(locale)).format(date) : "";
 }
+
+/** Human-readable turn duration (wall-clock), locale-aware via ``Intl`` (seconds/minutes). */
+export function formatTurnLatency(ms: number, locale?: string): string {
+  const loc = activeLocale(locale);
+  const msClamped = Math.max(0, ms);
+  const secTotal = msClamped / 1000;
+  if (secTotal < 60) {
+    return new Intl.NumberFormat(loc, {
+      style: "unit",
+      unit: "second",
+      unitDisplay: "narrow",
+      maximumFractionDigits: secTotal < 10 ? 1 : 0,
+      minimumFractionDigits: 0,
+    }).format(secTotal);
+  }
+  const wholeMin = Math.floor(secTotal / 60);
+  const remSec = Math.max(0, Math.round(secTotal - wholeMin * 60));
+  const minStr = new Intl.NumberFormat(loc, {
+    style: "unit",
+    unit: "minute",
+    unitDisplay: "narrow",
+  }).format(wholeMin);
+  const secStr = new Intl.NumberFormat(loc, {
+    style: "unit",
+    unit: "second",
+    unitDisplay: "narrow",
+    maximumFractionDigits: 0,
+  }).format(remSec);
+  return `${minStr}\u00a0${secStr}`;
+}

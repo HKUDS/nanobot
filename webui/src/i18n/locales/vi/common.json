@@ -218,6 +218,13 @@
       "placeholderStreaming": "Mô hình đang trả lời…",
       "inputAria": "Ô nhập tin nhắn",
       "sendHint": "Enter để gửi · Shift+Enter để xuống dòng",
+      "runRuntimeTitle": "Đang chạy · {{elapsed}}",
+      "goalStateStrip": "Mục tiêu · {{label}}",
+      "goalStateFallback": "Mục tiêu",
+      "goalStateExpandAria": "Xem đầy đủ mục tiêu",
+      "goalStateSheetTitle": "Mục tiêu luồng",
+      "goalStateSummaryHeading": "Tóm tắt",
+      "goalStateObjectiveHeading": "Mục tiêu",
       "send": "Gửi tin nhắn",
       "stop": "Dừng phản hồi",
       "attachImage": "Đính kèm ảnh",
@@ -286,6 +293,10 @@
             "title": "Khôi phục bộ nhớ",
             "description": "Đưa bộ nhớ về một snapshot Dream trước đó."
           },
+          "goal": {
+            "title": "Mục tiêu dài hạn",
+            "description": "Yêu cầu agent xử lý đây là mục tiêu nhiều bước kéo dài."
+          },
           "help": {
             "title": "Hiển thị trợ giúp",
             "description": "Liệt kê các lệnh slash có sẵn."
@@ -300,7 +311,19 @@
     "assistantTyping": "Trợ lý đang nhập",
     "toolSingle": "Đang dùng một công cụ",
     "toolMany": "Đã dùng {{count}} công cụ",
-    "imageAttachment": "Tệp hình ảnh đính kèm"
+    "toolSummary": "{{count}} công cụ",
+    "toolSummaryMany": "{{count}} công cụ",
+    "reasoningTools": "Suy luận · {{count}} công cụ",
+    "reasoningToolsSingular": "Suy luận · 1 công cụ",
+    "reasoning": "Suy luận",
+    "reasoningStreaming": "Đang suy nghĩ…",
+    "reasoningSummary": "Suy luận",
+    "agentActivitySummary": "{{reasoning}} bước · {{tools}} lần gọi công cụ",
+    "agentActivityToolsOnly": "{{tools}} lần gọi công cụ",
+    "agentActivityLiveSummary": "Đang chạy… · {{reasoning}} bước · {{tools}} lần gọi công cụ",
+    "agentActivityLiveToolsOnly": "Đang chạy… · {{tools}} lần gọi công cụ",
+    "imageAttachment": "Tệp hình ảnh đính kèm",
+    "turnLatencyTitle": "Thời gian phản hồi (end-to-end)"
   },
   "lightbox": {
     "title": "Xem trước ảnh",

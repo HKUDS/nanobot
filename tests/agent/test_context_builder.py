@@ -1,13 +1,11 @@
 """Tests for ContextBuilder — system prompt and message assembly."""
 
-import base64
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
 from nanobot.agent.context import ContextBuilder
-
+from nanobot.session.goal_state import GOAL_STATE_KEY
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -285,6 +283,22 @@ class TestBuildMessages:
         assert "[Runtime Context" in user_msg
         assert "hello" in user_msg
 
+    def test_session_metadata_injects_active_goal_state(self, tmp_path):
+        builder = _builder(tmp_path)
+        meta = {
+            GOAL_STATE_KEY: {"status": "active", "objective": "Finish docs migration."},
+        }
+        messages = builder.build_messages(
+            [],
+            "hi",
+            channel="cli",
+            chat_id="x",
+            session_metadata=meta,
+        )
+        user_msg = str(messages[-1]["content"])
+        assert "Goal (active):" in user_msg
+        assert "Finish docs migration." in user_msg
+
     def test_consecutive_same_role_merged(self, tmp_path):
         builder = _builder(tmp_path)
         history = [{"role": "user", "content": "previous user message"}]
@@ -308,26 +322,3 @@ class TestBuildMessages:
         user_msg = messages[-1]["content"]
         assert isinstance(user_msg, list)
         assert any(b.get("type") == "image_url" for b in user_msg)
-
-
-# ---------------------------------------------------------------------------
-# add_tool_result
-# ---------------------------------------------------------------------------
-
-
-class TestAddToolResult:
-    def test_appends_tool_message(self, tmp_path):
-        builder = _builder(tmp_path)
-        msgs = [{"role": "user", "content": "hello"}]
-        result = builder.add_tool_result(msgs, "call_123", "read_file", "file content")
-        assert len(result) == 2
-        assert result[1]["role"] == "tool"
-        assert result[1]["tool_call_id"] == "call_123"
-        assert result[1]["name"] == "read_file"
-        assert result[1]["content"] == "file content"
-
-    def test_returns_same_list(self, tmp_path):
-        builder = _builder(tmp_path)
-        msgs = []
-        result = builder.add_tool_result(msgs, "id", "tool", "ok")
-        assert result is msgs

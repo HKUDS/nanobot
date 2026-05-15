@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   deleteSession,
-  fetchSessionMessages,
+  fetchWebuiThread,
   listSessions,
   listSlashCommands,
   updateProviderSettings,
@@ -21,13 +21,14 @@ describe("webui API helpers", () => {
     );
   });
 
-  it("percent-encodes websocket keys when fetching session history", async () => {
-    await fetchSessionMessages("tok", "websocket:chat-1");
+  it("percent-encodes websocket keys when fetching webui-thread snapshot", async () => {
+    await fetchWebuiThread("tok", "websocket:chat-1");
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/sessions/websocket%3Achat-1/messages",
+      "/api/sessions/websocket%3Achat-1/webui-thread",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
+        credentials: "same-origin",
       }),
     );
   });

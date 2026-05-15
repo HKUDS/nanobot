@@ -59,6 +59,19 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
   });
 
+  it("does not show copy when showAssistantCopyAction is false", () => {
+    const message: UIMessage = {
+      id: "a-mid",
+      role: "assistant",
+      content: "Mid-turn snippet.",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} showAssistantCopyAction={false} />);
+
+    expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
+  });
+
   it("renders trace messages as collapsible tool groups", () => {
     const message: UIMessage = {
       id: "t1",
@@ -118,7 +131,7 @@ describe("MessageBubble", () => {
 
     expect(screen.getByText("Thinking…")).toBeInTheDocument();
     expect(screen.getByText(/Step 1: parse intent\./)).toBeInTheDocument();
-    expect(container.querySelector(".reasoning-shimmer")).toBeInTheDocument();
+    expect(container.querySelector(".reasoning-sheen-stripe")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /thinking/i }).parentElement).not.toHaveClass("mb-2");
   });
 
@@ -141,6 +154,27 @@ describe("MessageBubble", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /thinking/i }));
     expect(screen.getByText("hidden until expanded")).toBeInTheDocument();
+  });
+
+  it("renders reasoning body as markdown so headings are not left as raw ###", async () => {
+    await import("@/components/MarkdownTextRenderer");
+    const message: UIMessage = {
+      id: "a-reasoning-md",
+      role: "assistant",
+      content: "",
+      createdAt: Date.now(),
+      reasoning: "### Section title\n\nBody line.",
+      reasoningStreaming: false,
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+    fireEvent.click(screen.getByRole("button", { name: /thinking/i }));
+
+    await waitFor(() => {
+      expect(container.querySelector("h3")?.textContent).toBe("Section title");
+    });
+    expect(container.textContent).not.toContain("###");
+    expect(screen.getByText("Body line.")).toBeInTheDocument();
   });
 
   it("renders assistant image media as a larger generated result", () => {

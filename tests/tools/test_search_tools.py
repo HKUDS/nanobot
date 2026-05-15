@@ -1,4 +1,4 @@
-"""Tests for grep/glob search tools."""
+"""Tests for grep search tools."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.subagent import SubagentManager, SubagentStatus
-from nanobot.agent.tools.search import GlobTool, GrepTool
+from nanobot.agent.tools.search import GrepTool
 from nanobot.agent.tools.web import WebSearchTool
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import WebSearchConfig
@@ -31,39 +31,6 @@ async def test_web_search_tool_refreshes_dynamic_config_loader(monkeypatch) -> N
     monkeypatch.setattr(WebSearchTool, "_search_duckduckgo", fake_duckduckgo)
 
     assert await tool.execute("nanobot") == "duckduckgo:nanobot:3"
-
-
-@pytest.mark.asyncio
-async def test_glob_matches_recursively_and_skips_noise_dirs(tmp_path: Path) -> None:
-    (tmp_path / "src").mkdir()
-    (tmp_path / "nested").mkdir()
-    (tmp_path / "node_modules").mkdir()
-    (tmp_path / "src" / "app.py").write_text("print('ok')\n", encoding="utf-8")
-    (tmp_path / "nested" / "util.py").write_text("print('ok')\n", encoding="utf-8")
-    (tmp_path / "node_modules" / "skip.py").write_text("print('skip')\n", encoding="utf-8")
-
-    tool = GlobTool(workspace=tmp_path, allowed_dir=tmp_path)
-    result = await tool.execute(pattern="*.py", path=".")
-
-    assert "src/app.py" in result
-    assert "nested/util.py" in result
-    assert "node_modules/skip.py" not in result
-
-
-@pytest.mark.asyncio
-async def test_glob_can_return_directories_only(tmp_path: Path) -> None:
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "api").mkdir(parents=True)
-    (tmp_path / "src" / "api" / "handlers.py").write_text("ok\n", encoding="utf-8")
-
-    tool = GlobTool(workspace=tmp_path, allowed_dir=tmp_path)
-    result = await tool.execute(
-        pattern="api",
-        path="src",
-        entry_type="dirs",
-    )
-
-    assert result.splitlines() == ["src/api/"]
 
 
 @pytest.mark.asyncio
@@ -247,33 +214,6 @@ async def test_grep_files_with_matches_mode_respects_max_results(tmp_path: Path)
 
 
 @pytest.mark.asyncio
-async def test_glob_supports_head_limit_offset_and_recent_first(tmp_path: Path) -> None:
-    (tmp_path / "src").mkdir()
-    a = tmp_path / "src" / "a.py"
-    b = tmp_path / "src" / "b.py"
-    c = tmp_path / "src" / "c.py"
-    a.write_text("a\n", encoding="utf-8")
-    b.write_text("b\n", encoding="utf-8")
-    c.write_text("c\n", encoding="utf-8")
-
-    os.utime(a, (1, 1))
-    os.utime(b, (2, 2))
-    os.utime(c, (3, 3))
-
-    tool = GlobTool(workspace=tmp_path, allowed_dir=tmp_path)
-    result = await tool.execute(
-        pattern="*.py",
-        path="src",
-        head_limit=1,
-        offset=1,
-    )
-
-    lines = result.splitlines()
-    assert lines[0] == "src/b.py"
-    assert "pagination: limit=1, offset=1" in result
-
-
-@pytest.mark.asyncio
 async def test_grep_reports_skipped_binary_and_large_files(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -296,16 +236,13 @@ async def test_search_tools_reject_paths_outside_workspace(tmp_path: Path) -> No
     outside.write_text("secret\n", encoding="utf-8")
 
     grep_tool = GrepTool(workspace=tmp_path, allowed_dir=tmp_path)
-    glob_tool = GlobTool(workspace=tmp_path, allowed_dir=tmp_path)
 
     grep_result = await grep_tool.execute(pattern="secret", path=str(outside))
-    glob_result = await glob_tool.execute(pattern="*.txt", path=str(outside.parent))
 
     assert grep_result.startswith("Error:")
-    assert glob_result.startswith("Error:")
 
 
-def test_agent_loop_registers_grep_and_glob(tmp_path: Path) -> None:
+def test_agent_loop_registers_grep(tmp_path: Path) -> None:
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
@@ -313,11 +250,10 @@ def test_agent_loop_registers_grep_and_glob(tmp_path: Path) -> None:
     loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path, model="test-model")
 
     assert "grep" in loop.tools.tool_names
-    assert "glob" in loop.tools.tool_names
 
 
 @pytest.mark.asyncio
-async def test_subagent_registers_grep_and_glob(tmp_path: Path) -> None:
+async def test_subagent_registers_grep(tmp_path: Path) -> None:
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
@@ -345,7 +281,6 @@ async def test_subagent_registers_grep_and_glob(tmp_path: Path) -> None:
     await mgr._run_subagent("sub-1", "search task", "label", {"channel": "cli", "chat_id": "direct"}, status)
 
     assert "grep" in captured["tool_names"]
-    assert "glob" in captured["tool_names"]
 
 
 def test_subagent_prompt_respects_disabled_skills(tmp_path: Path) -> None:

@@ -286,3 +286,62 @@ class TestExecuteEndToEnd:
 
         assert "hello world" in result
         assert "Exit code: 0" in result
+
+
+# ---------------------------------------------------------------------------
+# _extract_absolute_paths - UNC path support
+# ---------------------------------------------------------------------------
+
+class TestExtractAbsolutePaths:
+    """Tests for Windows UNC path extraction in shell commands."""
+
+    def test_windows_drive_path(self):
+        """Test extraction of standard Windows drive paths."""
+        cmd = r"dir C:\Users\Public"
+        paths = ExecTool._extract_absolute_paths(cmd)
+        assert r"C:\Users\Public" in paths
+
+    def test_windows_drive_path_root(self):
+        """Test extraction of Windows drive root paths."""
+        cmd = r"dir C:\temp"
+        paths = ExecTool._extract_absolute_paths(cmd)
+        assert any("C:\\" in p for p in paths)
+
+    def test_unc_path_simple(self):
+        """Test extraction of simple UNC paths."""
+        cmd = r"dir \\server\share"
+        paths = ExecTool._extract_absolute_paths(cmd)
+        assert r"\\server\share" in paths
+
+    def test_unc_path_with_subdirs(self):
+        """Test extraction of UNC paths with subdirectories."""
+        cmd = r"copy \\server\share\folder\file.txt D:\backup"
+        paths = ExecTool._extract_absolute_paths(cmd)
+        assert r"\\server\share\folder\file.txt" in paths
+        assert r"D:\backup" in paths
+
+    def test_unc_path_in_quotes(self):
+        """Test extraction of UNC paths enclosed in quotes."""
+        cmd = r'type "\\server\share\docs\readme.txt"'
+        paths = ExecTool._extract_absolute_paths(cmd)
+        assert r"\\server\share\docs\readme.txt" in paths
+
+    def test_mixed_paths(self):
+        """Test extraction of mixed UNC, drive, and POSIX paths."""
+        cmd = r'copy \\server\data\file.txt C:\local\temp && ls /tmp'
+        paths = ExecTool._extract_absolute_paths(cmd)
+        assert r"\\server\data\file.txt" in paths
+        assert any("C:\\" in p for p in paths)
+        assert "/tmp" in paths
+
+    def test_home_path(self):
+        """Test extraction of home directory shortcuts."""
+        cmd = "cat ~/config.txt"
+        paths = ExecTool._extract_absolute_paths(cmd)
+        assert "~/config.txt" in paths
+
+    def test_no_paths(self):
+        """Test command with no absolute paths."""
+        cmd = "echo hello"
+        paths = ExecTool._extract_absolute_paths(cmd)
+        assert paths == []

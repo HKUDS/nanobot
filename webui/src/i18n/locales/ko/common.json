@@ -218,6 +218,13 @@
       "placeholderStreaming": "모델이 응답 중입니다…",
       "inputAria": "메시지 입력",
       "sendHint": "Enter로 전송 · Shift+Enter로 줄바꿈",
+      "runRuntimeTitle": "실행 중 · {{elapsed}}",
+      "goalStateStrip": "목표 · {{label}}",
+      "goalStateFallback": "목표",
+      "goalStateExpandAria": "전체 목표 보기",
+      "goalStateSheetTitle": "스레드 목표",
+      "goalStateSummaryHeading": "요약",
+      "goalStateObjectiveHeading": "목표 설명",
       "send": "메시지 보내기",
       "stop": "응답 중지",
       "attachImage": "이미지 첨부",
@@ -286,6 +293,10 @@
             "title": "메모리 복원",
             "description": "이전 Dream 스냅샷으로 메모리를 되돌립니다."
           },
+          "goal": {
+            "title": "장기 목표",
+            "description": "에이전트에게 지속적인 다단계 목표로 처리하도록 지시합니다."
+          },
           "help": {
             "title": "도움말 보기",
             "description": "사용 가능한 슬래시 명령을 나열합니다."
@@ -300,7 +311,19 @@
     "assistantTyping": "도우미가 입력 중",
     "toolSingle": "도구 사용 중",
     "toolMany": "도구 {{count}}개 사용됨",
-    "imageAttachment": "이미지 첨부"
+    "toolSummary": "도구 {{count}}개",
+    "toolSummaryMany": "도구 {{count}}개",
+    "reasoningTools": "추론 · 도구 {{count}}개",
+    "reasoningToolsSingular": "추론 · 도구 1개",
+    "reasoning": "추론",
+    "reasoningStreaming": "추론 중…",
+    "reasoningSummary": "추론",
+    "agentActivitySummary": "{{reasoning}}단계 · 도구 호출 {{tools}}회",
+    "agentActivityToolsOnly": "도구 호출 {{tools}}회",
+    "agentActivityLiveSummary": "진행 중… · {{reasoning}}단계 · 도구 호출 {{tools}}회",
+    "agentActivityLiveToolsOnly": "진행 중… · 도구 호출 {{tools}}회",
+    "imageAttachment": "이미지 첨부",
+    "turnLatencyTitle": "응답 시간(엔드투엔드)"
   },
   "lightbox": {
     "title": "이미지 미리보기",

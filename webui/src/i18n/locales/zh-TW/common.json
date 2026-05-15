@@ -218,6 +218,13 @@
       "placeholderStreaming": "模型正在回覆…",
       "inputAria": "訊息輸入框",
       "sendHint": "Enter 送出 · Shift+Enter 換行",
+      "runRuntimeTitle": "執行中 · {{elapsed}}",
+      "goalStateStrip": "目標 · {{label}}",
+      "goalStateFallback": "目標",
+      "goalStateExpandAria": "查看完整目標",
+      "goalStateSheetTitle": "對話目標",
+      "goalStateSummaryHeading": "摘要",
+      "goalStateObjectiveHeading": "目標描述",
       "send": "送出訊息",
       "stop": "停止回覆",
       "attachImage": "附加圖片",
@@ -286,6 +293,10 @@
             "title": "恢復記憶",
             "description": "將記憶恢復到之前的 Dream 快照。"
           },
+          "goal": {
+            "title": "長期目標",
+            "description": "請助理把這則請求當成需要多步驟持續推進的目標。"
+          },
           "help": {
             "title": "查看說明",
             "description": "列出可用的斜線命令。"
@@ -300,7 +311,19 @@
     "assistantTyping": "助理正在輸入",
     "toolSingle": "正在使用工具",
     "toolMany": "已使用 {{count}} 個工具",
-    "imageAttachment": "圖片附件"
+    "toolSummary": "{{count}} 個工具",
+    "toolSummaryMany": "{{count}} 個工具",
+    "reasoningTools": "推理 · {{count}} 個工具",
+    "reasoningToolsSingular": "推理 · 1 個工具",
+    "reasoning": "思考過程",
+    "reasoningStreaming": "正在思考…",
+    "reasoningSummary": "推理",
+    "agentActivitySummary": "{{reasoning}} 步 · {{tools}} 次工具呼叫",
+    "agentActivityToolsOnly": "{{tools}} 次工具呼叫",
+    "agentActivityLiveSummary": "進行中… · {{reasoning}} 步 · {{tools}} 次工具呼叫",
+    "agentActivityLiveToolsOnly": "進行中… · {{tools}} 次工具呼叫",
+    "imageAttachment": "圖片附件",
+    "turnLatencyTitle": "本輪耗時（端到端）"
   },
   "lightbox": {
     "title": "圖片預覽",

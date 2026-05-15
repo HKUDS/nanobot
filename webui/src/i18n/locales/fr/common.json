@@ -218,6 +218,13 @@
       "placeholderStreaming": "Le modèle est en train de répondre…",
       "inputAria": "Champ de message",
       "sendHint": "Entrée pour envoyer · Maj+Entrée pour un retour à la ligne",
+      "runRuntimeTitle": "Exécution · {{elapsed}}",
+      "goalStateStrip": "Objectif · {{label}}",
+      "goalStateFallback": "Objectif",
+      "goalStateExpandAria": "Afficher l’objectif complet",
+      "goalStateSheetTitle": "Objectif du fil",
+      "goalStateSummaryHeading": "Résumé",
+      "goalStateObjectiveHeading": "Objectif",
       "send": "Envoyer le message",
       "stop": "Arrêter la réponse",
       "attachImage": "Joindre une image",
@@ -286,6 +293,10 @@
             "title": "Restaurer la mémoire",
             "description": "Revenir à un instantané Dream précédent."
           },
+          "goal": {
+            "title": "Objectif long terme",
+            "description": "Demandez à l’agent de traiter ceci comme un objectif multi‑étapes durable."
+          },
           "help": {
             "title": "Afficher l’aide",
             "description": "Lister les commandes slash disponibles."
@@ -300,7 +311,19 @@
     "assistantTyping": "L’assistant est en train d’écrire",
     "toolSingle": "Utilisation d’un outil",
     "toolMany": "{{count}} outils utilisés",
-    "imageAttachment": "Pièce jointe image"
+    "toolSummary": "{{count}} outil",
+    "toolSummaryMany": "{{count}} outils",
+    "reasoningTools": "Raisonnement · {{count}} outils",
+    "reasoningToolsSingular": "Raisonnement · 1 outil",
+    "reasoning": "Raisonnement",
+    "reasoningStreaming": "En réflexion…",
+    "reasoningSummary": "Raisonnement",
+    "agentActivitySummary": "{{reasoning}} étapes · {{tools}} appels d’outils",
+    "agentActivityToolsOnly": "{{tools}} appels d’outils",
+    "agentActivityLiveSummary": "En cours… · {{reasoning}} étapes · {{tools}} appels d’outils",
+    "agentActivityLiveToolsOnly": "En cours… · {{tools}} appels d’outils",
+    "imageAttachment": "Pièce jointe image",
+    "turnLatencyTitle": "Temps de réponse (de bout en bout)"
   },
   "lightbox": {
     "title": "Aperçu de l’image",
