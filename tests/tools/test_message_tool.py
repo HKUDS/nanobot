@@ -299,8 +299,82 @@ async def test_message_tool_cross_target_does_not_track_turn_media(tmp_path) -> 
     f.write_text("hello", encoding="utf-8")
     await tool.execute(
         content="see file",
-        channel="websocket",
-        chat_id="other",
+        channel="telegram",
+        chat_id="tg-other",
         media=[str(f)],
     )
     assert tool.turn_delivered_media_paths() == []
+
+
+@pytest.mark.asyncio
+async def test_message_tool_rejects_wrong_explicit_ws_chat_id(tmp_path) -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+    from nanobot.agent.tools.context import RequestContext
+
+    conv = "550e8400-e29b-41d4-a716-446655440000"
+    tool.set_context(RequestContext(channel="websocket", chat_id=conv, metadata={}))
+    f = tmp_path / "doc.md"
+    f.write_text("hello", encoding="utf-8")
+    result = await tool.execute(
+        content="see file",
+        channel="websocket",
+        chat_id="anon-deadbeefcafe",
+        media=[str(f)],
+    )
+    assert result.startswith("Error: chat_id does not match")
+    assert sent == []
+
+
+@pytest.mark.asyncio
+async def test_message_tool_allows_ws_explicit_when_matches_context(tmp_path) -> None:
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+    from nanobot.agent.tools.context import RequestContext
+
+    conv = "550e8400-e29b-41d4-a716-446655440000"
+    tool.set_context(RequestContext(channel="websocket", chat_id=conv, metadata={}))
+    f = tmp_path / "doc.md"
+    f.write_text("hello", encoding="utf-8")
+    result = await tool.execute(
+        content="see file",
+        channel="websocket",
+        chat_id=conv,
+        media=[str(f)],
+    )
+    assert result.startswith("Message sent")
+    assert sent[0].chat_id == conv
+
+
+@pytest.mark.asyncio
+async def test_message_tool_cli_context_may_target_other_ws_chat(tmp_path) -> None:
+    """Cron / CLI handlers keep non-websocket defaults; explicit websocket + uuid remains valid."""
+    sent: list[OutboundMessage] = []
+
+    async def _send(msg: OutboundMessage) -> None:
+        sent.append(msg)
+
+    tool = MessageTool(send_callback=_send)
+    from nanobot.agent.tools.context import RequestContext
+
+    target = "550e8400-e29b-41d4-a716-446655440000"
+    tool.set_context(RequestContext(channel="cli", chat_id="direct", metadata={}))
+    f = tmp_path / "doc.md"
+    f.write_text("hello", encoding="utf-8")
+    result = await tool.execute(
+        content="ping",
+        channel="websocket",
+        chat_id=target,
+        media=[str(f)],
+    )
+    assert result.startswith("Message sent")
+    assert sent[0].channel == "websocket"
+    assert sent[0].chat_id == target

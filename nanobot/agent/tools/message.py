@@ -24,6 +24,8 @@ from nanobot.config.paths import get_workspace_path
         ),
         chat_id=StringSchema(
             "Optional target chat/user ID for cross-channel/proactive delivery. "
+            "On WebSocket/WebUI turns: omit chat_id to use the server's conversation id "
+            "(never pass client_id values like anon-…). "
             "Do not set this to the current runtime chat for a normal reply."
         ),
         media=ArraySchema(
@@ -154,6 +156,20 @@ class MessageTool(Tool, ContextAware):
         default_channel = self._default_channel.get()
         default_chat_id = self._default_chat_id.get()
         channel = channel or default_channel
+        explicit_chat_id = chat_id
+        if (
+            default_channel == "websocket"
+            and channel == "websocket"
+            and explicit_chat_id is not None
+            and str(explicit_chat_id).strip() != ""
+            and str(explicit_chat_id).strip() != str(default_chat_id).strip()
+        ):
+            return (
+                "Error: chat_id does not match the active WebSocket conversation. "
+                "Omit chat_id (and usually channel) so delivery uses the current "
+                "conversation id from context — WebSocket client_id strings "
+                "(e.g. anon-…) are not chat ids."
+            )
         chat_id = chat_id or default_chat_id
         # Only inherit default message_id when targeting the same channel+chat.
         # Cross-chat sends must not carry the original message_id, because
