@@ -1104,8 +1104,6 @@ class FeishuChannel(BaseChannel):
             if not filename:
                 filename = fallback_filename
 
-            filename = self._safe_media_filename(filename, fallback_filename)
-
             # Feishu voice messages are opus in OGG container.
             # Use .ogg extension for better Whisper compatibility.
             if msg_type == "audio":
