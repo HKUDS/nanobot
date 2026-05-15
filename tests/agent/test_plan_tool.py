@@ -69,6 +69,14 @@ class TestCreate:
         result = await tool.execute(action="create", title="Plan B")
         assert "already exists" in result
 
+    async def test_create_title_only(self, tool):
+        set_session(tool)
+        result = await tool.execute(action="create", title="Minimal Plan")
+        assert "Plan created" in result
+        assert "Minimal Plan" in result
+        assert "Goal" not in result
+        assert "## Steps" not in result
+
 
 class TestUpdate:
     async def test_update_adds_notes(self, tool):
@@ -105,6 +113,25 @@ class TestUpdate:
         set_session(tool)
         result = await tool.execute(action="update", notes="No plan")
         assert "No active plan" in result
+
+    async def test_update_steps_and_notes_together(self, tool):
+        set_session(tool)
+        steps = '[{"text": "Step 1"}, {"text": "Step 2"}]'
+        await tool.execute(action="create", title="Plan A", steps=steps)
+        updated = '[{"status": "done"}, {"status": "active"}]'
+        result = await tool.execute(action="update", steps=updated, notes="Halfway there")
+        assert "- [x] Step 1" in result
+        assert "- [>] Step 2" in result
+        assert "Halfway there" in result
+
+    async def test_update_notes_no_duplicate_heading(self, tool):
+        set_session(tool)
+        await tool.execute(action="create", title="Plan A")
+        await tool.execute(action="update", notes="First note")
+        result = await tool.execute(action="update", notes="Second note")
+        assert result.count("## Notes") == 1
+        assert "First note" in result
+        assert "Second note" in result
 
 
 class TestShow:

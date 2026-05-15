@@ -6,7 +6,7 @@ import platform
 from contextlib import suppress
 from importlib.resources import files as pkg_files
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
@@ -32,7 +32,7 @@ class ContextBuilder:
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
-        self._runtime_context_providers: list[Any] = []
+        self._runtime_context_providers: list[Callable[[str | None], str | None]] = []
 
     def register_runtime_context_provider(self, provider: Any) -> None:
         """Register a callable(provider(session_key) -> str|None) to inject extra content into runtime context."""
@@ -163,10 +163,9 @@ class ContextBuilder:
         for provider in self._runtime_context_providers:
             extra = provider(session_key)
             if extra:
-                runtime_ctx = runtime_ctx.replace(
-                    self._RUNTIME_CONTEXT_END,
-                    f"\n\n{extra}\n{self._RUNTIME_CONTEXT_END}",
-                )
+                idx = runtime_ctx.rfind(self._RUNTIME_CONTEXT_END)
+                if idx != -1:
+                    runtime_ctx = runtime_ctx[:idx] + f"\n\n{extra}\n" + runtime_ctx[idx:]
 
         user_content = self._build_user_content(current_message, media)
 

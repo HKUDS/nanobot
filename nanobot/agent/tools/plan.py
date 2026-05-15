@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,6 +49,9 @@ _PLAN_PARAMETERS = tool_parameters_schema(
 
 
 _plan_session_key: ContextVar[str] = ContextVar("plan_session_key", default="")
+
+_PLAN_CACHE_TTL = 5.0
+_plan_cache: dict[str, tuple[float, str]] = {}
 
 
 def _safe_filename(key: str) -> str:
@@ -124,10 +128,12 @@ class PlanTool(Tool, ContextAware):
         tmp = path.with_suffix(".tmp")
         tmp.write_text(content, encoding="utf-8")
         tmp.replace(path)
+        _plan_cache.pop(path.name, None)
 
     def _delete_plan(self, path: Path) -> None:
         if path.exists():
             path.unlink()
+        _plan_cache.pop(path.name, None)
 
     # --- Parsing ---
 
@@ -259,9 +265,9 @@ class PlanTool(Tool, ContextAware):
 
         # Append notes
         if notes and notes.strip():
-            notes_heading = "\n## Notes"
-            if notes_heading not in lines:
-                lines.append(notes_heading)
+            if "## Notes" not in lines:
+                lines.append("")
+                lines.append("## Notes")
             lines.append(f"- [{_now_iso()}] {notes.strip()}")
 
         content = "\n".join(lines)
@@ -309,9 +315,12 @@ class PlanTool(Tool, ContextAware):
             # Treat as plain text lines
             items = []
             for line in str(steps_raw).split("\n"):
-                line = line.strip().lstrip("- ").strip()
-                if line:
-                    items.append({"text": line})
+                cleaned = line.strip()
+                if cleaned.startswith("- "):
+                    cleaned = cleaned[2:]
+                cleaned = cleaned.strip()
+                if cleaned:
+                    items.append({"text": cleaned})
 
         if not isinstance(items, list):
             return []
@@ -351,6 +360,14 @@ class PlanTool(Tool, ContextAware):
         """Load the active plan for context injection. Returns None if no plan exists."""
         plans_dir = Path(workspace) / "memory" / "plans"
         path = plans_dir / f"{_safe_filename(session_key)}.md"
+        cache_key = path.name
+        now = time.monotonic()
+        cached = _plan_cache.get(cache_key)
+        if cached and (now - cached[0]) < _PLAN_CACHE_TTL:
+            return cached[1]
         if not path.exists():
+            _plan_cache.pop(cache_key, None)
             return None
-        return path.read_text(encoding="utf-8")
+        content = path.read_text(encoding="utf-8")
+        _plan_cache[cache_key] = (now, content)
+        return content
