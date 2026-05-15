@@ -18,6 +18,7 @@ from nanobot.agent.tools.schema import (
     StringSchema,
     tool_parameters_schema,
 )
+from nanobot.utils.helpers import _write_text_atomic
 
 _PLAN_PARAMETERS = tool_parameters_schema(
     action=StringSchema(
@@ -65,7 +66,8 @@ _plan_session_key: ContextVar[str] = ContextVar("plan_session_key", default="")
 
 _PLAN_CACHE_TTL = 5.0
 _PLAN_CACHE_MAX = 256
-_plan_cache: OrderedDict[str, tuple[float, str]] = OrderedDict()
+_PLAN_MISS = object()
+_plan_cache: OrderedDict[str, tuple[float, Any]] = OrderedDict()
 
 _VALID_STATUSES = frozenset({"pending", "active", "done", "blocked"})
 
@@ -147,11 +149,7 @@ class PlanTool(Tool, ContextAware):
     def _write_plan(self, path: Path, plan: dict) -> None:
         self._plans_dir.mkdir(parents=True, exist_ok=True)
         plan["updated"] = _now_iso()
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(
-            json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-        tmp.replace(path)
+        _write_text_atomic(path, json.dumps(plan, indent=2, ensure_ascii=False))
         _plan_cache.pop(path.name, None)
 
     def _delete_plan(self, path: Path) -> None:
@@ -291,15 +289,12 @@ class PlanTool(Tool, ContextAware):
         now = _now_iso()
         plan["completed"] = now
 
-        # Archive
         archive_dir = self._plans_dir / "archive"
         archive_dir.mkdir(parents=True, exist_ok=True)
-        archive_path = archive_dir / path.name
-        tmp = archive_path.with_suffix(".tmp")
-        tmp.write_text(
-            json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8"
+        _write_text_atomic(
+            archive_dir / path.name,
+            json.dumps(plan, indent=2, ensure_ascii=False),
         )
-        tmp.replace(archive_path)
 
         self._delete_plan(path)
 
@@ -336,8 +331,6 @@ class PlanTool(Tool, ContextAware):
     @staticmethod
     def _evict_cache(now: float) -> None:
         """Evict expired entries; if still over limit, evict oldest."""
-        if len(_plan_cache) <= _PLAN_CACHE_MAX:
-            return
         expired = [k for k, (ts, _) in _plan_cache.items()
                    if (now - ts) >= _PLAN_CACHE_TTL]
         for k in expired:
@@ -350,14 +343,14 @@ class PlanTool(Tool, ContextAware):
         """Load the active plan for context injection. Returns rendered markdown or None."""
         plans_dir = Path(workspace) / "memory" / "plans"
         path = plans_dir / f"{_safe_filename(session_key)}.json"
-        cache_key = path.name
+        cache_key = str(path)
         now = time.monotonic()
         cached = _plan_cache.get(cache_key)
         if cached and (now - cached[0]) < _PLAN_CACHE_TTL:
-            return cached[1]
+            return cached[1] if cached[1] is not _PLAN_MISS else None
         PlanTool._evict_cache(now)
         if not path.exists():
-            _plan_cache.pop(cache_key, None)
+            _plan_cache[cache_key] = (now, _PLAN_MISS)
             return None
         try:
             plan = json.loads(path.read_text(encoding="utf-8"))

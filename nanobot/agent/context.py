@@ -34,8 +34,8 @@ class ContextBuilder:
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
         self._runtime_context_providers: list[Callable[[str | None], str | None]] = []
 
-    def register_runtime_context_provider(self, provider: Any) -> None:
-        """Register a callable(provider(session_key) -> str|None) to inject extra content into runtime context."""
+    def register_runtime_context_provider(self, provider: Callable[[str | None], str | None]) -> None:
+        """Register a callable(session_key -> str|None) to inject extra content into runtime context."""
         self._runtime_context_providers.append(provider)
 
     def inject_runtime_providers(

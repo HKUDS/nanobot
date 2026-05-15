@@ -303,12 +303,18 @@ class TestRuntimeContextProvider:
 
 
 class TestContextBuilderIntegration:
+    @staticmethod
+    def _make_plan_dir(tmp_path, plan_data):
+        plans_dir = tmp_path / "memory" / "plans"
+        plans_dir.mkdir(parents=True)
+        (plans_dir / f"{_safe_filename('cli:test')}.json").write_text(
+            json.dumps(plan_data), encoding="utf-8",
+        )
+        return plans_dir
+
     def test_plan_injected_into_runtime_context(self, tmp_path):
         from nanobot.agent.context import ContextBuilder
 
-        workspace = tmp_path
-        plans_dir = workspace / "memory" / "plans"
-        plans_dir.mkdir(parents=True)
         plan_data = {
             "title": "Test",
             "goal": "Do stuff",
@@ -317,13 +323,10 @@ class TestContextBuilderIntegration:
             "created": "2025-01-01T00:00:00Z",
             "updated": None,
         }
-        (plans_dir / f"{_safe_filename('cli:test')}.json").write_text(
-            json.dumps(plan_data), encoding="utf-8",
-        )
+        self._make_plan_dir(tmp_path, plan_data)
 
-        builder = ContextBuilder(workspace=workspace)
-        prompt = builder.build_system_prompt()
-        assert "Active Plan" not in prompt
+        builder = ContextBuilder(workspace=tmp_path)
+        assert "Active Plan" not in builder.build_system_prompt()
 
         def _provider(session_key):
             if session_key == "cli:test":
@@ -334,6 +337,8 @@ class TestContextBuilderIntegration:
         messages = builder.build_messages(
             history=[], current_message="hello", session_key="cli:test"
         )
+        # Plan in user message (runtime context), not system prompt
+        assert "Active Plan" not in messages[0]["content"]
         user_content = messages[-1]["content"]
         assert "Active Plan" in user_content
         assert "Test" in user_content
@@ -346,43 +351,7 @@ class TestContextBuilderIntegration:
         messages = builder.build_messages(
             history=[], current_message="hello", session_key="cli:no_plan"
         )
-        user_content = messages[-1]["content"]
-        assert "Active Plan" not in user_content
-
-    def test_plan_in_full_messages(self, tmp_path):
-        from nanobot.agent.context import ContextBuilder
-
-        workspace = tmp_path
-        plans_dir = workspace / "memory" / "plans"
-        plans_dir.mkdir(parents=True)
-        plan_data = {
-            "title": "Integration Test",
-            "goal": "Verify injection",
-            "steps": [],
-            "notes": [],
-            "created": "2025-01-01T00:00:00Z",
-            "updated": None,
-        }
-        (plans_dir / f"{_safe_filename('cli:test')}.json").write_text(
-            json.dumps(plan_data), encoding="utf-8",
-        )
-
-        builder = ContextBuilder(workspace=workspace)
-
-        def _provider(session_key):
-            if session_key == "cli:test":
-                return "# Active Plan\n\n" + PlanTool.render_markdown(plan_data)
-            return None
-
-        builder.register_runtime_context_provider(_provider)
-        messages = builder.build_messages(
-            history=[], current_message="hello", session_key="cli:test"
-        )
-        system = messages[0]["content"]
-        assert "Active Plan" not in system
-        user_content = messages[-1]["content"]
-        assert "Active Plan" in user_content
-        assert "Integration Test" in user_content
+        assert "Active Plan" not in messages[-1]["content"]
 
 
 class TestSpecialCharacters:
