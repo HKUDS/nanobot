@@ -6,7 +6,7 @@ from typing import Any, Awaitable, Callable
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
-from nanobot.agent.tools.filesystem import _resolve_path
+from nanobot.agent.tools.path_utils import resolve_workspace_path
 from nanobot.agent.tools.schema import ArraySchema, StringSchema, tool_parameters_schema
 from nanobot.bus.events import OutboundMessage
 from nanobot.config.paths import get_workspace_path
@@ -146,7 +146,7 @@ class MessageTool(Tool, ContextAware):
                 path = Path(p).expanduser()
                 resolved.append(p if path.is_absolute() else str(self._workspace / path))
             else:
-                resolved.append(str(_resolve_path(p, self._workspace, allowed_dir)))
+                resolved.append(str(resolve_workspace_path(p, self._workspace, allowed_dir)))
         return resolved
 
     async def execute(
