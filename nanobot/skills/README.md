@@ -9,10 +9,10 @@ Each skill is a directory containing a `SKILL.md` file with:
 - Markdown instructions for the agent
 
 When skills reference large local documentation or logs, prefer nanobot's built-in
-`grep` / `glob` tools to narrow the search space before loading full files.
+`grep` tool to narrow the search space before loading full files.
 Use `grep(output_mode="count")` / `files_with_matches` for broad searches first,
 use `head_limit` / `offset` to page through large result sets,
-and `glob(entry_type="dirs")` when discovering directory structure matters.
+and `grep(glob="*.md")` to filter by file name pattern.
 
 ## Attribution
 
