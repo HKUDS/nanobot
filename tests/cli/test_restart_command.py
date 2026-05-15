@@ -176,7 +176,7 @@ class TestRestartCommand:
         assert response is not None
         assert "Model: test-model" in response.content
         assert "Tokens: 0 in / 0 out" in response.content
-        assert "Context: 20k/65k (31% of input budget)" in response.content
+        assert "Context: 20k/262k (7% of input budget)" in response.content
         assert "Session: 3 messages" in response.content
         assert "Uptime: 2m 5s" in response.content
         assert "Tasks: 0 active" in response.content
@@ -240,7 +240,7 @@ class TestRestartCommand:
 
         assert response is not None
         assert "Tokens: 1200 in / 34 out" in response.content
-        assert "Context: 1k/65k (1% of input budget)" in response.content
+        assert "Context: 1k/262k (0% of input budget)" in response.content
         assert "Tasks: 0 active" in response.content
 
     @pytest.mark.asyncio

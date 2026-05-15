@@ -1050,6 +1050,7 @@ class WebSocketChannel(BaseChannel):
         media: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
+        is_dm: bool = False,
     ) -> None:
         meta = metadata or {}
         if meta.get("webui"):
@@ -1062,7 +1063,13 @@ class WebSocketChannel(BaseChannel):
                 user_obj["media_paths"] = list(media)
             self._try_append_webui_transcript(chat_id, user_obj)
         await super()._handle_message(
-            sender_id, chat_id, content, media, metadata, session_key,
+            sender_id,
+            chat_id,
+            content,
+            media,
+            metadata,
+            session_key,
+            is_dm,
         )
 
     def _augment_media_urls(self, payload: dict[str, Any]) -> None:
