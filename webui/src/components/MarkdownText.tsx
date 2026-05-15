@@ -10,7 +10,9 @@ interface MarkdownTextProps {
 const loadMarkdownRenderer = () => import("@/components/MarkdownTextRenderer");
 const LazyMarkdownRenderer = lazy(loadMarkdownRenderer);
 
-
+export function preloadMarkdownText(): void {
+  void loadMarkdownRenderer();
+}
 
 /**
  * Lightweight markdown renderer mirroring agent-chat-ui: GFM + math via

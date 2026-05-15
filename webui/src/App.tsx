@@ -157,8 +157,6 @@ export default function App() {
     return bootstrapWithSecret(saved);
   }, [bootstrapWithSecret]);
 
-
-
   if (state.status === "loading") {
     return (
       <div className="flex h-full w-full items-center justify-center">
