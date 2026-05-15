@@ -6,7 +6,7 @@ import platform
 from contextlib import suppress
 from importlib.resources import files as pkg_files
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.skills import SkillsLoader
@@ -32,6 +32,23 @@ class ContextBuilder:
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+        self._runtime_context_providers: list[Callable[[str | None], str | None]] = []
+
+    def register_runtime_context_provider(self, provider: Callable[[str | None], str | None]) -> None:
+        """Register a callable(session_key -> str|None) to inject extra content into runtime context."""
+        self._runtime_context_providers.append(provider)
+
+    def inject_runtime_providers(
+        self, runtime_ctx: str, session_key: str | None,
+    ) -> str:
+        """Inject registered runtime context provider content before the end marker."""
+        for provider in self._runtime_context_providers:
+            extra = provider(session_key)
+            if extra:
+                idx = runtime_ctx.rfind(self._RUNTIME_CONTEXT_END)
+                if idx != -1:
+                    runtime_ctx = runtime_ctx[:idx] + f"\n\n{extra}\n" + runtime_ctx[idx:]
+        return runtime_ctx
 
     def build_system_prompt(
         self,
@@ -147,9 +164,12 @@ class ContextBuilder:
         current_role: str = "user",
         sender_id: str | None = None,
         session_summary: str | None = None,
+        session_key: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone, sender_id=sender_id)
+        runtime_ctx = self.inject_runtime_providers(runtime_ctx, session_key)
+
         user_content = self._build_user_content(current_message, media)
 
         # Merge runtime context and user content into a single user message
@@ -159,7 +179,9 @@ class ContextBuilder:
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
         messages = [
-            {"role": "system", "content": self.build_system_prompt(skill_names, channel=channel, session_summary=session_summary)},
+            {"role": "system", "content": self.build_system_prompt(
+                skill_names, channel=channel, session_summary=session_summary,
+            )},
             *history,
         ]
         if messages[-1].get("role") == current_role:

@@ -288,6 +288,12 @@ class AgentLoop:
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
         self._register_default_tools()
+        # Discover tools that want to augment runtime context and register them.
+        # This keeps ContextBuilder decoupled from individual tools.
+        for name in self.tools.tool_names:
+            tool = self.tools.get(name)
+            if tool and hasattr(tool, "runtime_context_provider"):
+                self.context.register_runtime_context_provider(tool.runtime_context_provider())
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
         self.commands = CommandRouter()
@@ -588,6 +594,7 @@ class AgentLoop:
         session: Session,
         history: list[dict[str, Any]],
         pending_summary: str | None,
+        session_key: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the initial message list for the LLM turn."""
         return self.context.build_messages(
@@ -598,6 +605,7 @@ class AgentLoop:
             chat_id=self._runtime_chat_id(msg),
             sender_id=msg.sender_id,
             session_summary=pending_summary,
+            session_key=session_key,
         )
 
     async def _dispatch_command_inline(
@@ -718,6 +726,10 @@ class AgentLoop:
                     pending_msg.channel,
                     self._runtime_chat_id(pending_msg),
                     self.context.timezone,
+                    sender_id=pending_msg.sender_id,
+                )
+                runtime_ctx = self.context.inject_runtime_providers(
+                    runtime_ctx, session_key,
                 )
                 if isinstance(user_content, str):
                     merged: str | list[dict[str, Any]] = f"{runtime_ctx}\n\n{user_content}"
@@ -1081,6 +1093,7 @@ class AgentLoop:
             current_role=current_role,
             sender_id=msg.sender_id,
             session_summary=pending,
+            session_key=key,
         )
         final_content, _, all_msgs, stop_reason, _ = await self._run_agent_loop(
             messages, session=session, channel=channel, chat_id=chat_id,
@@ -1311,7 +1324,8 @@ class AgentLoop:
         ctx.history = ctx.session.get_history(**_hist_kwargs)
 
         ctx.initial_messages = self._build_initial_messages(
-            ctx.msg, ctx.session, ctx.history, ctx.pending_summary
+            ctx.msg, ctx.session, ctx.history, ctx.pending_summary,
+            session_key=ctx.session_key,
         )
         ctx.user_persisted_early = self._persist_user_message_early(
             ctx.msg, ctx.session
