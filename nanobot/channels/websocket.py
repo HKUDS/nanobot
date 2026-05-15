@@ -35,6 +35,7 @@ from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import builtin_command_palette
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.media_decode import (
     FileSizeExceeded,
@@ -43,6 +44,7 @@ from nanobot.utils.media_decode import (
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
 from nanobot.utils.webui_thread_disk import delete_webui_thread
 from nanobot.utils.webui_transcript import append_transcript_object, build_webui_thread_response
+from nanobot.utils.webui_turn_helpers import websocket_turn_wall_started_at
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
@@ -484,6 +486,36 @@ class WebSocketChannel(BaseChannel):
             if not subs:
                 self._subs.pop(cid, None)
         self._conn_default.pop(connection, None)
+
+    async def _maybe_push_active_goal_state(self, chat_id: str) -> None:
+        """Replay an active sustained goal from session metadata after *chat_id* is subscribed.
+
+        Goal metadata lives on the session JSONL and survives gateway restarts, but the
+        WebUI composer only learns about it from ``goal_state`` / ``turn_end`` frames.
+        Pushing here makes refresh + reconnect restore the strip without a new model turn.
+        """
+        if self._session_manager is None:
+            return
+        row = self._session_manager.read_session_file(f"websocket:{chat_id}")
+        meta = row.get("metadata", {}) if isinstance(row, dict) else {}
+        if not isinstance(meta, dict):
+            meta = {}
+        blob = goal_state_ws_blob(meta)
+        if not blob.get("active"):
+            return
+        await self.send_goal_state(chat_id, blob)
+
+    async def _maybe_push_turn_run_wall_clock(self, chat_id: str) -> None:
+        """Replay ``goal_status: running`` when a turn is still active (same-process refresh)."""
+        t0 = websocket_turn_wall_started_at(chat_id)
+        if t0 is None:
+            return
+        await self.send_goal_status(chat_id, "running", started_at=t0)
+
+    async def _hydrate_webui_after_subscribe(self, chat_id: str) -> None:
+        """Restore composer strips after subscribe (goal + run timer wall clock)."""
+        await self._maybe_push_active_goal_state(chat_id)
+        await self._maybe_push_turn_run_wall_clock(chat_id)
 
     async def _send_event(self, connection: Any, event: str, **fields: Any) -> None:
         """Send a control event (attached, error, ...) to a single connection."""
@@ -1304,6 +1336,7 @@ class WebSocketChannel(BaseChannel):
             # Register only after ready is successfully sent to avoid out-of-order sends
             self._conn_default[connection] = default_chat_id
             self._attach(connection, default_chat_id)
+            await self._hydrate_webui_after_subscribe(default_chat_id)
 
             async for raw in connection:
                 if isinstance(raw, bytes):
@@ -1412,6 +1445,7 @@ class WebSocketChannel(BaseChannel):
             new_id = str(uuid.uuid4())
             self._attach(connection, new_id)
             await self._send_event(connection, "attached", chat_id=new_id)
+            await self._hydrate_webui_after_subscribe(new_id)
             return
         if t == "attach":
             cid = envelope.get("chat_id")
@@ -1420,6 +1454,7 @@ class WebSocketChannel(BaseChannel):
                 return
             self._attach(connection, cid)
             await self._send_event(connection, "attached", chat_id=cid)
+            await self._hydrate_webui_after_subscribe(cid)
             return
         if t == "message":
             cid = envelope.get("chat_id")
@@ -1455,6 +1490,7 @@ class WebSocketChannel(BaseChannel):
 
             # Auto-attach on first use so clients can one-shot without a separate attach.
             self._attach(connection, cid)
+            await self._hydrate_webui_after_subscribe(cid)
             metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
             if envelope.get("webui") is True:
                 metadata["webui"] = True

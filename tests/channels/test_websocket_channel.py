@@ -650,6 +650,96 @@ async def test_send_goal_state_emits_blob_per_chat() -> None:
 
 
 @pytest.mark.asyncio
+async def test_maybe_push_active_goal_state_noop_without_session_manager() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+    channel._session_manager = None
+    await channel._maybe_push_active_goal_state("chat-1")
+    mock_ws.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_maybe_push_active_goal_state_skips_when_no_goal_on_disk() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    sm = MagicMock()
+    sm.read_session_file.return_value = None
+    channel._session_manager = sm
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+    await channel._maybe_push_active_goal_state("chat-1")
+    mock_ws.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_maybe_push_active_goal_state_notifies_when_goal_active_on_disk() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    sm = MagicMock()
+    sm.read_session_file.return_value = {
+        "metadata": {
+            "goal_state": {
+                "status": "active",
+                "objective": "finish docs",
+                "ui_summary": "Docs",
+            },
+        },
+        "messages": [],
+    }
+    channel._session_manager = sm
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+    await channel._maybe_push_active_goal_state("chat-1")
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body["event"] == "goal_state"
+    assert body["chat_id"] == "chat-1"
+    assert body["goal_state"]["active"] is True
+    assert body["goal_state"]["objective"] == "finish docs"
+    assert body["goal_state"]["ui_summary"] == "Docs"
+
+
+@pytest.mark.asyncio
+async def test_maybe_push_turn_run_wall_clock_skips_when_no_active_turn() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+    from nanobot.utils import webui_turn_helpers as wth
+
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    await channel._maybe_push_turn_run_wall_clock("chat-1")
+    mock_ws.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_maybe_push_turn_run_wall_clock_replays_running() -> None:
+    bus = MagicMock()
+    channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    mock_ws = AsyncMock()
+    channel._attach(mock_ws, "chat-1")
+    from nanobot.utils import webui_turn_helpers as wth
+
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    try:
+        wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-1"] = 1_700_000_000.0
+        await channel._maybe_push_turn_run_wall_clock("chat-1")
+    finally:
+        wth._WEBSOCKET_TURN_WALL_STARTED_AT.pop("chat-1", None)
+
+    mock_ws.send.assert_awaited_once()
+    body = json.loads(mock_ws.send.await_args.args[0])
+    assert body == {
+        "event": "goal_status",
+        "chat_id": "chat-1",
+        "status": "running",
+        "started_at": 1_700_000_000.0,
+    }
+
+
+@pytest.mark.asyncio
 async def test_send_session_updated_emits_session_updated_event() -> None:
     bus = MagicMock()
     channel = WebSocketChannel({"enabled": True, "allowFrom": ["*"]}, bus)
