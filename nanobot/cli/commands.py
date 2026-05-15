@@ -829,9 +829,21 @@ def _run_gateway(
 
     cron.on_job = on_cron_job
 
+    def _webui_runtime_model_name() -> str | None:
+        model = getattr(agent, "model", None)
+        if isinstance(model, str):
+            stripped = model.strip()
+            return stripped or None
+        return None
+
     # Create channel manager (forwards SessionManager so the WebSocket channel
     # can serve the embedded webui's REST surface).
-    channels = ChannelManager(config, bus, session_manager=session_manager)
+    channels = ChannelManager(
+        config,
+        bus,
+        session_manager=session_manager,
+        webui_runtime_model_name=_webui_runtime_model_name,
+    )
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""

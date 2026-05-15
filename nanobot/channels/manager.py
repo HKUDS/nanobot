@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -55,10 +56,12 @@ class ChannelManager:
         bus: MessageBus,
         *,
         session_manager: "SessionManager | None" = None,
+        webui_runtime_model_name: Callable[[], str | None] | None = None,
     ):
         self.config = config
         self.bus = bus
         self._session_manager = session_manager
+        self._webui_runtime_model_name = webui_runtime_model_name
         self.channels: dict[str, BaseChannel] = {}
         self._dispatch_task: asyncio.Task | None = None
         self._origin_reply_fingerprints: dict[tuple[str, str, str], str] = {}
@@ -89,11 +92,14 @@ class ChannelManager:
                 kwargs: dict[str, Any] = {}
                 # Only the WebSocket channel currently hosts the embedded webui
                 # surface; other channels stay oblivious to these knobs.
-                if cls.name == "websocket" and self._session_manager is not None:
-                    kwargs["session_manager"] = self._session_manager
-                    static_path = _default_webui_dist()
-                    if static_path is not None:
-                        kwargs["static_dist_path"] = static_path
+                if cls.name == "websocket":
+                    if self._session_manager is not None:
+                        kwargs["session_manager"] = self._session_manager
+                        static_path = _default_webui_dist()
+                        if static_path is not None:
+                            kwargs["static_dist_path"] = static_path
+                    if self._webui_runtime_model_name is not None:
+                        kwargs["runtime_model_name"] = self._webui_runtime_model_name
                 channel = cls(section, self.bus, **kwargs)
                 channel.transcription_provider = transcription_provider
                 channel.transcription_api_key = transcription_key

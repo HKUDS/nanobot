@@ -17,6 +17,7 @@ import shutil
 import ssl
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import parse_qs, unquote, urlparse
@@ -157,7 +158,7 @@ def publish_runtime_model_update(
     model: str,
     model_preset: str | None,
 ) -> None:
-    """Publish a WebUI runtime-model update onto the outbound bus."""
+    """Enqueue a runtime model snapshot for websocket subscribers (fan-out in-channel)."""
     bus.outbound.put_nowait(OutboundMessage(
         channel="websocket",
         chat_id="*",
@@ -170,16 +171,33 @@ def publish_runtime_model_update(
     ))
 
 
-def _read_webui_model_name() -> str | None:
-    """Return the resolved startup model for readonly WebUI display."""
+def _default_model_name_from_config() -> str | None:
+    """Resolved model string from on-disk config (bootstrap fallback)."""
     try:
         from nanobot.config.loader import load_config
 
         model = load_config().resolve_preset().model.strip()
         return model or None
     except Exception as e:
-        logger.debug("webui bootstrap could not load model name: {}", e)
+        logger.debug("bootstrap model_name could not load from config: {}", e)
         return None
+
+
+def _resolve_bootstrap_model_name(
+    runtime_name: Callable[[], str | None] | None,
+) -> str | None:
+    """Prefer an in-process resolver (e.g. AgentLoop); else config-derived default."""
+    if runtime_name is not None:
+        try:
+            raw = runtime_name()
+        except Exception as e:
+            logger.debug("bootstrap runtime model resolver failed: {}", e)
+        else:
+            if isinstance(raw, str):
+                stripped = raw.strip()
+                if stripped:
+                    return stripped
+    return _default_model_name_from_config()
 
 
 def _parse_request_path(path_with_query: str) -> tuple[str, dict[str, list[str]]]:
@@ -441,6 +459,7 @@ class WebSocketChannel(BaseChannel):
         *,
         session_manager: "SessionManager | None" = None,
         static_dist_path: Path | None = None,
+        runtime_model_name: Callable[[], str | None] | None = None,
     ):
         if isinstance(config, dict):
             config = WebSocketConfig.model_validate(config)
@@ -454,7 +473,7 @@ class WebSocketChannel(BaseChannel):
         self._conn_default: dict[Any, str] = {}
         # Single-use tokens consumed at WebSocket handshake.
         self._issued_tokens: dict[str, float] = {}
-        # Multi-use tokens for the embedded webui's REST surface; checked but not consumed.
+        # Multi-use tokens for HTTP routes served beside WS; checked but not consumed.
         self._api_tokens: dict[str, float] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
@@ -462,6 +481,7 @@ class WebSocketChannel(BaseChannel):
         self._static_dist_path: Path | None = (
             static_dist_path.resolve() if static_dist_path is not None else None
         )
+        self._runtime_model_name = runtime_model_name
         # Process-local secret used to HMAC-sign media URLs. The signed URL is
         # the capability — anyone who holds a valid URL can fetch that one
         # file, nothing else. The secret regenerates on restart so links
@@ -490,8 +510,8 @@ class WebSocketChannel(BaseChannel):
     async def _maybe_push_active_goal_state(self, chat_id: str) -> None:
         """Replay an active sustained goal from session metadata after *chat_id* is subscribed.
 
-        Goal metadata lives on the session JSONL and survives gateway restarts, but the
-        WebUI composer only learns about it from ``goal_state`` / ``turn_end`` frames.
+        Goal metadata lives on the session JSONL and survives gateway restarts, but
+        connected clients normally see it via ``goal_state`` / ``turn_end`` frames.
         Pushing here makes refresh + reconnect restore the strip without a new model turn.
         """
         if self._session_manager is None:
@@ -512,8 +532,8 @@ class WebSocketChannel(BaseChannel):
             return
         await self.send_goal_status(chat_id, "running", started_at=t0)
 
-    async def _hydrate_webui_after_subscribe(self, chat_id: str) -> None:
-        """Restore composer strips after subscribe (goal + run timer wall clock)."""
+    async def _hydrate_after_subscribe(self, chat_id: str) -> None:
+        """Replay goal/run strip state after subscribe (same-process refresh)."""
         await self._maybe_push_active_goal_state(chat_id)
         await self._maybe_push_turn_run_wall_clock(chat_id)
 
@@ -610,11 +630,11 @@ class WebSocketChannel(BaseChannel):
             if got == issue_expected:
                 return self._handle_token_issue_http(connection, request)
 
-        # 2. WebUI bootstrap: mints tokens for the embedded UI.
+        # 2. Bootstrap (`/webui/bootstrap`): mint WS/API tokens + shared session metadata.
         if got == "/webui/bootstrap":
-            return self._handle_webui_bootstrap(connection, request)
+            return self._handle_bootstrap(connection, request)
 
-        # 3. REST surface for the embedded UI.
+        # 3. REST handlers co-located with this channel (sessions, settings, …).
         if got == "/api/sessions":
             return self._handle_sessions_list(request)
 
@@ -698,7 +718,7 @@ class WebSocketChannel(BaseChannel):
             if now > expiry:
                 self._api_tokens.pop(token_key, None)
 
-    def _handle_webui_bootstrap(self, connection: Any, request: Any) -> Response:
+    def _handle_bootstrap(self, connection: Any, request: Any) -> Response:
         # When a secret is configured (token_issue_secret or static token),
         # validate it regardless of source IP.  This secures deployments
         # behind a reverse proxy where all connections appear as localhost.
@@ -708,7 +728,7 @@ class WebSocketChannel(BaseChannel):
                 return _http_error(401, "Unauthorized")
         elif not _is_localhost(connection):
             # No secret configured: only allow localhost (local dev mode).
-            return _http_error(403, "webui bootstrap is localhost-only")
+            return _http_error(403, "bootstrap is localhost-only")
         # Cap outstanding tokens to avoid runaway growth from a misbehaving client.
         self._purge_expired_issued_tokens()
         self._purge_expired_api_tokens()
@@ -732,7 +752,7 @@ class WebSocketChannel(BaseChannel):
                 "token": token,
                 "ws_path": self._expected_path(),
                 "expires_in": self.config.token_ttl_s,
-                "model_name": _read_webui_model_name(),
+                "model_name": _resolve_bootstrap_model_name(self._runtime_model_name),
             }
         )
 
@@ -742,10 +762,8 @@ class WebSocketChannel(BaseChannel):
         if self._session_manager is None:
             return _http_error(503, "session manager unavailable")
         sessions = self._session_manager.list_sessions()
-        # The webui is only meaningful for websocket-channel chats — CLI /
-        # Slack / Lark / Discord sessions can't be resumed from the browser,
-        # so leaking them into the sidebar is just noise. Filter to the
-        # ``websocket:`` prefix and strip absolute paths on the way out.
+        # Sidebar/chat listing for WS-backed sessions only — CLI / Slack / etc.
+        # keys are not intended for resume over this HTTP surface.
         cleaned = [
             {k: v for k, v in s.items() if k != "path"}
             for s in sessions
@@ -957,8 +975,8 @@ class WebSocketChannel(BaseChannel):
         return _http_json_response(self._settings_payload(requires_restart=False))
 
     @staticmethod
-    def _is_webui_session_key(key: str) -> bool:
-        """Return True when *key* belongs to the webui's websocket-only surface."""
+    def _is_websocket_channel_session_key(key: str) -> bool:
+        """True when *key* is a ``websocket:…`` session exposed on this HTTP surface."""
         return key.startswith("websocket:")
 
     def _handle_session_messages(self, request: WsRequest, key: str) -> Response:
@@ -969,10 +987,9 @@ class WebSocketChannel(BaseChannel):
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        # The embedded webui only understands websocket-channel sessions. Keep
-        # its read surface aligned with ``/api/sessions`` instead of letting a
-        # caller probe arbitrary CLI / Slack / Lark history by handcrafted URL.
-        if not self._is_webui_session_key(decoded_key):
+        # Only ``websocket:…`` sessions are listed/served here — same boundary as
+        # ``/api/sessions``. Block handcrafted URLs from probing CLI / Slack / etc.
+        if not self._is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
         data = self._session_manager.read_session_file(decoded_key)
         if data is None:
@@ -993,7 +1010,7 @@ class WebSocketChannel(BaseChannel):
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        if not self._is_webui_session_key(decoded_key):
+        if not self._is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
         data = build_webui_thread_response(
             decoded_key,
@@ -1086,7 +1103,7 @@ class WebSocketChannel(BaseChannel):
         The URL is self-authenticating: the signature binds the payload to
         this process's ``_media_secret``, so only paths we chose to sign can
         be fetched. The returned path is relative to the server origin; the
-        client joins it against the existing webui base.
+        client joins it against this server's HTTP origin (same host as WS).
         """
         try:
             media_root = get_media_dir().resolve()
@@ -1182,10 +1199,9 @@ class WebSocketChannel(BaseChannel):
         decoded_key = _decode_api_key(key)
         if decoded_key is None:
             return _http_error(400, "invalid session key")
-        # Same boundary as ``_handle_session_messages``: the webui may only
-        # mutate websocket sessions, and deletion really does unlink the local
-        # JSONL, so keep the blast radius narrow and explicit.
-        if not self._is_webui_session_key(decoded_key):
+        # Same boundary as ``_handle_session_messages``: mutations apply only to
+        # websocket-channel sessions; deletion unlinks local JSONL — keep scope narrow.
+        if not self._is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
         deleted = self._session_manager.delete_session(decoded_key)
         delete_webui_thread(decoded_key)
@@ -1336,7 +1352,7 @@ class WebSocketChannel(BaseChannel):
             # Register only after ready is successfully sent to avoid out-of-order sends
             self._conn_default[connection] = default_chat_id
             self._attach(connection, default_chat_id)
-            await self._hydrate_webui_after_subscribe(default_chat_id)
+            await self._hydrate_after_subscribe(default_chat_id)
 
             async for raw in connection:
                 if isinstance(raw, bytes):
@@ -1445,7 +1461,7 @@ class WebSocketChannel(BaseChannel):
             new_id = str(uuid.uuid4())
             self._attach(connection, new_id)
             await self._send_event(connection, "attached", chat_id=new_id)
-            await self._hydrate_webui_after_subscribe(new_id)
+            await self._hydrate_after_subscribe(new_id)
             return
         if t == "attach":
             cid = envelope.get("chat_id")
@@ -1454,7 +1470,7 @@ class WebSocketChannel(BaseChannel):
                 return
             self._attach(connection, cid)
             await self._send_event(connection, "attached", chat_id=cid)
-            await self._hydrate_webui_after_subscribe(cid)
+            await self._hydrate_after_subscribe(cid)
             return
         if t == "message":
             cid = envelope.get("chat_id")
@@ -1490,7 +1506,7 @@ class WebSocketChannel(BaseChannel):
 
             # Auto-attach on first use so clients can one-shot without a separate attach.
             self._attach(connection, cid)
-            await self._hydrate_webui_after_subscribe(cid)
+            await self._hydrate_after_subscribe(cid)
             metadata: dict[str, Any] = {"remote": getattr(connection, "remote_address", None)}
             if envelope.get("webui") is True:
                 metadata["webui"] = True
@@ -1631,7 +1647,7 @@ class WebSocketChannel(BaseChannel):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Push one chunk of model reasoning. Mirrors ``send_delta`` shape so
-        WebUI receives a stream that opens, updates in place, and closes —
+        clients receive a stream that opens, updates in place, and closes —
         rendered above the active assistant bubble with a shimmer header
         until the matching ``reasoning_end`` arrives.
         """
@@ -1737,7 +1753,7 @@ class WebSocketChannel(BaseChannel):
         *,
         started_at: float | None = None,
     ) -> None:
-        """Notify clients that a turn started or finished (WebUI run timer)."""
+        """Notify subscribed clients that a turn started or finished (wall-clock hint)."""
         conns = list(self._subs.get(chat_id, ()))
         if not conns:
             return
@@ -1768,7 +1784,7 @@ class WebSocketChannel(BaseChannel):
         model_name: Any,
         model_preset: Any = None,
     ) -> None:
-        """Broadcast runtime model changes to all active WebUI clients."""
+        """Broadcast runtime model changes to every open websocket connection."""
         conns = list(self._conn_chats)
         if not conns or not isinstance(model_name, str) or not model_name.strip():
             return
