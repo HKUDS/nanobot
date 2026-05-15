@@ -718,9 +718,9 @@ class AgentLoop:
                     self.context.timezone,
                 )
                 if isinstance(user_content, str):
-                    merged: str | list[dict[str, Any]] = f"{runtime_ctx}\n\n{user_content}"
+                    merged: str | list[dict[str, Any]] = f"{user_content}\n\n{runtime_ctx}"
                 else:
-                    merged = [{"type": "text", "text": runtime_ctx}] + user_content
+                    merged = user_content + [{"type": "text", "text": runtime_ctx}]
                 return {"role": "user", "content": merged}
 
             items: list[dict[str, Any]] = []
@@ -1427,24 +1427,14 @@ class AgentLoop:
                         continue
                     entry["content"] = filtered
             elif role == "user":
-                if isinstance(content, str) and content.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
-                    # Strip the entire runtime-context block (including any session summary).
-                    # The block is bounded by _RUNTIME_CONTEXT_TAG and _RUNTIME_CONTEXT_END.
-                    end_marker = ContextBuilder._RUNTIME_CONTEXT_END
-                    end_pos = content.find(end_marker)
-                    if end_pos >= 0:
-                        after = content[end_pos + len(end_marker):].lstrip("\n")
-                        if after:
-                            entry["content"] = after
-                        else:
-                            continue
+                if isinstance(content, str) and ContextBuilder._RUNTIME_CONTEXT_TAG in content:
+                    # Strip the runtime-context block appended at the end.
+                    tag_pos = content.find(ContextBuilder._RUNTIME_CONTEXT_TAG)
+                    before = content[:tag_pos].rstrip("\n ")
+                    if before:
+                        entry["content"] = before
                     else:
-                        # Fallback: no end marker found, strip the tag prefix
-                        after_tag = content[len(ContextBuilder._RUNTIME_CONTEXT_TAG):].lstrip("\n")
-                        if after_tag.strip():
-                            entry["content"] = after_tag
-                        else:
-                            continue
+                        continue
                 if isinstance(content, list):
                     filtered = self._sanitize_persisted_blocks(content, drop_runtime=True)
                     if not filtered:
