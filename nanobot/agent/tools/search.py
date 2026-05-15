@@ -109,7 +109,6 @@ class _SearchTool(_FsTool):
                 yield current / filename
 
 
-
 class GrepTool(_SearchTool):
     """Search file contents using a regex-like pattern."""
     _scopes = {"core", "subagent"}
