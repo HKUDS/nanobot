@@ -82,6 +82,8 @@ def generate_code(
     with _LOCK:
         data = _load()
         _gc_pending(data)
+        # Collision probability is negligible (~1e-12 with 20 pending codes),
+        # so we skip an existence check for simplicity.
         raw = "".join(secrets.choice(_ALPHABET) for _ in range(_CODE_LENGTH))
         code = f"{raw[:4]}-{raw[4:]}"
 

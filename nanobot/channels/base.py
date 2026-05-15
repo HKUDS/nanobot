@@ -202,6 +202,7 @@ class BaseChannel(ABC):
             allow_list = getattr(self.config, "allow_from", []) or []
         if "*" in allow_list:
             return True
+        # allowFrom entries are opaque tokens — must match exactly.
         if str(sender_id) in allow_list:
             return True
         if is_approved(self.name, str(sender_id)):
