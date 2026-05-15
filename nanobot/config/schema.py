@@ -527,8 +527,30 @@ class Config(BaseSettings):
         *,
         preset: ModelPresetConfig | None = None,
     ) -> str | None:
-        """Get API key for the given model. Falls back to first available key."""
+        """Get API key for the given model. Falls back to first available key.
+
+        Env vars take precedence over config JSON values — this allows Railway
+        env vars to override stale keys embedded in NANOBOT_CONFIG_JSON.
+        """
+        import os
+
         p = self.get_provider(model, preset=preset)
+        if not p:
+            return None
+
+        # Env var override: use the registry's env_key for the matched provider.
+        # This lets Railway env vars (MINIMAX_API_KEY, etc.) supersede config JSON
+        # values without having to update the JSON itself.
+        if model:
+            from nanobot.providers.registry import find_by_name
+            provider_name = self.get_provider_name(model)
+            if provider_name:
+                spec = find_by_name(provider_name)
+                if spec and spec.env_key:
+                    env_val = os.environ.get(spec.env_key, "").strip()
+                    if env_val:
+                        return env_val
+
         return p.api_key if p else None
 
     def get_api_base(
