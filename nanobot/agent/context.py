@@ -32,13 +32,17 @@ class ContextBuilder:
         self.timezone = timezone
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace, disabled_skills=set(disabled_skills) if disabled_skills else None)
+        self._runtime_context_providers: list[Any] = []
+
+    def register_runtime_context_provider(self, provider: Any) -> None:
+        """Register a callable(provider(session_key) -> str|None) to inject extra content into runtime context."""
+        self._runtime_context_providers.append(provider)
 
     def build_system_prompt(
         self,
         skill_names: list[str] | None = None,
         channel: str | None = None,
         session_summary: str | None = None,
-        session_key: str | None = None,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity(channel=channel)]
@@ -46,13 +50,6 @@ class ContextBuilder:
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
             parts.append(bootstrap)
-
-        # Inject active plan into system prompt so it survives compaction
-        if session_key:
-            from nanobot.agent.tools.plan import PlanTool
-            plan = PlanTool.load_active_plan(str(self.workspace), session_key)
-            if plan:
-                parts.append(f"# Active Plan\n\n{plan}")
 
         memory = self.memory.get_memory_context()
         if memory and not self._is_template_content(self.memory.read_memory(), "memory/MEMORY.md"):
@@ -159,6 +156,18 @@ class ContextBuilder:
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone, sender_id=sender_id)
+
+        # Allow registered tools to inject extra content into runtime context.
+        # This keeps the system prompt stable for KV cache while making
+        # per-session state (e.g. active plan) visible every turn.
+        for provider in self._runtime_context_providers:
+            extra = provider(session_key)
+            if extra:
+                runtime_ctx = runtime_ctx.replace(
+                    self._RUNTIME_CONTEXT_END,
+                    f"\n\n{extra}\n{self._RUNTIME_CONTEXT_END}",
+                )
+
         user_content = self._build_user_content(current_message, media)
 
         # Merge runtime context and user content into a single user message
@@ -170,7 +179,6 @@ class ContextBuilder:
         messages = [
             {"role": "system", "content": self.build_system_prompt(
                 skill_names, channel=channel, session_summary=session_summary,
-                session_key=session_key,
             )},
             *history,
         ]

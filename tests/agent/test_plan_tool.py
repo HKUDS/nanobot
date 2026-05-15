@@ -176,8 +176,29 @@ class TestSchema:
         assert len(tool.description) > 10
 
 
+class TestRuntimeContextProvider:
+    async def test_provider_returns_plan_when_exists(self, tool):
+        set_session(tool)
+        await tool.execute(action="create", title="Test Plan", goal="Do things")
+        provider = tool.runtime_context_provider()
+        result = provider("cli:test")
+        assert result is not None
+        assert "Test Plan" in result
+        assert "Do things" in result
+
+    def test_provider_returns_none_when_no_plan(self, tool):
+        provider = tool.runtime_context_provider()
+        result = provider("nonexistent")
+        assert result is None
+
+    def test_provider_returns_none_for_empty_session_key(self, tool):
+        provider = tool.runtime_context_provider()
+        result = provider(None)
+        assert result is None
+
+
 class TestContextBuilderIntegration:
-    def test_plan_injected_into_system_prompt(self, tmp_path):
+    def test_plan_injected_into_runtime_context(self, tmp_path):
         from nanobot.agent.context import ContextBuilder
 
         workspace = tmp_path
@@ -189,17 +210,35 @@ class TestContextBuilderIntegration:
         )
 
         builder = ContextBuilder(workspace=workspace)
-        prompt = builder.build_system_prompt(session_key="cli:test")
-        assert "Active Plan" in prompt
-        assert "Test" in prompt
-        assert "Step 1" in prompt
+        # System prompt must NOT contain the plan (KV cache stability)
+        prompt = builder.build_system_prompt()
+        assert "Active Plan" not in prompt
+
+        # Register a mock provider to simulate PlanTool integration
+        def _provider(session_key):
+            if session_key == "cli:test":
+                plan_path = plans_dir / f"{_safe_filename('cli:test')}.md"
+                return f"# Active Plan\n\n{plan_path.read_text(encoding='utf-8')}"
+            return None
+
+        builder.register_runtime_context_provider(_provider)
+        messages = builder.build_messages(
+            history=[], current_message="hello", session_key="cli:test"
+        )
+        user_content = messages[-1]["content"]
+        assert "Active Plan" in user_content
+        assert "Test" in user_content
+        assert "Step 1" in user_content
 
     def test_no_plan_no_injection(self, tmp_path):
         from nanobot.agent.context import ContextBuilder
 
         builder = ContextBuilder(workspace=tmp_path)
-        prompt = builder.build_system_prompt(session_key="cli:no_plan")
-        assert "Active Plan" not in prompt
+        messages = builder.build_messages(
+            history=[], current_message="hello", session_key="cli:no_plan"
+        )
+        user_content = messages[-1]["content"]
+        assert "Active Plan" not in user_content
 
     def test_plan_in_full_messages(self, tmp_path):
         from nanobot.agent.context import ContextBuilder
@@ -212,9 +251,20 @@ class TestContextBuilderIntegration:
         )
 
         builder = ContextBuilder(workspace=tmp_path)
+
+        def _provider(session_key):
+            if session_key == "cli:test":
+                plan_path = plans_dir / f"{_safe_filename('cli:test')}.md"
+                return f"# Active Plan\n\n{plan_path.read_text(encoding='utf-8')}"
+            return None
+
+        builder.register_runtime_context_provider(_provider)
         messages = builder.build_messages(
             history=[], current_message="hello", session_key="cli:test"
         )
+        # Plan must be in user message (runtime context), not system prompt
         system = messages[0]["content"]
-        assert "Active Plan" in system
-        assert "Integration Test" in system
+        assert "Active Plan" not in system
+        user_content = messages[-1]["content"]
+        assert "Active Plan" in user_content
+        assert "Integration Test" in user_content

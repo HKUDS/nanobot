@@ -7,7 +7,7 @@ import re
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.context import ContextAware, RequestContext
@@ -98,6 +98,17 @@ class PlanTool(Tool, ContextAware):
             "When updating steps, existing steps are merged by index (you can modify "
             "status/text or append new steps, but cannot delete or reorder existing ones)."
         )
+
+    def runtime_context_provider(self) -> Callable[[str | None], str | None]:
+        """Return a provider that injects the active plan into runtime context."""
+        def _provider(session_key: str | None) -> str | None:
+            if not session_key:
+                return None
+            plan = PlanTool.load_active_plan(self._workspace, session_key)
+            if plan:
+                return f"# Active Plan\n\n{plan}"
+            return None
+        return _provider
 
     def _plan_path(self, session_key: str | None = None) -> Path:
         key = session_key or _plan_session_key.get()

@@ -288,6 +288,12 @@ class AgentLoop:
         if model_preset:
             self.set_model_preset(model_preset, publish_update=False)
         self._register_default_tools()
+        # Discover tools that want to augment runtime context and register them.
+        # This keeps ContextBuilder decoupled from individual tools.
+        for name in self.tools.tool_names:
+            tool = self.tools.get(name)
+            if tool and hasattr(tool, "runtime_context_provider"):
+                self.context.register_runtime_context_provider(tool.runtime_context_provider())
         self._runtime_vars: dict[str, Any] = {}
         self._current_iteration: int = 0
         self.commands = CommandRouter()
