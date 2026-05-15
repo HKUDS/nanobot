@@ -1,6 +1,7 @@
 """Plan tool for task decomposition and progress tracking."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from contextvars import ContextVar
@@ -46,6 +47,9 @@ _PLAN_PARAMETERS = tool_parameters_schema(
 )
 
 
+_plan_session_key: ContextVar[str] = ContextVar("plan_session_key", default="")
+
+
 def _safe_filename(key: str) -> str:
     out = []
     for ch in key:
@@ -53,8 +57,11 @@ def _safe_filename(key: str) -> str:
             out.append(ch)
         else:
             out.append("_")
-    name = "".join(out).strip("_")[:120]
-    return name or "default"
+    name = "".join(out).strip("_")[:100]
+    short_hash = hashlib.sha256(key.encode()).hexdigest()[:8]
+    if name:
+        return f"{name}_{short_hash}"
+    return f"default_{short_hash}"
 
 
 def _now_iso() -> str:
@@ -70,14 +77,13 @@ class PlanTool(Tool, ContextAware):
     def __init__(self, workspace: str):
         self._workspace = workspace
         self._plans_dir = Path(workspace) / "memory" / "plans"
-        self._session_key: ContextVar[str] = ContextVar("plan_session_key", default="")
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
         return cls(workspace=ctx.workspace)
 
     def set_context(self, ctx: RequestContext) -> None:
-        self._session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
+        _plan_session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
 
     @property
     def name(self) -> str:
@@ -88,11 +94,13 @@ class PlanTool(Tool, ContextAware):
         return (
             "Create and manage a task plan with steps and progress tracking. "
             "Use before tackling complex, multi-step tasks. "
-            "The plan persists across turns and is visible in your context."
+            "The plan persists across turns and is visible in your context. "
+            "When updating steps, existing steps are merged by index (you can modify "
+            "status/text or append new steps, but cannot delete or reorder existing ones)."
         )
 
     def _plan_path(self, session_key: str | None = None) -> Path:
-        key = session_key or self._session_key.get()
+        key = session_key or _plan_session_key.get()
         return self._plans_dir / f"{_safe_filename(key)}.md"
 
     def _read_plan(self, path: Path) -> str | None:
@@ -102,7 +110,9 @@ class PlanTool(Tool, ContextAware):
 
     def _write_plan(self, path: Path, content: str) -> None:
         self._plans_dir.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(path)
 
     def _delete_plan(self, path: Path) -> None:
         if path.exists():
@@ -238,7 +248,9 @@ class PlanTool(Tool, ContextAware):
 
         # Append notes
         if notes and notes.strip():
-            lines.append("\n## Notes")
+            notes_heading = "\n## Notes"
+            if notes_heading not in lines:
+                lines.append(notes_heading)
             lines.append(f"- [{_now_iso()}] {notes.strip()}")
 
         content = "\n".join(lines)
@@ -264,7 +276,7 @@ class PlanTool(Tool, ContextAware):
         total = len(steps)
         summary = f"({done}/{total} steps completed)" if total else ""
 
-        # Archive by appending timestamp and removing
+        # Mark completion, append timestamp, and remove active plan
         archive_line = f"\nCompleted: {_now_iso()}"
         if reason:
             archive_line += f" — {reason.strip()}"
@@ -273,7 +285,7 @@ class PlanTool(Tool, ContextAware):
 
         content = plan + archive_line
         self._delete_plan(path)
-        return f"Plan completed and archived. {summary}\n\n{content}"
+        return f"Plan completed and removed. {summary}\n\n{content}"
 
     @staticmethod
     def _parse_steps_input(steps_raw: str | None) -> list[dict[str, str]]:

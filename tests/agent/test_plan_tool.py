@@ -1,13 +1,10 @@
 """Tests for the plan tool."""
 from __future__ import annotations
 
-import asyncio
-from pathlib import Path
-
 import pytest
 
 from nanobot.agent.tools.context import RequestContext
-from nanobot.agent.tools.plan import PlanTool, _safe_filename
+from nanobot.agent.tools.plan import PlanTool, _plan_session_key, _safe_filename
 
 
 @pytest.fixture
@@ -26,25 +23,27 @@ def ctx():
 
 
 def set_session(tool, key="cli:test"):
-    tool._session_key.set(key)
+    _plan_session_key.set(key)
 
 
 class TestSafeFilename:
     def test_alphanumeric(self):
-        assert _safe_filename("hello") == "hello"
+        result = _safe_filename("hello")
+        assert result.startswith("hello_")
 
     def test_colon_replaced(self):
-        assert _safe_filename("cli:test") == "cli_test"
+        result = _safe_filename("cli:test")
+        assert result.startswith("cli_test_")
 
     def test_long_key_truncated(self):
-        assert len(_safe_filename("a" * 200)) <= 120
+        assert len(_safe_filename("a" * 200)) <= 109
 
     def test_empty_falls_back(self):
-        assert _safe_filename("") == "default"
+        result = _safe_filename("")
+        assert result.startswith("default_")
 
 
 class TestCreate:
-    @pytest.mark.asyncio
     async def test_create_plan(self, tool, ctx):
         set_session(tool)
         result = await tool.execute(action="create", title="Test Plan", goal="Fix the bug")
@@ -52,13 +51,11 @@ class TestCreate:
         assert "Test Plan" in result
         assert "Fix the bug" in result
 
-    @pytest.mark.asyncio
     async def test_create_requires_title(self, tool):
         set_session(tool)
         result = await tool.execute(action="create", title="")
         assert "Error" in result
 
-    @pytest.mark.asyncio
     async def test_create_with_steps(self, tool):
         set_session(tool)
         steps = '[{"text": "Step 1"}, {"text": "Step 2"}]'
@@ -66,7 +63,6 @@ class TestCreate:
         assert "- [ ] Step 1" in result
         assert "- [ ] Step 2" in result
 
-    @pytest.mark.asyncio
     async def test_create_rejects_duplicate(self, tool):
         set_session(tool)
         await tool.execute(action="create", title="Plan A")
@@ -75,7 +71,6 @@ class TestCreate:
 
 
 class TestUpdate:
-    @pytest.mark.asyncio
     async def test_update_adds_notes(self, tool):
         set_session(tool)
         await tool.execute(action="create", title="Plan A")
@@ -83,14 +78,12 @@ class TestUpdate:
         assert "Found root cause" in result
         assert "Notes" in result
 
-    @pytest.mark.asyncio
     async def test_update_modifies_goal(self, tool):
         set_session(tool)
         await tool.execute(action="create", title="Plan A", goal="Original goal")
         result = await tool.execute(action="update", goal="New goal")
         assert "New goal" in result
 
-    @pytest.mark.asyncio
     async def test_update_marks_steps(self, tool):
         set_session(tool)
         steps = '[{"text": "Read file"}, {"text": "Fix bug"}]'
@@ -100,7 +93,6 @@ class TestUpdate:
         assert "- [x] Read file" in result
         assert "- [>] Fix bug" in result
 
-    @pytest.mark.asyncio
     async def test_update_appends_new_steps(self, tool):
         set_session(tool)
         steps = '[{"text": "Step 1"}]'
@@ -109,7 +101,6 @@ class TestUpdate:
         result = await tool.execute(action="update", steps=new_steps)
         assert "Step 3" in result
 
-    @pytest.mark.asyncio
     async def test_update_no_plan(self, tool):
         set_session(tool)
         result = await tool.execute(action="update", notes="No plan")
@@ -117,14 +108,12 @@ class TestUpdate:
 
 
 class TestShow:
-    @pytest.mark.asyncio
     async def test_show_existing(self, tool):
         set_session(tool)
         await tool.execute(action="create", title="Plan A", goal="Do things")
         result = await tool.execute(action="show")
         assert "Plan A" in result
 
-    @pytest.mark.asyncio
     async def test_show_no_plan(self, tool):
         set_session(tool)
         result = await tool.execute(action="show")
@@ -132,7 +121,6 @@ class TestShow:
 
 
 class TestDone:
-    @pytest.mark.asyncio
     async def test_done_removes_plan(self, tool):
         set_session(tool)
         await tool.execute(action="create", title="Plan A")
@@ -142,7 +130,6 @@ class TestDone:
         result2 = await tool.execute(action="show")
         assert "No active plan" in result2
 
-    @pytest.mark.asyncio
     async def test_done_no_plan(self, tool):
         set_session(tool)
         result = await tool.execute(action="done")
@@ -150,21 +137,19 @@ class TestDone:
 
 
 class TestSessionIsolation:
-    @pytest.mark.asyncio
     async def test_different_sessions_separate_plans(self, tool):
-        tool._session_key.set("session:a")
+        _plan_session_key.set("session:a")
         await tool.execute(action="create", title="Plan A")
-        tool._session_key.set("session:b")
+        _plan_session_key.set("session:b")
         result = await tool.execute(action="show")
         assert "No active plan" in result
         await tool.execute(action="create", title="Plan B")
-        tool._session_key.set("session:a")
+        _plan_session_key.set("session:a")
         result_a = await tool.execute(action="show")
         assert "Plan A" in result_a
 
 
 class TestContextInjection:
-    @pytest.mark.asyncio
     async def test_load_active_plan(self, workspace, tool):
         set_session(tool)
         await tool.execute(action="create", title="Test Plan", goal="Do things")
@@ -198,7 +183,7 @@ class TestContextBuilderIntegration:
         workspace = tmp_path
         plans_dir = workspace / "memory" / "plans"
         plans_dir.mkdir(parents=True)
-        (plans_dir / "cli_test.md").write_text(
+        (plans_dir / f"{_safe_filename('cli:test')}.md").write_text(
             "# Plan: Test\nGoal: Do stuff\n## Steps\n- [x] Step 1\n- [ ] Step 2",
             encoding="utf-8",
         )
@@ -221,7 +206,7 @@ class TestContextBuilderIntegration:
 
         plans_dir = tmp_path / "memory" / "plans"
         plans_dir.mkdir(parents=True)
-        (plans_dir / "cli_test.md").write_text(
+        (plans_dir / f"{_safe_filename('cli:test')}.md").write_text(
             "# Plan: Integration Test\nGoal: Verify injection",
             encoding="utf-8",
         )
