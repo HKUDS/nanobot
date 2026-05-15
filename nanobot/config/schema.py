@@ -93,8 +93,8 @@ class ModelPresetConfig(Base):
 
     model: str
     provider: str = "auto"
-    max_tokens: int = 8192
-    context_window_tokens: int = 65_536
+    max_tokens: int = 32_000
+    context_window_tokens: int = 262_144
     temperature: float = 0.1
     reasoning_effort: str | None = None
 
@@ -116,8 +116,8 @@ class AgentDefaults(Base):
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
-    max_tokens: int = 8192
-    context_window_tokens: int = 65_536
+    max_tokens: int = 32_000
+    context_window_tokens: int = 262_144
     context_block_limit: int | None = None
     temperature: float = 0.1
     fallback_models: list[FallbackCandidate] = Field(default_factory=list)
