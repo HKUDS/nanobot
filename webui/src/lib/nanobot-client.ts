@@ -5,7 +5,6 @@ import type {
   OutboundImageGeneration,
   OutboundMedia,
   GoalStateWsPayload,
-  WebuiThreadPersistedPayload,
 } from "./types";
 
 /** WebSocket readyState constants, referenced by value to stay portable
@@ -263,15 +262,6 @@ export class NanobotClient {
       webui: true,
     };
     this.queueSend(frame);
-  }
-
-  /** Persist WebUI display thread to ``<data-dir>/webui`` via gateway (WebSocket envelope). */
-  saveWebuiThreadSnapshot(sessionKey: string, payload: WebuiThreadPersistedPayload): void {
-    this.queueSend({
-      type: "webui_thread_save",
-      session_key: sessionKey,
-      payload,
-    });
   }
 
   // -- internals ---------------------------------------------------------

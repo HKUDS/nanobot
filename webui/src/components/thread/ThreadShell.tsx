@@ -19,12 +19,9 @@ import { StreamErrorNotice } from "@/components/thread/StreamErrorNotice";
 import { ThreadViewport } from "@/components/thread/ThreadViewport";
 import { useNanobotStream, type SendImage, type SendOptions } from "@/hooks/useNanobotStream";
 import { useSessionHistory } from "@/hooks/useSessions";
-import { listSlashCommands, fetchWebuiThreadWithRetry } from "@/lib/api";
+import { listSlashCommands } from "@/lib/api";
 import type { ChatSummary, SlashCommand, UIMessage } from "@/lib/types";
-import { WEBUI_THREAD_SCHEMA_VERSION } from "@/lib/types";
-import { mergeCanonicalHistoryPreservingLongTasks } from "@/lib/thread-history-merge";
 import { normalizeLegacyLongTaskMessages } from "@/lib/thread-display-compat";
-import { mergeWebuiDiskSnapshotWithHistorical } from "@/lib/thread-webui-merge";
 import { scrubSubagentUiMessages } from "@/lib/subagent-channel-display";
 import { useClient } from "@/providers/ClientProvider";
 
@@ -111,8 +108,6 @@ export function ThreadShell({
   const appliedHistoryVersionRef = useRef<Map<string, number>>(new Map());
   const pendingCanonicalHydrateRef = useRef<Set<string>>(new Set());
   const sessionKeyByChatIdRef = useRef<Map<string, string>>(new Map());
-  const webuiDiskHydratedKeyRef = useRef<string | null>(null);
-  const webuiSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const initial = useMemo(() => {
     if (!chatId) return historical;
@@ -139,51 +134,6 @@ export function ThreadShell({
     if (chatId && historyKey) sessionKeyByChatIdRef.current.set(chatId, historyKey);
   }, [chatId, historyKey]);
 
-  useEffect(() => {
-    webuiDiskHydratedKeyRef.current = null;
-  }, [historyKey]);
-
-  useEffect(() => {
-    if (!historyKey || !chatId || loading) return;
-    if (webuiDiskHydratedKeyRef.current === historyKey) return;
-    let cancelled = false;
-    void (async () => {
-      const disk = await fetchWebuiThreadWithRetry(token, historyKey);
-      if (cancelled) return;
-      webuiDiskHydratedKeyRef.current = historyKey;
-      const dm = disk?.messages;
-      if (!dm?.length) return;
-      setMessages((prev) =>
-        projectWebuiThreadMessages(
-          mergeWebuiDiskSnapshotWithHistorical(dm, prev.length ? prev : historical),
-        ),
-      );
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [historyKey, chatId, loading, historical, setMessages, token]);
-
-  useEffect(() => {
-    if (!historyKey || !chatId) return;
-    if (webuiSaveTimerRef.current !== null) clearTimeout(webuiSaveTimerRef.current);
-    webuiSaveTimerRef.current = setTimeout(() => {
-      webuiSaveTimerRef.current = null;
-      client.saveWebuiThreadSnapshot(historyKey, {
-        schemaVersion: WEBUI_THREAD_SCHEMA_VERSION,
-        savedAt: new Date().toISOString(),
-        sessionKey: historyKey,
-        messages: projectWebuiThreadMessages(messages),
-      });
-    }, 450);
-    return () => {
-      if (webuiSaveTimerRef.current !== null) {
-        clearTimeout(webuiSaveTimerRef.current);
-        webuiSaveTimerRef.current = null;
-      }
-    };
-  }, [messages, historyKey, chatId, client]);
-
   const displayMessages = useMemo(() => projectWebuiThreadMessages(messages), [messages]);
 
   const showHeroComposer = messages.length === 0 && !loading;
@@ -203,16 +153,16 @@ export function ThreadShell({
       if (hasNewCanonicalHistory && historical.length > 0) {
         pendingCanonicalHydrateRef.current.delete(chatId);
         appliedHistoryVersionRef.current.set(chatId, historyVersion);
-        const merged = mergeCanonicalHistoryPreservingLongTasks(prev, historical);
-        const normalized = projectWebuiThreadMessages(merged);
+        const normalized = projectWebuiThreadMessages(historical);
         messageCacheRef.current.set(chatId, normalized);
         return normalized;
       }
       if (cached && cached.length > 0) return projectWebuiThreadMessages(cached);
       if (historical.length === 0 && prev.length > 0) return projectWebuiThreadMessages(prev);
       appliedHistoryVersionRef.current.set(chatId, historyVersion);
-      const merged = mergeCanonicalHistoryPreservingLongTasks(prev, historical);
-      return projectWebuiThreadMessages(merged);
+      const next = projectWebuiThreadMessages(historical);
+      if (historical.length > 0) messageCacheRef.current.set(chatId, next);
+      return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, chatId, historical, historyVersion]);
@@ -240,16 +190,6 @@ export function ThreadShell({
     if (chatId) {
       const prev = prevChatIdForCacheRef.current;
       if (prev && prev !== chatId) {
-        const oldKey = sessionKeyByChatIdRef.current.get(prev);
-        const cached = messageCacheRef.current.get(prev);
-        if (oldKey && cached && cached.length > 0) {
-          client.saveWebuiThreadSnapshot(oldKey, {
-            schemaVersion: WEBUI_THREAD_SCHEMA_VERSION,
-            savedAt: new Date().toISOString(),
-            sessionKey: oldKey,
-            messages: projectWebuiThreadMessages(cached),
-          });
-        }
         messageCacheRef.current.set(prev, projectWebuiThreadMessages(messages));
         skipLayoutCacheRef.current = true;
       }
@@ -264,7 +204,7 @@ export function ThreadShell({
       }
       prevChatIdForCacheRef.current = null;
     }
-  }, [chatId, messages, client]);
+  }, [chatId, messages]);
 
   // Persist thread to in-memory cache after paint so ``useNanobotStream``'s chat switch
   // ``useEffect`` reset has flushed; ``skipLayoutCacheRef`` drops the first run that still

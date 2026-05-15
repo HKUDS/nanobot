@@ -176,7 +176,7 @@ function absorbCompleteAssistantMessage(
 /**
  * Subscribe to a chat by ID. Returns the in-memory message list for the chat,
  * a streaming flag, and a ``send`` function. Initial history must be seeded
- * separately (e.g. via ``fetchSessionMessages``) since the server only replays
+ * separately (e.g. via ``fetchWebuiThread``) since the server only replays
  * live events.
  */
 /** Payload passed to ``send`` when the user attaches one or more images.

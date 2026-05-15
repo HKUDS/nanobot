@@ -250,9 +250,9 @@ export interface OutboundImageGeneration {
   aspect_ratio?: string | null;
 }
 
-export const WEBUI_THREAD_SCHEMA_VERSION = 2 as const;
+export const WEBUI_THREAD_SCHEMA_VERSION = 3 as const;
 
-/** Payload persisted under ``<data-dir>/webui/*.json`` for WebUI display. */
+/** Response shape for ``GET .../webui-thread`` (server-built transcript replay). */
 export interface WebuiThreadPersistedPayload {
   schemaVersion: number;
   sessionKey?: string;
@@ -272,9 +272,4 @@ export type Outbound =
       /** Marks messages sent by the embedded WebUI, without changing the
        * generic websocket protocol for other clients. */
       webui?: true;
-    }
-  | {
-      type: "webui_thread_save";
-      session_key: string;
-      payload: WebuiThreadPersistedPayload;
     };

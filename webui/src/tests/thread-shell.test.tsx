@@ -4,15 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { ClientProvider } from "@/providers/ClientProvider";
-
-vi.mock("@/lib/api", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api")>();
-  return {
-    ...actual,
-    fetchWebuiThreadWithRetry: vi.fn(() => Promise.resolve(null)),
-  };
-});
-
+import type { UIMessage } from "@/lib/types";
 function makeClient() {
   const errorHandlers = new Set<(err: { kind: string }) => void>();
   const chatHandlers = new Map<string, Set<(ev: import("@/lib/types").InboundEvent) => void>>();
@@ -66,7 +58,6 @@ function makeClient() {
     connect: vi.fn(),
     close: vi.fn(),
     updateUrl: vi.fn(),
-    saveWebuiThreadSnapshot: vi.fn(),
   };
 }
 
@@ -89,6 +80,20 @@ function session(chatId: string) {
     createdAt: null,
     updatedAt: null,
     preview: "",
+  };
+}
+
+function transcriptFromSimpleMessages(
+  rows: Array<{ role: "user" | "assistant"; content: string }>,
+): { schemaVersion: number; messages: UIMessage[] } {
+  return {
+    schemaVersion: 3,
+    messages: rows.map((m, i) => ({
+      id: `m-${i}`,
+      role: m.role,
+      content: m.content,
+      createdAt: 1000 + i,
+    })),
   };
 }
 
@@ -373,16 +378,13 @@ describe("ThreadShell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/messages")) {
-          return httpJson({
-            key: "websocket:chat-a",
-            created_at: null,
-            updated_at: null,
-            messages: [
+        if (url.includes("websocket%3Achat-a/webui-thread")) {
+          return httpJson(
+            transcriptFromSimpleMessages([
               { role: "user", content: "old question" },
               { role: "assistant", content: "old answer" },
-            ],
-          });
+            ]),
+          );
         }
         return {
           ok: false,
@@ -524,15 +526,8 @@ describe("ThreadShell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/messages")) {
-          return httpJson({
-            key: "websocket:chat-a",
-            created_at: null,
-            updated_at: null,
-            // Simulate a stale history response that has not persisted the
-            // just-received assistant reply yet.
-            messages: [{ role: "user", content: "hello" }],
-          });
+        if (url.includes("websocket%3Achat-a/webui-thread")) {
+          return httpJson(transcriptFromSimpleMessages([{ role: "user", content: "hello" }]));
         }
         return {
           ok: false,
@@ -605,19 +600,18 @@ describe("ThreadShell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/messages")) {
+        if (url.includes("websocket%3Achat-a/webui-thread")) {
           historyCalls += 1;
-          return httpJson({
-            key: "websocket:chat-a",
-            created_at: null,
-            updated_at: null,
-            messages: historyCalls === 1
-              ? [{ role: "user", content: "question" }]
-              : [
-                  { role: "user", content: "question" },
-                  { role: "assistant", content: "canonical markdown answer" },
-                ],
-          });
+          return httpJson(
+            transcriptFromSimpleMessages(
+              historyCalls === 1
+                ? [{ role: "user", content: "question" }]
+                : [
+                    { role: "user", content: "question" },
+                    { role: "assistant", content: "canonical markdown answer" },
+                  ],
+            ),
+          );
         }
         return {
           ok: false,
@@ -665,16 +659,13 @@ describe("ThreadShell", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/messages")) {
-          return httpJson({
-            key: "websocket:chat-a",
-            created_at: null,
-            updated_at: null,
-            messages: [
+        if (url.includes("websocket%3Achat-a/webui-thread")) {
+          return httpJson(
+            transcriptFromSimpleMessages([
               { role: "user", content: "question" },
               { role: "assistant", content: "loaded answer" },
-            ],
-          });
+            ]),
+          );
         }
         return {
           ok: false,
@@ -894,17 +885,14 @@ describe("ThreadShell", () => {
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.includes("websocket%3Achat-a/messages")) {
+        if (url.includes("websocket%3Achat-a/webui-thread")) {
           return Promise.resolve(
-            httpJson({
-              key: "websocket:chat-a",
-              created_at: null,
-              updated_at: null,
-              messages: [{ role: "assistant", content: "from chat a" }],
-            }),
+            httpJson(
+              transcriptFromSimpleMessages([{ role: "assistant", content: "from chat a" }]),
+            ),
           );
         }
-        if (url.includes("websocket%3Achat-b/messages")) {
+        if (url.includes("websocket%3Achat-b/webui-thread")) {
           return new Promise((resolve) => {
             resolveChatB = resolve;
           });
@@ -952,12 +940,7 @@ describe("ThreadShell", () => {
 
     await act(async () => {
       resolveChatB?.(
-        httpJson({
-          key: "websocket:chat-b",
-          created_at: null,
-          updated_at: null,
-          messages: [{ role: "assistant", content: "from chat b" }],
-        }),
+        httpJson(transcriptFromSimpleMessages([{ role: "assistant", content: "from chat b" }])),
       );
     });
 

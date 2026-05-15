@@ -41,12 +41,8 @@ from nanobot.utils.media_decode import (
     save_base64_data_url,
 )
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
-from nanobot.utils.webui_thread_disk import (
-    WEBUI_THREAD_SCHEMA_VERSION,
-    delete_webui_thread,
-    read_webui_thread,
-    write_webui_thread_atomic,
-)
+from nanobot.utils.webui_thread_disk import delete_webui_thread
+from nanobot.utils.webui_transcript import append_transcript_object, build_webui_thread_response
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
@@ -967,61 +963,58 @@ class WebSocketChannel(BaseChannel):
             return _http_error(400, "invalid session key")
         if not self._is_webui_session_key(decoded_key):
             return _http_error(404, "session not found")
-        data = read_webui_thread(decoded_key)
+        data = build_webui_thread_response(
+            decoded_key,
+            augment_user_media=self._augment_transcript_user_media,
+        )
         if data is None:
             return _http_error(404, "webui thread not found")
         return _http_json_response(data)
 
-    @staticmethod
-    def _normalize_webui_thread_payload(session_key: str, payload: Any) -> dict[str, Any] | None:
-        if not isinstance(payload, dict):
-            return None
-        messages = payload.get("messages")
-        if not isinstance(messages, list):
-            return None
-        for item in messages:
-            if not isinstance(item, dict):
-                return None
-        raw_sv = payload.get("schemaVersion")
+    def _try_append_webui_transcript(self, chat_id: str, wire: dict[str, Any]) -> None:
+        sk = f"websocket:{chat_id}"
         try:
-            schema_version = int(raw_sv) if raw_sv not in (None, "") else WEBUI_THREAD_SCHEMA_VERSION
-        except (TypeError, ValueError):
-            schema_version = WEBUI_THREAD_SCHEMA_VERSION
-        out = {
-            "schemaVersion": schema_version,
-            "sessionKey": session_key,
-            "messages": messages,
-        }
-        if isinstance(payload.get("savedAt"), str):
-            out["savedAt"] = payload["savedAt"]
+            dup = json.loads(json.dumps(wire, ensure_ascii=False))
+            append_transcript_object(sk, dup)
+        except (ValueError, TypeError) as e:
+            self.logger.warning("webui transcript append failed: {}", e)
+
+    def _augment_transcript_user_media(self, paths: list[str]) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for pstr in paths:
+            path = Path(pstr)
+            att = self._sign_or_stage_media_path(path)
+            if att is None:
+                continue
+            mime, _ = mimetypes.guess_type(path.name)
+            kind = "video" if mime and mime.startswith("video/") else "image"
+            out.append(
+                {"kind": kind, "url": att["url"], "name": att.get("name", path.name)},
+            )
         return out
 
-    async def _handle_webui_thread_save_envelope(
+    async def _handle_message(
         self,
-        connection: Any,
-        client_id: str,
-        envelope: dict[str, Any],
+        sender_id: str,
+        chat_id: str,
+        content: str,
+        media: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+        session_key: str | None = None,
     ) -> None:
-        """Persist WebUI display thread JSON from a typed envelope."""
-        _ = client_id
-        sk = envelope.get("session_key")
-        if not isinstance(sk, str) or not self._is_webui_session_key(sk):
-            await self._send_event(connection, "error", detail="invalid session_key for webui_thread_save")
-            return
-        payload = self._normalize_webui_thread_payload(sk, envelope.get("payload"))
-        if payload is None:
-            await self._send_event(connection, "error", detail="invalid webui_thread payload")
-            return
-        try:
-            write_webui_thread_atomic(sk, payload)
-        except ValueError as e:
-            await self._send_event(connection, "error", detail=str(e))
-            return
-        except OSError as e:
-            logger.warning("webui_thread save failed: {}", e)
-            await self._send_event(connection, "error", detail="webui_thread save failed")
-            return
-        await self._send_event(connection, "webui_thread_saved", session_key=sk)
+        meta = metadata or {}
+        if meta.get("webui"):
+            user_obj: dict[str, Any] = {
+                "event": "user",
+                "chat_id": chat_id,
+                "text": content,
+            }
+            if media:
+                user_obj["media_paths"] = list(media)
+            self._try_append_webui_transcript(chat_id, user_obj)
+        await super()._handle_message(
+            sender_id, chat_id, content, media, metadata, session_key,
+        )
 
     def _augment_media_urls(self, payload: dict[str, Any]) -> None:
         """Mutate *payload* in place: each message's ``media`` path list is
@@ -1428,9 +1421,6 @@ class WebSocketChannel(BaseChannel):
             self._attach(connection, cid)
             await self._send_event(connection, "attached", chat_id=cid)
             return
-        if t == "webui_thread_save":
-            await self._handle_webui_thread_save_envelope(connection, client_id, envelope)
-            return
         if t == "message":
             cid = envelope.get("chat_id")
             content = envelope.get("content")
@@ -1598,6 +1588,7 @@ class WebSocketChannel(BaseChannel):
             payload["kind"] = "tool_hint"
         elif msg.metadata.get("_progress"):
             payload["kind"] = "progress"
+        self._try_append_webui_transcript(msg.chat_id, payload)
         raw = json.dumps(payload, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" ")
@@ -1625,6 +1616,7 @@ class WebSocketChannel(BaseChannel):
         stream_id = meta.get("_stream_id")
         if stream_id is not None:
             body["stream_id"] = stream_id
+        self._try_append_webui_transcript(chat_id, body)
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" reasoning ")
@@ -1646,6 +1638,7 @@ class WebSocketChannel(BaseChannel):
         stream_id = meta.get("_stream_id")
         if stream_id is not None:
             body["stream_id"] = stream_id
+        self._try_append_webui_transcript(chat_id, body)
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" reasoning_end ")
@@ -1670,6 +1663,7 @@ class WebSocketChannel(BaseChannel):
             }
         if meta.get("_stream_id") is not None:
             body["stream_id"] = meta["_stream_id"]
+        self._try_append_webui_transcript(chat_id, body)
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" stream ")
@@ -1690,6 +1684,7 @@ class WebSocketChannel(BaseChannel):
             body["latency_ms"] = int(latency_ms)
         if goal_state is not None:
             body["goal_state"] = goal_state
+        self._try_append_webui_transcript(chat_id, body)
         raw = json.dumps(body, ensure_ascii=False)
         for connection in conns:
             await self._safe_send_to(connection, raw, label=" turn_end ")

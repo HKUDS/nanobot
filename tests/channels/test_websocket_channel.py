@@ -1396,14 +1396,11 @@ def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:
     from websockets.datastructures import Headers
     from websockets.http11 import Request
 
-    from nanobot.utils.webui_thread_disk import write_webui_thread_atomic
+    from nanobot.utils.webui_transcript import append_transcript_object
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:c1"
-    write_webui_thread_atomic(
-        key,
-        {"schemaVersion": 1, "sessionKey": key, "messages": [{"role": "user", "content": "hi"}]},
-    )
+    append_transcript_object(key, {"event": "user", "chat_id": "c1", "text": "hi"})
     bus = MagicMock()
     channel = _ch(bus)
     channel._api_tokens["tok"] = time.monotonic() + 300.0
@@ -1414,50 +1411,5 @@ def test_handle_webui_thread_get_returns_json(tmp_path, monkeypatch) -> None:
     body = json.loads(resp.body.decode())
     assert body["sessionKey"] == key
     assert len(body["messages"]) == 1
-
-
-@pytest.mark.asyncio
-async def test_webui_thread_save_envelope_persists(bus: MagicMock, monkeypatch, tmp_path) -> None:
-    from nanobot.utils import webui_thread_disk
-
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    channel = _ch(bus)
-    mock_ws = AsyncMock()
-    env = {
-        "type": "webui_thread_save",
-        "session_key": "websocket:e1",
-        "payload": {
-            "schemaVersion": 1,
-            "messages": [{"role": "user", "content": "x", "id": "1", "createdAt": 1}],
-        },
-    }
-    await channel._handle_webui_thread_save_envelope(mock_ws, "cid", env)
-    path = webui_thread_disk.webui_thread_file_path("websocket:e1")
-    assert path.is_file()
-    data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["messages"][0]["content"] == "x"
-    mock_ws.send.assert_awaited()
-
-
-@pytest.mark.asyncio
-async def test_webui_thread_save_envelope_coerces_invalid_schema_version(
-    bus: MagicMock, monkeypatch, tmp_path
-) -> None:
-    from nanobot.utils import webui_thread_disk
-
-    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
-    channel = _ch(bus)
-    mock_ws = AsyncMock()
-    env = {
-        "type": "webui_thread_save",
-        "session_key": "websocket:e2",
-        "payload": {
-            "schemaVersion": "not-an-int",
-            "messages": [{"role": "user", "content": "y", "id": "1", "createdAt": 1}],
-        },
-    }
-    await channel._handle_webui_thread_save_envelope(mock_ws, "cid", env)
-    path = webui_thread_disk.webui_thread_file_path("websocket:e2")
-    data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["schemaVersion"] == webui_thread_disk.WEBUI_THREAD_SCHEMA_VERSION
-    assert data["messages"][0]["content"] == "y"
+    assert body["messages"][0]["role"] == "user"
+    assert body["messages"][0]["content"] == "hi"

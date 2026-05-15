@@ -176,12 +176,9 @@ async def test_session_delete_removes_file(
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:doomed")
-    from nanobot.utils.webui_thread_disk import write_webui_thread_atomic
+    from nanobot.utils.webui_transcript import append_transcript_object
 
-    write_webui_thread_atomic(
-        "websocket:doomed",
-        {"schemaVersion": 1, "sessionKey": "websocket:doomed", "messages": []},
-    )
+    append_transcript_object("websocket:doomed", {"event": "user", "chat_id": "doomed", "text": "x"})
     channel = _ch(bus, session_manager=sm, port=29903)
     server_task = asyncio.create_task(channel.start())
     await asyncio.sleep(0.3)
@@ -192,7 +189,7 @@ async def test_session_delete_removes_file(
 
         path = sm._get_session_path("websocket:doomed")
         assert path.exists()
-        webui_path = tmp_path / "webui" / f"{SessionManager.safe_key('websocket:doomed')}.json"
+        webui_path = tmp_path / "webui" / f"{SessionManager.safe_key('websocket:doomed')}.jsonl"
         assert webui_path.is_file()
         resp = await _http_get(
             "http://127.0.0.1:29903/api/sessions/websocket:doomed/delete",
