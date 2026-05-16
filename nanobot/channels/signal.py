@@ -8,7 +8,8 @@ import re
 import shutil
 import unicodedata
 from collections import deque
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -557,10 +558,29 @@ class SignalChannel(BaseChannel):
             self.logger.error(f"Error in SSE receive loop: {e}")
             raise
 
+    @asynccontextmanager
+    async def _safe_handle(
+        self, action: str, payload: Any = None
+    ) -> AsyncIterator[None]:
+        """Swallow and log any exception from a top-level handler block.
+
+        Logs `self.logger.error` with the action name, the exception, and a
+        bounded ``repr`` of the offending payload so the offending input is
+        recoverable from logs without having to correlate by timestamp.
+        """
+        try:
+            yield
+        except Exception as e:
+            snippet = repr(payload)[:200] if payload is not None else ""
+            text = f"Error in {action}: {e}"
+            if snippet:
+                text += f" | payload={snippet}"
+            self.logger.opt(exception=True).error(text)
+
     async def _handle_receive_notification(self, params: dict[str, Any]) -> None:
         """Handle incoming message notification from signal-cli."""
         self.logger.debug(f"_handle_receive_notification called with: {params}")
-        try:
+        async with self._safe_handle("receive notification", params):
             # Extract envelope from SSE notification: {"envelope": {...}}
             envelope = params.get("envelope", {})
 
@@ -612,9 +632,6 @@ class SignalChannel(BaseChannel):
             # Handle typing indicators (silently ignore)
             elif typing_message:
                 pass  # Ignore typing indicators
-
-        except Exception as e:
-            self.logger.error(f"Error handling receive notification: {e}")
 
     async def _handle_data_message(
         self,
