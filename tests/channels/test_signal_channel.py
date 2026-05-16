@@ -448,10 +448,13 @@ class TestGroupBuffer:
             ch._add_to_group_buffer("g1", "Alice", "+1111", f"msg{i}", i)
         assert len(ch._group_buffers["g1"]) == 3
 
-    def test_zero_buffer_size_does_not_add(self):
-        ch = _make_channel(group_buffer_size=0)
-        ch._add_to_group_buffer("g1", "Alice", "+1111", "msg", 1000)
-        assert "g1" not in ch._group_buffers
+    def test_zero_buffer_size_rejected_by_validator(self):
+        with pytest.raises(ValueError, match="group_message_buffer_size"):
+            _make_channel(group_buffer_size=0)
+
+    def test_negative_buffer_size_rejected_by_validator(self):
+        with pytest.raises(ValueError, match="group_message_buffer_size"):
+            _make_channel(group_buffer_size=-1)
 
     def test_context_limits_message_length(self):
         ch = _make_channel(group_buffer_size=5)
