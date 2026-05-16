@@ -1,7 +1,5 @@
 """Unit tests for the Signal markdown → plain text + textStyle converter."""
 
-import pytest
-
 from nanobot.channels.signal import _markdown_to_signal, _partition_styles
 from nanobot.utils.helpers import split_message
 
@@ -94,8 +92,9 @@ def test_inline_code():
 def test_code_block():
     plain, styles = _markdown_to_signal("```\nprint('hi')\n```")
     assert "print('hi')" in plain
-    assert styles_for(plain, styles).get("print('hi')\n") == ["MONOSPACE"] or \
-           "MONOSPACE" in str(styles_for(plain, styles))
+    assert styles_for(plain, styles).get("print('hi')\n") == ["MONOSPACE"] or "MONOSPACE" in str(
+        styles_for(plain, styles)
+    )
 
 
 def test_code_block_with_lang():
@@ -278,9 +277,7 @@ def assert_within_utf16_bounds(plain: str, styles: list[str]) -> None:
         start_s, length_s, _ = entry.split(":", 2)
         start, length = int(start_s), int(length_s)
         assert start >= 0
-        assert start + length <= limit, (
-            f"range {entry} exceeds utf-16 length {limit} of {plain!r}"
-        )
+        assert start + length <= limit, f"range {entry} exceeds utf-16 length {limit} of {plain!r}"
 
 
 def test_bold_with_emoji_inside():
@@ -413,7 +410,9 @@ def test_partition_styles_long_message_preserves_chunk_one_styles():
     for entry in final_styles:
         s, ln, _ = entry.split(":", 2)
         start, length = int(s), int(ln)
-        slice_ = final_chunk.encode("utf-16-le")[start * 2 : (start + length) * 2].decode("utf-16-le")
+        slice_ = final_chunk.encode("utf-16-le")[start * 2 : (start + length) * 2].decode(
+            "utf-16-le"
+        )
         assert slice_ == "tail"
 
 
@@ -444,7 +443,9 @@ def test_partition_styles_with_non_bmp_chunk_offset():
     for entry in final_styles:
         s, ln, _ = entry.split(":", 2)
         start, length = int(s), int(ln)
-        slice_ = final_chunk.encode("utf-16-le")[start * 2 : (start + length) * 2].decode("utf-16-le")
+        slice_ = final_chunk.encode("utf-16-le")[start * 2 : (start + length) * 2].decode(
+            "utf-16-le"
+        )
         assert slice_ == "tail"
 
 
