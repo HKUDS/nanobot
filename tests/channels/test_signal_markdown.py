@@ -3,6 +3,10 @@
 from nanobot.channels.signal import _markdown_to_signal
 
 
+def _utf16_len(s: str) -> int:
+    return len(s.encode("utf-16-le")) // 2
+
+
 def styles_for(plain: str, text_styles: list[str]) -> dict[str, list[str]]:
     """Return a dict mapping each styled substring to its style list."""
     result: dict[str, list[str]] = {}
@@ -10,6 +14,18 @@ def styles_for(plain: str, text_styles: list[str]) -> dict[str, list[str]]:
         start_s, length_s, style = entry.split(":", 2)
         start, length = int(start_s), int(length_s)
         span = plain[start : start + length]
+        result.setdefault(span, []).append(style)
+    return result
+
+
+def utf16_styles_for(plain: str, text_styles: list[str]) -> dict[str, list[str]]:
+    """Like styles_for, but slices `plain` using UTF-16 offsets (Signal's units)."""
+    encoded = plain.encode("utf-16-le")
+    result: dict[str, list[str]] = {}
+    for entry in text_styles:
+        start_s, length_s, style = entry.split(":", 2)
+        start, length = int(start_s), int(length_s)
+        span = encoded[start * 2 : (start + length) * 2].decode("utf-16-le")
         result.setdefault(span, []).append(style)
     return result
 
@@ -242,3 +258,96 @@ def test_style_ranges_are_within_bounds():
         start, length = int(start_s), int(length_s)
         assert start >= 0
         assert start + length <= len(plain)
+
+
+# ---------------------------------------------------------------------------
+# Non-BMP / UTF-16 offsets
+#
+# Signal's BodyRange (and signal-cli's textStyle) interprets start/length in
+# UTF-16 code units. Python's len() counts code points, so characters outside
+# the BMP (emojis, supplementary CJK) shift offsets by +1 per occurrence.
+# ---------------------------------------------------------------------------
+
+
+def assert_within_utf16_bounds(plain: str, styles: list[str]) -> None:
+    limit = _utf16_len(plain)
+    for entry in styles:
+        start_s, length_s, _ = entry.split(":", 2)
+        start, length = int(start_s), int(length_s)
+        assert start >= 0
+        assert start + length <= limit, (
+            f"range {entry} exceeds utf-16 length {limit} of {plain!r}"
+        )
+
+
+def test_bold_with_emoji_inside():
+    plain, styles = _markdown_to_signal("**hi 🎉 bye**")
+    assert plain == "hi 🎉 bye"
+    assert utf16_styles_for(plain, styles) == {"hi 🎉 bye": ["BOLD"]}
+    assert_within_utf16_bounds(plain, styles)
+
+
+def test_italic_with_trailing_emoji():
+    plain, styles = _markdown_to_signal("*bye 🎉*")
+    assert plain == "bye 🎉"
+    assert utf16_styles_for(plain, styles) == {"bye 🎉": ["ITALIC"]}
+    assert_within_utf16_bounds(plain, styles)
+
+
+def test_bold_after_emoji_prefix():
+    plain, styles = _markdown_to_signal("🎉 **bold**")
+    assert plain == "🎉 bold"
+    assert utf16_styles_for(plain, styles) == {"bold": ["BOLD"]}
+    assert_within_utf16_bounds(plain, styles)
+
+
+def test_bold_after_and_inside_emoji():
+    plain, styles = _markdown_to_signal("🎉 **a 🎊 b**")
+    assert plain == "🎉 a 🎊 b"
+    assert utf16_styles_for(plain, styles) == {"a 🎊 b": ["BOLD"]}
+    assert_within_utf16_bounds(plain, styles)
+
+
+def test_supplementary_cjk_in_bold():
+    """Non-BMP CJK (U+20BB7) proves the bug is UTF-16, not emoji-specific."""
+    plain, styles = _markdown_to_signal("**𠮷野家**")
+    assert plain == "𠮷野家"
+    assert utf16_styles_for(plain, styles) == {"𠮷野家": ["BOLD"]}
+    assert_within_utf16_bounds(plain, styles)
+
+
+def test_zwj_emoji_in_bold():
+    """ZWJ family sequence = multiple surrogate pairs + BMP ZWJs."""
+    plain, styles = _markdown_to_signal("**hi 👨‍👩‍👧 bye**")
+    assert plain == "hi 👨‍👩‍👧 bye"
+    assert utf16_styles_for(plain, styles) == {"hi 👨‍👩‍👧 bye": ["BOLD"]}
+    assert_within_utf16_bounds(plain, styles)
+
+
+def test_ascii_offsets_unchanged():
+    """ASCII-only path must produce the same offsets as before the UTF-16 fix."""
+    plain, styles = _markdown_to_signal("**bold** plain *it*")
+    assert plain == "bold plain it"
+    assert sorted(styles) == sorted(["0:4:BOLD", "11:2:ITALIC"])
+
+
+def test_reported_daily_brief_pattern():
+    """Regression for the reported bug: a single non-BMP emoji shifts every
+    subsequent styled span left by 1 UTF-16 unit, lopping off the last letter.
+    """
+    md = (
+        "**Weather**\n"
+        "- Conditions: 🌩️ Thunderstorms\n\n"
+        "**News**\n"
+        "*World*\n"
+        "*Local*\n\n"
+        "**Quote of the Day**"
+    )
+    plain, styles = _markdown_to_signal(md)
+    sd = utf16_styles_for(plain, styles)
+    assert sd.get("Weather") == ["BOLD"]
+    assert sd.get("News") == ["BOLD"]
+    assert sd.get("World") == ["ITALIC"]
+    assert sd.get("Local") == ["ITALIC"]
+    assert sd.get("Quote of the Day") == ["BOLD"]
+    assert_within_utf16_bounds(plain, styles)
