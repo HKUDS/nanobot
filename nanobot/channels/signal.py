@@ -276,7 +276,7 @@ class SignalChannel(BaseChannel):
     async def start(self) -> None:
         """Start the Signal channel and connect to signal-cli daemon."""
         if not self.config.phone_number:
-            self.self.logger.error("Signal account not configured")
+            self.logger.error("Signal account not configured")
             return
 
         self._running = True
