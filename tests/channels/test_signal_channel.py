@@ -474,6 +474,104 @@ class TestGroupBuffer:
 # ---------------------------------------------------------------------------
 
 
+class TestCheckInboundPolicy:
+    """Direct tests for the policy gate that _handle_data_message now delegates to."""
+
+    def _call(
+        self,
+        ch: SignalChannel,
+        *,
+        sender_id: str = "+19995550001",
+        sender_number: str = "+19995550001",
+        group_id: str | None = None,
+        is_group_message: bool = False,
+        message_text: str = "hi",
+        mentions: list | None = None,
+        sender_name: str | None = "Alice",
+        timestamp: int | None = 1000,
+    ) -> tuple[bool, str]:
+        return ch._check_inbound_policy(
+            sender_id=sender_id,
+            sender_number=sender_number,
+            group_id=group_id,
+            is_group_message=is_group_message,
+            message_text=message_text,
+            mentions=mentions or [],
+            sender_name=sender_name,
+            timestamp=timestamp,
+        )
+
+    def test_dm_open_allows(self):
+        ch = _make_channel(dm_enabled=True, dm_policy="open")
+        allowed, chat_id = self._call(ch)
+        assert allowed is True
+        assert chat_id == "+19995550001"
+
+    def test_dm_disabled_blocks(self):
+        ch = _make_channel(dm_enabled=False)
+        allowed, _ = self._call(ch)
+        assert allowed is False
+
+    def test_dm_allowlist_blocks_unknown_sender(self):
+        ch = _make_channel(dm_policy="allowlist", dm_allow_from=["+12223334444"])
+        allowed, _ = self._call(ch, sender_id="+19995550001")
+        assert allowed is False
+
+    def test_dm_allowlist_allows_known_sender(self):
+        ch = _make_channel(dm_policy="allowlist", dm_allow_from=["+19995550001"])
+        allowed, _ = self._call(ch, sender_id="+19995550001")
+        assert allowed is True
+
+    def test_group_disabled_blocks(self):
+        ch = _make_channel(group_enabled=False)
+        allowed, _ = self._call(ch, is_group_message=True, group_id="g1")
+        assert allowed is False
+
+    def test_group_open_with_mention_allows(self):
+        ch = _make_channel(
+            group_enabled=True,
+            group_policy="open",
+            phone_number="+10000000000",
+            require_mention=True,
+        )
+        allowed, chat_id = self._call(
+            ch,
+            is_group_message=True,
+            group_id="g1",
+            message_text="hello @bot",
+            mentions=[{"number": "+10000000000", "start": 6, "length": 4}],
+        )
+        assert allowed is True
+        assert chat_id == "g1"
+
+    def test_group_open_without_mention_blocks(self):
+        ch = _make_channel(group_enabled=True, group_policy="open", require_mention=True)
+        allowed, _ = self._call(
+            ch, is_group_message=True, group_id="g1", message_text="plain talk"
+        )
+        assert allowed is False
+
+    def test_group_command_bypasses_mention_requirement(self):
+        ch = _make_channel(group_enabled=True, group_policy="open", require_mention=True)
+        allowed, _ = self._call(
+            ch, is_group_message=True, group_id="g1", message_text="/help"
+        )
+        assert allowed is True
+
+    def test_allowed_group_appends_to_buffer(self):
+        """Side effect: when a group message is allowed, it lands in the buffer."""
+        ch = _make_channel(group_enabled=True, group_policy="open", require_mention=False)
+        self._call(ch, is_group_message=True, group_id="g1", message_text="first")
+        self._call(ch, is_group_message=True, group_id="g1", message_text="second")
+        assert len(ch._group_buffers["g1"]) == 2
+
+    def test_blocked_group_does_not_append_to_buffer(self):
+        """Side effect: when a group is disabled, the buffer must not change."""
+        ch = _make_channel(group_enabled=False)
+        self._call(ch, is_group_message=True, group_id="g1", message_text="hi")
+        assert "g1" not in ch._group_buffers
+
+
 class TestAttachmentsDir:
     def test_default_attachments_dir(self):
         ch = _make_channel()
