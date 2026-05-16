@@ -296,6 +296,11 @@ class SignalConfig(Base):
     daemon_host: str = "localhost"
     daemon_port: int = 8080
     group_message_buffer_size: int = 20  # Number of recent group messages to keep for context
+    # Override the directory signal-cli writes inbound attachments to. When
+    # None, defaults to ~/.local/share/signal-cli/attachments (the daemon's
+    # platform default on Linux). Set this if the daemon is running with a
+    # custom XDG_DATA_HOME or on macOS/Windows where the default path differs.
+    attachments_dir: str | None = None
     dm: SignalDMConfig = Field(default_factory=SignalDMConfig)
     group: SignalGroupConfig = Field(default_factory=SignalGroupConfig)
 
@@ -749,10 +754,7 @@ class SignalChannel(BaseChannel):
                     continue
 
                 try:
-                    # signal-cli stores attachments in ~/.local/share/signal-cli/attachments/
-                    source_path = (
-                        Path.home() / ".local/share/signal-cli/attachments" / attachment_id
-                    )
+                    source_path = self._signal_attachments_dir() / attachment_id
 
                     if source_path.exists():
                         dest_path = media_dir / f"signal_{safe_filename(filename)}"
@@ -863,6 +865,17 @@ class SignalChannel(BaseChannel):
             lines.append(f"{sender}: {content}")
 
         return "\n".join(lines)
+
+    def _signal_attachments_dir(self) -> Path:
+        """Return the directory signal-cli writes inbound attachments to.
+
+        Defaults to ``~/.local/share/signal-cli/attachments`` (the daemon's
+        platform default on Linux) when ``config.attachments_dir`` is unset.
+        """
+        configured = self.config.attachments_dir
+        if configured:
+            return Path(configured).expanduser()
+        return Path.home() / ".local/share/signal-cli/attachments"
 
     @staticmethod
     def _normalize_signal_id(value: str) -> list[str]:
