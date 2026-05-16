@@ -28,6 +28,14 @@ class AgentHookContext:
     error: str | None = None
 
 
+@dataclass(slots=True)
+class ToolCallContext:
+    """Per-tool-call context for ``before_tool_call`` / ``after_tool_call``."""
+
+    tool_name: str
+    arguments: dict[str, Any]
+
+
 class AgentHook:
     """Minimal lifecycle surface for shared runner customization."""
 
@@ -48,6 +56,12 @@ class AgentHook:
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         pass
+
+    async def before_tool_call(self, tc_ctx: ToolCallContext) -> None:
+        pass
+
+    async def after_tool_call(self, tc_ctx: ToolCallContext, result: Any) -> Any:
+        return result
 
     async def emit_reasoning(self, reasoning_content: str | None) -> None:
         pass
@@ -106,6 +120,14 @@ class CompositeHook(AgentHook):
 
     async def before_execute_tools(self, context: AgentHookContext) -> None:
         await self._for_each_hook_safe("before_execute_tools", context)
+
+    async def before_tool_call(self, tc_ctx: ToolCallContext) -> None:
+        await self._for_each_hook_safe("before_tool_call", tc_ctx)
+
+    async def after_tool_call(self, tc_ctx: ToolCallContext, result: Any) -> Any:
+        for h in self._hooks:
+            result = await h.after_tool_call(tc_ctx, result)
+        return result
 
     async def emit_reasoning(self, reasoning_content: str | None) -> None:
         await self._for_each_hook_safe("emit_reasoning", reasoning_content)
