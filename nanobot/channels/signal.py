@@ -43,6 +43,11 @@ _SIG_STRIKE_RE = re.compile(r'~~(.+?)~~|(?<![~\w])~([^~\n]+)~(?![~\w])', re.DOTA
 _SIG_TOKEN_RE = re.compile(r'\x00C(\d+)\x00')
 
 
+def _utf16_len(s: str) -> int:
+    """UTF-16 code-unit length, matching Signal BodyRange semantics."""
+    return len(s.encode("utf-16-le")) // 2
+
+
 def _sig_strip_cell(s: str) -> str:
     """Strip inline markdown from a table cell for plain-text rendering."""
     s = re.sub(r'\*\*(.+?)\*\*', r'\1', s)
@@ -183,15 +188,20 @@ def _markdown_to_signal(text: str) -> tuple[str, list[str]]:
     # Strikethrough: ~~text~~ (standard) or ~text~ (single-tilde variant).
     transform(_SIG_STRIKE_RE, lambda m, s: [_Run(m.group(1) or m.group(2), s | {"STRIKETHROUGH"})])
 
-    # Phase 3: assemble output.
+    # Phase 3: assemble output. Offsets and lengths are emitted in UTF-16 code
+    # units because Signal's BodyRange (via signal-cli's textStyle) interprets
+    # them as such; Python's len() counts code points, which would shift ranges
+    # left by 1 unit per non-BMP character preceding them.
     plain_text = ""
     text_styles: list[str] = []
+    utf16_offset = 0
     for run in runs:
         if not run.text:
             continue
-        start = len(plain_text)
         plain_text += run.text
-        length = len(plain_text) - start
+        start = utf16_offset
+        length = _utf16_len(run.text)
+        utf16_offset += length
         for style in sorted(run.styles):
             text_styles.append(f"{start}:{length}:{style}")
 
