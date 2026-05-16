@@ -511,6 +511,36 @@ class TestHandleDataMessageDM:
         assert handled == []
 
     @pytest.mark.asyncio
+    async def test_dm_allowlist_matches_without_plus_prefix(self):
+        """An allowlist entry without '+' must match a sender that carries '+'."""
+        ch, handled = self._make_dm_channel(policy="allowlist", allow_from=["19995550001"])
+        params = _dm_envelope(source_number="+19995550001")
+        await ch._handle_receive_notification(params)
+        assert len(handled) == 1
+
+    @pytest.mark.asyncio
+    async def test_dm_allowlist_matches_with_plus_prefix(self):
+        """An allowlist entry with '+' must match a sender without '+'."""
+        ch, handled = self._make_dm_channel(policy="allowlist", allow_from=["+19995550001"])
+        params = _dm_envelope(source_number="+19995550001", source_uuid=None)
+        # Replace envelope's sourceNumber with the non-prefixed form by editing
+        # the constructed dict directly so _collect_sender_id_parts sees it.
+        params["envelope"]["sourceNumber"] = "19995550001"
+        await ch._handle_receive_notification(params)
+        assert len(handled) == 1
+
+    @pytest.mark.asyncio
+    async def test_dm_allowlist_matches_uuid_case_insensitive(self):
+        """UUID matching must be case-insensitive."""
+        uuid = "ABCDEF12-3456-7890-ABCD-EF1234567890"
+        ch, handled = self._make_dm_channel(
+            policy="allowlist", allow_from=[uuid.lower()]
+        )
+        params = _dm_envelope(source_number="+19995550001", source_uuid=uuid)
+        await ch._handle_receive_notification(params)
+        assert len(handled) == 1
+
+    @pytest.mark.asyncio
     async def test_dm_disabled_rejected(self):
         ch = _make_channel(dm_enabled=False)
         handled: list[dict] = []
