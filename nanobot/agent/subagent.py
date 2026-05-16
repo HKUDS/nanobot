@@ -6,7 +6,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from loguru import logger
 
@@ -79,6 +79,7 @@ class SubagentManager:
         restrict_to_workspace: bool = False,
         disabled_skills: list[str] | None = None,
         max_iterations: int | None = None,
+        llm_wall_timeout_for_session: Callable[[str | None], float | None] | None = None,
     ):
         defaults = AgentDefaults()
         self.provider = provider
@@ -96,6 +97,7 @@ class SubagentManager:
         )
         self.max_concurrent_subagents = defaults.max_concurrent_subagents
         self.runner = AgentRunner(provider)
+        self._llm_wall_timeout_for_session = llm_wall_timeout_for_session
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
         self._task_statuses: dict[str, SubagentStatus] = {}
         self._session_tasks: dict[str, set[str]] = {}  # session_key -> {task_id, ...}
@@ -196,6 +198,12 @@ class SubagentManager:
                 {"role": "user", "content": task},
             ]
 
+            sess_key = origin.get("session_key")
+            llm_timeout = (
+                self._llm_wall_timeout_for_session(sess_key)
+                if self._llm_wall_timeout_for_session
+                else None
+            )
             result = await self.runner.run(AgentRunSpec(
                 initial_messages=messages,
                 tools=tools,
@@ -207,6 +215,8 @@ class SubagentManager:
                 error_message=None,
                 fail_on_tool_error=True,
                 checkpoint_callback=_on_checkpoint,
+                session_key=sess_key,
+                llm_timeout_s=llm_timeout,
             ))
             status.phase = "done"
             status.stop_reason = result.stop_reason

@@ -35,7 +35,7 @@ from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.goal_state import (
     goal_state_runtime_lines,
     goal_state_ws_blob,
-    sustained_goal_active,
+    runner_wall_llm_timeout_s,
 )
 from nanobot.session.manager import Session, SessionManager
 from nanobot.utils.artifacts import generated_image_paths_from_messages
@@ -253,6 +253,7 @@ class AgentLoop:
             restrict_to_workspace=restrict_to_workspace,
             disabled_skills=disabled_skills,
             max_iterations=self.max_iterations,
+            llm_wall_timeout_for_session=lambda sk: runner_wall_llm_timeout_s(self.sessions, sk),
         )
         self._unified_session = unified_session
         self._max_messages = max_messages if max_messages > 0 else 120
@@ -795,10 +796,10 @@ class AgentLoop:
                 injection_callback=_drain_pending,
                 # Sustained goals may legitimately exceed NANOBOT_LLM_TIMEOUT_S; idle stall
                 # is still capped by NANOBOT_STREAM_IDLE_TIMEOUT_S in streaming providers.
-                llm_timeout_s=(
-                    0.0
-                    if session is not None and sustained_goal_active(session.metadata)
-                    else None
+                llm_timeout_s=runner_wall_llm_timeout_s(
+                    self.sessions,
+                    session.key if session is not None else session_key,
+                    metadata=(session.metadata if session is not None else None),
                 ),
             ))
         finally:
