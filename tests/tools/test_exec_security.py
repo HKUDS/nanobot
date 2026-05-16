@@ -243,3 +243,44 @@ def test_exec_still_blocks_real_outside_path_via_redirect(tmp_path):
     blocked = tool._guard_command("echo pwn > /etc/issue", str(workspace))
     assert blocked is not None
     assert "path outside working dir" in blocked
+
+
+# --- format command blocking -----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "format C: /q",
+        "format D: /fs:ntfs",
+        "&& format",
+        "| format",
+        "&format",
+        ";format",
+        "|format",
+    ],
+)
+def test_exec_blocks_format_command(command):
+    """The Windows ``format`` disk command must be denied."""
+    tool = ExecTool()
+    result = tool._guard_command(command, "/tmp")
+    assert result is not None
+    assert "deny pattern filter" in result.lower()
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # URL parameter &format= must NOT be blocked (regression).
+        'curl -s "wttr.in/xxx?lang=zh&format=%l:+%c+%t+%h+%w&1"',
+        'curl -s "wttr.in/xxx?format=%l:+%c+%t+%h+%w&1"',
+        # format as a non-command word in a normal argument.
+        "echo format",
+        "echo reformat",
+    ],
+)
+def test_exec_allows_format_in_url_and_args(command):
+    """``format`` inside URL parameters or as a non-command arg must be allowed."""
+    tool = ExecTool()
+    result = tool._guard_command(command, "/tmp")
+    assert result is None
