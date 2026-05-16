@@ -1,6 +1,7 @@
 ---
 name: project-manager
 description: "Project context isolation and state management system. Creates per-project STATUS.md files for seamless context recovery across sessions. Supports intent recognition, tiered templates, and write-safe updates."
+triggers: ["项目状态", "项目进度", "切换项目", "回到项目", "STATUS", "新建项目", "项目列表", "换个话题"]
 always: false
 ---
 

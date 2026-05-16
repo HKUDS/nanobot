@@ -8,6 +8,8 @@ from pathlib import Path
 
 import yaml
 
+from nanobot.agent.skill_router import SkillRouter, extract_skill_keywords
+
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
 
@@ -139,6 +141,79 @@ class SkillsLoader:
                 missing = self._get_missing_requirements(meta)
                 suffix = f" (unavailable: {missing})" if missing else " (unavailable)"
                 lines.append(f"- **{skill_name}** — {desc}{suffix}  `{entry['path']}`")
+        return "\n".join(lines)
+
+    def build_routed_skills_summary(
+        self,
+        user_message: str,
+        *,
+        top_k: int = 5,
+        min_score: float = 3.0,
+        exclude: set[str] | None = None,
+    ) -> str:
+        """Build a skills summary routed to the user's message.
+
+        Uses BM25-lite routing to select only the most relevant skills.
+        When no skill scores above min_score, returns empty string —
+        letting the base LLM handle the query directly without skill
+        context overhead.
+
+        Args:
+            user_message: The current user message to route against.
+            top_k: Maximum number of routed skills to include.
+            min_score: Minimum BM25 score to include a skill. Skills
+                below this threshold are dropped. Set to 0.0 to disable.
+            exclude: Set of skill names to omit from the summary.
+
+        Returns:
+            Markdown-formatted routed skills summary, or empty string
+            if no skill has a confident match.
+        """
+        all_skills = self.list_skills(filter_unavailable=False)
+        if not all_skills:
+            return ""
+
+        always_names = set(self.get_always_skills())
+
+        # Enrich skill entries with description + triggers for the router
+        enriched: list[dict] = []
+        for entry in all_skills:
+            if exclude and entry["name"] in exclude:
+                continue
+            meta = self.get_skill_metadata(entry["name"]) or {}
+            desc = meta.get("description", entry["name"])
+            triggers = extract_skill_keywords(meta)
+            enriched.append({
+                **entry,
+                "description": desc if isinstance(desc, str) else str(desc),
+                "triggers": triggers,
+            })
+
+        router = SkillRouter(enriched, always_skills=always_names)
+        ranked = router.route(user_message, top_k=top_k, min_score=min_score)
+
+        # Only include routed skills that meet the confidence threshold.
+        # Always-included skills (score -1) are filtered out here.
+        routed = [s for s in ranked if s.get("score", 0) >= min_score]
+        if not routed:
+            # No confident match — let the base LLM handle it directly
+            return ""
+
+        # Format routed results
+        lines: list[str] = []
+        for entry in ranked:
+            skill_name = entry["name"]
+            meta = self._get_skill_meta(skill_name)
+            available = self._check_requirements(meta)
+            desc = self._get_skill_description(skill_name)
+            score = entry.get("score", -1.0)
+            score_tag = f"  `score={score:.2f}`" if score >= 0 else "  `always`"
+            if available:
+                lines.append(f"- **{skill_name}** — {desc}  `{entry['path']}`{score_tag}")
+            else:
+                missing = self._get_missing_requirements(meta)
+                suffix = f" (unavailable: {missing})" if missing else " (unavailable)"
+                lines.append(f"- **{skill_name}** — {desc}{suffix}  `{entry['path']}`{score_tag}")
         return "\n".join(lines)
 
     def _get_missing_requirements(self, skill_meta: dict) -> str:
