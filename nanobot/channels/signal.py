@@ -695,10 +695,7 @@ class SignalChannel(BaseChannel):
                 self.logger.debug(f"Ignoring DM from {sender_id} (DMs disabled)")
                 return
             if self.config.dm.policy == "allowlist":
-                allow_list = self.config.dm.allow_from
-                sender_str = str(sender_id)
-                parts = [sender_str] + (sender_str.split("|") if "|" in sender_str else [])
-                if not any(p for p in parts if p in allow_list):
+                if not self._sender_matches_allowlist(sender_id, self.config.dm.allow_from):
                     self.logger.debug(f"Ignoring DM from {sender_id} (policy: {self.config.dm.policy})")
                     return
 
@@ -863,6 +860,28 @@ class SignalChannel(BaseChannel):
         elif raw.isdigit():
             normalized.append(f"+{raw}")
         return list(dict.fromkeys(normalized))
+
+    @classmethod
+    def _sender_matches_allowlist(cls, sender_id: str, allow_list: list[str]) -> bool:
+        """Return True if any normalized variant of sender_id is on allow_list.
+
+        sender_id is the pipe-joined identifier string built by
+        _collect_sender_id_parts. Each part and each allow_list entry is run
+        through _normalize_signal_id so an allowlist entry like ``1234567890``
+        matches a sender ``+1234567890`` (and vice versa), and case-only
+        differences in UUIDs/ACIs match too.
+        """
+        if not allow_list:
+            return False
+        sender_variants: set[str] = set()
+        for part in str(sender_id).split("|"):
+            sender_variants.update(cls._normalize_signal_id(part))
+        if not sender_variants:
+            return False
+        allow_variants: set[str] = set()
+        for entry in allow_list:
+            allow_variants.update(cls._normalize_signal_id(entry))
+        return bool(sender_variants & allow_variants)
 
     def _remember_account_id_alias(self, value: str | None) -> None:
         """Remember known bot identifiers for mention matching."""
