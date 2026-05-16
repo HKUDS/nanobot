@@ -360,6 +360,23 @@ class SignalChannel(BaseChannel):
         # Each message is a dict with: sender_name, sender_number, content, timestamp
         self._group_buffers: dict[str, deque] = {}
 
+    def is_allowed(self, sender_id: str) -> bool:
+        """Override base check to normalize and split pipe-joined identifiers.
+
+        ``sender_id`` from Signal is the pipe-joined composite produced by
+        ``_collect_sender_id_parts``; allow_from entries may be single
+        identifiers or composites and may use the ``+`` prefix variant or
+        not. Delegates to ``_sender_matches_allowlist`` so the base gate
+        matches the per-policy DM gate.
+        """
+        allow_list = self.config.allow_from
+        if not allow_list:
+            self.logger.warning("allow_from is empty — all access denied")
+            return False
+        if "*" in allow_list:
+            return True
+        return self._sender_matches_allowlist(sender_id, allow_list)
+
     async def start(self) -> None:
         """Start the Signal channel and connect to signal-cli daemon."""
         if not self.config.phone_number:
@@ -937,11 +954,12 @@ class SignalChannel(BaseChannel):
     def _sender_matches_allowlist(cls, sender_id: str, allow_list: list[str]) -> bool:
         """Return True if any normalized variant of sender_id is on allow_list.
 
-        sender_id is the pipe-joined identifier string built by
-        _collect_sender_id_parts. Each part and each allow_list entry is run
-        through _normalize_signal_id so an allowlist entry like ``1234567890``
-        matches a sender ``+1234567890`` (and vice versa), and case-only
-        differences in UUIDs/ACIs match too.
+        Both ``sender_id`` and each allow_list entry can be a single
+        identifier or a pipe-joined composite of several (e.g.
+        ``"+1234567890|uuid-abc"``); both sides are split on ``|`` and each
+        part is run through ``_normalize_signal_id`` so an allowlist entry
+        like ``1234567890`` matches a sender ``+1234567890`` (and vice
+        versa), and case-only differences in UUIDs/ACIs match too.
         """
         if not allow_list:
             return False
@@ -952,7 +970,8 @@ class SignalChannel(BaseChannel):
             return False
         allow_variants: set[str] = set()
         for entry in allow_list:
-            allow_variants.update(cls._normalize_signal_id(entry))
+            for part in str(entry).split("|"):
+                allow_variants.update(cls._normalize_signal_id(part))
         return bool(sender_variants & allow_variants)
 
     def _remember_account_id_alias(self, value: str | None) -> None:
