@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -71,6 +72,7 @@ def _make_channel(
     group_allow_from: list[str] | None = None,
     require_mention: bool = True,
     group_buffer_size: int = 20,
+    attachments_dir: str | None = None,
 ) -> SignalChannel:
     config = SignalConfig(
         enabled=True,
@@ -87,6 +89,7 @@ def _make_channel(
             require_mention=require_mention,
         ),
         group_message_buffer_size=group_buffer_size,
+        attachments_dir=attachments_dir,
     )
     return SignalChannel(config, MessageBus())
 
@@ -469,6 +472,21 @@ class TestGroupBuffer:
 # ---------------------------------------------------------------------------
 # _handle_data_message — DM routing
 # ---------------------------------------------------------------------------
+
+
+class TestAttachmentsDir:
+    def test_default_attachments_dir(self):
+        ch = _make_channel()
+        expected = Path.home() / ".local/share/signal-cli/attachments"
+        assert ch._signal_attachments_dir() == expected
+
+    def test_configured_attachments_dir(self, tmp_path):
+        ch = _make_channel(attachments_dir=str(tmp_path / "custom"))
+        assert ch._signal_attachments_dir() == tmp_path / "custom"
+
+    def test_attachments_dir_expands_user(self):
+        ch = _make_channel(attachments_dir="~/signal-attachments")
+        assert ch._signal_attachments_dir() == Path.home() / "signal-attachments"
 
 
 class TestHandleDataMessageDM:
