@@ -835,6 +835,38 @@ class TestSend:
         assert any("BOLD" in s for s in params["textStyle"])
 
     @pytest.mark.asyncio
+    async def test_send_split_message_redistributes_text_styles(self):
+        """Long message split across chunks: each chunk gets its own textStyle
+        with offsets rebased to that chunk."""
+        ch, client = self._make_send_channel()
+        ch._MAX_MESSAGE_LEN = 12  # type: ignore[attr-defined]
+        msg = OutboundMessage(
+            channel="signal",
+            chat_id="+19995550001",
+            content="**head** middle and **tail**",
+        )
+        await ch.send(msg)
+        assert len(client.posts) >= 2
+        # Chunk 0 has BOLD for "head"; chunk 1+ must also carry BOLD for "tail".
+        bold_chunks = [
+            p["json"]["params"]
+            for p in client.posts
+            if any("BOLD" in s for s in p["json"]["params"].get("textStyle", []))
+        ]
+        assert len(bold_chunks) >= 2, (
+            "expected BOLD ranges in more than one chunk; got "
+            f"{[p['json']['params'] for p in client.posts]}"
+        )
+        # Each emitted range must point inside its own chunk's text.
+        for params in bold_chunks:
+            chunk_text = params["message"]
+            for entry in params["textStyle"]:
+                s, ln, _ = entry.split(":", 2)
+                start, length = int(s), int(ln)
+                end_units = start + length
+                assert end_units <= len(chunk_text.encode("utf-16-le")) // 2
+
+    @pytest.mark.asyncio
     async def test_send_empty_content_skips_rpc(self):
         ch, client = self._make_send_channel()
         msg = OutboundMessage(channel="signal", chat_id="+19995550001", content="")

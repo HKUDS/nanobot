@@ -208,6 +208,54 @@ def _markdown_to_signal(text: str) -> tuple[str, list[str]]:
     return plain_text, text_styles
 
 
+def _partition_styles(
+    plain_text: str, chunks: list[str], text_styles: list[str]
+) -> list[list[str]]:
+    """Partition Signal textStyle ranges across message chunks.
+
+    ``split_message`` slices ``plain_text`` into pieces (optionally trimming
+    whitespace at the boundaries), but the style ranges produced by
+    ``_markdown_to_signal`` are expressed in UTF-16 offsets relative to the
+    full ``plain_text``. This redistributes them per chunk with offsets
+    rebased to each chunk's start. Ranges that span a boundary are split
+    across the chunks they touch; ranges that fall entirely in trimmed
+    whitespace are dropped.
+    """
+    if not chunks:
+        return []
+    if not text_styles:
+        return [[] for _ in chunks]
+
+    # Locate each chunk's UTF-16 start in plain_text. split_message lstrips at
+    # boundaries (but not before the first chunk), so we skip whitespace
+    # between chunks to mirror that.
+    chunk_ranges: list[tuple[int, int]] = []
+    cursor = 0  # Python codepoint cursor in plain_text
+    for i, chunk in enumerate(chunks):
+        if i > 0:
+            while cursor < len(plain_text) and plain_text[cursor].isspace():
+                cursor += 1
+        utf16_start = _utf16_len(plain_text[:cursor])
+        utf16_end = utf16_start + _utf16_len(chunk)
+        chunk_ranges.append((utf16_start, utf16_end))
+        cursor += len(chunk)
+
+    result: list[list[str]] = [[] for _ in chunks]
+    for entry in text_styles:
+        s, ln, style = entry.split(":", 2)
+        r_start = int(s)
+        r_end = r_start + int(ln)
+        for i, (c_start, c_end) in enumerate(chunk_ranges):
+            if r_end <= c_start or r_start >= c_end:
+                continue
+            new_start = max(r_start, c_start) - c_start
+            new_end = min(r_end, c_end) - c_start
+            new_length = new_end - new_start
+            if new_length > 0:
+                result[i].append(f"{new_start}:{new_length}:{style}")
+    return result
+
+
 class SignalDMConfig(Base):
     """Signal DM policy configuration."""
 
@@ -392,10 +440,11 @@ class SignalChannel(BaseChannel):
             recipient_params = self._recipient_params(msg.chat_id)
 
             chunks = split_message(plain_text, self._MAX_MESSAGE_LEN) if plain_text else [""]
+            chunk_styles = _partition_styles(plain_text, chunks, text_styles)
             for i, chunk in enumerate(chunks):
                 params: dict[str, Any] = {"message": chunk}
-                if text_styles and i == 0:
-                    params["textStyle"] = text_styles
+                if chunk_styles[i]:
+                    params["textStyle"] = chunk_styles[i]
                 params.update(recipient_params)
                 if msg.media and i == 0:
                     params["attachments"] = msg.media

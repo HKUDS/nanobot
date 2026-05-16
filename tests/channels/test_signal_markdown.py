@@ -1,6 +1,9 @@
 """Unit tests for the Signal markdown → plain text + textStyle converter."""
 
-from nanobot.channels.signal import _markdown_to_signal
+import pytest
+
+from nanobot.channels.signal import _markdown_to_signal, _partition_styles
+from nanobot.utils.helpers import split_message
 
 
 def _utf16_len(s: str) -> int:
@@ -351,3 +354,108 @@ def test_reported_daily_brief_pattern():
     assert sd.get("Local") == ["ITALIC"]
     assert sd.get("Quote of the Day") == ["BOLD"]
     assert_within_utf16_bounds(plain, styles)
+
+
+# ---------------------------------------------------------------------------
+# Chunk redistribution
+#
+# split_message can break a long Signal payload into multiple chunks. The
+# style ranges from _markdown_to_signal are anchored to the full text, so
+# they must be redistributed per-chunk with rebased offsets — otherwise
+# styles for chunks 1..N are silently lost.
+# ---------------------------------------------------------------------------
+
+
+def _resolve_chunk_styles(text: str, max_len: int) -> tuple[list[str], list[list[str]]]:
+    """Helper: full markdown → signal pipeline, including chunking."""
+    plain, styles = _markdown_to_signal(text)
+    chunks = split_message(plain, max_len) if plain else [""]
+    return chunks, _partition_styles(plain, chunks, styles)
+
+
+def test_partition_styles_single_chunk_passthrough():
+    plain, styles = _markdown_to_signal("**bold** plain *it*")
+    parts = _partition_styles(plain, [plain], styles)
+    assert parts == [styles]
+
+
+def test_partition_styles_no_styles():
+    plain = "hello world"
+    assert _partition_styles(plain, [plain], []) == [[]]
+    assert _partition_styles(plain, ["hello", "world"], []) == [[], []]
+
+
+def test_partition_styles_drops_styles_outside_chunks():
+    """Whitespace trimmed by split_message must not carry a style range."""
+    plain = "a   b"
+    # Fake a style spanning the trimmed whitespace only.
+    chunks = ["a", "b"]
+    parts = _partition_styles(plain, chunks, ["1:3:BOLD"])
+    assert parts == [[], []]
+
+
+def test_partition_styles_long_message_preserves_chunk_one_styles():
+    """A bold span deep in the message must follow the message into chunk 1."""
+    # Two ~30-char paragraphs separated by a blank line, then **tail**.
+    line_a = "alpha " * 5  # 30 chars, ends with space
+    line_b = "beta " * 5
+    md = f"{line_a.strip()}\n\n{line_b.strip()}\n\n**tail**"
+    plain, styles = _markdown_to_signal(md)
+    # Force a split between the paragraphs.
+    max_len = len(line_a.strip()) + 2  # fits paragraph A + the "\n\n"
+    chunks = split_message(plain, max_len)
+    assert len(chunks) >= 2, "test setup must produce a split"
+    parts = _partition_styles(plain, chunks, styles)
+    # The bold "tail" should land in the last chunk, with chunk-relative offset.
+    final_chunk = chunks[-1]
+    final_styles = parts[-1]
+    assert any("BOLD" in s for s in final_styles)
+    for entry in final_styles:
+        s, ln, _ = entry.split(":", 2)
+        start, length = int(s), int(ln)
+        slice_ = final_chunk.encode("utf-16-le")[start * 2 : (start + length) * 2].decode("utf-16-le")
+        assert slice_ == "tail"
+
+
+def test_partition_styles_chunk_zero_styles_unchanged():
+    """Styles entirely in chunk 0 keep their original offsets."""
+    md = "**head** middle and **tail**"
+    plain, styles = _markdown_to_signal(md)
+    # Split so chunk 0 contains "head" and part of the rest, chunk 1 contains "tail".
+    chunks = split_message(plain, 12)
+    assert len(chunks) >= 2
+    parts = _partition_styles(plain, chunks, styles)
+    # "head" lives in chunk 0; assert its offset is unchanged (chunk 0 starts at 0).
+    head_entries = [s for s in parts[0] if "BOLD" in s]
+    assert any(s.startswith("0:4:") for s in head_entries)
+
+
+def test_partition_styles_with_non_bmp_chunk_offset():
+    """Chunk-start offsets must be expressed in UTF-16 code units."""
+    # Emoji in chunk 0, bold in chunk 1.
+    md = "🎉 alpha beta gamma\n\n**tail**"
+    plain, styles = _markdown_to_signal(md)
+    chunks = split_message(plain, 18)
+    assert len(chunks) >= 2
+    parts = _partition_styles(plain, chunks, styles)
+    final_styles = parts[-1]
+    assert any("BOLD" in s for s in final_styles)
+    final_chunk = chunks[-1]
+    for entry in final_styles:
+        s, ln, _ = entry.split(":", 2)
+        start, length = int(s), int(ln)
+        slice_ = final_chunk.encode("utf-16-le")[start * 2 : (start + length) * 2].decode("utf-16-le")
+        assert slice_ == "tail"
+
+
+def test_partition_styles_range_spanning_chunks_is_split():
+    """A style range that straddles a chunk boundary gets sliced into both chunks."""
+    # Construct manually: plain = "abc def", style covers "abc def" (whole thing).
+    plain = "abc def"
+    chunks = split_message(plain, 4)  # "abc" / "def"
+    assert chunks == ["abc", "def"]
+    parts = _partition_styles(plain, chunks, ["0:7:BOLD"])
+    # Chunk 0 holds 0:3:BOLD, chunk 1 holds 0:3:BOLD (length=3 each, "def" only
+    # since the space was trimmed by lstrip).
+    assert parts[0] == ["0:3:BOLD"]
+    assert parts[1] == ["0:3:BOLD"]
