@@ -610,16 +610,12 @@ class TestCheckInboundPolicy:
 
     def test_group_open_without_mention_blocks(self):
         ch = _make_channel(group_enabled=True, group_policy="open", require_mention=True)
-        allowed, _ = self._call(
-            ch, is_group_message=True, group_id="g1", message_text="plain talk"
-        )
+        allowed, _ = self._call(ch, is_group_message=True, group_id="g1", message_text="plain talk")
         assert allowed is False
 
     def test_group_command_bypasses_mention_requirement(self):
         ch = _make_channel(group_enabled=True, group_policy="open", require_mention=True)
-        allowed, _ = self._call(
-            ch, is_group_message=True, group_id="g1", message_text="/help"
-        )
+        allowed, _ = self._call(ch, is_group_message=True, group_id="g1", message_text="/help")
         assert allowed is True
 
     def test_allowed_group_appends_to_buffer(self):
@@ -703,9 +699,7 @@ class TestHandleDataMessageDM:
     async def test_dm_allowlist_matches_uuid_case_insensitive(self):
         """UUID matching must be case-insensitive."""
         uuid = "ABCDEF12-3456-7890-ABCD-EF1234567890"
-        ch, handled = self._make_dm_channel(
-            policy="allowlist", allow_from=[uuid.lower()]
-        )
+        ch, handled = self._make_dm_channel(policy="allowlist", allow_from=[uuid.lower()])
         params = _dm_envelope(source_number="+19995550001", source_uuid=uuid)
         await ch._handle_receive_notification(params)
         assert len(handled) == 1
@@ -1076,9 +1070,7 @@ class TestCommandHandling:
         ch, forwarded = _make_channel_with_capture(
             group_enabled=True, group_policy="open", require_mention=True
         )
-        params = _group_envelope(
-            source_number="+19995550001", group_id="grp==", message="/reset"
-        )
+        params = _group_envelope(source_number="+19995550001", group_id="grp==", message="/reset")
         await ch._handle_receive_notification(params)
         assert len(forwarded) == 1
         assert "/reset" in forwarded[0]["content"]
@@ -1357,9 +1349,7 @@ def test_config_allow_from_aggregates_dm_and_group() -> None:
         enabled=True,
         phone_number="+10000000000",
         dm=SignalDMConfig(enabled=True, policy="allowlist", allow_from=["+1111", "+2222"]),
-        group=SignalGroupConfig(
-            enabled=True, policy="allowlist", allow_from=["+3333", "+1111"]
-        ),
+        group=SignalGroupConfig(enabled=True, policy="allowlist", allow_from=["+3333", "+1111"]),
     )
     combined = config.allow_from
     assert "+1111" in combined
