@@ -33,7 +33,6 @@ from nanobot.config.schema import AgentDefaults, ModelPresetConfig
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.goal_state import (
-    goal_state_runtime_lines,
     goal_state_ws_blob,
     runner_wall_llm_timeout_s,
 )
@@ -728,19 +727,7 @@ class AgentLoop:
                     content, media = extract_documents(content, media)
                     media = media or None
                 user_content = self.context._build_user_content(content, media)
-                extra = goal_state_runtime_lines(session.metadata) if session is not None else []
-                runtime_ctx = self.context._build_runtime_context(
-                    pending_msg.channel,
-                    self._runtime_chat_id(pending_msg),
-                    self.context.timezone,
-                    sender_id=pending_msg.sender_id,
-                    supplemental_lines=extra or None,
-                )
-                if isinstance(user_content, str):
-                    merged: str | list[dict[str, Any]] = f"{user_content}\n\n{runtime_ctx}"
-                else:
-                    merged = user_content + [{"type": "text", "text": runtime_ctx}]
-                return {"role": "user", "content": merged}
+                return {"role": "user", "content": user_content}
 
             items: list[dict[str, Any]] = []
             while len(items) < limit:
