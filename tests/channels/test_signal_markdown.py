@@ -459,3 +459,66 @@ def test_partition_styles_range_spanning_chunks_is_split():
     # since the space was trimmed by lstrip).
     assert parts[0] == ["0:3:BOLD"]
     assert parts[1] == ["0:3:BOLD"]
+
+
+# ---------------------------------------------------------------------------
+# Adjacency, nesting, and malformed input
+# ---------------------------------------------------------------------------
+
+
+def test_bold_italic_combo_outer_bold_inner_italic():
+    """`**_combo_**` carries both BOLD and ITALIC over the same span."""
+    plain, styles = _markdown_to_signal("**_combo_**")
+    assert plain == "combo"
+    sd = styles_for(plain, styles)
+    assert set(sd.get("combo", [])) == {"BOLD", "ITALIC"}
+
+
+def test_bold_and_italic_adjacent_no_separator():
+    """`**bold***italic*` produces BOLD on `bold` and ITALIC on `italic`."""
+    plain, styles = _markdown_to_signal("**bold***italic*")
+    assert plain == "bolditalic"
+    sd = styles_for(plain, styles)
+    assert sd.get("bold") == ["BOLD"]
+    assert sd.get("italic") == ["ITALIC"]
+
+
+def test_unclosed_bold_falls_through_as_plain():
+    """An unmatched `**` opener round-trips as literal text with no style."""
+    plain, styles = _markdown_to_signal("**bold")
+    assert plain == "**bold"
+    assert styles == []
+
+
+def test_unclosed_inline_code_falls_through_as_plain():
+    """An unmatched backtick round-trips as literal text with no style."""
+    plain, styles = _markdown_to_signal("use `grep")
+    assert plain == "use `grep"
+    assert styles == []
+
+
+def test_inline_code_inside_blockquote():
+    """Blockquote prefix is stripped; inline code becomes MONOSPACE."""
+    plain, styles = _markdown_to_signal("> use `grep`")
+    assert plain == "use grep"
+    sd = styles_for(plain, styles)
+    assert sd.get("grep") == ["MONOSPACE"]
+
+
+def test_header_with_inner_bold_produces_contiguous_bold_ranges():
+    """`# **wrap** me` — header forces BOLD over the whole line; the inner `**`
+    splits the run, yielding two contiguous BOLD ranges that together cover
+    "wrap me". This is intentional — Signal renders adjacent same-style ranges
+    as a single visual span.
+    """
+    plain, styles = _markdown_to_signal("# **wrap** me")
+    assert plain == "wrap me"
+    # Both ranges are BOLD; collectively they cover the whole "wrap me".
+    bold_ranges = [s for s in styles if s.endswith(":BOLD")]
+    assert len(bold_ranges) == 2
+    covered = set()
+    for entry in bold_ranges:
+        start, length, _ = entry.split(":", 2)
+        for i in range(int(start), int(start) + int(length)):
+            covered.add(i)
+    assert covered == set(range(len(plain)))
