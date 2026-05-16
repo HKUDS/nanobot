@@ -26,7 +26,52 @@ Instead of storing secrets directly in `config.json`, you can use `${VAR_NAME}` 
 }
 ```
 
-For **systemd** deployments, use `EnvironmentFile=` in the service unit to load variables from a file that only the deploying user can read:
+Any string value in `config.json` can use `${VAR_NAME}`. Resolution runs once at startup, in memory only — resolved values are never written back to disk, so editing config through `nanobot onboard` or the WebUI preserves the placeholder.
+
+If a referenced variable is unset, nanobot fails fast at startup with `ValueError: Environment variable 'NAME' referenced in config is not set`.
+
+### More examples
+
+**MCP servers** — both stdio `env` and HTTP `headers`:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "github": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}" }
+      },
+      "remote": {
+        "url": "https://example.com/mcp/",
+        "headers": { "Authorization": "Bearer ${REMOTE_MCP_TOKEN}" }
+      }
+    }
+  }
+}
+```
+
+**Web search providers:**
+
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "brave",
+        "apiKey": "${BRAVE_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+### Loading variables at startup
+
+Pick whatever fits your deployment — nanobot only reads `os.environ` at startup, so any mechanism that populates the process environment works.
+
+**systemd** — use `EnvironmentFile=` in the service unit to load variables from a file that only the deploying user can read:
 
 ```ini
 # /etc/systemd/system/nanobot.service (excerpt)
@@ -40,6 +85,33 @@ ExecStart=...
 # /home/youruser/nanobot_secrets.env (mode 600, owned by youruser)
 TELEGRAM_TOKEN=your-token-here
 IMAP_PASSWORD=your-password-here
+```
+
+**Docker** — `--env-file` (one `KEY=VALUE` per line) or `-e KEY=value`:
+
+```bash
+docker run --env-file=./nanobot.env nanobot/nanobot
+```
+
+**direnv** — drop a `.envrc` in your working directory and run `direnv allow`:
+
+```bash
+# .envrc (auto-loaded by direnv)
+export TELEGRAM_TOKEN=your-token-here
+export ANTHROPIC_API_KEY=...
+```
+
+**Secret managers (1Password, Bitwarden, pass)** — wrap the process so secrets only exist as env vars for the lifetime of the run, never on disk:
+
+```bash
+# 1Password — references in .env.tpl look like `op://Vault/Item/field`
+op run --env-file=.env.tpl -- nanobot agent
+
+# pass (passwordstore.org)
+ANTHROPIC_API_KEY="$(pass show api/anthropic)" nanobot agent
+
+# Bitwarden
+ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 ```
 
 ## Providers
@@ -917,7 +989,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
     "web": {
       "search": {
         "provider": "brave",
-        "apiKey": "BSA..."
+        "apiKey": "${BRAVE_API_KEY}"
       }
     }
   }
@@ -931,7 +1003,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
     "web": {
       "search": {
         "provider": "tavily",
-        "apiKey": "tvly-..."
+        "apiKey": "${TAVILY_API_KEY}"
       }
     }
   }
@@ -945,7 +1017,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
     "web": {
       "search": {
         "provider": "jina",
-        "apiKey": "jina_..."
+        "apiKey": "${JINA_API_KEY}"
       }
     }
   }
@@ -959,7 +1031,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
     "web": {
       "search": {
         "provider": "kagi",
-        "apiKey": "your-kagi-api-key"
+        "apiKey": "${KAGI_API_KEY}"
       }
     }
   }
@@ -973,7 +1045,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
     "web": {
       "search": {
         "provider": "olostep",
-        "apiKey": "YOUR_OLOSTEP_API_KEY"
+        "apiKey": "${OLOSTEP_API_KEY}"
       }
     }
   }
@@ -1135,6 +1207,8 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 > [!TIP]
 > For production deployments, set `"restrictToWorkspace": true` and `"tools.exec.sandbox": "bwrap"` in your config to sandbox the agent.
+
+For API keys, tokens, and other secrets, see [Environment Variables for Secrets](#environment-variables-for-secrets) — avoid storing them directly in `config.json`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
