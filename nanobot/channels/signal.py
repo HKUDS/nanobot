@@ -648,141 +648,57 @@ class SignalChannel(BaseChannel):
         """Handle a data message (text, attachments, etc.)."""
         message_text = data_message.get("message") or ""
         attachments = data_message.get("attachments", [])
-        group_info = data_message.get("groupInfo")
-        timestamp = data_message.get("timestamp")
         mentions = data_message.get("mentions", [])
-        reaction = data_message.get("reaction")
+        timestamp = data_message.get("timestamp")
 
-        # Log full data_message for debugging group detection
         self.logger.info(
             f"Data message from {sender_number}: "
-            f"groupInfo={group_info}, "
+            f"groupInfo={data_message.get('groupInfo')}, "
             f"groupV2={data_message.get('groupV2')}, "
             f"keys={list(data_message.keys())}"
         )
 
-        # Ignore reaction messages (emoji reactions to messages)
-        if reaction:
-            self.logger.debug(f"Ignoring reaction message from {sender_number}: {reaction}")
+        if data_message.get("reaction"):
+            self.logger.debug(
+                f"Ignoring reaction message from {sender_number}: {data_message['reaction']}"
+            )
             return
-
-        # Ignore empty messages (e.g., when bot is added to a group)
         if not message_text and not attachments:
             self.logger.debug(f"Ignoring empty message from {sender_number}")
             return
 
-        # Determine chat_id (group ID or sender number)
-        # Check both groupInfo (v1) and groupV2 (v2) fields for group detection
+        group_info = data_message.get("groupInfo")
         group_v2 = data_message.get("groupV2")
         is_group_message = group_info is not None or group_v2 is not None
         group_id = self._extract_group_id(group_info, group_v2)
 
-        is_command = bool(message_text and message_text.strip().startswith("/"))
+        allowed, chat_id = self._check_inbound_policy(
+            sender_id=sender_id,
+            sender_number=sender_number,
+            group_id=group_id,
+            is_group_message=is_group_message,
+            message_text=message_text,
+            mentions=mentions,
+            sender_name=sender_name,
+            timestamp=timestamp,
+        )
+        if not allowed:
+            return
 
-        if is_group_message:
-            chat_id = group_id or sender_number
-
-            # Check if this group is allowed before doing anything else
-            if not self.config.group.enabled:
-                self.logger.info(f"Ignoring group message from {chat_id} (groups disabled)")
-                return
-            if (
-                self.config.group.policy == "allowlist"
-                and chat_id not in self.config.group.allow_from
-            ):
-                self.logger.info(
-                    f"Ignoring group message from {chat_id} (policy: {self.config.group.policy})"
-                )
-                return
-
-            # Add to group message buffer (group is allowed)
-            self._add_to_group_buffer(
-                group_id=chat_id,
-                sender_name=sender_name or sender_number,
-                sender_number=sender_number,
-                message_text=message_text,
-                timestamp=timestamp,
-            )
-
-            # Commands bypass the mention requirement; non-commands require it.
-            if not is_command and not self._should_respond_in_group(message_text, mentions):
-                self.logger.info(
-                    f"Ignoring group message (require_mention: {self.config.group.require_mention})"
-                )
-                return
-        else:
-            # Direct message — check policy first, then forward everything to the bus.
-            chat_id = sender_number
-            if not self.config.dm.enabled:
-                self.logger.debug(f"Ignoring DM from {sender_id} (DMs disabled)")
-                return
-            if self.config.dm.policy == "allowlist":
-                if not self._sender_matches_allowlist(sender_id, self.config.dm.allow_from):
-                    self.logger.debug(f"Ignoring DM from {sender_id} (policy: {self.config.dm.policy})")
-                    return
-
-        # Build content from text and attachments
-        content_parts = []
-        media_paths = []
-
-        # For group messages, include recent message context
-        if is_group_message:
-            buffer_context = self._get_group_buffer_context(chat_id)
-            if buffer_context:
-                content_parts.append(f"[Recent group messages for context:]\n{buffer_context}\n---")
-
-        # Prepend sender name for group messages so history shows who said what
-        if message_text:
-            # Strip bot mentions from text (for group messages)
-            if is_group_message:
-                message_text = self._strip_bot_mention(message_text, mentions)
-                # Prepend sender name to make it clear who is speaking
-                display_name = sender_name or sender_number
-                message_text = f"[{display_name}]: {message_text}"
-            content_parts.append(message_text)
-
-        # Handle attachments
-        if attachments:
-            media_dir = get_media_dir("signal")
-
-            for attachment in attachments:
-                attachment_id = attachment.get("id")
-                content_type = attachment.get("contentType", "")
-                filename = attachment.get("filename") or f"attachment_{attachment_id}"
-
-                if not attachment_id:
-                    continue
-
-                try:
-                    source_path = self._signal_attachments_dir() / attachment_id
-
-                    if source_path.exists():
-                        dest_path = media_dir / f"signal_{safe_filename(filename)}"
-                        shutil.copy2(source_path, dest_path)
-                        media_paths.append(str(dest_path))
-
-                        # Determine media type from content type
-                        media_type = content_type.split("/")[0] if "/" in content_type else "file"
-                        if media_type not in ("image", "audio", "video"):
-                            media_type = "file"
-
-                        content_parts.append(f"[{media_type}: {dest_path}]")
-                        self.logger.debug(f"Downloaded attachment: {filename} -> {dest_path}")
-                    else:
-                        self.logger.warning(f"Attachment not found: {source_path}")
-                        content_parts.append(f"[attachment: {filename} - not found]")
-
-                except Exception as e:
-                    self.logger.warning(f"Failed to process attachment {filename}: {e}")
-                    content_parts.append(f"[attachment: {filename} - error]")
-
-        content = "\n".join(content_parts) if content_parts else "[empty message]"
+        content, media_paths = self._assemble_inbound_content(
+            sender_name=sender_name,
+            sender_number=sender_number,
+            message_text=message_text,
+            attachments=attachments,
+            mentions=mentions,
+            is_group_message=is_group_message,
+            chat_id=chat_id,
+        )
 
         self.logger.debug(f"Signal message from {sender_number}: {content[:50]}...")
 
         await self._start_typing(chat_id)
         try:
-            # Forward to message bus
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=chat_id,
@@ -799,6 +715,132 @@ class SignalChannel(BaseChannel):
         except Exception:
             await self._stop_typing(chat_id)
             raise
+
+    def _check_inbound_policy(
+        self,
+        *,
+        sender_id: str,
+        sender_number: str,
+        group_id: str | None,
+        is_group_message: bool,
+        message_text: str,
+        mentions: list,
+        sender_name: str | None,
+        timestamp: int | None,
+    ) -> tuple[bool, str]:
+        """Decide whether to route an inbound message past DM/group policy.
+
+        Returns ``(allow, chat_id)``. Has one side effect: when a group
+        message passes the enabled+allowlist gates, it is appended to the
+        group's rolling context buffer before the mention check.
+        """
+        if is_group_message:
+            chat_id = group_id or sender_number
+            if not self.config.group.enabled:
+                self.logger.info(f"Ignoring group message from {chat_id} (groups disabled)")
+                return False, chat_id
+            if (
+                self.config.group.policy == "allowlist"
+                and chat_id not in self.config.group.allow_from
+            ):
+                self.logger.info(
+                    f"Ignoring group message from {chat_id} (policy: {self.config.group.policy})"
+                )
+                return False, chat_id
+
+            self._add_to_group_buffer(
+                group_id=chat_id,
+                sender_name=sender_name or sender_number,
+                sender_number=sender_number,
+                message_text=message_text,
+                timestamp=timestamp,
+            )
+
+            is_command = bool(message_text and message_text.strip().startswith("/"))
+            if not is_command and not self._should_respond_in_group(message_text, mentions):
+                self.logger.info(
+                    f"Ignoring group message (require_mention: {self.config.group.require_mention})"
+                )
+                return False, chat_id
+            return True, chat_id
+
+        # Direct message
+        chat_id = sender_number
+        if not self.config.dm.enabled:
+            self.logger.debug(f"Ignoring DM from {sender_id} (DMs disabled)")
+            return False, chat_id
+        if self.config.dm.policy == "allowlist":
+            if not self._sender_matches_allowlist(sender_id, self.config.dm.allow_from):
+                self.logger.debug(
+                    f"Ignoring DM from {sender_id} (policy: {self.config.dm.policy})"
+                )
+                return False, chat_id
+        return True, chat_id
+
+    def _assemble_inbound_content(
+        self,
+        *,
+        sender_name: str | None,
+        sender_number: str,
+        message_text: str,
+        attachments: list,
+        mentions: list,
+        is_group_message: bool,
+        chat_id: str,
+    ) -> tuple[str, list[str]]:
+        """Build ``(content, media_paths)`` for an inbound message.
+
+        Pulls in group context, strips bot mentions, prefixes the sender's
+        display name on group messages, and copies any attachments from
+        signal-cli's storage into the channel media dir.
+        """
+        content_parts: list[str] = []
+        media_paths: list[str] = []
+
+        if is_group_message:
+            buffer_context = self._get_group_buffer_context(chat_id)
+            if buffer_context:
+                content_parts.append(
+                    f"[Recent group messages for context:]\n{buffer_context}\n---"
+                )
+
+        if message_text:
+            if is_group_message:
+                message_text = self._strip_bot_mention(message_text, mentions)
+                display_name = sender_name or sender_number
+                message_text = f"[{display_name}]: {message_text}"
+            content_parts.append(message_text)
+
+        if attachments:
+            media_dir = get_media_dir("signal")
+            for attachment in attachments:
+                attachment_id = attachment.get("id")
+                content_type = attachment.get("contentType", "")
+                filename = attachment.get("filename") or f"attachment_{attachment_id}"
+                if not attachment_id:
+                    continue
+                try:
+                    source_path = self._signal_attachments_dir() / attachment_id
+                    if source_path.exists():
+                        dest_path = media_dir / f"signal_{safe_filename(filename)}"
+                        shutil.copy2(source_path, dest_path)
+                        media_paths.append(str(dest_path))
+                        media_type = (
+                            content_type.split("/")[0] if "/" in content_type else "file"
+                        )
+                        if media_type not in ("image", "audio", "video"):
+                            media_type = "file"
+                        content_parts.append(f"[{media_type}: {dest_path}]")
+                        self.logger.debug(f"Downloaded attachment: {filename} -> {dest_path}")
+                    else:
+                        self.logger.warning(f"Attachment not found: {source_path}")
+                        content_parts.append(f"[attachment: {filename} - not found]")
+                except Exception as e:
+                    self.logger.warning(f"Failed to process attachment {filename}: {e}")
+                    content_parts.append(f"[attachment: {filename} - error]")
+
+        content = "\n".join(content_parts) if content_parts else "[empty message]"
+        return content, media_paths
 
     def _add_to_group_buffer(
         self,
