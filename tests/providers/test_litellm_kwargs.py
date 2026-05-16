@@ -1173,9 +1173,16 @@ def test_kimi_k25_no_extra_body_when_reasoning_effort_none() -> None:
 
 
 def test_kimi_k25_thinking_enabled_with_openrouter_prefix() -> None:
-    """OpenRouter-style model names like moonshotai/kimi-k2.5 must trigger thinking."""
+    """OpenRouter-style model names like moonshotai/kimi-k2.5 must trigger thinking.
+
+    OR drops upstream-provider `thinking` fields, so the same intent also has
+    to go through OR's `reasoning.effort` shape (#3851 follow-up).
+    """
     kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.5", reasoning_effort="medium")
-    assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+    assert kw.get("extra_body") == {
+        "thinking": {"type": "enabled"},
+        "reasoning": {"effort": "medium"},
+    }
 
 
 def test_kimi_k26_thinking_enabled() -> None:
@@ -1185,9 +1192,13 @@ def test_kimi_k26_thinking_enabled() -> None:
 
 
 def test_kimi_k26_thinking_enabled_with_openrouter_prefix() -> None:
-    """OpenRouter-style names like moonshotai/kimi-k2.6 must trigger thinking."""
+    """OpenRouter-style names like moonshotai/kimi-k2.6 must trigger thinking
+    via both upstream `thinking` and OR's `reasoning.effort`."""
     kw = _build_kwargs_for("openrouter", "moonshotai/kimi-k2.6", reasoning_effort="medium")
-    assert kw.get("extra_body") == {"thinking": {"type": "enabled"}}
+    assert kw.get("extra_body") == {
+        "thinking": {"type": "enabled"},
+        "reasoning": {"effort": "medium"},
+    }
 
 
 def test_moonshot_kimi_k26_temperature_override() -> None:

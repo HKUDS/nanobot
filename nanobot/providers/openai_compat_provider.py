@@ -586,6 +586,27 @@ class OpenAICompatProvider(LLMProvider):
                 {"thinking": {"type": "enabled" if thinking_enabled else "disabled"}}
             )
 
+        # OpenRouter uses its own unified `reasoning` field and does not
+        # forward provider-specific thinking shapes (the Kimi/MiMo
+        # extra_body.thinking above) to upstream. Reported as the follow-up
+        # to #3845/#3851: MiMo via OR kept thinking despite our injection.
+        # For known thinking-capable models routed via OR, mirror the
+        # effort signal into reasoning.effort (OR's documented enum:
+        # "none"|"minimal"|"low"|"medium"|"high"|"xhigh"), which OR
+        # translates to the upstream model's native shape.
+        if (
+            spec
+            and spec.name == "openrouter"
+            and reasoning_effort is not None
+            and (
+                _is_kimi_thinking_model(model_name)
+                or _is_mimo_thinking_model(model_name)
+            )
+        ):
+            kwargs.setdefault("extra_body", {}).update(
+                {"reasoning": {"effort": semantic_effort}}
+            )
+
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
