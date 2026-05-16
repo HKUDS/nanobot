@@ -493,6 +493,51 @@ class TestGroupBuffer:
 # ---------------------------------------------------------------------------
 
 
+class TestIsAllowed:
+    """The base-channel allowlist gate is overridden to understand Signal's
+    pipe-joined composite sender_ids and the +/no-+ phone variants.
+    """
+
+    def test_denies_when_allowlist_empty(self):
+        ch = _make_channel(dm_enabled=True, dm_policy="open")  # open -> no entries
+        assert ch.is_allowed("+19995550001") is False
+
+    def test_allows_wildcard(self):
+        ch = _make_channel(dm_policy="allowlist", dm_allow_from=["*"])
+        assert ch.is_allowed("+19995550001|some-uuid") is True
+
+    def test_allows_composite_sender_against_split_allowlist(self):
+        """Composite sender_id, single-id allow_from — must match either part."""
+        ch = _make_channel(
+            dm_policy="allowlist",
+            dm_allow_from=["+19995550001"],
+        )
+        assert ch.is_allowed("+19995550001|1872ba20-uuid") is True
+
+    def test_allows_composite_sender_against_composite_allowlist_entry(self):
+        """Backward compat: pipe-joined composite allowlist entries still match."""
+        composite = "+19995550001|1872ba20-uuid"
+        ch = _make_channel(dm_policy="allowlist", dm_allow_from=[composite])
+        assert ch.is_allowed(composite) is True
+
+    def test_allows_when_only_uuid_part_is_listed(self):
+        ch = _make_channel(dm_policy="allowlist", dm_allow_from=["1872ba20-uuid"])
+        assert ch.is_allowed("+19995550001|1872ba20-uuid") is True
+
+    def test_denies_when_no_part_matches(self):
+        ch = _make_channel(dm_policy="allowlist", dm_allow_from=["+12223334444"])
+        assert ch.is_allowed("+19995550001|1872ba20-uuid") is False
+
+    def test_allowlist_union_includes_group_ids(self):
+        """allow_from is the union of dm.allow_from and group.allow_from."""
+        ch = _make_channel(
+            group_enabled=True,
+            group_policy="allowlist",
+            group_allow_from=["group-id-base64=="],
+        )
+        assert "group-id-base64==" in ch.config.allow_from
+
+
 class TestCheckInboundPolicy:
     """Direct tests for the policy gate that _handle_data_message now delegates to."""
 
@@ -662,6 +707,22 @@ class TestHandleDataMessageDM:
             policy="allowlist", allow_from=[uuid.lower()]
         )
         params = _dm_envelope(source_number="+19995550001", source_uuid=uuid)
+        await ch._handle_receive_notification(params)
+        assert len(handled) == 1
+
+    @pytest.mark.asyncio
+    async def test_dm_allowlist_matches_pipe_joined_composite_entry(self):
+        """Allowlist entries written as ``phone|uuid`` composites still work.
+
+        Some configs pre-date the per-part splitting and store the full
+        sender_id composite as a single allow_from entry. Keep matching it.
+        """
+        composite = "+19995550001|1872ba20-f52a-4bad-b434-bf7f808c8b22"
+        ch, handled = self._make_dm_channel(policy="allowlist", allow_from=[composite])
+        params = _dm_envelope(
+            source_number="+19995550001",
+            source_uuid="1872ba20-f52a-4bad-b434-bf7f808c8b22",
+        )
         await ch._handle_receive_notification(params)
         assert len(handled) == 1
 
