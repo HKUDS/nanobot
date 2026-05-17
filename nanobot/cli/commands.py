@@ -22,6 +22,11 @@ if sys.platform == "win32":
 import typer
 from loguru import logger
 
+# Buffered reasoning display: accumulate streaming tokens and flush
+# on sentence/line boundaries so the user sees grouped text instead of
+# one token per line. The empty string placeholder is the sentinel.
+_reasoning_buf: str = ""
+
 # Remove default handler and re-add with unified nanobot format
 logger.remove()
 _log_handler_id = logger.add(
@@ -242,16 +247,42 @@ def _print_cli_progress_line(text: str, thinking: ThinkingSpinner | None, render
         target.print(f"  [dim]↳ {text}[/dim]")
 
 
-def _print_cli_reasoning(text: str, thinking: ThinkingSpinner | None, renderer: StreamRenderer | None = None) -> None:
-    """Print reasoning/thinking content in a distinct style."""
-    if not text.strip():
+def _flush_reasoning(thinking: ThinkingSpinner | None, renderer: StreamRenderer | None = None) -> None:
+    """Flush accumulated reasoning buffer to the display."""
+    global _reasoning_buf
+    if not _reasoning_buf or not _reasoning_buf.strip():
+        _reasoning_buf = ""
         return
+    text = _reasoning_buf.strip()
+    _reasoning_buf = ""
     target = renderer.console if renderer else console
     pause = renderer.pause_spinner() if renderer else (thinking.pause() if thinking else nullcontext())
     with pause:
         if renderer:
             renderer.ensure_header()
         target.print(f"[dim italic]✻ {text}[/dim italic]")
+
+
+def _print_cli_reasoning(text: str, thinking: ThinkingSpinner | None, renderer: StreamRenderer | None = None) -> None:
+    """Accumulate reasoning tokens and flush on sentence / line boundaries.
+
+    Without buffering, each streaming delta (often a single token) would be
+    printed as a separate ``✻`` line.  This version groups tokens into
+    natural chunks visible in the terminal.
+    """
+    global _reasoning_buf
+    if not text:
+        return
+    _reasoning_buf += text
+
+    # Flush on newline, sentence-ending punctuation, or when the chunk is
+    # long enough to wrap meaningfully at typical terminal widths.
+    if (
+        text.endswith("\n")
+        or any(text.rstrip().endswith(p) for p in (".", "!", "?", "。", "！", "？"))
+        or len(_reasoning_buf) >= 60
+    ):
+        _flush_reasoning(thinking, renderer)
 
 
 async def _print_interactive_progress_line(text: str, thinking: ThinkingSpinner | None, renderer: StreamRenderer | None = None) -> None:
@@ -280,6 +311,11 @@ async def _maybe_print_interactive_progress(
 
     if not metadata.get("_progress"):
         return False
+
+    # Flush reasoning buffer when the reasoning stream ends (bus path).
+    if metadata.get("_reasoning_end"):
+        _flush_reasoning(thinking, renderer)
+        return True
 
     is_tool_hint = metadata.get("_tool_hint", False)
     is_reasoning = metadata.get("_reasoning", False) or metadata.get("_reasoning_delta", False)
@@ -1109,6 +1145,12 @@ def agent(
     def _make_progress(renderer: StreamRenderer | None = None):
         async def _cli_progress(content: str, *, tool_hint: bool = False, reasoning: bool = False, **_kwargs: Any) -> None:
             ch = agent_loop.channels_config
+
+            # Flush remaining reasoning buffer when the stream ends.
+            if _kwargs.get("reasoning_end"):
+                _flush_reasoning(_thinking, renderer)
+                return
+
             if reasoning:
                 if ch and not ch.show_reasoning:
                     return
