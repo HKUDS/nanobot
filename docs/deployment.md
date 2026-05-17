@@ -36,8 +36,39 @@ docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot onboard
 # Edit config on host to add API keys
 vim ~/.nanobot/config.json
 
+> [!IMPORTANT]
+> **Docker configuration for WebUI access:** When running nanobot in Docker, connections from the browser arrive from the Docker gateway IP (e.g. `172.17.0.1`), not `127.0.0.1`. You must:
+> 1. Set `channels.websocket.host` to `"0.0.0.0"` in `~/.nanobot/config.json`
+> 2. Set `gateway.host` to `"0.0.0.0"` so that `http://localhost:18790/health` is reachable
+> 3. Set `channels.websocket.tokenIssueSecret` to a strong secret for authentication
+>
+> Example snippet for `config.json`:
+> ```json
+> {
+>   "gateway": { "host": "0.0.0.0" },
+>   "channels": {
+>     "websocket": {
+>       "enabled": true,
+>       "host": "0.0.0.0",
+>       "port": 8765,
+>       "tokenIssueSecret": "your-strong-secret-here"
+>     }
+>   }
+> }
+> ```
+> Without `tokenIssueSecret`, the WebUI bootstrap endpoint is restricted to localhost connections only (local dev mode). See [`webui/README.md`](../webui/README.md#access-from-another-device-lan) for details.
+
 # Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat)
-docker run -v ~/.nanobot:/home/nanobot/.nanobot -p 18790:18790 nanobot gateway
+#   --cap-drop ALL --cap-add SYS_ADMIN: required when tools.exec.sandbox is "bwrap"
+#   --security-opt: required for bwrap sandbox on Docker
+#   -p 8765:8765: exposes the WebUI/WebSocket port (bundled in the wheel)
+docker run \
+  --cap-drop ALL --cap-add SYS_ADMIN \
+  --security-opt apparmor=unconfined \
+  --security-opt seccomp=unconfined \
+  -v ~/.nanobot:/home/nanobot/.nanobot \
+  -p 18790:18790 -p 8765:8765 \
+  nanobot gateway
 
 # Or run a single command
 docker run -v ~/.nanobot:/home/nanobot/.nanobot --rm nanobot agent -m "Hello!"
