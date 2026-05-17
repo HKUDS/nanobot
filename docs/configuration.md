@@ -87,10 +87,12 @@ TELEGRAM_TOKEN=your-token-here
 IMAP_PASSWORD=your-password-here
 ```
 
-**Docker** — `--env-file` (one `KEY=VALUE` per line) or `-e KEY=value`:
+**Docker** — pass an env file to the locally built image (one `KEY=VALUE` per line), or use `-e KEY=value`:
 
 ```bash
-docker run --env-file=./nanobot.env nanobot/nanobot
+docker run --rm --env-file=./nanobot.env \
+  -v ~/.nanobot:/home/nanobot/.nanobot \
+  nanobot agent -m "Hello"
 ```
 
 **direnv** — drop a `.envrc` in your working directory and run `direnv allow`:
