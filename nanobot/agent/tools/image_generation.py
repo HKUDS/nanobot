@@ -19,6 +19,7 @@ from nanobot.config.schema import Base
 from nanobot.providers.image_generation import (
     AIHubMixImageGenerationClient,
     ImageGenerationError,
+    MiniMaxImageGenerationClient,
     OpenRouterImageGenerationClient,
 )
 from nanobot.utils.artifacts import (
@@ -117,7 +118,9 @@ class ImageGenerationTool(Tool):
     def _provider_config(self) -> ProviderConfig | None:
         return self.provider_configs.get(self.config.provider)
 
-    def _provider_client(self) -> OpenRouterImageGenerationClient | AIHubMixImageGenerationClient | None:
+    def _provider_client(
+        self,
+    ) -> OpenRouterImageGenerationClient | AIHubMixImageGenerationClient | MiniMaxImageGenerationClient | None:
         provider = self._provider_config()
         kwargs = {
             "api_key": provider.api_key if provider else None,
@@ -129,6 +132,8 @@ class ImageGenerationTool(Tool):
             return OpenRouterImageGenerationClient(**kwargs)
         if self.config.provider == "aihubmix":
             return AIHubMixImageGenerationClient(**kwargs)
+        if self.config.provider == "minimax":
+            return MiniMaxImageGenerationClient(**kwargs)
         return None
 
     def _missing_api_key_error(self) -> str:
@@ -137,6 +142,8 @@ class ImageGenerationTool(Tool):
             return "Error: OpenRouter API key is not configured. Set providers.openrouter.apiKey."
         if provider == "aihubmix":
             return "Error: AIHubMix API key is not configured. Set providers.aihubmix.apiKey."
+        if provider == "minimax":
+            return "Error: MiniMax API key is not configured. Set providers.minimax.apiKey."
         return f"Error: {provider} API key is not configured."
 
     def _resolve_reference_image(self, value: str) -> str:
