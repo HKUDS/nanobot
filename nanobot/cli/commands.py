@@ -1,6 +1,7 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import json
 import os
 import select
 import signal
@@ -1387,6 +1388,539 @@ def plugins_list():
         )
 
     console.print(table)
+
+
+# ============================================================================
+# Model Commands
+# ============================================================================
+
+
+model_app = typer.Typer(name="model", help="Model configuration management", no_args_is_help=False, invoke_without_command=True)
+app.add_typer(model_app, name="model", no_args_is_help=False, invoke_without_command=True)
+
+
+@model_app.callback(invoke_without_command=True, no_args_is_help=False)
+def model_callback(
+    ctx: typer.Context,
+    model: str = typer.Option(None, "--model", "-m", help="Set the default model"),
+    provider: str = typer.Option(None, "--provider", "-p", help="Set the default provider"),
+):
+    """Show agent model configuration and test API connectivity (default action)."""
+    import asyncio
+
+    # If a subcommand was invoked, don't execute this callback's main logic
+    if ctx.invoked_subcommand is not None:
+        return
+
+    try:
+        import aiohttp
+    except ImportError:
+        console.print("[red]aiohttp is required for model command. Install with: pip install 'nanobot-ai[api]'[/red]")
+        raise typer.Exit(1)
+
+    from nanobot.config.loader import get_config_path, load_config, save_config
+
+    actual_config_path = get_config_path()
+    config = load_config()
+    defaults = config.agents.defaults
+    active_preset_name = defaults.model_preset or "default"
+    active_preset = config.model_presets.get(active_preset_name, config.resolve_preset())
+
+    # Handle modifications
+    config_modified = False
+
+    if model is not None:
+        active_preset.model = model
+        defaults.model = model
+        config.model_presets[active_preset_name].model = model
+        config_modified = True
+        console.print(f"[green]✓[/green] Model set to [cyan]{model}[/cyan]")
+
+    if provider is not None:
+        active_preset.provider = provider
+        defaults.provider = provider
+        config.model_presets[active_preset_name].provider = provider
+        config_modified = True
+        console.print(f"[green]✓[/green] Provider set to [cyan]{provider}[/cyan]")
+
+    # Save config if modified
+    if config_modified:
+        try:
+            save_config(config, actual_config_path)
+            console.print(f"[dim]Config saved to {actual_config_path}[/dim]\n")
+        except Exception as e:
+            console.print(f"[red]✗[/red] Failed to save config: {e}\n")
+            raise typer.Exit(1)
+
+    console.print(f"{__logo__} Model Configuration\n")
+    console.print(f"[dim]Config: {actual_config_path}[/dim]\n")
+
+    # Active preset section
+    console.print("[bold]Active Preset:[/bold]")
+    preset_table = Table(show_header=False, box=None)
+    preset_table.add_column("Key", style="cyan")
+    preset_table.add_column("Value")
+    preset_table.add_row("Name", active_preset_name)
+    preset_table.add_row("Model", active_preset.model)
+    preset_table.add_row("Provider", active_preset.provider)
+    preset_table.add_row("Max Tokens", str(active_preset.max_tokens))
+    preset_table.add_row("Context Window", f"{active_preset.context_window_tokens:,}")
+    preset_table.add_row("Temperature", str(active_preset.temperature))
+    if active_preset.reasoning_effort:
+        preset_table.add_row("Reasoning Effort", active_preset.reasoning_effort)
+    console.print(preset_table)
+    console.print()
+
+    # Provider status section - read directly from config file
+    console.print("[bold]Provider Configuration:[/bold]")
+    provider_table = Table(show_header=False, box=None)
+    provider_table.add_column("Provider", style="cyan")
+    provider_table.add_column("API Key")
+    provider_table.add_column("API Base")
+
+    # Read raw config file to get providers in their actual order
+    try:
+        with open(actual_config_path, encoding="utf-8") as f:
+            raw_config = json.load(f)
+        providers_data = raw_config.get("providers", {})
+    except Exception:
+        providers_data = {}
+
+    # Display providers in the order they appear in config file
+    for provider_name, provider_config in providers_data.items():
+        if not isinstance(provider_config, dict):
+            continue
+
+        # API Key status
+        api_key = provider_config.get("apiKey") or provider_config.get("api_key")
+        if api_key:
+            key_status = "[green]✓ set[/green]"
+        else:
+            key_status = "[dim]not set[/dim]"
+
+        # API Base status
+        api_base = provider_config.get("apiBase") or provider_config.get("api_base")
+        if api_base:
+            base_status = f"[green]✓ {api_base}[/green]"
+        else:
+            base_status = "[dim]not set[/dim]"
+
+        # Format display name (camelCase to readable)
+        display_name = provider_name
+
+        provider_table.add_row(display_name, key_status, base_status)
+
+    console.print(provider_table)
+    console.print()
+
+    # Available presets section
+    if config.model_presets:
+        console.print("[bold]Available Presets:[/bold]")
+        presets_table = Table()
+        presets_table.add_column("Name", style="cyan")
+        presets_table.add_column("Model")
+        presets_table.add_column("Provider")
+        presets_table.add_column("Active")
+
+        for preset_name in sorted(config.model_presets.keys()):
+            preset = config.model_presets[preset_name]
+            is_active = preset_name == active_preset_name
+            active_marker = "[green]✓[/green]" if is_active else ""
+            presets_table.add_row(
+                preset_name,
+                preset.model,
+                preset.provider,
+                active_marker,
+            )
+        console.print(presets_table)
+        console.print()
+
+    # Fallback presets section
+    if defaults.fallback_presets:
+        console.print("[bold]Fallback Presets:[/bold]")
+        console.print(f"  Chain: {' → '.join(defaults.fallback_presets)}")
+        console.print()
+
+    # API Connectivity Test
+    console.print("[bold]API Connectivity Test:[/bold]")
+    console.print("  Testing connection to configured provider...\n")
+
+    async def test_api_connectivity() -> None:
+        """Test API connectivity using current config."""
+        try:
+            # Get matched provider info
+            provider_cfg = config.get_provider(active_preset.model)
+            api_base = config.get_api_base(active_preset.model)
+            api_key = config.get_api_key(active_preset.model)
+
+            if not provider_cfg and not api_key and not api_base:
+                console.print("  [red]✗[/red] No provider configured for this model.")
+                console.print("  [dim]  (apiKey or apiBase not set in config)[/dim]")
+                return
+
+            if not api_key and not (api_base or provider_cfg.api_base):
+                console.print("  [red]✗[/red] Missing apiKey for API test.")
+                return
+
+            # Use provider's api_base or get from config
+            test_api_base = api_base or (provider_cfg.api_base if provider_cfg else None)
+            if not test_api_base:
+                console.print("  [yellow]![/yellow] No api_base configured, skipping connectivity test.")
+                return
+
+            console.print(f"  [dim]Target: {test_api_base}[/dim]")
+
+            # Try a simple GET request to the API base (most providers support this)
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                headers = {}
+                if api_key:
+                    headers["Authorization"] = f"Bearer {api_key}"
+
+                # Try models endpoint first (most OpenAI-compatible APIs support this)
+                test_url = test_api_base.rstrip("/")
+                if not test_url.endswith("/models"):
+                    test_url += "/models"
+
+                try:
+                    async with session.get(test_url, headers=headers) as resp:
+                        if resp.status == 200:
+                            console.print("  [green]✓[/green] API endpoint reachable")
+                            console.print(f"  [dim]  Status: {resp.status} OK[/dim]")
+                        elif resp.status == 401:
+                            console.print("  [yellow]![/yellow] API endpoint reachable but authentication failed")
+                            console.print(f"  [dim]  Status: {resp.status} Unauthorized (check apiKey)[/dim]")
+                        elif resp.status == 404:
+                            # Try GET on base URL (some providers only support this)
+                            async with session.get(test_api_base, headers=headers) as resp:
+                                if resp.status == 200:
+                                    console.print("  [green]✓[/green] API endpoint reachable")
+                                    console.print(f"  [dim]  Status: {resp.status} OK[/dim]")
+                                elif resp.status == 401:
+                                    console.print("  [yellow]![/yellow] API endpoint reachable but authentication failed")
+                                    console.print(f"  [dim]  Status: {resp.status} Unauthorized (check apiKey)[/dim]")
+                                else:
+                                    console.print("  [yellow]![/yellow] API endpoint returned unexpected status")
+                                    console.print(f"  [dim]  Status: {resp.status} (may not support GET requests)[/dim]")
+                        else:
+                            console.print("  [yellow]![/yellow] API endpoint returned unexpected status")
+                            console.print(f"  [dim]  Status: {resp.status}[/dim]")
+                except asyncio.TimeoutError:
+                    console.print("  [red]✗[/red] Connection timeout")
+                    console.print("  [dim]  The endpoint did not respond within 10 seconds[/dim]")
+                except aiohttp.ClientConnectorError:
+                    console.print("  [red]✗[/red] Connection refused")
+                    console.print("  [dim]  Could not connect to the API endpoint[/dim]")
+                except Exception as e:
+                    console.print(f"  [red]✗[/red] Connection error: {e}")
+
+        except Exception as e:
+            console.print(f"  [red]✗[/red] Test failed: {e}")
+
+    asyncio.run(test_api_connectivity())
+
+
+@model_app.command("show")
+def model_show(
+    model: str = typer.Option(None, "--model", "-m", help="Set the default model"),
+    provider: str = typer.Option(None, "--provider", "-p", help="Set the default provider"),
+    set_key_provider: str = typer.Option(None, "--key-provider", help="Provider name for --key"),
+    set_key_value: str = typer.Option(None, "--key-value", help="API key value"),
+    set_base_provider: str = typer.Option(None, "--base-provider", help="Provider name for --base"),
+    set_base_value: str = typer.Option(None, "--base-value", help="API base value"),
+):
+    """Show agent model configuration and test API connectivity.
+
+    Set configuration:
+      nanobot model show -m <model>          Set default model
+      nanobot model show -p <provider>       Set default provider
+    """
+    import asyncio
+
+    try:
+        import aiohttp
+    except ImportError:
+        console.print("[red]aiohttp is required for model command. Install with: pip install 'nanobot-ai[api]'[/red]")
+        raise typer.Exit(1)
+
+    from nanobot.config.loader import get_config_path, load_config, save_config
+
+    # Read raw config file path for display
+    actual_config_path = get_config_path()
+
+    config = load_config()
+    defaults = config.agents.defaults
+    active_preset_name = defaults.model_preset or "default"
+    active_preset = config.model_presets.get(active_preset_name, config.resolve_preset())
+
+    # Handle modifications
+    config_modified = False
+
+    if model is not None:
+        active_preset.model = model
+        defaults.model = model
+        config.model_presets[active_preset_name].model = model
+        config_modified = True
+        console.print(f"[green]✓[/green] Model set to [cyan]{model}[/cyan]")
+
+    if provider is not None:
+        active_preset.provider = provider
+        defaults.provider = provider
+        config.model_presets[active_preset_name].provider = provider
+        config_modified = True
+        console.print(f"[green]✓[/green] Provider set to [cyan]{provider}[/cyan]")
+
+    if set_key_provider is not None and set_key_value is not None:
+        # Convert provider name from kebab-case to snake_case for config
+        provider_snake = set_key_provider.replace("-", "_").lower()
+        if hasattr(config.providers, provider_snake):
+            provider_cfg = getattr(config.providers, provider_snake)
+            provider_cfg.api_key = set_key_value
+            config_modified = True
+            console.print(f"[green]✓[/green] API key set for [cyan]{set_key_provider}[/cyan]")
+        else:
+            console.print(f"[red]✗[/red] Provider [cyan]{set_key_provider}[/cyan] not found in config")
+
+    if set_base_provider is not None and set_base_value is not None:
+        # Convert provider name from kebab-case to snake_case for config
+        provider_snake = set_base_provider.replace("-", "_").lower()
+        if hasattr(config.providers, provider_snake):
+            provider_cfg = getattr(config.providers, provider_snake)
+            provider_cfg.api_base = set_base_value
+            config_modified = True
+            console.print(f"[green]✓[/green] API base set for [cyan]{set_base_provider}[/cyan]")
+        else:
+            console.print(f"[red]✗[/red] Provider [cyan]{set_base_provider}[/cyan] not found in config")
+
+    # Save config if modified
+    if config_modified:
+        try:
+            save_config(config, actual_config_path)
+            console.print(f"[dim]Config saved to {actual_config_path}[/dim]\n")
+        except Exception as e:
+            console.print(f"[red]✗[/red] Failed to save config: {e}\n")
+            raise typer.Exit(1)
+
+    console.print(f"{__logo__} Model Configuration\n")
+    console.print(f"[dim]Config: {actual_config_path}[/dim]\n")
+
+    # Active preset section
+    console.print("[bold]Active Preset:[/bold]")
+    preset_table = Table(show_header=False, box=None)
+    preset_table.add_column("Key", style="cyan")
+    preset_table.add_column("Value")
+    preset_table.add_row("Name", active_preset_name)
+    preset_table.add_row("Model", active_preset.model)
+    preset_table.add_row("Provider", active_preset.provider)
+    preset_table.add_row("Max Tokens", str(active_preset.max_tokens))
+    preset_table.add_row("Context Window", f"{active_preset.context_window_tokens:,}")
+    preset_table.add_row("Temperature", str(active_preset.temperature))
+    if active_preset.reasoning_effort:
+        preset_table.add_row("Reasoning Effort", active_preset.reasoning_effort)
+    console.print(preset_table)
+    console.print()
+
+    # Provider status section - read directly from config file
+    console.print("[bold]Provider Configuration:[/bold]")
+    provider_table = Table(show_header=False, box=None)
+    provider_table.add_column("Provider", style="cyan")
+    provider_table.add_column("API Key")
+    provider_table.add_column("API Base")
+
+    # Read raw config file to get providers in their actual order
+    try:
+        with open(actual_config_path, encoding="utf-8") as f:
+            raw_config = json.load(f)
+        providers_data = raw_config.get("providers", {})
+    except Exception:
+        providers_data = {}
+
+    # Display providers in the order they appear in config file
+    for provider_name, provider_config in providers_data.items():
+        if not isinstance(provider_config, dict):
+            continue
+
+        # API Key status
+        api_key = provider_config.get("apiKey") or provider_config.get("api_key")
+        if api_key:
+            key_status = "[green]✓ set[/green]"
+        else:
+            key_status = "[dim]not set[/dim]"
+
+        # API Base status
+        api_base = provider_config.get("apiBase") or provider_config.get("api_base")
+        if api_base:
+            base_status = f"[green]✓ {api_base}[/green]"
+        else:
+            base_status = "[dim]not set[/dim]"
+
+        # Format display name (camelCase to readable)
+        display_name = provider_name
+
+        provider_table.add_row(display_name, key_status, base_status)
+
+    console.print(provider_table)
+    console.print()
+
+    # Available presets section
+    if config.model_presets:
+        console.print("[bold]Available Presets:[/bold]")
+        presets_table = Table()
+        presets_table.add_column("Name", style="cyan")
+        presets_table.add_column("Model")
+        presets_table.add_column("Provider")
+        presets_table.add_column("Active")
+
+        for preset_name in sorted(config.model_presets.keys()):
+            preset = config.model_presets[preset_name]
+            is_active = preset_name == active_preset_name
+            active_marker = "[green]✓[/green]" if is_active else ""
+            presets_table.add_row(
+                preset_name,
+                preset.model,
+                preset.provider,
+                active_marker,
+            )
+        console.print(presets_table)
+        console.print()
+
+    # Fallback presets section
+    if defaults.fallback_presets:
+        console.print("[bold]Fallback Presets:[/bold]")
+        console.print(f"  Chain: {' → '.join(defaults.fallback_presets)}")
+        console.print()
+
+    # API Connectivity Test
+    console.print("[bold]API Connectivity Test:[/bold]")
+    console.print("  Testing connection to configured provider...\n")
+
+    async def test_api_connectivity() -> None:
+        """Test API connectivity using current config."""
+        try:
+            # Get matched provider info
+            provider_cfg = config.get_provider(active_preset.model)
+            api_base = config.get_api_base(active_preset.model)
+            api_key = config.get_api_key(active_preset.model)
+
+            if not provider_cfg and not api_key and not api_base:
+                console.print("  [red]✗[/red] No provider configured for this model.")
+                console.print("  [dim]  (apiKey or apiBase not set in config)[/dim]")
+                return
+
+            if not api_key and not (api_base or provider_cfg.api_base):
+                console.print("  [red]✗[/red] Missing apiKey for API test.")
+                return
+
+            # Use provider's api_base or get from config
+            test_api_base = api_base or (provider_cfg.api_base if provider_cfg else None)
+            if not test_api_base:
+                console.print("  [yellow]![/yellow] No api_base configured, skipping connectivity test.")
+                return
+
+            console.print(f"  [dim]Target: {test_api_base}[/dim]")
+
+            # Try a simple GET request to the API base (most providers support this)
+            timeout = aiohttp.ClientTimeout(total=10)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                headers = {}
+                if api_key:
+                    headers["Authorization"] = f"Bearer {api_key}"
+
+                # Try models endpoint first (most OpenAI-compatible APIs support this)
+                test_url = test_api_base.rstrip("/")
+                if not test_url.endswith("/models"):
+                    test_url += "/models"
+
+                try:
+                    async with session.get(test_url, headers=headers) as resp:
+                        if resp.status == 200:
+                            console.print("  [green]✓[/green] API endpoint reachable")
+                            console.print(f"  [dim]  Status: {resp.status} OK[/dim]")
+                        elif resp.status == 401:
+                            console.print("  [yellow]![/yellow] API endpoint reachable but authentication failed")
+                            console.print(f"  [dim]  Status: {resp.status} Unauthorized (check apiKey)[/dim]")
+                        elif resp.status == 404:
+                            # Try GET on base URL (some providers only support this)
+                            async with session.get(test_api_base, headers=headers) as resp:
+                                if resp.status == 200:
+                                    console.print("  [green]✓[/green] API endpoint reachable")
+                                    console.print(f"  [dim]  Status: {resp.status} OK[/dim]")
+                                elif resp.status == 401:
+                                    console.print("  [yellow]![/yellow] API endpoint reachable but authentication failed")
+                                    console.print(f"  [dim]  Status: {resp.status} Unauthorized (check apiKey)[/dim]")
+                                else:
+                                    console.print("  [yellow]![/yellow] API endpoint returned unexpected status")
+                                    console.print(f"  [dim]  Status: {resp.status} (may not support GET requests)[/dim]")
+                        else:
+                            console.print("  [yellow]![/yellow] API endpoint returned unexpected status")
+                            console.print(f"  [dim]  Status: {resp.status}[/dim]")
+                except asyncio.TimeoutError:
+                    console.print("  [red]✗[/red] Connection timeout")
+                    console.print("  [dim]  The endpoint did not respond within 10 seconds[/dim]")
+                except aiohttp.ClientConnectorError:
+                    console.print("  [red]✗[/red] Connection refused")
+                    console.print("  [dim]  Could not connect to the API endpoint[/dim]")
+                except Exception as e:
+                    console.print(f"  [red]✗[/red] Connection error: {e}")
+
+        except Exception as e:
+            console.print(f"  [red]✗[/red] Test failed: {e}")
+
+    asyncio.run(test_api_connectivity())
+
+
+@model_app.command("key")
+def model_key(
+    provider_name: str = typer.Argument(..., help="Provider name (e.g., openai, zhipu)"),
+    api_key: str = typer.Argument(..., help="API key value"),
+):
+    """Set API key for a provider.
+
+    Example: nanobot model key zhipu your-api-key-here
+    """
+    from nanobot.config.loader import get_config_path, load_config, save_config
+
+    actual_config_path = get_config_path()
+    config = load_config()
+
+    # Convert provider name from kebab-case to snake_case for config
+    provider_snake = provider_name.replace("-", "_").lower()
+    if hasattr(config.providers, provider_snake):
+        provider_cfg = getattr(config.providers, provider_snake)
+        provider_cfg.api_key = api_key
+        save_config(config, actual_config_path)
+        console.print(f"[green]✓[/green] API key set for [cyan]{provider_name}[/cyan]")
+        console.print(f"[dim]Config saved to {actual_config_path}[/dim]")
+    else:
+        console.print(f"[red]✗[/red] Provider [cyan]{provider_name}[/cyan] not found in config")
+        raise typer.Exit(1)
+
+
+@model_app.command("base")
+def model_base(
+    provider_name: str = typer.Argument(..., help="Provider name (e.g., openai, zhipu)"),
+    api_base: str = typer.Argument(..., help="API base URL"),
+):
+    """Set API base for a provider.
+
+    Example: nanobot model base zhipu https://open.bigmodel.cn/api/paas/v4/
+    """
+    from nanobot.config.loader import get_config_path, load_config, save_config
+
+    actual_config_path = get_config_path()
+    config = load_config()
+
+    # Convert provider name from kebab-case to snake_case for config
+    provider_snake = provider_name.replace("-", "_").lower()
+    if hasattr(config.providers, provider_snake):
+        provider_cfg = getattr(config.providers, provider_snake)
+        provider_cfg.api_base = api_base
+        save_config(config, actual_config_path)
+        console.print(f"[green]✓[/green] API base set for [cyan]{provider_name}[/cyan]")
+        console.print(f"[dim]Config saved to {actual_config_path}[/dim]")
+    else:
+        console.print(f"[red]✗[/red] Provider [cyan]{provider_name}[/cyan] not found in config")
+        raise typer.Exit(1)
 
 
 # ============================================================================
