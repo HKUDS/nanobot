@@ -678,7 +678,7 @@ class Consolidator:
         The budget reserves space for completion tokens and a safety buffer
         so the LLM request never exceeds the context window.
         """
-        if not session.messages or self.context_window_tokens <= 0:
+        if self.context_window_tokens <= 0:
             return
 
         lock = self.get_lock(session.key)
@@ -687,6 +687,8 @@ class Consolidator:
             fresh = self.sessions.get_or_create(session.key)
             if fresh is not session:
                 session = fresh
+            if not session.messages:
+                return
 
             budget = self._input_token_budget
             target = int(budget * self.consolidation_ratio)

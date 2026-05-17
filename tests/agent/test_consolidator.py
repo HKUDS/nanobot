@@ -478,6 +478,47 @@ class TestConsolidatorSessionRefresh:
     """Background consolidation must detect stale session references."""
 
     @pytest.mark.asyncio
+    async def test_reloads_before_empty_session_guard(self, tmp_path):
+        """A stale empty reference must not skip a non-empty cached session."""
+        from nanobot.agent.memory import Consolidator, MemoryStore
+        from nanobot.session.manager import Session, SessionManager
+
+        store = MemoryStore(tmp_path)
+        provider = MagicMock()
+        provider.chat_with_retry = AsyncMock(
+            return_value=MagicMock(content="summary", finish_reason="stop")
+        )
+        provider.generation.max_tokens = 4096
+        provider.estimate_prompt_tokens = MagicMock(return_value=(10, "test"))
+        sessions = SessionManager(tmp_path)
+        consolidator = Consolidator(
+            store=store,
+            provider=provider,
+            model="test-model",
+            sessions=sessions,
+            context_window_tokens=128_000,
+            build_messages=MagicMock(return_value=[]),
+            get_tool_definitions=MagicMock(return_value=[]),
+        )
+
+        fresh = sessions.get_or_create("cli:test")
+        fresh.add_message("user", "fresh message")
+        sessions.save(fresh)
+        stale_empty = Session(key="cli:test")
+
+        seen: dict[str, Session] = {}
+
+        def estimate(session: Session):
+            seen["session"] = session
+            return 10, "test"
+
+        consolidator.estimate_session_prompt_tokens = MagicMock(side_effect=estimate)
+
+        await consolidator.maybe_consolidate_by_tokens(stale_empty)
+
+        assert seen["session"] is fresh
+
+    @pytest.mark.asyncio
     async def test_reloads_stale_session_after_compact(self, tmp_path):
         """After compact_idle_session replaces the session, a concurrent
         maybe_consolidate_by_tokens with the old reference should use the
