@@ -17,11 +17,9 @@ from nanobot.agent.tools.schema import (
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.providers.image_generation import (
-    AIHubMixImageGenerationClient,
-    GeminiImageGenerationClient,
     ImageGenerationError,
-    MiniMaxImageGenerationClient,
-    OpenRouterImageGenerationClient,
+    ImageGenerationProvider,
+    get_image_gen_provider,
 )
 from nanobot.utils.artifacts import (
     ArtifactError,
@@ -119,37 +117,24 @@ class ImageGenerationTool(Tool):
     def _provider_config(self) -> ProviderConfig | None:
         return self.provider_configs.get(self.config.provider)
 
-    def _provider_client(
-        self,
-    ) -> OpenRouterImageGenerationClient | AIHubMixImageGenerationClient | MiniMaxImageGenerationClient | GeminiImageGenerationClient | None:
+    def _provider_client(self) -> ImageGenerationProvider | None:
         provider = self._provider_config()
+        cls = get_image_gen_provider(self.config.provider)
+        if cls is None:
+            return None
         kwargs = {
             "api_key": provider.api_key if provider else None,
             "api_base": provider.api_base if provider else None,
             "extra_headers": provider.extra_headers if provider else None,
             "extra_body": provider.extra_body if provider else None,
         }
-        if self.config.provider == "openrouter":
-            return OpenRouterImageGenerationClient(**kwargs)
-        if self.config.provider == "aihubmix":
-            return AIHubMixImageGenerationClient(**kwargs)
-        if self.config.provider == "minimax":
-            return MiniMaxImageGenerationClient(**kwargs)
-        if self.config.provider == "gemini":
-            return GeminiImageGenerationClient(**kwargs)
-        return None
+        return cls(**kwargs)
 
     def _missing_api_key_error(self) -> str:
-        provider = self.config.provider
-        if provider == "openrouter":
-            return "Error: OpenRouter API key is not configured. Set providers.openrouter.apiKey."
-        if provider == "aihubmix":
-            return "Error: AIHubMix API key is not configured. Set providers.aihubmix.apiKey."
-        if provider == "minimax":
-            return "Error: MiniMax API key is not configured. Set providers.minimax.apiKey."
-        if provider == "gemini":
-            return "Error: Gemini API key is not configured. Set providers.gemini.apiKey."
-        return f"Error: {provider} API key is not configured."
+        cls = get_image_gen_provider(self.config.provider)
+        if cls and cls.missing_key_message:
+            return f"Error: {cls.missing_key_message}"
+        return f"Error: {self.config.provider} API key is not configured."
 
     def _resolve_reference_image(self, value: str) -> str:
         raw_path = Path(value).expanduser()

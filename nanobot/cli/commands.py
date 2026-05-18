@@ -620,6 +620,7 @@ def serve(
 
     from nanobot.api.server import create_app
     from nanobot.bus.queue import MessageBus
+    from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
 
     if verbose:
@@ -639,12 +640,7 @@ def serve(
         agent_loop = AgentLoop.from_config(
             runtime_config, bus,
             session_manager=session_manager,
-            image_generation_provider_configs={
-                "openrouter": runtime_config.providers.openrouter,
-                "aihubmix": runtime_config.providers.aihubmix,
-                "minimax": runtime_config.providers.minimax,
-                "gemini": runtime_config.providers.gemini,
-            },
+            image_generation_provider_configs=image_gen_provider_configs(runtime_config),
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")
@@ -724,6 +720,7 @@ def _run_gateway(
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.providers.factory import build_provider_snapshot, load_provider_snapshot
+    from nanobot.providers.image_generation import image_gen_provider_configs
     from nanobot.session.manager import SessionManager
 
     port = port if port is not None else config.gateway.port
@@ -754,12 +751,7 @@ def _run_gateway(
         context_window_tokens=provider_snapshot.context_window_tokens,
         cron_service=cron,
         session_manager=session_manager,
-        image_generation_provider_configs={
-            "openrouter": config.providers.openrouter,
-            "aihubmix": config.providers.aihubmix,
-            "minimax": config.providers.minimax,
-            "gemini": config.providers.gemini,
-        },
+        image_generation_provider_configs=image_gen_provider_configs(config),
         provider_snapshot_loader=load_provider_snapshot,
         runtime_model_publisher=lambda model, preset: publish_runtime_model_update(
             bus,
@@ -1126,6 +1118,7 @@ def agent(
 
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
+    from nanobot.providers.image_generation import image_gen_provider_configs
 
     config = _load_runtime_config(config, workspace)
     sync_workspace_templates(config.workspace_path)
@@ -1149,6 +1142,7 @@ def agent(
         agent_loop = AgentLoop.from_config(
             config, bus,
             cron_service=cron,
+            image_generation_provider_configs=image_gen_provider_configs(config),
         )
     except ValueError as exc:
         console.print(f"[red]Error: {exc}[/red]")

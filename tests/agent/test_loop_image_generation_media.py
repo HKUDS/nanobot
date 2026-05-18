@@ -35,8 +35,8 @@ async def test_generated_image_media_is_attached_to_final_assistant_message(
 ) -> None:
     set_config_path(tmp_path / "config.json")
     monkeypatch.setattr(
-        "nanobot.agent.tools.image_generation.OpenRouterImageGenerationClient",
-        FakeImageClient,
+        "nanobot.agent.tools.image_generation.get_image_gen_provider",
+        lambda name: FakeImageClient if name == "openrouter" else None,
     )
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"

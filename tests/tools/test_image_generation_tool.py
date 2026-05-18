@@ -44,8 +44,8 @@ async def test_generate_image_tool_stores_artifact_and_source_images(
     set_config_path(tmp_path / "config.json")
     FakeImageClient.instances = []
     monkeypatch.setattr(
-        "nanobot.agent.tools.image_generation.OpenRouterImageGenerationClient",
-        FakeImageClient,
+        "nanobot.agent.tools.image_generation.get_image_gen_provider",
+        lambda name: FakeImageClient if name == "openrouter" else None,
     )
     ref = tmp_path / "ref.png"
     ref.write_bytes(PNG_BYTES)
@@ -98,8 +98,8 @@ async def test_generate_image_tool_selects_aihubmix_provider(
     set_config_path(tmp_path / "config.json")
     FakeImageClient.instances = []
     monkeypatch.setattr(
-        "nanobot.agent.tools.image_generation.AIHubMixImageGenerationClient",
-        FakeImageClient,
+        "nanobot.agent.tools.image_generation.get_image_gen_provider",
+        lambda name: FakeImageClient if name == "aihubmix" else None,
     )
     tool = ImageGenerationTool(
         workspace=tmp_path,
