@@ -34,6 +34,7 @@ See [docs/deployment.md](./docs/deployment.md) for the full Windows deployment g
 
 ## News
 
+- **2026-05-18** Synced with upstream **v0.2.0** — WebUI bundled in wheel (no source checkout), model presets, `/goal` for long-term objectives, image generation (Gemini/MiniMax), streaming reasoning, NVIDIA NIM support, Ant Ling provider, pairing-based access control, and 292 upstream commits. Windows fork layers preserved: configurable shell, Job Objects, device path hardening, console restore, cross-platform paths, winget manifest, and Windows deployment docs.
 - **2026-04-29** Synced with upstream **v0.1.5.post3** — DeepSeek-V4, Hugging Face & Olostep providers, thread sessions for Feishu/Discord/Slack/Teams, `ask_user` tool, `/history` command, per-channel progress controls, atomic history writes, and LLM request timeouts. Notable for Windows: upstream now includes a WinError 193 fix for MCP stdio launchers and Matrix user-id sanitization for Windows-safe filenames.
 - **2026-04-21** Upstream **v0.1.5.post2** added Windows & Python 3.14 CI, Office document reading, SSE streaming, and stronger session/memory reliability.
 
