@@ -2,6 +2,7 @@ import { Children, isValidElement, useMemo } from "react";
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import rehypeKatex from "rehype-katex";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 
@@ -17,7 +18,7 @@ interface MarkdownTextRendererProps {
   highlightCode?: boolean;
 }
 
-const remarkPlugins = [remarkGfm, remarkMath];
+const remarkPlugins = [remarkBreaks, remarkGfm, remarkMath];
 const rehypePlugins = [rehypeKatex];
 
 /**

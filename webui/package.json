@@ -30,6 +30,7 @@
     "react-markdown": "^9.0.1",
     "react-syntax-highlighter": "^15.6.1",
     "rehype-katex": "^7.0.1",
+    "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.0",
     "remark-math": "^6.0.0",
     "tailwind-merge": "^2.6.0"
