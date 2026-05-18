@@ -215,6 +215,13 @@ describe("App layout", () => {
                   default_api_base: "https://openrouter.ai/api/v1",
                 },
                 {
+                  name: "ant_ling",
+                  label: "Ant Ling",
+                  configured: false,
+                  api_key_required: true,
+                  default_api_base: "https://api.ant-ling.com/v1",
+                },
+                {
                   name: "azure_openai",
                   label: "Azure OpenAI",
                   configured: false,
@@ -301,6 +308,7 @@ describe("App layout", () => {
     expect(screen.getByRole("tab", { name: "LLM" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "Web Search" })).toBeInTheDocument();
     expect(screen.getByText("OpenRouter")).toBeInTheDocument();
+    expect(screen.getByText("Ant Ling")).toBeInTheDocument();
     expect(screen.getAllByText("Not configured").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByText("OpenAI"));
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
@@ -311,6 +319,8 @@ describe("App layout", () => {
     fireEvent.click(screen.getByText("OpenAI"));
     expect(screen.getByText("open••••-key")).toBeInTheDocument();
     expect(screen.queryByDisplayValue("unsaved-openai-key")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Ant Ling"));
+    expect(screen.getByDisplayValue("https://api.ant-ling.com/v1")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Atomic Chat"));
     expect(screen.getByDisplayValue("http://localhost:1337/v1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();

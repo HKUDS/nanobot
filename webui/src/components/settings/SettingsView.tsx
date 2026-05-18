@@ -1246,6 +1246,7 @@ const PROVIDER_ICONS: Record<string, LucideIcon> = {
   byteplus: Cloud,
   byteplus_coding_plan: Cloud,
   qianfan: Database,
+  ant_ling: Sparkles,
   azure_openai: Cloud,
   bedrock: Database,
   vllm: Cpu,
