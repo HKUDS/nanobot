@@ -49,7 +49,7 @@ body:
     attributes:
       label: nanobot Version
       description: Run `nanobot --version` or `pip show nanobot-ai`
-      placeholder: e.g., 0.1.5
+      placeholder: e.g., 0.2.0
     validations:
       required: true
 

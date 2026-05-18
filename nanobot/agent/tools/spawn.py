@@ -1,9 +1,12 @@
 """Spawn tool for creating background subagents."""
 
+from __future__ import annotations
+
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
+from nanobot.agent.tools.context import ContextAware, RequestContext
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 
 if TYPE_CHECKING:
@@ -17,7 +20,7 @@ if TYPE_CHECKING:
         required=["task"],
     )
 )
-class SpawnTool(Tool):
+class SpawnTool(Tool, ContextAware):
     """Tool to spawn a subagent for background task execution."""
 
     def __init__(self, manager: "SubagentManager"):
@@ -30,15 +33,16 @@ class SpawnTool(Tool):
             default=None,
         )
 
-    def set_context(self, channel: str, chat_id: str, effective_key: str | None = None) -> None:
-        """Set the origin context for subagent announcements."""
-        self._origin_channel.set(channel)
-        self._origin_chat_id.set(chat_id)
-        self._session_key.set(effective_key or f"{channel}:{chat_id}")
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        return cls(manager=ctx.subagent_manager)
 
-    def set_origin_message_id(self, message_id: str | None) -> None:
-        """Set the source message id for downstream deduplication."""
-        self._origin_message_id.set(message_id)
+    def set_context(self, ctx: RequestContext) -> None:
+        """Set the origin context for subagent announcements."""
+        self._origin_channel.set(ctx.channel)
+        self._origin_chat_id.set(ctx.chat_id)
+        self._session_key.set(ctx.session_key or f"{ctx.channel}:{ctx.chat_id}")
+        self._origin_message_id.set(ctx.message_id)
 
     @property
     def name(self) -> str:

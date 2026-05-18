@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { MessageBubble } from "@/components/MessageBubble";
 import type { UIMessage } from "@/lib/types";
@@ -19,6 +19,57 @@ describe("MessageBubble", () => {
 
     expect(row).toHaveClass("ml-auto", "flex");
     expect(pill).toHaveClass("ml-auto", "w-fit", "rounded-[18px]");
+    expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
+  });
+
+  it("copies completed assistant replies from the action row", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const message: UIMessage = {
+      id: "a-copy",
+      role: "assistant",
+      content: "I can help with the next step.",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy reply" }));
+
+    expect(writeText).toHaveBeenCalledWith("I can help with the next step.");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Copied reply" })).toBeInTheDocument(),
+    );
+  });
+
+  it("does not show copy actions for streaming placeholders", () => {
+    const message: UIMessage = {
+      id: "a-streaming",
+      role: "assistant",
+      content: "",
+      isStreaming: true,
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
+  });
+
+  it("does not show copy when showAssistantCopyAction is false", () => {
+    const message: UIMessage = {
+      id: "a-mid",
+      role: "assistant",
+      content: "Mid-turn snippet.",
+      createdAt: Date.now(),
+    };
+
+    render(<MessageBubble message={message} showAssistantCopyAction={false} />);
+
+    expect(screen.queryByRole("button", { name: "Copy reply" })).not.toBeInTheDocument();
   });
 
   it("renders trace messages as collapsible tool groups", () => {
@@ -34,11 +85,12 @@ describe("MessageBubble", () => {
     render(<MessageBubble message={message} />);
     const toggle = screen.getByRole("button", { name: /used 2 tools/i });
 
-    expect(screen.getByText('weather("get")')).toBeInTheDocument();
-    expect(screen.getByText('search "hk weather"')).toBeInTheDocument();
+    expect(screen.queryByText('weather("get")')).not.toBeInTheDocument();
+    expect(screen.queryByText('search "hk weather"')).not.toBeInTheDocument();
 
     fireEvent.click(toggle);
-    expect(screen.queryByText('weather("get")')).not.toBeInTheDocument();
+    expect(screen.getByText('weather("get")')).toBeInTheDocument();
+    expect(screen.getByText('search "hk weather"')).toBeInTheDocument();
   });
 
   it("renders video media as an inline player", () => {
@@ -63,5 +115,131 @@ describe("MessageBubble", () => {
     expect(video.tagName).toBe("VIDEO");
     expect(video).toHaveAttribute("src", "/api/media/sig/payload");
     expect(container.querySelector("video[controls]")).toBeInTheDocument();
+  });
+
+  it("auto-expands the reasoning trace while streaming with a shimmer header", () => {
+    const message: UIMessage = {
+      id: "a-reasoning-streaming",
+      role: "assistant",
+      content: "",
+      createdAt: Date.now(),
+      reasoning: "Step 1: parse intent. Step 2: compute.",
+      reasoningStreaming: true,
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+
+    expect(screen.getByText("Thinking…")).toBeInTheDocument();
+    expect(screen.getByText(/Step 1: parse intent\./)).toBeInTheDocument();
+    expect(container.querySelector(".reasoning-sheen-stripe")).not.toBeInTheDocument();
+    expect(screen.getByText("Thinking…")).toHaveClass("streaming-text-sheen");
+    expect(screen.getByText("Thinking…")).toHaveAttribute("data-sheen-text", "Thinking…");
+    expect(screen.getByRole("button", { name: /thinking/i }).parentElement).not.toHaveClass("mb-2");
+  });
+
+  it("collapses the reasoning section by default once streaming ends", () => {
+    const message: UIMessage = {
+      id: "a-reasoning-done",
+      role: "assistant",
+      content: "The answer is 42.",
+      createdAt: Date.now(),
+      reasoning: "hidden until expanded",
+      reasoningStreaming: false,
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(screen.getByText("Thinking")).toBeInTheDocument();
+    expect(screen.getByText("The answer is 42.")).toBeInTheDocument();
+    expect(screen.queryByText("hidden until expanded")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /thinking/i }).parentElement).toHaveClass("mb-2");
+
+    fireEvent.click(screen.getByRole("button", { name: /thinking/i }));
+    expect(screen.getByText("hidden until expanded")).toBeInTheDocument();
+  });
+
+  it("renders reasoning body as markdown so headings are not left as raw ###", async () => {
+    await import("@/components/MarkdownTextRenderer");
+    const message: UIMessage = {
+      id: "a-reasoning-md",
+      role: "assistant",
+      content: "",
+      createdAt: Date.now(),
+      reasoning: "### Section title\n\nBody line.",
+      reasoningStreaming: false,
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+    fireEvent.click(screen.getByRole("button", { name: /thinking/i }));
+
+    await waitFor(() => {
+      expect(container.querySelector("h3")?.textContent).toBe("Section title");
+    });
+    expect(container.textContent).not.toContain("###");
+    expect(screen.getByText("Body line.")).toBeInTheDocument();
+  });
+
+  it("renders inline file paths as compact file references", async () => {
+    await import("@/components/MarkdownTextRenderer");
+    const message: UIMessage = {
+      id: "a-file-path",
+      role: "assistant",
+      content:
+        "改动在 `webui/src/components/MarkdownTextRenderer.tsx` 和 `/Users/renxubin/.nanobot/workspace/minecraft-fps/index.html`。",
+      createdAt: Date.now(),
+    };
+
+    try {
+      render(<MessageBubble message={message} />);
+
+      const references = await screen.findAllByTestId("inline-file-path");
+      expect(references).toHaveLength(2);
+      expect(references[0].parentElement).not.toHaveClass("translate-y-[0.08em]");
+      expect(references[0].parentElement).toHaveClass("align-[0.14em]");
+      expect(references[0]).toHaveTextContent("MarkdownTextRenderer.tsx");
+      expect(references[0]).not.toHaveTextContent("webui/src/components");
+      expect(screen.getByText("index.html")).toBeInTheDocument();
+      expect(references[1]).not.toHaveTextContent("/Users/renxubin");
+      expect(references[1]).not.toHaveAttribute("title");
+      expect(references[1]).toHaveAttribute(
+        "aria-label",
+        "/Users/renxubin/.nanobot/workspace/minecraft-fps/index.html",
+      );
+
+      vi.useFakeTimers();
+      fireEvent.pointerMove(references[1].parentElement!);
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      const tooltip = screen.getByRole("tooltip");
+      expect(tooltip).toHaveTextContent(
+        "/Users/renxubin/.nanobot/workspace/minecraft-fps/index.html",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("renders assistant image media as a larger generated result", () => {
+    const message: UIMessage = {
+      id: "a-image",
+      role: "assistant",
+      content: "done",
+      createdAt: Date.now(),
+      media: [
+        {
+          kind: "image",
+          url: "/api/media/sig/image",
+          name: "generated.png",
+        },
+      ],
+    };
+
+    const { container } = render(<MessageBubble message={message} />);
+
+    const imageButton = screen.getByRole("button", { name: /view image/i });
+    expect(imageButton).toHaveClass("w-[min(100%,34rem)]", "rounded-[20px]");
+    expect(imageButton).not.toHaveAttribute("title");
+    expect(container.querySelector("img")).toHaveClass("h-auto", "w-full", "object-contain");
   });
 });

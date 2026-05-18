@@ -11,7 +11,7 @@ Generate a personalized upgrade skill for this workspace.
 
 Use `read_file` to check if `skills/update/SKILL.md` already exists in the workspace.
 
-If it exists, use `ask_user` to ask: "An upgrade skill already exists. Reconfigure?" with options ["yes", "no"]. If no, stop here.
+If it exists, ask the user: "An upgrade skill already exists. Reconfigure?" Wait for the user's reply. If no, stop here.
 
 ## Step 2: Current Version and Install Clues
 
@@ -38,9 +38,9 @@ answer or confirmation, not from inference alone. If you cannot get a clear
 answer, stop and ask the user to rerun this setup when they know how nanobot was
 installed.
 
-Use `ask_user` for the questions below, one question per call. If `ask_user` is
-not available or cannot collect the answer, ask in normal chat and stop without
-writing the skill.
+Ask the user the questions below, one at a time, in your response text. Wait for
+the user's reply before proceeding to the next question. If you cannot get a clear
+answer, stop without writing the skill.
 
 **Question 1 — Install method:**
 

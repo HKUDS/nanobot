@@ -6,21 +6,21 @@ import { useClient } from "@/providers/ClientProvider";
 import type { ConnectionStatus } from "@/lib/types";
 
 const COPY: Record<ConnectionStatus, { color: string }> = {
-  idle: { color: "bg-card/40 text-muted-foreground" },
+  idle: { color: "text-muted-foreground" },
   connecting: {
-    color: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    color: "text-amber-700 dark:text-amber-300",
   },
   open: {
-    color: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+    color: "text-emerald-700 dark:text-emerald-400",
   },
   reconnecting: {
-    color: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    color: "text-amber-700 dark:text-amber-300",
   },
   closed: {
-    color: "bg-card/40 text-muted-foreground",
+    color: "text-muted-foreground",
   },
   error: {
-    color: "bg-destructive/10 text-destructive",
+    color: "text-destructive",
   },
 };
 
@@ -36,21 +36,25 @@ export function ConnectionBadge() {
     status === "connecting" ||
     status === "reconnecting" ||
     status === "error";
+  const label = t(`connection.${status}`);
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border border-border/60 px-2 py-1 text-[11px] font-medium transition-colors",
+        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
+        "text-muted-foreground/70 hover:bg-sidebar-accent/65",
         meta.color,
       )}
       aria-live="polite"
+      role="status"
+      title={label}
     >
-      <span className="relative flex h-1.5 w-1.5" aria-hidden>
+      <span className="relative flex h-2 w-2" aria-hidden>
         {pulsing && (
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-75" />
         )}
-        <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-current" />
+        <span className="relative inline-flex h-2 w-2 rounded-full bg-current" />
       </span>
-      {t(`connection.${status}`)}
+      <span className="sr-only">{label}</span>
     </span>
   );
 }

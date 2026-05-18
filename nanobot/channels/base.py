@@ -10,6 +10,12 @@ from loguru import logger
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.pairing import (
+    PAIRING_CODE_META_KEY,
+    format_pairing_reply,
+    generate_code,
+    is_approved,
+)
 
 
 class BaseChannel(ABC):
@@ -28,6 +34,7 @@ class BaseChannel(ABC):
     transcription_language: str | None = None
     send_progress: bool = True
     send_tool_hints: bool = False
+    show_reasoning: bool = True
 
     def __init__(self, config: Any, bus: MessageBus):
         """
@@ -38,6 +45,7 @@ class BaseChannel(ABC):
             bus: The message bus for communication.
         """
         self.config = config
+        self.logger = logger.bind(channel=self.name)
         self.bus = bus
         self._running = False
 
@@ -61,8 +69,8 @@ class BaseChannel(ABC):
                     language=self.transcription_language or None,
                 )
             return await provider.transcribe(file_path)
-        except Exception as e:
-            logger.warning("{}: audio transcription failed: {}", self.name, e)
+        except Exception:
+            self.logger.exception("Audio transcription failed")
             return ""
 
     async def login(self, force: bool = False) -> bool:
@@ -119,6 +127,53 @@ class BaseChannel(ABC):
         """
         pass
 
+    async def send_reasoning_delta(
+        self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None
+    ) -> None:
+        """Stream a chunk of model reasoning/thinking content.
+
+        Default is no-op. Channels with a native low-emphasis primitive
+        (Slack context block, Telegram expandable blockquote, Discord
+        subtext, WebUI italic bubble, ...) override to render reasoning
+        as a subordinate trace that updates in place as the model thinks.
+
+        Streaming contract mirrors :meth:`send_delta`: ``_reasoning_delta``
+        is a chunk, ``_reasoning_end`` ends the current reasoning segment,
+        and stateful implementations should key buffers by ``_stream_id``
+        rather than only by ``chat_id``.
+        """
+        return
+
+    async def send_reasoning_end(
+        self, chat_id: str, metadata: dict[str, Any] | None = None
+    ) -> None:
+        """Mark the end of a reasoning stream segment.
+
+        Default is no-op. Channels that buffer ``send_reasoning_delta``
+        chunks for in-place updates use this signal to flush and freeze
+        the rendered group; one-shot channels can ignore it entirely.
+        """
+        return
+
+    async def send_reasoning(self, msg: OutboundMessage) -> None:
+        """Deliver a complete reasoning block.
+
+        Default implementation reuses the streaming pair so plugins only
+        need to override the delta/end methods. Equivalent to one delta
+        with the full content followed immediately by an end marker —
+        keeps a single rendering path for both streamed and one-shot
+        reasoning (e.g. DeepSeek-R1's final-response ``reasoning_content``).
+        """
+        if not msg.content:
+            return
+        meta = dict(msg.metadata or {})
+        meta.setdefault("_reasoning_delta", True)
+        await self.send_reasoning_delta(msg.chat_id, msg.content, meta)
+        end_meta = dict(meta)
+        end_meta.pop("_reasoning_delta", None)
+        end_meta["_reasoning_end"] = True
+        await self.send_reasoning_end(msg.chat_id, end_meta)
+
     @property
     def supports_streaming(self) -> bool:
         """True when config enables streaming AND this subclass implements send_delta."""
@@ -127,20 +182,19 @@ class BaseChannel(ABC):
         return bool(streaming) and type(self).send_delta is not BaseChannel.send_delta
 
     def is_allowed(self, sender_id: str) -> bool:
-        """Check if *sender_id* is permitted.  Empty list → deny all; ``"*"`` → allow all."""
+        """Check sender permission: star > allowlist > pairing store > deny."""
         if isinstance(self.config, dict):
-            if "allow_from" in self.config:
-                allow_list = self.config.get("allow_from")
-            else:
-                allow_list = self.config.get("allowFrom", [])
+            allow_list = self.config.get("allow_from") or self.config.get("allowFrom") or []
         else:
-            allow_list = getattr(self.config, "allow_from", [])
-        if not allow_list:
-            logger.warning("{}: allow_from is empty — all access denied", self.name)
-            return False
+            allow_list = getattr(self.config, "allow_from", None) or []
         if "*" in allow_list:
             return True
-        return str(sender_id) in allow_list
+        # allowFrom entries are opaque tokens — must match exactly.
+        if str(sender_id) in allow_list:
+            return True
+        if is_approved(self.name, str(sender_id)):
+            return True
+        return False
 
     async def _handle_message(
         self,
@@ -150,26 +204,30 @@ class BaseChannel(ABC):
         media: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
+        is_dm: bool = False,
     ) -> None:
-        """
-        Handle an incoming message from the chat platform.
-
-        This method checks permissions and forwards to the bus.
-
-        Args:
-            sender_id: The sender's identifier.
-            chat_id: The chat/channel identifier.
-            content: Message text content.
-            media: Optional list of media URLs.
-            metadata: Optional channel-specific metadata.
-            session_key: Optional session key override (e.g. thread-scoped sessions).
-        """
+        """Handle an incoming message: check permissions, issue pairing codes in DMs, or forward to bus."""
         if not self.is_allowed(sender_id):
-            logger.warning(
-                "Access denied for sender {} on channel {}. "
-                "Add them to allowFrom list in config to grant access.",
-                sender_id, self.name,
-            )
+            if is_dm:
+                code = generate_code(self.name, str(sender_id))
+                await self.send(
+                    OutboundMessage(
+                        channel=self.name,
+                        chat_id=str(chat_id),
+                        content=format_pairing_reply(code),
+                        metadata={PAIRING_CODE_META_KEY: code},
+                    )
+                )
+                self.logger.info(
+                    "Sent pairing code {} to sender {} in chat {}",
+                    code, sender_id, chat_id,
+                )
+            else:
+                self.logger.warning(
+                    "Access denied for sender {}. "
+                    "Add them to allowFrom list in config to grant access.",
+                    sender_id,
+                )
             return
 
         meta = metadata or {}

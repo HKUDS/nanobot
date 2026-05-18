@@ -306,17 +306,19 @@ async def test_on_error_logs_network_issues_as_warning(monkeypatch) -> None:
     recorded: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.warning",
+        channel.logger,
+        "warning",
         lambda message, error: recorded.append(("warning", message.format(error))),
     )
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.error",
+        channel.logger,
+        "error",
         lambda message, error: recorded.append(("error", message.format(error))),
     )
 
     await channel._on_error(object(), SimpleNamespace(error=NetworkError("proxy disconnected")))
 
-    assert recorded == [("warning", "Telegram network issue: proxy disconnected")]
+    assert recorded == [("warning", "network issue: proxy disconnected")]
 
 
 @pytest.mark.asyncio
@@ -330,13 +332,14 @@ async def test_on_error_summarizes_empty_network_error(monkeypatch) -> None:
     recorded: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.warning",
+        channel.logger,
+        "warning",
         lambda message, error: recorded.append(("warning", message.format(error))),
     )
 
     await channel._on_error(object(), SimpleNamespace(error=NetworkError("")))
 
-    assert recorded == [("warning", "Telegram network issue: NetworkError")]
+    assert recorded == [("warning", "network issue: NetworkError")]
 
 
 @pytest.mark.asyncio
@@ -348,17 +351,19 @@ async def test_on_error_keeps_non_network_exceptions_as_error(monkeypatch) -> No
     recorded: list[tuple[str, str]] = []
 
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.warning",
+        channel.logger,
+        "warning",
         lambda message, error: recorded.append(("warning", message.format(error))),
     )
     monkeypatch.setattr(
-        "nanobot.channels.telegram.logger.error",
+        channel.logger,
+        "error",
         lambda message, error: recorded.append(("error", message.format(error))),
     )
 
     await channel._on_error(object(), SimpleNamespace(error=RuntimeError("boom")))
 
-    assert recorded == [("error", "Telegram error: boom")]
+    assert recorded == [("error", "error: boom")]
 
 
 @pytest.mark.asyncio
@@ -1289,6 +1294,20 @@ async def test_forward_command_normalizes_telegram_safe_dream_aliases() -> None:
     assert handled[0]["content"] == "/dream-restore deadbeef"
 
 
+def test_telegram_bus_slash_command_regex_matches_agent_loop_commands() -> None:
+    """Bus-routed slash commands must match the Telegram handler regex (see builtin router)."""
+    pat = TelegramChannel.TELEGRAM_BUS_SLASH_COMMAND_RE
+    assert pat.fullmatch("/history")
+    assert pat.fullmatch("/history 5")
+    assert pat.fullmatch("/goal ship the feature")
+    assert pat.fullmatch("/pairing list")
+    assert pat.fullmatch("/model fast")
+    assert pat.fullmatch("/new@nanobot_bot")
+    assert pat.fullmatch("/goal@nanobot_bot refine objective")
+    assert pat.fullmatch("/dream-log deadbeef") is None
+    assert pat.fullmatch("/dream-restore deadbeef") is None
+
+
 @pytest.mark.asyncio
 async def test_on_help_includes_restart_command() -> None:
     channel = TelegramChannel(
@@ -1306,6 +1325,9 @@ async def test_on_help_includes_restart_command() -> None:
     assert "/status" in help_text
     assert "/dream" in help_text
     assert "/dream-log" in help_text
+    assert "/goal" in help_text
+    assert "/pairing" in help_text
+    assert "/model" in help_text
     assert "/dream-restore" in help_text
 
 

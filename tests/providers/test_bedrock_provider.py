@@ -106,6 +106,7 @@ def test_generic_bedrock_model_keeps_temperature_and_skips_anthropic_thinking() 
     assert kwargs["modelId"] == "amazon.nova-lite-v1:0"
     assert kwargs["inferenceConfig"] == {"maxTokens": 1024, "temperature": 0.3}
     assert "additionalModelRequestFields" not in kwargs
+    assert "toolConfig" not in kwargs
 
 
 def test_build_kwargs_converts_messages_tools_and_tool_results() -> None:
@@ -158,6 +159,39 @@ def test_build_kwargs_converts_messages_tools_and_tool_results() -> None:
     tool_spec = kwargs["toolConfig"]["tools"][0]["toolSpec"]
     assert tool_spec["name"] == "read_file"
     assert kwargs["toolConfig"]["toolChoice"] == {"any": {}}
+
+
+def test_build_kwargs_keeps_tool_config_for_historical_tool_blocks_without_tools() -> None:
+    provider = BedrockProvider(region="us-east-1", client=FakeClient())
+    messages = [
+        {"role": "user", "content": "read x"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "toolu_1",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": '{"path": "x"}'},
+            }],
+        },
+        {"role": "tool", "tool_call_id": "toolu_1", "name": "read_file", "content": "ok"},
+        {"role": "user", "content": "continue"},
+    ]
+
+    kwargs = provider._build_kwargs(
+        messages=messages,
+        tools=[],
+        model="bedrock/anthropic.claude-opus-4-7",
+        max_tokens=1024,
+        temperature=0.7,
+        reasoning_effort=None,
+        tool_choice=None,
+    )
+
+    assert any("toolUse" in block for msg in kwargs["messages"] for block in msg["content"])
+    assert any("toolResult" in block for msg in kwargs["messages"] for block in msg["content"])
+    assert kwargs["toolConfig"]["tools"][0]["toolSpec"]["name"] == "nanobot_noop"
+    assert "toolChoice" not in kwargs["toolConfig"]
 
 
 def test_parse_response_maps_text_tools_reasoning_usage_and_stop_reason() -> None:

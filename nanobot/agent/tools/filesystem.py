@@ -8,47 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool, tool_parameters
-from nanobot.agent.tools.schema import BooleanSchema, IntegerSchema, StringSchema, tool_parameters_schema
 from nanobot.agent.tools.file_state import FileStates, _hash_file, current_file_states
-from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
-from nanobot.config.paths import get_media_dir
-
-
-_FS_WORKSPACE_BOUNDARY_NOTE = (
-    " (this is a hard policy boundary, not a transient failure; "
-    "do not retry with shell tricks or alternative tools, and ask "
-    "the user how to proceed if the resource is genuinely required)"
+from nanobot.agent.tools.path_utils import resolve_workspace_path
+from nanobot.agent.tools.schema import (
+    BooleanSchema,
+    IntegerSchema,
+    StringSchema,
+    tool_parameters_schema,
 )
-
-
-def _resolve_path(
-    path: str,
-    workspace: Path | None = None,
-    allowed_dir: Path | None = None,
-    extra_allowed_dirs: list[Path] | None = None,
-) -> Path:
-    """Resolve path against workspace (if relative) and enforce directory restriction."""
-    p = Path(path).expanduser()
-    if not p.is_absolute() and workspace:
-        p = workspace / p
-    resolved = p.resolve()
-    if allowed_dir:
-        media_path = get_media_dir().resolve()
-        all_dirs = [allowed_dir] + [media_path] + (extra_allowed_dirs or []) 
-        if not any(_is_under(resolved, d) for d in all_dirs):
-            raise PermissionError(
-                f"Path {path} is outside allowed directory {allowed_dir}"
-                + _FS_WORKSPACE_BOUNDARY_NOTE
-            )
-    return resolved
-
-
-def _is_under(path: Path, directory: Path) -> bool:
-    try:
-        path.relative_to(directory.resolve())
-        return True
-    except ValueError:
-        return False
+from nanobot.utils.helpers import build_image_content_blocks, detect_image_mime
 
 
 class _FsTool(Tool):
@@ -70,6 +38,23 @@ class _FsTool(Tool):
         self._explicit_file_states = file_states
         self._fallback_file_states = FileStates()
 
+    @classmethod
+    def create(cls, ctx: Any) -> Tool:
+        from nanobot.agent.skills import BUILTIN_SKILLS_DIR
+
+        restrict = (
+            ctx.config.restrict_to_workspace
+            or ctx.config.exec.sandbox
+        )
+        allowed_dir = Path(ctx.workspace) if restrict else None
+        extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
+        return cls(
+            workspace=Path(ctx.workspace),
+            allowed_dir=allowed_dir,
+            extra_allowed_dirs=extra_read,
+            file_states=ctx.file_state_store,
+        )
+
     @property
     def _file_states(self) -> FileStates:
         if self._explicit_file_states is not None:
@@ -77,7 +62,12 @@ class _FsTool(Tool):
         return current_file_states(self._fallback_file_states)
 
     def _resolve(self, path: str) -> Path:
-        return _resolve_path(path, self._workspace, self._allowed_dir, self._extra_allowed_dirs)
+        return resolve_workspace_path(
+            path,
+            self._workspace,
+            self._allowed_dir,
+            self._extra_allowed_dirs,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +137,7 @@ def _parse_page_range(pages: str, total: int) -> tuple[int, int]:
 )
 class ReadFileTool(_FsTool):
     """Read file contents with optional line-based pagination."""
+    _scopes = {"core", "subagent", "memory"}
 
     _MAX_CHARS = 128_000
     _DEFAULT_LIMIT = 2000
@@ -365,6 +356,7 @@ class ReadFileTool(_FsTool):
 )
 class WriteFileTool(_FsTool):
     """Write content to a file."""
+    _scopes = {"core", "subagent", "memory"}
 
     @property
     def name(self) -> str:
@@ -602,11 +594,6 @@ def _find_matches(content: str, old_text: str) -> list[_MatchSpan]:
     return []
 
 
-def _find_match_line_numbers(content: str, old_text: str) -> list[int]:
-    """Return 1-based starting line numbers for the current matching strategies."""
-    return [match.line for match in _find_matches(content, old_text)]
-
-
 def _collapse_internal_whitespace(text: str) -> str:
     return "\n".join(" ".join(line.split()) for line in text.splitlines())
 
@@ -675,6 +662,7 @@ def _find_match(content: str, old_text: str) -> tuple[str | None, int]:
 )
 class EditFileTool(_FsTool):
     """Edit a file by replacing text with fallback matching."""
+    _scopes = {"core", "subagent", "memory"}
 
     _MAX_EDIT_FILE_SIZE = 1024 * 1024 * 1024  # 1 GiB
     _MARKDOWN_EXTS = frozenset({".md", ".mdx", ".markdown"})
@@ -858,6 +846,7 @@ class EditFileTool(_FsTool):
 )
 class ListDirTool(_FsTool):
     """List directory contents with optional recursion."""
+    _scopes = {"core", "subagent"}
 
     _DEFAULT_MAX = 200
     _IGNORE_DIRS = {

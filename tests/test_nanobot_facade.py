@@ -39,7 +39,7 @@ def test_from_config_default_path():
     from nanobot.config.schema import Config
 
     with patch("nanobot.config.loader.load_config") as mock_load, \
-         patch("nanobot.nanobot._make_provider") as mock_prov:
+         patch("nanobot.providers.factory.make_provider") as mock_prov:
         mock_load.return_value = Config()
         mock_prov.return_value = MagicMock()
         mock_prov.return_value.get_default_model.return_value = "test"
@@ -127,7 +127,7 @@ def test_workspace_override(tmp_path):
 
 def test_sdk_make_provider_uses_github_copilot_backend():
     from nanobot.config.schema import Config
-    from nanobot.nanobot import _make_provider
+    from nanobot.providers.factory import make_provider
 
     config = Config.model_validate(
         {
@@ -141,7 +141,7 @@ def test_sdk_make_provider_uses_github_copilot_backend():
     )
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
-        provider = _make_provider(config)
+        provider = make_provider(config)
 
     assert provider.__class__.__name__ == "GitHubCopilotProvider"
 
@@ -190,7 +190,7 @@ async def test_run_populates_tools_used_across_iterations(tmp_path):
         ctx1 = AgentHookContext(iteration=0, messages=messages)
         ctx1.tool_calls = [
             ToolCallRequest(id="c1", name="read_file", arguments={}),
-            ToolCallRequest(id="c2", name="glob", arguments={}),
+            ToolCallRequest(id="c2", name="grep", arguments={}),
         ]
         for h in extras:
             await h.after_iteration(ctx1)
@@ -204,7 +204,7 @@ async def test_run_populates_tools_used_across_iterations(tmp_path):
     bot._loop.process_direct = fake_process_direct
     result = await bot.run("do stuff")
     assert result.content == "final"
-    assert result.tools_used == ["read_file", "glob", "web_fetch"]
+    assert result.tools_used == ["read_file", "grep", "web_fetch"]
 
 
 @pytest.mark.asyncio

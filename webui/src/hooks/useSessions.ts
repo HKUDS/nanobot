@@ -5,11 +5,10 @@ import i18n from "@/i18n";
 import {
   ApiError,
   deleteSession as apiDeleteSession,
-  fetchSessionMessages,
+  fetchWebuiThread,
   listSessions,
 } from "@/lib/api";
 import { deriveTitle } from "@/lib/format";
-import { toMediaAttachment } from "@/lib/media";
 import type { ChatSummary, UIMessage } from "@/lib/types";
 
 const EMPTY_MESSAGES: UIMessage[] = [];
@@ -49,6 +48,12 @@ export function useSessions(): {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    return client.onSessionUpdate(() => {
+      void refresh();
+    });
+  }, [client, refresh]);
+
   const createChat = useCallback(async (): Promise<string> => {
     const chatId = await client.newChat();
     const key = `websocket:${chatId}`;
@@ -61,6 +66,7 @@ export function useSessions(): {
         chatId,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        title: "",
         preview: "",
       },
       ...prev.filter((s) => s.key !== key),
@@ -84,23 +90,30 @@ export function useSessionHistory(key: string | null): {
   messages: UIMessage[];
   loading: boolean;
   error: string | null;
-  /** ``true`` when the last persisted assistant turn has ``tool_calls`` but no
-   *  final text yet — the model was still processing when the page loaded. */
+  refresh: () => void;
+  version: number;
+  /** ``true`` when the replayed transcript ends with a trace row (turn still in flight). */
   hasPendingToolCalls: boolean;
 } {
   const { token } = useClient();
+  const [refreshSeq, setRefreshSeq] = useState(0);
+  const refresh = useCallback(() => {
+    setRefreshSeq((value) => value + 1);
+  }, []);
   const [state, setState] = useState<{
     key: string | null;
     messages: UIMessage[];
     loading: boolean;
     error: string | null;
     hasPendingToolCalls: boolean;
+    version: number;
   }>({
     key: null,
     messages: [],
     loading: false,
     error: null,
     hasPendingToolCalls: false,
+    version: 0,
   });
 
   useEffect(() => {
@@ -111,106 +124,111 @@ export function useSessionHistory(key: string | null): {
         loading: false,
         error: null,
         hasPendingToolCalls: false,
+        version: 0,
       });
       return;
     }
     let cancelled = false;
     // Mark the new key as loading immediately so callers never see stale
     // messages from the previous session during the render right after a switch.
-    setState({
-      key,
-      messages: [],
-      loading: true,
-      error: null,
-      hasPendingToolCalls: false,
-    });
+    setState((prev) => prev.key === key
+      ? { ...prev, loading: true, error: null }
+      : {
+          key,
+          messages: [],
+          loading: true,
+          error: null,
+          hasPendingToolCalls: false,
+          version: 0,
+        });
     (async () => {
       try {
-        const body = await fetchSessionMessages(token, key);
+        const body = await fetchWebuiThread(token, key);
         if (cancelled) return;
-        const ui: UIMessage[] = body.messages.flatMap((m, idx) => {
-          if (m.role !== "user" && m.role !== "assistant") return [];
-          if (typeof m.content !== "string") return [];
-          // Hydrate signed media URLs into generic UI attachments. Image-only
-          // user turns still populate the legacy ``images`` slot so the
-          // existing optimistic-send and lightbox paths remain unchanged.
-          const media =
-            Array.isArray(m.media_urls) && m.media_urls.length > 0
-              ? m.media_urls.map((mu) => toMediaAttachment(mu))
-              : undefined;
-          const images =
-            m.role === "user" && media?.every((item) => item.kind === "image")
-              ? media.map((item) => ({ url: item.url, name: item.name }))
-              : undefined;
-          return [
-            {
-              id: `hist-${idx}`,
-              role: m.role,
-              content: m.content,
-              createdAt: m.timestamp ? Date.parse(m.timestamp) : Date.now(),
-              ...(images ? { images } : {}),
-              ...(media ? { media } : {}),
-            },
-          ];
-        });
-        // Tool result rows can trail the assistant tool-call row while the turn
-        // is still running, so check the last conversational row.
-        const lastRaw = [...body.messages]
-          .reverse()
-          .find((m) => m.role === "user" || m.role === "assistant");
-        const hasPending =
-          lastRaw?.role === "assistant" &&
-          Array.isArray(lastRaw.tool_calls) &&
-          lastRaw.tool_calls.length > 0;
-        setState({
-          key,
-          messages: ui,
-          loading: false,
-          error: null,
-          hasPendingToolCalls: hasPending,
-        });
-      } catch (e) {
-        if (cancelled) return;
-        // A 404 just means the session hasn't been persisted yet (brand-new
-        // chat, first message not sent). That's a normal state, not an error.
-        if (e instanceof ApiError && e.status === 404) {
-          setState({
+        if (!body?.messages?.length) {
+          setState((prev) => ({
             key,
             messages: [],
             loading: false,
             error: null,
             hasPendingToolCalls: false,
-          });
+            version: prev.key === key ? prev.version + 1 : 1,
+          }));
+          return;
+        }
+        const ui: UIMessage[] = body.messages.map((m, idx) => ({
+          ...m,
+          id: m.id ?? `hist-${idx}`,
+          createdAt: typeof m.createdAt === "number" ? m.createdAt : Date.now(),
+        }));
+        const last = ui[ui.length - 1];
+        const hasPending = last?.kind === "trace";
+        setState((prev) => ({
+          key,
+          messages: ui,
+          loading: false,
+          error: null,
+          hasPendingToolCalls: hasPending,
+          version: prev.key === key ? prev.version + 1 : 1,
+        }));
+      } catch (e) {
+        if (cancelled) return;
+        if (e instanceof ApiError && e.status === 404) {
+          setState((prev) => ({
+            key,
+            messages: [],
+            loading: false,
+            error: null,
+            hasPendingToolCalls: false,
+            version: prev.key === key ? prev.version + 1 : 1,
+          }));
         } else {
-          setState({
+          setState((prev) => ({
             key,
             messages: [],
             loading: false,
             error: (e as Error).message,
             hasPendingToolCalls: false,
-          });
+            version: prev.key === key ? prev.version : 0,
+          }));
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [key, token]);
+  }, [key, token, refreshSeq]);
 
   if (!key) {
-    return { messages: EMPTY_MESSAGES, loading: false, error: null, hasPendingToolCalls: false };
+    return {
+      messages: EMPTY_MESSAGES,
+      loading: false,
+      error: null,
+      refresh,
+      version: 0,
+      hasPendingToolCalls: false,
+    };
   }
 
   // Even before the effect above commits its loading state, never surface the
   // previous session's payload for a brand-new key.
   if (state.key !== key) {
-    return { messages: EMPTY_MESSAGES, loading: true, error: null, hasPendingToolCalls: false };
+    return {
+      messages: EMPTY_MESSAGES,
+      loading: true,
+      error: null,
+      refresh,
+      version: 0,
+      hasPendingToolCalls: false,
+    };
   }
 
   return {
     messages: state.messages,
     loading: state.loading,
     error: state.error,
+    refresh,
+    version: state.version,
     hasPendingToolCalls: state.hasPendingToolCalls,
   };
 }
@@ -221,7 +239,7 @@ export function sessionTitle(
   firstUserMessage?: string,
 ): string {
   return deriveTitle(
-    firstUserMessage || session.preview,
+    session.title || firstUserMessage || session.preview,
     i18n.t("chat.newChat"),
   );
 }

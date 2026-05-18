@@ -553,6 +553,26 @@ async def test_process_file_message() -> None:
 
 
 @pytest.mark.asyncio
+async def test_process_file_message_uses_sdk_filename_when_name_missing(tmp_path: Path) -> None:
+    """Without `file.name`, fall back to SDK fname instead of saving as 'unknown' (#3737)."""
+    channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["user1"]), MessageBus())
+    client = _FakeWeComClient()
+    client.download_file.return_value = (b"%PDF-1.4 fake", "real_name.pdf")
+    channel._client = client
+
+    with patch("nanobot.channels.wecom.get_media_dir", return_value=tmp_path):
+        frame = _FakeFrame(body={
+            "msgid": "msg_file_2", "chatid": "chat1", "from": {"userid": "user1"},
+            "file": {"url": "https://example.com/x", "aeskey": "key456"},
+        })
+        await channel._process_message(frame, "file")
+
+    msg = await channel.bus.consume_inbound()
+    assert msg.media == [str(tmp_path / "real_name.pdf")]
+    assert "[file: real_name.pdf]" in msg.content
+
+
+@pytest.mark.asyncio
 async def test_process_voice_message() -> None:
     """Voice message: transcribed text is included in content."""
     channel = WecomChannel(WecomConfig(bot_id="b", secret="s", allow_from=["user1"]), MessageBus())

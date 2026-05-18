@@ -26,7 +26,52 @@ Instead of storing secrets directly in `config.json`, you can use `${VAR_NAME}` 
 }
 ```
 
-For **systemd** deployments, use `EnvironmentFile=` in the service unit to load variables from a file that only the deploying user can read:
+Any string value in `config.json` can use `${VAR_NAME}`. Resolution runs once at startup, in memory only — resolved values are never written back to disk, so editing config through `nanobot onboard` or the WebUI preserves the placeholder.
+
+If a referenced variable is unset, nanobot fails fast at startup with `ValueError: Environment variable 'NAME' referenced in config is not set`.
+
+### More examples
+
+**MCP servers** — both stdio `env` and HTTP `headers`:
+
+```json
+{
+  "tools": {
+    "mcpServers": {
+      "github": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}" }
+      },
+      "remote": {
+        "url": "https://example.com/mcp/",
+        "headers": { "Authorization": "Bearer ${REMOTE_MCP_TOKEN}" }
+      }
+    }
+  }
+}
+```
+
+**Web search providers:**
+
+```json
+{
+  "tools": {
+    "web": {
+      "search": {
+        "provider": "brave",
+        "apiKey": "${BRAVE_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+### Loading variables at startup
+
+Pick whatever fits your deployment — nanobot only reads `os.environ` at startup, so any mechanism that populates the process environment works.
+
+**systemd** — use `EnvironmentFile=` in the service unit to load variables from a file that only the deploying user can read:
 
 ```ini
 # /etc/systemd/system/nanobot.service (excerpt)
@@ -42,6 +87,35 @@ TELEGRAM_TOKEN=your-token-here
 IMAP_PASSWORD=your-password-here
 ```
 
+**Docker** — pass an env file to the locally built image (one `KEY=VALUE` per line), or use `-e KEY=value`:
+
+```bash
+docker run --rm --env-file=./nanobot.env \
+  -v ~/.nanobot:/home/nanobot/.nanobot \
+  nanobot agent -m "Hello"
+```
+
+**direnv** — drop a `.envrc` in your working directory and run `direnv allow`:
+
+```bash
+# .envrc (auto-loaded by direnv)
+export TELEGRAM_TOKEN=your-token-here
+export ANTHROPIC_API_KEY=...
+```
+
+**Secret managers (1Password, Bitwarden, pass)** — wrap the process so secrets only exist as env vars for the lifetime of the run, never on disk:
+
+```bash
+# 1Password — references in .env.tpl look like `op://Vault/Item/field`
+op run --env-file=.env.tpl -- nanobot agent
+
+# pass (passwordstore.org)
+ANTHROPIC_API_KEY="$(pass show api/anthropic)" nanobot agent
+
+# Bitwarden
+ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
+```
+
 ## Providers
 
 > [!TIP]
@@ -53,6 +127,7 @@ IMAP_PASSWORD=your-password-here
 > - **Zhipu Coding Plan**: If you're on Zhipu's coding plan, set `"apiBase": "https://open.bigmodel.cn/api/coding/paas/v4"` in your zhipu provider config.
 > - **Alibaba Cloud BaiLian**: If you're using Alibaba Cloud BaiLian's OpenAI-compatible endpoint, set `"apiBase": "https://dashscope.aliyuncs.com/compatible-mode/v1"` in your dashscope provider config.
 > - **Step Fun (Mainland China)**: If your API key is from Step Fun's mainland China platform (stepfun.com), set `"apiBase": "https://api.stepfun.com/v1"` in your stepfun provider config.
+> - **Xiaomi MiMo thinking mode**: MiMo models (e.g. `mimo-v2.5-pro`) default to enabled thinking. Use `agents.defaults.reasoningEffort: "none"` to disable it, or `"low"` / `"medium"` / `"high"` to keep it on. Omitting the field preserves the provider's per-model default.
 
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
@@ -80,6 +155,7 @@ IMAP_PASSWORD=your-password-here
 | `qiniu` | LLM (Qiniu) | [七牛云](https://www.qiniu.com) |
 | `ollama` | LLM (local, Ollama) | — |
 | `lm_studio` | LLM (local, LM Studio) | — |
+| `atomic_chat` | LLM (local, [Atomic Chat](https://atomic.chat/)) | — |
 | `mistral` | LLM | [docs.mistral.ai](https://docs.mistral.ai/) |
 | `stepfun` | LLM (Step Fun/阶跃星辰) | [platform.stepfun.com](https://platform.stepfun.com) |
 | `ovms` | LLM (local, OpenVINO Model Server) | [docs.openvino.ai](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html) |
@@ -530,6 +606,36 @@ ollama run llama3.2
 </details>
 
 <details>
+<summary><b>Atomic Chat (local)</b></summary>
+
+[Atomic Chat](https://atomic.chat/) is a local-first desktop app that exposes an **OpenAI-compatible** HTTP API (default `http://localhost:1337/v1`). Start Atomic Chat and enable the local API server, then point nanobot at it.
+
+**1. Add to config** (partial — merge into `~/.nanobot/config.json`):
+
+```json
+{
+  "providers": {
+    "atomic_chat": {
+      "apiKey": null,
+      "apiBase": "http://localhost:1337/v1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "atomic_chat",
+      "model": "your-model-id-from-atomic-chat"
+    }
+  }
+}
+```
+
+> **Note:** Set `apiKey` to `null` if your Atomic Chat server does not require a key. If it does, set `apiKey` (or the `ATOMIC_CHAT_API_KEY` environment variable) to the value Atomic Chat expects. The `model` string must match the model id Atomic Chat exposes on its OpenAI-compatible endpoint.
+
+> `provider: "auto"` also works when `providers.atomic_chat.apiBase` is configured, but setting `"provider": "atomic_chat"` is the clearest option.
+
+</details>
+
+<details>
 <summary><b>OpenVINO Model Server (local / OpenAI-compatible)</b></summary>
 
 Run LLMs locally on Intel GPUs using [OpenVINO Model Server](https://docs.openvino.ai/2026/model-server/ovms_docs_llm_quickstart.html). OVMS exposes an OpenAI-compatible API at `/v3`.
@@ -684,6 +790,106 @@ That's it! Environment variables, model routing, config matching, and `nanobot s
 
 </details>
 
+## Model Presets
+
+Model presets let you name a complete model configuration and switch it at runtime with `/model <preset>`.
+
+Existing configs do not need to change. If you do not set `modelPresets` or `agents.defaults.modelPreset`, nanobot keeps using `agents.defaults.*` exactly as before.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "model": "openai/gpt-4.1",
+      "provider": "openai",
+      "maxTokens": 8192,
+      "contextWindowTokens": 128000,
+      "temperature": 0.1,
+      "modelPreset": "fast",
+      "fallbackModels": ["deep"]
+    }
+  },
+  "modelPresets": {
+    "fast": {
+      "model": "openai/gpt-4.1-mini",
+      "provider": "openai",
+      "maxTokens": 4096,
+      "contextWindowTokens": 128000,
+      "temperature": 0.2,
+      "reasoningEffort": "low"
+    },
+    "deep": {
+      "model": "anthropic/claude-opus-4-5",
+      "provider": "anthropic",
+      "maxTokens": 8192,
+      "contextWindowTokens": 200000,
+      "reasoningEffort": "high"
+    }
+  }
+}
+```
+
+`modelPresets` is a top-level object. The keys under it (`fast`, `deep`, `coding`, etc.) are user-defined preset names. Each preset supports:
+
+| Field | Description |
+|-------|-------------|
+| `model` | Model name to use for this preset. |
+| `provider` | Provider name, or `"auto"` to use provider auto-detection. |
+| `maxTokens` | Maximum completion/output tokens. |
+| `contextWindowTokens` | Context window size used by prompt building and consolidation decisions. |
+| `temperature` | Sampling temperature. |
+| `reasoningEffort` | Optional reasoning/thinking setting. Provider support varies. |
+
+`default` is reserved and always means the implicit preset built from `agents.defaults.*`; do not define `modelPresets.default`. Use `/model default` to switch back to `agents.defaults.*`.
+
+### Model Fallbacks
+
+`agents.defaults.fallbackModels` defines an ordered failover chain for the active model configuration. The primary model is still selected by `agents.defaults.modelPreset` (or the implicit default config when no preset is active).
+
+Each fallback candidate can be either:
+
+- A preset name from `modelPresets`, such as `"deep"`. The preset's full model, provider, generation, and context-window config is used.
+- An inline fallback object with at least `provider` and `model`. Optional `maxTokens`, `contextWindowTokens`, and `temperature` fields inherit from the active primary config when omitted. `reasoningEffort` does not inherit; omit it to leave reasoning off for that fallback, or set it explicitly for models that support reasoning.
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "modelPreset": "fast",
+      "fallbackModels": [
+        "deep",
+        {
+          "provider": "deepseek",
+          "model": "deepseek-v4-pro",
+          "maxTokens": 4096,
+          "contextWindowTokens": 262144
+        }
+      ]
+    }
+  }
+}
+```
+
+String entries are preset names, not raw model names. If you want to use a model that is not already a preset, use the inline object form.
+
+Failover only runs when the primary provider returns a retryable model/provider error before any answer text has been streamed. Typical fallback cases include timeouts, connection errors, 5xx server errors, 429 rate limits, overloads, and quota/balance exhaustion. It does not run for malformed requests, authentication/permission errors, content filtering/refusals, or context-length/message-format errors.
+
+If fallback candidates use smaller `contextWindowTokens` values, nanobot builds context using the smallest window in the active chain so every candidate can receive the same prompt.
+
+Set `agents.defaults.modelPreset` to start with a named preset:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "modelPreset": "fast"
+    }
+  }
+}
+```
+
+When `modelPreset` is `null` or omitted, startup uses the implicit `default` preset from `agents.defaults.*`. Runtime changes made with `/model <preset>` are not written back to `config.json`; they affect future turns until the process restarts or another model/config change replaces them.
+
 ## Channel Settings
 
 Global settings that apply to all channels. Configure under the `channels` section in `~/.nanobot/config.json`:
@@ -705,6 +911,7 @@ Global settings that apply to all channels. Configure under the `channels` secti
 |---------|---------|-------------|
 | `sendProgress` | `true` | Stream agent's text progress to the channel |
 | `sendToolHints` | `false` | Stream tool-call hints (e.g. `read_file("…")`) |
+| `showReasoning` | `true` | Allow channels to surface model reasoning/thinking content (DeepSeek-R1 `reasoning_content`, Anthropic `thinking_blocks`, inline `<think>` tags). Reasoning flows as a dedicated stream with `_reasoning_delta` / `_reasoning_end` markers — channels override `send_reasoning_delta` / `send_reasoning_end` to render in-place updates. Even with `true`, channels without those overrides stay no-op silently. Currently surfaced on CLI and WebSocket/WebUI (italic shimmer header, auto-collapses after the stream ends); Telegram / Slack / Discord / Feishu / WeChat / Matrix keep the base no-op until their bubble UI is adapted. Independent of `sendProgress`. |
 | `sendMaxRetries` | `3` | Max delivery attempts per outbound message, including the initial send (0-10 configured, minimum 1 actual attempt) |
 | `transcriptionProvider` | `"groq"` | Voice transcription backend: `"groq"` (free tier, default) or `"openai"`. API key is auto-resolved from the matching provider config. |
 | `transcriptionLanguage` | `null` | Optional ISO-639-1 language hint for audio transcription, e.g. `"en"`, `"ko"`, `"ja"`. |
@@ -812,7 +1019,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
     "web": {
       "search": {
         "provider": "brave",
-        "apiKey": "BSA..."
+        "apiKey": "${BRAVE_API_KEY}"
       }
     }
   }
@@ -826,7 +1033,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
     "web": {
       "search": {
         "provider": "tavily",
-        "apiKey": "tvly-..."
+        "apiKey": "${TAVILY_API_KEY}"
       }
     }
   }
@@ -840,7 +1047,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
     "web": {
       "search": {
         "provider": "jina",
-        "apiKey": "jina_..."
+        "apiKey": "${JINA_API_KEY}"
       }
     }
   }
@@ -854,7 +1061,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
     "web": {
       "search": {
         "provider": "kagi",
-        "apiKey": "your-kagi-api-key"
+        "apiKey": "${KAGI_API_KEY}"
       }
     }
   }
@@ -868,7 +1075,7 @@ By default, web search uses `duckduckgo`, and it works out of the box without an
     "web": {
       "search": {
         "provider": "olostep",
-        "apiKey": "YOUR_OLOSTEP_API_KEY"
+        "apiKey": "${OLOSTEP_API_KEY}"
       }
     }
   }
@@ -942,6 +1149,12 @@ If you want to always use the local conversion, you can force it using:
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `useJinaReader` | boolean | `true` | If true, Jina Reader will be preferred over the local conversion |
+
+## Image Generation
+
+Image generation is configured under `tools.imageGeneration` and uses provider credentials from `providers.openrouter` or `providers.aihubmix`.
+
+See [Image Generation](./image-generation.md) for WebUI usage, provider examples, artifact storage, and troubleshooting.
 
 ## MCP (Model Context Protocol)
 
@@ -1024,7 +1237,8 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 > [!TIP]
 > For production deployments, set `"restrictToWorkspace": true` and `"tools.exec.sandbox": "bwrap"` in your config to sandbox the agent.
-> In `v0.1.4.post3` and earlier, an empty `allowFrom` allowed all senders. Since `v0.1.4.post4`, empty `allowFrom` denies all access by default. To allow all senders, set `"allowFrom": ["*"]`.
+
+For API keys, tokens, and other secrets, see [Environment Variables for Secrets](#environment-variables-for-secrets) — avoid storing them directly in `config.json`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -1032,9 +1246,74 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 | `tools.exec.sandbox` | `""` | Sandbox backend for shell commands. Set to `"bwrap"` to wrap exec calls in a [bubblewrap](https://github.com/containers/bubblewrap) sandbox — the process can only see the workspace (read-write) and media directory (read-only); config files and API keys are hidden. Automatically enables `restrictToWorkspace` for file tools. **Linux only** — requires `bwrap` installed (`apt install bubblewrap`; pre-installed in the Docker image). Not available on macOS or Windows (bwrap depends on Linux kernel namespaces). |
 | `tools.exec.enable` | `true` | When `false`, the shell `exec` tool is not registered at all. Use this to completely disable shell command execution. |
 | `tools.exec.pathAppend` | `""` | Extra directories to append to `PATH` when running shell commands (e.g. `/usr/sbin` for `ufw`). |
-| `channels.*.allowFrom` | `[]` (deny all) | Whitelist of user IDs. Empty denies all; use `["*"]` to allow everyone. |
+| `channels.*.allowFrom` | omitted | Access control per channel. Omit to use pairing-only mode; set `["*"]` to allow everyone; or list specific user IDs. See [Pairing](#pairing) for details. |
 
 **Docker security**: The official Docker image runs as a non-root user (`nanobot`, UID 1000) with bubblewrap pre-installed. When using `docker-compose.yml`, the container drops all Linux capabilities except `SYS_ADMIN` (required for bwrap's namespace isolation).
+
+
+## Pairing
+
+Pairing lets users get access to the bot through a simple code exchange — no config editing required. This works for both new users and existing users connecting from a new channel (e.g. someone already approved on Telegram now setting up Discord).
+
+### How it works
+
+1. A user sends a DM to the bot on any channel (Telegram, Discord, Slack, etc.) where they aren't yet approved.
+2. The bot replies with a pairing code (like `ABCD-EFGH`) and tells them to forward it to you.
+3. You approve the code:
+
+```text
+/pairing approve ABCD-EFGH
+```
+
+4. The user can now chat with the bot normally.
+
+Pairing only works in **DMs** — unapproved users in group chats are silently ignored.
+
+### Pairing-only mode
+
+By default, if you don't set `allowFrom`, anyone who isn't approved yet will get a pairing code when they DM the bot. This means you can skip `allowFrom` entirely and manage all access through pairing:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "enabled": true
+    }
+  }
+}
+```
+
+If you prefer to allow everyone without approval:
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "allowFrom": ["*"]
+    }
+  }
+}
+```
+
+### Managing access
+
+| Command | What it does |
+|---------|-------------|
+| `/pairing` | Show all pending pairing requests |
+| `/pairing approve <code>` | Approve a request — the sender can now chat |
+| `/pairing deny <code>` | Reject a pending request |
+| `/pairing revoke <user_id>` | Remove a previously approved user from the current channel |
+| `/pairing revoke <channel> <user_id>` | Remove a user from a specific channel |
+
+You can find user IDs in the output of `/pairing list`.
+
+From the terminal:
+
+```bash
+nanobot agent -m "/pairing list"
+nanobot agent -m "/pairing approve ABCD-EFGH"
+```
 
 
 ## Subagent Concurrency
@@ -1159,3 +1438,23 @@ Disabled skills are excluded from the main agent's skill summary, from always-on
 | Option | Default | Description |
 |--------|---------|-------------|
 | `agents.defaults.disabledSkills` | `[]` | List of skill directory names to exclude from loading. Applies to both built-in skills and workspace skills. |
+
+## Tool Hint Max Length
+
+Tool hints are the short progress messages shown when the agent calls tools (e.g. `$ cd …/project && npm test`). By default, these are truncated at 40 characters, which can make long commands hard to read.
+
+Set `agents.defaults.toolHintMaxLength` to control the truncation threshold:
+
+```json
+{
+  "agents": {
+    "defaults": {
+      "toolHintMaxLength": 120
+    }
+  }
+}
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `agents.defaults.toolHintMaxLength` | `40` | Maximum characters for tool hint display. Range: 20–500. Higher values show more of the command or path; lower values keep hints compact. |
