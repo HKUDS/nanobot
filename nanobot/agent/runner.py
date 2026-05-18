@@ -20,6 +20,7 @@ from nanobot.utils.file_edit_events import (
     build_file_edit_error_event,
     build_file_edit_start_event,
     prepare_file_edit_tracker,
+    StreamingFileEditTracker,
 )
 from nanobot.utils.helpers import (
     IncrementalThinkExtractor,
@@ -629,6 +630,24 @@ class AgentRunner:
         )
 
         progress_state: dict[str, bool] | None = None
+        live_file_edits: StreamingFileEditTracker | None = None
+
+        if (
+            spec.progress_callback is not None
+            and on_progress_accepts_file_edit_events(spec.progress_callback)
+        ):
+            async def _emit_live_file_edits(events: list[dict[str, Any]]) -> None:
+                await invoke_file_edit_progress(spec.progress_callback, events)
+
+            live_file_edits = StreamingFileEditTracker(
+                workspace=spec.workspace,
+                tools=spec.tools,
+                emit=_emit_live_file_edits,
+            )
+
+        async def _tool_call_delta(delta: dict[str, Any]) -> None:
+            if live_file_edits is not None:
+                await live_file_edits.update(delta)
 
         if wants_streaming:
             async def _stream(delta: str) -> None:
@@ -646,6 +665,7 @@ class AgentRunner:
                 **kwargs,
                 on_content_delta=_stream,
                 on_thinking_delta=_thinking,
+                on_tool_call_delta=_tool_call_delta if live_file_edits is not None else None,
             )
         elif wants_progress_streaming:
             stream_buf = ""
@@ -675,6 +695,7 @@ class AgentRunner:
             coro = self.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream_progress,
+                on_tool_call_delta=_tool_call_delta if live_file_edits is not None else None,
             )
         else:
             coro = self.provider.chat_with_retry(**kwargs)
@@ -689,6 +710,14 @@ class AgentRunner:
                 await coro if outer_timeout_s is None
                 else await asyncio.wait_for(coro, timeout=outer_timeout_s)
             )
+            if live_file_edits is not None:
+                await live_file_edits.flush()
+                if response.should_execute_tools:
+                    live_file_edits.apply_final_call_ids(response.tool_calls)
+                await live_file_edits.error_unmatched(
+                    response.tool_calls if response.should_execute_tools else [],
+                    "Tool call did not complete.",
+                )
         except asyncio.TimeoutError:
             if outer_timeout_s is None:
                 return LLMResponse(
@@ -907,7 +936,10 @@ class AgentRunner:
         if file_edit_tracker is not None and progress_callback is not None:
             await invoke_file_edit_progress(
                 progress_callback,
-                [build_file_edit_end_event(file_edit_tracker)],
+                [build_file_edit_end_event(
+                    file_edit_tracker,
+                    params if isinstance(params, dict) else None,
+                )],
             )
 
         detail = "" if result is None else str(result)

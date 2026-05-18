@@ -243,6 +243,7 @@ class GitHubCopilotProvider(OpenAICompatProvider):
         tool_choice: str | dict[str, object] | None = None,
         on_content_delta: Callable[[str], None] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, object]], Awaitable[None]] | None = None,
     ):
         await self._refresh_client_api_key()
         return await super().chat_stream(
@@ -255,4 +256,5 @@ class GitHubCopilotProvider(OpenAICompatProvider):
             tool_choice=tool_choice,
             on_content_delta=on_content_delta,
             on_thinking_delta=on_thinking_delta,
+            on_tool_call_delta=on_tool_call_delta,
         )

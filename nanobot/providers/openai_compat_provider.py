@@ -999,6 +999,21 @@ class OpenAICompatProvider(LLMProvider):
             if fn_prov:
                 buf["fn_prov"] = fn_prov
 
+        def _accum_legacy_function_call(function_call: Any) -> None:
+            """Accumulate legacy ``delta.function_call`` streaming chunks."""
+            if not function_call:
+                return
+            buf = tc_bufs.setdefault(0, {
+                "id": "", "name": "", "arguments": "",
+                "extra_content": None, "prov": None, "fn_prov": None,
+            })
+            fn_name = _get(function_call, "name")
+            if fn_name:
+                buf["name"] = str(fn_name)
+            fn_args = _get(function_call, "arguments")
+            if fn_args:
+                buf["arguments"] += str(fn_args)
+
         for chunk in chunks:
             if isinstance(chunk, str):
                 content_parts.append(chunk)
@@ -1029,6 +1044,7 @@ class OpenAICompatProvider(LLMProvider):
                     reasoning_parts.append(text)
                 for idx, tc in enumerate(delta.get("tool_calls") or []):
                     _accum_tc(tc, idx)
+                _accum_legacy_function_call(delta.get("function_call"))
                 usage = cls._extract_usage(chunk_map) or usage
                 continue
 
@@ -1047,8 +1063,10 @@ class OpenAICompatProvider(LLMProvider):
                     reasoning = getattr(delta, "reasoning", None)
                 if reasoning:
                     reasoning_parts.append(reasoning)
-            for tc in (delta.tool_calls or []) if delta else []:
+            for tc in (getattr(delta, "tool_calls", None) or []) if delta else []:
                 _accum_tc(tc, getattr(tc, "index", 0))
+            if delta:
+                _accum_legacy_function_call(getattr(delta, "function_call", None))
 
         return LLMResponse(
             content="".join(content_parts) or None,
@@ -1203,6 +1221,7 @@ class OpenAICompatProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
@@ -1226,9 +1245,16 @@ class OpenAICompatProvider(LLMProvider):
                             except StopAsyncIteration:
                                 break
 
-                    content, tool_calls, finish_reason, usage, reasoning_content = await consume_sdk_stream(
+                    (
+                        content,
+                        tool_calls,
+                        finish_reason,
+                        usage,
+                        reasoning_content,
+                    ) = await consume_sdk_stream(
                         _timed_stream(),
                         on_content_delta,
+                        on_tool_call_delta=on_tool_call_delta,
                     )
                     self._record_responses_success(model, reasoning_effort)
                     return LLMResponse(
@@ -1252,6 +1278,12 @@ class OpenAICompatProvider(LLMProvider):
                 messages, tools, model, max_tokens, temperature,
                 reasoning_effort, tool_choice,
             )
+            if self._spec and self._spec.name == "zhipu" and tools and on_tool_call_delta:
+                # Z.AI/GLM keeps streaming tool-call arguments behind an
+                # explicit provider flag.  Pass it through the OpenAI SDK's
+                # extra_body escape hatch so the usual delta.tool_calls path
+                # can surface live file-edit progress.
+                kwargs.setdefault("extra_body", {})["tool_stream"] = True
             kwargs["stream"] = True
             kwargs["stream_options"] = {"include_usage": True}
             stream = await self._client.chat.completions.create(**kwargs)
@@ -1279,6 +1311,28 @@ class OpenAICompatProvider(LLMProvider):
                         r_text = self._extract_text_content(reasoning)
                         if r_text:
                             await on_thinking_delta(r_text)
+                    if on_tool_call_delta:
+                        for idx, tool_delta in enumerate(
+                            getattr(delta_obj, "tool_calls", None) or []
+                        ):
+                            fn = _get(tool_delta, "function")
+                            tool_index = _get(tool_delta, "index")
+                            await on_tool_call_delta({
+                                "index": tool_index if tool_index is not None else idx,
+                                "call_id": str(_get(tool_delta, "id") or ""),
+                                "name": str(_get(fn, "name") or "") if fn is not None else "",
+                                "arguments_delta": (
+                                    str(_get(fn, "arguments") or "") if fn is not None else ""
+                                ),
+                            })
+                        function_call = getattr(delta_obj, "function_call", None)
+                        if function_call:
+                            await on_tool_call_delta({
+                                "index": 0,
+                                "call_id": "",
+                                "name": str(_get(function_call, "name") or ""),
+                                "arguments_delta": str(_get(function_call, "arguments") or ""),
+                            })
             return self._parse_chunks(chunks)
         except asyncio.TimeoutError:
             return LLMResponse(
