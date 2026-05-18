@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DeleteConfirm } from "@/components/DeleteConfirm";
 import { Sidebar } from "@/components/Sidebar";
+import { SessionSearchDialog } from "@/components/SessionSearchDialog";
 import { SettingsView } from "@/components/settings/SettingsView";
 import { ThreadShell } from "@/components/thread/ThreadShell";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -298,6 +299,7 @@ function Shell({
   const [desktopSidebarOpen, setDesktopSidebarOpen] =
     useState<boolean>(readSidebarOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{
     key: string;
     label: string;
@@ -371,7 +373,21 @@ function Shell({
     [],
   );
 
+  const onOpenSessionSearch = useCallback(() => {
+    setMobileSidebarOpen(false);
+    setSessionSearchOpen(true);
+  }, []);
+
+  const onSelectSearchResult = useCallback(
+    (key: string) => {
+      setSessionSearchOpen(false);
+      onSelectChat(key);
+    },
+    [onSelectChat],
+  );
+
   const onOpenSettings = useCallback(() => {
+    setSessionSearchOpen(false);
     setView("settings");
     setMobileSidebarOpen(false);
   }, []);
@@ -477,6 +493,7 @@ function Shell({
     onRequestDelete: (key: string, label: string) =>
       setPendingDelete({ key, label }),
     onOpenSettings,
+    onOpenSearch: onOpenSessionSearch,
   };
   const showMainSidebar = view !== "settings";
 
@@ -519,6 +536,17 @@ function Shell({
               <Sidebar {...sidebarProps} onCollapse={closeMobileSidebar} />
             </SheetContent>
           </Sheet>
+        ) : null}
+
+        {showMainSidebar ? (
+          <SessionSearchDialog
+            open={sessionSearchOpen}
+            onOpenChange={setSessionSearchOpen}
+            sessions={sessions}
+            activeKey={activeKey}
+            loading={loading}
+            onSelect={onSelectSearchResult}
+          />
         ) : null}
 
         <main className="relative flex h-full min-w-0 flex-1 flex-col">

@@ -537,7 +537,7 @@ describe("App layout", () => {
     expect(screen.getByText("What can I do for you?")).toBeInTheDocument();
   });
 
-  it("filters sidebar sessions through the lightweight search row", async () => {
+  it("filters sessions in the centered search dialog", async () => {
     mockSessions = [
       {
         key: "websocket:chat-alpha",
@@ -564,20 +564,38 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     expect(within(sidebar).getByText("Q2 roadmap")).toBeInTheDocument();
     expect(within(sidebar).getByText("Travel ideas")).toBeInTheDocument();
+    const newChatButton = within(sidebar).getByRole("button", { name: "New chat" });
+    const searchButton = within(sidebar).getByRole("button", { name: "Search chats" });
+    expect(
+      newChatButton.compareDocumentPosition(searchButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Search chats" }), {
+    fireEvent.click(searchButton);
+    const dialog = await screen.findByRole("dialog", { name: "Search chats" });
+    expect(within(dialog).getByText("Q2 roadmap")).toBeInTheDocument();
+    expect(within(dialog).getByText("Travel ideas")).toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search chats" }), {
       target: { value: "planning" },
     });
 
-    expect(within(sidebar).getByText("Q2 roadmap")).toBeInTheDocument();
-    expect(within(sidebar).queryByText("Travel ideas")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Q2 roadmap")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Travel ideas")).not.toBeInTheDocument();
+    expect(within(sidebar).getByText("Travel ideas")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Search chats" }), {
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search chats" }), {
       target: { value: "road q2" },
     });
 
-    expect(within(sidebar).getByText("Q2 roadmap")).toBeInTheDocument();
-    expect(within(sidebar).queryByText("Travel ideas")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Q2 roadmap")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Travel ideas")).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: /Q2 roadmap/ }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Search chats" })).not.toBeInTheDocument(),
+    );
   });
 
   it("opens a blank start page without creating an empty chat", async () => {

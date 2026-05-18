@@ -1,4 +1,3 @@
-import { useMemo, useState } from "react";
 import {
   Menu,
   Search,
@@ -11,7 +10,6 @@ import { ChatList } from "@/components/ChatList";
 import { ConnectionBadge } from "@/components/ConnectionBadge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { cn } from "@/lib/utils";
 import type { ChatSummary } from "@/lib/types";
 
 interface SidebarProps {
@@ -22,30 +20,12 @@ interface SidebarProps {
   onSelect: (key: string) => void;
   onRequestDelete: (key: string, label: string) => void;
   onOpenSettings: () => void;
+  onOpenSearch: () => void;
   onCollapse: () => void;
 }
 
 export function Sidebar(props: SidebarProps) {
   const { t } = useTranslation();
-  const [query, setQuery] = useState("");
-  const normalizedQuery = query.trim().toLowerCase();
-  const filteredSessions = useMemo(() => {
-    if (!normalizedQuery) return props.sessions;
-    const terms = normalizedQuery.split(/\s+/).filter(Boolean);
-    return props.sessions.filter((session) => {
-      const haystack = [
-        session.title,
-        session.preview,
-        session.chatId,
-        session.channel,
-        session.key,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return terms.every((term) => haystack.includes(term));
-    });
-  }, [normalizedQuery, props.sessions]);
 
   return (
     <nav
@@ -74,27 +54,6 @@ export function Sidebar(props: SidebarProps) {
       </div>
 
       <div className="space-y-1.5 px-2 pb-2">
-        <label className="relative block">
-          <span className="sr-only">{t("sidebar.searchAria")}</span>
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/70"
-            aria-hidden
-          />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t("sidebar.searchPlaceholder")}
-            aria-label={t("sidebar.searchAria")}
-            className={cn(
-              "h-8 w-full rounded-full border border-transparent bg-sidebar-accent/45",
-              "pl-8 pr-3 text-[12.5px] text-sidebar-foreground outline-none",
-              "placeholder:text-muted-foreground/75",
-              "transition-colors hover:bg-sidebar-accent/65",
-              "focus:border-sidebar-border/80 focus:bg-sidebar-accent/70",
-              "focus:ring-1 focus:ring-sidebar-border/70",
-            )}
-          />
-        </label>
         <Button
           onClick={props.onNewChat}
           className="h-8 w-full justify-start gap-2 rounded-full px-3 text-[12.5px] font-medium text-sidebar-foreground/92 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
@@ -103,15 +62,22 @@ export function Sidebar(props: SidebarProps) {
           <SquarePen className="h-3.5 w-3.5" />
           {t("sidebar.newChat")}
         </Button>
+        <Button
+          type="button"
+          onClick={props.onOpenSearch}
+          className="h-8 w-full justify-start gap-2 rounded-full px-3 text-[12.5px] font-medium text-sidebar-foreground/85 hover:bg-sidebar-accent/75 hover:text-sidebar-foreground"
+          variant="ghost"
+        >
+          <Search className="h-3.5 w-3.5" aria-hidden />
+          {t("sidebar.searchAria")}
+        </Button>
       </div>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <ChatList
-          sessions={filteredSessions}
+          sessions={props.sessions}
           activeKey={props.activeKey}
           loading={props.loading}
-          emptyLabel={
-            normalizedQuery ? t("sidebar.noSearchResults") : t("chat.noSessions")
-          }
+          emptyLabel={t("chat.noSessions")}
           onSelect={props.onSelect}
           onRequestDelete={props.onRequestDelete}
         />
