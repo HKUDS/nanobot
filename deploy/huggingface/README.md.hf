@@ -1,0 +1,172 @@
+---
+title: Nanobot-Agent-Squad
+emoji: 🐈
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+hf_oauth: true
+---
+
+# 🐈 军团指挥中心 · Nanobot Squad Edition
+
+基于 **Nanobot v0.1.5.post3** 的多角色 Agent 小队生产级部署方案。在 Hugging Face Spaces 单容器单端口环境下，通过 **Gatekeeper 调度中枢** 实现多 Agent 并行运行、WebUI 小队监控、跨代理协同通信。
+
+> 本项目既是 HF Space 部署参考实现，也是向上游 [nanobot](https://github.com/HKUDS/nanobot) 提交 PR 的验证场。
+
+---
+
+## 🏗️ 架构
+
+```
+                         HF OAuth (7860)
+                              │
+                    ┌─────────┴─────────┐
+                    │    Gatekeeper      │
+                    │  (FastAPI proxy)   │
+                    │  · HTTP 分发       │
+                    │  · WS 代理         │
+                    │  · legion_monitor  │
+                    │  · squad_roster    │
+                    └──┬───────┬──────┬──┘
+                       │       │      │
+              ws_port  │       │      │  ws_port
+              18888    │  18891│ 18892│  ...
+              ┌────────┴──┐ ┌──┴──────┐
+              │   Neo     │ │ Trinity │  ...
+              │ :18790    │ │ :18791  │
+              │  (gw)     │ │  (gw)   │
+              └───────────┘ └─────────┘
+                  ▲  ▲
+     /webui/      │  │  squad_bridge
+     bootstrap    │  │  (WS relay)
+     ┌────────────┘  │
+     │ peers: {...}  │
+     ▼               ▼
+  Sidebar V6    Cross-agent
+  勋章阵列      消息路由
+```
+
+**核心原则**：
+- **单点配置**：`squad_config_sync.py` 是唯一的 `NANOBOT_PEER_*` 读取点，其他模块全部通过 `get_roster()` 获取
+- **零硬编码**：所有 agent 名、端口、ID 均从环境变量动态派生
+- **沙箱隔离**：agent 之间禁止互读环境变量，仅通过 gatekeeper/squad_bridge 通信
+
+---
+
+## 📦 核心组件 (deploy/huggingface/)
+
+| 文件 | 功能 | 是否 PR 候选 |
+|------|------|:---:|
+| `squad_config_sync.py` | 解析 `NANOBOT_PEER_*` → 生成 config.json + squad.json | 部署层 |
+| `gatekeeper.py` | 单端口 HTTP/WS 代理 + 健康检查 + roster 广播 | 部署层 |
+| `squad_bridge.py` | 跨 Agent WebSocket 中继（定向发送/阻塞回收） | 部署层 |
+| `entrypoint.sh` | 动态遍历 `NANOBOT_PEER_*` 启动所有 agent 实例 | 部署层 |
+| `Dockerfile` | 多阶段构建：源码补丁 → pip install → npm build → 综合部署 | 部署层 |
+| `patch_bootstrap_peers.py` | 向 `/webui/bootstrap` 注入 `peers` 字段，驱动前端动态发现 agent | ✅ PR 候选 |
+| `patch_app_logic_v4.py` | 浏览器端 WebSocket 拦截器，捕获 squad 消息并分发 | ✅ PR 候选 |
+| `patch_sidebar_ui_v6.py` | React 侧边栏 "勋章阵列" + 实时 agent 状态徽章 | ✅ PR 候选 |
+
+---
+
+## 🖥️ 前端增强：军团指挥中心终端
+
+侧边栏 V6 在 Nanobot WebUI 基础上新增：
+
+- **勋章阵列**：动态发现所有在线 agent，以 18×18px 彩色状态徽章展示
+- **实时心跳**：WebSocket `legion_status` 事件驱动，秒级刷新
+- **状态色**：
+  - 🟢 `standby` — 待命
+  - 🔵 `executing` — 执行中（蓝色脉冲动画）
+  - 🟠 `blocked` — 阻塞 >10s（琥珀色）
+  - 🔴 `disconnected` — 离线（红色呼吸动画）
+- **动态发现**：从前端 `/webui/bootstrap` 的 `peers` 字段→ WebSocket `roster` → 内置 fallback 三层链路，新增 agent 无需修改任何前端代码
+
+---
+
+## ⚙️ 环境变量
+
+### 编制定义（HF Space Secrets）
+```bash
+# 每个 agent 一条，值必须是 JSON，含 id / gateway_port / ws_port
+NANOBOT_PEER_NEO={"id":"<chat_id>","gateway_port":18790,"ws_port":18888}
+NANOBOT_PEER_TRINITY={"id":"<chat_id>","gateway_port":18791,"ws_port":18891}
+NANOBOT_PEER_SENTINEL={"id":"<chat_id>","gateway_port":18792,"ws_port":18892}
+NANOBOT_PEER_ASSISTANT={"id":"<chat_id>","gateway_port":18793,"ws_port":18893}
+# 新增 agent 只需加一条 → Factory Rebuild → 自动上线
+```
+
+### 可选配置
+```bash
+WEBUI_AGENT=neo          # gatekeeper 对外暴露哪个 agent 的 WebUI（默认 neo）
+NANOBOT_TOKEN=<token>    # 全局安全令牌（可选）
+COMMANDER_WHITELIST=...  # HF 用户名，逗号分隔，有写权限
+OAUTH_CLIENT_ID=...      # HF OAuth
+OAUTH_CLIENT_SECRET=...
+SESSION_SECRET=...
+```
+
+---
+
+## 🚀 部署流程
+
+1. 在 HF Space 添加上述环境变量
+2. Factory Rebuild → Docker 构建自动执行：
+
+```
+Step 1-3:   基础依赖 (apt, node, pip)
+Step 4:     Build Surgery — 内核协议适配 (sed 修补 host/ws auth)
+Step 5:     pip install nanobot + 依赖
+Step 5.5:   patch_bootstrap_peers → 注入 peers 到 /webui/bootstrap
+Step 6-8:   npm build WebUI + V4/V6 前端补丁注入
+Step 9-10:  部署 squad 脚本 + entrypoint.sh
+Step 11:    entrypoint.sh 启动
+              ├─ squad_config_sync → 生成每个 agent 的 config.json
+              ├─ 日志管道预热（动态）
+              ├─ 动态启动所有 agent 实例
+              └─ uv run python gatekeeper.py → 对外服务 7860
+```
+
+3. 访问 HF Space WebUI → 左侧 "军团指挥中心终端" 监控全部 agent
+
+---
+
+## 🔗 跨代理通信
+
+```
+Commander 发送命令
+  → gatekeeper (WS) 路由到目标 agent
+  → agent 处理
+  → squad_bridge 原生 WS 直连目标 → 发送结果
+  → gatekeeper 回收 → Commander
+```
+
+`NANOBOT_TOKEN` 为空时跳过鉴权（开发模式），生产环境必须设置。
+
+---
+
+## 📋 向上游提交 PR 规划
+
+| 层次 | 内容 | 提交位置 | 状态 |
+|------|------|----------|:---:|
+| **内核补丁** | bootstrap peers 注入 | nanobot/channels/websocket.py | 🔬 测试中 |
+| **内核补丁** | WebSocket auth 容器适配 | nanobot/channels/websocket.py | 🔬 测试中 |
+| **前端补丁** | V4 WS 拦截器 | nanobot/bridge/src/ | 🔬 测试中 |
+| **前端补丁** | V6 勋章阵列 Sidebar | nanobot/bridge/src/ | 🔬 测试中 |
+| **部署层** | gatekeeper / squad_config_sync / squad_bridge / entrypoint | 本仓库保留 | — |
+
+PR 策略：内核补丁（patch_bootstrap_peers / patch_app_logic_v4 / patch_sidebar_ui_v6）作为可选功能提交到官方 nanobot，通过 feature flag 控制启用。部署层组件保留在 `deploy/huggingface/` 作为参考实现。
+
+---
+
+## 📝 变更记录
+
+- **v4.0** (2026-05-11): 统一配置读取链路，squad_bridge + patch_bootstrap_peers 改走 squad_config_sync.get_roster()
+- **v3.x** (2026-05-10): bootstrap peers 注入 + 前端 V4/V6 补丁完善
+- **v2.x** (2026-05-09): 端口架构修正（gateway_port vs ws_port 分离）
+- **v1.x** (2026-04): 初始 Gatekeeper + Multi-Agent 部署方案
+
+---
+
+*注：本项目部分功能依赖于对官方内核的微调以适配容器环境。如需本地纯净体验，请参考 [官方主库](https://github.com/HKUDS/nanobot)。*
