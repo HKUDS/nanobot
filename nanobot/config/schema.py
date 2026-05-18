@@ -167,6 +167,9 @@ class AgentsConfig(Base):
 class ProviderConfig(Base):
     """LLM provider configuration."""
 
+    # Re-declare model_config to ensure alias_generator is applied
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
     api_key: str | None = None
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
@@ -181,7 +184,13 @@ class BedrockProviderConfig(ProviderConfig):
 
 
 class ProvidersConfig(Base):
-    """Configuration for LLM providers."""
+    """Configuration for LLM providers.
+
+    Supports custom providers via extra fields — any additional field
+    becomes an OpenAI-compatible custom provider.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
@@ -218,6 +227,15 @@ class ProvidersConfig(Base):
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig, exclude=True)  # Github Copilot (OAuth)
     qianfan: ProviderConfig = Field(default_factory=ProviderConfig)  # Qianfan (百度千帆)
     nvidia: ProviderConfig = Field(default_factory=ProviderConfig)  # NVIDIA NIM (nvapi- keys)
+
+    @model_validator(mode="after")
+    def convert_extra_providers(self):
+        """Convert extra fields (custom providers) to ProviderConfig objects."""
+        if self.model_extra:
+            for key, value in self.model_extra.items():
+                if isinstance(value, dict):
+                    self.model_extra[key] = ProviderConfig.model_validate(value)
+        return self
 
 
 class HeartbeatConfig(Base):
@@ -338,7 +356,11 @@ class Config(BaseSettings):
         preset: ModelPresetConfig | None = None,
     ) -> tuple["ProviderConfig | None", str | None]:
         """Match provider config and its registry name. Returns (config, spec_name)."""
-        from nanobot.providers.registry import PROVIDERS, find_by_name
+        from nanobot.providers.registry import (
+            PROVIDERS,
+            create_dynamic_spec,
+            find_by_name,
+        )
 
         resolved = preset or self.resolve_preset()
         forced = resolved.provider
@@ -347,6 +369,11 @@ class Config(BaseSettings):
             if spec:
                 p = getattr(self.providers, spec.name, None)
                 return (p, spec.name) if p else (None, None)
+            # Check for custom provider by name (try both original and normalized)
+            for name_to_try in (forced, forced.replace("-", "_")):
+                p = getattr(self.providers, name_to_try, None)
+                if p and isinstance(p, ProviderConfig):
+                    return p, name_to_try
             return None, None
 
         model_lower = (model or resolved.model).lower()
@@ -364,6 +391,14 @@ class Config(BaseSettings):
             if p and model_prefix and normalized_prefix == spec.name:
                 if spec.is_oauth or spec.is_local or spec.is_direct or p.api_key:
                     return p, spec.name
+
+        # Check for custom provider by prefix (e.g., "myprovider/gpt-4")
+        # Try both original prefix and normalized (snake_case) prefix
+        if model_prefix:
+            for prefix_to_try in (model_prefix, normalized_prefix):
+                p = getattr(self.providers, prefix_to_try, None)
+                if p and isinstance(p, ProviderConfig) and p.api_base:
+                    return p, prefix_to_try
 
         # Match by keyword (order follows PROVIDERS registry)
         for spec in PROVIDERS:
@@ -398,6 +433,15 @@ class Config(BaseSettings):
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
                 return p, spec.name
+
+        # Final fallback: check for any configured custom provider
+        for attr_name in dir(self.providers):
+            if attr_name.startswith("_"):
+                continue
+            p = getattr(self.providers, attr_name, None)
+            if isinstance(p, ProviderConfig) and p.api_base:
+                return p, attr_name
+
         return None, None
 
     def get_provider(
