@@ -10,10 +10,12 @@ from nanobot.agent.tools.base import Tool, tool_parameters
 from nanobot.agent.tools.schema import StringSchema, tool_parameters_schema
 
 
-@tool_parameters(tool_parameters_schema(
-    skill_name=StringSchema("Name of the skill to load"),
-    required=["skill_name"],
-))
+@tool_parameters(
+    tool_parameters_schema(
+        skill_name=StringSchema("Name of the skill to load"),
+        required=["skill_name"],
+    )
+)
 class SkillLoadTool(Tool):
     """Load the full content of a skill by name."""
 
@@ -44,7 +46,7 @@ class SkillLoadTool(Tool):
                 return "Error: skill_name is required"
 
             loader = SkillsLoader(self._workspace or Path("."))
-            content = loader.load_skill(skill_name)
+            content = loader.load_skills_for_context([skill_name])
             if content is None:
                 available = [s["name"] for s in loader.list_skills(filter_unavailable=False)]
                 return f"Error: skill '{skill_name}' not found. Available skills: {', '.join(available)}"
