@@ -91,6 +91,7 @@ def test_discover_finds_concrete_tools():
     class_names = {cls.__name__ for cls in discovered}
     assert "ExecTool" in class_names
     assert "MessageTool" in class_names
+    assert "SkillLoadTool" in class_names
     assert "SpawnTool" in class_names
 
 

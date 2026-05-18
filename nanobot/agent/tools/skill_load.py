@@ -55,12 +55,24 @@ class SkillLoadTool(Tool):
             if self._skills_loader is None:
                 return "Error: skills_loader is not initialized"
 
+            all_skills = self._skills_loader.list_skills(filter_unavailable=False)
+            all_names = {skill["name"] for skill in all_skills}
+            if skill_name not in all_names:
+                available = ", ".join(sorted(all_names)) or "(none)"
+                return f"Error: skill '{skill_name}' not found. Available skills: {available}"
+
+            available_names = {
+                skill["name"] for skill in self._skills_loader.list_skills(filter_unavailable=True)
+            }
+            if skill_name not in available_names:
+                meta = self._skills_loader._get_skill_meta(skill_name)
+                missing = self._skills_loader._get_missing_requirements(meta)
+                detail = f": {missing}" if missing else ""
+                return f"Error: skill '{skill_name}' is unavailable{detail}"
+
             content = self._skills_loader.load_skills_for_context([skill_name])
             if not content:
-                available = [
-                    s["name"] for s in self._skills_loader.list_skills(filter_unavailable=False)
-                ]
-                return f"Error: skill '{skill_name}' not found. Available skills: {', '.join(available)}"
+                return f"Error: skill '{skill_name}' has no loadable content"
             return content
         except Exception as e:
             return f"Error loading skill: {e}"
