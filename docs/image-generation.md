@@ -48,6 +48,26 @@ AIHubMix example:
 }
 ```
 
+MiniMax example:
+
+```json
+{
+  "providers": {
+    "minimax": {
+      "apiKey": "${MINIMAX_API_KEY}"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "minimax",
+      "model": "image-01",
+      "defaultAspectRatio": "1:1"
+    }
+  }
+}
+```
+
 Gemini example (Imagen 4):
 
 ```json
@@ -91,7 +111,7 @@ The WebUI hides provider storage details from the user. The agent sees the saved
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `tools.imageGeneration.enabled` | boolean | `false` | Register the `generate_image` tool |
-| `tools.imageGeneration.provider` | string | `"openrouter"` | Image provider name. Supported values: `openrouter`, `aihubmix`, `gemini` |
+| `tools.imageGeneration.provider` | string | `"openrouter"` | Image provider name. Supported values: `openrouter`, `aihubmix`, `minimax`, `gemini` |
 | `tools.imageGeneration.model` | string | `"openai/gpt-5.4-image-2"` | Provider model name |
 | `tools.imageGeneration.defaultAspectRatio` | string | `"1:1"` | Default ratio when the prompt/tool call does not specify one |
 | `tools.imageGeneration.defaultImageSize` | string | `"1K"` | Default size hint, for example `1K`, `2K`, `4K`, or `1024x1024` |
@@ -160,6 +180,28 @@ Configure:
 ```
 
 `quality: low` is optional. It can make free image models faster and less likely to time out, but it is not required for correctness.
+
+### MiniMax
+
+MiniMax `image-01` supports text-to-image and reference-image (subject reference) edits. Supported aspect ratios are `1:1`, `16:9`, `4:3`, `3:2`, `2:3`, `3:4`, `9:16`, and `21:9`.
+
+```json
+{
+  "providers": {
+    "minimax": {
+      "apiKey": "${MINIMAX_API_KEY}"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "minimax",
+      "model": "image-01",
+      "defaultAspectRatio": "1:1"
+    }
+  }
+}
+```
 
 ### Gemini
 
@@ -245,7 +287,7 @@ Use the reference image. Keep the same robot and composition, change the palette
 |---------|-------|
 | `generate_image` is not available | Set `tools.imageGeneration.enabled` to `true` and restart the gateway |
 | Missing API key error | Configure `providers.<provider>.apiKey`; if using `${VAR_NAME}`, confirm the environment variable is visible to the gateway process |
-| `unsupported image generation provider` | Use `openrouter`, `aihubmix`, or `gemini` |
+| `unsupported image generation provider` | Use `openrouter`, `aihubmix`, `minimax`, or `gemini` |
 | AIHubMix says `Incorrect model ID` | Use `model: "gpt-image-2-free"`; nanobot expands it to the required `openai/gpt-image-2-free` model path internally |
 | Generation times out | Try a smaller/default image size, set AIHubMix `extraBody.quality` to `"low"`, or retry later |
 | Reference image rejected | Reference image paths must be inside the workspace or nanobot media directory and must be valid image files |
