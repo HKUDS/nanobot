@@ -152,6 +152,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `mimo` | LLM (MiMo) | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
 | `longcat` | LLM (LongCat) | [longcat.chat](https://longcat.chat/platform/docs/zh/) |
+| `qiniu` | LLM (Qiniu) | [七牛云](https://www.qiniu.com) |
 | `ollama` | LLM (local, Ollama) | — |
 | `lm_studio` | LLM (local, LM Studio) | — |
 | `atomic_chat` | LLM (local, [Atomic Chat](https://atomic.chat/)) | — |
@@ -441,6 +442,33 @@ usually only need to set `apiKey`.
 
 Official model names include `LongCat-Flash-Chat`, `LongCat-Flash-Thinking`,
 `LongCat-Flash-Thinking-2601`, and `LongCat-Flash-Lite`.
+
+</details>
+
+<details>
+<summary><b>Qiniu (OpenAI-compatible)</b></summary>
+
+The Qiniu gateway exposes an OpenAI-compatible **chat completions** API. The default
+`apiBase` is `https://api.qnaigc.com/v1`; set `apiKey` from the Qiniu console (or
+`QINIU_API_KEY` via env substitution).
+
+```json
+{
+  "providers": {
+    "qiniu": {
+      "apiKey": "${QINIU_API_KEY}"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "qiniu",
+      "model": "your-model-id"
+    }
+  }
+}
+```
+
+Use the model identifiers shown in the Qiniu console for your account.
 
 </details>
 

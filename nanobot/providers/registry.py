@@ -390,6 +390,15 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         default_api_base="https://api.longcat.chat/openai/v1",
     ),
+    # Qiniu: OpenAI-compatible chat completions (api.qnaigc.com)
+    ProviderSpec(
+        name="qiniu",
+        keywords=("qiniu",),
+        env_key="QINIU_API_KEY",
+        display_name="Qiniu",
+        backend="openai_compat",
+        default_api_base="https://api.qnaigc.com/v1",
+    ),
     # === Local deployment (matched by config key, NOT by api_base) =========
     # vLLM / any OpenAI-compatible local server
     ProviderSpec(

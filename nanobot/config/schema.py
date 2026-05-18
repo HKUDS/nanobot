@@ -207,6 +207,7 @@ class ProvidersConfig(Base):
     stepfun: ProviderConfig = Field(default_factory=ProviderConfig)  # Step Fun (阶跃星辰)
     xiaomi_mimo: ProviderConfig = Field(default_factory=ProviderConfig)  # Xiaomi MIMO (小米)
     longcat: ProviderConfig = Field(default_factory=ProviderConfig)  # LongCat
+    qiniu: ProviderConfig = Field(default_factory=ProviderConfig)  # Qiniu
     aihubmix: ProviderConfig = Field(default_factory=ProviderConfig)  # AiHubMix API gateway
     siliconflow: ProviderConfig = Field(default_factory=ProviderConfig)  # SiliconFlow (硅基流动)
     volcengine: ProviderConfig = Field(default_factory=ProviderConfig)  # VolcEngine (火山引擎)
