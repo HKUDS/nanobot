@@ -573,6 +573,9 @@ describe("App layout", () => {
 
     fireEvent.click(searchButton);
     const dialog = await screen.findByRole("dialog", { name: "Search" });
+    expect(dialog).toHaveClass("origin-center");
+    expect(dialog.className).not.toContain("translate-x");
+    expect(dialog.className).not.toContain("translate-y");
     expect(within(dialog).getByText("Q2 roadmap")).toBeInTheDocument();
     expect(within(dialog).getByText("Travel ideas")).toBeInTheDocument();
 
