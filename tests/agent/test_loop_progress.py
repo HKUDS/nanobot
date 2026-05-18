@@ -133,6 +133,7 @@ class TestToolEventProgress:
             "call_id": "call-write",
             "tool": "write_file",
             "path": "foo.txt",
+            "absolute_path": (tmp_path / "foo.txt").resolve().as_posix(),
             "phase": "start",
             "added": 2,
             "deleted": 1,

@@ -16,7 +16,15 @@ async def test_codex_prompt_cache_key_uses_stable_conversation_prefix(monkeypatc
         lambda: SimpleNamespace(account_id="acct", access="token"),
     )
 
-    async def fake_request(url, headers, body, verify, on_content_delta=None):
+    async def fake_request(
+        url,
+        headers,
+        body,
+        verify,
+        on_content_delta=None,
+        on_tool_call_delta=None,
+    ):
+        _ = on_tool_call_delta
         bodies.append(body)
         return "ok", [], "stop"
 
