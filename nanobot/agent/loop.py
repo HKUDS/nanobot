@@ -440,6 +440,7 @@ class AgentLoop:
             provider_snapshot_loader=self._provider_snapshot_loader,
             image_generation_provider_configs=self._image_generation_provider_configs,
             timezone=self.context.timezone or "UTC",
+            skills_loader=self.context.skills,
         )
         loader = ToolLoader()
         registered = loader.load(ctx, self.tools)

@@ -21,12 +21,19 @@ class SkillLoadTool(Tool):
 
     _scopes = {"core", "subagent"}
 
-    def __init__(self, workspace: Path | None = None) -> None:
+    def __init__(
+        self, workspace: Path | None = None, skills_loader: SkillsLoader | None = None
+    ) -> None:
         self._workspace = workspace
+        self._skills_loader = skills_loader
+        if self._skills_loader is None:
+            self._skills_loader = SkillsLoader(workspace or Path("."))
 
     @classmethod
     def create(cls, ctx: Any) -> Tool:
-        return cls(workspace=Path(ctx.workspace) if ctx.workspace else None)
+        workspace = Path(ctx.workspace) if ctx.workspace else None
+        loader = ctx.skills_loader if ctx.skills_loader else SkillsLoader(workspace or Path("."))
+        return cls(workspace=workspace, skills_loader=loader)
 
     @property
     def name(self) -> str:
@@ -45,10 +52,14 @@ class SkillLoadTool(Tool):
             if not skill_name:
                 return "Error: skill_name is required"
 
-            loader = SkillsLoader(self._workspace or Path("."))
-            content = loader.load_skills_for_context([skill_name])
-            if content is None:
-                available = [s["name"] for s in loader.list_skills(filter_unavailable=False)]
+            if self._skills_loader is None:
+                return "Error: skills_loader is not initialized"
+
+            content = self._skills_loader.load_skills_for_context([skill_name])
+            if not content:
+                available = [
+                    s["name"] for s in self._skills_loader.list_skills(filter_unavailable=False)
+                ]
                 return f"Error: skill '{skill_name}' not found. Available skills: {', '.join(available)}"
             return content
         except Exception as e:

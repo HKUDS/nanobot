@@ -32,3 +32,4 @@ class ToolContext:
     provider_snapshot_loader: Callable[[], Any] | None = None
     image_generation_provider_configs: dict[str, Any] | None = None
     timezone: str = "UTC"
+    skills_loader: Any = field(default=None)
