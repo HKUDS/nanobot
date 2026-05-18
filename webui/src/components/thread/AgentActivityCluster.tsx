@@ -30,16 +30,19 @@ interface ActivityCounts {
   hasEditingFiles: boolean;
   hasFailedFiles: boolean;
   primaryFilePath?: string;
+  primaryFileTooltipPath?: string;
 }
 
 interface FileEditSummary {
   key: string;
   path: string;
+  absolute_path?: string;
   added: number;
   deleted: number;
   approximate: boolean;
   binary: boolean;
   status: UIFileEdit["status"];
+  pending: boolean;
   error?: string;
 }
 
@@ -61,8 +64,10 @@ function countActivity(messages: UIMessage[], fileEdits: FileEditSummary[]): Act
   let hasEditingFiles = false;
   let failedFileCount = 0;
   let primaryFilePath: string | undefined;
+  let primaryFileTooltipPath: string | undefined;
   for (const edit of fileEdits) {
     primaryFilePath = edit.path;
+    primaryFileTooltipPath = edit.absolute_path || edit.path;
     if (edit.status === "editing") {
       hasEditingFiles = true;
     }
@@ -84,6 +89,7 @@ function countActivity(messages: UIMessage[], fileEdits: FileEditSummary[]): Act
     hasEditingFiles,
     hasFailedFiles: fileEdits.length > 0 && failedFileCount === fileEdits.length,
     primaryFilePath,
+    primaryFileTooltipPath,
   };
 }
 
@@ -117,7 +123,9 @@ export function AgentActivityCluster({
     hasEditingFiles,
     hasFailedFiles,
     primaryFilePath,
+    primaryFileTooltipPath,
   } = countActivity(messages, fileEdits);
+  const hasPendingFileEdit = fileEdits.some((edit) => edit.pending);
 
   const [userToggledOuter, setUserToggledOuter] = useState(false);
   const [outerOpenLocal, setOuterOpenLocal] = useState(false);
@@ -130,11 +138,15 @@ export function AgentActivityCluster({
 
   const hasLiveEditingFiles = isTurnStreaming && hasEditingFiles;
   const headerBusy = fileCount > 0 ? hasEditingFiles : isTurnStreaming;
+  const singleFilePath = fileCount === 1 ? primaryFilePath : undefined;
+  const singleFileTooltipPath = fileCount === 1 ? primaryFileTooltipPath : undefined;
 
   const fileActivitySummary = fileCount > 0
-    ? fileCount === 1 && primaryFilePath
+    ? hasPendingFileEdit && !singleFilePath
+      ? t("message.fileActivityPreparing", { defaultValue: "Preparing edit…" })
+      : singleFilePath
       ? t(fileActivitySummaryKey(hasLiveEditingFiles, hasFailedFiles), {
-          file: shortFileName(primaryFilePath),
+          file: shortFileName(singleFilePath),
           defaultValue: `${fileActivityVerb(hasLiveEditingFiles, hasFailedFiles)} {{file}}`,
         })
       : t(fileActivityManySummaryKey(hasLiveEditingFiles, hasFailedFiles), {
@@ -241,15 +253,35 @@ export function AgentActivityCluster({
           "text-xs text-muted-foreground transition-colors hover:bg-muted/45",
         )}
         aria-expanded={outerExpanded}
+        aria-label={summary}
       >
         <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden />
         <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-left">
-          <StreamingLabelSheen
-            active={headerBusy}
-            className="min-w-0"
-          >
-            {summary}
-          </StreamingLabelSheen>
+          {singleFilePath ? (
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <StreamingLabelSheen
+                active={headerBusy}
+                className="shrink-0"
+              >
+                {fileActivityVerb(hasLiveEditingFiles, hasFailedFiles)}
+              </StreamingLabelSheen>
+              <FileReferenceChip
+                path={singleFilePath}
+                tooltipPath={singleFileTooltipPath}
+                active={hasLiveEditingFiles}
+                className="-my-0.5 min-w-0"
+                textClassName="text-xs"
+                testId="activity-header-file-reference"
+              />
+            </span>
+          ) : (
+            <StreamingLabelSheen
+              active={headerBusy}
+              className="min-w-0"
+            >
+              {summary}
+            </StreamingLabelSheen>
+          )}
           {fileCount > 0 && (
             <span className="inline-flex min-w-0 items-center gap-1 text-muted-foreground/85">
               <DiffPair added={added} deleted={deleted} />
@@ -332,7 +364,8 @@ function fileActivityManySummaryKey(editing: boolean, failed: boolean): string {
 }
 
 function fileEditCallKey(edit: UIFileEdit): string {
-  return `${edit.call_id}|${edit.tool}|${edit.path}`;
+  if (edit.call_id) return `${edit.call_id}|${edit.tool}`;
+  return `${edit.tool}|${edit.path}`;
 }
 
 function collectFileEdits(messages: UIMessage[]): UIFileEdit[] {
@@ -360,10 +393,12 @@ function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSumma
   interface MutableSummary {
     key: string;
     path: string;
+    absolute_path?: string;
     added: number;
     deleted: number;
     approximate: boolean;
     binary: boolean;
+    pending: boolean;
     hasSuccessfulChange: boolean;
     hasActiveEditing: boolean;
     hasFailed: boolean;
@@ -373,16 +408,18 @@ function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSumma
   const order: string[] = [];
   const byPath = new Map<string, MutableSummary>();
   for (const edit of latestFileEditEvents(edits)) {
-    const key = edit.path;
+    const key = edit.path || edit.call_id || edit.tool;
     let summary = byPath.get(key);
     if (!summary) {
       summary = {
         key,
-        path: edit.path,
+        path: edit.path || "",
+        absolute_path: edit.absolute_path,
         added: 0,
         deleted: 0,
         approximate: false,
         binary: false,
+        pending: false,
         hasSuccessfulChange: false,
         hasActiveEditing: false,
         hasFailed: false,
@@ -391,6 +428,13 @@ function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSumma
       order.push(key);
     }
 
+    if (edit.path && !summary.path) {
+      summary.path = edit.path;
+    }
+    if (edit.absolute_path) {
+      summary.absolute_path = edit.absolute_path;
+    }
+    summary.pending = summary.pending || !!edit.pending || !edit.path;
     if (active && edit.status === "editing") {
       summary.hasActiveEditing = true;
       summary.binary = summary.binary || !!edit.binary;
@@ -429,11 +473,13 @@ function summarizeFileEdits(edits: UIFileEdit[], active: boolean): FileEditSumma
     return {
       key: summary.key,
       path: summary.path,
+      absolute_path: summary.absolute_path,
       added: summary.added,
       deleted: summary.deleted,
       approximate: summary.approximate,
       binary: summary.binary,
       status,
+      pending: summary.pending && !summary.path,
       error: summary.error,
     };
   });
@@ -458,14 +504,24 @@ function FileEditRow({ edit }: { edit: FileEditSummary }) {
   return (
     <li className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 py-1.5 text-xs">
       <div className="flex min-w-0 items-center gap-2">
-        <FileReferenceChip
-          path={edit.path}
-          display="path"
-          active={editing}
-          className="min-w-0"
-          textClassName="text-[12px]"
-          testId="activity-file-reference"
-        />
+        {edit.pending && !edit.path ? (
+          <StreamingLabelSheen
+            active={editing}
+            className="min-w-0 text-[12px] font-medium text-muted-foreground"
+          >
+            {t("message.fileEditPreparing", { defaultValue: "Preparing file edit…" })}
+          </StreamingLabelSheen>
+        ) : (
+          <FileReferenceChip
+            path={edit.path}
+            tooltipPath={edit.absolute_path}
+            display="path"
+            active={editing}
+            className="min-w-0"
+            textClassName="text-[12px]"
+            testId="activity-file-reference"
+          />
+        )}
         {failed ? (
           <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] font-medium text-destructive/75">
             <AlertCircle className="h-3 w-3" aria-hidden />
@@ -487,13 +543,30 @@ function FileEditRow({ edit }: { edit: FileEditSummary }) {
 
 function DiffPair({ added, deleted }: { added: number; deleted: number }) {
   return (
-    <span className="inline-flex shrink-0 items-center gap-1.5 tabular-nums">
-      <span className="text-emerald-600/75 dark:text-emerald-300/75">
-        +<AnimatedNumber value={added} />
+    <span className="inline-flex shrink-0 translate-y-[0.055em] items-center gap-1.5 tabular-nums">
+      <DiffValue
+        sign="+"
+        value={added}
+        className="text-emerald-600/75 dark:text-emerald-300/75"
+      />
+      <DiffValue
+        sign="-"
+        value={deleted}
+        className="text-rose-600/70 dark:text-rose-300/75"
+      />
+    </span>
+  );
+}
+
+function DiffValue({ sign, value, className }: { sign: string; value: number; className: string }) {
+  const safeValue = Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+  return (
+    <span className={cn("inline-flex", className)} aria-label={`${sign}${safeValue}`}>
+      <span className="inline-flex" aria-hidden>
+        {sign}
+        <AnimatedNumber value={safeValue} />
       </span>
-      <span className="text-rose-600/70 dark:text-rose-300/75">
-        -<AnimatedNumber value={deleted} />
-      </span>
+      <span className="sr-only">{sign}{safeValue}</span>
     </span>
   );
 }
@@ -537,5 +610,37 @@ function AnimatedNumber({ value }: { value: number }) {
     return () => window.cancelAnimationFrame(frame);
   }, [safeValue, setAnimatedDisplay]);
 
-  return <>{display}</>;
+  return <RollingNumber value={display} />;
+}
+
+function RollingNumber({ value }: { value: number }) {
+  const digits = String(value).split("");
+  return (
+    <span className="inline-flex h-[1em] overflow-hidden align-[-0.13em]" aria-hidden>
+      {digits.map((digit, index) => (
+        <RollingDigit
+          key={`${digits.length}-${index}`}
+          digit={Number(digit)}
+        />
+      ))}
+    </span>
+  );
+}
+
+function RollingDigit({ digit }: { digit: number }) {
+  const safeDigit = Number.isFinite(digit) ? Math.min(9, Math.max(0, digit)) : 0;
+  return (
+    <span className="relative inline-block h-[1em] w-[0.62em] overflow-hidden">
+      <span
+        className="flex flex-col transition-transform duration-200 ease-out will-change-transform"
+        style={{ transform: `translateY(-${safeDigit}em)` }}
+      >
+        {Array.from({ length: 10 }, (_, n) => (
+          <span key={n} className="block h-[1em] leading-none">
+            {n}
+          </span>
+        ))}
+      </span>
+    </span>
+  );
 }

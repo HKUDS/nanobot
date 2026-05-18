@@ -195,7 +195,8 @@ describe("MessageBubble", () => {
       const references = await screen.findAllByTestId("inline-file-path");
       expect(references).toHaveLength(2);
       expect(references[0].parentElement).not.toHaveClass("translate-y-[0.08em]");
-      expect(references[0].parentElement).toHaveClass("align-[0.14em]");
+      expect(references[0].parentElement).toHaveClass("align-baseline");
+      expect(references[0].parentElement).toHaveClass("leading-[inherit]");
       expect(references[0]).toHaveTextContent("MarkdownTextRenderer.tsx");
       expect(references[0]).not.toHaveTextContent("webui/src/components");
       expect(screen.getByText("index.html")).toBeInTheDocument();

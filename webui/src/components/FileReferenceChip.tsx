@@ -19,6 +19,7 @@ type FileReferenceKind =
 
 interface FileReferenceChipProps {
   path: string;
+  tooltipPath?: string;
   display?: "name" | "path";
   active?: boolean;
   className?: string;
@@ -28,27 +29,29 @@ interface FileReferenceChipProps {
 
 export function FileReferenceChip({
   path,
+  tooltipPath,
   display = "name",
   active = false,
   className,
   textClassName,
   testId = "inline-file-path",
 }: FileReferenceChipProps) {
-  const { name } = splitFilePath(path);
+  const { directory, name } = splitFilePath(path);
   const kind = fileKindForPath(path);
   const displayText = display === "path" ? path.replace(/\\/g, "/") : name;
+  const fullPath = tooltipPath || path;
   return (
     <TooltipProvider delayDuration={500} skipDelayDuration={100}>
       <Tooltip>
         <TooltipTrigger asChild>
           <span
-            className={cn("not-prose inline-flex max-w-full align-[0.14em]", className)}
+            className={cn("not-prose inline-flex max-w-full align-baseline leading-[inherit]", className)}
           >
             <span
               data-testid={testId}
-              aria-label={path}
+              aria-label={fullPath}
               className={cn(
-                "inline-flex max-w-full items-center gap-1 font-medium leading-[1.1]",
+                "inline-flex max-w-full items-center gap-1 font-medium leading-[inherit]",
                 "text-sky-600 transition-colors hover:text-sky-700",
                 "dark:text-sky-300 dark:hover:text-sky-200",
               )}
@@ -57,12 +60,19 @@ export function FileReferenceChip({
               <span
                 data-sheen-text={active ? displayText : undefined}
                 className={cn(
-                  "min-w-0 truncate",
-                  active && "streaming-text-sheen",
+                  "min-w-0 max-w-full truncate",
+                  active && "streaming-text-sheen file-reference-sheen",
                   textClassName,
                 )}
               >
-                {displayText}
+                {display === "path" && directory ? (
+                  <>
+                    <span className="text-muted-foreground/65">{directory}</span>
+                    <span className="font-semibold text-sky-700 dark:text-sky-200">{name}</span>
+                  </>
+                ) : (
+                  displayText
+                )}
               </span>
             </span>
           </span>
@@ -79,7 +89,7 @@ export function FileReferenceChip({
             "shadow-lg backdrop-blur",
           )}
         >
-          {path}
+          {fullPath}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
