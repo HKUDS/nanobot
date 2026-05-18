@@ -314,8 +314,8 @@ def test_system_prompt_keeps_message_tool_out_of_current_chat_replies(tmp_path) 
     prompt = builder.build_system_prompt(channel="slack")
 
     assert "Do not use the 'message' tool for normal replies in the current chat" in prompt
-    assert "the runtime attaches those artifacts to the final assistant reply automatically" in prompt
-    assert "do not call 'message' just to announce or resend them" in prompt
+    assert "When 'generate_image' creates images" in prompt
+    assert "call 'message' with the artifact paths in the 'media' parameter" in prompt
     assert "Wait for the tool results, then answer once" in prompt
 
 

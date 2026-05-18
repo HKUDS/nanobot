@@ -83,5 +83,5 @@ def test_generated_image_paths_from_tool_results() -> None:
             {"role": "tool", "name": "other", "content": result},
         ]
     ) == ["/tmp/one.png", "/tmp/two.png"]
-    assert "runtime attaches generated images automatically" in payload["next_step"]
-    assert "Do not call message" in payload["next_step"]
+    assert "Call the message tool" in payload["next_step"]
+    assert "media parameter" in payload["next_step"]

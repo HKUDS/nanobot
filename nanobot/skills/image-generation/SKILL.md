@@ -15,7 +15,7 @@ If the `generate_image` tool is not available in the current tool list, tell the
 - Image editing: pass the saved artifact path or user image path in `reference_images`.
 - Iterative edits in the same conversation: prefer the most recent generated image artifact if the user says things like "make it brighter", "change the background", or "try another version".
 - Ambiguous edits: ask a short clarifying question if multiple recent images could be the target.
-- In the current chat, do not call `message` just to announce or resend generated images. The runtime attaches images from `generate_image` to the final assistant reply automatically.
+- After generating images, call the `message` tool with the artifact paths in the `media` parameter to deliver them to the user.
 
 ## Prompt Rules
 

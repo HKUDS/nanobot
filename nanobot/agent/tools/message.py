@@ -140,8 +140,8 @@ class MessageTool(Tool, ContextAware):
             "Do not use this for the normal reply in the current chat: answer naturally instead. "
             "If channel/chat_id would target the current runtime conversation, do not call this tool "
             "unless the user explicitly asked you to proactively send an existing file attachment. "
-            "When generate_image creates images in the current chat, the final assistant reply "
-            "automatically attaches them; do not call message just to announce or resend them. "
+            "When generate_image creates images in the current chat, use the message tool "
+            "with the artifact paths in the media parameter to deliver the images to the user. "
             "For proactive attachment delivery, use the 'media' parameter with file paths. "
             "Do NOT use read_file to send files — that only reads content for your own analysis."
         )
