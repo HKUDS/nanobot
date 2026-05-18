@@ -37,8 +37,8 @@
       "label": "語言",
       "ariaLabel": "切換語言"
     },
-    "searchAria": "搜尋對話",
-    "searchPlaceholder": "搜尋對話",
+    "searchAria": "搜尋",
+    "searchPlaceholder": "搜尋",
     "searchResults": "搜尋結果",
     "noSearchResults": "沒有符合的對話。"
   },

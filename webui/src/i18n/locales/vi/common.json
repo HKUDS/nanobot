@@ -37,8 +37,8 @@
       "label": "Ngôn ngữ",
       "ariaLabel": "Đổi ngôn ngữ"
     },
-    "searchAria": "Tìm cuộc trò chuyện",
-    "searchPlaceholder": "Tìm cuộc trò chuyện",
+    "searchAria": "Tìm kiếm",
+    "searchPlaceholder": "Tìm kiếm",
     "searchResults": "Kết quả",
     "noSearchResults": "Không có cuộc trò chuyện phù hợp."
   },

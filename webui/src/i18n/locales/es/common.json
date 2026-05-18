@@ -37,8 +37,8 @@
       "label": "Idioma",
       "ariaLabel": "Cambiar idioma"
     },
-    "searchAria": "Buscar chats",
-    "searchPlaceholder": "Buscar chats",
+    "searchAria": "Buscar",
+    "searchPlaceholder": "Buscar",
     "searchResults": "Resultados",
     "noSearchResults": "No hay chats coincidentes."
   },

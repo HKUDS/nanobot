@@ -37,8 +37,8 @@
       "label": "言語",
       "ariaLabel": "言語を変更"
     },
-    "searchAria": "チャットを検索",
-    "searchPlaceholder": "チャットを検索",
+    "searchAria": "検索",
+    "searchPlaceholder": "検索",
     "searchResults": "検索結果",
     "noSearchResults": "一致するチャットはありません。"
   },

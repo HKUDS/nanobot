@@ -37,8 +37,8 @@
       "label": "Langue",
       "ariaLabel": "Changer de langue"
     },
-    "searchAria": "Rechercher des chats",
-    "searchPlaceholder": "Rechercher des chats",
+    "searchAria": "Rechercher",
+    "searchPlaceholder": "Rechercher",
     "searchResults": "Résultats",
     "noSearchResults": "Aucun chat correspondant."
   },

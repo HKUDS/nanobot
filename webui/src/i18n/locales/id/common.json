@@ -37,8 +37,8 @@
       "label": "Bahasa",
       "ariaLabel": "Ganti bahasa"
     },
-    "searchAria": "Cari chat",
-    "searchPlaceholder": "Cari chat",
+    "searchAria": "Cari",
+    "searchPlaceholder": "Cari",
     "searchResults": "Hasil",
     "noSearchResults": "Tidak ada chat yang cocok."
   },

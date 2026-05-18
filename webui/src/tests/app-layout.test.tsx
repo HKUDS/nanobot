@@ -565,18 +565,18 @@ describe("App layout", () => {
     expect(within(sidebar).getByText("Q2 roadmap")).toBeInTheDocument();
     expect(within(sidebar).getByText("Travel ideas")).toBeInTheDocument();
     const newChatButton = within(sidebar).getByRole("button", { name: "New chat" });
-    const searchButton = within(sidebar).getByRole("button", { name: "Search chats" });
+    const searchButton = within(sidebar).getByRole("button", { name: "Search" });
     expect(
       newChatButton.compareDocumentPosition(searchButton) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
 
     fireEvent.click(searchButton);
-    const dialog = await screen.findByRole("dialog", { name: "Search chats" });
+    const dialog = await screen.findByRole("dialog", { name: "Search" });
     expect(within(dialog).getByText("Q2 roadmap")).toBeInTheDocument();
     expect(within(dialog).getByText("Travel ideas")).toBeInTheDocument();
 
-    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search chats" }), {
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search" }), {
       target: { value: "planning" },
     });
 
@@ -584,7 +584,7 @@ describe("App layout", () => {
     expect(within(dialog).queryByText("Travel ideas")).not.toBeInTheDocument();
     expect(within(sidebar).getByText("Travel ideas")).toBeInTheDocument();
 
-    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search chats" }), {
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search" }), {
       target: { value: "road q2" },
     });
 
@@ -594,7 +594,7 @@ describe("App layout", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: /Q2 roadmap/ }));
 
     await waitFor(() =>
-      expect(screen.queryByRole("dialog", { name: "Search chats" })).not.toBeInTheDocument(),
+      expect(screen.queryByRole("dialog", { name: "Search" })).not.toBeInTheDocument(),
     );
   });
 

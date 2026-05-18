@@ -37,8 +37,8 @@
       "label": "언어",
       "ariaLabel": "언어 변경"
     },
-    "searchAria": "채팅 검색",
-    "searchPlaceholder": "채팅 검색",
+    "searchAria": "검색",
+    "searchPlaceholder": "검색",
     "searchResults": "결과",
     "noSearchResults": "일치하는 채팅이 없습니다."
   },
