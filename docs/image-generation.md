@@ -48,6 +48,28 @@ AIHubMix example:
 }
 ```
 
+Gemini example (Imagen 4):
+
+```json
+{
+  "providers": {
+    "gemini": {
+      "apiKey": "${GEMINI_API_KEY}"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "gemini",
+      "model": "imagen-4.0-generate-001",
+      "defaultAspectRatio": "1:1"
+    }
+  }
+}
+```
+
+For Gemini Flash (which supports reference-image edits) see the [Gemini](#gemini) section below.
+
 > [!TIP]
 > Prefer environment variables for API keys. nanobot resolves `${VAR_NAME}` values from the environment at startup.
 
@@ -69,7 +91,7 @@ The WebUI hides provider storage details from the user. The agent sees the saved
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `tools.imageGeneration.enabled` | boolean | `false` | Register the `generate_image` tool |
-| `tools.imageGeneration.provider` | string | `"openrouter"` | Image provider name. Currently `openrouter` and `aihubmix` are supported |
+| `tools.imageGeneration.provider` | string | `"openrouter"` | Image provider name. Supported values: `openrouter`, `aihubmix`, `gemini` |
 | `tools.imageGeneration.model` | string | `"openai/gpt-5.4-image-2"` | Provider model name |
 | `tools.imageGeneration.defaultAspectRatio` | string | `"1:1"` | Default ratio when the prompt/tool call does not specify one |
 | `tools.imageGeneration.defaultImageSize` | string | `"1K"` | Default size hint, for example `1K`, `2K`, `4K`, or `1024x1024` |
@@ -139,6 +161,36 @@ Configure:
 
 `quality: low` is optional. It can make free image models faster and less likely to time out, but it is not required for correctness.
 
+### Gemini
+
+nanobot supports two Gemini image generation model families via Google's Generative Language API:
+
+| Model | Endpoint | Reference images |
+|-------|----------|-----------------|
+| `imagen-4.0-generate-001` | `:predict` | Not supported by this integration |
+| `gemini-2.5-flash-image` | `:generateContent` | Supported |
+
+For reference-image edits, use a Gemini Flash image model:
+
+```json
+{
+  "providers": {
+    "gemini": {
+      "apiKey": "${GEMINI_API_KEY}"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "gemini",
+      "model": "gemini-2.5-flash-image"
+    }
+  }
+}
+```
+
+Imagen 4 supports the aspect ratios `1:1`, `9:16`, `16:9`, `3:4`, and `4:3`. Unsupported ratios are ignored and the model uses its default. The `defaultImageSize` setting has no effect on Gemini models; sizing is controlled by `defaultAspectRatio` only. Reference images passed with an Imagen model are ignored (with a warning logged).
+
 ## Artifacts
 
 Generated images are stored under the active nanobot instance's media directory:
@@ -193,7 +245,7 @@ Use the reference image. Keep the same robot and composition, change the palette
 |---------|-------|
 | `generate_image` is not available | Set `tools.imageGeneration.enabled` to `true` and restart the gateway |
 | Missing API key error | Configure `providers.<provider>.apiKey`; if using `${VAR_NAME}`, confirm the environment variable is visible to the gateway process |
-| `unsupported image generation provider` | Use `openrouter` or `aihubmix` |
+| `unsupported image generation provider` | Use `openrouter`, `aihubmix`, or `gemini` |
 | AIHubMix says `Incorrect model ID` | Use `model: "gpt-image-2-free"`; nanobot expands it to the required `openai/gpt-image-2-free` model path internally |
 | Generation times out | Try a smaller/default image size, set AIHubMix `extraBody.quality` to `"low"`, or retry later |
 | Reference image rejected | Reference image paths must be inside the workspace or nanobot media directory and must be valid image files |

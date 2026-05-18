@@ -643,6 +643,7 @@ def serve(
                 "openrouter": runtime_config.providers.openrouter,
                 "aihubmix": runtime_config.providers.aihubmix,
                 "minimax": runtime_config.providers.minimax,
+                "gemini": runtime_config.providers.gemini,
             },
         )
     except ValueError as exc:
@@ -757,6 +758,7 @@ def _run_gateway(
             "openrouter": config.providers.openrouter,
             "aihubmix": config.providers.aihubmix,
             "minimax": config.providers.minimax,
+            "gemini": config.providers.gemini,
         },
         provider_snapshot_loader=load_provider_snapshot,
         runtime_model_publisher=lambda model, preset: publish_runtime_model_update(
