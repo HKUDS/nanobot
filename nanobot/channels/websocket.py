@@ -90,6 +90,7 @@ class WebSocketConfig(Base):
     token_issue_secret: str = ""
     token_ttl_s: int = Field(default=300, ge=30, le=86_400)
     websocket_requires_token: bool = True
+    bootstrap_localhost_only: bool = True
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
     streaming: bool = True
     # Default 36 MB, upper 40 MB: supports up to 4 images at ~6 MB each after
@@ -745,7 +746,7 @@ class WebSocketChannel(BaseChannel):
         if secret:
             if not _issue_route_secret_matches(request.headers, secret):
                 return _http_error(401, "Unauthorized")
-        elif not _is_localhost(connection):
+        elif self.config.bootstrap_localhost_only and not _is_localhost(connection):
             # No secret configured: only allow localhost (local dev mode).
             return _http_error(403, "bootstrap is localhost-only")
         # Cap outstanding tokens to avoid runaway growth from a misbehaving client.
