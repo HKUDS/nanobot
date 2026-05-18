@@ -18,6 +18,7 @@ from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.providers.image_generation import (
     AIHubMixImageGenerationClient,
+    GeminiImageGenerationClient,
     ImageGenerationError,
     MiniMaxImageGenerationClient,
     OpenRouterImageGenerationClient,
@@ -120,7 +121,7 @@ class ImageGenerationTool(Tool):
 
     def _provider_client(
         self,
-    ) -> OpenRouterImageGenerationClient | AIHubMixImageGenerationClient | MiniMaxImageGenerationClient | None:
+    ) -> OpenRouterImageGenerationClient | AIHubMixImageGenerationClient | MiniMaxImageGenerationClient | GeminiImageGenerationClient | None:
         provider = self._provider_config()
         kwargs = {
             "api_key": provider.api_key if provider else None,
@@ -134,6 +135,8 @@ class ImageGenerationTool(Tool):
             return AIHubMixImageGenerationClient(**kwargs)
         if self.config.provider == "minimax":
             return MiniMaxImageGenerationClient(**kwargs)
+        if self.config.provider == "gemini":
+            return GeminiImageGenerationClient(**kwargs)
         return None
 
     def _missing_api_key_error(self) -> str:
@@ -144,6 +147,8 @@ class ImageGenerationTool(Tool):
             return "Error: AIHubMix API key is not configured. Set providers.aihubmix.apiKey."
         if provider == "minimax":
             return "Error: MiniMax API key is not configured. Set providers.minimax.apiKey."
+        if provider == "gemini":
+            return "Error: Gemini API key is not configured. Set providers.gemini.apiKey."
         return f"Error: {provider} API key is not configured."
 
     def _resolve_reference_image(self, value: str) -> str:

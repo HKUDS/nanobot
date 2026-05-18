@@ -88,6 +88,27 @@ AIHubMix `gpt-image-2-free` uses AIHubMix's unified predictions endpoint interna
 
 `providers.aihubmix.extraBody` can be used for provider-specific options. For example, `"extraBody": {"quality": "low"}` is optional but can make `gpt-image-2-free` faster and less likely to time out.
 
+For Gemini, the image tool supports two model families. Imagen 4 (`imagen-4.0-generate-001`) supports text-to-image only. Gemini Flash (`gemini-2.5-flash-image`) also supports reference-image edits. Configuration:
+
+```json
+{
+  "providers": {
+    "gemini": {
+      "apiKey": "AIza..."
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "gemini",
+      "model": "imagen-4.0-generate-001"
+    }
+  }
+}
+```
+
+For Gemini models, `defaultImageSize` has no effect; use `defaultAspectRatio` instead. Imagen 4 supports `1:1`, `9:16`, `16:9`, `3:4`, and `4:3`.
+
 ## Examples
 
 Generate a new image:
