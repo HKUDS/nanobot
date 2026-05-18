@@ -53,12 +53,27 @@
     },
     "nav": {
       "general": "通用",
-      "byok": "BYOK"
+      "byok": "BYOK",
+      "overview": "概览",
+      "appearance": "外观",
+      "models": "模型",
+      "providers": "提供商",
+      "web": "Web",
+      "runtime": "运行时",
+      "advanced": "高级"
     },
     "sections": {
       "interface": "界面",
       "ai": "AI",
-      "system": "系统"
+      "system": "系统",
+      "status": "状态",
+      "localPreferences": "本地偏好",
+      "presets": "预设",
+      "webSearch": "Web Search",
+      "webBehavior": "行为",
+      "identity": "身份",
+      "safety": "安全",
+      "integrations": "集成"
     },
     "rows": {
       "theme": "主题",
@@ -66,19 +81,70 @@
       "provider": "提供商",
       "model": "模型",
       "restart": "重启 nanobot",
-      "configPath": "配置路径"
+      "configPath": "配置路径",
+      "activePreset": "当前预设",
+      "gateway": "网关",
+      "restartState": "重启状态",
+      "selectedPreset": "选中的预设",
+      "presetModel": "预设模型",
+      "density": "密度",
+      "activityMode": "活动细节",
+      "codeWrap": "代码换行",
+      "maxResults": "最大结果数",
+      "timeout": "超时",
+      "jinaReader": "Jina Reader",
+      "botName": "Bot 名称",
+      "botIcon": "Bot 图标",
+      "timezone": "时区",
+      "toolHintMaxLength": "工具提示长度",
+      "workspacePath": "Workspace 路径",
+      "heartbeat": "Heartbeat",
+      "dream": "Dream",
+      "unifiedSession": "统一会话",
+      "restrictWorkspace": "限制到 workspace",
+      "execTool": "Exec 工具",
+      "execSandbox": "Exec 沙箱",
+      "ssrfWhitelist": "SSRF 白名单",
+      "mcpServers": "MCP 服务器",
+      "pathAppend": "PATH 追加",
+      "configurationDocs": "配置文档"
     },
     "help": {
       "theme": "在浅色和深色外观之间切换。",
       "language": "选择 WebUI 使用的语言。",
       "provider": "选择新模型请求使用的服务提供商。",
       "model": "设置 nanobot 默认使用的模型名称。",
-      "configPath": "当前网关正在使用的配置文件。"
+      "configPath": "当前网关正在使用的配置文件。",
+      "selectedPreset": "命名预设在这里只读；需要编辑时请改 config.json。",
+      "presetModel": "切回 Default 后可在 WebUI 编辑模型和提供商。",
+      "density": "仅保存在当前浏览器。",
+      "activityMode": "选择默认显示多少 agent 活动细节。",
+      "codeWrap": "让较小屏幕上的长代码行更易读。",
+      "maxResults": "每次 web_search 返回的结果数量。",
+      "timeout": "搜索 provider 请求超时秒数。",
+      "jinaReader": "可用时为 web_fetch 使用 Jina Reader。",
+      "botName": "显示在使用 bot 身份的运行时界面里。",
+      "botIcon": "显示在 bot 名称旁的短 emoji 或文本。",
+      "timezone": "运行时上下文和计划任务使用的 IANA 时区。",
+      "toolHintMaxLength": "工具进度提示显示的最大字符数。",
+      "advancedReadOnly": "高级安全控制在 WebUI 中只读；需要时请谨慎编辑 config.json。"
     },
     "values": {
       "light": "浅色",
       "dark": "深色",
-      "notAvailable": "不可用"
+      "notAvailable": "不可用",
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "restartRequired": "需要重启",
+      "liveReload": "可热更新",
+      "comfortable": "舒适",
+      "compact": "紧凑",
+      "auto": "自动",
+      "expanded": "展开",
+      "on": "开",
+      "off": "关",
+      "configured": "已配置",
+      "notConfigured": "未配置"
     },
     "status": {
       "loading": "正在加载设置...",
@@ -90,7 +156,8 @@
       "save": "保存",
       "saving": "保存中",
       "edit": "编辑",
-      "cancel": "取消"
+      "cancel": "取消",
+      "openDocs": "打开文档"
     },
     "byok": {
       "description": "自带 provider key。Nanobot 会从当前 config 读取这些值，只有已配置的 provider 才能在通用设置里选择。",
@@ -133,6 +200,18 @@
         "missingCredential": "填写所需凭证后才能保存。",
         "saveHint": "改动会应用到新的 web search 请求。"
       }
+    },
+    "overview": {
+      "model": "当前模型",
+      "providers": "提供商",
+      "configuredCount": "已配置 {{count}} 个",
+      "totalProviders": "共 {{count}} 个可用",
+      "webSearch": "Web Search",
+      "workspace": "Workspace"
+    },
+    "providers": {
+      "searchPlaceholder": "搜索 provider",
+      "noMatches": "没有匹配的 provider。"
     }
   },
   "chat": {

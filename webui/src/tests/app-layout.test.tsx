@@ -67,6 +67,9 @@ vi.mock("@/lib/nanobot-client", () => {
     onRuntimeModelUpdate = () => () => {};
     onError = () => () => {};
     onChat = () => () => {};
+    onSessionUpdate = () => () => {};
+    getRunStartedAt = () => null;
+    getGoalState = () => undefined;
     sendMessage = vi.fn();
     newChat = vi.fn();
     attach = vi.fn();
@@ -199,7 +202,42 @@ describe("App layout", () => {
                 provider: "auto",
                 resolved_provider: "openai",
                 has_api_key: true,
+                model_preset: "default",
+                max_tokens: 8192,
+                context_window_tokens: 65536,
+                temperature: 0.1,
+                reasoning_effort: null,
+                timezone: "UTC",
+                bot_name: "nanobot",
+                bot_icon: "nb",
+                tool_hint_max_length: 40,
               },
+              model_presets: [
+                {
+                  name: "default",
+                  label: "Default",
+                  active: true,
+                  is_default: true,
+                  model: "openai/gpt-4o",
+                  provider: "auto",
+                  max_tokens: 8192,
+                  context_window_tokens: 65536,
+                  temperature: 0.1,
+                  reasoning_effort: null,
+                },
+                {
+                  name: "deep",
+                  label: "deep",
+                  active: false,
+                  is_default: false,
+                  model: "anthropic/claude-opus-4-5",
+                  provider: "anthropic",
+                  max_tokens: 8192,
+                  context_window_tokens: 200000,
+                  temperature: 0.1,
+                  reasoning_effort: "high",
+                },
+              ],
               providers: [
                 {
                   name: "openai",
@@ -269,14 +307,46 @@ describe("App layout", () => {
                 provider: "brave",
                 api_key_hint: "BSAo••••ew20",
                 base_url: null,
+                max_results: 5,
+                timeout: 30,
                 providers: [
                   { name: "duckduckgo", label: "DuckDuckGo", credential: "none" },
                   { name: "brave", label: "Brave Search", credential: "api_key" },
                   { name: "tavily", label: "Tavily", credential: "api_key" },
                 ],
               },
+              web: {
+                enable: true,
+                proxy: null,
+                user_agent: null,
+                search: { max_results: 5, timeout: 30 },
+                fetch: { use_jina_reader: true },
+              },
               runtime: {
                 config_path: "/tmp/config.json",
+                workspace_path: "/tmp/workspace",
+                gateway_host: "127.0.0.1",
+                gateway_port: 18790,
+                heartbeat: {
+                  enabled: true,
+                  interval_s: 1800,
+                  keep_recent_messages: 8,
+                },
+                dream: {
+                  schedule: "every 2h",
+                  max_batch_size: 20,
+                  max_iterations: 15,
+                  annotate_line_ages: true,
+                },
+                unified_session: false,
+              },
+              advanced: {
+                restrict_to_workspace: false,
+                ssrf_whitelist_count: 0,
+                mcp_server_count: 0,
+                exec_enabled: true,
+                exec_sandbox: null,
+                exec_path_append_set: false,
               },
               requires_restart: false,
             }),
@@ -292,21 +362,23 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
 
-    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
     expect(document.title).toBe("Settings · nanobot");
     expect(screen.queryByRole("navigation", { name: "Sidebar navigation" })).not.toBeInTheDocument();
     const settingsNav = screen.getByRole("navigation", { name: "Settings sections" });
-    expect(within(settingsNav).getByRole("button", { name: "General" })).toHaveAttribute(
+    expect(within(settingsNav).getByRole("button", { name: "Overview" })).toHaveAttribute(
       "aria-current",
       "page",
     );
-    expect(within(settingsNav).getByRole("button", { name: "BYOK" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Models" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Providers" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Web" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Advanced" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Models" }));
     expect(screen.getByText("AI")).toBeInTheDocument();
     expect(screen.getByDisplayValue("openai/gpt-4o")).toBeInTheDocument();
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "BYOK" }));
-    expect(screen.getByRole("tab", { name: "LLM" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "Web Search" })).toBeInTheDocument();
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Providers" }));
     expect(screen.getByText("OpenRouter")).toBeInTheDocument();
     expect(screen.getByText("Ant Ling")).toBeInTheDocument();
     expect(screen.getAllByText("Not configured").length).toBeGreaterThan(0);
@@ -325,7 +397,7 @@ describe("App layout", () => {
     expect(screen.getByDisplayValue("http://localhost:1337/v1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Web Search" }));
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Web" }));
     expect(screen.getByText("Search provider")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Brave Search/ })).toBeInTheDocument();
     expect(screen.getByText("BSAo••••ew20")).toBeInTheDocument();
@@ -373,19 +445,74 @@ describe("App layout", () => {
                 provider: "openai",
                 resolved_provider: "openai",
                 has_api_key: true,
+                model_preset: "default",
+                max_tokens: 8192,
+                context_window_tokens: 65536,
+                temperature: 0.1,
+                reasoning_effort: null,
+                timezone: "UTC",
+                bot_name: "nanobot",
+                bot_icon: "nb",
+                tool_hint_max_length: 40,
               },
+              model_presets: [
+                {
+                  name: "default",
+                  label: "Default",
+                  active: true,
+                  is_default: true,
+                  model: "openai/gpt-4o",
+                  provider: "openai",
+                  max_tokens: 8192,
+                  context_window_tokens: 65536,
+                  temperature: 0.1,
+                  reasoning_effort: null,
+                },
+              ],
               providers: [{ name: "openai", label: "OpenAI", configured: true }],
               web_search: {
                 provider: "duckduckgo",
                 api_key_hint: null,
                 base_url: null,
+                max_results: 5,
+                timeout: 30,
                 providers: [
                   { name: "duckduckgo", label: "DuckDuckGo", credential: "none" },
                   { name: "brave", label: "Brave Search", credential: "api_key" },
                 ],
               },
+              web: {
+                enable: true,
+                proxy: null,
+                user_agent: null,
+                search: { max_results: 5, timeout: 30 },
+                fetch: { use_jina_reader: true },
+              },
               runtime: {
                 config_path: "/tmp/config.json",
+                workspace_path: "/tmp/workspace",
+                gateway_host: "127.0.0.1",
+                gateway_port: 18790,
+                heartbeat: {
+                  enabled: true,
+                  interval_s: 1800,
+                  keep_recent_messages: 8,
+                },
+                dream: {
+                  schedule: "every 2h",
+                  max_batch_size: 20,
+                  max_iterations: 15,
+                  annotate_line_ages: true,
+                },
+                unified_session: false,
+              },
+              advanced: {
+                restrict_to_workspace: false,
+                ssrf_whitelist_count: 0,
+                mcp_server_count: 0,
+                exec_enabled: true,
+                exec_sandbox: null,
+                exec_path_append_set: false,
               },
               requires_restart: false,
             }),
@@ -403,7 +530,7 @@ describe("App layout", () => {
     await waitFor(() => expect(document.title).toBe("nanobot"));
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
-    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
 
     await waitFor(() => expect(document.title).toBe("nanobot"));

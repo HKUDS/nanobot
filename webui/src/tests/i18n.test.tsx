@@ -8,7 +8,15 @@ import { resources } from "@/i18n";
 
 const QUICK_ACTION_KEYS = ["plan", "analyze", "brainstorm", "code", "summarize", "more"];
 const IMAGE_QUICK_ACTION_KEYS = ["icon", "sticker", "poster", "product", "portrait", "edit"];
-const SETTINGS_NAV_KEYS = ["general", "byok"];
+const SETTINGS_NAV_KEYS = [
+  "overview",
+  "appearance",
+  "models",
+  "providers",
+  "web",
+  "runtime",
+  "advanced",
+];
 
 describe("webui i18n", () => {
   it("switches UI copy and document locale through the language switcher", async () => {
