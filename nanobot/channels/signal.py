@@ -22,6 +22,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
+from nanobot.pairing import is_approved
 from nanobot.utils.helpers import safe_filename, split_message
 
 
@@ -375,12 +376,28 @@ class SignalChannel(BaseChannel):
         matches the per-policy DM gate.
         """
         allow_list = self.config.allow_from
-        if not allow_list:
-            self.logger.warning("allow_from is empty — all access denied")
-            return False
         if "*" in allow_list:
             return True
-        return self._sender_matches_allowlist(sender_id, allow_list)
+        if self._sender_matches_allowlist(sender_id, allow_list):
+            return True
+        if self._sender_approved_via_pairing(sender_id):
+            return True
+        if not allow_list:
+            self.logger.warning("allow_from is empty — all access denied")
+        return False
+
+    def _sender_approved_via_pairing(self, sender_id: str) -> bool:
+        """Return True if any normalized variant of sender_id is in the pairing store.
+
+        Pairing approval may be recorded under any of the identifier forms
+        signal exposes (phone with/without ``+``, UUID, ACI), so we check
+        each part of the pipe-joined composite against ``is_approved``.
+        """
+        for part in str(sender_id).split("|"):
+            for variant in self._normalize_signal_id(part):
+                if is_approved(self.name, variant):
+                    return True
+        return False
 
     async def start(self) -> None:
         """Start the Signal channel and connect to signal-cli daemon."""
