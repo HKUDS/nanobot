@@ -17,6 +17,7 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 | **Wecom** | Bot ID + Bot Secret |
 | **Microsoft Teams** | App ID + App Password + public HTTPS endpoint |
 | **Mochat** | Claw token (auto-setup available) |
+| **Signal** | signal-cli daemon + phone number |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -667,5 +668,71 @@ Create or reuse a Microsoft Teams / Azure bot app registration. Set the bot mess
 ```bash
 nanobot gateway
 ```
+
+</details>
+
+<details>
+<summary><b>Signal</b></summary>
+
+Uses **signal-cli** daemon in HTTP mode — receive messages via SSE, send via JSON-RPC.
+
+**1. Install signal-cli**
+
+Install [signal-cli](https://github.com/AsamK/signal-cli) and register a phone number:
+
+```bash
+signal-cli -u +1234567890 register
+signal-cli -u +1234567890 verify <CODE>
+```
+
+Start the daemon:
+
+```bash
+signal-cli -a +1234567890 daemon --http localhost:8080
+```
+
+**2. Configure**
+
+```json
+{
+  "channels": {
+    "signal": {
+      "enabled": true,
+      "phoneNumber": "+1234567890",
+      "daemonHost": "localhost",
+      "daemonPort": 8080,
+      "dm": {
+        "enabled": true,
+        "policy": "open"
+      },
+      "group": {
+        "enabled": true,
+        "policy": "open",
+        "requireMention": true
+      }
+    }
+  }
+}
+```
+
+> - `phoneNumber`: Your registered Signal phone number.
+> - `daemonHost` / `daemonPort`: Where signal-cli daemon is listening (default `localhost:8080`).
+> - `dm.policy`: `"open"` (anyone can DM) or `"allowlist"` (only listed numbers/UUIDs). When `"allowlist"`, unlisted DM senders receive a pairing code.
+> - `dm.allowFrom`: List of allowed phone numbers or UUIDs (used when policy is `"allowlist"`).
+> - `group.policy`: `"open"` (all groups) or `"allowlist"` (only listed group IDs).
+> - `group.requireMention`: When `true` (default), the bot only responds in groups when @mentioned.
+> - `group.allowFrom`: List of allowed group IDs (used when group policy is `"allowlist"`).
+> - `attachmentsDir`: Override the directory where signal-cli stores inbound attachments. Defaults to `~/.local/share/signal-cli/attachments` (the Linux default). Set this if signal-cli runs with a custom `XDG_DATA_HOME` or on macOS/Windows.
+> - `groupMessageBufferSize`: Number of recent group messages kept for context (default `20`, must be > 0).
+
+**3. Run**
+
+```bash
+nanobot gateway
+```
+
+> [!TIP]
+> The channel automatically reconnects to the signal-cli daemon with exponential backoff if the connection drops.
+> Markdown in bot replies is automatically converted to Signal text styles (bold, italic, code, etc.).
 
 </details>
