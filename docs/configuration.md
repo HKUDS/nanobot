@@ -477,9 +477,7 @@ Official OpenAI-compatible model names include `Ling-2.6-1T`,
 <details>
 <summary><b>APIFree (OpenAI-compatible)</b></summary>
 
-APIFree is available through nanobot's built-in OpenAI-compatible provider flow.
-The default API base points to `https://api.apifree.ai/agent/v1`, so you usually
-only need to set `apiKey`.
+APIFree is available through nanobot's built-in OpenAI-compatible provider flow. The default API base points to `https://api.apifree.ai/agent/v1`, so you usually only need to set `apiKey`.
 
 ```json
 {
