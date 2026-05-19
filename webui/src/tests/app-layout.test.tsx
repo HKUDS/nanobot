@@ -578,6 +578,8 @@ describe("App layout", () => {
     expect(dialog.className).not.toContain("translate-y");
     expect(within(dialog).getByText("Q2 roadmap")).toBeInTheDocument();
     expect(within(dialog).getByText("Travel ideas")).toBeInTheDocument();
+    expect(within(dialog).queryByText("websocket")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("#1")).not.toBeInTheDocument();
 
     fireEvent.change(within(dialog).getByRole("textbox", { name: "Search" }), {
       target: { value: "planning" },

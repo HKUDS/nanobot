@@ -1,5 +1,5 @@
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
-import { MessageSquare, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -155,23 +155,12 @@ export function SessionSearchDialog({
                       onMouseEnter={() => setHighlightedIndex(index)}
                       aria-current={active ? "page" : undefined}
                       className={cn(
-                        "flex min-h-12 w-full min-w-0 items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
+                        "flex min-h-12 w-full min-w-0 rounded-xl px-3 py-2.5 text-left transition-colors",
                         highlighted
                           ? "bg-accent text-accent-foreground"
                           : "text-popover-foreground hover:bg-accent/75 hover:text-accent-foreground",
                       )}
                     >
-                      <span
-                        className={cn(
-                          "flex h-7 w-7 shrink-0 items-center justify-center rounded-full border",
-                          highlighted
-                            ? "border-accent-foreground/20 bg-background/20"
-                            : "border-border/70 bg-muted/40 text-muted-foreground",
-                        )}
-                        aria-hidden
-                      >
-                        <MessageSquare className="h-3.5 w-3.5" />
-                      </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[14px] font-medium leading-5">
                           {title}
@@ -189,24 +178,6 @@ export function SessionSearchDialog({
                           </span>
                         ) : null}
                       </span>
-                      <span
-                        className={cn(
-                          "ml-3 hidden shrink-0 items-center gap-1.5 text-[12px] sm:flex",
-                          highlighted
-                            ? "text-accent-foreground/70"
-                            : "text-muted-foreground",
-                        )}
-                      >
-                        <span>{session.channel}</span>
-                        <span
-                          className={cn(
-                            "rounded-md px-1.5 py-0.5 font-medium",
-                            highlighted ? "bg-background/20" : "bg-muted",
-                          )}
-                        >
-                          #{index + 1}
-                        </span>
-                      </span>
                     </button>
                   </li>
                 );
@@ -223,9 +194,6 @@ function sessionMatchesTerms(session: ChatSummary, terms: string[]) {
   const haystack = [
     session.title,
     session.preview,
-    session.chatId,
-    session.channel,
-    session.key,
   ]
     .filter(Boolean)
     .join(" ")
