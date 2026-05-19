@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nanobot.bus.events import OutboundMessage
+from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.signal import (
     SignalChannel,
@@ -499,7 +499,12 @@ class TestIsAllowed:
     """
 
     def test_denies_when_allowlist_empty(self):
-        ch = _make_channel(dm_enabled=True, dm_policy="open")  # open -> no entries
+        ch = _make_channel(dm_enabled=True, dm_policy="allowlist")
+        assert ch.is_allowed("+19995550001") is False
+
+    def test_denies_when_no_policy_allows(self):
+        """When both dm and group are disabled, is_allowed denies."""
+        ch = _make_channel(dm_enabled=False, group_enabled=False)
         assert ch.is_allowed("+19995550001") is False
 
     def test_allows_wildcard(self):
@@ -536,6 +541,121 @@ class TestIsAllowed:
             group_allow_from=["group-id-base64=="],
         )
         assert "group-id-base64==" in ch.config.allow_from
+
+
+class TestEndToEndDMRouting:
+    """End-to-end tests that keep the real _handle_message chain (no mock),
+    verifying that _check_inbound_policy + _handle_message work together
+    correctly for DM routing.  The override of _handle_message publishes
+    directly to bus (policy already checked); denied DMs call
+    super()._handle_message which issues a pairing code.
+    """
+
+    @pytest.mark.asyncio
+    async def test_open_dm_policy_publishes_to_bus(self):
+        """Open DM: _check_inbound_policy passes → _handle_message publishes."""
+        ch = _make_channel(dm_enabled=True, dm_policy="open")
+
+        async def noop_typing(chat_id):
+            pass
+
+        ch._start_typing = noop_typing  # type: ignore[method-assign]
+        published: list[InboundMessage] = []
+
+        async def capture_publish(msg: InboundMessage):
+            published.append(msg)
+
+        ch.bus.publish_inbound = capture_publish  # type: ignore[method-assign]
+
+        params = _dm_envelope(source_number="+19995550001", message="hello")
+        await ch._handle_receive_notification(params)
+
+        assert len(published) == 1
+        assert published[0].content == "hello"
+        assert published[0].sender_id == "+19995550001"
+
+    @pytest.mark.asyncio
+    async def test_allowlist_dm_denied_triggers_pairing(self):
+        """Allowlist DM: denied sender triggers pairing code via send()."""
+        ch = _make_channel(dm_enabled=True, dm_policy="allowlist", dm_allow_from=[])
+        ch._http = _FakeHTTPClient()  # type: ignore[assignment]
+
+        async def noop_typing(chat_id):
+            pass
+
+        ch._start_typing = noop_typing  # type: ignore[method-assign]
+        published: list[InboundMessage] = []
+
+        async def capture_publish(msg: InboundMessage):
+            published.append(msg)
+
+        ch.bus.publish_inbound = capture_publish  # type: ignore[method-assign]
+
+        params = _dm_envelope(source_number="+19995550002", message="hello")
+        await ch._handle_receive_notification(params)
+
+        # Should NOT publish to bus — sender is not on allowlist.
+        assert published == []
+        # Should have sent a pairing code via send (captured in HTTP posts).
+        assert len(ch._http.posts) == 1  # type: ignore[attr-defined]
+        sent_text = ch._http.posts[0]["json"]["params"]["message"]  # type: ignore[attr-defined]
+        assert "pairing" in sent_text.lower() or "pair" in sent_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_allowlist_dm_denied_with_group_open_still_pairs(self):
+        """dm.policy="allowlist" + group.policy="open": denied DM sender
+        must still get a pairing code, not be leaked by the group open check."""
+        ch = _make_channel(
+            dm_enabled=True,
+            dm_policy="allowlist",
+            dm_allow_from=[],
+            group_enabled=True,
+            group_policy="open",
+        )
+        ch._http = _FakeHTTPClient()  # type: ignore[assignment]
+
+        async def noop_typing(chat_id):
+            pass
+
+        ch._start_typing = noop_typing  # type: ignore[method-assign]
+        published: list[InboundMessage] = []
+
+        async def capture_publish(msg: InboundMessage):
+            published.append(msg)
+
+        ch.bus.publish_inbound = capture_publish  # type: ignore[method-assign]
+
+        params = _dm_envelope(source_number="+19995550002", message="hello")
+        await ch._handle_receive_notification(params)
+
+        assert published == []
+        assert len(ch._http.posts) == 1  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_open_group_policy_publishes_to_bus(self):
+        """Open group: group message from unknown sender publishes to bus."""
+        ch = _make_channel(
+            group_enabled=True,
+            group_policy="open",
+            require_mention=False,
+        )
+
+        async def noop_typing(chat_id):
+            pass
+
+        ch._start_typing = noop_typing  # type: ignore[method-assign]
+        published: list[InboundMessage] = []
+
+        async def capture_publish(msg: InboundMessage):
+            published.append(msg)
+
+        ch.bus.publish_inbound = capture_publish  # type: ignore[method-assign]
+
+        params = _group_envelope(group_id="grp==", message="hello group")
+        await ch._handle_receive_notification(params)
+
+        assert len(published) == 1
+        assert "hello group" in published[0].content
 
 
 class TestCheckInboundPolicy:
@@ -671,15 +791,18 @@ class TestHandleDataMessageDM:
 
     @pytest.mark.asyncio
     async def test_dm_allowlist_rejected_triggers_pairing(self):
-        # Denied DM senders are routed to _handle_message with empty content
-        # and is_dm=True so BaseChannel issues a pairing code (mirrors Slack).
+        # Denied DM senders go through super()._handle_message which checks
+        # is_allowed → sends pairing code via self.send().
         ch, handled = self._make_dm_channel(policy="allowlist", allow_from=["+10000000001"])
+        ch._http = _FakeHTTPClient()  # type: ignore[attr-defined]
         params = _dm_envelope(source_number="+19995550002")
         await ch._handle_receive_notification(params)
-        assert len(handled) == 1
-        assert handled[0]["content"] == ""
-        assert handled[0]["is_dm"] is True
-        assert handled[0]["chat_id"] == "+19995550002"
+        # The denied DM path calls super()._handle_message, not self._handle_message,
+        # so the capture list stays empty. Verify pairing code was sent via HTTP.
+        assert handled == []
+        assert len(ch._http.posts) == 1  # type: ignore[attr-defined]
+        sent_text = ch._http.posts[0]["json"]["params"]["message"]  # type: ignore[attr-defined]
+        assert "pairing" in sent_text.lower() or "pair" in sent_text.lower()
 
     @pytest.mark.asyncio
     async def test_dm_paired_sender_allowed_without_allowlist_entry(self, monkeypatch):
