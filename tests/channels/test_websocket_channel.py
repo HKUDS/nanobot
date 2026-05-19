@@ -1666,6 +1666,54 @@ def test_parse_envelope_rejects_legacy_and_garbage() -> None:
     assert _parse_envelope('{"type":123}') is None
 
 
+def test_sessions_list_includes_active_run_started_at() -> None:
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.session import webui_turns as wth
+
+    bus = MagicMock()
+    channel = _ch(bus)
+    channel._api_tokens["tok"] = time.monotonic() + 300.0
+    channel._session_manager = MagicMock()
+    channel._session_manager.list_sessions.return_value = [
+        {
+            "key": "websocket:chat-1",
+            "created_at": "2026-05-19T10:00:00Z",
+            "updated_at": "2026-05-19T10:01:00Z",
+            "title": "Running",
+            "preview": "work",
+            "path": "/private/path",
+        },
+        {
+            "key": "cli:chat-2",
+            "created_at": "2026-05-19T10:00:00Z",
+            "updated_at": "2026-05-19T10:01:00Z",
+        },
+    ]
+
+    wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+    try:
+        wth._WEBSOCKET_TURN_WALL_STARTED_AT["chat-1"] = 1_700_000_000.0
+        req = Request("/api/sessions", Headers([("Authorization", "Bearer tok")]))
+        resp = channel._handle_sessions_list(req)
+    finally:
+        wth._WEBSOCKET_TURN_WALL_STARTED_AT.clear()
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert body["sessions"] == [
+        {
+            "key": "websocket:chat-1",
+            "created_at": "2026-05-19T10:00:00Z",
+            "updated_at": "2026-05-19T10:01:00Z",
+            "title": "Running",
+            "preview": "work",
+            "run_started_at": 1_700_000_000.0,
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [

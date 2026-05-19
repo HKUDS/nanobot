@@ -764,11 +764,17 @@ class WebSocketChannel(BaseChannel):
         sessions = self._session_manager.list_sessions()
         # Sidebar/chat listing for WS-backed sessions only — CLI / Slack / etc.
         # keys are not intended for resume over this HTTP surface.
-        cleaned = [
-            {k: v for k, v in s.items() if k != "path"}
-            for s in sessions
-            if isinstance(s.get("key"), str) and s["key"].startswith("websocket:")
-        ]
+        cleaned = []
+        for s in sessions:
+            key = s.get("key")
+            if not (isinstance(key, str) and key.startswith("websocket:")):
+                continue
+            row = {k: v for k, v in s.items() if k != "path"}
+            chat_id = key.split(":", 1)[1]
+            started_at = websocket_turn_wall_started_at(chat_id)
+            if started_at is not None:
+                row["run_started_at"] = started_at
+            cleaned.append(row)
         return _http_json_response({"sessions": cleaned})
 
     def _handle_settings(self, request: WsRequest) -> Response:

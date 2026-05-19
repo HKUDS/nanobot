@@ -54,6 +54,7 @@ export async function listSessions(
     updated_at: string | null;
     title?: string;
     preview?: string;
+    run_started_at?: number | null;
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
@@ -66,6 +67,7 @@ export async function listSessions(
     updatedAt: s.updated_at,
     title: s.title ?? "",
     preview: s.preview ?? "",
+    runStartedAt: s.run_started_at ?? null,
   }));
 }
 

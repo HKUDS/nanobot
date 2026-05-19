@@ -9,6 +9,7 @@ const createChatSpy = vi.fn().mockResolvedValue("chat-1");
 const deleteChatSpy = vi.fn();
 const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
+const attachSpy = vi.fn();
 const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
 let mockSessions: ChatSummary[] = [];
 
@@ -77,7 +78,7 @@ vi.mock("@/lib/nanobot-client", () => {
     getGoalState = () => undefined;
     sendMessage = vi.fn();
     newChat = vi.fn();
-    attach = vi.fn();
+    attach = attachSpy;
     close = vi.fn();
     updateUrl = updateUrlSpy;
   }
@@ -97,7 +98,9 @@ describe("App layout", () => {
     createChatSpy.mockClear();
     deleteChatSpy.mockReset();
     toggleThemeSpy.mockReset();
+    attachSpy.mockReset();
     runStatusHandlers.clear();
+    localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
       ws_path: "/",
@@ -458,6 +461,42 @@ describe("App layout", () => {
       fireEvent.click(within(sidebar).getByRole("button", { name: /^Working chat$/ }));
     });
     expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
+  });
+
+  it("restores sidebar run indicators after a page reload", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Running after reload",
+        runStartedAt: 12_345,
+      },
+      {
+        key: "websocket:chat-b",
+        channel: "websocket",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        preview: "Completed after reload",
+      },
+    ];
+    localStorage.setItem(
+      "nanobot-webui.sidebar.completed-runs.v1",
+      JSON.stringify(["chat-b"]),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await waitFor(() =>
+      expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument(),
+    );
+    expect(within(sidebar).getByTitle("Agent finished")).toBeInTheDocument();
+    expect(attachSpy).toHaveBeenCalledWith("chat-a");
   });
 
   it("opens the settings view from the sidebar footer", async () => {

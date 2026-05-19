@@ -40,6 +40,7 @@ type BootState =
     };
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
+const COMPLETED_RUNS_STORAGE_KEY = "nanobot-webui.sidebar.completed-runs.v1";
 const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 const SIDEBAR_WIDTH = 272;
 const TOKEN_REFRESH_MARGIN_MS = 30_000;
@@ -121,6 +122,29 @@ function readSidebarOpen(): boolean {
     return raw === "1";
   } catch {
     return true;
+  }
+}
+
+function readCompletedRunChatIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(COMPLETED_RUNS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((item): item is string => typeof item === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeCompletedRunChatIds(chatIds: Set<string>): void {
+  try {
+    window.localStorage.setItem(
+      COMPLETED_RUNS_STORAGE_KEY,
+      JSON.stringify(Array.from(chatIds)),
+    );
+  } catch {
+    // ignore storage errors (private mode, etc.)
   }
 }
 
@@ -316,7 +340,7 @@ function Shell({
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
   const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
-  const [completedChatIds, setCompletedChatIds] = useState<Set<string>>(() => new Set());
+  const [completedChatIds, setCompletedChatIds] = useState<Set<string>>(readCompletedRunChatIds);
   const runningChatIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -330,12 +354,58 @@ function Shell({
     }
   }, [desktopSidebarOpen]);
 
+  useEffect(() => {
+    writeCompletedRunChatIds(completedChatIds);
+  }, [completedChatIds]);
+
   const activeSession = useMemo<ChatSummary | null>(() => {
     if (!activeKey) return null;
     return sessions.find((s) => s.key === activeKey) ?? null;
   }, [sessions, activeKey]);
   const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
   const completedChatIdList = useMemo(() => Array.from(completedChatIds), [completedChatIds]);
+
+  useEffect(() => {
+    if (loading) return;
+    const knownChatIds = new Set(sessions.map((session) => session.chatId));
+    setCompletedChatIds((current) => {
+      const next = new Set(
+        Array.from(current).filter((chatId) => knownChatIds.has(chatId)),
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, [loading, sessions]);
+
+  useEffect(() => {
+    if (loading) return;
+    const activeRunIds = sessions
+      .filter((session) => typeof session.runStartedAt === "number")
+      .map((session) => session.chatId);
+    if (activeRunIds.length === 0) return;
+
+    for (const chatId of activeRunIds) {
+      client.attach(chatId);
+    }
+    setRunningChatIds((current) => {
+      let changed = false;
+      const next = new Set(current);
+      for (const chatId of activeRunIds) {
+        if (!next.has(chatId)) changed = true;
+        next.add(chatId);
+      }
+      if (!changed) return current;
+      runningChatIdsRef.current = next;
+      return next;
+    });
+    setCompletedChatIds((current) => {
+      let changed = false;
+      const next = new Set(current);
+      for (const chatId of activeRunIds) {
+        if (next.delete(chatId)) changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [client, loading, sessions]);
 
   const closeDesktopSidebar = useCallback(() => {
     setDesktopSidebarOpen(false);

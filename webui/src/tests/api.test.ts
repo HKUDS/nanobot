@@ -170,6 +170,7 @@ describe("webui API helpers", () => {
             created_at: "2026-05-01T10:00:00",
             updated_at: "2026-05-01T10:01:00",
             title: "优化 WebUI 标题",
+            run_started_at: 1_700_000_000,
           },
         ],
       }),
@@ -180,6 +181,7 @@ describe("webui API helpers", () => {
         key: "websocket:chat-1",
         title: "优化 WebUI 标题",
         preview: "",
+        runStartedAt: 1_700_000_000,
       },
     ]);
   });

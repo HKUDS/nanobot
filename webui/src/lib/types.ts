@@ -110,6 +110,8 @@ export interface ChatSummary {
   updatedAt: string | null;
   title?: string;
   preview: string;
+  /** Unix epoch seconds when this session currently has a turn in flight. */
+  runStartedAt?: number | null;
 }
 
 export type SidebarDensity = "comfortable" | "compact";
