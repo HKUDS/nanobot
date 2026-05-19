@@ -46,7 +46,7 @@ The WebUI hides provider storage details from the user. The agent sees the saved
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `tools.imageGeneration.enabled` | boolean | `false` | Register the `generate_image` tool |
-| `tools.imageGeneration.provider` | string | `"openrouter"` | Image provider name. Supported values: `openrouter`, `aihubmix`, `minimax`, `gemini` |
+| `tools.imageGeneration.provider` | string | `"openrouter"` | Image provider name. Supported values: `openrouter`, `aihubmix`, `minimax`, `gemini`, `stepfun` |
 | `tools.imageGeneration.model` | string | `"openai/gpt-5.4-image-2"` | Provider model name |
 | `tools.imageGeneration.defaultAspectRatio` | string | `"1:1"` | Default ratio when the prompt/tool call does not specify one |
 | `tools.imageGeneration.defaultImageSize` | string | `"1K"` | Default size hint, for example `1K`, `2K`, `4K`, or `1024x1024` |
@@ -168,6 +168,58 @@ For reference-image edits, use a Gemini Flash image model:
 
 Imagen 4 supports the aspect ratios `1:1`, `9:16`, `16:9`, `3:4`, and `4:3`. Unsupported ratios are ignored and the model uses its default. The `defaultImageSize` setting has no effect on Gemini models; sizing is controlled by `defaultAspectRatio` only. Reference images passed with an Imagen model are ignored (with a warning logged).
 
+### StepFun
+
+StepFun (阶跃星辰) `step-image-edit-2` supports text-to-image generation.  The `step-1x-medium` variant additionally supports **style-reference** image edits, where a reference image guides the visual style of the output.
+
+Supported aspect ratios: `1:1`, `16:9`, `9:16`, `3:4`, `4:3`.  Sizes are specified as `WIDTHxHEIGHT` (e.g. `1024x1024`, `1280x800`, `800x1280`).
+
+```json
+{
+  "providers": {
+    "stepfun": {
+      "apiKey": "${STEPFUN_API_KEY}"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "stepfun",
+      "model": "step-image-edit-2"
+    }
+  }
+}
+```
+
+> [!NOTE]
+> The StepFun provider reuses the existing `providers.stepfun` config block (the same one used for StepFun's LLM API).  Set `providers.stepfun.apiKey` once and it is shared between text and image generation.
+>
+> When `step-image-edit-2` is used, `reference_images` are ignored (the model does not support style reference).  Switch to `step-1x-medium` to use reference-image-guided generation.
+
+#### StepPlan (订阅制)
+
+StepPlan 是阶跃星辰的订阅制服务，使用不同的 API base URL。图片生成端点路径相同，只需覆盖 `apiBase`：
+
+```json
+{
+  "providers": {
+    "stepfun": {
+      "apiKey": "${STEPFUN_API_KEY}",
+      "apiBase": "https://api.stepfun.com/step_plan/v1"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "stepfun",
+      "model": "step-image-edit-2"
+    }
+  }
+}
+```
+
+`apiBase` 优先级高于 registry 默认值，因此配了 StepPlan 地址后图片请求会走 `https://api.stepfun.com/step_plan/v1/images/generations`，与 LLM 调用路径一致。API Key 与普通 StepFun 共用同一套。
+
 ## Artifacts
 
 Generated images are stored under the active nanobot instance's media directory:
@@ -222,7 +274,7 @@ Use the reference image. Keep the same robot and composition, change the palette
 |---------|-------|
 | `generate_image` is not available | Set `tools.imageGeneration.enabled` to `true` and restart the gateway |
 | Missing API key error | Configure `providers.<provider>.apiKey`; if using `${VAR_NAME}`, confirm the environment variable is visible to the gateway process |
-| `unsupported image generation provider` | Use `openrouter`, `aihubmix`, `minimax`, or `gemini` |
+| `unsupported image generation provider` | Use `openrouter`, `aihubmix`, `minimax`, `gemini`, or `stepfun` |
 | AIHubMix says `Incorrect model ID` | Use `model: "gpt-image-2-free"`; nanobot expands it to the required `openai/gpt-image-2-free` model path internally |
 | Generation times out | Try a smaller/default image size, set AIHubMix `extraBody.quality` to `"low"`, or retry later |
 | Reference image rejected | Reference image paths must be inside the workspace or nanobot media directory and must be valid image files |
