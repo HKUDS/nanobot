@@ -682,6 +682,22 @@ class TestHandleDataMessageDM:
         assert handled[0]["chat_id"] == "+19995550002"
 
     @pytest.mark.asyncio
+    async def test_dm_paired_sender_allowed_without_allowlist_entry(self, monkeypatch):
+        # Once a sender completes pairing they should pass is_allowed on every
+        # subsequent message — otherwise the pairing reply loops forever.
+        approved = {"+19995550002"}
+        monkeypatch.setattr(
+            "nanobot.channels.signal.is_approved",
+            lambda channel, sender_id: sender_id in approved,
+        )
+        ch = _make_channel(dm_enabled=True, dm_policy="allowlist", dm_allow_from=[])
+        assert ch.is_allowed("+19995550002") is True
+        # Variant forms (with/without "+") must still match a stored approval.
+        assert ch.is_allowed("19995550002") is True
+        # Unpaired sender stays denied.
+        assert ch.is_allowed("+19995559999") is False
+
+    @pytest.mark.asyncio
     async def test_dm_allowlist_matches_without_plus_prefix(self):
         """An allowlist entry without '+' must match a sender that carries '+'."""
         ch, handled = self._make_dm_channel(policy="allowlist", allow_from=["19995550001"])
