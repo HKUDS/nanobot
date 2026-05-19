@@ -24,6 +24,7 @@ import {
   Grid3X3,
   HardDrive,
   Hexagon,
+  ImageIcon,
   Info,
   KeyRound,
   Layers,
@@ -57,19 +58,25 @@ import {
 import { Input } from "@/components/ui/input";
 import {
   fetchSettings,
+  updateImageGenerationSettings,
   updateProviderSettings,
   updateSettings,
   updateWebSearchSettings,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useClient } from "@/providers/ClientProvider";
-import type { SettingsPayload, WebSearchSettingsUpdate } from "@/lib/types";
+import type {
+  ImageGenerationSettingsUpdate,
+  SettingsPayload,
+  WebSearchSettingsUpdate,
+} from "@/lib/types";
 
 type SettingsSectionKey =
   | "overview"
   | "appearance"
   | "models"
   | "providers"
+  | "image"
   | "web"
   | "runtime"
   | "advanced";
@@ -93,6 +100,9 @@ interface AgentSettingsDraft {
   toolHintMaxLength: number;
 }
 
+type PendingRestartSection = "runtime" | "web" | "image";
+type PendingRestartSections = Record<PendingRestartSection, boolean>;
+
 const LOCAL_PREFS_STORAGE_KEY = "nanobot-webui.settings-preferences";
 
 const DEFAULT_LOCAL_PREFS: LocalPreferences = {
@@ -107,6 +117,14 @@ const LOCAL_UNCONFIGURED_PROVIDER_ORDER = new Map(
     index,
   ]),
 );
+
+const IMAGE_ASPECT_RATIO_OPTIONS = ["1:1", "3:4", "9:16", "4:3", "16:9", "3:2", "2:3", "21:9"];
+const IMAGE_SIZE_OPTIONS = ["1K", "2K", "4K", "1024x1024", "1536x1024", "1024x1536"];
+const EMPTY_PENDING_RESTART_SECTIONS: PendingRestartSections = {
+  runtime: false,
+  web: false,
+  image: false,
+};
 
 interface SettingsViewProps {
   theme: "light" | "dark";
@@ -162,6 +180,7 @@ export function SettingsView({
   const [saving, setSaving] = useState(false);
   const [providerSaving, setProviderSaving] = useState<string | null>(null);
   const [webSearchSaving, setWebSearchSaving] = useState(false);
+  const [imageGenerationSaving, setImageGenerationSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<SettingsSectionKey>("overview");
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
@@ -169,6 +188,9 @@ export function SettingsView({
   const [providerForms, setProviderForms] = useState<Record<string, { apiKey: string; apiBase: string }>>({});
   const [visibleProviderKeys, setVisibleProviderKeys] = useState<Record<string, boolean>>({});
   const [editingProviderKeys, setEditingProviderKeys] = useState<Record<string, boolean>>({});
+  const [pendingRestartSections, setPendingRestartSections] = useState<PendingRestartSections>(
+    EMPTY_PENDING_RESTART_SECTIONS,
+  );
   const [localPrefs, setLocalPrefs] = useState<LocalPreferences>(() => readLocalPreferences());
   const [webSearchForm, setWebSearchForm] = useState<WebSearchSettingsUpdate>({
     provider: "duckduckgo",
@@ -177,6 +199,14 @@ export function SettingsView({
     maxResults: 5,
     timeout: 30,
     useJinaReader: true,
+  });
+  const [imageGenerationForm, setImageGenerationForm] = useState<ImageGenerationSettingsUpdate>({
+    enabled: false,
+    provider: "openrouter",
+    model: "openai/gpt-5.4-image-2",
+    defaultAspectRatio: "1:1",
+    defaultImageSize: "1K",
+    maxImagesPerTurn: 4,
   });
   const [webSearchKeyVisible, setWebSearchKeyVisible] = useState(false);
   const [webSearchKeyEditing, setWebSearchKeyEditing] = useState(false);
@@ -216,6 +246,21 @@ export function SettingsView({
       timeout: payload.web_search.timeout,
       useJinaReader: payload.web.fetch.use_jina_reader,
     }));
+    setImageGenerationForm({
+      enabled: payload.image_generation.enabled,
+      provider: payload.image_generation.provider,
+      model: payload.image_generation.model,
+      defaultAspectRatio: payload.image_generation.default_aspect_ratio,
+      defaultImageSize: payload.image_generation.default_image_size,
+      maxImagesPerTurn: payload.image_generation.max_images_per_turn,
+    });
+    if (payload.restart_required_sections) {
+      setPendingRestartSections({
+        runtime: payload.restart_required_sections.includes("runtime"),
+        web: payload.restart_required_sections.includes("web"),
+        image: payload.restart_required_sections.includes("image"),
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -283,6 +328,27 @@ export function SettingsView({
     );
   }, [form, settings]);
 
+  const imageGenerationDirty = useMemo(() => {
+    if (!settings) return false;
+    return (
+      imageGenerationForm.enabled !== settings.image_generation.enabled ||
+      imageGenerationForm.provider !== settings.image_generation.provider ||
+      imageGenerationForm.model !== settings.image_generation.model ||
+      imageGenerationForm.defaultAspectRatio !== settings.image_generation.default_aspect_ratio ||
+      imageGenerationForm.defaultImageSize !== settings.image_generation.default_image_size ||
+      imageGenerationForm.maxImagesPerTurn !== settings.image_generation.max_images_per_turn
+    );
+  }, [imageGenerationForm, settings]);
+
+  const hasPendingRestart = useMemo(
+    () =>
+      !!settings?.requires_restart ||
+      pendingRestartSections.runtime ||
+      pendingRestartSections.web ||
+      pendingRestartSections.image,
+    [pendingRestartSections, settings?.requires_restart],
+  );
+
   const saveModelSettings = async () => {
     if (!settings || !modelDirty || saving) return;
     setSaving(true);
@@ -315,11 +381,31 @@ export function SettingsView({
         toolHintMaxLength: form.toolHintMaxLength,
       });
       applyPayload(payload);
+      if (payload.requires_restart) {
+        setPendingRestartSections((prev) => ({ ...prev, runtime: true }));
+      }
       setError(null);
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveImageGenerationSettings = async () => {
+    if (!settings || !imageGenerationDirty || imageGenerationSaving) return;
+    setImageGenerationSaving(true);
+    try {
+      const payload = await updateImageGenerationSettings(token, imageGenerationForm);
+      applyPayload(payload);
+      if (payload.requires_restart) {
+        setPendingRestartSections((prev) => ({ ...prev, image: true }));
+      }
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setImageGenerationSaving(false);
     }
   };
 
@@ -342,6 +428,9 @@ export function SettingsView({
         apiBase: providerForm.apiBase.trim(),
       });
       applyPayload(payload);
+      if (payload.requires_restart) {
+        setPendingRestartSections((prev) => ({ ...prev, image: true }));
+      }
       setProviderForms((prev) => ({
         ...prev,
         [providerName]: {
@@ -381,6 +470,9 @@ export function SettingsView({
 
     setWebSearchSaving(true);
     try {
+      const webFetchRestartRequired =
+        (webSearchForm.useJinaReader ?? settings.web.fetch.use_jina_reader) !==
+        settings.web.fetch.use_jina_reader;
       const update: WebSearchSettingsUpdate = {
         provider: webSearchForm.provider,
         maxResults: webSearchForm.maxResults,
@@ -391,6 +483,9 @@ export function SettingsView({
       if (provider.credential === "base_url") update.baseUrl = baseUrl;
       const payload = await updateWebSearchSettings(token, update);
       applyPayload(payload);
+      if (payload.requires_restart || webFetchRestartRequired) {
+        setPendingRestartSections((prev) => ({ ...prev, web: true }));
+      }
       setWebSearchForm((prev) => ({
         provider: payload.web_search.provider,
         apiKey: "",
@@ -482,7 +577,15 @@ export function SettingsView({
     if (!settings) return null;
     switch (activeSection) {
       case "overview":
-        return <OverviewSettings settings={settings} onSelectSection={setActiveSection} />;
+        return (
+          <OverviewSettings
+            settings={settings}
+            requiresRestart={hasPendingRestart}
+            onRestart={onRestart}
+            isRestarting={isRestarting}
+            onSelectSection={setActiveSection}
+          />
+        );
       case "appearance":
         return (
           <AppearanceSettings
@@ -530,6 +633,24 @@ export function SettingsView({
             }
             onSaveProvider={saveProvider}
             onResetProviderDraft={resetProviderDraft}
+            imageProviderRestartPending={pendingRestartSections.image}
+            onRestart={onRestart}
+            isRestarting={isRestarting}
+          />
+        );
+      case "image":
+        return (
+          <ImageGenerationSettings
+            settings={settings}
+            form={imageGenerationForm}
+            dirty={imageGenerationDirty}
+            saving={imageGenerationSaving}
+            onChangeForm={setImageGenerationForm}
+            onSave={saveImageGenerationSettings}
+            onOpenProviders={() => setActiveSection("providers")}
+            onRestart={onRestart}
+            isRestarting={isRestarting}
+            requiresRestartPending={pendingRestartSections.image}
           />
         );
       case "web":
@@ -550,6 +671,9 @@ export function SettingsView({
             }}
             onReset={resetWebSearchDraft}
             onSave={saveWebSearch}
+            onRestart={onRestart}
+            isRestarting={isRestarting}
+            requiresRestartPending={pendingRestartSections.web}
           />
         );
       case "runtime":
@@ -563,6 +687,7 @@ export function SettingsView({
             onSave={saveRuntimeSettings}
             onRestart={onRestart}
             isRestarting={isRestarting}
+            requiresRestartPending={pendingRestartSections.runtime}
           />
         );
       case "advanced":
@@ -624,6 +749,7 @@ const SETTINGS_NAV_ITEMS: Array<{ key: SettingsSectionKey; icon: LucideIcon; fal
   { key: "appearance", icon: Palette, fallback: "Appearance" },
   { key: "models", icon: SlidersHorizontal, fallback: "Models" },
   { key: "providers", icon: KeyRound, fallback: "Providers" },
+  { key: "image", icon: ImageIcon, fallback: "Image" },
   { key: "web", icon: Globe2, fallback: "Web" },
   { key: "runtime", icon: Server, fallback: "Runtime" },
   { key: "advanced", icon: ShieldCheck, fallback: "Advanced" },
@@ -706,9 +832,15 @@ function SettingsSidebar({
 
 function OverviewSettings({
   settings,
+  requiresRestart,
+  onRestart,
+  isRestarting,
   onSelectSection,
 }: {
   settings: SettingsPayload;
+  requiresRestart: boolean;
+  onRestart?: () => void;
+  isRestarting?: boolean;
   onSelectSection: (section: SettingsSectionKey) => void;
 }) {
   const { t } = useTranslation();
@@ -739,6 +871,17 @@ function OverviewSettings({
           onClick={() => onSelectSection("web")}
         />
         <OverviewTile
+          icon={ImageIcon}
+          title={tx("settings.overview.imageGeneration", "Image generation")}
+          value={settings.image_generation.enabled ? tx("settings.values.enabled", "Enabled") : tx("settings.values.disabled", "Disabled")}
+          caption={`${providerLabel(settings.image_generation.providers, settings.image_generation.provider)} · ${
+            settings.image_generation.provider_configured
+              ? tx("settings.values.configured", "Configured")
+              : tx("settings.values.notConfigured", "Not configured")
+          }`}
+          onClick={() => onSelectSection("image")}
+        />
+        <OverviewTile
           icon={HardDrive}
           title={tx("settings.overview.workspace", "Workspace")}
           value={settings.runtime.workspace_path}
@@ -758,13 +901,29 @@ function OverviewSettings({
               {settings.runtime.gateway_host}:{settings.runtime.gateway_port}
             </span>
           </SettingsRow>
-          <SettingsRow title={tx("settings.rows.restartState", "Restart state")}>
-            <StatusPill tone={settings.requires_restart ? "warning" : "success"}>
-              {settings.requires_restart
-                ? tx("settings.values.restartRequired", "Restart required")
-                : tx("settings.values.liveReload", "Live reload ready")}
-            </StatusPill>
-          </SettingsRow>
+          {requiresRestart ? (
+            <SettingsRow title={tx("settings.rows.pendingChanges", "Pending changes")}>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <StatusPill>{tx("settings.values.restartPending", "Restart pending")}</StatusPill>
+                {onRestart ? (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={onRestart}
+                    disabled={isRestarting}
+                    className="rounded-full"
+                  >
+                    {isRestarting ? (
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                    ) : (
+                      <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                    )}
+                    {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
+                  </Button>
+                ) : null}
+              </div>
+            </SettingsRow>
+          ) : null}
         </SettingsGroup>
       </section>
     </div>
@@ -979,7 +1138,7 @@ function ModelsSettings({
           <SettingsFooter
             dirty={dirty}
             saving={saving}
-            saved={settings.requires_restart && !dirty}
+            saved={false}
             onSave={onSave}
           />
           {configuredProviders.length === 0 ? (
@@ -1010,6 +1169,9 @@ function ProvidersSettings({
   onChangeProviderForm,
   onSaveProvider,
   onResetProviderDraft,
+  imageProviderRestartPending,
+  onRestart,
+  isRestarting,
 }: {
   settings: SettingsPayload;
   expandedProvider: string | null;
@@ -1025,6 +1187,9 @@ function ProvidersSettings({
   onChangeProviderForm: (provider: string, value: Partial<{ apiKey: string; apiBase: string }>) => void;
   onSaveProvider: (provider: string) => void;
   onResetProviderDraft: (provider: string) => void;
+  imageProviderRestartPending: boolean;
+  onRestart?: () => void;
+  isRestarting?: boolean;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -1177,6 +1342,29 @@ function ProvidersSettings({
       <p className="max-w-[42rem] text-[13px] leading-6 text-muted-foreground">
         {t("settings.byok.description")}
       </p>
+      {imageProviderRestartPending && onRestart ? (
+        <div className="flex min-h-[48px] items-center justify-between gap-3 border-y border-border/55 py-3">
+          <p className="text-[13px] leading-5 text-muted-foreground">
+            {tx("settings.status.imageProviderRestart", "Image provider changes saved. Restart when ready.")}
+          </p>
+          <div className="shrink-0">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onRestart}
+              disabled={isRestarting}
+              className="rounded-full"
+            >
+              {isRestarting ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+              )}
+              {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
         <Input
@@ -1204,6 +1392,171 @@ function ProvidersSettings({
   );
 }
 
+function ImageGenerationSettings({
+  settings,
+  form,
+  dirty,
+  saving,
+  onChangeForm,
+  onSave,
+  onOpenProviders,
+  onRestart,
+  isRestarting,
+  requiresRestartPending,
+}: {
+  settings: SettingsPayload;
+  form: ImageGenerationSettingsUpdate;
+  dirty: boolean;
+  saving: boolean;
+  onChangeForm: Dispatch<SetStateAction<ImageGenerationSettingsUpdate>>;
+  onSave: () => void;
+  onOpenProviders: () => void;
+  onRestart?: () => void;
+  isRestarting?: boolean;
+  requiresRestartPending: boolean;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const selectedProvider =
+    settings.image_generation.providers.find((provider) => provider.name === form.provider) ??
+    settings.image_generation.providers[0];
+  const providerConfigured = !!selectedProvider?.configured;
+  const missingCredential = form.enabled && !providerConfigured;
+  const aspectOptions = optionRowsWithCurrent(
+    IMAGE_ASPECT_RATIO_OPTIONS.map((value) => ({ name: value, label: value })),
+    form.defaultAspectRatio,
+  );
+  const sizeOptions = optionRowsWithCurrent(
+    IMAGE_SIZE_OPTIONS.map((value) => ({ name: value, label: value })),
+    form.defaultImageSize,
+  );
+
+  return (
+    <div className="space-y-7">
+      <section>
+        <SettingsSectionTitle>{tx("settings.sections.imageGeneration", "Image generation")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.rows.imageGeneration", "Image generation")}
+            description={tx("settings.help.imageGeneration", "Expose generate_image in chats when a configured image provider is available.")}
+          >
+            <ToggleButton
+              checked={form.enabled}
+              onChange={(enabled) => onChangeForm((prev) => ({ ...prev, enabled }))}
+              label={form.enabled ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.imageProvider", "Image provider")}
+            description={tx("settings.help.imageProvider", "Choose the registry provider used by generate_image.")}
+          >
+            <ProviderPicker
+              providers={settings.image_generation.providers}
+              value={form.provider}
+              emptyLabel={tx("settings.image.selectProvider", "Select provider")}
+              onChange={(provider) => onChangeForm((prev) => ({ ...prev, provider }))}
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.imageProviderStatus", "Provider status")}
+            description={tx("settings.help.imageProviderStatus", "Image generation reuses provider credentials from Providers.")}
+          >
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <StatusPill tone={providerConfigured ? "success" : "neutral"}>
+                {providerConfigured
+                  ? tx("settings.values.configured", "Configured")
+                  : tx("settings.values.notConfigured", "Not configured")}
+              </StatusPill>
+              {!providerConfigured ? (
+                <Button size="sm" variant="outline" onClick={onOpenProviders} className="rounded-full">
+                  {tx("settings.image.configureProvider", "Configure provider")}
+                </Button>
+              ) : null}
+            </div>
+          </SettingsRow>
+          <SettingsRow title={tx("settings.rows.imageProviderBase", "Provider base")}>
+            <span className="max-w-[320px] truncate text-right text-[13px] text-muted-foreground">
+              {selectedProvider?.api_base || selectedProvider?.default_api_base || selectedProvider?.name || tx("settings.values.notAvailable", "Not available")}
+            </span>
+          </SettingsRow>
+        </SettingsGroup>
+      </section>
+
+      <section>
+        <SettingsSectionTitle>{tx("settings.sections.imageDefaults", "Defaults")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <SettingsRow
+            title={tx("settings.rows.imageModel", "Image model")}
+            description={tx("settings.help.imageModel", "Model name sent to the selected image provider.")}
+          >
+            <Input
+              value={form.model}
+              onChange={(event) => onChangeForm((prev) => ({ ...prev, model: event.target.value }))}
+              className="h-8 w-[min(300px,70vw)] rounded-full text-[13px]"
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.defaultAspectRatio", "Default aspect")}
+            description={tx("settings.help.defaultAspectRatio", "Used when the prompt does not choose an aspect ratio.")}
+          >
+            <ProviderPicker
+              providers={aspectOptions}
+              value={form.defaultAspectRatio}
+              emptyLabel={tx("settings.image.selectAspect", "Select aspect")}
+              onChange={(defaultAspectRatio) =>
+                onChangeForm((prev) => ({ ...prev, defaultAspectRatio }))
+              }
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.defaultImageSize", "Default size")}
+            description={tx("settings.help.defaultImageSize", "Size hint sent to providers that support it.")}
+          >
+            <ProviderPicker
+              providers={sizeOptions}
+              value={form.defaultImageSize}
+              emptyLabel={tx("settings.image.selectSize", "Select size")}
+              onChange={(defaultImageSize) =>
+                onChangeForm((prev) => ({ ...prev, defaultImageSize }))
+              }
+            />
+          </SettingsRow>
+          <SettingsRow
+            title={tx("settings.rows.maxImagesPerTurn", "Max images per turn")}
+            description={tx("settings.help.maxImagesPerTurn", "Upper bound for one generate_image request.")}
+          >
+            <NumberInput
+              value={form.maxImagesPerTurn}
+              min={1}
+              max={8}
+              onChange={(maxImagesPerTurn) =>
+                onChangeForm((prev) => ({ ...prev, maxImagesPerTurn }))
+              }
+            />
+          </SettingsRow>
+          <ReadOnlyRow title={tx("settings.rows.imageSaveDir", "Save directory")} value={settings.image_generation.save_dir} />
+          <RestartSettingsFooter
+            dirty={dirty}
+            saving={saving}
+            pendingRestart={requiresRestartPending}
+            disabled={missingCredential}
+            message={
+              missingCredential
+                ? tx("settings.image.missingCredential", "Configure this provider before enabling image generation.")
+                : undefined
+            }
+            dirtyMessage={tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")}
+            pendingMessage={tx("settings.status.savedRestartApply", "Saved. Restart when ready.")}
+            onSave={onSave}
+            onRestart={onRestart}
+            isRestarting={isRestarting}
+          />
+        </SettingsGroup>
+      </section>
+    </div>
+  );
+}
+
 function WebSettings({
   settings,
   form,
@@ -1216,6 +1569,9 @@ function WebSettings({
   onToggleKeyEditing,
   onReset,
   onSave,
+  onRestart,
+  isRestarting,
+  requiresRestartPending,
 }: {
   settings: SettingsPayload;
   form: WebSearchSettingsUpdate;
@@ -1228,6 +1584,9 @@ function WebSettings({
   onToggleKeyEditing: () => void;
   onReset: () => void;
   onSave: () => void;
+  onRestart?: () => void;
+  isRestarting?: boolean;
+  requiresRestartPending: boolean;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -1241,13 +1600,15 @@ function WebSettings({
   const showKeyInput = selectedProvider?.credential === "api_key" && (!hasExistingSecret || keyEditing);
   const apiKey = form.apiKey?.trim() ?? "";
   const baseUrl = form.baseUrl?.trim() ?? "";
+  const effectiveJinaReader = form.useJinaReader ?? settings.web.fetch.use_jina_reader;
   const dirty =
     form.provider !== settings.web_search.provider ||
     apiKey.length > 0 ||
     baseUrl !== (settings.web_search.base_url ?? "") ||
     form.maxResults !== settings.web_search.max_results ||
     form.timeout !== settings.web_search.timeout ||
-    form.useJinaReader !== settings.web.fetch.use_jina_reader;
+    effectiveJinaReader !== settings.web.fetch.use_jina_reader;
+  const jinaReaderDirty = effectiveJinaReader !== settings.web.fetch.use_jina_reader;
   const missingCredential =
     selectedProvider?.credential === "api_key"
       ? !apiKey && !hasExistingSecret
@@ -1389,32 +1750,32 @@ function WebSettings({
             description={tx("settings.help.jinaReader", "Use Jina Reader for web_fetch when available.")}
           >
             <ToggleButton
-              checked={form.useJinaReader ?? settings.web.fetch.use_jina_reader}
+              checked={effectiveJinaReader}
               onChange={(useJinaReader) => onChangeForm((prev) => ({ ...prev, useJinaReader }))}
-              label={(form.useJinaReader ?? settings.web.fetch.use_jina_reader) ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
+              label={effectiveJinaReader ? tx("settings.values.on", "On") : tx("settings.values.off", "Off")}
             />
           </SettingsRow>
-          <div className="flex min-h-[58px] items-center justify-between gap-4 px-4 py-3 sm:px-5">
-            <div className="text-[13px] text-muted-foreground">
-              {missingCredential
+          <RestartSettingsFooter
+            dirty={dirty}
+            saving={saving}
+            pendingRestart={requiresRestartPending}
+            disabled={missingCredential}
+            message={
+              missingCredential
                 ? t("settings.byok.webSearch.missingCredential")
-                : t("settings.byok.webSearch.saveHint")}
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" variant="ghost" onClick={onReset} disabled={!dirty || saving} className="rounded-full">
-                {t("settings.actions.cancel")}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onSave}
-                disabled={!dirty || missingCredential || saving}
-                className="rounded-full"
-              >
-                {saving ? t("settings.actions.saving") : t("settings.actions.save")}
-              </Button>
-            </div>
-          </div>
+                : requiresRestartPending && !dirty
+                  ? tx("settings.status.savedRestartApply", "Saved. Restart when ready.")
+                  : jinaReaderDirty
+                    ? tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")
+                    : dirty
+                      ? t("settings.byok.webSearch.saveHint")
+                      : undefined
+            }
+            onSave={onSave}
+            onRestart={onRestart}
+            onReset={onReset}
+            isRestarting={isRestarting}
+          />
         </SettingsGroup>
       </section>
     </div>
@@ -1430,6 +1791,7 @@ function RuntimeSettings({
   onSave,
   onRestart,
   isRestarting,
+  requiresRestartPending,
 }: {
   form: AgentSettingsDraft;
   setForm: Dispatch<SetStateAction<AgentSettingsDraft>>;
@@ -1439,6 +1801,7 @@ function RuntimeSettings({
   onSave: () => void;
   onRestart?: () => void;
   isRestarting?: boolean;
+  requiresRestartPending: boolean;
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
@@ -1476,14 +1839,23 @@ function RuntimeSettings({
               onChange={(toolHintMaxLength) => setForm((prev) => ({ ...prev, toolHintMaxLength }))}
             />
           </SettingsRow>
-          <SettingsFooter dirty={dirty} saving={saving} saved={settings.requires_restart && !dirty} onSave={onSave} />
+          <RestartSettingsFooter
+            dirty={dirty}
+            saving={saving}
+            pendingRestart={requiresRestartPending}
+            dirtyMessage={tx("settings.status.restartAfterSaving", "Save changes, then restart when ready.")}
+            pendingMessage={tx("settings.status.savedRestartApply", "Saved. Restart when ready.")}
+            onSave={onSave}
+            onRestart={onRestart}
+            isRestarting={isRestarting}
+          />
         </SettingsGroup>
       </section>
 
       <section>
         <SettingsSectionTitle>{t("settings.sections.system")}</SettingsSectionTitle>
         <SettingsGroup>
-          {onRestart && (
+          {onRestart && !requiresRestartPending ? (
             <SettingsRow
               title={t("settings.rows.restart")}
               description={t("app.system.restartHint")}
@@ -1503,7 +1875,7 @@ function RuntimeSettings({
                 {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
               </Button>
             </SettingsRow>
-          )}
+          ) : null}
           <ReadOnlyRow title={t("settings.rows.configPath")} value={settings.runtime.config_path} />
           <ReadOnlyRow title={tx("settings.rows.workspacePath", "Workspace path")} value={settings.runtime.workspace_path} />
           <ReadOnlyRow title={tx("settings.rows.heartbeat", "Heartbeat")} value={settings.runtime.heartbeat.enabled ? `${settings.runtime.heartbeat.interval_s}s` : tx("settings.values.disabled", "Disabled")} />
@@ -1690,8 +2062,16 @@ function filterProviders(
   );
 }
 
+function optionRowsWithCurrent(
+  options: Array<{ name: string; label: string }>,
+  value: string,
+): Array<{ name: string; label: string }> {
+  if (!value || options.some((option) => option.name === value)) return options;
+  return [{ name: value, label: value }, ...options];
+}
+
 function providerLabel(
-  providers: SettingsPayload["web_search"]["providers"],
+  providers: Array<{ name: string; label: string }>,
   value: string,
 ): string {
   return providers.find((provider) => provider.name === value)?.label ?? value;
@@ -1818,6 +2198,106 @@ function ReadOnlyRow({ title, value }: { title: string; value: string }) {
   );
 }
 
+function RestartSettingsFooter({
+  dirty,
+  saving,
+  pendingRestart,
+  disabled = false,
+  message,
+  dirtyMessage,
+  pendingMessage,
+  onSave,
+  onRestart,
+  onReset,
+  isRestarting,
+}: {
+  dirty: boolean;
+  saving: boolean;
+  pendingRestart: boolean;
+  disabled?: boolean;
+  message?: string;
+  dirtyMessage?: string;
+  pendingMessage?: string;
+  onSave: () => void;
+  onRestart?: () => void;
+  onReset?: () => void;
+  isRestarting?: boolean;
+}) {
+  const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const statusMessage =
+    message ??
+    (pendingRestart && !dirty
+      ? pendingMessage ?? tx("settings.status.savedRestartApply", "Saved. Restart when ready.")
+      : dirty
+        ? dirtyMessage ?? t("settings.status.unsaved")
+        : undefined);
+  const showStatusDot = !!statusMessage && (dirty || pendingRestart || disabled);
+
+  return (
+    <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+      <div className="min-w-0 text-[13px] leading-5 text-muted-foreground">
+        {statusMessage ? (
+          <span className="inline-flex items-center gap-2">
+            {showStatusDot ? (
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 shrink-0 rounded-full",
+                  disabled
+                    ? "bg-destructive/60"
+                    : pendingRestart && !dirty
+                      ? "bg-primary/65"
+                      : "bg-muted-foreground/45",
+                )}
+                aria-hidden
+              />
+            ) : null}
+            <span>{statusMessage}</span>
+          </span>
+        ) : null}
+      </div>
+      <div className="flex w-full shrink-0 flex-wrap justify-end gap-2 sm:w-auto">
+        {pendingRestart && !dirty && onRestart ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onRestart}
+            disabled={isRestarting}
+            className="rounded-full"
+          >
+            {isRestarting ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+            )}
+            {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
+          </Button>
+        ) : null}
+        {onReset ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onReset}
+            disabled={!dirty || saving}
+            className="rounded-full"
+          >
+            {t("settings.actions.cancel")}
+          </Button>
+        ) : null}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onSave}
+          disabled={!dirty || disabled || saving}
+          className="rounded-full"
+        >
+          {saving ? t("settings.actions.saving") : t("settings.actions.save")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function SettingsFooter({
   dirty,
   saving,
@@ -1830,14 +2310,21 @@ function SettingsFooter({
   onSave: () => void;
 }) {
   const { t } = useTranslation();
+  const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   return (
-    <div className="flex min-h-[58px] items-center justify-between gap-4 px-4 py-3 sm:px-5">
+    <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
       <div className="text-[13px] text-muted-foreground">
-        {saved ? t("settings.status.savedRestart") : t("settings.status.unsaved")}
+        {dirty
+          ? t("settings.status.unsaved")
+          : saved
+            ? t("settings.status.savedRestart")
+            : tx("settings.status.upToDate", "Up to date.")}
       </div>
-      <Button size="sm" variant="outline" onClick={onSave} disabled={!dirty || saving} className="rounded-full">
-        {saving ? t("settings.actions.saving") : t("settings.actions.save")}
-      </Button>
+      <div className="flex justify-end">
+        <Button size="sm" variant="outline" onClick={onSave} disabled={!dirty || saving} className="rounded-full">
+          {saving ? t("settings.actions.saving") : t("settings.actions.save")}
+        </Button>
+      </div>
     </div>
   );
 }

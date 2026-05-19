@@ -48,6 +48,7 @@ from nanobot.webui.settings_api import (
     WebUISettingsError,
     settings_payload,
     update_agent_settings,
+    update_image_generation_settings,
     update_provider_settings,
     update_web_search_settings,
 )
@@ -471,6 +472,7 @@ class WebSocketChannel(BaseChannel):
             static_dist_path.resolve() if static_dist_path is not None else None
         )
         self._runtime_model_name = runtime_model_name
+        self._settings_restart_sections: set[str] = set()
         # Process-local secret used to HMAC-sign media URLs. The signed URL is
         # the capability — anyone who holds a valid URL can fetch that one
         # file, nothing else. The secret regenerates on restart so links
@@ -648,6 +650,9 @@ class WebSocketChannel(BaseChannel):
         if got == "/api/settings/web-search/update":
             return self._handle_settings_web_search_update(request)
 
+        if got == "/api/settings/image-generation/update":
+            return self._handle_settings_image_generation_update(request)
+
         m = re.match(r"^/api/sessions/([^/]+)/messages$", got)
         if m:
             return self._handle_session_messages(request, m.group(1))
@@ -769,7 +774,25 @@ class WebSocketChannel(BaseChannel):
     def _handle_settings(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
-        return _http_json_response(settings_payload())
+        return _http_json_response(self._with_settings_restart_state(settings_payload()))
+
+    def _with_settings_restart_state(
+        self,
+        payload: dict[str, Any],
+        *,
+        section: str | None = None,
+    ) -> dict[str, Any]:
+        """Keep restart-required state alive for this gateway process."""
+        if section and payload.get("requires_restart"):
+            self._settings_restart_sections.add(section)
+        if self._settings_restart_sections:
+            payload = dict(payload)
+            payload["requires_restart"] = True
+            payload["restart_required_sections"] = sorted(self._settings_restart_sections)
+        else:
+            payload = dict(payload)
+            payload["restart_required_sections"] = []
+        return payload
 
     def _handle_commands(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
@@ -811,7 +834,9 @@ class WebSocketChannel(BaseChannel):
             payload = update_agent_settings(query)
         except WebUISettingsError as e:
             return _http_error(e.status, e.message)
-        return _http_json_response(payload)
+        return _http_json_response(
+            self._with_settings_restart_state(payload, section="runtime")
+        )
 
     def _handle_settings_provider_update(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
@@ -821,7 +846,7 @@ class WebSocketChannel(BaseChannel):
             payload = update_provider_settings(query)
         except WebUISettingsError as e:
             return _http_error(e.status, e.message)
-        return _http_json_response(payload)
+        return _http_json_response(self._with_settings_restart_state(payload, section="image"))
 
     def _handle_settings_web_search_update(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
@@ -831,7 +856,17 @@ class WebSocketChannel(BaseChannel):
             payload = update_web_search_settings(query)
         except WebUISettingsError as e:
             return _http_error(e.status, e.message)
-        return _http_json_response(payload)
+        return _http_json_response(self._with_settings_restart_state(payload, section="web"))
+
+    def _handle_settings_image_generation_update(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        try:
+            payload = update_image_generation_settings(query)
+        except WebUISettingsError as e:
+            return _http_error(e.status, e.message)
+        return _http_json_response(self._with_settings_restart_state(payload, section="image"))
 
     @staticmethod
     def _is_websocket_channel_session_key(key: str) -> bool:

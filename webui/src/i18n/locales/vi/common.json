@@ -63,6 +63,7 @@
       "appearance": "Appearance",
       "models": "Models",
       "providers": "Providers",
+      "image": "Image",
       "web": "Web",
       "runtime": "Runtime",
       "advanced": "Advanced"

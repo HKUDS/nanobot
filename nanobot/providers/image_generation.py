@@ -139,6 +139,11 @@ def get_image_gen_provider(name: str) -> type[ImageGenerationProvider] | None:
     return _IMAGE_GEN_PROVIDERS.get(name)
 
 
+def image_gen_provider_names() -> tuple[str, ...]:
+    """Return registered image generation provider names in registry order."""
+    return tuple(_IMAGE_GEN_PROVIDERS)
+
+
 def image_gen_provider_configs(config: Any) -> dict[str, Any]:
     providers_cfg = config.providers
     return {

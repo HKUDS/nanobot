@@ -66,6 +66,7 @@
       "appearance": "外观",
       "models": "模型",
       "providers": "提供商",
+      "image": "图片",
       "web": "Web",
       "runtime": "运行时",
       "advanced": "高级"
@@ -77,6 +78,8 @@
       "status": "状态",
       "localPreferences": "本地偏好",
       "presets": "预设",
+      "imageGeneration": "图片生成",
+      "imageDefaults": "默认值",
       "webSearch": "Web Search",
       "webBehavior": "行为",
       "identity": "身份",
@@ -93,6 +96,7 @@
       "activePreset": "当前预设",
       "gateway": "网关",
       "restartState": "重启状态",
+      "pendingChanges": "待处理更改",
       "selectedPreset": "选中的预设",
       "presetModel": "预设模型",
       "density": "密度",
@@ -101,6 +105,15 @@
       "maxResults": "最大结果数",
       "timeout": "超时",
       "jinaReader": "Jina Reader",
+      "imageGeneration": "图片生成",
+      "imageProvider": "图片 provider",
+      "imageProviderStatus": "Provider 状态",
+      "imageProviderBase": "Provider base",
+      "imageModel": "图片模型",
+      "defaultAspectRatio": "默认比例",
+      "defaultImageSize": "默认尺寸",
+      "maxImagesPerTurn": "每轮最多图片数",
+      "imageSaveDir": "保存目录",
       "botName": "Bot 名称",
       "botIcon": "Bot 图标",
       "timezone": "时区",
@@ -131,6 +144,13 @@
       "maxResults": "每次 web_search 返回的结果数量。",
       "timeout": "搜索 provider 请求超时秒数。",
       "jinaReader": "可用时为 web_fetch 使用 Jina Reader。",
+      "imageGeneration": "当已配置图片 provider 时，在对话中开放 generate_image。",
+      "imageProvider": "选择 generate_image 使用的 registry provider。",
+      "imageProviderStatus": "图片生成复用 Providers 里的凭证配置。",
+      "imageModel": "发送给所选图片 provider 的模型名称。",
+      "defaultAspectRatio": "当提示词没有选择比例时使用。",
+      "defaultImageSize": "发送给支持该能力的 provider 的尺寸提示。",
+      "maxImagesPerTurn": "单次 generate_image 请求允许的图片上限。",
       "botName": "显示在使用 bot 身份的运行时界面里。",
       "botIcon": "显示在 bot 名称旁的短 emoji 或文本。",
       "timezone": "运行时上下文和计划任务使用的 IANA 时区。",
@@ -143,8 +163,7 @@
       "notAvailable": "不可用",
       "enabled": "已启用",
       "disabled": "已禁用",
-      "restartRequired": "需要重启",
-      "liveReload": "可热更新",
+      "restartPending": "等待重启",
       "comfortable": "舒适",
       "compact": "紧凑",
       "auto": "自动",
@@ -158,7 +177,11 @@
       "loading": "正在加载设置...",
       "loadError": "无法加载设置",
       "unsaved": "有未保存的更改。",
-      "savedRestart": "已保存。重启 nanobot 后生效。"
+      "upToDate": "已是最新。",
+      "savedRestart": "已保存。重启 nanobot 后生效。",
+      "restartAfterSaving": "保存后，可在合适时重启。",
+      "savedRestartApply": "已保存，可稍后重启。",
+      "imageProviderRestart": "图片 provider 改动已保存，可稍后重启。"
     },
     "actions": {
       "save": "保存",
@@ -215,11 +238,19 @@
       "configuredCount": "已配置 {{count}} 个",
       "totalProviders": "共 {{count}} 个可用",
       "webSearch": "Web Search",
+      "imageGeneration": "图片生成",
       "workspace": "Workspace"
     },
     "providers": {
       "searchPlaceholder": "搜索 provider",
       "noMatches": "没有匹配的 provider。"
+    },
+    "image": {
+      "selectProvider": "选择 provider",
+      "selectAspect": "选择比例",
+      "selectSize": "选择尺寸",
+      "configureProvider": "配置 provider",
+      "missingCredential": "启用图片生成前，请先配置这个 provider。"
     }
   },
   "chat": {

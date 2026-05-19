@@ -10,6 +10,10 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from nanobot.config.loader import get_config_path, load_config, save_config
+from nanobot.providers.image_generation import (
+    get_image_gen_provider,
+    image_gen_provider_names,
+)
 from nanobot.providers.registry import PROVIDERS, find_by_name
 
 QueryParams = dict[str, list[str]]
@@ -25,6 +29,17 @@ _WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
 )
 _WEB_SEARCH_PROVIDER_BY_NAME = {
     provider["name"]: provider for provider in _WEB_SEARCH_PROVIDER_OPTIONS
+}
+
+_IMAGE_GENERATION_ASPECT_RATIOS = {
+    "1:1",
+    "3:4",
+    "9:16",
+    "4:3",
+    "16:9",
+    "3:2",
+    "2:3",
+    "21:9",
 }
 
 
@@ -74,6 +89,40 @@ def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
     )
 
 
+def _parse_bool(value: str, field: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized not in {"1", "0", "true", "false", "yes", "no"}:
+        raise WebUISettingsError(f"{field} must be boolean")
+    return normalized in {"1", "true", "yes"}
+
+
+def _image_generation_provider_rows(config: Any) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for name in image_gen_provider_names():
+        spec = find_by_name(name)
+        provider_config = getattr(config.providers, name, None)
+        configured = (
+            _provider_configured_for_settings(spec, provider_config)
+            if spec is not None and provider_config is not None
+            else bool(getattr(provider_config, "api_key", None))
+        )
+        rows.append(
+            {
+                "name": name,
+                "label": spec.label if spec is not None else name,
+                "configured": configured,
+                "api_key_hint": _mask_secret_hint(
+                    getattr(provider_config, "api_key", None)
+                ),
+                "api_base": getattr(provider_config, "api_base", None),
+                "default_api_base": (
+                    spec.default_api_base if spec and spec.default_api_base else None
+                ),
+            }
+        )
+    return rows
+
+
 def settings_payload(*, requires_restart: bool = False) -> dict[str, Any]:
     config = load_config()
     defaults = config.agents.defaults
@@ -112,10 +161,20 @@ def settings_payload(*, requires_restart: bool = False) -> dict[str, Any]:
         )
 
     search_config = config.tools.web.search
+    image_config = config.tools.image_generation
     search_provider = (
         search_config.provider
         if search_config.provider in _WEB_SEARCH_PROVIDER_BY_NAME
         else "duckduckgo"
+    )
+    image_providers = _image_generation_provider_rows(config)
+    selected_image_provider = next(
+        (
+            provider
+            for provider in image_providers
+            if provider["name"] == image_config.provider
+        ),
+        None,
     )
     model_presets = [
         {
@@ -186,6 +245,19 @@ def settings_payload(*, requires_restart: bool = False) -> dict[str, Any]:
                 "use_jina_reader": config.tools.web.fetch.use_jina_reader,
             },
         },
+        "image_generation": {
+            "enabled": image_config.enabled,
+            "provider": image_config.provider,
+            "provider_configured": bool(
+                selected_image_provider and selected_image_provider["configured"]
+            ),
+            "model": image_config.model,
+            "default_aspect_ratio": image_config.default_aspect_ratio,
+            "default_image_size": image_config.default_image_size,
+            "max_images_per_turn": image_config.max_images_per_turn,
+            "save_dir": image_config.save_dir,
+            "providers": image_providers,
+        },
         "runtime": {
             "config_path": str(get_config_path().expanduser()),
             "workspace_path": str(config.workspace_path),
@@ -220,6 +292,7 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
     config = load_config()
     defaults = config.agents.defaults
     changed = False
+    restart_required = False
 
     if "model_preset" in query or "modelPreset" in query:
         preset = (_query_first_alias(query, "model_preset", "modelPreset") or "").strip()
@@ -269,6 +342,7 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
         if defaults.timezone != timezone:
             defaults.timezone = timezone
             changed = True
+            restart_required = True
 
     bot_name = _query_first_alias(query, "bot_name", "botName")
     if bot_name is not None:
@@ -278,6 +352,7 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
         if defaults.bot_name != bot_name:
             defaults.bot_name = bot_name
             changed = True
+            restart_required = True
 
     bot_icon = _query_first_alias(query, "bot_icon", "botIcon")
     if bot_icon is not None:
@@ -285,6 +360,7 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
         if defaults.bot_icon != bot_icon:
             defaults.bot_icon = bot_icon
             changed = True
+            restart_required = True
 
     tool_hint_max_length = _query_first_alias(
         query,
@@ -301,10 +377,11 @@ def update_agent_settings(query: QueryParams) -> dict[str, Any]:
         if defaults.tool_hint_max_length != parsed:
             defaults.tool_hint_max_length = parsed
             changed = True
+            restart_required = True
 
     if changed:
         save_config(config)
-    return settings_payload(requires_restart=False)
+    return settings_payload(requires_restart=restart_required)
 
 
 def update_provider_settings(query: QueryParams) -> dict[str, Any]:
@@ -337,7 +414,14 @@ def update_provider_settings(query: QueryParams) -> dict[str, Any]:
 
     if changed:
         save_config(config)
-    return settings_payload(requires_restart=False)
+    image_config = config.tools.image_generation
+    restart_required = (
+        changed
+        and image_config.enabled
+        and image_config.provider == spec.name
+        and get_image_gen_provider(spec.name) is not None
+    )
+    return settings_payload(requires_restart=restart_required)
 
 
 def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
@@ -351,6 +435,7 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
     web_config = config.tools.web
     previous_provider = search_config.provider
     changed = False
+    restart_required = False
 
     def set_search_value(attr: str, value: object) -> None:
         nonlocal changed
@@ -416,9 +501,109 @@ def update_web_search_settings(query: QueryParams) -> dict[str, Any]:
         normalized = use_jina_reader.strip().lower()
         if normalized not in {"1", "0", "true", "false", "yes", "no"}:
             raise WebUISettingsError("use_jina_reader must be boolean")
+        previous_jina_reader = web_config.fetch.use_jina_reader
         set_fetch_value("use_jina_reader", normalized in {"1", "true", "yes"})
+        if web_config.fetch.use_jina_reader != previous_jina_reader:
+            restart_required = True
 
     if changed:
         save_config(config)
-    return settings_payload(requires_restart=False)
+    return settings_payload(requires_restart=restart_required)
 
+
+def update_image_generation_settings(query: QueryParams) -> dict[str, Any]:
+    config = load_config()
+    image_config = config.tools.image_generation
+    changed = False
+
+    provider_name = _query_first(query, "provider")
+    if provider_name is not None:
+        provider_name = provider_name.strip().lower()
+        if not provider_name:
+            raise WebUISettingsError("image generation provider is required")
+        if get_image_gen_provider(provider_name) is None:
+            raise WebUISettingsError("unknown image generation provider")
+        if image_config.provider != provider_name:
+            image_config.provider = provider_name
+            changed = True
+
+    enabled = _query_first(query, "enabled")
+    if enabled is not None:
+        parsed_enabled = _parse_bool(enabled, "enabled")
+        if image_config.enabled != parsed_enabled:
+            image_config.enabled = parsed_enabled
+            changed = True
+
+    model = _query_first(query, "model")
+    if model is not None:
+        model = model.strip()
+        if not model:
+            raise WebUISettingsError("image generation model is required")
+        if len(model) > 200:
+            raise WebUISettingsError("image generation model is too long")
+        if image_config.model != model:
+            image_config.model = model
+            changed = True
+
+    default_aspect_ratio = _query_first_alias(
+        query,
+        "default_aspect_ratio",
+        "defaultAspectRatio",
+    )
+    if default_aspect_ratio is not None:
+        default_aspect_ratio = default_aspect_ratio.strip()
+        if default_aspect_ratio not in _IMAGE_GENERATION_ASPECT_RATIOS:
+            raise WebUISettingsError("unsupported image generation aspect ratio")
+        if image_config.default_aspect_ratio != default_aspect_ratio:
+            image_config.default_aspect_ratio = default_aspect_ratio
+            changed = True
+
+    default_image_size = _query_first_alias(
+        query,
+        "default_image_size",
+        "defaultImageSize",
+    )
+    if default_image_size is not None:
+        default_image_size = default_image_size.strip()
+        if not default_image_size:
+            raise WebUISettingsError("default image size is required")
+        if len(default_image_size) > 32 or not all(
+            char.isascii() and (char.isalnum() or char in {"x", "X", ":", "-", "_"})
+            for char in default_image_size
+        ):
+            raise WebUISettingsError("unsupported image generation size")
+        if image_config.default_image_size != default_image_size:
+            image_config.default_image_size = default_image_size
+            changed = True
+
+    max_images_per_turn = _query_first_alias(
+        query,
+        "max_images_per_turn",
+        "maxImagesPerTurn",
+    )
+    if max_images_per_turn is not None:
+        try:
+            parsed_max = int(max_images_per_turn)
+        except ValueError:
+            raise WebUISettingsError("max_images_per_turn must be an integer") from None
+        if parsed_max < 1 or parsed_max > 8:
+            raise WebUISettingsError("max_images_per_turn must be between 1 and 8")
+        if image_config.max_images_per_turn != parsed_max:
+            image_config.max_images_per_turn = parsed_max
+            changed = True
+
+    if image_config.enabled:
+        selected_provider = next(
+            (
+                provider
+                for provider in _image_generation_provider_rows(config)
+                if provider["name"] == image_config.provider
+            ),
+            None,
+        )
+        if not selected_provider or not selected_provider["configured"]:
+            raise WebUISettingsError("image generation provider is not configured")
+
+    if changed:
+        save_config(config)
+    return settings_payload(requires_restart=changed)

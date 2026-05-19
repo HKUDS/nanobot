@@ -1,5 +1,6 @@
 import type {
   ChatSummary,
+  ImageGenerationSettingsUpdate,
   ProviderSettingsUpdate,
   SettingsPayload,
   SettingsUpdate,
@@ -197,6 +198,24 @@ export async function updateWebSearchSettings(
   }
   return request<SettingsPayload>(
     `${base}/api/settings/web-search/update?${query}`,
+    token,
+  );
+}
+
+export async function updateImageGenerationSettings(
+  token: string,
+  update: ImageGenerationSettingsUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  query.set("enabled", String(update.enabled));
+  query.set("provider", update.provider);
+  query.set("model", update.model);
+  query.set("default_aspect_ratio", update.defaultAspectRatio);
+  query.set("default_image_size", update.defaultImageSize);
+  query.set("max_images_per_turn", String(update.maxImagesPerTurn));
+  return request<SettingsPayload>(
+    `${base}/api/settings/image-generation/update?${query}`,
     token,
   );
 }

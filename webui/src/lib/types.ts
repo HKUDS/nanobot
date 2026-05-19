@@ -202,6 +202,24 @@ export interface SettingsPayload {
       use_jina_reader: boolean;
     };
   };
+  image_generation: {
+    enabled: boolean;
+    provider: string;
+    provider_configured: boolean;
+    model: string;
+    default_aspect_ratio: string;
+    default_image_size: string;
+    max_images_per_turn: number;
+    save_dir: string;
+    providers: Array<{
+      name: string;
+      label: string;
+      configured: boolean;
+      api_key_hint?: string | null;
+      api_base?: string | null;
+      default_api_base?: string | null;
+    }>;
+  };
   runtime: {
     config_path: string;
     workspace_path: string;
@@ -229,6 +247,7 @@ export interface SettingsPayload {
     exec_path_append_set: boolean;
   };
   requires_restart: boolean;
+  restart_required_sections?: Array<"runtime" | "web" | "image">;
 }
 
 export interface SettingsUpdate {
@@ -254,6 +273,15 @@ export interface WebSearchSettingsUpdate {
   maxResults?: number;
   timeout?: number;
   useJinaReader?: boolean;
+}
+
+export interface ImageGenerationSettingsUpdate {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  defaultAspectRatio: string;
+  defaultImageSize: string;
+  maxImagesPerTurn: number;
 }
 
 export interface SlashCommand {

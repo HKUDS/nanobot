@@ -551,6 +551,34 @@ describe("App layout", () => {
                 search: { max_results: 5, timeout: 30 },
                 fetch: { use_jina_reader: true },
               },
+              image_generation: {
+                enabled: false,
+                provider: "openrouter",
+                provider_configured: true,
+                model: "openai/gpt-5.4-image-2",
+                default_aspect_ratio: "1:1",
+                default_image_size: "1K",
+                max_images_per_turn: 4,
+                save_dir: "generated",
+                providers: [
+                  {
+                    name: "openrouter",
+                    label: "OpenRouter",
+                    configured: true,
+                    api_key_hint: "sk-o••••test",
+                    api_base: "https://openrouter.ai/api/v1",
+                    default_api_base: "https://openrouter.ai/api/v1",
+                  },
+                  {
+                    name: "gemini",
+                    label: "Gemini",
+                    configured: false,
+                    api_key_hint: null,
+                    api_base: null,
+                    default_api_base: "https://generativelanguage.googleapis.com/v1beta/openai/",
+                  },
+                ],
+              },
               runtime: {
                 config_path: "/tmp/config.json",
                 workspace_path: "/tmp/workspace",
@@ -603,6 +631,7 @@ describe("App layout", () => {
     );
     expect(within(settingsNav).getByRole("button", { name: "Models" })).toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Providers" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Image" })).toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Web" })).toBeInTheDocument();
     expect(within(settingsNav).getByRole("button", { name: "Advanced" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
@@ -628,6 +657,13 @@ describe("App layout", () => {
     expect(screen.getByDisplayValue("http://localhost:1337/v1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Image" }));
+    expect(screen.getByRole("heading", { name: "Image" })).toBeInTheDocument();
+    expect(screen.getByText("Provider status")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("openai/gpt-5.4-image-2")).toBeInTheDocument();
+    expect(screen.getByText("Save directory")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Web" }));
     expect(screen.getByText("Search provider")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Brave Search/ })).toBeInTheDocument();
@@ -642,6 +678,10 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Brave Search" }));
     expect(screen.getByText("BSAo••••ew20")).toBeInTheDocument();
     expect(screen.queryByDisplayValue("unsaved-brave-key")).not.toBeInTheDocument();
+
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Runtime" }));
+    expect(screen.getByText("Bot name")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("returns from settings to the blank start page when no session was active", async () => {
@@ -718,6 +758,26 @@ describe("App layout", () => {
                 user_agent: null,
                 search: { max_results: 5, timeout: 30 },
                 fetch: { use_jina_reader: true },
+              },
+              image_generation: {
+                enabled: false,
+                provider: "openrouter",
+                provider_configured: false,
+                model: "openai/gpt-5.4-image-2",
+                default_aspect_ratio: "1:1",
+                default_image_size: "1K",
+                max_images_per_turn: 4,
+                save_dir: "generated",
+                providers: [
+                  {
+                    name: "openrouter",
+                    label: "OpenRouter",
+                    configured: false,
+                    api_key_hint: null,
+                    api_base: null,
+                    default_api_base: "https://openrouter.ai/api/v1",
+                  },
+                ],
               },
               runtime: {
                 config_path: "/tmp/config.json",

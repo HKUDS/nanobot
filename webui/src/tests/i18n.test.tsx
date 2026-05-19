@@ -13,6 +13,7 @@ const SETTINGS_NAV_KEYS = [
   "appearance",
   "models",
   "providers",
+  "image",
   "web",
   "runtime",
   "advanced",

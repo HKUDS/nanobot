@@ -1043,11 +1043,23 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         search_providers = {provider["name"]: provider for provider in body["web_search"]["providers"]}
         assert search_providers["duckduckgo"]["credential"] == "none"
         assert search_providers["searxng"]["credential"] == "base_url"
+        assert body["image_generation"]["enabled"] is False
+        assert body["image_generation"]["provider"] == "openrouter"
+        assert body["image_generation"]["provider_configured"] is False
+        assert body["image_generation"]["default_aspect_ratio"] == "1:1"
+        image_providers = {
+            provider["name"]: provider
+            for provider in body["image_generation"]["providers"]
+        }
+        assert image_providers["openrouter"]["label"] == "OpenRouter"
+        assert image_providers["openrouter"]["configured"] is False
+        assert image_providers["gemini"]["label"] == "Gemini"
         assert body["runtime"]["config_path"] == str(config_path)
         assert body["runtime"]["workspace_path"].endswith(".nanobot/workspace")
         assert body["runtime"]["gateway_port"] == 18790
         assert body["advanced"]["exec_enabled"] is True
         assert body["advanced"]["mcp_server_count"] == 0
+        assert body["restart_required_sections"] == []
         assert "secret-key" not in settings.text
         assert "brave-secret" not in settings.text
 
@@ -1062,6 +1074,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert provider_body["requires_restart"] is False
         provider_rows = {provider["name"]: provider for provider in provider_body["providers"]}
         assert provider_rows["openrouter"]["configured"] is True
+        assert provider_body["image_generation"]["provider_configured"] is True
         assert "sk-or-test" not in provider_updated.text
 
         local_provider_updated = await _http_get(
@@ -1086,7 +1099,9 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
             headers={"Authorization": "Bearer tok"},
         )
         assert updated.status_code == 200
-        assert updated.json()["requires_restart"] is False
+        updated_body = updated.json()
+        assert updated_body["requires_restart"] is True
+        assert updated_body["restart_required_sections"] == ["runtime"]
 
         preset_updated = await _http_get(
             "http://127.0.0.1:"
@@ -1112,12 +1127,46 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         )
         assert search_updated.status_code == 200
         search_body = search_updated.json()
-        assert search_body["requires_restart"] is False
+        assert search_body["requires_restart"] is True
+        assert search_body["restart_required_sections"] == ["runtime", "web"]
         assert search_body["web_search"]["provider"] == "searxng"
         assert search_body["web_search"]["api_key_hint"] is None
         assert search_body["web_search"]["base_url"] == "https://search.example.com"
         assert search_body["web_search"]["max_results"] == 8
         assert search_body["web"]["fetch"]["use_jina_reader"] is False
+
+        image_updated = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/image-generation/update?enabled=true"
+            "&provider=openrouter&model=openai%2Fgpt-image-1"
+            "&default_aspect_ratio=16%3A9&default_image_size=2K"
+            "&max_images_per_turn=3",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert image_updated.status_code == 200
+        image_body = image_updated.json()
+        assert image_body["requires_restart"] is True
+        assert image_body["restart_required_sections"] == ["image", "runtime", "web"]
+        assert image_body["image_generation"]["enabled"] is True
+        assert image_body["image_generation"]["model"] == "openai/gpt-image-1"
+        assert image_body["image_generation"]["default_aspect_ratio"] == "16:9"
+        assert image_body["image_generation"]["default_image_size"] == "2K"
+        assert image_body["image_generation"]["max_images_per_turn"] == 3
+
+        image_provider_updated = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/provider/update?provider=openrouter"
+            "&api_key=sk-or-next&api_base=https%3A%2F%2Fopenrouter.ai%2Fapi%2Fv1",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert image_provider_updated.status_code == 200
+        assert image_provider_updated.json()["requires_restart"] is True
+        assert image_provider_updated.json()["restart_required_sections"] == [
+            "image",
+            "runtime",
+            "web",
+        ]
+        assert "sk-or-next" not in image_provider_updated.text
 
         bad_web = await _http_get(
             "http://127.0.0.1:"
@@ -1125,6 +1174,13 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
             headers={"Authorization": "Bearer tok"},
         )
         assert bad_web.status_code == 400
+
+        bad_image = await _http_get(
+            "http://127.0.0.1:"
+            f"{port}/api/settings/image-generation/update?provider=missing",
+            headers={"Authorization": "Bearer tok"},
+        )
+        assert bad_image.status_code == 400
 
         saved = load_config(config_path)
         assert saved.agents.defaults.model == "atomic_chat/test"
@@ -1143,6 +1199,12 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert saved.tools.web.search.max_results == 8
         assert saved.tools.web.search.timeout == 45
         assert saved.tools.web.fetch.use_jina_reader is False
+        assert saved.tools.image_generation.enabled is True
+        assert saved.tools.image_generation.provider == "openrouter"
+        assert saved.tools.image_generation.model == "openai/gpt-image-1"
+        assert saved.tools.image_generation.default_aspect_ratio == "16:9"
+        assert saved.tools.image_generation.default_image_size == "2K"
+        assert saved.tools.image_generation.max_images_per_turn == 3
     finally:
         await channel.stop()
         await server_task

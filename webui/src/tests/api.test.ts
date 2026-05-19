@@ -7,6 +7,7 @@ import {
   listSessions,
   listSlashCommands,
   updateSidebarState,
+  updateImageGenerationSettings,
   updateProviderSettings,
   updateSettings,
   updateWebSearchSettings,
@@ -91,6 +92,24 @@ describe("webui API helpers", () => {
 
     expect(fetch).toHaveBeenCalledWith(
       "/api/settings/web-search/update?provider=searxng&base_url=https%3A%2F%2Fsearch.example.com&max_results=8&timeout=45&use_jina_reader=false",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("serializes image generation settings updates", async () => {
+    await updateImageGenerationSettings("tok", {
+      enabled: true,
+      provider: "openrouter",
+      model: "openai/gpt-5.4-image-2",
+      defaultAspectRatio: "16:9",
+      defaultImageSize: "2K",
+      maxImagesPerTurn: 3,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/image-generation/update?enabled=true&provider=openrouter&model=openai%2Fgpt-5.4-image-2&default_aspect_ratio=16%3A9&default_image_size=2K&max_images_per_turn=3",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),

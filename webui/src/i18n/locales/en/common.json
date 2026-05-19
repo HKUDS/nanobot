@@ -78,6 +78,7 @@
       "appearance": "Appearance",
       "models": "Models",
       "providers": "Providers",
+      "image": "Image",
       "web": "Web",
       "runtime": "Runtime",
       "advanced": "Advanced"
@@ -89,6 +90,8 @@
       "status": "Status",
       "localPreferences": "Local preferences",
       "presets": "Presets",
+      "imageGeneration": "Image generation",
+      "imageDefaults": "Defaults",
       "webSearch": "Web search",
       "webBehavior": "Behavior",
       "identity": "Identity",
@@ -105,6 +108,7 @@
       "activePreset": "Active preset",
       "gateway": "Gateway",
       "restartState": "Restart state",
+      "pendingChanges": "Pending changes",
       "selectedPreset": "Selected preset",
       "presetModel": "Preset model",
       "density": "Density",
@@ -113,6 +117,15 @@
       "maxResults": "Max results",
       "timeout": "Timeout",
       "jinaReader": "Jina reader",
+      "imageGeneration": "Image generation",
+      "imageProvider": "Image provider",
+      "imageProviderStatus": "Provider status",
+      "imageProviderBase": "Provider base",
+      "imageModel": "Image model",
+      "defaultAspectRatio": "Default aspect",
+      "defaultImageSize": "Default size",
+      "maxImagesPerTurn": "Max images per turn",
+      "imageSaveDir": "Save directory",
       "botName": "Bot name",
       "botIcon": "Bot icon",
       "timezone": "Timezone",
@@ -143,6 +156,13 @@
       "maxResults": "Results returned by each web_search call.",
       "timeout": "Seconds before a search provider request times out.",
       "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "imageGeneration": "Expose generate_image in chats when a configured image provider is available.",
+      "imageProvider": "Choose the registry provider used by generate_image.",
+      "imageProviderStatus": "Image generation reuses provider credentials from Providers.",
+      "imageModel": "Model name sent to the selected image provider.",
+      "defaultAspectRatio": "Used when the prompt does not choose an aspect ratio.",
+      "defaultImageSize": "Size hint sent to providers that support it.",
+      "maxImagesPerTurn": "Upper bound for one generate_image request.",
       "botName": "Shown in runtime surfaces that use the configured bot identity.",
       "botIcon": "Short emoji or text shown beside the bot name.",
       "timezone": "IANA timezone used by runtime context and schedules.",
@@ -155,8 +175,7 @@
       "notAvailable": "Not available",
       "enabled": "Enabled",
       "disabled": "Disabled",
-      "restartRequired": "Restart required",
-      "liveReload": "Live reload ready",
+      "restartPending": "Restart pending",
       "comfortable": "Comfortable",
       "compact": "Compact",
       "auto": "Auto",
@@ -170,7 +189,11 @@
       "loading": "Loading settings...",
       "loadError": "Could not load settings",
       "unsaved": "Unsaved changes.",
-      "savedRestart": "Saved. Restart nanobot to apply."
+      "upToDate": "Up to date.",
+      "savedRestart": "Saved. Restart nanobot to apply.",
+      "restartAfterSaving": "Save changes, then restart when ready.",
+      "savedRestartApply": "Saved. Restart when ready.",
+      "imageProviderRestart": "Image provider changes saved. Restart when ready."
     },
     "actions": {
       "save": "Save",
@@ -227,11 +250,19 @@
       "configuredCount": "{{count}} configured",
       "totalProviders": "{{count}} available",
       "webSearch": "Web search",
+      "imageGeneration": "Image generation",
       "workspace": "Workspace"
     },
     "providers": {
       "searchPlaceholder": "Search providers",
       "noMatches": "No providers match this search."
+    },
+    "image": {
+      "selectProvider": "Select provider",
+      "selectAspect": "Select aspect",
+      "selectSize": "Select size",
+      "configureProvider": "Configure provider",
+      "missingCredential": "Configure this provider before enabling image generation."
     }
   },
   "chat": {
