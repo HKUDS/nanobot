@@ -152,6 +152,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
 | `mimo` | LLM (MiMo) | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
 | `longcat` | LLM (LongCat) | [longcat.chat](https://longcat.chat/platform/docs/zh/) |
+| `ant_ling` | LLM (Ant Ling / 蚂蚁百灵) | [developer.ant-ling.com](https://developer.ant-ling.com/en/docs/api-reference/openai/) |
 | `ollama` | LLM (local, Ollama) | — |
 | `lm_studio` | LLM (local, LM Studio) | — |
 | `atomic_chat` | LLM (local, [Atomic Chat](https://atomic.chat/)) | — |
@@ -441,6 +442,34 @@ usually only need to set `apiKey`.
 
 Official model names include `LongCat-Flash-Chat`, `LongCat-Flash-Thinking`,
 `LongCat-Flash-Thinking-2601`, and `LongCat-Flash-Lite`.
+
+</details>
+
+<details>
+<summary><b>Ant Ling (OpenAI-compatible)</b></summary>
+
+Ant Ling is available through nanobot's built-in OpenAI-compatible provider flow.
+The default API base points to `https://api.ant-ling.com/v1`, so you usually
+only need to set `apiKey`.
+
+```json
+{
+  "providers": {
+    "antLing": {
+      "apiKey": "${ANT_LING_API_KEY}"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "ant_ling",
+      "model": "Ling-2.6-flash"
+    }
+  }
+}
+```
+
+Official OpenAI-compatible model names include `Ling-2.6-1T`,
+`Ling-2.6-flash`, `Ling-2.5-1T`, `Ling-1T`, `Ring-2.5-1T`, and `Ring-1T`.
 
 </details>
 

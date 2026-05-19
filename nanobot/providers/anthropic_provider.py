@@ -590,6 +590,7 @@ class AnthropicProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
         on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_tool_call_delta: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         kwargs = self._build_kwargs(
             messages, tools, model, max_tokens, temperature,
@@ -598,11 +599,12 @@ class AnthropicProvider(LLMProvider):
         idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
             async with self._client.messages.stream(**kwargs) as stream:
-                if on_content_delta or on_thinking_delta:
+                if on_content_delta or on_thinking_delta or on_tool_call_delta:
                     # Idle timeout must track *any* SSE chunk (thinking_delta,
                     # tool JSON deltas, etc.), not only text_stream tokens.
                     # Otherwise extended thinking can stall text_stream for minutes
                     # while the connection is healthy (e.g. MiniMax Anthropic).
+                    tool_blocks: dict[int, dict[str, str]] = {}
                     while True:
                         try:
                             chunk = await asyncio.wait_for(
@@ -611,7 +613,22 @@ class AnthropicProvider(LLMProvider):
                             )
                         except StopAsyncIteration:
                             break
-                        if (
+                        if chunk.type == "content_block_start":
+                            block = getattr(chunk, "content_block", None)
+                            if getattr(block, "type", None) == "tool_use":
+                                index = int(getattr(chunk, "index", 0) or 0)
+                                state = {
+                                    "call_id": str(getattr(block, "id", "") or ""),
+                                    "name": str(getattr(block, "name", "") or ""),
+                                }
+                                tool_blocks[index] = state
+                                if on_tool_call_delta:
+                                    await on_tool_call_delta({
+                                        "index": index,
+                                        **state,
+                                        "arguments_delta": "",
+                                    })
+                        elif (
                             chunk.type == "content_block_delta"
                             and getattr(chunk.delta, "type", None) == "thinking_delta"
                         ):
@@ -625,6 +642,20 @@ class AnthropicProvider(LLMProvider):
                             text = getattr(chunk.delta, "text", None) or ""
                             if text and on_content_delta:
                                 await on_content_delta(text)
+                        elif (
+                            chunk.type == "content_block_delta"
+                            and getattr(chunk.delta, "type", None) == "input_json_delta"
+                        ):
+                            partial = getattr(chunk.delta, "partial_json", None) or ""
+                            if partial and on_tool_call_delta:
+                                index = int(getattr(chunk, "index", 0) or 0)
+                                state = tool_blocks.get(index, {})
+                                await on_tool_call_delta({
+                                    "index": index,
+                                    "call_id": state.get("call_id", ""),
+                                    "name": state.get("name", ""),
+                                    "arguments_delta": partial,
+                                })
                 response = await asyncio.wait_for(
                     stream.get_final_message(),
                     timeout=idle_timeout_s,

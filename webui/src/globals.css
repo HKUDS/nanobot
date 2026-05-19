@@ -131,6 +131,9 @@
     position: relative;
     color: hsl(var(--muted-foreground));
   }
+  .file-reference-sheen {
+    color: inherit;
+  }
   .streaming-text-sheen::after {
     content: attr(data-sheen-text);
     position: absolute;

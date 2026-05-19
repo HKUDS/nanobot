@@ -98,6 +98,201 @@ def test_replay_file_edit_event_creates_file_activity(tmp_path, monkeypatch) -> 
     assert msgs[2]["activitySegmentId"] != msgs[1]["activitySegmentId"]
 
 
+def test_replay_file_edit_progress_merges_after_interleaved_activity(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-file-progress"
+    for ev in (
+        {"event": "user", "chat_id": "t-file-progress", "text": "edit"},
+        {
+            "event": "message",
+            "chat_id": "t-file-progress",
+            "text": 'write_file({"path":"foo.txt"})',
+            "kind": "tool_hint",
+        },
+        {
+            "event": "file_edit",
+            "chat_id": "t-file-progress",
+            "edits": [
+                {
+                    "version": 1,
+                    "call_id": "call-write",
+                    "tool": "write_file",
+                    "path": "foo.txt",
+                    "phase": "start",
+                    "added": 12,
+                    "deleted": 0,
+                    "approximate": True,
+                    "status": "editing",
+                },
+            ],
+        },
+        {
+            "event": "message",
+            "chat_id": "t-file-progress",
+            "text": "still working",
+            "kind": "progress",
+        },
+        {
+            "event": "file_edit",
+            "chat_id": "t-file-progress",
+            "edits": [
+                {
+                    "version": 1,
+                    "call_id": "call-write",
+                    "tool": "write_file",
+                    "path": "foo.txt",
+                    "phase": "end",
+                    "added": 30,
+                    "deleted": 0,
+                    "approximate": False,
+                    "status": "done",
+                },
+            ],
+        },
+    ):
+        append_transcript_object(key, ev)
+
+    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
+    file_edit_messages = [msg for msg in msgs if msg.get("fileEdits")]
+
+    assert len(file_edit_messages) == 1
+    assert file_edit_messages[0]["fileEdits"] == [
+        {
+            "version": 1,
+            "call_id": "call-write",
+            "tool": "write_file",
+            "path": "foo.txt",
+            "phase": "end",
+            "added": 30,
+            "deleted": 0,
+            "approximate": False,
+            "status": "done",
+        },
+    ]
+
+
+def test_replay_file_edit_pending_placeholder_upgrades_to_path(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-file-pending"
+    for ev in (
+        {"event": "user", "chat_id": "t-file-pending", "text": "write"},
+        {
+            "event": "file_edit",
+            "chat_id": "t-file-pending",
+            "edits": [
+                {
+                    "version": 1,
+                    "call_id": "call-write",
+                    "tool": "write_file",
+                    "path": "",
+                    "phase": "start",
+                    "added": 1,
+                    "deleted": 0,
+                    "approximate": True,
+                    "status": "editing",
+                    "pending": True,
+                },
+            ],
+        },
+        {
+            "event": "file_edit",
+            "chat_id": "t-file-pending",
+            "edits": [
+                {
+                    "version": 1,
+                    "call_id": "call-write",
+                    "tool": "write_file",
+                    "path": "foo.txt",
+                    "phase": "start",
+                    "added": 12,
+                    "deleted": 0,
+                    "approximate": True,
+                    "status": "editing",
+                },
+            ],
+        },
+    ):
+        append_transcript_object(key, ev)
+
+    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
+    file_edit_messages = [msg for msg in msgs if msg.get("fileEdits")]
+
+    assert len(file_edit_messages) == 1
+    assert file_edit_messages[0]["fileEdits"] == [
+        {
+            "version": 1,
+            "call_id": "call-write",
+            "tool": "write_file",
+            "path": "foo.txt",
+            "phase": "start",
+            "added": 12,
+            "deleted": 0,
+            "approximate": True,
+            "status": "editing",
+        },
+    ]
+
+
+def test_replay_keeps_new_file_edit_after_reasoning_in_order(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    key = "websocket:t-file-order"
+    for ev in (
+        {"event": "user", "chat_id": "t-file-order", "text": "edit"},
+        {
+            "event": "file_edit",
+            "chat_id": "t-file-order",
+            "edits": [
+                {
+                    "version": 1,
+                    "call_id": "call-one",
+                    "tool": "write_file",
+                    "path": "one.txt",
+                    "phase": "start",
+                    "added": 10,
+                    "deleted": 0,
+                    "approximate": True,
+                    "status": "editing",
+                },
+            ],
+        },
+        {"event": "reasoning_delta", "chat_id": "t-file-order", "text": "Check next."},
+        {"event": "reasoning_end", "chat_id": "t-file-order"},
+        {
+            "event": "file_edit",
+            "chat_id": "t-file-order",
+            "edits": [
+                {
+                    "version": 1,
+                    "call_id": "call-two",
+                    "tool": "write_file",
+                    "path": "two.txt",
+                    "phase": "start",
+                    "added": 20,
+                    "deleted": 0,
+                    "approximate": True,
+                    "status": "editing",
+                },
+            ],
+        },
+    ):
+        append_transcript_object(key, ev)
+
+    msgs = replay_transcript_to_ui_messages(read_transcript_lines(key))
+
+    assert [msg.get("fileEdits", [{}])[0].get("path") if msg.get("fileEdits") else msg.get("reasoning") for msg in msgs[1:]] == [
+        "one.txt",
+        "Check next.",
+        "two.txt",
+    ]
+    file_edit_segments = [
+        msg.get("activitySegmentId")
+        for msg in msgs
+        if msg.get("fileEdits")
+    ]
+    assert len(file_edit_segments) == 2
+    assert file_edit_segments[0] != file_edit_segments[1]
+
+
 def test_build_response_schema(monkeypatch, tmp_path) -> None:
     from nanobot.utils.webui_transcript import build_webui_thread_response
 

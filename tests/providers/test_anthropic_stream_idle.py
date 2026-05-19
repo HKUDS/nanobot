@@ -130,6 +130,74 @@ async def test_chat_stream_invokes_on_thinking_delta_for_thinking_delta() -> Non
 
 
 @pytest.mark.asyncio
+async def test_chat_stream_invokes_tool_call_delta_for_input_json_delta() -> None:
+    provider = AnthropicProvider(api_key="sk-test")
+    provider._client = MagicMock()
+
+    chunks = [
+        SimpleNamespace(
+            type="content_block_start",
+            index=1,
+            content_block=SimpleNamespace(
+                type="tool_use",
+                id="toolu_1",
+                name="write_file",
+            ),
+        ),
+        SimpleNamespace(
+            type="content_block_delta",
+            index=1,
+            delta=SimpleNamespace(
+                type="input_json_delta",
+                partial_json='{"path":"notes.md","content":"',
+            ),
+        ),
+        SimpleNamespace(
+            type="content_block_delta",
+            index=1,
+            delta=SimpleNamespace(type="input_json_delta", partial_json="line\\n"),
+        ),
+    ]
+    fake = _FakeAsyncStream(chunks)
+    stream_cm = MagicMock()
+    stream_cm.__aenter__ = AsyncMock(return_value=fake)
+    stream_cm.__aexit__ = AsyncMock(return_value=None)
+    provider._client.messages.stream = MagicMock(return_value=stream_cm)
+
+    deltas: list[dict] = []
+
+    async def on_tool_delta(delta: dict) -> None:
+        deltas.append(delta)
+
+    await provider.chat_stream(
+        messages=[{"role": "user", "content": "write"}],
+        on_tool_call_delta=on_tool_delta,
+    )
+
+    assert deltas == [
+        {
+            "index": 1,
+            "call_id": "toolu_1",
+            "name": "write_file",
+            "arguments_delta": "",
+        },
+        {
+            "index": 1,
+            "call_id": "toolu_1",
+            "name": "write_file",
+            "arguments_delta": '{"path":"notes.md","content":"',
+        },
+        {
+            "index": 1,
+            "call_id": "toolu_1",
+            "name": "write_file",
+            "arguments_delta": "line\\n",
+        },
+    ]
+    fake.get_final_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_chat_stream_without_callback_still_finalizes() -> None:
     provider = AnthropicProvider(api_key="sk-test")
     provider._client = MagicMock()

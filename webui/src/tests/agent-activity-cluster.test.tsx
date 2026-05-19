@@ -236,6 +236,7 @@ describe("AgentActivityCluster", () => {
               call_id: "call-edit",
               tool: "edit_file",
               path: "src/app.tsx",
+              absolute_path: "/Users/renxubin/project/src/app.tsx",
               phase: "end",
               added: 12,
               deleted: 3,
@@ -250,13 +251,17 @@ describe("AgentActivityCluster", () => {
       );
 
       expect(screen.getByRole("button", { name: /edited app\.tsx/i })).toBeInTheDocument();
+      expect(screen.getByTestId("activity-header-file-reference")).toHaveTextContent("app.tsx");
+      expect(screen.getByTestId("activity-header-file-reference")).toHaveAttribute(
+        "aria-label",
+        "/Users/renxubin/project/src/app.tsx",
+      );
       fireEvent.click(screen.getByRole("button", { name: /edited app\.tsx/i }));
 
       expect(screen.queryByText("Edited files")).not.toBeInTheDocument();
-      expect(screen.queryByText("Edited")).not.toBeInTheDocument();
       const fileRef = screen.getByTestId("activity-file-reference");
       expect(fileRef).toHaveTextContent("src/app.tsx");
-      expect(fileRef).toHaveAttribute("aria-label", "src/app.tsx");
+      expect(fileRef).toHaveAttribute("aria-label", "/Users/renxubin/project/src/app.tsx");
       await waitFor(() => {
         expect(screen.getAllByText("+12").length).toBeGreaterThan(0);
         expect(screen.getAllByText("-3").length).toBeGreaterThan(0);
@@ -264,6 +269,38 @@ describe("AgentActivityCluster", () => {
     } finally {
       restoreMotion();
     }
+  });
+
+  it("renders pending file edit placeholders before the path is known", () => {
+    render(
+      <AgentActivityCluster
+        messages={activityMessages("", {
+          id: "t2",
+          role: "tool",
+          kind: "trace",
+          content: "",
+          traces: [],
+          fileEdits: [{
+            call_id: "call-edit",
+            tool: "edit_file",
+            path: "",
+            phase: "start",
+            added: 0,
+            deleted: 0,
+            approximate: true,
+            status: "editing",
+            pending: true,
+          }],
+          createdAt: 3,
+        })}
+        isTurnStreaming
+        hasBodyBelow={false}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /preparing edit/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /preparing edit/i }));
+    expect(screen.getByText("Preparing file edit…")).toBeInTheDocument();
   });
 
   it("merges repeated edits for the same path and lets successful edits win over failures", async () => {

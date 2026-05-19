@@ -215,18 +215,19 @@ function absorbCompleteAssistantMessage(
 }
 
 function fileEditKey(edit: Pick<UIFileEdit, "call_id" | "tool" | "path">): string {
-  return `${edit.call_id}|${edit.tool}|${edit.path}`;
+  if (edit.call_id) return `${edit.call_id}|${edit.tool}`;
+  return `${edit.tool}|${edit.path}`;
 }
 
 function normalizeFileEdit(edit: UIFileEdit): UIFileEdit | null {
-  if (!edit || !edit.path || !edit.tool) return null;
+  if (!edit || !edit.tool || (!edit.path && !edit.pending)) return null;
   const inferredStatus =
     edit.phase === "error"
       ? "error"
       : edit.phase === "end"
         ? "done"
         : "editing";
-  return {
+  const normalized: UIFileEdit = {
     ...edit,
     call_id: edit.call_id || `${edit.tool}:${edit.path}`,
     added: Number.isFinite(edit.added) ? Math.max(0, Math.round(edit.added)) : 0,
@@ -235,6 +236,8 @@ function normalizeFileEdit(edit: UIFileEdit): UIFileEdit | null {
       ? edit.status
       : inferredStatus,
   };
+  if (edit.pending && !edit.path) normalized.pending = true;
+  return normalized;
 }
 
 function mergeFileEdits(existing: UIFileEdit[] | undefined, incoming: UIFileEdit[]): UIFileEdit[] {
@@ -250,9 +253,29 @@ function mergeFileEdits(existing: UIFileEdit[] | undefined, incoming: UIFileEdit
       next.push(edit);
       continue;
     }
-    next[existingIndex] = { ...next[existingIndex], ...edit };
+    const merged = { ...next[existingIndex], ...edit };
+    if (edit.path && !edit.pending) delete merged.pending;
+    next[existingIndex] = merged;
   }
   return next;
+}
+
+function findFileEditTraceIndex(
+  prev: UIMessage[],
+  segmentId: string | null,
+  incoming: UIFileEdit[],
+): number | null {
+  const incomingKeys = new Set(incoming.map(fileEditKey));
+  for (let i = prev.length - 1; i >= 0; i -= 1) {
+    const candidate = prev[i];
+    if (candidate.role === "user") break;
+    if (candidate.kind !== "trace" || !candidate.fileEdits?.length) continue;
+    if (segmentId && candidate.activitySegmentId === segmentId) return i;
+    for (const existing of candidate.fileEdits) {
+      if (incomingKeys.has(fileEditKey(existing))) return i;
+    }
+  }
+  return null;
 }
 
 /**
@@ -534,6 +557,7 @@ export function useNanobotStream(
         if (suppressStreamUntilTurnEndRef.current) return;
         const chunk = typeof ev.text === "string" ? ev.text : "";
         if (!chunk) return;
+        clearActivitySegment();
         setIsStreaming(true);
         pendingStreamEventsRef.current.push({ kind: "delta", text: chunk });
         schedulePendingStreamFlush();
@@ -544,6 +568,7 @@ export function useNanobotStream(
         if (suppressStreamUntilTurnEndRef.current) return;
         const chunk = ev.text;
         if (!chunk) return;
+        if (fileEditSegmentRef.current) clearActivitySegment();
         setIsStreaming(true);
         pendingStreamEventsRef.current.push({ kind: "reasoning", text: chunk });
         schedulePendingStreamFlush();
@@ -622,6 +647,7 @@ export function useNanobotStream(
         if (ev.kind === "reasoning") {
           const line = ev.text;
           if (!line) return;
+          if (fileEditSegmentRef.current) clearActivitySegment();
           setMessages((prev) => closeReasoningStream(attachReasoningChunk(prev, line, {
             ensure: ensureActivitySegmentId,
           })));
@@ -685,6 +711,7 @@ export function useNanobotStream(
         // flight, drop the placeholder so we don't render the text twice.
         // Do NOT reset isStreaming here — only ``turn_end`` signals that
         // the full turn (all tool calls + final text) is complete.
+        clearActivitySegment();
         setMessages((prev) => {
           const activeId = buffer.current?.messageId;
           buffer.current = null;
@@ -709,27 +736,32 @@ export function useNanobotStream(
       if (ev.event === "file_edit") {
         const edits = Array.isArray(ev.edits) ? ev.edits : [];
         if (edits.length === 0) return;
+        const normalized = mergeFileEdits(undefined, edits);
+        if (normalized.length === 0) return;
+        const opensFileEditPhase = normalized.some(
+          (edit) => edit.status === "editing" || edit.phase === "start",
+        );
+        let eventSegmentId = fileEditSegmentRef.current;
+        if (!eventSegmentId && opensFileEditPhase) {
+          eventSegmentId = detachedActivitySegmentId();
+          fileEditSegmentRef.current = eventSegmentId;
+        }
         setMessages((prev) => {
-          const last = prev[prev.length - 1];
-          let segmentId = fileEditSegmentRef.current;
-          if (!segmentId || !(last?.kind === "trace" && last.fileEdits?.length)) {
-            segmentId = detachedActivitySegmentId();
-            fileEditSegmentRef.current = segmentId;
-          }
-          if (
-            last
-            && last.kind === "trace"
-            && !last.isStreaming
-            && !!last.fileEdits?.length
-            && last.activitySegmentId === segmentId
-          ) {
+          let segmentId = eventSegmentId;
+          const targetIndex = findFileEditTraceIndex(prev, segmentId, normalized);
+          if (targetIndex !== null) {
+            const target = prev[targetIndex];
+            segmentId = target.activitySegmentId ?? segmentId ?? detachedActivitySegmentId();
+            if (opensFileEditPhase) fileEditSegmentRef.current = segmentId;
             const merged: UIMessage = {
-              ...last,
-              fileEdits: mergeFileEdits(last.fileEdits, edits),
-              activitySegmentId: last.activitySegmentId ?? segmentId,
+              ...target,
+              fileEdits: mergeFileEdits(target.fileEdits, normalized),
+              activitySegmentId: segmentId,
             };
-            return [...prev.slice(0, -1), merged];
+            return replaceMessageAt(prev, targetIndex, merged);
           }
+          segmentId = segmentId ?? detachedActivitySegmentId();
+          if (opensFileEditPhase) fileEditSegmentRef.current = segmentId;
           return [
             ...prev,
             {
@@ -738,7 +770,7 @@ export function useNanobotStream(
               kind: "trace",
               content: "",
               traces: [],
-              fileEdits: mergeFileEdits(undefined, edits),
+              fileEdits: normalized,
               activitySegmentId: segmentId,
               createdAt: Date.now(),
             },

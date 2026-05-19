@@ -89,6 +89,7 @@ export interface UIFileEdit {
   call_id: string;
   tool: string;
   path: string;
+  absolute_path?: string;
   phase?: "start" | "end" | "error" | string;
   added: number;
   deleted: number;
@@ -96,6 +97,7 @@ export interface UIFileEdit {
   status: "editing" | "done" | "error";
   binary?: boolean;
   error?: string;
+  pending?: boolean;
 }
 
 export interface ChatSummary {

@@ -144,6 +144,17 @@ def replay_transcript_to_ui_messages(
     def _ensure_activity_segment() -> str:
         return active_activity_segment_id or _new_activity_segment()
 
+    def close_activity_for_answer() -> None:
+        nonlocal active_activity_segment_id, active_file_edit_segment_id
+        active_activity_segment_id = None
+        active_file_edit_segment_id = None
+
+    def close_file_edit_phase_before_activity() -> None:
+        nonlocal active_activity_segment_id, active_file_edit_segment_id
+        if active_file_edit_segment_id:
+            active_activity_segment_id = None
+            active_file_edit_segment_id = None
+
     def attach_reasoning_chunk(prev: list[dict[str, Any]], chunk: str, idx: int) -> None:
         for i in range(len(prev) - 1, -1, -1):
             candidate = prev[i]
@@ -243,7 +254,7 @@ def replay_transcript_to_ui_messages(
                 return
 
     def absorb_complete(extra: dict[str, Any], idx: int) -> None:
-        nonlocal active_activity_segment_id
+        nonlocal active_activity_segment_id, active_file_edit_segment_id
         last = messages[-1] if messages else None
         if last and is_reasoning_only_placeholder(last):
             messages[-1] = {
@@ -262,35 +273,50 @@ def replay_transcript_to_ui_messages(
                 },
             )
         active_activity_segment_id = None
+        active_file_edit_segment_id = None
 
     def _file_edit_key(edit: dict[str, Any]) -> str:
-        return "|".join(
-            str(edit.get(k) or "")
-            for k in ("call_id", "tool", "path")
-        )
+        call_id = str(edit.get("call_id") or "")
+        tool = str(edit.get("tool") or "")
+        if call_id:
+            return f"{call_id}|{tool}"
+        return f"{tool}|{edit.get('path') or ''}"
+
+    def find_file_edit_trace_index(
+        segment: str | None,
+        edits: list[dict[str, Any]],
+    ) -> int | None:
+        incoming_keys = {_file_edit_key(edit) for edit in edits if isinstance(edit, dict)}
+        for i in range(len(messages) - 1, -1, -1):
+            candidate = messages[i]
+            if candidate.get("role") == "user":
+                break
+            if candidate.get("kind") != "trace" or not candidate.get("fileEdits"):
+                continue
+            if segment and candidate.get("activitySegmentId") == segment:
+                return i
+            existing_edits = candidate.get("fileEdits")
+            if not isinstance(existing_edits, list):
+                continue
+            for existing in existing_edits:
+                if isinstance(existing, dict) and _file_edit_key(existing) in incoming_keys:
+                    return i
+        return None
 
     def upsert_file_edits(edits: list[dict[str, Any]], idx: int) -> None:
         nonlocal active_file_edit_segment_id
         if not edits:
             return
-        last = messages[-1] if messages else None
-        if (
-            active_file_edit_segment_id
-            and last
-            and last.get("kind") == "trace"
-            and last.get("fileEdits")
-        ):
-            segment = active_file_edit_segment_id
-        else:
-            segment = _new_activity_segment(activate=False)
+        segment = active_file_edit_segment_id
+        target_index = find_file_edit_trace_index(segment, edits)
+        if target_index is not None:
+            last = messages[target_index]
+            segment = str(last.get("activitySegmentId") or segment or _new_activity_segment(activate=False))
             active_file_edit_segment_id = segment
-        if not (
-            last
-            and last.get("kind") == "trace"
-            and not last.get("isStreaming")
-            and last.get("fileEdits")
-            and last.get("activitySegmentId") == segment
-        ):
+        else:
+            if not segment:
+                segment = _new_activity_segment(activate=False)
+            active_file_edit_segment_id = segment
             messages.append(
                 {
                     "id": _new_id("tr", idx),
@@ -303,7 +329,11 @@ def replay_transcript_to_ui_messages(
                     "createdAt": _ts_base + idx,
                 },
             )
-            last = messages[-1]
+            target_index = len(messages) - 1
+            last = messages[target_index]
+        if not segment:
+            segment = _new_activity_segment(activate=False)
+            active_file_edit_segment_id = segment
         existing = list(last.get("fileEdits") or [])
         index_by_key = {
             _file_edit_key(edit): pos
@@ -316,11 +346,14 @@ def replay_transcript_to_ui_messages(
             key = _file_edit_key(edit)
             if key in index_by_key:
                 pos = index_by_key[key]
-                existing[pos] = {**existing[pos], **edit}
+                merged = {**existing[pos], **edit}
+                if edit.get("path") and not edit.get("pending"):
+                    merged.pop("pending", None)
+                existing[pos] = merged
             else:
                 index_by_key[key] = len(existing)
                 existing.append(dict(edit))
-        messages[-1] = {
+        messages[target_index] = {
             **last,
             "fileEdits": existing,
             "activitySegmentId": last.get("activitySegmentId") or segment,
@@ -365,6 +398,7 @@ def replay_transcript_to_ui_messages(
             chunk = rec.get("text")
             if not isinstance(chunk, str):
                 continue
+            close_activity_for_answer()
             adopted = find_active_placeholder(messages) if buffer_message_id is None else None
             if buffer_message_id is None:
                 if adopted:
@@ -403,6 +437,7 @@ def replay_transcript_to_ui_messages(
             chunk = rec.get("text")
             if not isinstance(chunk, str) or not chunk:
                 continue
+            close_file_edit_phase_before_activity()
             attach_reasoning_chunk(messages, chunk, idx)
             continue
 
@@ -424,6 +459,7 @@ def replay_transcript_to_ui_messages(
                 line = rec.get("text")
                 if not isinstance(line, str) or not line:
                     continue
+                close_file_edit_phase_before_activity()
                 attach_reasoning_chunk(messages, line, idx)
                 close_reasoning(messages)
                 continue
