@@ -732,6 +732,7 @@ class SignalChannel(BaseChannel):
                     "is_group": is_group_message,
                     "group_id": group_id,
                 },
+                is_dm=not is_group_message,
             )
         except Exception:
             await self._stop_typing(chat_id)
