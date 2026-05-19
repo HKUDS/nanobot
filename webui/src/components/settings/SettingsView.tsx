@@ -2291,29 +2291,12 @@ function RestartSettingsFooter({
       : dirty
         ? dirtyMessage ?? t("settings.status.unsaved")
         : undefined);
-  const showStatusDot = !!statusMessage && (dirty || pendingRestart || disabled);
+  const statusTone = disabled ? "danger" : dirty || pendingRestart ? "accent" : undefined;
 
   return (
     <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
       <div className="min-w-0 text-[13px] leading-5 text-muted-foreground">
-        {statusMessage ? (
-          <span className="inline-flex items-center gap-2">
-            {showStatusDot ? (
-              <span
-                className={cn(
-                  "h-1.5 w-1.5 shrink-0 rounded-full",
-                  disabled
-                    ? "bg-destructive/60"
-                    : pendingRestart && !dirty
-                      ? "bg-primary/65"
-                      : "bg-muted-foreground/45",
-                )}
-                aria-hidden
-              />
-            ) : null}
-            <span>{statusMessage}</span>
-          </span>
-        ) : null}
+        <SettingsStatusMessage tone={statusTone}>{statusMessage}</SettingsStatusMessage>
       </div>
       <div className="flex w-full shrink-0 flex-wrap justify-end gap-2 sm:w-auto">
         {pendingRestart && !dirty && onRestart ? (
@@ -2370,14 +2353,17 @@ function SettingsFooter({
 }) {
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
+  const statusMessage = dirty
+    ? t("settings.status.unsaved")
+    : saved
+      ? t("settings.status.savedRestart")
+      : tx("settings.status.upToDate", "Up to date.");
   return (
     <div className="flex min-h-[58px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
       <div className="text-[13px] text-muted-foreground">
-        {dirty
-          ? t("settings.status.unsaved")
-          : saved
-            ? t("settings.status.savedRestart")
-            : tx("settings.status.upToDate", "Up to date.")}
+        <SettingsStatusMessage tone={dirty || saved ? "accent" : undefined}>
+          {statusMessage}
+        </SettingsStatusMessage>
       </div>
       <div className="flex justify-end">
         <Button size="sm" variant="outline" onClick={onSave} disabled={!dirty || saving} className="rounded-full">
@@ -2385,6 +2371,31 @@ function SettingsFooter({
         </Button>
       </div>
     </div>
+  );
+}
+
+function SettingsStatusMessage({
+  children,
+  tone,
+}: {
+  children?: ReactNode;
+  tone?: "accent" | "danger";
+}) {
+  if (!children) return null;
+  return (
+    <span className="inline-flex items-center gap-2">
+      {tone ? (
+        <span
+          className={cn(
+            "h-1.5 w-1.5 shrink-0 rounded-full",
+            tone === "accent" && "bg-primary/65",
+            tone === "danger" && "bg-destructive/60",
+          )}
+          aria-hidden
+        />
+      ) : null}
+      <span>{children}</span>
+    </span>
   );
 }
 
