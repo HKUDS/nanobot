@@ -3,6 +3,7 @@ import type {
   ProviderSettingsUpdate,
   SettingsPayload,
   SettingsUpdate,
+  SidebarStatePayload,
   SlashCommand,
   WebSearchSettingsUpdate,
   WebuiThreadPersistedPayload,
@@ -123,6 +124,26 @@ export async function listSlashCommands(
       icon: command.icon,
       argHint: command.arg_hint ?? "",
     }));
+}
+
+export async function fetchSidebarState(
+  token: string,
+  base: string = "",
+): Promise<SidebarStatePayload> {
+  return request<SidebarStatePayload>(`${base}/api/webui/sidebar-state`, token);
+}
+
+export async function updateSidebarState(
+  token: string,
+  state: SidebarStatePayload,
+  base: string = "",
+): Promise<SidebarStatePayload> {
+  const query = new URLSearchParams();
+  query.set("state", JSON.stringify(state));
+  return request<SidebarStatePayload>(
+    `${base}/api/webui/sidebar-state/update?${query}`,
+    token,
+  );
 }
 
 export async function updateSettings(

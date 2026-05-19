@@ -2,9 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   deleteSession,
+  fetchSidebarState,
   fetchWebuiThread,
   listSessions,
   listSlashCommands,
+  updateSidebarState,
   updateProviderSettings,
   updateSettings,
   updateWebSearchSettings,
@@ -93,6 +95,50 @@ describe("webui API helpers", () => {
         headers: { Authorization: "Bearer tok" },
       }),
     );
+  });
+
+  it("reads and writes persisted sidebar state", async () => {
+    const state = {
+      schema_version: 1,
+      pinned_keys: ["websocket:chat-1"],
+      archived_keys: ["websocket:old"],
+      title_overrides: { "websocket:chat-1": "Release" },
+      tags_by_key: {},
+      collapsed_groups: {},
+      view: {
+        density: "compact" as const,
+        show_previews: false,
+        show_timestamps: false,
+        show_archived: true,
+        sort: "updated_desc" as const,
+      },
+      updated_at: null,
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => state,
+    } as Response);
+
+    await expect(fetchSidebarState("tok")).resolves.toEqual(state);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/sidebar-state",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await updateSidebarState("tok", state);
+    const [url, init] = vi.mocked(fetch).mock.calls.at(-1)!;
+    expect(String(url).startsWith("/api/webui/sidebar-state/update?")).toBe(true);
+    expect(init).toEqual(expect.objectContaining({
+      headers: { Authorization: "Bearer tok" },
+    }));
+    const encodedState = new URLSearchParams(String(url).split("?", 2)[1]).get("state");
+    expect(encodedState).toBeTruthy();
+    expect(JSON.parse(encodedState ?? "{}")).toMatchObject({
+      pinned_keys: ["websocket:chat-1"],
+      title_overrides: { "websocket:chat-1": "Release" },
+    });
   });
 
   it("maps generated session titles from the sessions list", async () => {

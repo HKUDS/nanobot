@@ -43,6 +43,10 @@ from nanobot.utils.media_decode import (
     save_base64_data_url,
 )
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
+from nanobot.utils.webui_sidebar_state import (
+    read_webui_sidebar_state,
+    write_webui_sidebar_state,
+)
 from nanobot.utils.webui_thread_disk import delete_webui_thread
 from nanobot.utils.webui_transcript import append_transcript_object, build_webui_thread_response
 from nanobot.utils.webui_turn_helpers import websocket_turn_wall_started_at
@@ -663,6 +667,12 @@ class WebSocketChannel(BaseChannel):
         if got == "/api/commands":
             return self._handle_commands(request)
 
+        if got == "/api/webui/sidebar-state":
+            return self._handle_webui_sidebar_state(request)
+
+        if got == "/api/webui/sidebar-state/update":
+            return self._handle_webui_sidebar_state_update(request)
+
         if got == "/api/settings/update":
             return self._handle_settings_update(request)
 
@@ -939,6 +949,33 @@ class WebSocketChannel(BaseChannel):
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
         return _http_json_response({"commands": builtin_command_palette()})
+
+    def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        return _http_json_response(read_webui_sidebar_state())
+
+    def _handle_webui_sidebar_state_update(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        raw_state = _query_first(query, "state")
+        if raw_state is None:
+            return _http_error(400, "missing state")
+        try:
+            decoded = json.loads(raw_state)
+        except json.JSONDecodeError:
+            return _http_error(400, "state must be JSON")
+        if not isinstance(decoded, dict):
+            return _http_error(400, "state must be an object")
+        try:
+            state = write_webui_sidebar_state(decoded)
+        except ValueError as e:
+            return _http_error(400, str(e))
+        except OSError:
+            self.logger.exception("failed to write webui sidebar state")
+            return _http_error(500, "failed to write sidebar state")
+        return _http_json_response(state)
 
     def _handle_settings_update(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
