@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nanobot.utils.webui_transcript import (
+from nanobot.webui.transcript import (
     WEBUI_TRANSCRIPT_SCHEMA_VERSION,
     append_transcript_object,
     read_transcript_lines,
@@ -294,7 +294,7 @@ def test_replay_keeps_new_file_edit_after_reasoning_in_order(tmp_path, monkeypat
 
 
 def test_build_response_schema(monkeypatch, tmp_path) -> None:
-    from nanobot.utils.webui_transcript import build_webui_thread_response
+    from nanobot.webui.transcript import build_webui_thread_response
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t3"

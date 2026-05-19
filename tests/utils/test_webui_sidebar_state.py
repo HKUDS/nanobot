@@ -1,6 +1,6 @@
 import json
 
-from nanobot.utils.webui_sidebar_state import (
+from nanobot.webui.sidebar_state import (
     default_webui_sidebar_state,
     read_webui_sidebar_state,
     webui_sidebar_state_path,

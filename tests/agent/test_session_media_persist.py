@@ -4,7 +4,7 @@ from pathlib import Path
 
 from nanobot.config.loader import set_config_path
 from nanobot.config.paths import get_media_dir
-from nanobot.utils.session_attachments import stage_media_paths_for_session_replay
+from nanobot.webui.attachments import stage_media_paths_for_session_replay
 
 
 def test_persist_media_stages_workspace_file(tmp_path: Path) -> None:
