@@ -225,6 +225,10 @@
     "loading": "載入中…",
     "noSessions": "目前還沒有會話。",
     "actions": "「{{title}}」的會話操作",
+    "activity": {
+      "running": "Agent 正在執行",
+      "complete": "Agent 已完成"
+    },
     "pin": "置頂",
     "unpin": "取消置頂",
     "rename": "重新命名",

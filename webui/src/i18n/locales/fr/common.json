@@ -225,6 +225,10 @@
     "loading": "Chargement…",
     "noSessions": "Aucune session pour le moment.",
     "actions": "Actions de la discussion {{title}}",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished"
+    },
     "pin": "Pin",
     "unpin": "Unpin",
     "rename": "Rename",

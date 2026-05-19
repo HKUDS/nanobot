@@ -260,6 +260,10 @@
     "loading": "加载中…",
     "noSessions": "还没有会话。",
     "actions": "“{{title}}” 的会话操作",
+    "activity": {
+      "running": "Agent 正在运行",
+      "complete": "Agent 已完成"
+    },
     "pin": "置顶",
     "unpin": "取消置顶",
     "rename": "重命名",

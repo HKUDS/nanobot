@@ -225,6 +225,10 @@
     "loading": "Đang tải…",
     "noSessions": "Chưa có phiên nào.",
     "actions": "Tác vụ cho cuộc trò chuyện {{title}}",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished"
+    },
     "pin": "Pin",
     "unpin": "Unpin",
     "rename": "Rename",

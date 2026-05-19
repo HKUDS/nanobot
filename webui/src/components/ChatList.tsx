@@ -30,6 +30,8 @@ interface ChatListProps {
   pinnedKeys?: string[];
   archivedKeys?: string[];
   titleOverrides?: Record<string, string>;
+  runningChatIds?: string[];
+  completedChatIds?: string[];
   density?: SidebarDensity;
   showPreviews?: boolean;
   showTimestamps?: boolean;
@@ -51,6 +53,8 @@ export function ChatList({
   pinnedKeys = [],
   archivedKeys = [],
   titleOverrides = {},
+  runningChatIds = [],
+  completedChatIds = [],
   density = "comfortable",
   showPreviews = false,
   showTimestamps = false,
@@ -94,6 +98,8 @@ export function ChatList({
   });
   const pinned = new Set(pinnedKeys);
   const archived = new Set(archivedKeys);
+  const running = new Set(runningChatIds);
+  const completed = new Set(completedChatIds);
   const compact = density === "compact";
 
   return (
@@ -123,6 +129,11 @@ export function ChatList({
                 const timestamp = showTimestamps
                   ? relativeTime(s.updatedAt ?? s.createdAt)
                   : "";
+                const activityState = running.has(s.chatId)
+                  ? "running"
+                  : completed.has(s.chatId)
+                    ? "complete"
+                    : null;
                 return (
                   <li key={s.key} className="min-w-0">
                     <div
@@ -155,6 +166,7 @@ export function ChatList({
                           </span>
                         ) : null}
                       </button>
+                      <SessionActivityIndicator state={activityState} />
                       <DropdownMenu modal={false}>
                         <DropdownMenuTrigger
                           className={cn(
@@ -219,6 +231,42 @@ export function ChatList({
       </div>
     </div>
   );
+}
+
+function SessionActivityIndicator({
+  state,
+}: {
+  state: "running" | "complete" | null;
+}) {
+  const { t } = useTranslation();
+
+  if (state === "running") {
+    const label = t("chat.activity.running");
+    return (
+      <span
+        aria-label={label}
+        title={label}
+        className="grid h-4 w-4 shrink-0 place-items-center"
+      >
+        <span className="h-3 w-3 animate-spin rounded-full border border-blue-500/25 border-t-blue-500 [animation-duration:1.4s] motion-reduce:animate-none dark:border-blue-400/25 dark:border-t-blue-400" />
+      </span>
+    );
+  }
+
+  if (state === "complete") {
+    const label = t("chat.activity.complete");
+    return (
+      <span
+        aria-label={label}
+        title={label}
+        className="grid h-4 w-4 shrink-0 place-items-center"
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.14)] dark:bg-blue-400 dark:shadow-[0_0_0_3px_rgba(96,165,250,0.18)]" />
+      </span>
+    );
+  }
+
+  return <span className="h-4 w-4 shrink-0" aria-hidden="true" />;
 }
 
 function groupSessions(

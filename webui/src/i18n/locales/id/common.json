@@ -225,6 +225,10 @@
     "loading": "Memuat…",
     "noSessions": "Belum ada sesi.",
     "actions": "Aksi obrolan untuk {{title}}",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished"
+    },
     "pin": "Pin",
     "unpin": "Unpin",
     "rename": "Rename",

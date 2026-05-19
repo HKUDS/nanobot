@@ -48,6 +48,8 @@ interface SidebarProps {
   pinnedKeys?: string[];
   archivedKeys?: string[];
   titleOverrides?: Record<string, string>;
+  runningChatIds?: string[];
+  completedChatIds?: string[];
   viewState?: SidebarViewState;
   showArchived?: boolean;
   archivedCount?: number;
@@ -133,6 +135,8 @@ export function Sidebar(props: SidebarProps) {
           pinnedKeys={props.pinnedKeys}
           archivedKeys={props.archivedKeys}
           titleOverrides={props.titleOverrides}
+          runningChatIds={props.runningChatIds}
+          completedChatIds={props.completedChatIds}
           density={props.viewState?.density}
           showPreviews={props.viewState?.show_previews}
           showTimestamps={props.viewState?.show_timestamps}

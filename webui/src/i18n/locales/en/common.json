@@ -272,6 +272,10 @@
     "loading": "Loading…",
     "noSessions": "No sessions yet.",
     "actions": "Chat actions for {{title}}",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished"
+    },
     "pin": "Pin",
     "unpin": "Unpin",
     "rename": "Rename",

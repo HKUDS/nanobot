@@ -225,6 +225,10 @@
     "loading": "불러오는 중…",
     "noSessions": "아직 세션이 없습니다.",
     "actions": "{{title}} 채팅 작업",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished"
+    },
     "pin": "Pin",
     "unpin": "Unpin",
     "rename": "Rename",

@@ -9,6 +9,7 @@ const createChatSpy = vi.fn().mockResolvedValue("chat-1");
 const deleteChatSpy = vi.fn();
 const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
+const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
 let mockSessions: ChatSummary[] = [];
 
 vi.mock("@/hooks/useSessions", async (importOriginal) => {
@@ -68,6 +69,10 @@ vi.mock("@/lib/nanobot-client", () => {
     onError = () => () => {};
     onChat = () => () => {};
     onSessionUpdate = () => () => {};
+    onRunStatus = (handler: (chatId: string, startedAt: number | null) => void) => {
+      runStatusHandlers.add(handler);
+      return () => runStatusHandlers.delete(handler);
+    };
     getRunStartedAt = () => null;
     getGoalState = () => undefined;
     sendMessage = vi.fn();
@@ -92,6 +97,7 @@ describe("App layout", () => {
     createChatSpy.mockClear();
     deleteChatSpy.mockReset();
     toggleThemeSpy.mockReset();
+    runStatusHandlers.clear();
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
       ws_path: "/",
@@ -405,6 +411,53 @@ describe("App layout", () => {
       .filter(Boolean);
 
     expect(labels).toEqual(["Alpha plan", "New chat", "Zulu work"]);
+  });
+
+  it("shows running and completed session indicators in the sidebar", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Working chat",
+      },
+      {
+        key: "websocket:chat-b",
+        channel: "websocket",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        preview: "Quiet chat",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await waitFor(() =>
+      expect(
+        within(sidebar).getByRole("button", { name: /^Working chat$/ }),
+      ).toBeInTheDocument(),
+    );
+
+    act(() => {
+      for (const handler of runStatusHandlers) handler("chat-a", 12_345);
+    });
+    expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument();
+
+    act(() => {
+      for (const handler of runStatusHandlers) handler("chat-a", null);
+    });
+    expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
+    expect(within(sidebar).getByTitle("Agent finished")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Working chat$/ }));
+    });
+    expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
   });
 
   it("opens the settings view from the sidebar footer", async () => {

@@ -315,6 +315,9 @@ function Shell({
   const restartSawDisconnectRef = useRef(false);
   const [restartToast, setRestartToast] = useState<string | null>(null);
   const [isRestarting, setIsRestarting] = useState(false);
+  const [runningChatIds, setRunningChatIds] = useState<Set<string>>(() => new Set());
+  const [completedChatIds, setCompletedChatIds] = useState<Set<string>>(() => new Set());
+  const runningChatIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     try {
@@ -331,6 +334,8 @@ function Shell({
     if (!activeKey) return null;
     return sessions.find((s) => s.key === activeKey) ?? null;
   }, [sessions, activeKey]);
+  const runningChatIdList = useMemo(() => Array.from(runningChatIds), [runningChatIds]);
+  const completedChatIdList = useMemo(() => Array.from(completedChatIds), [completedChatIds]);
 
   const closeDesktopSidebar = useCallback(() => {
     setDesktopSidebarOpen(false);
@@ -372,11 +377,20 @@ function Shell({
 
   const onSelectChat = useCallback(
     (key: string) => {
+      const selectedChatId = sessions.find((session) => session.key === key)?.chatId;
+      if (selectedChatId) {
+        setCompletedChatIds((current) => {
+          if (!current.has(selectedChatId)) return current;
+          const next = new Set(current);
+          next.delete(selectedChatId);
+          return next;
+        });
+      }
       setActiveKey(key);
       setView("chat");
       setMobileSidebarOpen(false);
     },
-    [],
+    [sessions],
   );
 
   const onTogglePin = useCallback(
@@ -520,6 +534,35 @@ function Shell({
   }, [client, onModelNameChange]);
 
   useEffect(() => {
+    return client.onRunStatus((chatId, startedAt) => {
+      if (startedAt != null) {
+        const nextRunning = new Set(runningChatIdsRef.current);
+        nextRunning.add(chatId);
+        runningChatIdsRef.current = nextRunning;
+        setRunningChatIds(nextRunning);
+        setCompletedChatIds((current) => {
+          if (!current.has(chatId)) return current;
+          const next = new Set(current);
+          next.delete(chatId);
+          return next;
+        });
+        return;
+      }
+
+      if (!runningChatIdsRef.current.has(chatId)) return;
+      const nextRunning = new Set(runningChatIdsRef.current);
+      nextRunning.delete(chatId);
+      runningChatIdsRef.current = nextRunning;
+      setRunningChatIds(nextRunning);
+      setCompletedChatIds((current) => {
+        const next = new Set(current);
+        next.add(chatId);
+        return next;
+      });
+    });
+  }, [client]);
+
+  useEffect(() => {
     return client.onStatus((status) => {
       let startedAt = 0;
       try {
@@ -601,6 +644,8 @@ function Shell({
     pinnedKeys: sidebarState.pinned_keys,
     archivedKeys: sidebarState.archived_keys,
     titleOverrides: sidebarState.title_overrides,
+    runningChatIds: runningChatIdList,
+    completedChatIds: completedChatIdList,
     viewState: sidebarState.view,
     showArchived: sidebarState.view.show_archived,
     archivedCount: sidebarState.archived_keys.length,
