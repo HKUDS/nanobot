@@ -29,7 +29,7 @@ def test_openai_compat_provider_sets_timeout_on_local_http_client() -> None:
     with (
         patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai,
         patch(
-            "nanobot.providers.openai_compat_provider.httpx.AsyncClient",
+            "httpx.AsyncClient",
             return_value=sentinel.http_client,
         ) as mock_http_client,
     ):

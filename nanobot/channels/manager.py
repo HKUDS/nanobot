@@ -70,28 +70,40 @@ class ChannelManager:
 
     def _init_channels(self) -> None:
         """Initialize channels discovered via pkgutil scan + entry_points plugins."""
-        from nanobot.channels.registry import discover_all
+        from nanobot.channels.registry import discover_channel_names, discover_enabled
 
         transcription_provider = self.config.channels.transcription_provider
         transcription_key = self._resolve_transcription_key(transcription_provider)
         transcription_base = self._resolve_transcription_base(transcription_provider)
         transcription_language = self.config.channels.transcription_language
 
-        for name, cls in discover_all().items():
+        # Collect enabled module names first, then only import those.
+        # Channel configs live in ChannelsConfig's extra fields (via
+        # extra="allow"), so we enumerate candidates from pkgutil scan
+        # (cheap, no imports) and any plugin keys in __pydantic_extra__.
+        names = discover_channel_names()
+        candidate_names = set(names)
+        extra = getattr(self.config.channels, "__pydantic_extra__", None) or {}
+        candidate_names.update(extra.keys())
+
+        enabled_names: set[str] = set()
+        for name in candidate_names:
             section = getattr(self.config.channels, name, None)
             if section is None:
                 continue
-            enabled = (
+            if (
                 section.get("enabled", False)
                 if isinstance(section, dict)
                 else getattr(section, "enabled", False)
-            )
-            if not enabled:
+            ):
+                enabled_names.add(name)
+
+        for name, cls in discover_enabled(enabled_names, _names=names).items():
+            section = getattr(self.config.channels, name, None)
+            if section is None:
                 continue
             try:
                 kwargs: dict[str, Any] = {}
-                # Only the WebSocket channel currently hosts the embedded webui
-                # surface; other channels stay oblivious to these knobs.
                 if cls.name == "websocket":
                     if self._session_manager is not None:
                         kwargs["session_manager"] = self._session_manager
