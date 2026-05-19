@@ -31,8 +31,8 @@ from nanobot.config.paths import get_workspace_path
         media=ArraySchema(
             StringSchema(""),
             description=(
-                "Optional list of existing file paths to attach for proactive or cross-channel delivery. "
-                "Do not use this to resend generate_image outputs in the current chat."
+                "Optional list of existing file paths to attach. "
+                "Use artifact paths returned by generate_image here when delivering generated images."
             ),
         ),
         buttons=ArraySchema(

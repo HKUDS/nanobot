@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,8 +68,16 @@ def image_path_to_inline_data(path: str | Path) -> dict[str, str]:
     return {"mimeType": mime, "data": encoded}
 
 
-def _b64_png_data_url(value: str) -> str:
-    return f"data:image/png;base64,{value}"
+def _b64_image_data_url(value: str) -> str:
+    encoded = "".join(value.split())
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except binascii.Error as exc:
+        raise ImageGenerationError("generated image payload was not valid base64") from exc
+    mime = detect_image_mime(raw)
+    if mime is None:
+        raise ImageGenerationError("generated image payload was not a supported image")
+    return f"data:{mime};base64,{encoded}"
 
 
 def _aihubmix_size(aspect_ratio: str | None, image_size: str | None) -> str:
@@ -598,13 +607,13 @@ async def _aihubmix_images_from_payload(
 
         b64_json = value.get("b64_json")
         if isinstance(b64_json, str) and b64_json:
-            images.append(_b64_png_data_url(b64_json))
+            images.append(_b64_image_data_url(b64_json))
         elif b64_json is not None:
             await collect(b64_json)
 
         bytes_base64 = value.get("bytesBase64") or value.get("bytes_base64") or value.get("base64")
         if isinstance(bytes_base64, str) and bytes_base64:
-            images.append(_b64_png_data_url(bytes_base64))
+            images.append(_b64_image_data_url(bytes_base64))
 
         image_url = value.get("image_url") or value.get("imageUrl")
         if isinstance(image_url, dict):
@@ -738,7 +747,7 @@ def _minimax_images_from_payload(payload: dict[str, Any]) -> list[str]:
         return images
     for b64 in data.get("image_base64") or []:
         if isinstance(b64, str) and b64:
-            images.append(_b64_png_data_url(b64))
+            images.append(_b64_image_data_url(b64))
     return images
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ from nanobot.providers.image_generation import (
     GeminiImageGenerationClient,
     GeneratedImageResponse,
     ImageGenerationError,
+    MiniMaxImageGenerationClient,
     OpenRouterImageGenerationClient,
 )
 
@@ -24,6 +26,7 @@ PNG_DATA_URL = (
     "data:image/png;base64,"
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
 )
+JPEG_BYTES = b"\xff\xd8\xff\xe0" + b"0" * 12
 
 
 class FakeResponse:
@@ -205,6 +208,20 @@ async def test_aihubmix_image_generation_downloads_url_response() -> None:
     assert fake.get_calls[0]["url"] == "https://cdn.example/image.png"
 
 
+@pytest.mark.asyncio
+async def test_aihubmix_base64_response_uses_detected_mime() -> None:
+    raw_b64 = base64.b64encode(JPEG_BYTES).decode("ascii")
+    fake = FakeClient(FakeResponse({"output": {"b64_json": raw_b64}}))
+    client = AIHubMixImageGenerationClient(
+        api_key="sk-ahm-test",
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    response = await client.generate(prompt="draw", model="gpt-image-2-free")
+
+    assert response.images == [f"data:image/jpeg;base64,{raw_b64}"]
+
+
 RAW_B64 = PNG_DATA_URL.removeprefix("data:image/png;base64,")
 
 
@@ -337,3 +354,36 @@ async def test_gemini_no_images_raises() -> None:
 
     with pytest.raises(ImageGenerationError, match="returned no images"):
         await client.generate(prompt="draw", model="gemini-2.0-flash-preview-image-generation")
+
+
+@pytest.mark.asyncio
+async def test_minimax_payload_and_response_with_reference_image(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(PNG_BYTES)
+    fake = FakeClient(FakeResponse({"data": {"image_base64": [RAW_B64]}}))
+    client = MiniMaxImageGenerationClient(
+        api_key="sk-mm-test",
+        api_base="https://api.minimaxi.com/v1/",
+        extra_headers={"X-Test": "1"},
+        client=fake,  # type: ignore[arg-type]
+    )
+
+    response = await client.generate(
+        prompt="draw a character",
+        model="image-01",
+        reference_images=[str(ref)],
+        aspect_ratio="21:9",
+    )
+
+    assert response.images == [PNG_DATA_URL]
+    call = fake.calls[0]
+    assert call["url"] == "https://api.minimaxi.com/v1/image_generation"
+    assert call["headers"]["Authorization"] == "Bearer sk-mm-test"
+    assert call["headers"]["X-Test"] == "1"
+    body = call["json"]
+    assert body["model"] == "image-01"
+    assert body["prompt"] == "draw a character"
+    assert body["response_format"] == "base64"
+    assert body["aspect_ratio"] == "21:9"
+    assert body["subject_reference"][0]["type"] == "character"
+    assert body["subject_reference"][0]["image_file"].startswith("data:image/png;base64,")
