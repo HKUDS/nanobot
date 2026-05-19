@@ -196,6 +196,30 @@ Supported aspect ratios: `1:1`, `16:9`, `9:16`, `3:4`, `4:3`.  Sizes are specifi
 >
 > When `step-image-edit-2` is used, `reference_images` are ignored (the model does not support style reference).  Switch to `step-1x-medium` to use reference-image-guided generation.
 
+#### StepPlan (订阅制)
+
+StepPlan 是阶跃星辰的订阅制服务，使用不同的 API base URL。图片生成端点路径相同，只需覆盖 `apiBase`：
+
+```json
+{
+  "providers": {
+    "stepfun": {
+      "apiKey": "${STEPFUN_API_KEY}",
+      "apiBase": "https://api.stepfun.com/step_plan/v1"
+    }
+  },
+  "tools": {
+    "imageGeneration": {
+      "enabled": true,
+      "provider": "stepfun",
+      "model": "step-image-edit-2"
+    }
+  }
+}
+```
+
+`apiBase` 优先级高于 registry 默认值，因此配了 StepPlan 地址后图片请求会走 `https://api.stepfun.com/step_plan/v1/images/generations`，与 LLM 调用路径一致。API Key 与普通 StepFun 共用同一套。
+
 ## Artifacts
 
 Generated images are stored under the active nanobot instance's media directory:
