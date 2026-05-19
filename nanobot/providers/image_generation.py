@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from loguru import logger
 
 from nanobot.providers.registry import find_by_name
 from nanobot.utils.helpers import detect_image_mime
@@ -26,6 +27,8 @@ _AIHUBMIX_ASPECT_RATIO_SIZES = {
     "4:3": "1536x1024",
     "16:9": "1536x1024",
 }
+_GEMINI_DEFAULT_TIMEOUT_S = 120.0
+_GEMINI_IMAGEN_ASPECT_RATIOS = {"1:1", "9:16", "16:9", "3:4", "4:3"}
 
 
 class ImageGenerationError(RuntimeError):
@@ -50,15 +53,26 @@ def _provider_base_url(provider: str, api_base: str | None, fallback: str) -> st
     return fallback
 
 
-def image_path_to_data_url(path: str | Path) -> str:
-    """Convert a local image path to an image data URL."""
+def _read_image_b64(path: str | Path) -> tuple[str, str]:
+    """Return ``(mime, base64)`` for the image at ``path``."""
     p = Path(path).expanduser()
     raw = p.read_bytes()
     mime = detect_image_mime(raw)
     if mime is None:
         raise ImageGenerationError(f"unsupported reference image: {p}")
-    encoded = base64.b64encode(raw).decode("ascii")
+    return mime, base64.b64encode(raw).decode("ascii")
+
+
+def image_path_to_data_url(path: str | Path) -> str:
+    """Convert a local image path to an image data URL."""
+    mime, encoded = _read_image_b64(path)
     return f"data:{mime};base64,{encoded}"
+
+
+def image_path_to_inline_data(path: str | Path) -> dict[str, str]:
+    """Convert a local image path to a Gemini ``inlineData`` payload dict."""
+    mime, encoded = _read_image_b64(path)
+    return {"mimeType": mime, "data": encoded}
 
 
 def _b64_png_data_url(value: str) -> str:
@@ -341,6 +355,203 @@ class AIHubMixImageGenerationClient:
         return GeneratedImageResponse(images=images, content="", raw=payload)
 
 
+def _http_error_detail(response: httpx.Response) -> str:
+    """Extract a readable error message from an HTTP error response."""
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            err = data.get("error")
+            if isinstance(err, dict):
+                return err.get("message") or str(err)
+            if err:
+                return str(err)
+    except Exception:
+        pass
+    return response.text[:500] or "<empty response body>"
+
+
+class GeminiImageGenerationClient:
+    """Async client for Gemini/Imagen image generation via the Generative Language API."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None,
+        api_base: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        timeout: float = _GEMINI_DEFAULT_TIMEOUT_S,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self.api_key = api_key
+        # The Gemini provider's registry default_api_base is the OpenAI-compat
+        # shim (.../v1beta/openai/), which has no image endpoints. Image
+        # generation needs the native Generative Language API base, so we don't
+        # use _provider_base_url() here.
+        self.api_base = (
+            api_base or "https://generativelanguage.googleapis.com/v1beta"
+        ).rstrip("/")
+        self.extra_headers = extra_headers or {}
+        self.extra_body = extra_body or {}
+        self.timeout = timeout
+        self._client = client
+
+    async def generate(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        reference_images: list[str] | None = None,
+        aspect_ratio: str | None = None,
+        image_size: str | None = None,
+    ) -> GeneratedImageResponse:
+        if not self.api_key:
+            raise ImageGenerationError(
+                "Gemini API key is not configured. Set providers.gemini.apiKey."
+            )
+        if "imagen" in model.lower():
+            if reference_images:
+                logger.warning(
+                    "Imagen models do not support reference images; "
+                    "ignoring {} reference image(s) for {}",
+                    len(reference_images),
+                    model,
+                )
+            return await self._generate_imagen(
+                prompt=prompt, model=model, aspect_ratio=aspect_ratio
+            )
+        return await self._generate_gemini_flash(
+            prompt=prompt, model=model, reference_images=reference_images or []
+        )
+
+    async def _generate_imagen(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        aspect_ratio: str | None,
+    ) -> GeneratedImageResponse:
+        parameters: dict[str, Any] = {"sampleCount": 1}
+        if aspect_ratio in _GEMINI_IMAGEN_ASPECT_RATIOS:
+            parameters["aspectRatio"] = aspect_ratio
+        body: dict[str, Any] = {
+            "instances": [{"prompt": prompt}],
+            "parameters": parameters,
+        }
+        body.update(self.extra_body)
+
+        url = f"{self.api_base}/models/{model}:predict"
+        headers = {
+            "x-goog-api-key": self.api_key or "",
+            "Content-Type": "application/json",
+            **self.extra_headers,
+        }
+
+        if self._client is not None:
+            response = await self._client.post(url, headers=headers, json=body)
+        else:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(url, headers=headers, json=body)
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = _http_error_detail(response)
+            logger.error("Gemini Imagen generation failed (HTTP {}): {}", response.status_code, detail)
+            raise ImageGenerationError(
+                f"Gemini Imagen generation failed (HTTP {response.status_code}): {detail}"
+            ) from exc
+
+        data = response.json()
+        images: list[str] = []
+        for prediction in data.get("predictions") or []:
+            if not isinstance(prediction, dict):
+                continue
+            b64 = prediction.get("bytesBase64Encoded")
+            mime = prediction.get("mimeType", "image/png")
+            if isinstance(b64, str) and b64:
+                images.append(f"data:{mime};base64,{b64}")
+
+        if not images:
+            provider_error = data.get("error") if isinstance(data, dict) else None
+            if provider_error:
+                raise ImageGenerationError(f"Gemini Imagen returned no images: {provider_error}")
+            raise ImageGenerationError("Gemini Imagen returned no images for this request")
+
+        return GeneratedImageResponse(images=images, content="", raw=data)
+
+    async def _generate_gemini_flash(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        reference_images: list[str],
+    ) -> GeneratedImageResponse:
+        parts: list[dict[str, Any]] = [
+            {"inlineData": image_path_to_inline_data(path)} for path in reference_images
+        ]
+        parts.append({"text": prompt})
+
+        body: dict[str, Any] = {
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]},
+        }
+        body.update(self.extra_body)
+
+        url = f"{self.api_base}/models/{model}:generateContent"
+        headers = {
+            "x-goog-api-key": self.api_key or "",
+            "Content-Type": "application/json",
+            **self.extra_headers,
+        }
+
+        if self._client is not None:
+            response = await self._client.post(url, headers=headers, json=body)
+        else:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(url, headers=headers, json=body)
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = _http_error_detail(response)
+            logger.error("Gemini image generation failed (HTTP {}): {}", response.status_code, detail)
+            raise ImageGenerationError(
+                f"Gemini image generation failed (HTTP {response.status_code}): {detail}"
+            ) from exc
+
+        data = response.json()
+        images: list[str] = []
+        text_parts: list[str] = []
+        for candidate in data.get("candidates") or []:
+            if not isinstance(candidate, dict):
+                continue
+            content = candidate.get("content") or {}
+            for part in content.get("parts") or []:
+                if not isinstance(part, dict):
+                    continue
+                if "text" in part:
+                    text_parts.append(part["text"])
+                inline = part.get("inlineData")
+                if isinstance(inline, dict):
+                    mime = inline.get("mimeType", "image/png")
+                    b64 = inline.get("data", "")
+                    if b64:
+                        images.append(f"data:{mime};base64,{b64}")
+
+        if not images:
+            provider_error = data.get("error") if isinstance(data, dict) else None
+            if provider_error:
+                raise ImageGenerationError(f"Gemini returned no images: {provider_error}")
+            raise ImageGenerationError("Gemini returned no images for this request")
+
+        return GeneratedImageResponse(
+            images=images,
+            content="\n".join(t for t in text_parts if t).strip(),
+            raw=data,
+        )
+
+
 async def _aihubmix_images_from_payload(
     client: httpx.AsyncClient,
     payload: dict[str, Any],
@@ -392,4 +603,137 @@ async def _aihubmix_images_from_payload(
 
     for candidate in candidates:
         await collect(candidate)
+    return images
+
+
+_MINIMAX_TIMEOUT_S = 300.0
+
+_MINIMAX_ASPECT_RATIO_SIZES = {
+    "1:1": "1:1",
+    "16:9": "16:9",
+    "4:3": "4:3",
+    "3:2": "3:2",
+    "2:3": "2:3",
+    "3:4": "3:4",
+    "9:16": "9:16",
+    "21:9": "21:9",
+}
+
+
+class MiniMaxImageGenerationClient:
+    """Async client for MiniMax image generation API."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None,
+        api_base: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, Any] | None = None,
+        timeout: float = _MINIMAX_TIMEOUT_S,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.api_base = _provider_base_url(
+            "minimax",
+            api_base,
+            "https://api.minimaxi.com/v1",
+        )
+        self.extra_headers = extra_headers or {}
+        self.extra_body = extra_body or {}
+        self.timeout = timeout
+        self._client = client
+
+    def _resolve_aspect_ratio(self, aspect_ratio: str | None) -> str:
+        if aspect_ratio and aspect_ratio in _MINIMAX_ASPECT_RATIO_SIZES:
+            return _MINIMAX_ASPECT_RATIO_SIZES[aspect_ratio]
+        return "1:1"
+
+    async def generate(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        reference_images: list[str] | None = None,
+        aspect_ratio: str | None = None,
+        image_size: str | None = None,
+    ) -> GeneratedImageResponse:
+        if not self.api_key:
+            raise ImageGenerationError(
+                "MiniMax API key is not configured. Set providers.minimax.apiKey."
+            )
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            **self.extra_headers,
+        }
+
+        body: dict[str, Any] = {
+            "model": model,
+            "prompt": prompt,
+            "response_format": "base64",
+        }
+
+        resolved_ratio = self._resolve_aspect_ratio(aspect_ratio)
+        body["aspect_ratio"] = resolved_ratio
+
+        refs = list(reference_images or [])
+        if refs:
+            image_refs = [image_path_to_data_url(path) for path in refs]
+            body["subject_reference"] = [
+                {"type": "character", "image_file": ref} for ref in image_refs
+            ]
+
+        body.update(self.extra_body)
+
+        if self._client is not None:
+            return await self._generate_with_client(self._client, body, headers)
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            return await self._generate_with_client(client, body, headers)
+
+    async def _generate_with_client(
+        self,
+        client: httpx.AsyncClient,
+        body: dict[str, Any],
+        headers: dict[str, str],
+    ) -> GeneratedImageResponse:
+        url = f"{self.api_base}/image_generation"
+        try:
+            response = await client.post(url, headers=headers, json=body)
+        except httpx.TimeoutException as exc:
+            raise ImageGenerationError("MiniMax image generation timed out") from exc
+        except httpx.RequestError as exc:
+            raise ImageGenerationError(f"MiniMax image generation request failed: {exc}") from exc
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            detail = response.text[:500]
+            raise ImageGenerationError(f"MiniMax image generation failed: {detail}") from exc
+
+        payload = response.json()
+        images = _minimax_images_from_payload(payload)
+
+        if not images:
+            provider_error = payload.get("error") if isinstance(payload, dict) else None
+            if provider_error:
+                raise ImageGenerationError(f"MiniMax returned no images: {provider_error}")
+            raise ImageGenerationError("MiniMax returned no images for this request")
+
+        return GeneratedImageResponse(images=images, content="", raw=payload)
+
+
+def _minimax_images_from_payload(payload: dict[str, Any]) -> list[str]:
+    """Extract base64 images from MiniMax API response.
+
+    MiniMax returns images in ``data.image_base64`` (list of base64 strings).
+    """
+    images: list[str] = []
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return images
+    for b64 in data.get("image_base64") or []:
+        if isinstance(b64, str) and b64:
+            images.append(_b64_png_data_url(b64))
     return images

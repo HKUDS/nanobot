@@ -106,7 +106,7 @@ class ExecTool(Tool):
             r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
             r"\bdel\s+/[fq]\b",              # del /f, del /q
             r"\brmdir\s+/s\b",               # rmdir /s
-            r"(?:^|[;&|]\s*)format\b",       # format (as standalone command only)
+            r"(?:^|[;&|]\s*)format(?!=)\b",   # format (as standalone command only)
             r"\b(mkfs|diskpart)\b",          # disk operations
             r"\bdd\s+if=",                   # dd
             r">\s*/dev/sd",                  # write to disk
@@ -413,9 +413,12 @@ class ExecTool(Tool):
 
     @staticmethod
     def _extract_absolute_paths(command: str) -> list[str]:
-        # Windows: match drive-root paths like `C:\` as well as `C:\path\to\file`
+        # Windows: match drive-root paths like `C:\` as well as `C:\path\to\file`, and UNC paths like `\\server\share`
         # NOTE: `*` is required so `C:\` (nothing after the slash) is still extracted.
-        win_paths = re.findall(r"[A-Za-z]:\\[^\s\"'|><;]*", command)
+        win_paths = re.findall(
+            r"(?:[A-Za-z]:[^\s\"'|><;]*|\\\\[^\s\"'|><;]+(?:\\[^\s\"'|><;]+)*)",
+            command
+        )
         posix_paths = re.findall(r"(?:^|[\s|>'\"])(/[^\s\"'>;|<]+)", command) # POSIX: /absolute only
         home_paths = re.findall(r"(?:^|[\s>'\"])(~[^\s\"'>;|<]*)", command) # POSIX/Windows home shortcut: ~
         return win_paths + posix_paths + home_paths

@@ -1,7 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 
 type Theme = "light" | "dark";
 const STORAGE_KEY = "nanobot-webui.theme";
+const ThemeContext = createContext<Theme>("light");
 
 function readStored(): Theme | null {
   try {
@@ -18,7 +27,11 @@ function applyTheme(theme: Theme): void {
   else root.classList.remove("dark");
 }
 
-export function useTheme(): { theme: Theme; toggle: () => void; setTheme: (t: Theme) => void } {
+export function useTheme(): {
+  theme: Theme;
+  toggle: () => void;
+  setTheme: (t: Theme) => void;
+} {
   const [theme, setThemeState] = useState<Theme>(() => {
     const stored = readStored();
     if (stored) return stored;
@@ -45,4 +58,12 @@ export function useTheme(): { theme: Theme; toggle: () => void; setTheme: (t: Th
     [],
   );
   return { theme, toggle, setTheme };
+}
+
+export function ThemeProvider({ theme, children }: { theme: Theme; children: ReactNode }) {
+  return createElement(ThemeContext.Provider, { value: theme }, children);
+}
+
+export function useThemeValue(): Theme {
+  return useContext(ThemeContext);
 }

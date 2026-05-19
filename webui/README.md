@@ -8,15 +8,11 @@ on the same port.
 For the project overview, install guide, and general docs map, see the root
 [`README.md`](../README.md).
 
-## Current status
+## Just want to use the WebUI?
 
-> [!NOTE]
-> The standalone WebUI development workflow currently requires a source
-> checkout.
->
-> WebUI changes in the GitHub repository may land before they are included in
-> the next packaged release, so source installs and published package versions
-> are not yet guaranteed to move in lockstep.
+If you installed nanobot via `pip install nanobot-ai`, the WebUI is **already bundled** in the wheel. Enable the WebSocket channel in `~/.nanobot/config.json` and run `nanobot gateway` — see the root [`README.md`](../README.md#-webui) for the 3-step setup. You do **not** need anything in this directory.
+
+This `webui/` tree is for people **hacking on the WebUI itself** (UI changes, new components, styling, etc.).
 
 ## Layout
 
@@ -25,7 +21,7 @@ webui/                 source tree (this directory)
 nanobot/web/dist/      build output served by the gateway
 ```
 
-## Develop from source
+## Develop the WebUI (Vite HMR)
 
 ### 1. Install nanobot from source
 
@@ -34,6 +30,8 @@ From the repository root:
 ```bash
 pip install -e .
 ```
+
+> Editable installs intentionally **skip** the WebUI bundle step — Vite HMR is faster than rebuilding `dist/` on every change.
 
 ### 2. Enable the WebSocket channel
 
@@ -63,8 +61,7 @@ bun run dev
 
 Then open `http://127.0.0.1:5173`.
 
-By default, the dev server proxies `/api`, `/webui`, `/auth`, and WebSocket
-traffic to `http://127.0.0.1:8765`.
+By default the dev server proxies `/api`, `/webui`, `/auth`, and WebSocket traffic to `http://127.0.0.1:8765`.
 
 If your gateway listens on a non-default port, point the dev server at it:
 
@@ -74,7 +71,7 @@ NANOBOT_API_URL=http://127.0.0.1:9000 bun run dev
 
 ### Access from another device (LAN)
 
-To use the webui from another device on the same network, set `host` to `"0.0.0.0"` and configure a `token` or `tokenIssueSecret` in `~/.nanobot/config.json`:
+To use the WebUI from another device on the same network, set `host` to `"0.0.0.0"` and configure a `token` or `tokenIssueSecret` in `~/.nanobot/config.json`:
 
 ```json
 {
@@ -91,20 +88,20 @@ To use the webui from another device on the same network, set `host` to `"0.0.0.
 
 The gateway will refuse to start if `host` is `"0.0.0.0"` and neither `token` nor `tokenIssueSecret` is set.
 
-Then open `http://<your-ip>:8765` on the other device. The webui will show an authentication form where you enter the secret. It is saved in your browser so you only need to enter it once.
+Then open `http://<your-ip>:8765` on the other device. The WebUI will show an authentication form where you enter the secret. It is saved in your browser so you only need to enter it once.
 
 ## Build for packaged runtime
 
+You usually do not need to run this by hand: `python -m build` invokes the WebUI build automatically when packaging the wheel.
+
+If you want to preview the production bundle locally without rebuilding the wheel:
+
 ```bash
 cd webui
-bun run build
+bun run build          # writes to ../nanobot/web/dist
 ```
 
-This writes the production assets to `../nanobot/web/dist`, which is the
-directory served by `nanobot gateway` and bundled into the Python wheel.
-
-If you are cutting a release, run the build before packaging so the published
-wheel contains the current WebUI assets.
+The gateway picks up the new bundle on the next restart.
 
 ## Test
 

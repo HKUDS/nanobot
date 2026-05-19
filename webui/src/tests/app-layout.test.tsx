@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ChatSummary } from "@/lib/types";
 
@@ -8,6 +8,7 @@ const refreshSpy = vi.fn();
 const createChatSpy = vi.fn().mockResolvedValue("chat-1");
 const deleteChatSpy = vi.fn();
 const toggleThemeSpy = vi.fn();
+const updateUrlSpy = vi.fn();
 let mockSessions: ChatSummary[] = [];
 
 vi.mock("@/hooks/useSessions", async (importOriginal) => {
@@ -32,12 +33,18 @@ vi.mock("@/hooks/useSessions", async (importOriginal) => {
   };
 });
 
-vi.mock("@/hooks/useTheme", () => ({
-  useTheme: () => ({
-    theme: "light" as const,
-    toggle: toggleThemeSpy,
-  }),
-}));
+vi.mock("@/hooks/useTheme", async () => {
+  const React = await import("react");
+  return {
+    ThemeProvider: ({ children }: { children: React.ReactNode }) =>
+      React.createElement(React.Fragment, null, children),
+    useTheme: () => ({
+      theme: "light" as const,
+      toggle: toggleThemeSpy,
+    }),
+    useThemeValue: () => "light" as const,
+  };
+});
 
 vi.mock("@/lib/bootstrap", () => ({
   fetchBootstrap: vi.fn().mockResolvedValue({
@@ -64,22 +71,30 @@ vi.mock("@/lib/nanobot-client", () => {
     newChat = vi.fn();
     attach = vi.fn();
     close = vi.fn();
-    updateUrl = vi.fn();
+    updateUrl = updateUrlSpy;
   }
 
   return { NanobotClient: MockClient };
 });
 
+import { deriveWsUrl, fetchBootstrap } from "@/lib/bootstrap";
 import App from "@/App";
 
 describe("App layout", () => {
   beforeEach(() => {
     mockSessions = [];
     connectSpy.mockClear();
+    updateUrlSpy.mockClear();
     refreshSpy.mockReset();
     createChatSpy.mockClear();
     deleteChatSpy.mockReset();
     toggleThemeSpy.mockReset();
+    vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
+      token: "tok",
+      ws_path: "/",
+      expires_in: 300,
+    });
+    vi.mocked(deriveWsUrl).mockReset().mockReturnValue("ws://test");
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -87,6 +102,10 @@ describe("App layout", () => {
         status: 404,
       }),
     );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("keeps sidebar layout out of the main thread width contract", async () => {
@@ -192,7 +211,51 @@ describe("App layout", () => {
                   name: "openrouter",
                   label: "OpenRouter",
                   configured: false,
+                  api_key_required: true,
                   default_api_base: "https://openrouter.ai/api/v1",
+                },
+                {
+                  name: "azure_openai",
+                  label: "Azure OpenAI",
+                  configured: false,
+                  api_key_required: true,
+                },
+                {
+                  name: "huggingface",
+                  label: "Hugging Face",
+                  configured: false,
+                  api_key_required: true,
+                },
+                {
+                  name: "siliconflow",
+                  label: "SiliconFlow",
+                  configured: false,
+                  api_key_required: true,
+                },
+                {
+                  name: "volcengine",
+                  label: "VolcEngine",
+                  configured: false,
+                  api_key_required: true,
+                },
+                {
+                  name: "byteplus",
+                  label: "BytePlus",
+                  configured: false,
+                  api_key_required: true,
+                },
+                {
+                  name: "qianfan",
+                  label: "Qianfan",
+                  configured: false,
+                  api_key_required: true,
+                },
+                {
+                  name: "atomic_chat",
+                  label: "Atomic Chat",
+                  configured: false,
+                  api_key_required: false,
+                  default_api_base: "http://localhost:1337/v1",
                 },
               ],
               web_search: {
@@ -248,6 +311,9 @@ describe("App layout", () => {
     fireEvent.click(screen.getByText("OpenAI"));
     expect(screen.getByText("open••••-key")).toBeInTheDocument();
     expect(screen.queryByDisplayValue("unsaved-openai-key")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Atomic Chat"));
+    expect(screen.getByDisplayValue("http://localhost:1337/v1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 
     fireEvent.click(screen.getByRole("tab", { name: "Web Search" }));
     expect(screen.getByText("Search provider")).toBeInTheDocument();
@@ -425,5 +491,37 @@ describe("App layout", () => {
     expect(within(sidebar).getByRole("button", { name: "Settings" })).toBeInTheDocument();
 
     expect(within(sidebar).getByText("Existing chat")).toBeInTheDocument();
+  });
+
+  it("refreshes the bootstrap token before REST settings auth expires", async () => {
+    vi.useFakeTimers();
+    vi.mocked(fetchBootstrap)
+      .mockResolvedValueOnce({
+        token: "tok-1",
+        ws_path: "/",
+        expires_in: 30,
+      })
+      .mockResolvedValueOnce({
+        token: "tok-2",
+        ws_path: "/",
+        expires_in: 300,
+      });
+    vi.mocked(deriveWsUrl).mockImplementation(
+      (_wsPath: string, token: string) => `ws://test?token=${token}`,
+    );
+
+    const { unmount } = render(<App />);
+    await act(async () => {});
+
+    expect(connectSpy).toHaveBeenCalled();
+    expect(fetchBootstrap).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+
+    expect(fetchBootstrap).toHaveBeenCalledTimes(2);
+    expect(updateUrlSpy).toHaveBeenCalledWith("ws://test?token=tok-2");
+    unmount();
   });
 });

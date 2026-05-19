@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine
 
 from loguru import logger
 
-if TYPE_CHECKING:
-    from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider
+from nanobot.utils.llm_runtime import LLMRuntimeResolver, static_llm_runtime
 
 _HEARTBEAT_TOOL = [
     {
@@ -53,17 +53,21 @@ class HeartbeatService:
     def __init__(
         self,
         workspace: Path,
-        provider: LLMProvider,
-        model: str,
+        provider: LLMProvider | None = None,
+        model: str | None = None,
         on_execute: Callable[[str], Coroutine[Any, Any, str]] | None = None,
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
         timezone: str | None = None,
+        llm_runtime: LLMRuntimeResolver | None = None,
     ):
         self.workspace = workspace
-        self.provider = provider
-        self.model = model
+        if llm_runtime is None:
+            if provider is None or model is None:
+                raise ValueError("HeartbeatService requires either llm_runtime or provider/model")
+            llm_runtime = static_llm_runtime(provider, model)
+        self._llm_runtime = llm_runtime
         self.on_execute = on_execute
         self.on_notify = on_notify
         self.interval_s = interval_s
@@ -91,7 +95,9 @@ class HeartbeatService:
         """
         from nanobot.utils.helpers import current_time_str
 
-        response = await self.provider.chat_with_retry(
+        llm = self._llm_runtime()
+
+        response = await llm.provider.chat_with_retry(
             messages=[
                 {"role": "system", "content": "You are a heartbeat agent. Call the heartbeat tool to report your decision."},
                 {"role": "user", "content": (
@@ -101,7 +107,7 @@ class HeartbeatService:
                 )},
             ],
             tools=_HEARTBEAT_TOOL,
-            model=self.model,
+            model=llm.model,
         )
 
         if not response.should_execute_tools:
@@ -214,8 +220,9 @@ class HeartbeatService:
                     )
                     return
 
+                llm = self._llm_runtime()
                 should_notify = await evaluate_response(
-                    response, tasks, self.provider, self.model,
+                    response, tasks, llm.provider, llm.model,
                 )
                 if should_notify and self.on_notify:
                     logger.info("Heartbeat: completed, delivering response")

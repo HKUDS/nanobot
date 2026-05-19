@@ -5,6 +5,7 @@ import type {
   SettingsUpdate,
   SlashCommand,
   WebSearchSettingsUpdate,
+  WebuiThreadPersistedPayload,
 } from "./types";
 
 export class ApiError extends Error {
@@ -66,42 +67,20 @@ export async function listSessions(
   }));
 }
 
-/** Signed image URL attached to a historical user message. The server
- * emits these in place of raw on-disk paths so the client can render
- * previews without learning where media lives on disk. Each URL is a
- * self-authenticating ``/api/media/...`` route (see backend
- * ``_sign_media_path``) safe to drop into an ``<img src>`` attribute. */
-export interface SessionMediaUrl {
-  url: string;
-  name?: string;
-}
-
-export async function fetchSessionMessages(
+/** Disk-backed WebUI display thread snapshot (separate from agent session). */
+export async function fetchWebuiThread(
   token: string,
   key: string,
   base: string = "",
-): Promise<{
-  key: string;
-  created_at: string | null;
-  updated_at: string | null;
-  messages: Array<{
-    role: string;
-    content: string;
-    timestamp?: string;
-    tool_calls?: unknown;
-    reasoning_content?: string | null;
-    thinking_blocks?: unknown;
-    tool_call_id?: string;
-    name?: string;
-    /** Present on ``user`` turns that attached images. Paths have already
-     * been stripped server-side; only the signed fetch URLs survive. */
-    media_urls?: SessionMediaUrl[];
-  }>;
-}> {
-  return request(
-    `${base}/api/sessions/${encodeURIComponent(key)}/messages`,
-    token,
-  );
+): Promise<WebuiThreadPersistedPayload | null> {
+  const url = `${base}/api/sessions/${encodeURIComponent(key)}/webui-thread`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: "same-origin",
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  return (await res.json()) as WebuiThreadPersistedPayload;
 }
 
 export async function deleteSession(

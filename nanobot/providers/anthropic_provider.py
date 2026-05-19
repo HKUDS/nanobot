@@ -589,6 +589,7 @@ class AnthropicProvider(LLMProvider):
         reasoning_effort: str | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         on_content_delta: Callable[[str], Awaitable[None]] | None = None,
+        on_thinking_delta: Callable[[str], Awaitable[None]] | None = None,
     ) -> LLMResponse:
         kwargs = self._build_kwargs(
             messages, tools, model, max_tokens, temperature,
@@ -597,17 +598,33 @@ class AnthropicProvider(LLMProvider):
         idle_timeout_s = int(os.environ.get("NANOBOT_STREAM_IDLE_TIMEOUT_S", "90"))
         try:
             async with self._client.messages.stream(**kwargs) as stream:
-                if on_content_delta:
-                    stream_iter = stream.text_stream.__aiter__()
+                if on_content_delta or on_thinking_delta:
+                    # Idle timeout must track *any* SSE chunk (thinking_delta,
+                    # tool JSON deltas, etc.), not only text_stream tokens.
+                    # Otherwise extended thinking can stall text_stream for minutes
+                    # while the connection is healthy (e.g. MiniMax Anthropic).
                     while True:
                         try:
-                            text = await asyncio.wait_for(
-                                stream_iter.__anext__(),
+                            chunk = await asyncio.wait_for(
+                                stream.__anext__(),
                                 timeout=idle_timeout_s,
                             )
                         except StopAsyncIteration:
                             break
-                        await on_content_delta(text)
+                        if (
+                            chunk.type == "content_block_delta"
+                            and getattr(chunk.delta, "type", None) == "thinking_delta"
+                        ):
+                            piece = getattr(chunk.delta, "thinking", None) or ""
+                            if piece and on_thinking_delta:
+                                await on_thinking_delta(piece)
+                        elif (
+                            chunk.type == "content_block_delta"
+                            and getattr(chunk.delta, "type", None) == "text_delta"
+                        ):
+                            text = getattr(chunk.delta, "text", None) or ""
+                            if text and on_content_delta:
+                                await on_content_delta(text)
                 response = await asyncio.wait_for(
                     stream.get_final_message(),
                     timeout=idle_timeout_s,

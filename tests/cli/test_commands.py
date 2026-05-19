@@ -371,6 +371,28 @@ def test_config_accepts_lm_studio_without_api_key_and_uses_default_localhost_api
     assert config.get_api_base() == "http://localhost:1234/v1"
 
 
+def test_config_accepts_atomic_chat_without_api_key_and_uses_default_localhost_api_base():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "atomic_chat",
+                    "model": "local-model",
+                }
+            },
+            "providers": {
+                "atomicChat": {
+                    "apiKey": None,
+                }
+            },
+        }
+    )
+
+    assert config.get_provider_name() == "atomic_chat"
+    assert config.get_api_key() is None
+    assert config.get_api_base() == "http://localhost:1337/v1"
+
+
 def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
     assert find_by_name("volcengineCodingPlan") is not None
     assert find_by_name("volcengineCodingPlan").name == "volcengine_coding_plan"
@@ -378,6 +400,8 @@ def test_find_by_name_accepts_camel_case_and_hyphen_aliases():
     assert find_by_name("github-copilot").name == "github_copilot"
     assert find_by_name("longcat") is not None
     assert find_by_name("longcat").name == "longcat"
+    assert find_by_name("atomic-chat") is not None
+    assert find_by_name("atomic-chat").name == "atomic_chat"
 
 
 def test_config_explicit_longcat_provider_resolves_provider_name():
@@ -1146,6 +1170,7 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
             self.model = "test-model"
             self.provider = kwargs.get("provider", object())
             self.tools = {}
+            seen["agent"] = self
 
         async def process_direct(self, *_args, **_kwargs):
             return OutboundMessage(
@@ -1194,6 +1219,11 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
     assert isinstance(cron, _FakeCron)
     assert cron.on_job is not None
 
+    runtime_provider = object()
+    agent = seen["agent"]
+    agent.provider = runtime_provider
+    agent.model = "runtime-model"
+
     job = CronJob(
         id="cron-1",
         name="stretch",
@@ -1209,8 +1239,8 @@ def test_gateway_cron_evaluator_receives_scheduled_reminder_context(
 
     assert response == "Time to stretch."
     assert seen["response"] == "Time to stretch."
-    assert seen["provider"] is provider
-    assert seen["model"] == "test-model"
+    assert seen["provider"] is runtime_provider
+    assert seen["model"] == "runtime-model"
     assert seen["task_context"] == (
         "The scheduled time has arrived. Deliver this reminder to the user now, "
         "as a brief and natural message in their language. Speak directly to them — "
@@ -1518,6 +1548,9 @@ def test_gateway_health_endpoint_binds_and_serves_expected_responses(
             self.provider = object()
             self.dream = _FakeDream()
             self.sessions = _FakeSessionManager()
+
+        def llm_runtime(self) -> None:
+            return None
 
         async def run(self) -> None:
             await asyncio.Event().wait()

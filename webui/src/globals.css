@@ -117,31 +117,99 @@
     --cjk-line-height: 1.625;
   }
 
-  /* Shimmer band sweeping across the reasoning header while
-     ``reasoning_delta`` frames are arriving. Pure CSS, no JS animation,
-     respects ``prefers-reduced-motion``. */
-  @keyframes reasoning-shimmer-sweep {
+  /* L→R sheen clipped to live activity labels. The highlight lives inside
+     the glyphs, not in the row background, so dark mode stays quiet. */
+  @keyframes streaming-text-sheen-ltr {
     0% {
-      background-position: -200% 0;
+      background-position: 140% 50%;
     }
     100% {
-      background-position: 200% 0;
+      background-position: -40% 50%;
     }
   }
-  .reasoning-shimmer {
+  .streaming-text-sheen {
+    position: relative;
+    color: hsl(var(--muted-foreground));
+  }
+  .streaming-text-sheen::after {
+    content: attr(data-sheen-text);
+    position: absolute;
+    inset: 0;
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    color: transparent;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      transparent 38%,
+      hsl(var(--foreground) / 0.98) 50%,
+      transparent 62%,
+      transparent 100%
+    );
+    background-size: 260% 100%;
+    background-position: 140% 50%;
+    background-repeat: no-repeat;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: streaming-text-sheen-ltr 2.8s ease-in-out infinite;
+  }
+  .dark .streaming-text-sheen::after {
     background-image: linear-gradient(
       90deg,
       transparent 0%,
-      hsl(var(--muted-foreground) / 0.18) 50%,
+      transparent 38%,
+      hsl(var(--foreground) / 0.98) 50%,
+      transparent 62%,
       transparent 100%
     );
-    background-size: 200% 100%;
-    background-repeat: no-repeat;
-    animation: reasoning-shimmer-sweep 2.2s linear infinite;
   }
   @media (prefers-reduced-motion: reduce) {
-    .reasoning-shimmer {
+    .streaming-text-sheen::after {
       animation: none;
+      content: "";
+    }
+  }
+
+  /** Goal halo: pale sky blue (not ``--primary``, which often reads as neutral gray). */
+  @keyframes goal-shell-glow-breathe {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 10px hsl(204 72% 52% / 0.22))
+        drop-shadow(0 0 24px hsl(199 80% 58% / 0.14));
+    }
+    50% {
+      filter: drop-shadow(0 0 17px hsl(204 78% 48% / 0.32))
+        drop-shadow(0 0 38px hsl(199 85% 55% / 0.2));
+    }
+  }
+  .goal-shell-glow {
+    animation: goal-shell-glow-breathe 4.8s ease-in-out infinite;
+  }
+  @keyframes goal-shell-glow-breathe-dark {
+    0%,
+    100% {
+      filter: drop-shadow(0 0 12px hsl(198 90% 72% / 0.28))
+        drop-shadow(0 0 28px hsl(195 95% 65% / 0.16));
+    }
+    50% {
+      filter: drop-shadow(0 0 20px hsl(198 95% 78% / 0.42))
+        drop-shadow(0 0 42px hsl(195 100% 70% / 0.24));
+    }
+  }
+  .dark .goal-shell-glow {
+    animation-name: goal-shell-glow-breathe-dark;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .goal-shell-glow {
+      animation: none;
+      filter: drop-shadow(0 0 14px hsl(204 70% 50% / 0.24));
+    }
+    .dark .goal-shell-glow {
+      filter: drop-shadow(0 0 14px hsl(198 88% 70% / 0.32));
     }
   }
 
@@ -157,5 +225,11 @@
   .scrollbar-thin::-webkit-scrollbar-thumb {
     background-color: hsl(var(--muted-foreground) / 0.4);
     border-radius: 9999px;
+  }
+  .scrollbar-track-transparent {
+    scrollbar-gutter: stable;
+  }
+  .scrollbar-track-transparent::-webkit-scrollbar-track {
+    background: transparent;
   }
 }

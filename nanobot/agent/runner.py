@@ -15,6 +15,12 @@ from loguru import logger
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from nanobot.utils.file_edit_events import (
+    build_file_edit_end_event,
+    build_file_edit_error_event,
+    build_file_edit_start_event,
+    prepare_file_edit_tracker,
+)
 from nanobot.utils.helpers import (
     IncrementalThinkExtractor,
     build_assistant_message,
@@ -25,6 +31,10 @@ from nanobot.utils.helpers import (
     maybe_persist_tool_result,
     strip_think,
     truncate_text,
+)
+from nanobot.utils.progress_events import (
+    invoke_file_edit_progress,
+    on_progress_accepts_file_edit_events,
 )
 from nanobot.utils.prompt_templates import render_template
 from nanobot.utils.runtime import (
@@ -47,7 +57,7 @@ _SNIP_SAFETY_BUFFER = 1024
 _MICROCOMPACT_KEEP_RECENT = 10
 _MICROCOMPACT_MIN_CHARS = 500
 _COMPACTABLE_TOOLS = frozenset({
-    "read_file", "exec", "grep", "glob",
+    "read_file", "exec", "grep",
     "web_search", "web_fetch", "list_dir",
 })
 _BACKFILL_CONTENT = "[Tool result unavailable — call was interrupted or lost]"
@@ -626,9 +636,16 @@ class AgentRunner:
                     context.streamed_content = True
                 await hook.on_stream(context, delta)
 
+            async def _thinking(delta: str) -> None:
+                if not delta:
+                    return
+                context.streamed_reasoning = True
+                await hook.emit_reasoning(delta)
+
             coro = self.provider.chat_stream_with_retry(
                 **kwargs,
                 on_content_delta=_stream,
+                on_thinking_delta=_thinking,
             )
         elif wants_progress_streaming:
             stream_buf = ""
@@ -662,14 +679,25 @@ class AgentRunner:
         else:
             coro = self.provider.chat_with_retry(**kwargs)
 
+        # Streaming requests already have provider-level idle timeouts
+        # (NANOBOT_STREAM_IDLE_TIMEOUT_S). Do not also apply the outer wall-clock
+        # LLM timeout here, or healthy long reasoning streams can be killed just
+        # because total elapsed time exceeded NANOBOT_LLM_TIMEOUT_S.
+        outer_timeout_s = None if (wants_streaming or wants_progress_streaming) else timeout_s
         try:
             response = (
-                await coro if timeout_s is None
-                else await asyncio.wait_for(coro, timeout=timeout_s)
+                await coro if outer_timeout_s is None
+                else await asyncio.wait_for(coro, timeout=outer_timeout_s)
             )
         except asyncio.TimeoutError:
+            if outer_timeout_s is None:
+                return LLMResponse(
+                    content="Error calling LLM: stream stalled",
+                    finish_reason="error",
+                    error_kind="timeout",
+                )
             return LLMResponse(
-                content=f"Error calling LLM: timed out after {timeout_s:g}s",
+                content=f"Error calling LLM: timed out after {outer_timeout_s:g}s",
                 finish_reason="error",
                 error_kind="timeout",
             )
@@ -795,6 +823,30 @@ class AgentRunner:
             return prep_error + hint, event, (
                 RuntimeError(prep_error) if spec.fail_on_tool_error else None
             )
+        emit_file_edit_events = (
+            spec.progress_callback is not None
+            and on_progress_accepts_file_edit_events(spec.progress_callback)
+        )
+        progress_callback = spec.progress_callback if emit_file_edit_events else None
+        file_edit_tracker = (
+            prepare_file_edit_tracker(
+                call_id=tool_call.id,
+                tool_name=tool_call.name,
+                tool=tool,
+                workspace=spec.workspace,
+                params=params if isinstance(params, dict) else None,
+            )
+            if progress_callback is not None
+            else None
+        )
+        if file_edit_tracker is not None and progress_callback is not None:
+            await invoke_file_edit_progress(
+                progress_callback,
+                [build_file_edit_start_event(
+                    file_edit_tracker,
+                    params if isinstance(params, dict) else None,
+                )],
+            )
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -803,6 +855,11 @@ class AgentRunner:
         except asyncio.CancelledError:
             raise
         except BaseException as exc:
+            if file_edit_tracker is not None and progress_callback is not None:
+                await invoke_file_edit_progress(
+                    progress_callback,
+                    [build_file_edit_error_event(file_edit_tracker, str(exc))],
+                )
             event = {
                 "name": tool_call.name,
                 "status": "error",
@@ -824,6 +881,11 @@ class AgentRunner:
             return payload, event, None
 
         if isinstance(result, str) and result.startswith("Error"):
+            if file_edit_tracker is not None and progress_callback is not None:
+                await invoke_file_edit_progress(
+                    progress_callback,
+                    [build_file_edit_error_event(file_edit_tracker, result)],
+                )
             event = {
                 "name": tool_call.name,
                 "status": "error",
@@ -841,6 +903,12 @@ class AgentRunner:
             if spec.fail_on_tool_error:
                 return result + hint, event, RuntimeError(result)
             return result + hint, event, None
+
+        if file_edit_tracker is not None and progress_callback is not None:
+            await invoke_file_edit_progress(
+                progress_callback,
+                [build_file_edit_end_event(file_edit_tracker)],
+            )
 
         detail = "" if result is None else str(result)
         detail = detail.replace("\n", " ").strip()

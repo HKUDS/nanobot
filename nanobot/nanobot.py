@@ -66,6 +66,8 @@ class Nanobot:
             image_generation_provider_configs={
                 "openrouter": config.providers.openrouter,
                 "aihubmix": config.providers.aihubmix,
+                "minimax": config.providers.minimax,
+                "gemini": config.providers.gemini,
             },
         )
         return cls(loop)

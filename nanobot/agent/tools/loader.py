@@ -112,5 +112,5 @@ class ToolLoader:
                     if not is_plugin_source:
                         builtin_names.add(tool.name)
                 except Exception:
-                    logger.error("Failed to register tool: %s", cls_label)
+                    logger.exception("Failed to register tool: %s", cls_label)
         return registered

@@ -52,6 +52,13 @@ import type { SettingsPayload, WebSearchSettingsUpdate } from "@/lib/types";
 type SettingsSectionKey = "general" | "byok";
 type ByokPaneKey = "llm" | "web-search";
 
+const LOCAL_UNCONFIGURED_PROVIDER_ORDER = new Map(
+  ["vllm", "ollama", "lm_studio", "atomic_chat", "ovms"].map((name, index) => [
+    name,
+    index,
+  ]),
+);
+
 interface SettingsViewProps {
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -176,7 +183,8 @@ export function SettingsView({
     if (!provider) return;
     const providerForm = providerForms[providerName] ?? { apiKey: "", apiBase: "" };
     const apiKey = providerForm.apiKey.trim();
-    if (!provider.configured && !apiKey) {
+    const apiKeyRequired = provider.api_key_required ?? true;
+    if (!provider.configured && apiKeyRequired && !apiKey) {
       setError(t("settings.byok.apiKeyRequired"));
       return;
     }
@@ -917,7 +925,10 @@ function ByokSettings({
   const [activePane, setActivePane] = useState<ByokPaneKey>("llm");
   const [showAllUnconfigured, setShowAllUnconfigured] = useState(false);
   const configuredProviders = settings.providers.filter((provider) => provider.configured);
-  const unconfiguredProviders = settings.providers.filter((provider) => !provider.configured);
+  const unconfiguredProviders = useMemo(
+    () => orderUnconfiguredProviders(settings.providers.filter((provider) => !provider.configured)),
+    [settings.providers],
+  );
   const initialUnconfiguredCount = 6;
   const visibleUnconfiguredProviders = showAllUnconfigured
     ? unconfiguredProviders
@@ -935,6 +946,12 @@ function ByokSettings({
     const saving = providerSaving === provider.name;
     const keyVisible = !!visibleProviderKeys[provider.name];
     const editingKey = !provider.configured || !!editingProviderKeys[provider.name];
+    const apiKeyRequired = provider.api_key_required ?? true;
+    const apiKey = form.apiKey.trim();
+    const apiBase = form.apiBase.trim();
+    const missingRequiredApiKey = apiKeyRequired && !provider.configured && !apiKey;
+    const missingOptionalCredential =
+      !apiKeyRequired && !provider.configured && !apiKey && !apiBase;
     return (
       <div
         key={provider.name}
@@ -1045,7 +1062,7 @@ function ByokSettings({
                 size="sm"
                 variant="outline"
                 onClick={() => onSaveProvider(provider.name)}
-                disabled={saving || (!provider.configured && !form.apiKey.trim())}
+                disabled={saving || missingRequiredApiKey || missingOptionalCredential}
                 className="rounded-full"
               >
                 {saving ? t("settings.actions.saving") : t("settings.actions.save")}
@@ -1188,6 +1205,25 @@ function ByokEmptyState({ children }: { children: ReactNode }) {
   );
 }
 
+function orderUnconfiguredProviders(
+  providers: SettingsPayload["providers"],
+): SettingsPayload["providers"] {
+  return providers
+    .map((provider, index) => ({ provider, index }))
+    .sort((left, right) => {
+      const rank = providerVisibilityRank(left.provider) - providerVisibilityRank(right.provider);
+      return rank || left.index - right.index;
+    })
+    .map(({ provider }) => provider);
+}
+
+function providerVisibilityRank(provider: SettingsPayload["providers"][number]): number {
+  const localRank = LOCAL_UNCONFIGURED_PROVIDER_ORDER.get(provider.name);
+  if (localRank !== undefined) return localRank;
+  if ((provider.api_key_required ?? true) === false) return 100;
+  return 200;
+}
+
 const PROVIDER_ICONS: Record<string, LucideIcon> = {
   custom: Hexagon,
   openrouter: Sparkles,
@@ -1212,6 +1248,12 @@ const PROVIDER_ICONS: Record<string, LucideIcon> = {
   qianfan: Database,
   azure_openai: Cloud,
   bedrock: Database,
+  vllm: Cpu,
+  ollama: Cpu,
+  lm_studio: Cpu,
+  atomic_chat: Cpu,
+  ovms: Cpu,
+  nvidia: Zap,
 };
 
 function ProviderIcon({ provider }: { provider: string }) {

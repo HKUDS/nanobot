@@ -38,7 +38,7 @@ def _make_autocompact(
         sessions = MagicMock(spec=SessionManager)
     if consolidator is None:
         consolidator = MagicMock()
-        consolidator.archive = AsyncMock(return_value="Summary.")
+        consolidator.compact_idle_session = AsyncMock(return_value="Summary.")
     return AutoCompact(
         sessions=sessions,
         consolidator=consolidator,
@@ -179,62 +179,6 @@ class TestFormatSummary:
 
 
 # ---------------------------------------------------------------------------
-# _split_unconsolidated
-# ---------------------------------------------------------------------------
-
-
-class TestSplitUnconsolidated:
-    """Test AutoCompact._split_unconsolidated splitting logic."""
-
-    def test_empty_session_returns_both_empty(self):
-        """Empty session should return ([], [])."""
-        ac = _make_autocompact()
-        session = _make_session(messages=[])
-        archive, kept = ac._split_unconsolidated(session)
-        assert archive == []
-        assert kept == []
-
-    def test_all_messages_archivable_when_more_than_suffix(self):
-        """Session with many messages should archive a prefix and keep suffix."""
-        ac = _make_autocompact()
-        msgs = [{"role": "user", "content": f"u{i}"} for i in range(20)]
-        session = _make_session(messages=msgs)
-        archive, kept = ac._split_unconsolidated(session)
-        assert len(archive) > 0
-        assert len(kept) <= AutoCompact._RECENT_SUFFIX_MESSAGES
-
-    def test_fewer_messages_than_suffix_returns_empty_archive(self):
-        """Session with fewer messages than suffix should have empty archive."""
-        ac = _make_autocompact()
-        msgs = [{"role": "user", "content": f"u{i}"} for i in range(3)]
-        session = _make_session(messages=msgs)
-        archive, kept = ac._split_unconsolidated(session)
-        assert archive == []
-        assert len(kept) == len(msgs)
-
-    def test_respects_last_consolidated_offset(self):
-        """Only messages after last_consolidated should be considered."""
-        ac = _make_autocompact()
-        msgs = [{"role": "user", "content": f"u{i}"} for i in range(20)]
-        # First 10 are already consolidated
-        session = _make_session(messages=msgs, last_consolidated=10)
-        archive, kept = ac._split_unconsolidated(session)
-        # Only the tail of 10 messages is considered for splitting
-        assert all(m["content"] in [f"u{i}" for i in range(10, 20)] for m in kept)
-        assert all(m["content"] in [f"u{i}" for i in range(10, 20)] for m in archive)
-
-    def test_retain_recent_legal_suffix_keeps_last_n(self):
-        """The kept suffix should be at most _RECENT_SUFFIX_MESSAGES long."""
-        ac = _make_autocompact()
-        # 20 user messages = 20 messages total, all after last_consolidated=0
-        msgs = [{"role": "user", "content": f"u{i}"} for i in range(20)]
-        session = _make_session(messages=msgs)
-        archive, kept = ac._split_unconsolidated(session)
-        assert len(kept) <= AutoCompact._RECENT_SUFFIX_MESSAGES
-        assert len(archive) == len(msgs) - len(kept)
-
-
-# ---------------------------------------------------------------------------
 # check_expired
 # ---------------------------------------------------------------------------
 
@@ -313,126 +257,71 @@ class TestCheckExpired:
 # ---------------------------------------------------------------------------
 
 
-class TestArchive:
-    """Test AutoCompact._archive async method."""
+class TestArchiveDelegates:
+    """_archive should delegate all session mutation to Consolidator."""
 
     @pytest.mark.asyncio
-    async def test_empty_session_updates_timestamp_no_archive_call(self):
-        """Empty session should refresh updated_at and not call consolidator.archive."""
+    async def test_calls_compact_idle_session(self):
         ac = _make_autocompact()
         mock_sm = MagicMock(spec=SessionManager)
-        empty_session = _make_session(messages=[])
-        mock_sm.get_or_create.return_value = empty_session
         ac.sessions = mock_sm
-        ac.consolidator.archive = AsyncMock(return_value="Summary.")
+        ac.consolidator.compact_idle_session = AsyncMock(return_value="Summary.")
 
         await ac._archive("cli:test")
 
-        ac.consolidator.archive.assert_not_called()
-        mock_sm.save.assert_called_once_with(empty_session)
-        # updated_at was refreshed
-        assert empty_session.updated_at > datetime.now() - timedelta(seconds=5)
+        ac.consolidator.compact_idle_session.assert_awaited_once_with(
+            "cli:test", ac._RECENT_SUFFIX_MESSAGES,
+        )
 
     @pytest.mark.asyncio
-    async def test_archive_returns_empty_string_no_summary_stored(self):
-        """If archive returns empty string, no summary should be stored."""
+    async def test_populates_summaries_from_metadata(self):
         ac = _make_autocompact()
         mock_sm = MagicMock(spec=SessionManager)
-        msgs = [{"role": "user", "content": f"u{i}"} for i in range(20)]
-        session = _make_session(messages=msgs)
+        session = _make_session(
+            metadata={"_last_summary": {"text": "Hello.", "last_active": "2026-05-13T10:00:00"}}
+        )
         mock_sm.get_or_create.return_value = session
         ac.sessions = mock_sm
-        ac.consolidator.archive = AsyncMock(return_value="")
+        ac.consolidator.compact_idle_session = AsyncMock(return_value="Hello.")
 
         await ac._archive("cli:test")
 
-        assert "cli:test" not in ac._summaries
-
-    @pytest.mark.asyncio
-    async def test_archive_returns_nothing_no_summary_stored(self):
-        """If archive returns '(nothing)', no summary should be stored."""
-        ac = _make_autocompact()
-        mock_sm = MagicMock(spec=SessionManager)
-        msgs = [{"role": "user", "content": f"u{i}"} for i in range(20)]
-        session = _make_session(messages=msgs)
-        mock_sm.get_or_create.return_value = session
-        ac.sessions = mock_sm
-        ac.consolidator.archive = AsyncMock(return_value="(nothing)")
-
-        await ac._archive("cli:test")
-
-        assert "cli:test" not in ac._summaries
-
-    @pytest.mark.asyncio
-    async def test_archive_exception_caught_key_removed_from_archiving(self):
-        """If archive raises, exception is caught and key removed from _archiving."""
-        ac = _make_autocompact()
-        mock_sm = MagicMock(spec=SessionManager)
-        msgs = [{"role": "user", "content": f"u{i}"} for i in range(20)]
-        session = _make_session(messages=msgs)
-        mock_sm.get_or_create.return_value = session
-        ac.sessions = mock_sm
-        ac.consolidator.archive = AsyncMock(side_effect=RuntimeError("LLM down"))
-
-        # Should not raise
-        await ac._archive("cli:test")
-
-        assert "cli:test" not in ac._archiving
-
-    @pytest.mark.asyncio
-    async def test_successful_archive_stores_summary_in_summaries_and_metadata(self):
-        """Successful archive should store summary in _summaries dict and metadata."""
-        ac = _make_autocompact()
-        mock_sm = MagicMock(spec=SessionManager)
-        msgs = [{"role": "user", "content": f"u{i}"} for i in range(20)]
-        last_active = datetime(2026, 5, 13, 10, 0, 0)
-        session = _make_session(messages=msgs, updated_at=last_active)
-        mock_sm.get_or_create.return_value = session
-        ac.sessions = mock_sm
-        ac.consolidator.archive = AsyncMock(return_value="User discussed AI.")
-
-        await ac._archive("cli:test")
-
-        # _summaries
         entry = ac._summaries.get("cli:test")
         assert entry is not None
-        assert entry[0] == "User discussed AI."
-        assert entry[1] == last_active
-        # metadata
-        meta = session.metadata.get("_last_summary")
-        assert meta is not None
-        assert meta["text"] == "User discussed AI."
-        assert "last_active" in meta
+        assert entry[0] == "Hello."
 
     @pytest.mark.asyncio
-    async def test_finally_block_always_removes_from_archiving(self):
-        """Finally block should always remove key from _archiving, even on error."""
+    async def test_no_summary_when_compact_returns_empty(self):
         ac = _make_autocompact()
         mock_sm = MagicMock(spec=SessionManager)
-        msgs = [{"role": "user", "content": f"u{i}"} for i in range(20)]
-        session = _make_session(messages=msgs)
-        mock_sm.get_or_create.return_value = session
         ac.sessions = mock_sm
-        ac.consolidator.archive = AsyncMock(side_effect=RuntimeError("fail"))
+        ac.consolidator.compact_idle_session = AsyncMock(return_value="")
 
-        # Pre-add key to archiving to verify it gets removed
-        ac._archiving.add("cli:test")
         await ac._archive("cli:test")
-        assert "cli:test" not in ac._archiving
+
+        assert "cli:test" not in ac._summaries
 
     @pytest.mark.asyncio
-    async def test_finally_removes_from_archiving_on_success(self):
-        """Finally block should remove key from _archiving on success too."""
+    async def test_no_summary_when_compact_returns_nothing(self):
         ac = _make_autocompact()
         mock_sm = MagicMock(spec=SessionManager)
-        msgs = [{"role": "user", "content": f"u{i}"} for i in range(20)]
-        session = _make_session(messages=msgs)
-        mock_sm.get_or_create.return_value = session
         ac.sessions = mock_sm
-        ac.consolidator.archive = AsyncMock(return_value="Summary.")
+        ac.consolidator.compact_idle_session = AsyncMock(return_value="(nothing)")
+
+        await ac._archive("cli:test")
+
+        assert "cli:test" not in ac._summaries
+
+    @pytest.mark.asyncio
+    async def test_exception_still_removes_from_archiving(self):
+        ac = _make_autocompact()
+        mock_sm = MagicMock(spec=SessionManager)
+        ac.sessions = mock_sm
+        ac.consolidator.compact_idle_session = AsyncMock(side_effect=RuntimeError("fail"))
 
         ac._archiving.add("cli:test")
         await ac._archive("cli:test")
+
         assert "cli:test" not in ac._archiving
 
 

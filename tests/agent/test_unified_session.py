@@ -387,6 +387,7 @@ class TestConsolidationUnaffectedByUnifiedSession:
 
         session = Session(key="unified:default")
         session.messages = [{"role": "user", "content": "msg"}]
+        sessions.get_or_create.return_value = session
 
         # Simulate over-budget: estimated > budget
         consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(950, "tiktoken"))

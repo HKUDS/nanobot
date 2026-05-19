@@ -577,6 +577,7 @@ class DiscordChannel(BaseChannel):
                 media=media_paths,
                 metadata=metadata,
                 session_key=session_key,
+                is_dm=message.guild is None,
             )
         except Exception:
             await self._clear_reactions(channel_id)

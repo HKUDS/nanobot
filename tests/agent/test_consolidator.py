@@ -28,6 +28,12 @@ def mock_provider():
 def consolidator(store, mock_provider):
     sessions = MagicMock()
     sessions.save = MagicMock()
+    # When maybe_consolidate_by_tokens refreshes the session reference via
+    # get_or_create(session.key), it should get back the same object the test
+    # passed in.  Store sessions by key so the lookup is transparent.
+    _session_cache: dict[str, MagicMock] = {}
+    sessions.get_or_create = MagicMock(side_effect=lambda key: _session_cache.get(key, MagicMock()))
+    sessions._session_cache = _session_cache
     return Consolidator(
         store=store,
         provider=mock_provider,
@@ -117,6 +123,7 @@ class TestConsolidatorTokenBudget:
         session.last_consolidated = 0
         session.messages = [{"role": "user", "content": "hi"}]
         session.key = "test:key"
+        consolidator.sessions._session_cache[session.key] = session
         consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
         consolidator.archive = AsyncMock(return_value=True)
         await consolidator.maybe_consolidate_by_tokens(session)
@@ -152,6 +159,7 @@ class TestConsolidatorTokenBudget:
             session.add_message("user", f"u{i}")
             session.add_message("assistant", f"a{i}")
 
+        consolidator.sessions._session_cache[session.key] = session
         consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
         consolidator.archive = AsyncMock(return_value="old conversation summary")
 
@@ -184,6 +192,7 @@ class TestConsolidatorTokenBudget:
         session.add_message("tool", "tool result", tool_call_id="call-1", name="x")
         session.add_message("assistant", "final answer")
 
+        consolidator.sessions._session_cache[session.key] = session
         consolidator.estimate_session_prompt_tokens = MagicMock(return_value=(100, "tiktoken"))
         consolidator.archive = AsyncMock(return_value="tool turn summary")
 
@@ -210,6 +219,7 @@ class TestConsolidatorTokenBudget:
             }
             for i in range(70)
         ]
+        consolidator.sessions._session_cache[session.key] = session
         consolidator.estimate_session_prompt_tokens = MagicMock(
             side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
         )
@@ -238,6 +248,7 @@ class TestConsolidatorTokenBudget:
             for i in range(70)
         ]
         session.metadata = {}
+        consolidator.sessions._session_cache[session.key] = session
         consolidator.estimate_session_prompt_tokens = MagicMock(
             side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
         )
@@ -263,6 +274,7 @@ class TestConsolidatorTokenBudget:
             for i in range(70)
         ]
         session.metadata = {}
+        consolidator.sessions._session_cache[session.key] = session
         # Keep estimates high so the loop would otherwise run multiple rounds.
         consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(1200, "tiktoken")
@@ -287,6 +299,7 @@ class TestConsolidatorTokenBudget:
             }
             for i in range(70)
         ]
+        consolidator.sessions._session_cache[session.key] = session
         consolidator.estimate_session_prompt_tokens = MagicMock(
             side_effect=[(1200, "tiktoken"), (400, "tiktoken")]
         )
@@ -297,6 +310,260 @@ class TestConsolidatorTokenBudget:
         consolidator.archive.assert_awaited_once()
         # pick_consolidation_boundary finds the only boundary at idx=61
         assert session.last_consolidated == 61
+
+
+class TestCompactIdleSession:
+    """Tests for Consolidator.compact_idle_session — lock-protected idle truncation."""
+
+    @pytest.fixture
+    def real_consolidator(self, store, mock_provider):
+        """Create a Consolidator with a real SessionManager (not a mock)."""
+        from nanobot.session.manager import SessionManager
+
+        sessions = SessionManager(store.workspace)
+        return Consolidator(
+            store=store,
+            provider=mock_provider,
+            model="test-model",
+            sessions=sessions,
+            context_window_tokens=1000,
+            build_messages=MagicMock(return_value=[]),
+            get_tool_definitions=MagicMock(return_value=[]),
+            max_completion_tokens=100,
+        )
+
+    @pytest.mark.asyncio
+    async def test_archives_prefix_keeps_suffix(self, real_consolidator, mock_provider):
+        """20 user/assistant turns → compact with max_suffix=8 → messages ≤ 8,
+        last_consolidated=0, _last_summary stored."""
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Summary of old conversation.", finish_reason="stop"
+        )
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:test")
+        for i in range(20):
+            session.add_message("user", f"user msg {i}")
+            session.add_message("assistant", f"assistant msg {i}")
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session("cli:test", max_suffix=8)
+        assert result == "Summary of old conversation."
+
+        reloaded = sessions.get_or_create("cli:test")
+        assert len(reloaded.messages) <= 8
+        assert reloaded.last_consolidated == 0
+        meta = reloaded.metadata.get("_last_summary")
+        assert meta is not None
+        assert meta["text"] == "Summary of old conversation."
+        assert "last_active" in meta
+
+    @pytest.mark.asyncio
+    async def test_empty_session_refreshes_timestamp(self, real_consolidator):
+        """Empty session with old updated_at → refreshed after call, returns ''."""
+        from datetime import datetime, timedelta
+
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:empty")
+        old_ts = datetime.now() - timedelta(hours=2)
+        session.updated_at = old_ts
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session("cli:empty")
+        assert result == ""
+
+        reloaded = sessions.get_or_create("cli:empty")
+        assert reloaded.updated_at > old_ts
+
+    @pytest.mark.asyncio
+    async def test_nothing_summary_not_stored(self, real_consolidator, mock_provider):
+        """LLM returns '(nothing)' → _last_summary NOT in metadata."""
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="(nothing)", finish_reason="stop"
+        )
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:nothing")
+        for i in range(10):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session("cli:nothing", max_suffix=4)
+        assert result == "(nothing)"
+
+        reloaded = sessions.get_or_create("cli:nothing")
+        assert "_last_summary" not in reloaded.metadata
+
+    @pytest.mark.asyncio
+    async def test_llm_failure_still_truncates(self, real_consolidator, mock_provider, store):
+        """LLM raises RuntimeError → raw_archive fires, session still truncated, returns None."""
+        mock_provider.chat_with_retry.side_effect = RuntimeError("LLM unavailable")
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:fail")
+        for i in range(10):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session("cli:fail", max_suffix=4)
+        assert result is None
+
+        # raw_archive should have been called (history.jsonl gets an entry)
+        entries = store.read_unprocessed_history(since_cursor=0)
+        assert any("[RAW]" in e["content"] for e in entries)
+
+        # Session should still be truncated
+        reloaded = sessions.get_or_create("cli:fail")
+        assert len(reloaded.messages) <= 4
+
+    @pytest.mark.asyncio
+    async def test_respects_last_consolidated(self, real_consolidator, mock_provider):
+        """30 turns with last_consolidated=50 → only unconsolidated tail considered."""
+        mock_provider.chat_with_retry.return_value = MagicMock(
+            content="Tail summary.", finish_reason="stop"
+        )
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:offset")
+        for i in range(30):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+        session.last_consolidated = 50  # Only 10 messages unconsolidated
+        sessions.save(session)
+
+        result = await real_consolidator.compact_idle_session("cli:offset", max_suffix=4)
+        assert result == "Tail summary."
+
+        # Verify only the unconsolidated tail was processed:
+        # 10 unconsolidated messages (50-59), keep suffix of 4 → archive 6
+        archived_call = mock_provider.chat_with_retry.call_args
+        user_content = archived_call.kwargs["messages"][1]["content"]
+        # Should contain only tail messages, not early ones
+        assert "u0" not in user_content
+        assert "u25" in user_content or "a25" in user_content
+
+    @pytest.mark.asyncio
+    async def test_acquires_consolidation_lock(self, real_consolidator, mock_provider):
+        """Verify lock is held during execution."""
+        import asyncio
+
+        # Use a slow LLM response to ensure the lock is held while we check
+        started = asyncio.Event()
+
+        async def slow_chat(**kwargs):
+            started.set()
+            await asyncio.sleep(0.1)
+            return MagicMock(content="Summary.", finish_reason="stop")
+
+        mock_provider.chat_with_retry = slow_chat
+
+        sessions = real_consolidator.sessions
+        session = sessions.get_or_create("cli:lock")
+        for i in range(10):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+        sessions.save(session)
+
+        lock = real_consolidator.get_lock("cli:lock")
+        assert not lock.locked()
+
+        task = asyncio.ensure_future(
+            real_consolidator.compact_idle_session("cli:lock", max_suffix=4)
+        )
+        await started.wait()
+        assert lock.locked()
+        await task
+        assert not lock.locked()
+
+
+class TestConsolidatorSessionRefresh:
+    """Background consolidation must detect stale session references."""
+
+    @pytest.mark.asyncio
+    async def test_reloads_before_empty_session_guard(self, tmp_path):
+        """A stale empty reference must not skip a non-empty cached session."""
+        from nanobot.agent.memory import Consolidator, MemoryStore
+        from nanobot.session.manager import Session, SessionManager
+
+        store = MemoryStore(tmp_path)
+        provider = MagicMock()
+        provider.chat_with_retry = AsyncMock(
+            return_value=MagicMock(content="summary", finish_reason="stop")
+        )
+        provider.generation.max_tokens = 4096
+        provider.estimate_prompt_tokens = MagicMock(return_value=(10, "test"))
+        sessions = SessionManager(tmp_path)
+        consolidator = Consolidator(
+            store=store,
+            provider=provider,
+            model="test-model",
+            sessions=sessions,
+            context_window_tokens=128_000,
+            build_messages=MagicMock(return_value=[]),
+            get_tool_definitions=MagicMock(return_value=[]),
+        )
+
+        fresh = sessions.get_or_create("cli:test")
+        fresh.add_message("user", "fresh message")
+        sessions.save(fresh)
+        stale_empty = Session(key="cli:test")
+
+        seen: dict[str, Session] = {}
+
+        def estimate(session: Session):
+            seen["session"] = session
+            return 10, "test"
+
+        consolidator.estimate_session_prompt_tokens = MagicMock(side_effect=estimate)
+
+        await consolidator.maybe_consolidate_by_tokens(stale_empty)
+
+        assert seen["session"] is fresh
+
+    @pytest.mark.asyncio
+    async def test_reloads_stale_session_after_compact(self, tmp_path):
+        """After compact_idle_session replaces the session, a concurrent
+        maybe_consolidate_by_tokens with the old reference should use the
+        fresh session from cache instead of overwriting."""
+        from nanobot.agent.memory import Consolidator, MemoryStore
+        from nanobot.session.manager import SessionManager
+
+        store = MemoryStore(tmp_path)
+        provider = MagicMock()
+        provider.chat_with_retry = AsyncMock(
+            return_value=MagicMock(content="summary", finish_reason="stop")
+        )
+        provider.generation.max_tokens = 4096
+        provider.estimate_prompt_tokens = MagicMock(return_value=(10, "test"))
+        sessions = SessionManager(tmp_path)
+        consolidator = Consolidator(
+            store=store,
+            provider=provider,
+            model="test-model",
+            sessions=sessions,
+            context_window_tokens=128_000,
+            build_messages=MagicMock(return_value=[]),
+            get_tool_definitions=MagicMock(return_value=[]),
+        )
+
+        # Populate session with many messages
+        session = sessions.get_or_create("cli:test")
+        for i in range(20):
+            session.add_message("user", f"u{i}")
+            session.add_message("assistant", f"a{i}")
+        sessions.save(session)
+
+        # Simulate: background consolidation captures old reference
+        old_ref = session
+
+        # AutoCompact runs first and truncates to 8
+        await consolidator.compact_idle_session("cli:test", max_suffix=8)
+
+        # Background consolidation runs with stale reference —
+        # should detect the session was replaced and not undo the compact.
+        await consolidator.maybe_consolidate_by_tokens(old_ref)
+
+        session_after = sessions.get_or_create("cli:test")
+        # Messages should still be truncated (not restored to 40)
+        assert len(session_after.messages) <= 8
 
 
 class TestRawArchiveTruncation:
