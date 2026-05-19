@@ -2383,13 +2383,20 @@ function SettingsStatusMessage({
 }) {
   if (!children) return null;
   return (
-    <span className="inline-flex items-center gap-2">
+    <span
+      className={cn(
+        "inline-flex items-center gap-2",
+        tone === "accent" && "font-medium text-blue-600 dark:text-blue-300",
+        tone === "danger" && "font-medium text-destructive",
+      )}
+    >
       {tone ? (
         <span
           className={cn(
             "h-1.5 w-1.5 shrink-0 rounded-full",
-            tone === "accent" && "bg-primary/65",
-            tone === "danger" && "bg-destructive/60",
+            tone === "accent" &&
+              "bg-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.14)] dark:bg-blue-400 dark:shadow-[0_0_0_3px_rgba(96,165,250,0.18)]",
+            tone === "danger" && "bg-destructive/70",
           )}
           aria-hidden
         />

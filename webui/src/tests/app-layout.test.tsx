@@ -729,7 +729,13 @@ describe("App layout", () => {
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Models" }));
     expect(screen.getByText("AI")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("openai/gpt-4o")).toBeInTheDocument();
+    const modelInput = screen.getByDisplayValue("openai/gpt-4o");
+    expect(modelInput).toBeInTheDocument();
+    fireEvent.change(modelInput, { target: { value: "openai/gpt-4o-mini" } });
+    expect(screen.getByText("Unsaved changes.").parentElement?.className).toContain(
+      "text-blue-600",
+    );
+    fireEvent.change(modelInput, { target: { value: "openai/gpt-4o" } });
     fireEvent.click(within(settingsNav).getByRole("button", { name: "Providers" }));
     expect(screen.getByText("OpenRouter")).toBeInTheDocument();
     expect(screen.getByText("Ant Ling")).toBeInTheDocument();
