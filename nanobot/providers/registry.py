@@ -400,6 +400,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         detect_by_base_keyword="ant-ling.com",
         default_api_base="https://api.ant-ling.com/v1",
     ),
+    # APIFree: OpenAI-compatible API gateway with agent-optimised models.
+    ProviderSpec(
+        name="apifree",
+        keywords=("apifree", "api-free", "skyclaw"),
+        env_key="APIFREE_API_KEY",
+        display_name="APIFree",
+        backend="openai_compat",
+        detect_by_base_keyword="apifree.ai",
+        default_api_base="https://api.apifree.ai/agent/v1",
+    ),
     # === Local deployment (matched by config key, NOT by api_base) =========
     # vLLM / any OpenAI-compatible local server
     ProviderSpec(
