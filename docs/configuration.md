@@ -134,6 +134,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 | `custom` | Any OpenAI-compatible endpoint | — |
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
 | `huggingface` | LLM (Hugging Face Inference Providers) | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
+| `skywork` | LLM (Skywork / APIFree API gateway) | [apifree.ai](https://www.apifree.ai) |
 | `volcengine` | LLM (VolcEngine, pay-per-use) | [Coding Plan](https://www.volcengine.com/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [volcengine.com](https://www.volcengine.com) |
 | `byteplus` | LLM (VolcEngine international, pay-per-use) | [Coding Plan](https://www.byteplus.com/en/activity/codingplan?utm_campaign=nanobot&utm_content=nanobot&utm_medium=devrel&utm_source=OWO&utm_term=nanobot) · [byteplus.com](https://www.byteplus.com) |
 | `anthropic` | LLM (Claude direct) | [console.anthropic.com](https://console.anthropic.com) |
@@ -163,6 +164,36 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 | `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
 | `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
 | `qianfan` | LLM (Baidu Qianfan) | [cloud.baidu.com](https://cloud.baidu.com/doc/qianfan/s/Hmh4suq26) |
+
+<details>
+<summary><b>Skywork / APIFree</b></summary>
+
+Skywork uses the OpenAI-compatible APIFree API endpoint. Configure the provider
+once, then use Skywork model IDs such as `skywork-ai/skyclaw-v1`.
+
+```json
+{
+  "providers": {
+    "skywork": {
+      "apiKey": "${SKYWORK_API_KEY}",
+      "apiBase": "https://api.apifree.ai/v1"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "skywork",
+      "model": "skywork-ai/skyclaw-v1",
+      "maxTokens": 32768,
+      "contextWindowTokens": 131072
+    }
+  }
+}
+```
+
+You can also reference `${APIFREE_API_KEY}` in `apiKey` if that is how your
+environment names the credential.
+
+</details>
 
 <details>
 <summary><b>AWS Bedrock (Converse API)</b></summary>
