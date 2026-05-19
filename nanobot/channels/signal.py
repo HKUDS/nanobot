@@ -704,6 +704,15 @@ class SignalChannel(BaseChannel):
             timestamp=timestamp,
         )
         if not allowed:
+            # Mirror Slack: let denied DMs reach _handle_message so the base
+            # class can reply with a pairing code. Group denials stay dropped.
+            if not is_group_message and self.config.dm.enabled:
+                await self._handle_message(
+                    sender_id=sender_id,
+                    chat_id=chat_id,
+                    content="",
+                    is_dm=True,
+                )
             return
 
         content, media_paths = self._assemble_inbound_content(

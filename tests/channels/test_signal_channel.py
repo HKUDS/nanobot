@@ -670,11 +670,16 @@ class TestHandleDataMessageDM:
         assert len(handled) == 1
 
     @pytest.mark.asyncio
-    async def test_dm_allowlist_rejected(self):
+    async def test_dm_allowlist_rejected_triggers_pairing(self):
+        # Denied DM senders are routed to _handle_message with empty content
+        # and is_dm=True so BaseChannel issues a pairing code (mirrors Slack).
         ch, handled = self._make_dm_channel(policy="allowlist", allow_from=["+10000000001"])
         params = _dm_envelope(source_number="+19995550002")
         await ch._handle_receive_notification(params)
-        assert handled == []
+        assert len(handled) == 1
+        assert handled[0]["content"] == ""
+        assert handled[0]["is_dm"] is True
+        assert handled[0]["chat_id"] == "+19995550002"
 
     @pytest.mark.asyncio
     async def test_dm_allowlist_matches_without_plus_prefix(self):
