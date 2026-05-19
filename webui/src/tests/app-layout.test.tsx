@@ -222,6 +222,13 @@ describe("App layout", () => {
                   default_api_base: "https://api.ant-ling.com/v1",
                 },
                 {
+                  name: "apifree",
+                  label: "APIFree",
+                  configured: false,
+                  api_key_required: true,
+                  default_api_base: "https://api.apifree.ai/agent/v1",
+                },
+                {
                   name: "azure_openai",
                   label: "Azure OpenAI",
                   configured: false,
@@ -309,6 +316,7 @@ describe("App layout", () => {
     expect(screen.getByRole("tab", { name: "Web Search" })).toBeInTheDocument();
     expect(screen.getByText("OpenRouter")).toBeInTheDocument();
     expect(screen.getByText("Ant Ling")).toBeInTheDocument();
+    expect(screen.getByText("APIFree")).toBeInTheDocument();
     expect(screen.getAllByText("Not configured").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByText("OpenAI"));
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
@@ -321,6 +329,8 @@ describe("App layout", () => {
     expect(screen.queryByDisplayValue("unsaved-openai-key")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Ant Ling"));
     expect(screen.getByDisplayValue("https://api.ant-ling.com/v1")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("APIFree"));
+    expect(screen.getByDisplayValue("https://api.apifree.ai/agent/v1")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Atomic Chat"));
     expect(screen.getByDisplayValue("http://localhost:1337/v1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
