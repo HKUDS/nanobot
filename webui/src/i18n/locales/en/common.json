@@ -96,6 +96,7 @@
       "webBehavior": "Behavior",
       "identity": "Identity",
       "safety": "Safety",
+      "capabilities": "Capabilities",
       "integrations": "Integrations"
     },
     "rows": {
@@ -176,6 +177,7 @@
       "enabled": "Enabled",
       "disabled": "Disabled",
       "restartPending": "Restart pending",
+      "ready": "Ready",
       "comfortable": "Comfortable",
       "compact": "Compact",
       "auto": "Auto",

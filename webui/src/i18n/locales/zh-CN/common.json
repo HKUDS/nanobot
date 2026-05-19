@@ -84,6 +84,7 @@
       "webBehavior": "行为",
       "identity": "身份",
       "safety": "安全",
+      "capabilities": "能力",
       "integrations": "集成"
     },
     "rows": {
@@ -164,6 +165,7 @@
       "enabled": "已启用",
       "disabled": "已禁用",
       "restartPending": "等待重启",
+      "ready": "就绪",
       "comfortable": "舒适",
       "compact": "紧凑",
       "auto": "自动",

@@ -14,6 +14,7 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
+  ChevronRight,
   Cloud,
   Cpu,
   Database,
@@ -846,84 +847,132 @@ function OverviewSettings({
   const { t } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const configuredCount = settings.providers.filter((provider) => provider.configured).length;
+  const activePreset = settings.agent.model_preset || "default";
+  const activeProvider = settings.agent.resolved_provider ?? settings.agent.provider;
+  const webStatus = settings.web.enable
+    ? tx("settings.values.enabled", "Enabled")
+    : tx("settings.values.disabled", "Disabled");
+  const imageStatus = settings.image_generation.enabled
+    ? tx("settings.values.enabled", "Enabled")
+    : tx("settings.values.disabled", "Disabled");
+  const imageCaption = `${providerLabel(settings.image_generation.providers, settings.image_generation.provider)} · ${
+    settings.image_generation.provider_configured
+      ? tx("settings.values.configured", "Configured")
+      : tx("settings.values.notConfigured", "Not configured")
+  }`;
   return (
     <div className="space-y-7">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <OverviewTile
-          icon={Bot}
-          title={tx("settings.overview.model", "Current model")}
-          value={settings.agent.model}
-          caption={settings.agent.resolved_provider ?? settings.agent.provider}
-          onClick={() => onSelectSection("models")}
-        />
-        <OverviewTile
-          icon={KeyRound}
-          title={tx("settings.overview.providers", "Providers")}
-          value={tx("settings.overview.configuredCount", "{{count}} configured").replace("{{count}}", String(configuredCount))}
-          caption={tx("settings.overview.totalProviders", "{{count}} available").replace("{{count}}", String(settings.providers.length))}
-          onClick={() => onSelectSection("providers")}
-        />
-        <OverviewTile
-          icon={Globe2}
-          title={tx("settings.overview.webSearch", "Web search")}
-          value={providerLabel(settings.web_search.providers, settings.web_search.provider)}
-          caption={settings.web.enable ? tx("settings.values.enabled", "Enabled") : tx("settings.values.disabled", "Disabled")}
-          onClick={() => onSelectSection("web")}
-        />
-        <OverviewTile
-          icon={ImageIcon}
-          title={tx("settings.overview.imageGeneration", "Image generation")}
-          value={settings.image_generation.enabled ? tx("settings.values.enabled", "Enabled") : tx("settings.values.disabled", "Disabled")}
-          caption={`${providerLabel(settings.image_generation.providers, settings.image_generation.provider)} · ${
-            settings.image_generation.provider_configured
-              ? tx("settings.values.configured", "Configured")
-              : tx("settings.values.notConfigured", "Not configured")
-          }`}
-          onClick={() => onSelectSection("image")}
-        />
-        <OverviewTile
-          icon={HardDrive}
-          title={tx("settings.overview.workspace", "Workspace")}
-          value={settings.runtime.workspace_path}
-          caption={settings.runtime.config_path}
-          onClick={() => onSelectSection("runtime")}
-        />
-      </div>
+      <section>
+        <div className="overflow-hidden rounded-[22px] border border-border/45 bg-card/86 shadow-[0_18px_65px_rgba(15,23,42,0.075)] backdrop-blur-xl dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.24)]">
+          <div className="flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-[16px] bg-muted text-foreground/82 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.025)] dark:bg-muted/70">
+                <Bot className="h-6 w-6" aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <div className="text-[12px] font-medium text-muted-foreground">nanobot</div>
+                <div className="mt-0.5 truncate text-[18px] font-semibold leading-6 text-foreground">
+                  {settings.agent.model}
+                </div>
+                <div className="mt-0.5 truncate text-[13px] leading-5 text-muted-foreground">
+                  {activeProvider} · {activePreset}
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              <StatusPill tone={requiresRestart ? "neutral" : "success"}>
+                {requiresRestart
+                  ? tx("settings.values.restartPending", "Restart pending")
+                  : tx("settings.values.ready", "Ready")}
+              </StatusPill>
+              {requiresRestart && onRestart ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={onRestart}
+                  disabled={isRestarting}
+                  className="rounded-full"
+                >
+                  {isRestarting ? (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
+                  ) : (
+                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
+                  )}
+                  {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section>
-        <SettingsSectionTitle>{tx("settings.sections.status", "Status")}</SettingsSectionTitle>
+        <SettingsSectionTitle>{tx("settings.sections.ai", "AI")}</SettingsSectionTitle>
         <SettingsGroup>
-          <SettingsRow title={tx("settings.rows.activePreset", "Active preset")}>
-            <StatusPill>{settings.agent.model_preset || "default"}</StatusPill>
-          </SettingsRow>
-          <SettingsRow title={tx("settings.rows.gateway", "Gateway")}>
-            <span className="text-right text-[13px] text-muted-foreground">
-              {settings.runtime.gateway_host}:{settings.runtime.gateway_port}
-            </span>
-          </SettingsRow>
-          {requiresRestart ? (
-            <SettingsRow title={tx("settings.rows.pendingChanges", "Pending changes")}>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <StatusPill>{tx("settings.values.restartPending", "Restart pending")}</StatusPill>
-                {onRestart ? (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={onRestart}
-                    disabled={isRestarting}
-                    className="rounded-full"
-                  >
-                    {isRestarting ? (
-                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden />
-                    ) : (
-                      <RotateCcw className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-                    )}
-                    {isRestarting ? t("app.system.restarting") : t("app.system.restart")}
-                  </Button>
-                ) : null}
-              </div>
-            </SettingsRow>
-          ) : null}
+          <OverviewListRow
+            icon={Bot}
+            title={tx("settings.overview.model", "Current model")}
+            value={settings.agent.model}
+            caption={`${activeProvider} · ${activePreset}`}
+            onClick={() => onSelectSection("models")}
+          />
+          <OverviewListRow
+            icon={KeyRound}
+            title={tx("settings.overview.providers", "Providers")}
+            value={tx("settings.overview.configuredCount", "{{count}} configured").replace(
+              "{{count}}",
+              String(configuredCount),
+            )}
+            caption={tx("settings.overview.totalProviders", "{{count}} available").replace(
+              "{{count}}",
+              String(settings.providers.length),
+            )}
+            onClick={() => onSelectSection("providers")}
+          />
+        </SettingsGroup>
+      </section>
+
+      <section>
+        <SettingsSectionTitle>{tx("settings.sections.capabilities", "Capabilities")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <OverviewListRow
+            icon={Globe2}
+            title={tx("settings.overview.webSearch", "Web search")}
+            value={providerLabel(settings.web_search.providers, settings.web_search.provider)}
+            caption={webStatus}
+            onClick={() => onSelectSection("web")}
+          />
+          <OverviewListRow
+            icon={ImageIcon}
+            title={tx("settings.overview.imageGeneration", "Image generation")}
+            value={imageStatus}
+            caption={imageCaption}
+            onClick={() => onSelectSection("image")}
+          />
+        </SettingsGroup>
+      </section>
+
+      <section>
+        <SettingsSectionTitle>{tx("settings.sections.system", "System")}</SettingsSectionTitle>
+        <SettingsGroup>
+          <OverviewListRow
+            icon={Server}
+            title={tx("settings.rows.gateway", "Gateway")}
+            value={`${settings.runtime.gateway_host}:${settings.runtime.gateway_port}`}
+            caption={
+              requiresRestart
+                ? tx("settings.values.restartPending", "Restart pending")
+                : tx("settings.values.ready", "Ready")
+            }
+            onClick={() => onSelectSection("runtime")}
+          />
+          <OverviewListRow
+            icon={HardDrive}
+            title={tx("settings.overview.workspace", "Workspace")}
+            value={settings.runtime.workspace_path}
+            caption={settings.runtime.config_path}
+            onClick={() => onSelectSection("runtime")}
+          />
         </SettingsGroup>
       </section>
     </div>
@@ -2119,7 +2168,7 @@ function ProviderIcon({ provider }: { provider: string }) {
   );
 }
 
-function OverviewTile({
+function OverviewListRow({
   icon: Icon,
   title,
   value,
@@ -2136,14 +2185,24 @@ function OverviewTile({
     <button
       type="button"
       onClick={onClick}
-      className="min-w-0 rounded-[22px] border border-border/45 bg-card/86 px-4 py-4 text-left shadow-[0_18px_65px_rgba(15,23,42,0.07)] transition-colors hover:bg-muted/30 dark:border-white/10 dark:shadow-[0_18px_65px_rgba(0,0,0,0.22)]"
+      className="group flex min-h-[68px] w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted/30 sm:px-5"
     >
-      <span className="mb-4 grid h-10 w-10 place-items-center rounded-2xl bg-muted text-foreground/82">
-        <Icon className="h-5 w-5" aria-hidden />
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-[12px] bg-muted text-foreground/82 transition-colors group-hover:bg-muted/80 dark:bg-muted/70">
+        <Icon className="h-4 w-4" aria-hidden />
       </span>
-      <span className="block text-[12px] font-medium text-muted-foreground">{title}</span>
-      <span className="mt-1 block truncate text-[16px] font-semibold text-foreground">{value}</span>
-      <span className="mt-1 block truncate text-[12px] text-muted-foreground">{caption}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-[14px] font-medium leading-5 text-foreground">{title}</span>
+        <span className="mt-0.5 block truncate text-[12px] leading-5 text-muted-foreground">{caption}</span>
+      </span>
+      <span className="ml-auto flex min-w-0 max-w-[48%] items-center gap-2">
+        <span className="truncate text-right text-[13px] leading-5 text-muted-foreground">
+          {value}
+        </span>
+        <ChevronRight
+          className="h-4 w-4 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5"
+          aria-hidden
+        />
+      </span>
     </button>
   );
 }
