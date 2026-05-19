@@ -506,6 +506,7 @@ class SignalChannel(BaseChannel):
 
                 if "error" in response:
                     self.logger.error(f"Error sending Signal message: {response['error']}")
+                    raise RuntimeError(f"signal-cli send failed: {response['error']}")
                 else:
                     self.logger.debug(
                         f"Signal message sent, timestamp: {response.get('result', {}).get('timestamp')}"
