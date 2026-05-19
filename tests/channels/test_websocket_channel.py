@@ -1190,7 +1190,7 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert saved.agents.defaults.bot_name == "Nano"
         assert saved.agents.defaults.bot_icon == "N"
         assert saved.agents.defaults.tool_hint_max_length == 120
-        assert saved.providers.openrouter.api_key == "sk-or-test"
+        assert saved.providers.openrouter.api_key == "sk-or-next"
         assert saved.providers.openrouter.api_base == "https://openrouter.ai/api/v1"
         assert saved.providers.atomic_chat.api_base == "http://localhost:1337/v1"
         assert saved.tools.web.search.provider == "searxng"
