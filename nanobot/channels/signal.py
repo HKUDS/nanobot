@@ -557,7 +557,7 @@ class SignalChannel(BaseChannel):
                                 # Try to parse the accumulated data
                                 data_str = ""
                                 try:
-                                    data_str = "".join(event_buffer)
+                                    data_str = "\n".join(event_buffer)
                                     data = json.loads(data_str)
                                     self.logger.debug(f"SSE event parsed: {data}")
                                     await self._handle_receive_notification(data)
