@@ -366,6 +366,8 @@ describe("App layout", () => {
     expect(document.title).toBe("Settings · nanobot");
     expect(screen.queryByRole("navigation", { name: "Sidebar navigation" })).not.toBeInTheDocument();
     const settingsNav = screen.getByRole("navigation", { name: "Settings sections" });
+    expect(settingsNav.className).toContain("overflow-x-auto");
+    expect(settingsNav.className).not.toContain("grid-cols-2");
     expect(within(settingsNav).getByRole("button", { name: "Overview" })).toHaveAttribute(
       "aria-current",
       "page",
