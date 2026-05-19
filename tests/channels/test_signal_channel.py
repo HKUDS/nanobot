@@ -1217,13 +1217,14 @@ class TestSend:
         assert "+19995550001" in stopped
 
     @pytest.mark.asyncio
-    async def test_send_logs_daemon_error_without_raising(self):
+    async def test_send_raises_on_daemon_error(self):
+        # _send_http_request turns every exception into {"error": ...}, so this branch
+        # is the only place ChannelManager retry can be triggered — must raise.
         ch = _make_channel()
-        # The daemon returns {"error": {...}} in the JSON body — this is not a Python
-        # exception; send() logs it but does not raise (only HTTP-level exceptions raise).
         ch._http = _FakeHTTPClient(default_response={"error": {"message": "fail"}})
         msg = OutboundMessage(channel="signal", chat_id="+19995550001", content="hello")
-        await ch.send(msg)  # must not raise
+        with pytest.raises(RuntimeError, match="signal-cli send failed"):
+            await ch.send(msg)
 
 
 # ---------------------------------------------------------------------------
