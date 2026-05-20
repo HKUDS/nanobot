@@ -154,7 +154,6 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 | `mimo` | LLM (MiMo) | [platform.xiaomimimo.com](https://platform.xiaomimimo.com) |
 | `longcat` | LLM (LongCat) | [longcat.chat](https://longcat.chat/platform/docs/zh/) |
 | `ant_ling` | LLM (Ant Ling / 蚂蚁百灵) | [developer.ant-ling.com](https://developer.ant-ling.com/en/docs/api-reference/openai/) |
-| `apifree` | LLM (APIFree) | [apifree.ai](https://www.apifree.ai) |
 | `ollama` | LLM (local, Ollama) | — |
 | `lm_studio` | LLM (local, LM Studio) | — |
 | `atomic_chat` | LLM (local, [Atomic Chat](https://atomic.chat/)) | — |
@@ -169,7 +168,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 <details>
 <summary><b>Skywork / APIFree</b></summary>
 
-Skywork uses the OpenAI-compatible APIFree API endpoint. Configure the provider
+Skywork uses APIFree's OpenAI-compatible Agent API endpoint. Configure the provider
 once, then use Skywork model IDs such as `skywork-ai/skyclaw-v1`.
 
 ```json
@@ -177,7 +176,7 @@ once, then use Skywork model IDs such as `skywork-ai/skyclaw-v1`.
   "providers": {
     "skywork": {
       "apiKey": "${SKYWORK_API_KEY}",
-      "apiBase": "https://api.apifree.ai/v1"
+      "apiBase": "https://api.apifree.ai/agent/v1"
     }
   },
   "agents": {
@@ -502,31 +501,6 @@ only need to set `apiKey`.
 
 Official OpenAI-compatible model names include `Ling-2.6-1T`,
 `Ling-2.6-flash`, `Ling-2.5-1T`, `Ling-1T`, `Ring-2.5-1T`, and `Ring-1T`.
-
-</details>
-
-<details>
-<summary><b>APIFree (OpenAI-compatible)</b></summary>
-
-APIFree is available through nanobot's built-in OpenAI-compatible provider flow. The default API base points to `https://api.apifree.ai/agent/v1`, so you usually only need to set `apiKey`.
-
-```json
-{
-  "providers": {
-    "apifree": {
-      "apiKey": "${APIFREE_API_KEY}"
-    }
-  },
-  "agents": {
-    "defaults": {
-      "provider": "apifree",
-      "model": "skywork-ai/skyclaw-v1"
-    }
-  }
-}
-```
-
-Available models include `skywork-ai/skyclaw-v1`.
 
 </details>
 

@@ -24,7 +24,7 @@ def test_skywork_provider_in_registry() -> None:
     assert skywork.display_name == "Skywork"
     assert skywork.is_gateway is True
     assert skywork.detect_by_base_keyword == "apifree.ai"
-    assert skywork.default_api_base == "https://api.apifree.ai/v1"
+    assert skywork.default_api_base == "https://api.apifree.ai/agent/v1"
     assert skywork.supports_max_completion_tokens is False
 
 
@@ -53,7 +53,7 @@ def test_skywork_model_auto_matches_with_default_api_base() -> None:
 
     assert config.get_provider_name("skywork-ai/skyclaw-v1") == "skywork"
     assert config.get_api_key("skywork-ai/skyclaw-v1") == "sky-key"
-    assert config.get_api_base("skywork-ai/skyclaw-v1") == "https://api.apifree.ai/v1"
+    assert config.get_api_base("skywork-ai/skyclaw-v1") == "https://api.apifree.ai/agent/v1"
 
 
 def test_skywork_preserves_model_id_and_uses_chat_completion_max_tokens() -> None:
