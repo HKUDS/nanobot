@@ -30,6 +30,7 @@ class WhatsAppConfig(Base):
     bridge_token: str = ""
     allow_from: list[str] = Field(default_factory=list)
     group_policy: Literal["open", "mention"] = "open"  # "open" responds to all, "mention" only when @mentioned
+    react_emoji: str = "👀"
 
 
 def _bridge_token_path() -> Path:
@@ -77,6 +78,7 @@ class WhatsAppChannel(BaseChannel):
         self._processed_message_ids: OrderedDict[str, None] = OrderedDict()
         self._lid_to_phone: dict[str, str] = {}
         self._bridge_token: str | None = None
+        self._typing_tasks: dict[str, asyncio.Task] = {}
 
     def _effective_bridge_token(self) -> str:
         """Resolve the bridge token, generating a local secret when needed."""
@@ -160,6 +162,9 @@ class WhatsAppChannel(BaseChannel):
         self._running = False
         self._connected = False
 
+        for chat_id in list(self._typing_tasks):
+            self._stop_typing(chat_id)
+
         if self._ws:
             await self._ws.close()
             self._ws = None
@@ -171,6 +176,13 @@ class WhatsAppChannel(BaseChannel):
             return
 
         chat_id = msg.chat_id
+
+        if not msg.metadata.get("_progress", False):
+            self._stop_typing(chat_id)
+            if message_id := msg.metadata.get("message_id"):
+                await self._remove_reaction(
+                    chat_id, message_id, msg.metadata.get("participant"),
+                )
 
         if msg.content:
             try:
@@ -194,6 +206,75 @@ class WhatsAppChannel(BaseChannel):
             except Exception:
                 self.logger.exception("Error sending media {}", media_path)
                 raise
+
+    def _start_typing(self, chat_id: str) -> None:
+        """Start sending composing presence for a chat."""
+        self._stop_typing(chat_id)
+        self._typing_tasks[chat_id] = asyncio.create_task(self._typing_loop(chat_id))
+
+    def _stop_typing(self, chat_id: str) -> None:
+        """Stop the composing presence for a chat."""
+        task = self._typing_tasks.pop(chat_id, None)
+        if task and not task.done():
+            task.cancel()
+
+    async def _typing_loop(self, chat_id: str) -> None:
+        """Repeatedly send composing presence until cancelled."""
+        try:
+            with suppress(asyncio.CancelledError):
+                while self._ws and self._connected:
+                    payload = {"type": "presence", "to": chat_id, "presence": "composing"}
+                    with suppress(Exception):
+                        await self._ws.send(json.dumps(payload))
+                    await asyncio.sleep(4)
+        except Exception as e:
+            self.logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
+
+    async def _send_reaction(
+        self,
+        chat_id: str,
+        message_id: str,
+        emoji: str,
+        participant: str | None = None,
+    ) -> None:
+        """Send a reaction payload through the bridge (best-effort).
+
+        For group messages, ``participant`` must be the original sender's JID
+        (from ``msg.key.participant``) so the reaction binds to the right message.
+        An empty ``emoji`` removes the bot's existing reaction on that message.
+        """
+        if not self._ws or not self._connected or not message_id:
+            return
+        try:
+            payload: dict[str, Any] = {
+                "type": "react", "to": chat_id, "messageId": message_id, "emoji": emoji,
+            }
+            if participant:
+                payload["participant"] = participant
+            await self._ws.send(json.dumps(payload))
+        except Exception as e:
+            self.logger.debug("reaction failed: {}", e)
+
+    async def _add_reaction(
+        self,
+        chat_id: str,
+        message_id: str,
+        emoji: str,
+        participant: str | None = None,
+    ) -> None:
+        """Add an emoji reaction to a message (best-effort)."""
+        if not emoji:
+            return
+        await self._send_reaction(chat_id, message_id, emoji, participant)
+
+    async def _remove_reaction(
+        self,
+        chat_id: str,
+        message_id: str,
+        participant: str | None = None,
+    ) -> None:
+        """Remove the bot's reaction from a message (best-effort)."""
+        await self._send_reaction(chat_id, message_id, "", participant)
 
     async def _handle_bridge_message(self, raw: str) -> None:
         """Handle a message from the bridge."""
@@ -280,6 +361,11 @@ class WhatsAppChannel(BaseChannel):
                     media_tag = f"[{media_type}: {p}]"
                     content = f"{content}\n{media_tag}" if content else media_tag
 
+            participant = data.get("participant") or None
+
+            self._start_typing(sender)
+            await self._add_reaction(sender, message_id, self.config.react_emoji, participant)
+
             await self._handle_message(
                 sender_id=sender_id,
                 chat_id=sender,  # Use full LID for replies
@@ -289,6 +375,7 @@ class WhatsAppChannel(BaseChannel):
                     "message_id": message_id,
                     "timestamp": data.get("timestamp"),
                     "is_group": data.get("isGroup", False),
+                    "participant": participant,
                 },
             )
 

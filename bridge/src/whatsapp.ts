@@ -29,6 +29,7 @@ export interface InboundMessage {
   content: string;
   timestamp: number;
   isGroup: boolean;
+  participant?: string;
   wasMentioned?: boolean;
   media?: string[];
 }
@@ -184,6 +185,7 @@ export class WhatsAppClient {
           content: finalContent,
           timestamp: msg.messageTimestamp as number,
           isGroup,
+          ...(isGroup && msg.key.participant ? { participant: msg.key.participant } : {}),
           ...(isGroup ? { wasMentioned } : {}),
           ...(mediaPaths.length > 0 ? { media: mediaPaths } : {}),
         });
@@ -287,6 +289,33 @@ export class WhatsAppClient {
       const name = fileName || basename(filePath);
       await this.sock.sendMessage(to, { document: buffer, mimetype, fileName: name });
     }
+  }
+
+  async sendReaction(
+    to: string,
+    messageId: string,
+    emoji: string,
+    participant?: string,
+  ): Promise<void> {
+    if (!this.sock) {
+      throw new Error('Not connected');
+    }
+    const key: { id: string; remoteJid: string; fromMe: boolean; participant?: string } = {
+      id: messageId,
+      remoteJid: to,
+      fromMe: false,
+    };
+    if (participant) {
+      key.participant = participant;
+    }
+    await this.sock.sendMessage(to, { react: { text: emoji, key } });
+  }
+
+  async sendPresence(to: string, presence: 'composing' | 'paused'): Promise<void> {
+    if (!this.sock) {
+      throw new Error('Not connected');
+    }
+    await this.sock.sendPresenceUpdate(presence, to);
   }
 
   async disconnect(): Promise<void> {
