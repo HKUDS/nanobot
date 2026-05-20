@@ -45,8 +45,16 @@
     "toggleTheme": "Toggle theme",
     "home": "Home",
     "newChat": "New chat",
-    "searchAria": "Search chats",
-    "searchPlaceholder": "Search chats",
+    "searchAria": "Search",
+    "viewOptions": "View",
+    "compactList": "Compact list",
+    "showPreviews": "Show previews",
+    "showTimestamps": "Show time",
+    "sortLabel": "Sort",
+    "sortUpdated": "Recently updated",
+    "sortCreated": "Recently created",
+    "sortTitle": "Title A-Z",
+    "searchPlaceholder": "Search",
     "searchResults": "Results",
     "noSearchResults": "No matching chats.",
     "recent": "Recent",
@@ -65,12 +73,31 @@
     },
     "nav": {
       "general": "General",
-      "byok": "BYOK"
+      "byok": "BYOK",
+      "overview": "Overview",
+      "appearance": "Appearance",
+      "models": "Models",
+      "providers": "Providers",
+      "image": "Image",
+      "web": "Web",
+      "runtime": "Runtime",
+      "advanced": "Advanced"
     },
     "sections": {
       "interface": "Interface",
       "ai": "AI",
-      "system": "System"
+      "system": "System",
+      "status": "Status",
+      "localPreferences": "Local preferences",
+      "presets": "Presets",
+      "imageGeneration": "Image generation",
+      "imageDefaults": "Defaults",
+      "webSearch": "Web search",
+      "webBehavior": "Behavior",
+      "identity": "Identity",
+      "safety": "Safety",
+      "capabilities": "Capabilities",
+      "integrations": "Integrations"
     },
     "rows": {
       "theme": "Theme",
@@ -78,31 +105,104 @@
       "provider": "Provider",
       "model": "Model",
       "restart": "Restart nanobot",
-      "configPath": "Config path"
+      "configPath": "Config path",
+      "activePreset": "Active preset",
+      "gateway": "Gateway",
+      "restartState": "Restart state",
+      "pendingChanges": "Pending changes",
+      "selectedPreset": "Selected preset",
+      "presetModel": "Preset model",
+      "density": "Density",
+      "activityMode": "Activity detail",
+      "codeWrap": "Code wrapping",
+      "maxResults": "Max results",
+      "timeout": "Timeout",
+      "jinaReader": "Jina reader",
+      "imageGeneration": "Image generation",
+      "imageProvider": "Image provider",
+      "imageProviderStatus": "Provider status",
+      "imageProviderBase": "Provider base",
+      "imageModel": "Image model",
+      "defaultAspectRatio": "Default aspect",
+      "defaultImageSize": "Default size",
+      "maxImagesPerTurn": "Max images per turn",
+      "imageSaveDir": "Save directory",
+      "botName": "Bot name",
+      "botIcon": "Bot icon",
+      "timezone": "Timezone",
+      "toolHintMaxLength": "Tool hint length",
+      "workspacePath": "Workspace path",
+      "heartbeat": "Heartbeat",
+      "dream": "Dream",
+      "unifiedSession": "Unified session",
+      "restrictWorkspace": "Restrict to workspace",
+      "execTool": "Exec tool",
+      "execSandbox": "Exec sandbox",
+      "ssrfWhitelist": "SSRF whitelist",
+      "mcpServers": "MCP servers",
+      "pathAppend": "PATH append",
+      "configurationDocs": "Configuration docs"
     },
     "help": {
       "theme": "Switch between light and dark appearance.",
       "language": "Choose the language used by the WebUI.",
       "provider": "Select the provider that should serve new model requests.",
       "model": "Set the default model name used by nanobot.",
-      "configPath": "The gateway configuration file currently in use."
+      "configPath": "The gateway configuration file currently in use.",
+      "selectedPreset": "Named presets are read-only here; edit them in config.json.",
+      "presetModel": "Switch to Default to edit model and provider from the WebUI.",
+      "density": "Stored only in this browser.",
+      "activityMode": "Choose how much agent activity chrome to show by default.",
+      "codeWrap": "Keep long code lines readable on smaller screens.",
+      "maxResults": "Results returned by each web_search call.",
+      "timeout": "Seconds before a search provider request times out.",
+      "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "imageGeneration": "Expose generate_image in chats when a configured image provider is available.",
+      "imageProvider": "Choose the registry provider used by generate_image.",
+      "imageProviderStatus": "Image generation reuses provider credentials from Providers.",
+      "imageModel": "Model name sent to the selected image provider.",
+      "defaultAspectRatio": "Used when the prompt does not choose an aspect ratio.",
+      "defaultImageSize": "Size hint sent to providers that support it.",
+      "maxImagesPerTurn": "Upper bound for one generate_image request.",
+      "botName": "Shown in runtime surfaces that use the configured bot identity.",
+      "botIcon": "Short emoji or text shown beside the bot name.",
+      "timezone": "IANA timezone used by runtime context and schedules.",
+      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
+      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed."
     },
     "values": {
       "light": "Light",
       "dark": "Dark",
-      "notAvailable": "Not available"
+      "notAvailable": "Not available",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "restartPending": "Restart pending",
+      "ready": "Ready",
+      "comfortable": "Comfortable",
+      "compact": "Compact",
+      "auto": "Auto",
+      "expanded": "Expanded",
+      "on": "On",
+      "off": "Off",
+      "configured": "Configured",
+      "notConfigured": "Not configured"
     },
     "status": {
       "loading": "Loading settings...",
       "loadError": "Could not load settings",
       "unsaved": "Unsaved changes.",
-      "savedRestart": "Saved. Restart nanobot to apply."
+      "upToDate": "Up to date.",
+      "savedRestart": "Saved. Restart nanobot to apply.",
+      "restartAfterSaving": "Save changes, then restart when ready.",
+      "savedRestartApply": "Saved. Restart when ready.",
+      "imageProviderRestart": "Image provider changes saved. Restart when ready."
     },
     "actions": {
       "save": "Save",
       "saving": "Saving",
       "edit": "Edit",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "openDocs": "Open docs"
     },
     "byok": {
       "description": "Bring your own provider keys. Nanobot reads these values from the current config and only configured providers can be selected in General.",
@@ -145,6 +245,26 @@
         "missingCredential": "Add the required credential before saving.",
         "saveHint": "Changes apply to new web search requests."
       }
+    },
+    "overview": {
+      "model": "Current model",
+      "providers": "Providers",
+      "configuredCount": "{{count}} configured",
+      "totalProviders": "{{count}} available",
+      "webSearch": "Web search",
+      "imageGeneration": "Image generation",
+      "workspace": "Workspace"
+    },
+    "providers": {
+      "searchPlaceholder": "Search providers",
+      "noMatches": "No providers match this search."
+    },
+    "image": {
+      "selectProvider": "Select provider",
+      "selectAspect": "Select aspect",
+      "selectSize": "Select size",
+      "configureProvider": "Configure provider",
+      "missingCredential": "Configure this provider before enabling image generation."
     }
   },
   "chat": {
@@ -152,12 +272,30 @@
     "loading": "Loading…",
     "noSessions": "No sessions yet.",
     "actions": "Chat actions for {{title}}",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished"
+    },
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "rename": "Rename",
+    "renameTitle": "Rename chat",
+    "renameDescription": "Choose a local sidebar name for this chat.",
+    "renamePlaceholder": "Chat name",
+    "renameSave": "Save",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "showArchived": "Show archived",
+    "hideArchived": "Hide archived",
     "delete": "Delete",
     "newChat": "New chat",
     "groups": {
+      "pinned": "Pinned",
+      "all": "Chats",
       "today": "Today",
       "yesterday": "Yesterday",
-      "earlier": "Earlier"
+      "earlier": "Earlier",
+      "archived": "Archived"
     }
   },
   "deleteConfirm": {

@@ -8,7 +8,16 @@ import { resources } from "@/i18n";
 
 const QUICK_ACTION_KEYS = ["plan", "analyze", "brainstorm", "code", "summarize", "more"];
 const IMAGE_QUICK_ACTION_KEYS = ["icon", "sticker", "poster", "product", "portrait", "edit"];
-const SETTINGS_NAV_KEYS = ["general", "byok"];
+const SETTINGS_NAV_KEYS = [
+  "overview",
+  "appearance",
+  "models",
+  "providers",
+  "image",
+  "web",
+  "runtime",
+  "advanced",
+];
 
 describe("webui i18n", () => {
   it("switches UI copy and document locale through the language switcher", async () => {
@@ -86,5 +95,15 @@ describe("webui i18n", () => {
       expect(common.settings.byok.hideApiKey).toBeTruthy();
       expect(common.settings.byok.configuredKeyHint).toBeTruthy();
     }
+  });
+
+  it("keeps Simplified Chinese settings overview copy localized", () => {
+    const settings = resources["zh-CN"].common.settings;
+
+    expect(settings.nav.web).toBe("网页");
+    expect(settings.sections.webSearch).toBe("网页搜索");
+    expect(settings.byok.tabs.webSearch).toBe("网页搜索");
+    expect(settings.overview.webSearch).toBe("网页搜索");
+    expect(settings.overview.workspace).toBe("工作区");
   });
 });

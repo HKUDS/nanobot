@@ -1,8 +1,10 @@
 import type {
   ChatSummary,
+  ImageGenerationSettingsUpdate,
   ProviderSettingsUpdate,
   SettingsPayload,
   SettingsUpdate,
+  SidebarStatePayload,
   SlashCommand,
   WebSearchSettingsUpdate,
   WebuiThreadPersistedPayload,
@@ -52,6 +54,7 @@ export async function listSessions(
     updated_at: string | null;
     title?: string;
     preview?: string;
+    run_started_at?: number | null;
   };
   const body = await request<{ sessions: Row[] }>(
     `${base}/api/sessions`,
@@ -64,6 +67,7 @@ export async function listSessions(
     updatedAt: s.updated_at,
     title: s.title ?? "",
     preview: s.preview ?? "",
+    runStartedAt: s.run_started_at ?? null,
   }));
 }
 
@@ -125,14 +129,43 @@ export async function listSlashCommands(
     }));
 }
 
+export async function fetchSidebarState(
+  token: string,
+  base: string = "",
+): Promise<SidebarStatePayload> {
+  return request<SidebarStatePayload>(`${base}/api/webui/sidebar-state`, token);
+}
+
+export async function updateSidebarState(
+  token: string,
+  state: SidebarStatePayload,
+  base: string = "",
+): Promise<SidebarStatePayload> {
+  const query = new URLSearchParams();
+  query.set("state", JSON.stringify(state));
+  return request<SidebarStatePayload>(
+    `${base}/api/webui/sidebar-state/update?${query}`,
+    token,
+  );
+}
+
 export async function updateSettings(
   token: string,
   update: SettingsUpdate,
   base: string = "",
 ): Promise<SettingsPayload> {
   const query = new URLSearchParams();
+  if (update.modelPreset !== undefined) {
+    query.set("model_preset", update.modelPreset ?? "default");
+  }
   if (update.model !== undefined) query.set("model", update.model);
   if (update.provider !== undefined) query.set("provider", update.provider);
+  if (update.timezone !== undefined) query.set("timezone", update.timezone);
+  if (update.botName !== undefined) query.set("bot_name", update.botName);
+  if (update.botIcon !== undefined) query.set("bot_icon", update.botIcon);
+  if (update.toolHintMaxLength !== undefined) {
+    query.set("tool_hint_max_length", String(update.toolHintMaxLength));
+  }
   return request<SettingsPayload>(`${base}/api/settings/update?${query}`, token);
 }
 
@@ -160,8 +193,31 @@ export async function updateWebSearchSettings(
   query.set("provider", update.provider);
   if (update.apiKey !== undefined) query.set("api_key", update.apiKey);
   if (update.baseUrl !== undefined) query.set("base_url", update.baseUrl);
+  if (update.maxResults !== undefined) query.set("max_results", String(update.maxResults));
+  if (update.timeout !== undefined) query.set("timeout", String(update.timeout));
+  if (update.useJinaReader !== undefined) {
+    query.set("use_jina_reader", String(update.useJinaReader));
+  }
   return request<SettingsPayload>(
     `${base}/api/settings/web-search/update?${query}`,
+    token,
+  );
+}
+
+export async function updateImageGenerationSettings(
+  token: string,
+  update: ImageGenerationSettingsUpdate,
+  base: string = "",
+): Promise<SettingsPayload> {
+  const query = new URLSearchParams();
+  query.set("enabled", String(update.enabled));
+  query.set("provider", update.provider);
+  query.set("model", update.model);
+  query.set("default_aspect_ratio", update.defaultAspectRatio);
+  query.set("default_image_size", update.defaultImageSize);
+  query.set("max_images_per_turn", String(update.maxImagesPerTurn));
+  return request<SettingsPayload>(
+    `${base}/api/settings/image-generation/update?${query}`,
     token,
   );
 }

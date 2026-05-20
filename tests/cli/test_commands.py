@@ -572,6 +572,7 @@ async def test_github_copilot_provider_refreshes_client_api_key_before_chat():
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI", return_value=mock_client):
         provider = GitHubCopilotProvider(default_model="github-copilot/gpt-4")
+        await provider._ensure_client()
 
     provider._get_copilot_access_token = AsyncMock(return_value="copilot-access-token")
 
@@ -611,7 +612,8 @@ def test_make_provider_passes_extra_headers_to_custom_provider():
     )
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_async_openai:
-        make_provider(config)
+        provider = make_provider(config)
+        asyncio.run(provider._ensure_client())
 
     kwargs = mock_async_openai.call_args.kwargs
     assert kwargs["api_key"] == "test-key"

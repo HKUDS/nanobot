@@ -30,13 +30,25 @@
     "collapse": "收合側邊欄",
     "toggleTheme": "切換主題",
     "newChat": "新增對話",
+    "viewOptions": "檢視",
+    "compactList": "緊湊列表",
+    "showPreviews": "顯示預覽",
+    "showTimestamps": "顯示時間",
+    "sortLabel": "排序",
+    "sortUpdated": "最近更新",
+    "sortCreated": "最近建立",
+    "sortTitle": "標題 A-Z",
     "recent": "最近對話",
     "refreshSessions": "重新整理會話",
     "settings": "設定",
     "language": {
       "label": "語言",
       "ariaLabel": "切換語言"
-    }
+    },
+    "searchAria": "搜尋",
+    "searchPlaceholder": "搜尋",
+    "searchResults": "搜尋結果",
+    "noSearchResults": "沒有符合的對話。"
   },
   "settings": {
     "backToChat": "返回對話",
@@ -46,12 +58,28 @@
     },
     "nav": {
       "general": "一般",
-      "byok": "BYOK"
+      "byok": "BYOK",
+      "overview": "Overview",
+      "appearance": "Appearance",
+      "models": "Models",
+      "providers": "Providers",
+      "image": "Image",
+      "web": "Web",
+      "runtime": "Runtime",
+      "advanced": "Advanced"
     },
     "sections": {
       "interface": "介面",
       "ai": "AI",
-      "system": "系統"
+      "system": "系統",
+      "status": "Status",
+      "localPreferences": "Local preferences",
+      "presets": "Presets",
+      "webSearch": "Web search",
+      "webBehavior": "Behavior",
+      "identity": "Identity",
+      "safety": "Safety",
+      "integrations": "Integrations"
     },
     "rows": {
       "theme": "主題",
@@ -59,19 +87,70 @@
       "provider": "提供者",
       "model": "模型",
       "restart": "重新啟動 nanobot",
-      "configPath": "設定檔路徑"
+      "configPath": "設定檔路徑",
+      "activePreset": "Active preset",
+      "gateway": "Gateway",
+      "restartState": "Restart state",
+      "selectedPreset": "Selected preset",
+      "presetModel": "Preset model",
+      "density": "Density",
+      "activityMode": "Activity detail",
+      "codeWrap": "Code wrapping",
+      "maxResults": "Max results",
+      "timeout": "Timeout",
+      "jinaReader": "Jina reader",
+      "botName": "Bot name",
+      "botIcon": "Bot icon",
+      "timezone": "Timezone",
+      "toolHintMaxLength": "Tool hint length",
+      "workspacePath": "Workspace path",
+      "heartbeat": "Heartbeat",
+      "dream": "Dream",
+      "unifiedSession": "Unified session",
+      "restrictWorkspace": "Restrict to workspace",
+      "execTool": "Exec tool",
+      "execSandbox": "Exec sandbox",
+      "ssrfWhitelist": "SSRF whitelist",
+      "mcpServers": "MCP servers",
+      "pathAppend": "PATH append",
+      "configurationDocs": "Configuration docs"
     },
     "help": {
       "theme": "在淺色與深色外觀之間切換。",
       "language": "選擇 WebUI 使用的語言。",
       "provider": "選擇新模型請求使用的服務提供者。",
       "model": "設定 nanobot 預設使用的模型名稱。",
-      "configPath": "目前閘道正在使用的設定檔。"
+      "configPath": "目前閘道正在使用的設定檔。",
+      "selectedPreset": "Named presets are read-only here; edit them in config.json.",
+      "presetModel": "Switch to Default to edit model and provider from the WebUI.",
+      "density": "Stored only in this browser.",
+      "activityMode": "Choose how much agent activity chrome to show by default.",
+      "codeWrap": "Keep long code lines readable on smaller screens.",
+      "maxResults": "Results returned by each web_search call.",
+      "timeout": "Seconds before a search provider request times out.",
+      "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "botName": "Shown in runtime surfaces that use the configured bot identity.",
+      "botIcon": "Short emoji or text shown beside the bot name.",
+      "timezone": "IANA timezone used by runtime context and schedules.",
+      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
+      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed."
     },
     "values": {
       "light": "淺色",
       "dark": "深色",
-      "notAvailable": "不可用"
+      "notAvailable": "不可用",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "restartRequired": "Restart required",
+      "liveReload": "Live reload ready",
+      "comfortable": "Comfortable",
+      "compact": "Compact",
+      "auto": "Auto",
+      "expanded": "Expanded",
+      "on": "On",
+      "off": "Off",
+      "configured": "Configured",
+      "notConfigured": "Not configured"
     },
     "status": {
       "loading": "正在載入設定...",
@@ -83,7 +162,8 @@
       "save": "儲存",
       "saving": "儲存中",
       "edit": "編輯",
-      "cancel": "取消"
+      "cancel": "取消",
+      "openDocs": "Open docs"
     },
     "byok": {
       "description": "自帶 provider key。Nanobot 會從目前 config 讀取這些值，只有已設定的 provider 才能在一般設定中選擇。",
@@ -126,6 +206,18 @@
         "missingCredential": "填寫必要憑證後才能儲存。",
         "saveHint": "變更會套用到新的 web search 請求。"
       }
+    },
+    "overview": {
+      "model": "Current model",
+      "providers": "Providers",
+      "configuredCount": "{{count}} configured",
+      "totalProviders": "{{count}} available",
+      "webSearch": "Web search",
+      "workspace": "Workspace"
+    },
+    "providers": {
+      "searchPlaceholder": "Search providers",
+      "noMatches": "No providers match this search."
     }
   },
   "chat": {
@@ -133,8 +225,31 @@
     "loading": "載入中…",
     "noSessions": "目前還沒有會話。",
     "actions": "「{{title}}」的會話操作",
+    "activity": {
+      "running": "Agent 正在執行",
+      "complete": "Agent 已完成"
+    },
+    "pin": "置頂",
+    "unpin": "取消置頂",
+    "rename": "重新命名",
+    "renameTitle": "重新命名對話",
+    "renameDescription": "為這個對話設定僅用於 WebUI 側邊欄的名稱。",
+    "renamePlaceholder": "對話名稱",
+    "renameSave": "儲存",
+    "archive": "封存",
+    "unarchive": "取消封存",
+    "showArchived": "顯示封存",
+    "hideArchived": "隱藏封存",
     "delete": "刪除",
-    "newChat": "新增對話"
+    "newChat": "新增對話",
+    "groups": {
+      "pinned": "置頂",
+      "all": "對話",
+      "today": "今天",
+      "yesterday": "昨天",
+      "earlier": "更早",
+      "archived": "已封存"
+    }
   },
   "deleteConfirm": {
     "title": "刪除這個對話？",

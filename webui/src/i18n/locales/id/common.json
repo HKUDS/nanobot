@@ -30,13 +30,25 @@
     "collapse": "Ciutkan sidebar",
     "toggleTheme": "Ganti tema",
     "newChat": "Obrolan baru",
+    "viewOptions": "View",
+    "compactList": "Compact list",
+    "showPreviews": "Show previews",
+    "showTimestamps": "Show time",
+    "sortLabel": "Sort",
+    "sortUpdated": "Recently updated",
+    "sortCreated": "Recently created",
+    "sortTitle": "Title A-Z",
     "recent": "Terbaru",
     "refreshSessions": "Segarkan sesi",
     "settings": "Pengaturan",
     "language": {
       "label": "Bahasa",
       "ariaLabel": "Ganti bahasa"
-    }
+    },
+    "searchAria": "Cari",
+    "searchPlaceholder": "Cari",
+    "searchResults": "Hasil",
+    "noSearchResults": "Tidak ada chat yang cocok."
   },
   "settings": {
     "backToChat": "Kembali ke obrolan",
@@ -46,12 +58,28 @@
     },
     "nav": {
       "general": "Umum",
-      "byok": "BYOK"
+      "byok": "BYOK",
+      "overview": "Overview",
+      "appearance": "Appearance",
+      "models": "Models",
+      "providers": "Providers",
+      "image": "Image",
+      "web": "Web",
+      "runtime": "Runtime",
+      "advanced": "Advanced"
     },
     "sections": {
       "interface": "Antarmuka",
       "ai": "AI",
-      "system": "Sistem"
+      "system": "Sistem",
+      "status": "Status",
+      "localPreferences": "Local preferences",
+      "presets": "Presets",
+      "webSearch": "Web search",
+      "webBehavior": "Behavior",
+      "identity": "Identity",
+      "safety": "Safety",
+      "integrations": "Integrations"
     },
     "rows": {
       "theme": "Tema",
@@ -59,19 +87,70 @@
       "provider": "Penyedia",
       "model": "Model",
       "restart": "Mulai ulang nanobot",
-      "configPath": "Path konfigurasi"
+      "configPath": "Path konfigurasi",
+      "activePreset": "Active preset",
+      "gateway": "Gateway",
+      "restartState": "Restart state",
+      "selectedPreset": "Selected preset",
+      "presetModel": "Preset model",
+      "density": "Density",
+      "activityMode": "Activity detail",
+      "codeWrap": "Code wrapping",
+      "maxResults": "Max results",
+      "timeout": "Timeout",
+      "jinaReader": "Jina reader",
+      "botName": "Bot name",
+      "botIcon": "Bot icon",
+      "timezone": "Timezone",
+      "toolHintMaxLength": "Tool hint length",
+      "workspacePath": "Workspace path",
+      "heartbeat": "Heartbeat",
+      "dream": "Dream",
+      "unifiedSession": "Unified session",
+      "restrictWorkspace": "Restrict to workspace",
+      "execTool": "Exec tool",
+      "execSandbox": "Exec sandbox",
+      "ssrfWhitelist": "SSRF whitelist",
+      "mcpServers": "MCP servers",
+      "pathAppend": "PATH append",
+      "configurationDocs": "Configuration docs"
     },
     "help": {
       "theme": "Beralih antara tampilan terang dan gelap.",
       "language": "Pilih bahasa yang digunakan WebUI.",
       "provider": "Pilih penyedia untuk permintaan model baru.",
       "model": "Atur nama model default yang digunakan nanobot.",
-      "configPath": "File konfigurasi gateway yang sedang digunakan."
+      "configPath": "File konfigurasi gateway yang sedang digunakan.",
+      "selectedPreset": "Named presets are read-only here; edit them in config.json.",
+      "presetModel": "Switch to Default to edit model and provider from the WebUI.",
+      "density": "Stored only in this browser.",
+      "activityMode": "Choose how much agent activity chrome to show by default.",
+      "codeWrap": "Keep long code lines readable on smaller screens.",
+      "maxResults": "Results returned by each web_search call.",
+      "timeout": "Seconds before a search provider request times out.",
+      "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "botName": "Shown in runtime surfaces that use the configured bot identity.",
+      "botIcon": "Short emoji or text shown beside the bot name.",
+      "timezone": "IANA timezone used by runtime context and schedules.",
+      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
+      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed."
     },
     "values": {
       "light": "Terang",
       "dark": "Gelap",
-      "notAvailable": "Tidak tersedia"
+      "notAvailable": "Tidak tersedia",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "restartRequired": "Restart required",
+      "liveReload": "Live reload ready",
+      "comfortable": "Comfortable",
+      "compact": "Compact",
+      "auto": "Auto",
+      "expanded": "Expanded",
+      "on": "On",
+      "off": "Off",
+      "configured": "Configured",
+      "notConfigured": "Not configured"
     },
     "status": {
       "loading": "Memuat pengaturan...",
@@ -83,7 +162,8 @@
       "save": "Simpan",
       "saving": "Menyimpan",
       "edit": "Edit",
-      "cancel": "Batal"
+      "cancel": "Batal",
+      "openDocs": "Open docs"
     },
     "byok": {
       "description": "Gunakan kunci provider Anda sendiri. Nanobot membaca nilai ini dari config saat ini, dan hanya provider yang sudah dikonfigurasi yang bisa dipilih di Umum.",
@@ -126,6 +206,18 @@
         "missingCredential": "Tambahkan kredensial yang diperlukan sebelum menyimpan.",
         "saveHint": "Perubahan berlaku untuk permintaan web search baru."
       }
+    },
+    "overview": {
+      "model": "Current model",
+      "providers": "Providers",
+      "configuredCount": "{{count}} configured",
+      "totalProviders": "{{count}} available",
+      "webSearch": "Web search",
+      "workspace": "Workspace"
+    },
+    "providers": {
+      "searchPlaceholder": "Search providers",
+      "noMatches": "No providers match this search."
     }
   },
   "chat": {
@@ -133,8 +225,31 @@
     "loading": "Memuat…",
     "noSessions": "Belum ada sesi.",
     "actions": "Aksi obrolan untuk {{title}}",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished"
+    },
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "rename": "Rename",
+    "renameTitle": "Rename chat",
+    "renameDescription": "Choose a local sidebar name for this chat.",
+    "renamePlaceholder": "Chat name",
+    "renameSave": "Save",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "showArchived": "Show archived",
+    "hideArchived": "Hide archived",
     "delete": "Hapus",
-    "newChat": "Obrolan baru"
+    "newChat": "Obrolan baru",
+    "groups": {
+      "pinned": "Pinned",
+      "all": "Chats",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "earlier": "Earlier",
+      "archived": "Archived"
+    }
   },
   "deleteConfirm": {
     "title": "Hapus obrolan ini?",

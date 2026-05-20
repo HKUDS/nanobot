@@ -9,6 +9,8 @@ const createChatSpy = vi.fn().mockResolvedValue("chat-1");
 const deleteChatSpy = vi.fn();
 const toggleThemeSpy = vi.fn();
 const updateUrlSpy = vi.fn();
+const attachSpy = vi.fn();
+const runStatusHandlers = new Set<(chatId: string, startedAt: number | null) => void>();
 let mockSessions: ChatSummary[] = [];
 
 vi.mock("@/hooks/useSessions", async (importOriginal) => {
@@ -67,9 +69,16 @@ vi.mock("@/lib/nanobot-client", () => {
     onRuntimeModelUpdate = () => () => {};
     onError = () => () => {};
     onChat = () => () => {};
+    onSessionUpdate = () => () => {};
+    onRunStatus = (handler: (chatId: string, startedAt: number | null) => void) => {
+      runStatusHandlers.add(handler);
+      return () => runStatusHandlers.delete(handler);
+    };
+    getRunStartedAt = () => null;
+    getGoalState = () => undefined;
     sendMessage = vi.fn();
     newChat = vi.fn();
-    attach = vi.fn();
+    attach = attachSpy;
     close = vi.fn();
     updateUrl = updateUrlSpy;
   }
@@ -89,6 +98,9 @@ describe("App layout", () => {
     createChatSpy.mockClear();
     deleteChatSpy.mockReset();
     toggleThemeSpy.mockReset();
+    attachSpy.mockReset();
+    runStatusHandlers.clear();
+    localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
       ws_path: "/",
@@ -175,6 +187,318 @@ describe("App layout", () => {
     expect(document.body.style.pointerEvents).not.toBe("none");
   }, 15_000);
 
+  it("keeps the mobile session action menu inside the sidebar sheet", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Existing chat",
+      },
+    ];
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn().mockImplementation((query: string) => ({
+        matches: !query.includes("1024px"),
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Toggle sidebar" }));
+
+    const sheet = await screen.findByRole("dialog");
+    const mobileSidebar = within(sheet).getByRole("navigation", {
+      name: "Sidebar navigation",
+    });
+    await waitFor(() =>
+      expect(
+        within(mobileSidebar).getByRole("button", { name: /^Existing chat$/ }),
+      ).toBeInTheDocument(),
+    );
+
+    fireEvent.pointerDown(
+      within(mobileSidebar).getByLabelText("Chat actions for Existing chat"),
+      { button: 0 },
+    );
+
+    const deleteItem = await within(sheet).findByRole("menuitem", {
+      name: "Delete",
+    });
+    expect(deleteItem).toBeInTheDocument();
+
+    fireEvent.click(deleteItem);
+    await waitFor(() =>
+      expect(screen.getByText("Delete this chat?")).toBeInTheDocument(),
+    );
+  }, 15_000);
+
+  it("applies persisted sidebar workspace state from the gateway", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "First chat",
+      },
+      {
+        key: "websocket:chat-b",
+        channel: "websocket",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        preview: "Second chat",
+      },
+    ];
+    const initialState = {
+      schema_version: 1,
+      pinned_keys: ["websocket:chat-b"],
+      archived_keys: ["websocket:chat-a"],
+      title_overrides: { "websocket:chat-b": "Roadmap" },
+      tags_by_key: {},
+      collapsed_groups: {},
+      view: {
+        density: "comfortable",
+        show_previews: false,
+        show_timestamps: false,
+        show_archived: false,
+        sort: "updated_desc",
+      },
+      updated_at: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string | URL | Request) => {
+        const href = String(url);
+        if (href === "/api/webui/sidebar-state") {
+          return { ok: true, json: async () => initialState };
+        }
+        if (href.startsWith("/api/webui/sidebar-state/update?")) {
+          const encoded = new URLSearchParams(href.split("?", 2)[1]).get("state");
+          return {
+            ok: true,
+            json: async () => JSON.parse(encoded ?? "{}"),
+          };
+        }
+        return { ok: false, status: 404 };
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await waitFor(() =>
+      expect(within(sidebar).getByText("Pinned")).toBeInTheDocument(),
+    );
+    expect(within(sidebar).getByRole("button", { name: /^Roadmap$/ })).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: /^First chat$/ })).not.toBeInTheDocument();
+
+    fireEvent.click(within(sidebar).getByRole("button", { name: "Show archived" }));
+    await waitFor(() =>
+      expect(within(sidebar).getByText("Archived")).toBeInTheDocument(),
+    );
+    expect(within(sidebar).getByRole("button", { name: /^First chat$/ })).toBeInTheDocument();
+    const updateUrl = vi.mocked(fetch).mock.calls
+      .map(([url]) => String(url))
+      .find((url) => url.startsWith("/api/webui/sidebar-state/update?"));
+    expect(updateUrl).toBeTruthy();
+    const encoded = new URLSearchParams(updateUrl?.split("?", 2)[1]).get("state");
+    expect(JSON.parse(encoded ?? "{}").view.show_archived).toBe(true);
+
+    fireEvent.pointerDown(within(sidebar).getByRole("button", { name: "View" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(await screen.findByText("Compact list"));
+    await waitFor(() => {
+      const lastUpdateUrl = vi.mocked(fetch).mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.startsWith("/api/webui/sidebar-state/update?"))
+        .at(-1);
+      const lastEncoded = new URLSearchParams(lastUpdateUrl?.split("?", 2)[1]).get("state");
+      expect(JSON.parse(lastEncoded ?? "{}").view.density).toBe("compact");
+    });
+
+    fireEvent.click(screen.getByText("Title A-Z"));
+    await waitFor(() => {
+      const lastUpdateUrl = vi.mocked(fetch).mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.startsWith("/api/webui/sidebar-state/update?"))
+        .at(-1);
+      const lastEncoded = new URLSearchParams(lastUpdateUrl?.split("?", 2)[1]).get("state");
+      expect(JSON.parse(lastEncoded ?? "{}").view.sort).toBe("title_asc");
+    });
+  });
+
+  it("sorts chats by displayed title when A-Z is persisted", async () => {
+    mockSessions = [
+      {
+        key: "websocket:zulu",
+        channel: "websocket",
+        chatId: "zulu",
+        createdAt: "2026-04-16T12:00:00Z",
+        updatedAt: "2026-04-16T12:00:00Z",
+        title: "Zulu work",
+        preview: "later",
+      },
+      {
+        key: "websocket:new",
+        channel: "websocket",
+        chatId: "new",
+        createdAt: "2026-04-15T12:00:00Z",
+        updatedAt: "2026-04-15T12:00:00Z",
+        preview: "hi nanobot",
+      },
+      {
+        key: "websocket:alpha",
+        channel: "websocket",
+        chatId: "alpha",
+        createdAt: "2026-04-14T12:00:00Z",
+        updatedAt: "2026-04-14T12:00:00Z",
+        title: "Alpha plan",
+        preview: "earlier",
+      },
+    ];
+    const initialState = {
+      schema_version: 1,
+      pinned_keys: [],
+      archived_keys: [],
+      title_overrides: {},
+      tags_by_key: {},
+      collapsed_groups: {},
+      view: {
+        density: "comfortable",
+        show_previews: false,
+        show_timestamps: false,
+        show_archived: false,
+        sort: "title_asc",
+      },
+      updated_at: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string | URL | Request) => {
+        const href = String(url);
+        if (href === "/api/webui/sidebar-state") {
+          return { ok: true, json: async () => initialState };
+        }
+        return { ok: false, status: 404 };
+      }),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await waitFor(() =>
+      expect(within(sidebar).getByText("Chats")).toBeInTheDocument(),
+    );
+    const group = within(sidebar).getByText("Chats").closest("section");
+    expect(group).toBeTruthy();
+    const labels = within(group as HTMLElement)
+      .getAllByRole("button")
+      .map((button) => button.textContent?.trim())
+      .filter(Boolean);
+
+    expect(labels).toEqual(["Alpha plan", "New chat", "Zulu work"]);
+  });
+
+  it("shows running and completed session indicators in the sidebar", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Working chat",
+      },
+      {
+        key: "websocket:chat-b",
+        channel: "websocket",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        preview: "Quiet chat",
+      },
+    ];
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await waitFor(() =>
+      expect(
+        within(sidebar).getByRole("button", { name: /^Working chat$/ }),
+      ).toBeInTheDocument(),
+    );
+
+    act(() => {
+      for (const handler of runStatusHandlers) handler("chat-a", 12_345);
+    });
+    expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument();
+
+    act(() => {
+      for (const handler of runStatusHandlers) handler("chat-a", null);
+    });
+    expect(within(sidebar).queryByTitle("Agent running")).not.toBeInTheDocument();
+    expect(within(sidebar).getByTitle("Agent finished")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(within(sidebar).getByRole("button", { name: /^Working chat$/ }));
+    });
+    expect(within(sidebar).queryByTitle("Agent finished")).not.toBeInTheDocument();
+  });
+
+  it("restores sidebar run indicators after a page reload", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-04-16T10:00:00Z",
+        updatedAt: "2026-04-16T10:00:00Z",
+        preview: "Running after reload",
+        runStartedAt: 12_345,
+      },
+      {
+        key: "websocket:chat-b",
+        channel: "websocket",
+        chatId: "chat-b",
+        createdAt: "2026-04-16T11:00:00Z",
+        updatedAt: "2026-04-16T11:00:00Z",
+        preview: "Completed after reload",
+      },
+    ];
+    localStorage.setItem(
+      "nanobot-webui.sidebar.completed-runs.v1",
+      JSON.stringify(["chat-b"]),
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
+    await waitFor(() =>
+      expect(within(sidebar).getByTitle("Agent running")).toBeInTheDocument(),
+    );
+    expect(within(sidebar).getByTitle("Agent finished")).toBeInTheDocument();
+    expect(attachSpy).toHaveBeenCalledWith("chat-a");
+  });
+
   it("opens the settings view from the sidebar footer", async () => {
     mockSessions = [
       {
@@ -199,7 +523,42 @@ describe("App layout", () => {
                 provider: "auto",
                 resolved_provider: "openai",
                 has_api_key: true,
+                model_preset: "default",
+                max_tokens: 8192,
+                context_window_tokens: 65536,
+                temperature: 0.1,
+                reasoning_effort: null,
+                timezone: "UTC",
+                bot_name: "nanobot",
+                bot_icon: "nb",
+                tool_hint_max_length: 40,
               },
+              model_presets: [
+                {
+                  name: "default",
+                  label: "Default",
+                  active: true,
+                  is_default: true,
+                  model: "openai/gpt-4o",
+                  provider: "auto",
+                  max_tokens: 8192,
+                  context_window_tokens: 65536,
+                  temperature: 0.1,
+                  reasoning_effort: null,
+                },
+                {
+                  name: "deep",
+                  label: "deep",
+                  active: false,
+                  is_default: false,
+                  model: "anthropic/claude-opus-4-5",
+                  provider: "anthropic",
+                  max_tokens: 8192,
+                  context_window_tokens: 200000,
+                  temperature: 0.1,
+                  reasoning_effort: "high",
+                },
+              ],
               providers: [
                 {
                   name: "openai",
@@ -269,14 +628,74 @@ describe("App layout", () => {
                 provider: "brave",
                 api_key_hint: "BSAo••••ew20",
                 base_url: null,
+                max_results: 5,
+                timeout: 30,
                 providers: [
                   { name: "duckduckgo", label: "DuckDuckGo", credential: "none" },
                   { name: "brave", label: "Brave Search", credential: "api_key" },
                   { name: "tavily", label: "Tavily", credential: "api_key" },
                 ],
               },
+              web: {
+                enable: true,
+                proxy: null,
+                user_agent: null,
+                search: { max_results: 5, timeout: 30 },
+                fetch: { use_jina_reader: true },
+              },
+              image_generation: {
+                enabled: false,
+                provider: "openrouter",
+                provider_configured: true,
+                model: "openai/gpt-5.4-image-2",
+                default_aspect_ratio: "1:1",
+                default_image_size: "1K",
+                max_images_per_turn: 4,
+                save_dir: "generated",
+                providers: [
+                  {
+                    name: "openrouter",
+                    label: "OpenRouter",
+                    configured: true,
+                    api_key_hint: "sk-o••••test",
+                    api_base: "https://openrouter.ai/api/v1",
+                    default_api_base: "https://openrouter.ai/api/v1",
+                  },
+                  {
+                    name: "gemini",
+                    label: "Gemini",
+                    configured: false,
+                    api_key_hint: null,
+                    api_base: null,
+                    default_api_base: "https://generativelanguage.googleapis.com/v1beta/openai/",
+                  },
+                ],
+              },
               runtime: {
                 config_path: "/tmp/config.json",
+                workspace_path: "/tmp/workspace",
+                gateway_host: "127.0.0.1",
+                gateway_port: 18790,
+                heartbeat: {
+                  enabled: true,
+                  interval_s: 1800,
+                  keep_recent_messages: 8,
+                },
+                dream: {
+                  schedule: "every 2h",
+                  max_batch_size: 20,
+                  max_iterations: 15,
+                  annotate_line_ages: true,
+                },
+                unified_session: false,
+              },
+              advanced: {
+                restrict_to_workspace: false,
+                ssrf_whitelist_count: 0,
+                mcp_server_count: 0,
+                exec_enabled: true,
+                exec_sandbox: null,
+                exec_path_append_set: false,
               },
               requires_restart: false,
             }),
@@ -292,21 +711,32 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
 
-    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
     expect(document.title).toBe("Settings · nanobot");
     expect(screen.queryByRole("navigation", { name: "Sidebar navigation" })).not.toBeInTheDocument();
     const settingsNav = screen.getByRole("navigation", { name: "Settings sections" });
-    expect(within(settingsNav).getByRole("button", { name: "General" })).toHaveAttribute(
+    expect(settingsNav.className).toContain("overflow-x-auto");
+    expect(settingsNav.className).not.toContain("grid-cols-2");
+    expect(within(settingsNav).getByRole("button", { name: "Overview" })).toHaveAttribute(
       "aria-current",
       "page",
     );
-    expect(within(settingsNav).getByRole("button", { name: "BYOK" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Models" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Providers" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Image" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Web" })).toBeInTheDocument();
+    expect(within(settingsNav).getByRole("button", { name: "Advanced" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Models" }));
     expect(screen.getByText("AI")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("openai/gpt-4o")).toBeInTheDocument();
-    fireEvent.click(within(settingsNav).getByRole("button", { name: "BYOK" }));
-    expect(screen.getByRole("tab", { name: "LLM" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "Web Search" })).toBeInTheDocument();
+    const modelInput = screen.getByDisplayValue("openai/gpt-4o");
+    expect(modelInput).toBeInTheDocument();
+    fireEvent.change(modelInput, { target: { value: "openai/gpt-4o-mini" } });
+    expect(screen.getByText("Unsaved changes.").parentElement?.className).toContain(
+      "text-blue-600",
+    );
+    fireEvent.change(modelInput, { target: { value: "openai/gpt-4o" } });
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Providers" }));
     expect(screen.getByText("OpenRouter")).toBeInTheDocument();
     expect(screen.getByText("Ant Ling")).toBeInTheDocument();
     expect(screen.getAllByText("Not configured").length).toBeGreaterThan(0);
@@ -325,7 +755,14 @@ describe("App layout", () => {
     expect(screen.getByDisplayValue("http://localhost:1337/v1")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Web Search" }));
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Image" }));
+    expect(screen.getByRole("heading", { name: "Image" })).toBeInTheDocument();
+    expect(screen.getByText("Provider status")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("openai/gpt-5.4-image-2")).toBeInTheDocument();
+    expect(screen.getByText("Save directory")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Web" }));
     expect(screen.getByText("Search provider")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Brave Search/ })).toBeInTheDocument();
     expect(screen.getByText("BSAo••••ew20")).toBeInTheDocument();
@@ -339,6 +776,10 @@ describe("App layout", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Brave Search" }));
     expect(screen.getByText("BSAo••••ew20")).toBeInTheDocument();
     expect(screen.queryByDisplayValue("unsaved-brave-key")).not.toBeInTheDocument();
+
+    fireEvent.click(within(settingsNav).getByRole("button", { name: "Runtime" }));
+    expect(screen.getByText("Bot name")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("returns from settings to the blank start page when no session was active", async () => {
@@ -373,19 +814,94 @@ describe("App layout", () => {
                 provider: "openai",
                 resolved_provider: "openai",
                 has_api_key: true,
+                model_preset: "default",
+                max_tokens: 8192,
+                context_window_tokens: 65536,
+                temperature: 0.1,
+                reasoning_effort: null,
+                timezone: "UTC",
+                bot_name: "nanobot",
+                bot_icon: "nb",
+                tool_hint_max_length: 40,
               },
+              model_presets: [
+                {
+                  name: "default",
+                  label: "Default",
+                  active: true,
+                  is_default: true,
+                  model: "openai/gpt-4o",
+                  provider: "openai",
+                  max_tokens: 8192,
+                  context_window_tokens: 65536,
+                  temperature: 0.1,
+                  reasoning_effort: null,
+                },
+              ],
               providers: [{ name: "openai", label: "OpenAI", configured: true }],
               web_search: {
                 provider: "duckduckgo",
                 api_key_hint: null,
                 base_url: null,
+                max_results: 5,
+                timeout: 30,
                 providers: [
                   { name: "duckduckgo", label: "DuckDuckGo", credential: "none" },
                   { name: "brave", label: "Brave Search", credential: "api_key" },
                 ],
               },
+              web: {
+                enable: true,
+                proxy: null,
+                user_agent: null,
+                search: { max_results: 5, timeout: 30 },
+                fetch: { use_jina_reader: true },
+              },
+              image_generation: {
+                enabled: false,
+                provider: "openrouter",
+                provider_configured: false,
+                model: "openai/gpt-5.4-image-2",
+                default_aspect_ratio: "1:1",
+                default_image_size: "1K",
+                max_images_per_turn: 4,
+                save_dir: "generated",
+                providers: [
+                  {
+                    name: "openrouter",
+                    label: "OpenRouter",
+                    configured: false,
+                    api_key_hint: null,
+                    api_base: null,
+                    default_api_base: "https://openrouter.ai/api/v1",
+                  },
+                ],
+              },
               runtime: {
                 config_path: "/tmp/config.json",
+                workspace_path: "/tmp/workspace",
+                gateway_host: "127.0.0.1",
+                gateway_port: 18790,
+                heartbeat: {
+                  enabled: true,
+                  interval_s: 1800,
+                  keep_recent_messages: 8,
+                },
+                dream: {
+                  schedule: "every 2h",
+                  max_batch_size: 20,
+                  max_iterations: 15,
+                  annotate_line_ages: true,
+                },
+                unified_session: false,
+              },
+              advanced: {
+                restrict_to_workspace: false,
+                ssrf_whitelist_count: 0,
+                mcp_server_count: 0,
+                exec_enabled: true,
+                exec_sandbox: null,
+                exec_path_append_set: false,
               },
               requires_restart: false,
             }),
@@ -403,14 +919,14 @@ describe("App layout", () => {
     await waitFor(() => expect(document.title).toBe("nanobot"));
 
     fireEvent.click(within(sidebar).getByRole("button", { name: "Settings" }));
-    expect(await screen.findByRole("heading", { name: "General" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Overview" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Back to chat" }));
 
     await waitFor(() => expect(document.title).toBe("nanobot"));
     expect(screen.getByText("What can I do for you?")).toBeInTheDocument();
   });
 
-  it("filters sidebar sessions through the lightweight search row", async () => {
+  it("filters sessions in the centered search dialog", async () => {
     mockSessions = [
       {
         key: "websocket:chat-alpha",
@@ -437,20 +953,43 @@ describe("App layout", () => {
     const sidebar = screen.getByRole("navigation", { name: "Sidebar navigation" });
     expect(within(sidebar).getByText("Q2 roadmap")).toBeInTheDocument();
     expect(within(sidebar).getByText("Travel ideas")).toBeInTheDocument();
+    const newChatButton = within(sidebar).getByRole("button", { name: "New chat" });
+    const searchButton = within(sidebar).getByRole("button", { name: "Search" });
+    expect(
+      newChatButton.compareDocumentPosition(searchButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Search chats" }), {
+    fireEvent.click(searchButton);
+    const dialog = await screen.findByRole("dialog", { name: "Search" });
+    expect(dialog).toHaveClass("origin-center");
+    expect(dialog.className).not.toContain("translate-x");
+    expect(dialog.className).not.toContain("translate-y");
+    expect(within(dialog).getByText("Q2 roadmap")).toBeInTheDocument();
+    expect(within(dialog).getByText("Travel ideas")).toBeInTheDocument();
+    expect(within(dialog).queryByText("websocket")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("#1")).not.toBeInTheDocument();
+
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search" }), {
       target: { value: "planning" },
     });
 
-    expect(within(sidebar).getByText("Q2 roadmap")).toBeInTheDocument();
-    expect(within(sidebar).queryByText("Travel ideas")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Q2 roadmap")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Travel ideas")).not.toBeInTheDocument();
+    expect(within(sidebar).getByText("Travel ideas")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Search chats" }), {
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Search" }), {
       target: { value: "road q2" },
     });
 
-    expect(within(sidebar).getByText("Q2 roadmap")).toBeInTheDocument();
-    expect(within(sidebar).queryByText("Travel ideas")).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Q2 roadmap")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Travel ideas")).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: /Q2 roadmap/ }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Search" })).not.toBeInTheDocument(),
+    );
   });
 
   it("opens a blank start page without creating an empty chat", async () => {

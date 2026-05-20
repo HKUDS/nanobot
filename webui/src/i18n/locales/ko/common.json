@@ -30,13 +30,25 @@
     "collapse": "사이드바 접기",
     "toggleTheme": "테마 전환",
     "newChat": "새 채팅",
+    "viewOptions": "View",
+    "compactList": "Compact list",
+    "showPreviews": "Show previews",
+    "showTimestamps": "Show time",
+    "sortLabel": "Sort",
+    "sortUpdated": "Recently updated",
+    "sortCreated": "Recently created",
+    "sortTitle": "Title A-Z",
     "recent": "최근 대화",
     "refreshSessions": "세션 새로고침",
     "settings": "설정",
     "language": {
       "label": "언어",
       "ariaLabel": "언어 변경"
-    }
+    },
+    "searchAria": "검색",
+    "searchPlaceholder": "검색",
+    "searchResults": "결과",
+    "noSearchResults": "일치하는 채팅이 없습니다."
   },
   "settings": {
     "backToChat": "채팅으로 돌아가기",
@@ -46,12 +58,28 @@
     },
     "nav": {
       "general": "일반",
-      "byok": "BYOK"
+      "byok": "BYOK",
+      "overview": "Overview",
+      "appearance": "Appearance",
+      "models": "Models",
+      "providers": "Providers",
+      "image": "Image",
+      "web": "Web",
+      "runtime": "Runtime",
+      "advanced": "Advanced"
     },
     "sections": {
       "interface": "인터페이스",
       "ai": "AI",
-      "system": "시스템"
+      "system": "시스템",
+      "status": "Status",
+      "localPreferences": "Local preferences",
+      "presets": "Presets",
+      "webSearch": "Web search",
+      "webBehavior": "Behavior",
+      "identity": "Identity",
+      "safety": "Safety",
+      "integrations": "Integrations"
     },
     "rows": {
       "theme": "테마",
@@ -59,19 +87,70 @@
       "provider": "제공자",
       "model": "모델",
       "restart": "nanobot 재시작",
-      "configPath": "설정 경로"
+      "configPath": "설정 경로",
+      "activePreset": "Active preset",
+      "gateway": "Gateway",
+      "restartState": "Restart state",
+      "selectedPreset": "Selected preset",
+      "presetModel": "Preset model",
+      "density": "Density",
+      "activityMode": "Activity detail",
+      "codeWrap": "Code wrapping",
+      "maxResults": "Max results",
+      "timeout": "Timeout",
+      "jinaReader": "Jina reader",
+      "botName": "Bot name",
+      "botIcon": "Bot icon",
+      "timezone": "Timezone",
+      "toolHintMaxLength": "Tool hint length",
+      "workspacePath": "Workspace path",
+      "heartbeat": "Heartbeat",
+      "dream": "Dream",
+      "unifiedSession": "Unified session",
+      "restrictWorkspace": "Restrict to workspace",
+      "execTool": "Exec tool",
+      "execSandbox": "Exec sandbox",
+      "ssrfWhitelist": "SSRF whitelist",
+      "mcpServers": "MCP servers",
+      "pathAppend": "PATH append",
+      "configurationDocs": "Configuration docs"
     },
     "help": {
       "theme": "밝은 모드와 어두운 모드를 전환합니다.",
       "language": "WebUI에서 사용할 언어를 선택합니다.",
       "provider": "새 모델 요청에 사용할 제공자를 선택합니다.",
       "model": "nanobot이 기본으로 사용할 모델 이름을 설정합니다.",
-      "configPath": "현재 게이트웨이가 사용하는 설정 파일입니다."
+      "configPath": "현재 게이트웨이가 사용하는 설정 파일입니다.",
+      "selectedPreset": "Named presets are read-only here; edit them in config.json.",
+      "presetModel": "Switch to Default to edit model and provider from the WebUI.",
+      "density": "Stored only in this browser.",
+      "activityMode": "Choose how much agent activity chrome to show by default.",
+      "codeWrap": "Keep long code lines readable on smaller screens.",
+      "maxResults": "Results returned by each web_search call.",
+      "timeout": "Seconds before a search provider request times out.",
+      "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "botName": "Shown in runtime surfaces that use the configured bot identity.",
+      "botIcon": "Short emoji or text shown beside the bot name.",
+      "timezone": "IANA timezone used by runtime context and schedules.",
+      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
+      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed."
     },
     "values": {
       "light": "라이트",
       "dark": "다크",
-      "notAvailable": "사용할 수 없음"
+      "notAvailable": "사용할 수 없음",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "restartRequired": "Restart required",
+      "liveReload": "Live reload ready",
+      "comfortable": "Comfortable",
+      "compact": "Compact",
+      "auto": "Auto",
+      "expanded": "Expanded",
+      "on": "On",
+      "off": "Off",
+      "configured": "Configured",
+      "notConfigured": "Not configured"
     },
     "status": {
       "loading": "설정을 불러오는 중...",
@@ -83,7 +162,8 @@
       "save": "저장",
       "saving": "저장 중",
       "edit": "편집",
-      "cancel": "취소"
+      "cancel": "취소",
+      "openDocs": "Open docs"
     },
     "byok": {
       "description": "직접 provider 키를 가져옵니다. Nanobot은 현재 config에서 값을 읽고, 설정된 provider만 일반 설정에서 선택할 수 있습니다.",
@@ -126,6 +206,18 @@
         "missingCredential": "저장하기 전에 필요한 자격 증명을 입력하세요.",
         "saveHint": "변경 사항은 새 web search 요청에 적용됩니다."
       }
+    },
+    "overview": {
+      "model": "Current model",
+      "providers": "Providers",
+      "configuredCount": "{{count}} configured",
+      "totalProviders": "{{count}} available",
+      "webSearch": "Web search",
+      "workspace": "Workspace"
+    },
+    "providers": {
+      "searchPlaceholder": "Search providers",
+      "noMatches": "No providers match this search."
     }
   },
   "chat": {
@@ -133,8 +225,31 @@
     "loading": "불러오는 중…",
     "noSessions": "아직 세션이 없습니다.",
     "actions": "{{title}} 채팅 작업",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished"
+    },
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "rename": "Rename",
+    "renameTitle": "Rename chat",
+    "renameDescription": "Choose a local sidebar name for this chat.",
+    "renamePlaceholder": "Chat name",
+    "renameSave": "Save",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "showArchived": "Show archived",
+    "hideArchived": "Hide archived",
     "delete": "삭제",
-    "newChat": "새 채팅"
+    "newChat": "새 채팅",
+    "groups": {
+      "pinned": "Pinned",
+      "all": "Chats",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "earlier": "Earlier",
+      "archived": "Archived"
+    }
   },
   "deleteConfirm": {
     "title": "이 채팅을 삭제할까요?",

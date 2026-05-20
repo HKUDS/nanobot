@@ -39,13 +39,40 @@ export function formatToolCallTrace(call: unknown): string | null {
   return `${name}()`;
 }
 
+const VALID_PHASES = new Set(["start", "end", "error"]);
+
 export function toolTraceLinesFromEvents(events: unknown): string[] {
   if (!Array.isArray(events)) return [];
-  return events
-    .filter((event) => {
-      if (!event || typeof event !== "object") return false;
-      return (event as { phase?: unknown }).phase === "start";
-    })
-    .map(formatToolCallTrace)
-    .filter((trace): trace is string => !!trace);
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const event of events) {
+    if (!event || typeof event !== "object") continue;
+    const phase = (event as { phase?: unknown }).phase;
+    if (!(phase && typeof phase === "string" && VALID_PHASES.has(phase))) continue;
+    const callId = (event as { call_id?: unknown }).call_id;
+    if (callId && typeof callId === "string") {
+      if (seen.has(callId)) continue;
+      seen.add(callId);
+    }
+    const line = formatToolCallTrace(event);
+    if (!line) continue;
+    lines.push(line);
+  }
+  return lines;
+}
+
+export function mergeUniqueToolTraceLines(
+  previousTraces: string[],
+  lines: string[],
+): { traces: string[]; added: boolean } {
+  const seen = new Set(previousTraces);
+  const traces = [...previousTraces];
+  let added = false;
+  for (const line of lines) {
+    if (seen.has(line)) continue;
+    seen.add(line);
+    traces.push(line);
+    added = true;
+  }
+  return { traces, added };
 }

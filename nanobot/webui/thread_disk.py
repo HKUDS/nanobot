@@ -1,4 +1,4 @@
-"""Legacy WebUI JSON snapshot path helpers (JSON file); transcripts use webui_transcript."""
+"""Legacy WebUI JSON snapshot path helpers (JSON file); transcripts use transcript."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from loguru import logger
 
 from nanobot.config.paths import get_webui_dir
 from nanobot.session.manager import SessionManager
-from nanobot.utils.webui_transcript import delete_webui_transcript
+from nanobot.webui.transcript import delete_webui_transcript
 
 
 def webui_thread_file_path(session_key: str) -> Path:

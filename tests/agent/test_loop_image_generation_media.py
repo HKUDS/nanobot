@@ -29,14 +29,15 @@ class FakeImageClient:
 
 
 @pytest.mark.asyncio
-async def test_generated_image_media_is_attached_to_final_assistant_message(
+async def test_outbound_no_longer_carries_generated_media(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Media delivery is now the LLM's responsibility via the message tool."""
     set_config_path(tmp_path / "config.json")
     monkeypatch.setattr(
-        "nanobot.agent.tools.image_generation.OpenRouterImageGenerationClient",
-        FakeImageClient,
+        "nanobot.agent.tools.image_generation.get_image_gen_provider",
+        lambda name: FakeImageClient if name == "openrouter" else None,
     )
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
@@ -81,9 +82,6 @@ async def test_generated_image_media_is_attached_to_final_assistant_message(
 
     assert result is not None
     assert result.content == "Done"
-    assert len(result.media) == 1
-    assert Path(result.media[0]).is_file()
-
-    session = loop.sessions.get_or_create("websocket:chat-image")
-    assert session.messages[-1]["role"] == "assistant"
-    assert session.messages[-1]["media"] == result.media
+    # OutboundMessage no longer carries generated media —
+    # the LLM sends images via the message tool instead.
+    assert result.media == []

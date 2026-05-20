@@ -30,13 +30,25 @@
     "collapse": "サイドバーを閉じる",
     "toggleTheme": "テーマを切り替える",
     "newChat": "新しいチャット",
+    "viewOptions": "View",
+    "compactList": "Compact list",
+    "showPreviews": "Show previews",
+    "showTimestamps": "Show time",
+    "sortLabel": "Sort",
+    "sortUpdated": "Recently updated",
+    "sortCreated": "Recently created",
+    "sortTitle": "Title A-Z",
     "recent": "最近のチャット",
     "refreshSessions": "セッションを更新",
     "settings": "設定",
     "language": {
       "label": "言語",
       "ariaLabel": "言語を変更"
-    }
+    },
+    "searchAria": "検索",
+    "searchPlaceholder": "検索",
+    "searchResults": "検索結果",
+    "noSearchResults": "一致するチャットはありません。"
   },
   "settings": {
     "backToChat": "チャットに戻る",
@@ -46,12 +58,28 @@
     },
     "nav": {
       "general": "一般",
-      "byok": "BYOK"
+      "byok": "BYOK",
+      "overview": "Overview",
+      "appearance": "Appearance",
+      "models": "Models",
+      "providers": "Providers",
+      "image": "Image",
+      "web": "Web",
+      "runtime": "Runtime",
+      "advanced": "Advanced"
     },
     "sections": {
       "interface": "インターフェース",
       "ai": "AI",
-      "system": "システム"
+      "system": "システム",
+      "status": "Status",
+      "localPreferences": "Local preferences",
+      "presets": "Presets",
+      "webSearch": "Web search",
+      "webBehavior": "Behavior",
+      "identity": "Identity",
+      "safety": "Safety",
+      "integrations": "Integrations"
     },
     "rows": {
       "theme": "テーマ",
@@ -59,19 +87,70 @@
       "provider": "プロバイダー",
       "model": "モデル",
       "restart": "nanobot を再起動",
-      "configPath": "設定パス"
+      "configPath": "設定パス",
+      "activePreset": "Active preset",
+      "gateway": "Gateway",
+      "restartState": "Restart state",
+      "selectedPreset": "Selected preset",
+      "presetModel": "Preset model",
+      "density": "Density",
+      "activityMode": "Activity detail",
+      "codeWrap": "Code wrapping",
+      "maxResults": "Max results",
+      "timeout": "Timeout",
+      "jinaReader": "Jina reader",
+      "botName": "Bot name",
+      "botIcon": "Bot icon",
+      "timezone": "Timezone",
+      "toolHintMaxLength": "Tool hint length",
+      "workspacePath": "Workspace path",
+      "heartbeat": "Heartbeat",
+      "dream": "Dream",
+      "unifiedSession": "Unified session",
+      "restrictWorkspace": "Restrict to workspace",
+      "execTool": "Exec tool",
+      "execSandbox": "Exec sandbox",
+      "ssrfWhitelist": "SSRF whitelist",
+      "mcpServers": "MCP servers",
+      "pathAppend": "PATH append",
+      "configurationDocs": "Configuration docs"
     },
     "help": {
       "theme": "ライト表示とダーク表示を切り替えます。",
       "language": "WebUI で使用する言語を選択します。",
       "provider": "新しいモデルリクエストに使うプロバイダーを選択します。",
       "model": "nanobot が既定で使用するモデル名を設定します。",
-      "configPath": "現在ゲートウェイが使用している設定ファイルです。"
+      "configPath": "現在ゲートウェイが使用している設定ファイルです。",
+      "selectedPreset": "Named presets are read-only here; edit them in config.json.",
+      "presetModel": "Switch to Default to edit model and provider from the WebUI.",
+      "density": "Stored only in this browser.",
+      "activityMode": "Choose how much agent activity chrome to show by default.",
+      "codeWrap": "Keep long code lines readable on smaller screens.",
+      "maxResults": "Results returned by each web_search call.",
+      "timeout": "Seconds before a search provider request times out.",
+      "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "botName": "Shown in runtime surfaces that use the configured bot identity.",
+      "botIcon": "Short emoji or text shown beside the bot name.",
+      "timezone": "IANA timezone used by runtime context and schedules.",
+      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
+      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed."
     },
     "values": {
       "light": "ライト",
       "dark": "ダーク",
-      "notAvailable": "利用不可"
+      "notAvailable": "利用不可",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "restartRequired": "Restart required",
+      "liveReload": "Live reload ready",
+      "comfortable": "Comfortable",
+      "compact": "Compact",
+      "auto": "Auto",
+      "expanded": "Expanded",
+      "on": "On",
+      "off": "Off",
+      "configured": "Configured",
+      "notConfigured": "Not configured"
     },
     "status": {
       "loading": "設定を読み込んでいます...",
@@ -83,7 +162,8 @@
       "save": "保存",
       "saving": "保存中",
       "edit": "編集",
-      "cancel": "キャンセル"
+      "cancel": "キャンセル",
+      "openDocs": "Open docs"
     },
     "byok": {
       "description": "自分の provider キーを使います。Nanobot は現在の config から値を読み込み、設定済みの provider だけを一般設定で選択できます。",
@@ -126,6 +206,18 @@
         "missingCredential": "保存する前に必要な認証情報を入力してください。",
         "saveHint": "変更は新しい web search リクエストに適用されます。"
       }
+    },
+    "overview": {
+      "model": "Current model",
+      "providers": "Providers",
+      "configuredCount": "{{count}} configured",
+      "totalProviders": "{{count}} available",
+      "webSearch": "Web search",
+      "workspace": "Workspace"
+    },
+    "providers": {
+      "searchPlaceholder": "Search providers",
+      "noMatches": "No providers match this search."
     }
   },
   "chat": {
@@ -133,8 +225,31 @@
     "loading": "読み込み中…",
     "noSessions": "まだセッションがありません。",
     "actions": "「{{title}}」のチャット操作",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished"
+    },
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "rename": "Rename",
+    "renameTitle": "Rename chat",
+    "renameDescription": "Choose a local sidebar name for this chat.",
+    "renamePlaceholder": "Chat name",
+    "renameSave": "Save",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "showArchived": "Show archived",
+    "hideArchived": "Hide archived",
     "delete": "削除",
-    "newChat": "新しいチャット"
+    "newChat": "新しいチャット",
+    "groups": {
+      "pinned": "Pinned",
+      "all": "Chats",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "earlier": "Earlier",
+      "archived": "Archived"
+    }
   },
   "deleteConfirm": {
     "title": "このチャットを削除しますか？",

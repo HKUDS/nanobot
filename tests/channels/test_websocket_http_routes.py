@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
+from urllib.parse import urlencode
 
 import httpx
 import pytest
@@ -177,12 +178,61 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
 
 
 @pytest.mark.asyncio
+async def test_webui_sidebar_state_routes_are_config_dir_scoped(
+    bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    sm = _seed_session(tmp_path, key="websocket:sidebar")
+    channel = _ch(bus, session_manager=sm, port=29911)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get("http://127.0.0.1:29911/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        initial = await _http_get(
+            "http://127.0.0.1:29911/api/webui/sidebar-state",
+            headers=auth,
+        )
+        assert initial.status_code == 200
+        assert initial.json()["schema_version"] == 1
+        assert initial.json()["pinned_keys"] == []
+
+        payload = {
+            "pinned_keys": ["websocket:sidebar"],
+            "archived_keys": ["websocket:old"],
+            "title_overrides": {"websocket:sidebar": "Pinned work"},
+            "view": {"density": "compact", "show_archived": True},
+        }
+        query = urlencode({"state": json.dumps(payload)})
+        updated = await _http_get(
+            f"http://127.0.0.1:29911/api/webui/sidebar-state/update?{query}",
+            headers=auth,
+        )
+        assert updated.status_code == 200
+        body = updated.json()
+        assert body["pinned_keys"] == ["websocket:sidebar"]
+        assert body["title_overrides"] == {"websocket:sidebar": "Pinned work"}
+        assert body["view"]["density"] == "compact"
+
+        state_path = tmp_path / "webui" / "sidebar-state.json"
+        assert state_path.is_file()
+        assert json.loads(state_path.read_text(encoding="utf-8"))["pinned_keys"] == [
+            "websocket:sidebar"
+        ]
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_session_delete_removes_file(
     bus: MagicMock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     sm = _seed_session(tmp_path, key="websocket:doomed")
-    from nanobot.utils.webui_transcript import append_transcript_object
+    from nanobot.webui.transcript import append_transcript_object
 
     append_transcript_object("websocket:doomed", {"event": "user", "chat_id": "doomed", "text": "x"})
     channel = _ch(bus, session_manager=sm, port=29903)

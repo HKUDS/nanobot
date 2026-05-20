@@ -33,8 +33,16 @@
     "toggleTheme": "切换主题",
     "home": "首页",
     "newChat": "新建对话",
-    "searchAria": "搜索会话",
-    "searchPlaceholder": "搜索会话",
+    "searchAria": "搜索",
+    "viewOptions": "视图",
+    "compactList": "紧凑列表",
+    "showPreviews": "显示预览",
+    "showTimestamps": "显示时间",
+    "sortLabel": "排序",
+    "sortUpdated": "最近更新",
+    "sortCreated": "最近创建",
+    "sortTitle": "标题 A-Z",
+    "searchPlaceholder": "搜索",
     "searchResults": "搜索结果",
     "noSearchResults": "没有匹配的会话。",
     "recent": "最近对话",
@@ -53,12 +61,31 @@
     },
     "nav": {
       "general": "通用",
-      "byok": "BYOK"
+      "byok": "BYOK",
+      "overview": "概览",
+      "appearance": "外观",
+      "models": "模型",
+      "providers": "提供商",
+      "image": "图片",
+      "web": "网页",
+      "runtime": "运行时",
+      "advanced": "高级"
     },
     "sections": {
       "interface": "界面",
       "ai": "AI",
-      "system": "系统"
+      "system": "系统",
+      "status": "状态",
+      "localPreferences": "本地偏好",
+      "presets": "预设",
+      "imageGeneration": "图片生成",
+      "imageDefaults": "默认值",
+      "webSearch": "网页搜索",
+      "webBehavior": "行为",
+      "identity": "身份",
+      "safety": "安全",
+      "capabilities": "能力",
+      "integrations": "集成"
     },
     "rows": {
       "theme": "主题",
@@ -66,34 +93,107 @@
       "provider": "提供商",
       "model": "模型",
       "restart": "重启 nanobot",
-      "configPath": "配置路径"
+      "configPath": "配置路径",
+      "activePreset": "当前预设",
+      "gateway": "网关",
+      "restartState": "重启状态",
+      "pendingChanges": "待处理更改",
+      "selectedPreset": "选中的预设",
+      "presetModel": "预设模型",
+      "density": "密度",
+      "activityMode": "活动细节",
+      "codeWrap": "代码换行",
+      "maxResults": "最大结果数",
+      "timeout": "超时",
+      "jinaReader": "Jina Reader",
+      "imageGeneration": "图片生成",
+      "imageProvider": "图片服务商",
+      "imageProviderStatus": "服务商状态",
+      "imageProviderBase": "服务商地址",
+      "imageModel": "图片模型",
+      "defaultAspectRatio": "默认比例",
+      "defaultImageSize": "默认尺寸",
+      "maxImagesPerTurn": "每轮最多图片数",
+      "imageSaveDir": "保存目录",
+      "botName": "Bot 名称",
+      "botIcon": "Bot 图标",
+      "timezone": "时区",
+      "toolHintMaxLength": "工具提示长度",
+      "workspacePath": "工作区路径",
+      "heartbeat": "Heartbeat",
+      "dream": "Dream",
+      "unifiedSession": "统一会话",
+      "restrictWorkspace": "限制在工作区内",
+      "execTool": "Exec 工具",
+      "execSandbox": "Exec 沙箱",
+      "ssrfWhitelist": "SSRF 白名单",
+      "mcpServers": "MCP 服务器",
+      "pathAppend": "PATH 追加",
+      "configurationDocs": "配置文档"
     },
     "help": {
       "theme": "在浅色和深色外观之间切换。",
       "language": "选择 WebUI 使用的语言。",
-      "provider": "选择新模型请求使用的服务提供商。",
+      "provider": "选择新模型请求使用的服务商。",
       "model": "设置 nanobot 默认使用的模型名称。",
-      "configPath": "当前网关正在使用的配置文件。"
+      "configPath": "当前网关正在使用的配置文件。",
+      "selectedPreset": "命名预设在这里只读；需要编辑时请改 config.json。",
+      "presetModel": "切回 Default 后可在 WebUI 编辑模型和服务商。",
+      "density": "仅保存在当前浏览器。",
+      "activityMode": "选择默认显示多少 agent 活动细节。",
+      "codeWrap": "让较小屏幕上的长代码行更易读。",
+      "maxResults": "每次 web_search 返回的结果数量。",
+      "timeout": "搜索服务商请求超时秒数。",
+      "jinaReader": "可用时为 web_fetch 使用 Jina Reader。",
+      "imageGeneration": "当已配置图片服务商时，在对话中开放 generate_image。",
+      "imageProvider": "选择 generate_image 使用的服务商。",
+      "imageProviderStatus": "图片生成复用服务商页里的凭证配置。",
+      "imageModel": "发送给所选图片服务商的模型名称。",
+      "defaultAspectRatio": "当提示词没有选择比例时使用。",
+      "defaultImageSize": "发送给支持该能力的服务商的尺寸提示。",
+      "maxImagesPerTurn": "单次 generate_image 请求允许的图片上限。",
+      "botName": "显示在使用 bot 身份的运行时界面里。",
+      "botIcon": "显示在 bot 名称旁的短 emoji 或文本。",
+      "timezone": "运行时上下文和计划任务使用的 IANA 时区。",
+      "toolHintMaxLength": "工具进度提示显示的最大字符数。",
+      "advancedReadOnly": "高级安全控制在 WebUI 中只读；需要时请谨慎编辑 config.json。"
     },
     "values": {
       "light": "浅色",
       "dark": "深色",
-      "notAvailable": "不可用"
+      "notAvailable": "不可用",
+      "enabled": "已启用",
+      "disabled": "已禁用",
+      "restartPending": "等待重启",
+      "ready": "就绪",
+      "comfortable": "舒适",
+      "compact": "紧凑",
+      "auto": "自动",
+      "expanded": "展开",
+      "on": "开",
+      "off": "关",
+      "configured": "已配置",
+      "notConfigured": "未配置"
     },
     "status": {
       "loading": "正在加载设置...",
       "loadError": "无法加载设置",
       "unsaved": "有未保存的更改。",
-      "savedRestart": "已保存。重启 nanobot 后生效。"
+      "upToDate": "已是最新。",
+      "savedRestart": "已保存。重启 nanobot 后生效。",
+      "restartAfterSaving": "保存后，可在合适时重启。",
+      "savedRestartApply": "已保存，可稍后重启。",
+      "imageProviderRestart": "图片服务商改动已保存，可稍后重启。"
     },
     "actions": {
       "save": "保存",
       "saving": "保存中",
       "edit": "编辑",
-      "cancel": "取消"
+      "cancel": "取消",
+      "openDocs": "打开文档"
     },
     "byok": {
-      "description": "自带 provider key。Nanobot 会从当前 config 读取这些值，只有已配置的 provider 才能在通用设置里选择。",
+      "description": "自带服务商密钥。Nanobot 会从当前 config 读取这些值，只有已配置的服务商才能在通用设置里选择。",
       "configured": "已配置",
       "notConfigured": "未配置",
       "configuredSection": "已配置",
@@ -105,22 +205,22 @@
       "apiKeyPlaceholder": "输入 API key",
       "apiKeyConfiguredPlaceholder": "留空则保留当前 key",
       "configuredKeyHint": "已配置的 key",
-      "apiBasePlaceholder": "使用 provider 默认地址",
-      "apiKeyRequired": "需要 API key 才能配置此 provider。",
+      "apiBasePlaceholder": "使用服务商默认地址",
+      "apiKeyRequired": "需要 API key 才能配置此服务商。",
       "showApiKey": "显示 API key",
       "hideApiKey": "隐藏 API key",
-      "noConfiguredProviders": "没有已配置的 provider",
-      "configureFirst": "请先在 BYOK 里配置 provider。",
+      "noConfiguredProviders": "没有已配置的服务商",
+      "configureFirst": "请先在 BYOK 里配置服务商。",
       "openByok": "打开 BYOK",
       "tabs": {
         "ariaLabel": "BYOK 凭证类型",
         "llm": "LLM",
-        "webSearch": "Web Search"
+        "webSearch": "网页搜索"
       },
       "webSearch": {
-        "provider": "搜索 provider",
-        "providerHelp": "选择 web search 工具使用的后端。",
-        "selectProvider": "选择 provider",
+        "provider": "搜索服务商",
+        "providerHelp": "选择网页搜索工具使用的后端。",
+        "selectProvider": "选择服务商",
         "credentials": "凭证",
         "noCredentialRequired": "无需 key",
         "noCredentialHelp": "DuckDuckGo 不需要保存 API key。",
@@ -128,11 +228,31 @@
         "baseUrl": "Base URL",
         "baseUrlHelp": "SearXNG 需要你自己的实例地址。",
         "baseUrlPlaceholder": "https://search.example.com",
-        "apiKeyRequired": "这个搜索 provider 需要 API key。",
+        "apiKeyRequired": "这个搜索服务商需要 API key。",
         "baseUrlRequired": "SearXNG 需要 Base URL。",
         "missingCredential": "填写所需凭证后才能保存。",
-        "saveHint": "改动会应用到新的 web search 请求。"
+        "saveHint": "改动会应用到新的网页搜索请求。"
       }
+    },
+    "overview": {
+      "model": "当前模型",
+      "providers": "提供商",
+      "configuredCount": "已配置 {{count}} 个",
+      "totalProviders": "共 {{count}} 个可用",
+      "webSearch": "网页搜索",
+      "imageGeneration": "图片生成",
+      "workspace": "工作区"
+    },
+    "providers": {
+      "searchPlaceholder": "搜索服务商",
+      "noMatches": "没有匹配的服务商。"
+    },
+    "image": {
+      "selectProvider": "选择服务商",
+      "selectAspect": "选择比例",
+      "selectSize": "选择尺寸",
+      "configureProvider": "配置服务商",
+      "missingCredential": "启用图片生成前，请先配置这个服务商。"
     }
   },
   "chat": {
@@ -140,12 +260,30 @@
     "loading": "加载中…",
     "noSessions": "还没有会话。",
     "actions": "“{{title}}” 的会话操作",
+    "activity": {
+      "running": "Agent 正在运行",
+      "complete": "Agent 已完成"
+    },
+    "pin": "置顶",
+    "unpin": "取消置顶",
+    "rename": "重命名",
+    "renameTitle": "重命名对话",
+    "renameDescription": "为这个对话设置一个仅用于 WebUI 侧边栏的名称。",
+    "renamePlaceholder": "对话名称",
+    "renameSave": "保存",
+    "archive": "归档",
+    "unarchive": "取消归档",
+    "showArchived": "显示归档",
+    "hideArchived": "隐藏归档",
     "delete": "删除",
     "newChat": "新建对话",
     "groups": {
+      "pinned": "置顶",
+      "all": "对话",
       "today": "今天",
       "yesterday": "昨天",
-      "earlier": "更早"
+      "earlier": "更早",
+      "archived": "已归档"
     }
   },
   "deleteConfirm": {
@@ -282,7 +420,7 @@
           },
           "status": {
             "title": "查看状态",
-            "description": "显示运行时、provider 和 channel 状态。"
+            "description": "显示运行时、服务商和通道状态。"
           },
           "history": {
             "title": "查看对话历史",

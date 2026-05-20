@@ -351,6 +351,7 @@ class ExecTool(Tool):
             # the raw command string to COMSPEC without re-quoting.
             return await asyncio.create_subprocess_shell(
                 command,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
@@ -359,6 +360,7 @@ class ExecTool(Tool):
         bash = shutil.which("bash") or "/bin/bash"
         return await asyncio.create_subprocess_exec(
             bash, "-l", "-c", command,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,

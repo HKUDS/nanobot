@@ -30,13 +30,25 @@
     "collapse": "Thu gọn thanh bên",
     "toggleTheme": "Chuyển giao diện",
     "newChat": "Cuộc trò chuyện mới",
+    "viewOptions": "View",
+    "compactList": "Compact list",
+    "showPreviews": "Show previews",
+    "showTimestamps": "Show time",
+    "sortLabel": "Sort",
+    "sortUpdated": "Recently updated",
+    "sortCreated": "Recently created",
+    "sortTitle": "Title A-Z",
     "recent": "Gần đây",
     "refreshSessions": "Làm mới phiên",
     "settings": "Cài đặt",
     "language": {
       "label": "Ngôn ngữ",
       "ariaLabel": "Đổi ngôn ngữ"
-    }
+    },
+    "searchAria": "Tìm kiếm",
+    "searchPlaceholder": "Tìm kiếm",
+    "searchResults": "Kết quả",
+    "noSearchResults": "Không có cuộc trò chuyện phù hợp."
   },
   "settings": {
     "backToChat": "Quay lại trò chuyện",
@@ -46,12 +58,28 @@
     },
     "nav": {
       "general": "Chung",
-      "byok": "BYOK"
+      "byok": "BYOK",
+      "overview": "Overview",
+      "appearance": "Appearance",
+      "models": "Models",
+      "providers": "Providers",
+      "image": "Image",
+      "web": "Web",
+      "runtime": "Runtime",
+      "advanced": "Advanced"
     },
     "sections": {
       "interface": "Giao diện",
       "ai": "AI",
-      "system": "Hệ thống"
+      "system": "Hệ thống",
+      "status": "Status",
+      "localPreferences": "Local preferences",
+      "presets": "Presets",
+      "webSearch": "Web search",
+      "webBehavior": "Behavior",
+      "identity": "Identity",
+      "safety": "Safety",
+      "integrations": "Integrations"
     },
     "rows": {
       "theme": "Giao diện",
@@ -59,19 +87,70 @@
       "provider": "Nhà cung cấp",
       "model": "Mô hình",
       "restart": "Khởi động lại nanobot",
-      "configPath": "Đường dẫn cấu hình"
+      "configPath": "Đường dẫn cấu hình",
+      "activePreset": "Active preset",
+      "gateway": "Gateway",
+      "restartState": "Restart state",
+      "selectedPreset": "Selected preset",
+      "presetModel": "Preset model",
+      "density": "Density",
+      "activityMode": "Activity detail",
+      "codeWrap": "Code wrapping",
+      "maxResults": "Max results",
+      "timeout": "Timeout",
+      "jinaReader": "Jina reader",
+      "botName": "Bot name",
+      "botIcon": "Bot icon",
+      "timezone": "Timezone",
+      "toolHintMaxLength": "Tool hint length",
+      "workspacePath": "Workspace path",
+      "heartbeat": "Heartbeat",
+      "dream": "Dream",
+      "unifiedSession": "Unified session",
+      "restrictWorkspace": "Restrict to workspace",
+      "execTool": "Exec tool",
+      "execSandbox": "Exec sandbox",
+      "ssrfWhitelist": "SSRF whitelist",
+      "mcpServers": "MCP servers",
+      "pathAppend": "PATH append",
+      "configurationDocs": "Configuration docs"
     },
     "help": {
       "theme": "Chuyển giữa giao diện sáng và tối.",
       "language": "Chọn ngôn ngữ dùng trong WebUI.",
       "provider": "Chọn nhà cung cấp cho các yêu cầu mô hình mới.",
       "model": "Đặt tên mô hình mặc định mà nanobot sử dụng.",
-      "configPath": "Tệp cấu hình gateway hiện đang dùng."
+      "configPath": "Tệp cấu hình gateway hiện đang dùng.",
+      "selectedPreset": "Named presets are read-only here; edit them in config.json.",
+      "presetModel": "Switch to Default to edit model and provider from the WebUI.",
+      "density": "Stored only in this browser.",
+      "activityMode": "Choose how much agent activity chrome to show by default.",
+      "codeWrap": "Keep long code lines readable on smaller screens.",
+      "maxResults": "Results returned by each web_search call.",
+      "timeout": "Seconds before a search provider request times out.",
+      "jinaReader": "Use Jina Reader for web_fetch when available.",
+      "botName": "Shown in runtime surfaces that use the configured bot identity.",
+      "botIcon": "Short emoji or text shown beside the bot name.",
+      "timezone": "IANA timezone used by runtime context and schedules.",
+      "toolHintMaxLength": "Maximum characters shown in tool progress hints.",
+      "advancedReadOnly": "Advanced safety controls are read-only in WebUI. Edit config.json intentionally when needed."
     },
     "values": {
       "light": "Sáng",
       "dark": "Tối",
-      "notAvailable": "Không khả dụng"
+      "notAvailable": "Không khả dụng",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "restartRequired": "Restart required",
+      "liveReload": "Live reload ready",
+      "comfortable": "Comfortable",
+      "compact": "Compact",
+      "auto": "Auto",
+      "expanded": "Expanded",
+      "on": "On",
+      "off": "Off",
+      "configured": "Configured",
+      "notConfigured": "Not configured"
     },
     "status": {
       "loading": "Đang tải cài đặt...",
@@ -83,7 +162,8 @@
       "save": "Lưu",
       "saving": "Đang lưu",
       "edit": "Sửa",
-      "cancel": "Hủy"
+      "cancel": "Hủy",
+      "openDocs": "Open docs"
     },
     "byok": {
       "description": "Dùng key provider của riêng bạn. Nanobot đọc các giá trị này từ config hiện tại, và chỉ provider đã cấu hình mới có thể chọn trong Chung.",
@@ -126,6 +206,18 @@
         "missingCredential": "Thêm thông tin bắt buộc trước khi lưu.",
         "saveHint": "Thay đổi áp dụng cho các yêu cầu web search mới."
       }
+    },
+    "overview": {
+      "model": "Current model",
+      "providers": "Providers",
+      "configuredCount": "{{count}} configured",
+      "totalProviders": "{{count}} available",
+      "webSearch": "Web search",
+      "workspace": "Workspace"
+    },
+    "providers": {
+      "searchPlaceholder": "Search providers",
+      "noMatches": "No providers match this search."
     }
   },
   "chat": {
@@ -133,8 +225,31 @@
     "loading": "Đang tải…",
     "noSessions": "Chưa có phiên nào.",
     "actions": "Tác vụ cho cuộc trò chuyện {{title}}",
+    "activity": {
+      "running": "Agent running",
+      "complete": "Agent finished"
+    },
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "rename": "Rename",
+    "renameTitle": "Rename chat",
+    "renameDescription": "Choose a local sidebar name for this chat.",
+    "renamePlaceholder": "Chat name",
+    "renameSave": "Save",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "showArchived": "Show archived",
+    "hideArchived": "Hide archived",
     "delete": "Xóa",
-    "newChat": "Cuộc trò chuyện mới"
+    "newChat": "Cuộc trò chuyện mới",
+    "groups": {
+      "pinned": "Pinned",
+      "all": "Chats",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "earlier": "Earlier",
+      "archived": "Archived"
+    }
   },
   "deleteConfirm": {
     "title": "Xóa cuộc trò chuyện này?",

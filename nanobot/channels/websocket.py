@@ -37,15 +37,27 @@ from nanobot.command.builtin import builtin_command_palette
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.session.goal_state import goal_state_ws_blob
+from nanobot.session.webui_turns import websocket_turn_wall_started_at
 from nanobot.utils.helpers import safe_filename
 from nanobot.utils.media_decode import (
     FileSizeExceeded,
     save_base64_data_url,
 )
 from nanobot.utils.subagent_channel_display import scrub_subagent_messages_for_channel
-from nanobot.utils.webui_thread_disk import delete_webui_thread
-from nanobot.utils.webui_transcript import append_transcript_object, build_webui_thread_response
-from nanobot.utils.webui_turn_helpers import websocket_turn_wall_started_at
+from nanobot.webui.settings_api import (
+    WebUISettingsError,
+    settings_payload,
+    update_agent_settings,
+    update_image_generation_settings,
+    update_provider_settings,
+    update_web_search_settings,
+)
+from nanobot.webui.sidebar_state import (
+    read_webui_sidebar_state,
+    write_webui_sidebar_state,
+)
+from nanobot.webui.thread_disk import delete_webui_thread
+from nanobot.webui.transcript import append_transcript_object, build_webui_thread_response
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
@@ -220,47 +232,6 @@ def _query_first(query: dict[str, list[str]], key: str) -> str | None:
     """Return the first value for *key*, or None."""
     values = query.get(key)
     return values[0] if values else None
-
-
-def _mask_secret_hint(secret: str | None) -> str | None:
-    if not secret:
-        return None
-    if len(secret) <= 8:
-        return "••••"
-    return f"{secret[:4]}••••{secret[-4:]}"
-
-
-def _provider_requires_api_key(spec: Any) -> bool:
-    if spec.backend == "azure_openai":
-        return True
-    if spec.is_local or spec.is_direct:
-        return False
-    return True
-
-
-def _provider_configured_for_settings(spec: Any, provider_config: Any) -> bool:
-    if _provider_requires_api_key(spec):
-        return bool(provider_config.api_key)
-    return bool(
-        provider_config.api_key
-        or provider_config.api_base
-        or getattr(provider_config, "region", None)
-        or getattr(provider_config, "profile", None)
-    )
-
-
-_WEB_SEARCH_PROVIDER_OPTIONS: tuple[dict[str, str], ...] = (
-    {"name": "duckduckgo", "label": "DuckDuckGo", "credential": "none"},
-    {"name": "brave", "label": "Brave Search", "credential": "api_key"},
-    {"name": "tavily", "label": "Tavily", "credential": "api_key"},
-    {"name": "searxng", "label": "SearXNG", "credential": "base_url"},
-    {"name": "jina", "label": "Jina", "credential": "api_key"},
-    {"name": "kagi", "label": "Kagi", "credential": "api_key"},
-    {"name": "olostep", "label": "Olostep", "credential": "api_key"},
-)
-_WEB_SEARCH_PROVIDER_BY_NAME = {
-    provider["name"]: provider for provider in _WEB_SEARCH_PROVIDER_OPTIONS
-}
 
 
 def _parse_inbound_payload(raw: str) -> str | None:
@@ -501,6 +472,7 @@ class WebSocketChannel(BaseChannel):
             static_dist_path.resolve() if static_dist_path is not None else None
         )
         self._runtime_model_name = runtime_model_name
+        self._settings_restart_sections: set[str] = set()
         # Process-local secret used to HMAC-sign media URLs. The signed URL is
         # the capability — anyone who holds a valid URL can fetch that one
         # file, nothing else. The secret regenerates on restart so links
@@ -663,6 +635,12 @@ class WebSocketChannel(BaseChannel):
         if got == "/api/commands":
             return self._handle_commands(request)
 
+        if got == "/api/webui/sidebar-state":
+            return self._handle_webui_sidebar_state(request)
+
+        if got == "/api/webui/sidebar-state/update":
+            return self._handle_webui_sidebar_state_update(request)
+
         if got == "/api/settings/update":
             return self._handle_settings_update(request)
 
@@ -671,6 +649,9 @@ class WebSocketChannel(BaseChannel):
 
         if got == "/api/settings/web-search/update":
             return self._handle_settings_web_search_update(request)
+
+        if got == "/api/settings/image-generation/update":
+            return self._handle_settings_image_generation_update(request)
 
         m = re.match(r"^/api/sessions/([^/]+)/messages$", got)
         if m:
@@ -783,221 +764,115 @@ class WebSocketChannel(BaseChannel):
         sessions = self._session_manager.list_sessions()
         # Sidebar/chat listing for WS-backed sessions only — CLI / Slack / etc.
         # keys are not intended for resume over this HTTP surface.
-        cleaned = [
-            {k: v for k, v in s.items() if k != "path"}
-            for s in sessions
-            if isinstance(s.get("key"), str) and s["key"].startswith("websocket:")
-        ]
-        return _http_json_response({"sessions": cleaned})
-
-    def _settings_payload(self, *, requires_restart: bool = False) -> dict[str, Any]:
-        from nanobot.config.loader import get_config_path, load_config
-        from nanobot.providers.registry import PROVIDERS, find_by_name
-
-        config = load_config()
-        defaults = config.agents.defaults
-        provider_name = config.get_provider_name(defaults.model) or defaults.provider
-        provider = config.get_provider(defaults.model)
-        selected_provider = provider_name
-        if defaults.provider != "auto":
-            spec = find_by_name(defaults.provider)
-            selected_provider = spec.name if spec else provider_name
-        providers = []
-        for spec in PROVIDERS:
-            provider_config = getattr(config.providers, spec.name, None)
-            if provider_config is None or spec.is_oauth:
+        cleaned = []
+        for s in sessions:
+            key = s.get("key")
+            if not (isinstance(key, str) and key.startswith("websocket:")):
                 continue
-            providers.append(
-                {
-                    "name": spec.name,
-                    "label": spec.label,
-                    "configured": _provider_configured_for_settings(spec, provider_config),
-                    "api_key_required": _provider_requires_api_key(spec),
-                    "api_key_hint": _mask_secret_hint(provider_config.api_key),
-                    "api_base": provider_config.api_base,
-                    "default_api_base": spec.default_api_base or None,
-                }
-            )
-        search_config = config.tools.web.search
-        search_provider = (
-            search_config.provider
-            if search_config.provider in _WEB_SEARCH_PROVIDER_BY_NAME
-            else "duckduckgo"
-        )
-        return {
-            "agent": {
-                "model": defaults.model,
-                "provider": selected_provider,
-                "resolved_provider": provider_name,
-                "has_api_key": bool(provider and provider.api_key),
-            },
-            "providers": providers,
-            "web_search": {
-                "provider": search_provider,
-                "api_key_hint": _mask_secret_hint(search_config.api_key),
-                "base_url": search_config.base_url or None,
-                "providers": list(_WEB_SEARCH_PROVIDER_OPTIONS),
-            },
-            "runtime": {
-                "config_path": str(get_config_path().expanduser()),
-            },
-            "requires_restart": requires_restart,
-        }
+            row = {k: v for k, v in s.items() if k != "path"}
+            chat_id = key.split(":", 1)[1]
+            started_at = websocket_turn_wall_started_at(chat_id)
+            if started_at is not None:
+                row["run_started_at"] = started_at
+            cleaned.append(row)
+        return _http_json_response({"sessions": cleaned})
 
     def _handle_settings(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
-        return _http_json_response(self._settings_payload())
+        return _http_json_response(self._with_settings_restart_state(settings_payload()))
+
+    def _with_settings_restart_state(
+        self,
+        payload: dict[str, Any],
+        *,
+        section: str | None = None,
+    ) -> dict[str, Any]:
+        """Keep restart-required state alive for this gateway process."""
+        if section and payload.get("requires_restart"):
+            self._settings_restart_sections.add(section)
+        if self._settings_restart_sections:
+            payload = dict(payload)
+            payload["requires_restart"] = True
+            payload["restart_required_sections"] = sorted(self._settings_restart_sections)
+        else:
+            payload = dict(payload)
+            payload["restart_required_sections"] = []
+        return payload
 
     def _handle_commands(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
         return _http_json_response({"commands": builtin_command_palette()})
 
+    def _handle_webui_sidebar_state(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        return _http_json_response(read_webui_sidebar_state())
+
+    def _handle_webui_sidebar_state_update(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        raw_state = _query_first(query, "state")
+        if raw_state is None:
+            return _http_error(400, "missing state")
+        try:
+            decoded = json.loads(raw_state)
+        except json.JSONDecodeError:
+            return _http_error(400, "state must be JSON")
+        if not isinstance(decoded, dict):
+            return _http_error(400, "state must be an object")
+        try:
+            state = write_webui_sidebar_state(decoded)
+        except ValueError as e:
+            return _http_error(400, str(e))
+        except OSError:
+            self.logger.exception("failed to write webui sidebar state")
+            return _http_error(500, "failed to write sidebar state")
+        return _http_json_response(state)
+
     def _handle_settings_update(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
-        from nanobot.config.loader import load_config, save_config
-        from nanobot.providers.registry import find_by_name
-
         query = _parse_query(request.path)
-        config = load_config()
-        defaults = config.agents.defaults
-        changed = False
-
-        model = _query_first(query, "model")
-        if model is not None:
-            model = model.strip()
-            if not model:
-                return _http_error(400, "model is required")
-            if defaults.model != model:
-                defaults.model = model
-                changed = True
-
-        provider = _query_first(query, "provider")
-        if provider is not None:
-            provider = provider.strip()
-            if not provider:
-                return _http_error(400, "provider is required")
-            if find_by_name(provider) is None:
-                return _http_error(400, "unknown provider")
-            provider_config = getattr(config.providers, provider, None)
-            spec = find_by_name(provider)
-            if (
-                provider_config is None
-                or spec is None
-                or not _provider_configured_for_settings(spec, provider_config)
-            ):
-                return _http_error(400, "provider is not configured")
-            if defaults.provider != provider:
-                defaults.provider = provider
-                changed = True
-
-        if changed:
-            save_config(config)
-        # LLM provider/model changes are hot-reloaded by AgentLoop before each
-        # new turn via the provider snapshot loader, so a restart is unnecessary.
-        return _http_json_response(self._settings_payload(requires_restart=False))
+        try:
+            payload = update_agent_settings(query)
+        except WebUISettingsError as e:
+            return _http_error(e.status, e.message)
+        return _http_json_response(
+            self._with_settings_restart_state(payload, section="runtime")
+        )
 
     def _handle_settings_provider_update(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
-        from nanobot.config.loader import load_config, save_config
-        from nanobot.providers.registry import find_by_name
-
         query = _parse_query(request.path)
-        provider_name = (_query_first(query, "provider") or "").strip()
-        if not provider_name:
-            return _http_error(400, "provider is required")
-        spec = find_by_name(provider_name)
-        if spec is None or spec.is_oauth:
-            return _http_error(400, "unknown provider")
-
-        config = load_config()
-        provider_config = getattr(config.providers, spec.name, None)
-        if provider_config is None:
-            return _http_error(400, "unknown provider")
-
-        changed = False
-        if "api_key" in query or "apiKey" in query:
-            api_key = _query_first(query, "api_key")
-            if api_key is None:
-                api_key = _query_first(query, "apiKey")
-            api_key = (api_key or "").strip() or None
-            if provider_config.api_key != api_key:
-                provider_config.api_key = api_key
-                changed = True
-
-        if "api_base" in query or "apiBase" in query:
-            api_base = _query_first(query, "api_base")
-            if api_base is None:
-                api_base = _query_first(query, "apiBase")
-            api_base = (api_base or "").strip() or None
-            if provider_config.api_base != api_base:
-                provider_config.api_base = api_base
-                changed = True
-
-        if changed:
-            save_config(config)
-        # API key/base changes are picked up by the next provider snapshot refresh.
-        return _http_json_response(self._settings_payload(requires_restart=False))
+        try:
+            payload = update_provider_settings(query)
+        except WebUISettingsError as e:
+            return _http_error(e.status, e.message)
+        return _http_json_response(self._with_settings_restart_state(payload, section="image"))
 
     def _handle_settings_web_search_update(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
             return _http_error(401, "Unauthorized")
-        from nanobot.config.loader import load_config, save_config
-
         query = _parse_query(request.path)
-        provider_name = (_query_first(query, "provider") or "").strip().lower()
-        provider_option = _WEB_SEARCH_PROVIDER_BY_NAME.get(provider_name)
-        if provider_option is None:
-            return _http_error(400, "unknown web search provider")
+        try:
+            payload = update_web_search_settings(query)
+        except WebUISettingsError as e:
+            return _http_error(e.status, e.message)
+        return _http_json_response(self._with_settings_restart_state(payload, section="web"))
 
-        config = load_config()
-        search_config = config.tools.web.search
-        previous_provider = search_config.provider
-        changed = False
-
-        def set_value(attr: str, value: str | None) -> None:
-            nonlocal changed
-            if getattr(search_config, attr) != value:
-                setattr(search_config, attr, value)
-                changed = True
-
-        if search_config.provider != provider_name:
-            search_config.provider = provider_name
-            changed = True
-
-        credential = provider_option["credential"]
-        if credential == "none":
-            set_value("api_key", "")
-            set_value("base_url", "")
-        elif credential == "base_url":
-            base_url = _query_first(query, "base_url")
-            if base_url is None:
-                base_url = _query_first(query, "baseUrl")
-            base_url = base_url.strip() if base_url is not None else None
-            if not base_url and previous_provider == provider_name and search_config.base_url:
-                base_url = search_config.base_url
-            if not base_url:
-                return _http_error(400, "base_url is required")
-            set_value("base_url", base_url)
-            set_value("api_key", "")
-        else:
-            api_key = _query_first(query, "api_key")
-            if api_key is None:
-                api_key = _query_first(query, "apiKey")
-            api_key = api_key.strip() if api_key is not None else None
-            if not api_key and previous_provider == provider_name and search_config.api_key:
-                api_key = search_config.api_key
-            if not api_key:
-                return _http_error(400, "api_key is required")
-            set_value("api_key", api_key)
-            set_value("base_url", "")
-
-        if changed:
-            save_config(config)
-        return _http_json_response(self._settings_payload(requires_restart=False))
+    def _handle_settings_image_generation_update(self, request: WsRequest) -> Response:
+        if not self._check_api_token(request):
+            return _http_error(401, "Unauthorized")
+        query = _parse_query(request.path)
+        try:
+            payload = update_image_generation_settings(query)
+        except WebUISettingsError as e:
+            return _http_error(e.status, e.message)
+        return _http_json_response(self._with_settings_restart_state(payload, section="image"))
 
     @staticmethod
     def _is_websocket_channel_session_key(key: str) -> bool:

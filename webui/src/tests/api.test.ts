@@ -2,9 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   deleteSession,
+  fetchSidebarState,
   fetchWebuiThread,
   listSessions,
   listSlashCommands,
+  updateSidebarState,
+  updateImageGenerationSettings,
   updateProviderSettings,
   updateSettings,
   updateWebSearchSettings,
@@ -46,12 +49,17 @@ describe("webui API helpers", () => {
 
   it("serializes settings updates as a narrow query string", async () => {
     await updateSettings("tok", {
+      modelPreset: "default",
       model: "openrouter/test",
       provider: "openrouter",
+      timezone: "Asia/Shanghai",
+      botName: "nanobot",
+      botIcon: "nb",
+      toolHintMaxLength: 120,
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/update?model=openrouter%2Ftest&provider=openrouter",
+      "/api/settings/update?model_preset=default&model=openrouter%2Ftest&provider=openrouter&timezone=Asia%2FShanghai&bot_name=nanobot&bot_icon=nb&tool_hint_max_length=120",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
@@ -77,14 +85,79 @@ describe("webui API helpers", () => {
     await updateWebSearchSettings("tok", {
       provider: "searxng",
       baseUrl: "https://search.example.com",
+      maxResults: 8,
+      timeout: 45,
+      useJinaReader: false,
     });
 
     expect(fetch).toHaveBeenCalledWith(
-      "/api/settings/web-search/update?provider=searxng&base_url=https%3A%2F%2Fsearch.example.com",
+      "/api/settings/web-search/update?provider=searxng&base_url=https%3A%2F%2Fsearch.example.com&max_results=8&timeout=45&use_jina_reader=false",
       expect.objectContaining({
         headers: { Authorization: "Bearer tok" },
       }),
     );
+  });
+
+  it("serializes image generation settings updates", async () => {
+    await updateImageGenerationSettings("tok", {
+      enabled: true,
+      provider: "openrouter",
+      model: "openai/gpt-5.4-image-2",
+      defaultAspectRatio: "16:9",
+      defaultImageSize: "2K",
+      maxImagesPerTurn: 3,
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/settings/image-generation/update?enabled=true&provider=openrouter&model=openai%2Fgpt-5.4-image-2&default_aspect_ratio=16%3A9&default_image_size=2K&max_images_per_turn=3",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+  });
+
+  it("reads and writes persisted sidebar state", async () => {
+    const state = {
+      schema_version: 1,
+      pinned_keys: ["websocket:chat-1"],
+      archived_keys: ["websocket:old"],
+      title_overrides: { "websocket:chat-1": "Release" },
+      tags_by_key: {},
+      collapsed_groups: {},
+      view: {
+        density: "compact" as const,
+        show_previews: false,
+        show_timestamps: false,
+        show_archived: true,
+        sort: "updated_desc" as const,
+      },
+      updated_at: null,
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => state,
+    } as Response);
+
+    await expect(fetchSidebarState("tok")).resolves.toEqual(state);
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/webui/sidebar-state",
+      expect.objectContaining({
+        headers: { Authorization: "Bearer tok" },
+      }),
+    );
+
+    await updateSidebarState("tok", state);
+    const [url, init] = vi.mocked(fetch).mock.calls.at(-1)!;
+    expect(String(url).startsWith("/api/webui/sidebar-state/update?")).toBe(true);
+    expect(init).toEqual(expect.objectContaining({
+      headers: { Authorization: "Bearer tok" },
+    }));
+    const encodedState = new URLSearchParams(String(url).split("?", 2)[1]).get("state");
+    expect(encodedState).toBeTruthy();
+    expect(JSON.parse(encodedState ?? "{}")).toMatchObject({
+      pinned_keys: ["websocket:chat-1"],
+      title_overrides: { "websocket:chat-1": "Release" },
+    });
   });
 
   it("maps generated session titles from the sessions list", async () => {
@@ -97,6 +170,7 @@ describe("webui API helpers", () => {
             created_at: "2026-05-01T10:00:00",
             updated_at: "2026-05-01T10:01:00",
             title: "优化 WebUI 标题",
+            run_started_at: 1_700_000_000,
           },
         ],
       }),
@@ -107,6 +181,7 @@ describe("webui API helpers", () => {
         key: "websocket:chat-1",
         title: "优化 WebUI 标题",
         preview: "",
+        runStartedAt: 1_700_000_000,
       },
     ]);
   });

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nanobot.utils.webui_transcript import (
+from nanobot.webui.transcript import (
     WEBUI_TRANSCRIPT_SCHEMA_VERSION,
     append_transcript_object,
     read_transcript_lines,
@@ -96,6 +96,53 @@ def test_replay_file_edit_event_creates_file_activity(tmp_path, monkeypatch) -> 
     ]
     assert msgs[2]["activitySegmentId"]
     assert msgs[2]["activitySegmentId"] != msgs[1]["activitySegmentId"]
+
+
+def test_replay_tool_events_dedupes_finish_after_start() -> None:
+    msgs = replay_transcript_to_ui_messages([
+        {
+            "event": "message",
+            "chat_id": "t-tool",
+            "text": 'exec({"cmd":"ls"})',
+            "kind": "tool_hint",
+            "tool_events": [
+                {
+                    "phase": "start",
+                    "call_id": "call-exec",
+                    "name": "exec",
+                    "arguments": {"cmd": "ls"},
+                },
+            ],
+        },
+        {
+            "event": "message",
+            "chat_id": "t-tool",
+            "text": "",
+            "kind": "progress",
+            "tool_events": [
+                {
+                    "phase": "end",
+                    "call_id": "call-exec",
+                    "name": "exec",
+                    "arguments": {"cmd": "ls"},
+                    "result": "ok",
+                },
+                {
+                    "phase": "end",
+                    "call_id": "call-read",
+                    "name": "read_file",
+                    "arguments": {"path": "notes.md"},
+                    "result": "done",
+                },
+            ],
+        },
+    ])
+
+    assert len(msgs) == 1
+    assert msgs[0]["traces"] == [
+        'exec({"cmd": "ls"})',
+        'read_file({"path": "notes.md"})',
+    ]
 
 
 def test_replay_file_edit_progress_merges_after_interleaved_activity(tmp_path, monkeypatch) -> None:
@@ -294,7 +341,7 @@ def test_replay_keeps_new_file_edit_after_reasoning_in_order(tmp_path, monkeypat
 
 
 def test_build_response_schema(monkeypatch, tmp_path) -> None:
-    from nanobot.utils.webui_transcript import build_webui_thread_response
+    from nanobot.webui.transcript import build_webui_thread_response
 
     monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
     key = "websocket:t3"

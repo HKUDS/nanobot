@@ -10,8 +10,6 @@ from nanobot.config.loader import set_config_path
 from nanobot.utils.artifacts import (
     ArtifactError,
     decode_image_data_url,
-    generated_image_paths_from_messages,
-    generated_image_tool_result,
     store_generated_image_artifact,
 )
 
@@ -66,22 +64,3 @@ def test_store_generated_image_artifact_rejects_unsafe_save_dir(tmp_path: Path) 
             model="m",
             save_dir="../outside",
         )
-
-
-def test_generated_image_paths_from_tool_results() -> None:
-    result = generated_image_tool_result(
-        [
-            {"id": "img_1", "path": "/tmp/one.png"},
-            {"id": "img_2", "path": "/tmp/two.png"},
-        ]
-    )
-    payload = json.loads(result)
-
-    assert generated_image_paths_from_messages(
-        [
-            {"role": "tool", "name": "generate_image", "content": result},
-            {"role": "tool", "name": "other", "content": result},
-        ]
-    ) == ["/tmp/one.png", "/tmp/two.png"]
-    assert "runtime attaches generated images automatically" in payload["next_step"]
-    assert "Do not call message" in payload["next_step"]
