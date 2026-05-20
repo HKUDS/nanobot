@@ -127,6 +127,45 @@ async def test_trigger_now_returns_none_when_decision_is_skip(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_decide_now_returns_phase_one_decision_without_execution(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] check backups", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "run", "tasks": "check backups"},
+                )
+            ],
+        )
+    ])
+
+    called = False
+
+    async def _on_execute(tasks: str) -> str:
+        nonlocal called
+        called = True
+        return tasks
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+    )
+
+    decision = await service.decide_now()
+
+    assert decision is not None
+    assert decision.action == "run"
+    assert decision.tasks == "check backups"
+    assert called is False
+
+
+@pytest.mark.asyncio
 async def test_tick_notifies_when_evaluator_says_yes(tmp_path, monkeypatch) -> None:
     """Phase 1 run -> Phase 2 execute -> Phase 3 evaluate=notify -> on_notify called."""
     (tmp_path / "HEARTBEAT.md").write_text("- [ ] check deployments", encoding="utf-8")
