@@ -65,6 +65,7 @@ async def test_github_copilot_does_not_fall_back_from_responses_error():
 
     with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI", return_value=mock_client):
         provider = GitHubCopilotProvider(default_model="github_copilot/gpt-5.4-mini")
+        await provider._ensure_client()
     provider._get_copilot_access_token = AsyncMock(return_value="copilot-access-token")
 
     response = await provider.chat(

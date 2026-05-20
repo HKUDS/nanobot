@@ -1030,6 +1030,8 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert providers["azure_openai"]["api_key_required"] is True
         assert providers["openrouter"]["configured"] is False
         assert providers["openrouter"]["api_key_required"] is True
+        assert providers["skywork"]["label"] == "Skywork"
+        assert providers["skywork"]["default_api_base"] == "https://api.apifree.ai/v1"
         assert providers["ant_ling"]["label"] == "Ant Ling"
         assert providers["ant_ling"]["default_api_base"] == "https://api.ant-ling.com/v1"
         assert providers["apifree"]["label"] == "APIFree"
@@ -1057,7 +1059,8 @@ async def test_settings_api_returns_safe_subset_and_updates_whitelist(
         assert image_providers["openrouter"]["configured"] is False
         assert image_providers["gemini"]["label"] == "Gemini"
         assert body["runtime"]["config_path"] == str(config_path)
-        assert body["runtime"]["workspace_path"].endswith(".nanobot/workspace")
+        workspace_path = body["runtime"]["workspace_path"].replace("\\", "/")
+        assert workspace_path.endswith("/.nanobot/workspace")
         assert body["runtime"]["gateway_port"] == 18790
         assert body["advanced"]["exec_enabled"] is True
         assert body["advanced"]["mcp_server_count"] == 0

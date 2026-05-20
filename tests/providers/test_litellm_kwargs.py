@@ -449,27 +449,28 @@ def test_gemma_routes_to_gemini_provider() -> None:
     assert "gemma" in spec.keywords
 
 
-def test_openrouter_sets_default_attribution_headers() -> None:
+async def test_openrouter_sets_default_attribution_headers() -> None:
     spec = find_by_name("openrouter")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
-        OpenAICompatProvider(
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client_cls:
+        provider = OpenAICompatProvider(
             api_key="sk-or-test-key",
             api_base="https://openrouter.ai/api/v1",
             default_model="anthropic/claude-sonnet-4-5",
             spec=spec,
         )
+        await provider._ensure_client()
 
-    headers = MockClient.call_args.kwargs["default_headers"]
+    headers = mock_client_cls.call_args.kwargs["default_headers"]
     assert headers["HTTP-Referer"] == "https://github.com/HKUDS/nanobot"
     assert headers["X-OpenRouter-Title"] == "nanobot"
     assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
     assert "x-session-affinity" in headers
 
 
-def test_openrouter_user_headers_override_default_attribution() -> None:
+async def test_openrouter_user_headers_override_default_attribution() -> None:
     spec = find_by_name("openrouter")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
-        OpenAICompatProvider(
+    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as mock_client_cls:
+        provider = OpenAICompatProvider(
             api_key="sk-or-test-key",
             api_base="https://openrouter.ai/api/v1",
             default_model="anthropic/claude-sonnet-4-5",
@@ -480,8 +481,9 @@ def test_openrouter_user_headers_override_default_attribution() -> None:
             },
             spec=spec,
         )
+        await provider._ensure_client()
 
-    headers = MockClient.call_args.kwargs["default_headers"]
+    headers = mock_client_cls.call_args.kwargs["default_headers"]
     assert headers["HTTP-Referer"] == "https://nanobot.ai"
     assert headers["X-OpenRouter-Title"] == "Nanobot Pro"
     assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
