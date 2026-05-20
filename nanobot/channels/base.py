@@ -32,6 +32,8 @@ class BaseChannel(ABC):
     transcription_api_key: str = ""
     transcription_api_base: str = ""
     transcription_language: str | None = None
+    transcription_model_size: str = "small"
+    transcription_device: str = "auto"
     send_progress: bool = True
     send_tool_hints: bool = False
     show_reasoning: bool = True
@@ -50,15 +52,26 @@ class BaseChannel(ABC):
         self._running = False
 
     async def transcribe_audio(self, file_path: str | Path) -> str:
-        """Transcribe an audio file via Whisper (OpenAI or Groq). Returns empty string on failure."""
-        if not self.transcription_api_key:
-            return ""
+        """Transcribe an audio file via Whisper. Returns empty string on failure.
+
+        Supported providers:
+        - ``groq`` — Groq Whisper API (requires transcription_api_key)
+        - ``openai`` — OpenAI Whisper API (requires transcription_api_key)
+        - ``local`` — faster-whisper running locally (no API key needed; uses model_size/device)
+        """
         try:
             if self.transcription_provider == "openai":
                 from nanobot.providers.transcription import OpenAITranscriptionProvider
                 provider = OpenAITranscriptionProvider(
                     api_key=self.transcription_api_key,
                     api_base=self.transcription_api_base or None,
+                    language=self.transcription_language or None,
+                )
+            elif self.transcription_provider == "local":
+                from nanobot.providers.transcription import FasterWhisperTranscriptionProvider
+                provider = FasterWhisperTranscriptionProvider(
+                    model_size=self.transcription_model_size,
+                    device=self.transcription_device,
                     language=self.transcription_language or None,
                 )
             else:
