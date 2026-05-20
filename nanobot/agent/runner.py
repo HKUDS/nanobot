@@ -1179,6 +1179,8 @@ class AgentRunner:
 
         stale = compactable_indices[: len(compactable_indices) - _MICROCOMPACT_KEEP_RECENT]
         updated: list[dict[str, Any]] | None = None
+        skill_count = 0
+        last_skill_idx = -1
         for idx in stale:
             msg = messages[idx]
             content = msg.get("content")
@@ -1188,6 +1190,12 @@ class AgentRunner:
             summary = f"[{name} result omitted from context]"
             if updated is None:
                 updated = [dict(m) for m in messages]
+            if name == "skill_load":
+                skill_count += 1
+                if skill_count > 1:
+                    updated[last_skill_idx]["content"] = summary
+                last_skill_idx = idx
+                continue
             updated[idx]["content"] = summary
 
         return updated if updated is not None else messages

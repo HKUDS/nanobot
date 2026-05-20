@@ -261,6 +261,20 @@ class TestBuildSystemPrompt:
         assert "## AGENTS.md" not in result
         assert "[Archived Context Summary]" not in result
 
+    def test_skills_section_guides_model_to_skill_load(self, tmp_path):
+        skill_dir = tmp_path / "skills" / "alpha"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: alpha\ndescription: Alpha skill.\n---\n\n# Alpha\n",
+            encoding="utf-8",
+        )
+        builder = _builder(tmp_path)
+
+        result = builder.build_system_prompt()
+
+        assert "using the skill_load tool" in result
+        assert "using the read_file tool" not in result
+
 
 # ---------------------------------------------------------------------------
 # build_messages
