@@ -8,7 +8,7 @@ import json
 import os
 import re
 from typing import Any, Callable
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 import httpx
 from loguru import logger
@@ -78,8 +78,40 @@ def _validate_url(url: str) -> tuple[bool, str]:
 def _validate_url_safe(url: str) -> tuple[bool, str]:
     """Validate URL with SSRF protection: scheme, domain, and resolved IP check."""
     from nanobot.security.network import validate_url_target
+
     return validate_url_target(url)
 
+
+async def _get_with_safe_redirects(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str] | None = None,
+) -> tuple[httpx.Response | None, str | None]:
+    """GET a URL while validating every redirect target before requesting it."""
+    current_url = url
+    for _ in range(MAX_REDIRECTS + 1):
+        is_valid, error_msg = _validate_url_safe(current_url)
+        if not is_valid:
+            return None, f"Redirect blocked: {error_msg}"
+
+        response = await client.get(current_url, headers=headers, follow_redirects=False)
+        if not response.is_redirect:
+            return response, None
+
+        location = response.headers.get("location")
+        if not location:
+            return response, None
+
+        next_url = urljoin(str(response.url), location)
+        is_valid, error_msg = _validate_url_safe(next_url)
+        if not is_valid:
+            await response.aclose()
+            return None, f"Redirect blocked: {error_msg}"
+
+        await response.aclose()
+        current_url = next_url
+
+    return None, f"Too many redirects: exceeded limit of {MAX_REDIRECTS}"
 
 def _format_results(query: str, items: list[dict[str, Any]], n: int) -> str:
     """Format provider results into shared plaintext output."""
@@ -488,19 +520,22 @@ class WebFetchTool(Tool):
 
         # Detect and fetch images directly to avoid Jina's textual image captioning
         try:
-            async with httpx.AsyncClient(proxy=self.proxy, follow_redirects=True, max_redirects=MAX_REDIRECTS, timeout=15.0) as client:
-                async with client.stream("GET", url, headers={"User-Agent": self.user_agent}) as r:
-                    from nanobot.security.network import validate_resolved_url
+            async with httpx.AsyncClient(proxy=self.proxy, timeout=15.0) as client:
+                r, redirect_error = await _get_with_safe_redirects(
+                    client,
+                    url,
+                    headers={"User-Agent": self.user_agent},
+                )
+                if redirect_error:
+                    return json.dumps({"error": redirect_error, "url": url}, ensure_ascii=False)
+                if r is None:
+                    return json.dumps({"error": "Fetch failed", "url": url}, ensure_ascii=False)
 
-                    redir_ok, redir_err = validate_resolved_url(str(r.url))
-                    if not redir_ok:
-                        return json.dumps({"error": f"Redirect blocked: {redir_err}", "url": url}, ensure_ascii=False)
-
-                    ctype = r.headers.get("content-type", "")
-                    if ctype.startswith("image/"):
-                        r.raise_for_status()
-                        raw = await r.aread()
-                        return build_image_content_blocks(raw, ctype, url, f"(Image fetched from: {url})")
+                ctype = r.headers.get("content-type", "")
+                if ctype.startswith("image/"):
+                    r.raise_for_status()
+                    raw = r.content
+                    return build_image_content_blocks(raw, ctype, url, f"(Image fetched from: {url})")
         except Exception as e:
             logger.debug("Pre-fetch image detection failed for {}: {}", url, e)
 
@@ -553,18 +588,19 @@ class WebFetchTool(Tool):
 
         try:
             async with httpx.AsyncClient(
-                follow_redirects=True,
-                max_redirects=MAX_REDIRECTS,
                 timeout=30.0,
                 proxy=self.proxy,
             ) as client:
-                r = await client.get(url, headers={"User-Agent": self.user_agent})
+                r, redirect_error = await _get_with_safe_redirects(
+                    client,
+                    url,
+                    headers={"User-Agent": self.user_agent},
+                )
+                if redirect_error:
+                    return json.dumps({"error": redirect_error, "url": url}, ensure_ascii=False)
+                if r is None:
+                    return json.dumps({"error": "Fetch failed", "url": url}, ensure_ascii=False)
                 r.raise_for_status()
-
-            from nanobot.security.network import validate_resolved_url
-            redir_ok, redir_err = validate_resolved_url(str(r.url))
-            if not redir_ok:
-                return json.dumps({"error": f"Redirect blocked: {redir_err}", "url": url}, ensure_ascii=False)
 
             ctype = r.headers.get("content-type", "")
             if ctype.startswith("image/"):
