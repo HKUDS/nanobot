@@ -11,6 +11,7 @@ import hmac
 import http
 import json
 import mimetypes
+import os
 import re
 import secrets
 import shutil
@@ -91,6 +92,7 @@ class WebSocketConfig(Base):
     token_ttl_s: int = Field(default=300, ge=30, le=86_400)
     websocket_requires_token: bool = True
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
+    peers_enabled: bool = False
     streaming: bool = True
     # Default 36 MB, upper 40 MB: supports up to 4 images at ~6 MB each after
     # client-side Worker normalization (see webui Composer). 4 × 6 MB × 1.37
@@ -198,6 +200,35 @@ def _resolve_bootstrap_model_name(
                 if stripped:
                     return stripped
     return _default_model_name_from_config()
+
+
+def _read_peers() -> dict | None:
+    """Build a peer roster from ``NANOBOT_PEER_*`` environment variables.
+
+    Each var should contain a JSON object with at least ``"id"``::
+
+        NANOBOT_PEER_NEO={"id":"abc123","gateway_port":8000,"ws_port":8001}
+
+    Returns a dict ``{name: {id, gateway_port, ws_port}}``, or ``None``
+    when no ``NANOBOT_PEER_*`` variables are configured.
+    """
+    peers: dict[str, dict[str, object]] = {}
+    for key, value in sorted(os.environ.items()):
+        if not key.startswith("NANOBOT_PEER_"):
+            continue
+        try:
+            info = json.loads(value)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(info, dict) or "id" not in info:
+            continue
+        name = key[len("NANOBOT_PEER_"):].lower()
+        peers[name] = {
+            "id": str(info["id"]),
+            "gateway_port": int(info.get("gateway_port", 0)),
+            "ws_port": int(info.get("ws_port", 0)),
+        }
+    return peers if peers else None
 
 
 def _parse_request_path(path_with_query: str) -> tuple[str, dict[str, list[str]]]:
@@ -1385,6 +1416,19 @@ class WebSocketChannel(BaseChannel):
             self._conn_default[connection] = default_chat_id
             self._attach(connection, default_chat_id)
             await self._hydrate_after_subscribe(default_chat_id)
+
+            # Emit peers_update event when NANOBOT_PEER_* env vars are configured.
+            # This provides machine-level peer discovery on the already-authenticated
+            # WS channel, keeping /webui/bootstrap clean of service-discovery data.
+            if self.config.peers_enabled:
+                peers = _read_peers()
+                if peers:
+                    await connection.send(
+                        json.dumps(
+                            {"event": "peers_update", "peers": peers},
+                            ensure_ascii=False,
+                        )
+                    )
 
             async for raw in connection:
                 if isinstance(raw, bytes):
